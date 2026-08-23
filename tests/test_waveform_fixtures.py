@@ -43,3 +43,23 @@ def test_nonzero_baseline_is_recorded():
     ds = build_ecg_dataset(num_samples=100, baseline_uv=250.0)
     chdef = ds.WaveformSequence[0].ChannelDefinitionSequence[0]
     assert float(chdef.ChannelBaseline) == pytest.approx(250.0)
+
+
+def test_channel_numbers_are_1_based_and_ordered():
+    ds = build_ecg_dataset(num_samples=100)
+    chdefs = ds.WaveformSequence[0].ChannelDefinitionSequence
+    assert [chdef.ChannelNumber for chdef in chdefs] == list(range(1, len(LEADS) + 1))
+
+
+def test_waveform_data_decodes_to_expected_sample_values():
+    num_samples = 1500
+    ds = build_ecg_dataset(num_samples=num_samples)
+    item = ds.WaveformSequence[0]
+    num_channels = len(LEADS)
+    decoded = np.frombuffer(item.WaveformData, dtype="<i2").reshape(num_samples, num_channels)
+
+    for c in (0, 3):
+        for i in (0, 999, 1499):
+            assert decoded[i, c] == (i % 1000) + c * 1000
+
+    assert list(decoded[0, :]) == [c * 1000 for c in range(num_channels)]

@@ -101,8 +101,9 @@ def build_ecg_dataset(num_samples=5000,
     samples = _synthetic_signal(num_samples, n_ch)
 
     chdefs = []
-    for code_value, code_meaning in channels:
+    for channel_number, (code_value, code_meaning) in enumerate(channels, start=1):
         chdef = Dataset()
+        chdef.ChannelNumber = channel_number
         chdef.ChannelSensitivity = "1.0"
         chdef.ChannelSensitivityCorrectionFactor = "1.0"
         chdef.ChannelBaseline = str(baseline_uv)
