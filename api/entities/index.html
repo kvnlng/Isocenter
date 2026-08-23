@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1914,7 +1914,7 @@ and handles hierarchical dirty tracking for persistence.</p>
 <span class="normal"><a href="#__codelineno-0-108">108</a></span>
 <span class="normal"><a href="#__codelineno-0-109">109</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-24" name="__codelineno-0-24"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-0-25" name="__codelineno-0-25"></a><span class="k">class</span><span class="w"> </span><span class="nc">DicomItem</span><span class="p">:</span>
-<a id="__codelineno-0-26" name="__codelineno-0-26"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-27" name="__codelineno-0-27"></a><span class="sd">    Base class for any entity that holds DICOM attributes and sequences.</span>
 <a id="__codelineno-0-28" name="__codelineno-0-28"></a>
 <a id="__codelineno-0-29" name="__codelineno-0-29"></a><span class="sd">    This class provides a dictionary-like interface for managing DICOM attributes</span>
@@ -1923,7 +1923,7 @@ and handles hierarchical dirty tracking for persistence.</p>
 <a id="__codelineno-0-32" name="__codelineno-0-32"></a><span class="sd">    Attributes:</span>
 <a id="__codelineno-0-33" name="__codelineno-0-33"></a><span class="sd">        attributes (Dict[str, Any]): A dictionary mapping generic DICOM tags to values.</span>
 <a id="__codelineno-0-34" name="__codelineno-0-34"></a><span class="sd">        sequences (Dict[str, DicomSequence]): A dictionary mapping tags to nested DicomSequences.</span>
-<a id="__codelineno-0-35" name="__codelineno-0-35"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35"></a><span class="sd">    """</span>
 <a id="__codelineno-0-36" name="__codelineno-0-36"></a>    <span class="c1"># init=False to avoid constructor conflicts during inheritance</span>
 <a id="__codelineno-0-37" name="__codelineno-0-37"></a>    <span class="n">attributes</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <a id="__codelineno-0-38" name="__codelineno-0-38"></a>    <span class="n">sequences</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">DicomSequence</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
@@ -1953,46 +1953,46 @@ and handles hierarchical dirty tracking for persistence.</p>
 <a id="__codelineno-0-62" name="__codelineno-0-62"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span>
 <a id="__codelineno-0-63" name="__codelineno-0-63"></a>
 <a id="__codelineno-0-64" name="__codelineno-0-64"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">mark_saved</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">version_saved</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-<a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-66" name="__codelineno-0-66"></a><span class="sd">        Marks specific version as saved. Robust against concurrent edits.</span>
 <a id="__codelineno-0-67" name="__codelineno-0-67"></a>
 <a id="__codelineno-0-68" name="__codelineno-0-68"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-69" name="__codelineno-0-69"></a><span class="sd">            version_saved (int): The modification count that was successfully persisted.</span>
-<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">        """</span>
 <a id="__codelineno-0-71" name="__codelineno-0-71"></a>        <span class="k">if</span> <span class="n">version_saved</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span><span class="p">:</span>
 <a id="__codelineno-0-72" name="__codelineno-0-72"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span> <span class="o">=</span> <span class="n">version_saved</span>
 <a id="__codelineno-0-73" name="__codelineno-0-73"></a>
 <a id="__codelineno-0-74" name="__codelineno-0-74"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">set_attr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">):</span>
-<a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="sd">        Sets a generic attribute by its hex tag (e.g., &#39;0010,0010&#39;).</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="sd">        Sets a generic attribute by its hex tag (e.g., '0010,0010').</span>
 <a id="__codelineno-0-77" name="__codelineno-0-77"></a>
 <a id="__codelineno-0-78" name="__codelineno-0-78"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-79" name="__codelineno-0-79"></a><span class="sd">            tag (str): The DICOM tag string.</span>
 <a id="__codelineno-0-80" name="__codelineno-0-80"></a><span class="sd">            value (Any): The value to set.</span>
-<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">        """</span>
 <a id="__codelineno-0-82" name="__codelineno-0-82"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
 <a id="__codelineno-0-83" name="__codelineno-0-83"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span> <span class="o">+=</span> <span class="mi">1</span>
 <a id="__codelineno-0-84" name="__codelineno-0-84"></a>
-<a id="__codelineno-0-85" name="__codelineno-0-85"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">add_sequence_item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">item</span><span class="p">:</span> <span class="s1">&#39;DicomItem&#39;</span><span class="p">):</span>
-<a id="__codelineno-0-86" name="__codelineno-0-86"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-85" name="__codelineno-0-85"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">add_sequence_item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">item</span><span class="p">:</span> <span class="s1">'DicomItem'</span><span class="p">):</span>
+<a id="__codelineno-0-86" name="__codelineno-0-86"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-87" name="__codelineno-0-87"></a><span class="sd">        Appends a new item to a sequence, creating the sequence if needed.</span>
 <a id="__codelineno-0-88" name="__codelineno-0-88"></a>
 <a id="__codelineno-0-89" name="__codelineno-0-89"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-90" name="__codelineno-0-90"></a><span class="sd">            tag (str): The DICOM tag for the sequence.</span>
 <a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">            item (DicomItem): The item to append.</span>
-<a id="__codelineno-0-92" name="__codelineno-0-92"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-92" name="__codelineno-0-92"></a><span class="sd">        """</span>
 <a id="__codelineno-0-93" name="__codelineno-0-93"></a>        <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="p">:</span>
 <a id="__codelineno-0-94" name="__codelineno-0-94"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">DicomSequence</span><span class="p">(</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
 <a id="__codelineno-0-95" name="__codelineno-0-95"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
 <a id="__codelineno-0-96" name="__codelineno-0-96"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span> <span class="o">+=</span> <span class="mi">1</span>
 <a id="__codelineno-0-97" name="__codelineno-0-97"></a>
 <a id="__codelineno-0-98" name="__codelineno-0-98"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-99" name="__codelineno-0-99"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Mark the entity and all its items as clean by syncing modification counts.</span>
+<a id="__codelineno-0-99" name="__codelineno-0-99"></a><span class="w">        </span><span class="sd">"""Mark the entity and all its items as clean by syncing modification counts.</span>
 <a id="__codelineno-0-100" name="__codelineno-0-100"></a>
 <a id="__codelineno-0-101" name="__codelineno-0-101"></a><span class="sd">        This is a legacy method that forces the entity to be marked as clean by</span>
 <a id="__codelineno-0-102" name="__codelineno-0-102"></a><span class="sd">        updating the saved modification count to match the current modification count.</span>
 <a id="__codelineno-0-103" name="__codelineno-0-103"></a><span class="sd">        Also recursively marks all items in all sequences as clean.</span>
-<a id="__codelineno-0-104" name="__codelineno-0-104"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-104" name="__codelineno-0-104"></a><span class="sd">        """</span>
 <a id="__codelineno-0-105" name="__codelineno-0-105"></a>        <span class="c1"># Legacy: force clean</span>
 <a id="__codelineno-0-106" name="__codelineno-0-106"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span>
 <a id="__codelineno-0-107" name="__codelineno-0-107"></a>        <span class="k">for</span> <span class="n">seq</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
@@ -2093,14 +2093,14 @@ and handles hierarchical dirty tracking for persistence.</p>
 <span class="normal"><a href="#__codelineno-0-93">93</a></span>
 <span class="normal"><a href="#__codelineno-0-94">94</a></span>
 <span class="normal"><a href="#__codelineno-0-95">95</a></span>
-<span class="normal"><a href="#__codelineno-0-96">96</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-85" name="__codelineno-0-85"></a><span class="k">def</span><span class="w"> </span><span class="nf">add_sequence_item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">item</span><span class="p">:</span> <span class="s1">&#39;DicomItem&#39;</span><span class="p">):</span>
-<a id="__codelineno-0-86" name="__codelineno-0-86"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="normal"><a href="#__codelineno-0-96">96</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-85" name="__codelineno-0-85"></a><span class="k">def</span><span class="w"> </span><span class="nf">add_sequence_item</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">item</span><span class="p">:</span> <span class="s1">'DicomItem'</span><span class="p">):</span>
+<a id="__codelineno-0-86" name="__codelineno-0-86"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-87" name="__codelineno-0-87"></a><span class="sd">    Appends a new item to a sequence, creating the sequence if needed.</span>
 <a id="__codelineno-0-88" name="__codelineno-0-88"></a>
 <a id="__codelineno-0-89" name="__codelineno-0-89"></a><span class="sd">    Args:</span>
 <a id="__codelineno-0-90" name="__codelineno-0-90"></a><span class="sd">        tag (str): The DICOM tag for the sequence.</span>
 <a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">        item (DicomItem): The item to append.</span>
-<a id="__codelineno-0-92" name="__codelineno-0-92"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-92" name="__codelineno-0-92"></a><span class="sd">    """</span>
 <a id="__codelineno-0-93" name="__codelineno-0-93"></a>    <span class="k">if</span> <span class="n">tag</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="p">:</span>
 <a id="__codelineno-0-94" name="__codelineno-0-94"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">DicomSequence</span><span class="p">(</span><span class="n">tag</span><span class="o">=</span><span class="n">tag</span><span class="p">)</span>
 <a id="__codelineno-0-95" name="__codelineno-0-95"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
@@ -2142,12 +2142,12 @@ Also recursively marks all items in all sequences as clean.</p>
 <span class="normal"><a href="#__codelineno-0-107">107</a></span>
 <span class="normal"><a href="#__codelineno-0-108">108</a></span>
 <span class="normal"><a href="#__codelineno-0-109">109</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-98" name="__codelineno-0-98"></a><span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-99" name="__codelineno-0-99"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Mark the entity and all its items as clean by syncing modification counts.</span>
+<a id="__codelineno-0-99" name="__codelineno-0-99"></a><span class="w">    </span><span class="sd">"""Mark the entity and all its items as clean by syncing modification counts.</span>
 <a id="__codelineno-0-100" name="__codelineno-0-100"></a>
 <a id="__codelineno-0-101" name="__codelineno-0-101"></a><span class="sd">    This is a legacy method that forces the entity to be marked as clean by</span>
 <a id="__codelineno-0-102" name="__codelineno-0-102"></a><span class="sd">    updating the saved modification count to match the current modification count.</span>
 <a id="__codelineno-0-103" name="__codelineno-0-103"></a><span class="sd">    Also recursively marks all items in all sequences as clean.</span>
-<a id="__codelineno-0-104" name="__codelineno-0-104"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-104" name="__codelineno-0-104"></a><span class="sd">    """</span>
 <a id="__codelineno-0-105" name="__codelineno-0-105"></a>    <span class="c1"># Legacy: force clean</span>
 <a id="__codelineno-0-106" name="__codelineno-0-106"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span>
 <a id="__codelineno-0-107" name="__codelineno-0-107"></a>    <span class="k">for</span> <span class="n">seq</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sequences</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
@@ -2215,12 +2215,12 @@ Also recursively marks all items in all sequences as clean.</p>
 <span class="normal"><a href="#__codelineno-0-70">70</a></span>
 <span class="normal"><a href="#__codelineno-0-71">71</a></span>
 <span class="normal"><a href="#__codelineno-0-72">72</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-64" name="__codelineno-0-64"></a><span class="k">def</span><span class="w"> </span><span class="nf">mark_saved</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">version_saved</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
-<a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-66" name="__codelineno-0-66"></a><span class="sd">    Marks specific version as saved. Robust against concurrent edits.</span>
 <a id="__codelineno-0-67" name="__codelineno-0-67"></a>
 <a id="__codelineno-0-68" name="__codelineno-0-68"></a><span class="sd">    Args:</span>
 <a id="__codelineno-0-69" name="__codelineno-0-69"></a><span class="sd">        version_saved (int): The modification count that was successfully persisted.</span>
-<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">    """</span>
 <a id="__codelineno-0-71" name="__codelineno-0-71"></a>    <span class="k">if</span> <span class="n">version_saved</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span><span class="p">:</span>
 <a id="__codelineno-0-72" name="__codelineno-0-72"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span> <span class="o">=</span> <span class="n">version_saved</span>
 </code></pre></div></td></tr></table></div>
@@ -2302,13 +2302,13 @@ Also recursively marks all items in all sequences as clean.</p>
 <span class="normal"><a href="#__codelineno-0-81">81</a></span>
 <span class="normal"><a href="#__codelineno-0-82">82</a></span>
 <span class="normal"><a href="#__codelineno-0-83">83</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-74" name="__codelineno-0-74"></a><span class="k">def</span><span class="w"> </span><span class="nf">set_attr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n">Any</span><span class="p">):</span>
-<a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="sd">    Sets a generic attribute by its hex tag (e.g., &#39;0010,0010&#39;).</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="sd">    Sets a generic attribute by its hex tag (e.g., '0010,0010').</span>
 <a id="__codelineno-0-77" name="__codelineno-0-77"></a>
 <a id="__codelineno-0-78" name="__codelineno-0-78"></a><span class="sd">    Args:</span>
 <a id="__codelineno-0-79" name="__codelineno-0-79"></a><span class="sd">        tag (str): The DICOM tag string.</span>
 <a id="__codelineno-0-80" name="__codelineno-0-80"></a><span class="sd">        value (Any): The value to set.</span>
-<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">    """</span>
 <a id="__codelineno-0-82" name="__codelineno-0-82"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
 <a id="__codelineno-0-83" name="__codelineno-0-83"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span> <span class="o">+=</span> <span class="mi">1</span>
 </code></pre></div></td></tr></table></div>
@@ -2408,15 +2408,15 @@ Also recursively marks all items in all sequences as clean.</p>
 <span class="normal"><a href="#__codelineno-0-20">20</a></span>
 <span class="normal"><a href="#__codelineno-0-21">21</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-11" name="__codelineno-0-11"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-0-12" name="__codelineno-0-12"></a><span class="k">class</span><span class="w"> </span><span class="nc">DicomSequence</span><span class="p">:</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-14" name="__codelineno-0-14"></a><span class="sd">    Represents a DICOM Sequence (SQ) containing multiple DicomItems.</span>
 <a id="__codelineno-0-15" name="__codelineno-0-15"></a>
 <a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="sd">    Attributes:</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17"></a><span class="sd">        tag (str): The DICOM tag for this sequence (e.g., &quot;0008,1111&quot;).</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17"></a><span class="sd">        tag (str): The DICOM tag for this sequence (e.g., "0008,1111").</span>
 <a id="__codelineno-0-18" name="__codelineno-0-18"></a><span class="sd">        items (List[DicomItem]): A list of DicomItem objects contained in this sequence.</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19"></a><span class="sd">    """</span>
 <a id="__codelineno-0-20" name="__codelineno-0-20"></a>    <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-0-21" name="__codelineno-0-21"></a>    <span class="n">items</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="s1">&#39;DicomItem&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21"></a>    <span class="n">items</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="s1">'DicomItem'</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -2534,7 +2534,7 @@ Frozen=True allows hashing, enabling unique set generation.</p>
 <span class="normal"><a href="#__codelineno-0-124">124</a></span>
 <span class="normal"><a href="#__codelineno-0-125">125</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-112" name="__codelineno-0-112"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-0-113" name="__codelineno-0-113"></a><span class="k">class</span><span class="w"> </span><span class="nc">Equipment</span><span class="p">:</span>
-<a id="__codelineno-0-114" name="__codelineno-0-114"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-114" name="__codelineno-0-114"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-115" name="__codelineno-0-115"></a><span class="sd">    Immutable Equipment definition.</span>
 <a id="__codelineno-0-116" name="__codelineno-0-116"></a><span class="sd">    Frozen=True allows hashing, enabling unique set generation.</span>
 <a id="__codelineno-0-117" name="__codelineno-0-117"></a>
@@ -2542,10 +2542,10 @@ Frozen=True allows hashing, enabling unique set generation.</p>
 <a id="__codelineno-0-119" name="__codelineno-0-119"></a><span class="sd">        manufacturer (str): The manufacturer of the equipment.</span>
 <a id="__codelineno-0-120" name="__codelineno-0-120"></a><span class="sd">        model_name (str): The model name of the equipment.</span>
 <a id="__codelineno-0-121" name="__codelineno-0-121"></a><span class="sd">        device_serial_number (str): The serial number (optional).</span>
-<a id="__codelineno-0-122" name="__codelineno-0-122"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-122" name="__codelineno-0-122"></a><span class="sd">    """</span>
 <a id="__codelineno-0-123" name="__codelineno-0-123"></a>    <span class="n">manufacturer</span><span class="p">:</span> <span class="nb">str</span>
 <a id="__codelineno-0-124" name="__codelineno-0-124"></a>    <span class="n">model_name</span><span class="p">:</span> <span class="nb">str</span>
-<a id="__codelineno-0-125" name="__codelineno-0-125"></a>    <span class="n">device_serial_number</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<a id="__codelineno-0-125" name="__codelineno-0-125"></a>    <span class="n">device_serial_number</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -2884,12 +2884,12 @@ Manages lazy loading of pixel data.</p>
 <span class="normal"><a href="#__codelineno-0-403">403</a></span>
 <span class="normal"><a href="#__codelineno-0-404">404</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-130" name="__codelineno-0-130"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-0-131" name="__codelineno-0-131"></a><span class="k">class</span><span class="w"> </span><span class="nc">Instance</span><span class="p">(</span><span class="n">DicomItem</span><span class="p">):</span>
-<a id="__codelineno-0-132" name="__codelineno-0-132"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-132" name="__codelineno-0-132"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-133" name="__codelineno-0-133"></a><span class="sd">    Represents a single DICOM image (SOP Instance).</span>
 <a id="__codelineno-0-134" name="__codelineno-0-134"></a><span class="sd">    Manages lazy loading of pixel data.</span>
-<a id="__codelineno-0-135" name="__codelineno-0-135"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-136" name="__codelineno-0-136"></a>    <span class="n">sop_instance_uid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
-<a id="__codelineno-0-137" name="__codelineno-0-137"></a>    <span class="n">sop_class_uid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+<a id="__codelineno-0-135" name="__codelineno-0-135"></a><span class="sd">    """</span>
+<a id="__codelineno-0-136" name="__codelineno-0-136"></a>    <span class="n">sop_instance_uid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
+<a id="__codelineno-0-137" name="__codelineno-0-137"></a>    <span class="n">sop_class_uid</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">""</span>
 <a id="__codelineno-0-138" name="__codelineno-0-138"></a>    <span class="n">instance_number</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
 <a id="__codelineno-0-139" name="__codelineno-0-139"></a>
 <a id="__codelineno-0-140" name="__codelineno-0-140"></a>    <span class="c1"># Persistence: Link to original file for lazy loading</span>
@@ -2910,7 +2910,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-155" name="__codelineno-0-155"></a>
 <a id="__codelineno-0-156" name="__codelineno-0-156"></a>    <span class="c1"># Transient: Index of all text-based nodes for O(1) PHI scanning</span>
 <a id="__codelineno-0-157" name="__codelineno-0-157"></a>    <span class="c1"># List of (DicomItem_Reference, Tag_String)</span>
-<a id="__codelineno-0-158" name="__codelineno-0-158"></a>    <span class="n">text_index</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="s1">&#39;DicomItem&#39;</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="nb">repr</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-0-158" name="__codelineno-0-158"></a>    <span class="n">text_index</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="s1">'DicomItem'</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">,</span> <span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="nb">repr</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 <a id="__codelineno-0-159" name="__codelineno-0-159"></a>
 <a id="__codelineno-0-160" name="__codelineno-0-160"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <a id="__codelineno-0-161" name="__codelineno-0-161"></a>        <span class="c1"># Inlined from DicomItem to avoid super() mismatch issues with slots/reloads</span>
@@ -2921,12 +2921,12 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-166" name="__codelineno-0-166"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span> <span class="o">=</span> <span class="mi">1</span>
 <a id="__codelineno-0-167" name="__codelineno-0-167"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_saved_mod_count</span> <span class="o">=</span> <span class="mi">0</span>
 <a id="__codelineno-0-168" name="__codelineno-0-168"></a>
-<a id="__codelineno-0-169" name="__codelineno-0-169"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0008,0018&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">)</span>
-<a id="__codelineno-0-170" name="__codelineno-0-170"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0008,0016&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">sop_class_uid</span><span class="p">)</span>
-<a id="__codelineno-0-171" name="__codelineno-0-171"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0020,0013&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">instance_number</span><span class="p">)</span>
+<a id="__codelineno-0-169" name="__codelineno-0-169"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0008,0018"</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">)</span>
+<a id="__codelineno-0-170" name="__codelineno-0-170"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0008,0016"</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">sop_class_uid</span><span class="p">)</span>
+<a id="__codelineno-0-171" name="__codelineno-0-171"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0020,0013"</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">instance_number</span><span class="p">)</span>
 <a id="__codelineno-0-172" name="__codelineno-0-172"></a>
 <a id="__codelineno-0-173" name="__codelineno-0-173"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">regenerate_uid</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">        Generates a new, globally unique SOP Instance UID.</span>
 <a id="__codelineno-0-176" name="__codelineno-0-176"></a>
 <a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">        Call this whenever pixel data is modified to ensure the instance is treated</span>
@@ -2935,27 +2935,27 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">        This method:</span>
 <a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">            1. Generates a new SOP Instance UID.</span>
 <a id="__codelineno-0-182" name="__codelineno-0-182"></a><span class="sd">            2. Updates the internal object property.</span>
-<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="sd">            3. Updates the &#39;0008,0018&#39; DICOM attribute.</span>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="sd">            3. Updates the '0008,0018' DICOM attribute.</span>
 <a id="__codelineno-0-184" name="__codelineno-0-184"></a><span class="sd">            4. Detaches the instance from its physical file path (since consistent hash changed).</span>
-<a id="__codelineno-0-185" name="__codelineno-0-185"></a><span class="sd">        &quot;&quot;&quot;</span>
-<a id="__codelineno-0-186" name="__codelineno-0-186"></a>        <span class="c1"># 1. Generate new UID using pydicom&#39;s generator (or your org root)</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a><span class="sd">        """</span>
+<a id="__codelineno-0-186" name="__codelineno-0-186"></a>        <span class="c1"># 1. Generate new UID using pydicom's generator (or your org root)</span>
 <a id="__codelineno-0-187" name="__codelineno-0-187"></a>        <span class="n">new_uid</span> <span class="o">=</span> <span class="n">generate_uid</span><span class="p">()</span>
 <a id="__codelineno-0-188" name="__codelineno-0-188"></a>
 <a id="__codelineno-0-189" name="__codelineno-0-189"></a>        <span class="c1"># 2. Update the Object Property</span>
 <a id="__codelineno-0-190" name="__codelineno-0-190"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span> <span class="o">=</span> <span class="n">new_uid</span>
 <a id="__codelineno-0-191" name="__codelineno-0-191"></a>
 <a id="__codelineno-0-192" name="__codelineno-0-192"></a>        <span class="c1"># 3. Update the DICOM Attribute Dictionary</span>
-<a id="__codelineno-0-193" name="__codelineno-0-193"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0008,0018&quot;</span><span class="p">,</span> <span class="n">new_uid</span><span class="p">)</span>
+<a id="__codelineno-0-193" name="__codelineno-0-193"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0008,0018"</span><span class="p">,</span> <span class="n">new_uid</span><span class="p">)</span>
 <a id="__codelineno-0-194" name="__codelineno-0-194"></a>
 <a id="__codelineno-0-195" name="__codelineno-0-195"></a>        <span class="c1"># 4. Detach from physical file</span>
-<a id="__codelineno-0-196" name="__codelineno-0-196"></a>        <span class="c1"># Since this object is now a &quot;new&quot; instance in memory,</span>
+<a id="__codelineno-0-196" name="__codelineno-0-196"></a>        <span class="c1"># Since this object is now a "new" instance in memory,</span>
 <a id="__codelineno-0-197" name="__codelineno-0-197"></a>        <span class="c1"># it no longer matches the file on disk.</span>
 <a id="__codelineno-0-198" name="__codelineno-0-198"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">file_path</span> <span class="o">=</span> <span class="kc">None</span>
 <a id="__codelineno-0-199" name="__codelineno-0-199"></a>
-<a id="__codelineno-0-200" name="__codelineno-0-200"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; Identity regenerated: </span><span class="si">{</span><span class="n">new_uid</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-200" name="__codelineno-0-200"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">"  -&gt; Identity regenerated: </span><span class="si">{</span><span class="n">new_uid</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 <a id="__codelineno-0-201" name="__codelineno-0-201"></a>
 <a id="__codelineno-0-202" name="__codelineno-0-202"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">unload_pixel_data</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-204" name="__codelineno-0-204"></a><span class="sd">        Clears the cached pixel_array from memory to free resources.</span>
 <a id="__codelineno-0-205" name="__codelineno-0-205"></a>
 <a id="__codelineno-0-206" name="__codelineno-0-206"></a><span class="sd">        Only performs the clear if the data can be re-loaded (i.e., `file_path`</span>
@@ -2964,21 +2964,21 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-209" name="__codelineno-0-209"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-210" name="__codelineno-0-210"></a><span class="sd">            bool: True if unloaded successfully,</span>
 <a id="__codelineno-0-211" name="__codelineno-0-211"></a><span class="sd">                 False if it was unsafe to unload (data would be lost).</span>
-<a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="sd">        """</span>
 <a id="__codelineno-0-213" name="__codelineno-0-213"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-214" name="__codelineno-0-214"></a>            <span class="k">return</span> <span class="kc">True</span>
 <a id="__codelineno-0-215" name="__codelineno-0-215"></a>
 <a id="__codelineno-0-216" name="__codelineno-0-216"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">file_path</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pixel_loader</span><span class="p">:</span>
 <a id="__codelineno-0-217" name="__codelineno-0-217"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-218" name="__codelineno-0-218"></a>            <span class="c1"># print(f&quot;DEBUG: Unloaded pixels for {self.sop_instance_uid}&quot;)</span>
+<a id="__codelineno-0-218" name="__codelineno-0-218"></a>            <span class="c1"># print(f"DEBUG: Unloaded pixels for {self.sop_instance_uid}")</span>
 <a id="__codelineno-0-219" name="__codelineno-0-219"></a>            <span class="k">return</span> <span class="kc">True</span>
 <a id="__codelineno-0-220" name="__codelineno-0-220"></a>        <span class="k">else</span><span class="p">:</span>
 <a id="__codelineno-0-221" name="__codelineno-0-221"></a>            <span class="c1"># Data is in memory only (e.g. modified but not saved)</span>
-<a id="__codelineno-0-222" name="__codelineno-0-222"></a>            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DEBUG: FAILED TO UNLOAD </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2"> - No file path or loader!&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-222" name="__codelineno-0-222"></a>            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"DEBUG: FAILED TO UNLOAD </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2"> - No file path or loader!"</span><span class="p">)</span>
 <a id="__codelineno-0-223" name="__codelineno-0-223"></a>            <span class="k">return</span> <span class="kc">False</span>
 <a id="__codelineno-0-224" name="__codelineno-0-224"></a>
 <a id="__codelineno-0-225" name="__codelineno-0-225"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_pixel_data</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
-<a id="__codelineno-0-226" name="__codelineno-0-226"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-226" name="__codelineno-0-226"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-227" name="__codelineno-0-227"></a><span class="sd">        Returns pixel_array. Loads from disk if not in memory.</span>
 <a id="__codelineno-0-228" name="__codelineno-0-228"></a>
 <a id="__codelineno-0-229" name="__codelineno-0-229"></a><span class="sd">        This method attempts to:</span>
@@ -2993,7 +2993,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-238" name="__codelineno-0-238"></a><span class="sd">        Raises:</span>
 <a id="__codelineno-0-239" name="__codelineno-0-239"></a><span class="sd">            RuntimeError: If loading fails due to transfer syntax issues or missing codecs.</span>
 <a id="__codelineno-0-240" name="__codelineno-0-240"></a><span class="sd">            FileNotFoundError: If the file path does not exist.</span>
-<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">        """</span>
 <a id="__codelineno-0-242" name="__codelineno-0-242"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-243" name="__codelineno-0-243"></a>            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span>
 <a id="__codelineno-0-244" name="__codelineno-0-244"></a>
@@ -3007,7 +3007,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-252" name="__codelineno-0-252"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">set_pixel_data</span><span class="p">(</span><span class="n">arr</span><span class="p">)</span>
 <a id="__codelineno-0-253" name="__codelineno-0-253"></a>                <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span>
 <a id="__codelineno-0-254" name="__codelineno-0-254"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a>                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Pixel Loader failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a>                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Pixel Loader failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
 <a id="__codelineno-0-256" name="__codelineno-0-256"></a>
 <a id="__codelineno-0-257" name="__codelineno-0-257"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">file_path</span> <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="p">):</span>
 <a id="__codelineno-0-258" name="__codelineno-0-258"></a>            <span class="k">try</span><span class="p">:</span>
@@ -3022,7 +3022,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-267" name="__codelineno-0-267"></a>                    <span class="c1"># No pixel data element</span>
 <a id="__codelineno-0-268" name="__codelineno-0-268"></a>                    <span class="k">return</span> <span class="kc">None</span>
 <a id="__codelineno-0-269" name="__codelineno-0-269"></a>                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-270" name="__codelineno-0-270"></a>                    <span class="k">if</span> <span class="s2">&quot;no pixel data&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+<a id="__codelineno-0-270" name="__codelineno-0-270"></a>                    <span class="k">if</span> <span class="s2">"no pixel data"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
 <a id="__codelineno-0-271" name="__codelineno-0-271"></a>                        <span class="k">return</span> <span class="kc">None</span>
 <a id="__codelineno-0-272" name="__codelineno-0-272"></a>                    <span class="c1"># Re-raise to be handled by outer except</span>
 <a id="__codelineno-0-273" name="__codelineno-0-273"></a>                    <span class="k">raise</span> <span class="n">e</span>
@@ -3040,11 +3040,11 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-285" name="__codelineno-0-285"></a>                    <span class="k">pass</span>
 <a id="__codelineno-0-286" name="__codelineno-0-286"></a>
 <a id="__codelineno-0-287" name="__codelineno-0-287"></a>                <span class="c1"># Try to get Transfer Syntax UID for better debugging</span>
-<a id="__codelineno-0-288" name="__codelineno-0-288"></a>                <span class="n">ts_uid</span> <span class="o">=</span> <span class="s2">&quot;Unknown&quot;</span>
-<a id="__codelineno-0-289" name="__codelineno-0-289"></a>                <span class="k">if</span> <span class="n">ds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="s2">&quot;file_meta&quot;</span><span class="p">):</span>
-<a id="__codelineno-0-290" name="__codelineno-0-290"></a>                    <span class="n">ts_uid</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">file_meta</span><span class="p">,</span> <span class="s2">&quot;TransferSyntaxUID&quot;</span><span class="p">,</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-288" name="__codelineno-0-288"></a>                <span class="n">ts_uid</span> <span class="o">=</span> <span class="s2">"Unknown"</span>
+<a id="__codelineno-0-289" name="__codelineno-0-289"></a>                <span class="k">if</span> <span class="n">ds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="s2">"file_meta"</span><span class="p">):</span>
+<a id="__codelineno-0-290" name="__codelineno-0-290"></a>                    <span class="n">ts_uid</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">file_meta</span><span class="p">,</span> <span class="s2">"TransferSyntaxUID"</span><span class="p">,</span> <span class="s2">"Unknown"</span><span class="p">)</span>
 <a id="__codelineno-0-291" name="__codelineno-0-291"></a>
-<a id="__codelineno-0-292" name="__codelineno-0-292"></a>                <span class="k">if</span> <span class="s2">&quot;missing dependencies&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;decompress&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
+<a id="__codelineno-0-292" name="__codelineno-0-292"></a>                <span class="k">if</span> <span class="s2">"missing dependencies"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">"decompress"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
 <a id="__codelineno-0-293" name="__codelineno-0-293"></a>                    <span class="c1"># Enhanced debug output</span>
 <a id="__codelineno-0-294" name="__codelineno-0-294"></a>                    <span class="n">handlers</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-295" name="__codelineno-0-295"></a>                    <span class="k">try</span><span class="p">:</span>
@@ -3054,21 +3054,21 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-299" name="__codelineno-0-299"></a>                        <span class="k">pass</span>
 <a id="__codelineno-0-300" name="__codelineno-0-300"></a>
 <a id="__codelineno-0-301" name="__codelineno-0-301"></a>                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
-<a id="__codelineno-0-302" name="__codelineno-0-302"></a>                        <span class="sa">f</span><span class="s2">&quot;Failed to decompress pixel data for </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
-<a id="__codelineno-0-303" name="__codelineno-0-303"></a>                        <span class="sa">f</span><span class="s2">&quot;(Transfer Syntax: </span><span class="si">{</span><span class="n">ts_uid</span><span class="si">}</span><span class="s2">).</span><span class="se">\n</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-304" name="__codelineno-0-304"></a>                        <span class="sa">f</span><span class="s2">&quot;Underlying Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-305" name="__codelineno-0-305"></a>                        <span class="sa">f</span><span class="s2">&quot;Active pydicom handlers: </span><span class="si">{</span><span class="n">handlers</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-306" name="__codelineno-0-306"></a>                        <span class="s2">&quot;Missing image codecs. Please ensure &#39;pillow&#39;, &#39;pylibjpeg&#39;, or &#39;gdcm&#39; are installed.&quot;</span>
+<a id="__codelineno-0-302" name="__codelineno-0-302"></a>                        <span class="sa">f</span><span class="s2">"Failed to decompress pixel data for </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="p">)</span><span class="si">}</span><span class="s2"> "</span>
+<a id="__codelineno-0-303" name="__codelineno-0-303"></a>                        <span class="sa">f</span><span class="s2">"(Transfer Syntax: </span><span class="si">{</span><span class="n">ts_uid</span><span class="si">}</span><span class="s2">).</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-0-304" name="__codelineno-0-304"></a>                        <span class="sa">f</span><span class="s2">"Underlying Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-0-305" name="__codelineno-0-305"></a>                        <span class="sa">f</span><span class="s2">"Active pydicom handlers: </span><span class="si">{</span><span class="n">handlers</span><span class="si">}</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-0-306" name="__codelineno-0-306"></a>                        <span class="s2">"Missing image codecs. Please ensure 'pillow', 'pylibjpeg', or 'gdcm' are installed."</span>
 <a id="__codelineno-0-307" name="__codelineno-0-307"></a>                    <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
 <a id="__codelineno-0-308" name="__codelineno-0-308"></a>
-<a id="__codelineno-0-309" name="__codelineno-0-309"></a>                <span class="c1"># If we just caught the re-raised &quot;no pixel data&quot; exception, it would be handled above,</span>
+<a id="__codelineno-0-309" name="__codelineno-0-309"></a>                <span class="c1"># If we just caught the re-raised "no pixel data" exception, it would be handled above,</span>
 <a id="__codelineno-0-310" name="__codelineno-0-310"></a>                <span class="c1"># but if dcmread fails completely or something else happens:</span>
-<a id="__codelineno-0-311" name="__codelineno-0-311"></a>                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Lazy load failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+<a id="__codelineno-0-311" name="__codelineno-0-311"></a>                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Lazy load failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
 <a id="__codelineno-0-312" name="__codelineno-0-312"></a>
-<a id="__codelineno-0-313" name="__codelineno-0-313"></a>        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Pixels missing and file not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-313" name="__codelineno-0-313"></a>        <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Pixels missing and file not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 <a id="__codelineno-0-314" name="__codelineno-0-314"></a>
 <a id="__codelineno-0-315" name="__codelineno-0-315"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">set_pixel_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">array</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
-<a id="__codelineno-0-316" name="__codelineno-0-316"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-316" name="__codelineno-0-316"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-317" name="__codelineno-0-317"></a><span class="sd">        Sets the pixel array and automatically updates metadata tags.</span>
 <a id="__codelineno-0-318" name="__codelineno-0-318"></a>
 <a id="__codelineno-0-319" name="__codelineno-0-319"></a><span class="sd">        Updates tags:</span>
@@ -3081,7 +3081,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-326" name="__codelineno-0-326"></a>
 <a id="__codelineno-0-327" name="__codelineno-0-327"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-328" name="__codelineno-0-328"></a><span class="sd">            array (np.ndarray): The pixel data to set. Can be 1D, 2D, 3D, or 4D.</span>
-<a id="__codelineno-0-329" name="__codelineno-0-329"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-329" name="__codelineno-0-329"></a><span class="sd">        """</span>
 <a id="__codelineno-0-330" name="__codelineno-0-330"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="o">=</span> <span class="n">array</span>
 <a id="__codelineno-0-331" name="__codelineno-0-331"></a>        <span class="n">shape</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">shape</span>
 <a id="__codelineno-0-332" name="__codelineno-0-332"></a>        <span class="n">ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
@@ -3094,10 +3094,10 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-339" name="__codelineno-0-339"></a>            <span class="c1"># Flattened array (e.g. from Sidecar loader)</span>
 <a id="__codelineno-0-340" name="__codelineno-0-340"></a>            <span class="c1"># Attempt to reshape using existing metadata if available</span>
 <a id="__codelineno-0-341" name="__codelineno-0-341"></a>            <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-342" name="__codelineno-0-342"></a>                <span class="n">r</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0010&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-<a id="__codelineno-0-343" name="__codelineno-0-343"></a>                <span class="n">c</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0011&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-<a id="__codelineno-0-344" name="__codelineno-0-344"></a>                <span class="n">s</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0002&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
-<a id="__codelineno-0-345" name="__codelineno-0-345"></a>                <span class="n">f</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0008&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<a id="__codelineno-0-342" name="__codelineno-0-342"></a>                <span class="n">r</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0010"</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+<a id="__codelineno-0-343" name="__codelineno-0-343"></a>                <span class="n">c</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0011"</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+<a id="__codelineno-0-344" name="__codelineno-0-344"></a>                <span class="n">s</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0002"</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<a id="__codelineno-0-345" name="__codelineno-0-345"></a>                <span class="n">f</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0008"</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
 <a id="__codelineno-0-346" name="__codelineno-0-346"></a>
 <a id="__codelineno-0-347" name="__codelineno-0-347"></a>                <span class="n">expected_size</span> <span class="o">=</span> <span class="n">r</span> <span class="o">*</span> <span class="n">c</span> <span class="o">*</span> <span class="n">s</span> <span class="o">*</span> <span class="n">f</span>
 <a id="__codelineno-0-348" name="__codelineno-0-348"></a>                <span class="k">if</span> <span class="n">expected_size</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">array</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;=</span> <span class="n">expected_size</span><span class="p">:</span>
@@ -3121,7 +3121,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-366" name="__codelineno-0-366"></a>            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
 <a id="__codelineno-0-367" name="__codelineno-0-367"></a>                <span class="k">pass</span>
 <a id="__codelineno-0-368" name="__codelineno-0-368"></a>
-<a id="__codelineno-0-369" name="__codelineno-0-369"></a>            <span class="c1"># Only raise if we couldn&#39;t resolve it</span>
+<a id="__codelineno-0-369" name="__codelineno-0-369"></a>            <span class="c1"># Only raise if we couldn't resolve it</span>
 <a id="__codelineno-0-370" name="__codelineno-0-370"></a>            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># Still 1D</span>
 <a id="__codelineno-0-371" name="__codelineno-0-371"></a>                <span class="n">rows</span><span class="p">,</span> <span class="n">cols</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
 <a id="__codelineno-0-372" name="__codelineno-0-372"></a>
@@ -3135,26 +3135,26 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-380" name="__codelineno-0-380"></a>        <span class="k">elif</span> <span class="n">ndim</span> <span class="o">==</span> <span class="mi">4</span><span class="p">:</span>
 <a id="__codelineno-0-381" name="__codelineno-0-381"></a>            <span class="n">frames</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">cols</span><span class="p">,</span> <span class="n">samples</span> <span class="o">=</span> <span class="n">shape</span>
 <a id="__codelineno-0-382" name="__codelineno-0-382"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-383" name="__codelineno-0-383"></a>            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown shape: </span><span class="si">{</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-383" name="__codelineno-0-383"></a>            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Unknown shape: </span><span class="si">{</span><span class="n">shape</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 <a id="__codelineno-0-384" name="__codelineno-0-384"></a>
-<a id="__codelineno-0-385" name="__codelineno-0-385"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0010&quot;</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
-<a id="__codelineno-0-386" name="__codelineno-0-386"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0011&quot;</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span>
-<a id="__codelineno-0-387" name="__codelineno-0-387"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0002&quot;</span><span class="p">,</span> <span class="n">samples</span><span class="p">)</span>
+<a id="__codelineno-0-385" name="__codelineno-0-385"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0010"</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
+<a id="__codelineno-0-386" name="__codelineno-0-386"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0011"</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span>
+<a id="__codelineno-0-387" name="__codelineno-0-387"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0002"</span><span class="p">,</span> <span class="n">samples</span><span class="p">)</span>
 <a id="__codelineno-0-388" name="__codelineno-0-388"></a>        <span class="k">if</span> <span class="n">frames</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-<a id="__codelineno-0-389" name="__codelineno-0-389"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0008&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">frames</span><span class="p">))</span>
+<a id="__codelineno-0-389" name="__codelineno-0-389"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0008"</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">frames</span><span class="p">))</span>
 <a id="__codelineno-0-390" name="__codelineno-0-390"></a>        <span class="k">if</span> <span class="n">samples</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">:</span>
-<a id="__codelineno-0-391" name="__codelineno-0-391"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0004&quot;</span><span class="p">,</span> <span class="s2">&quot;RGB&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-392" name="__codelineno-0-392"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0006&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>  <span class="c1"># Force Interleaved (standard numpy)</span>
+<a id="__codelineno-0-391" name="__codelineno-0-391"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0004"</span><span class="p">,</span> <span class="s2">"RGB"</span><span class="p">)</span>
+<a id="__codelineno-0-392" name="__codelineno-0-392"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0006"</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>  <span class="c1"># Force Interleaved (standard numpy)</span>
 <a id="__codelineno-0-393" name="__codelineno-0-393"></a>        <span class="k">else</span><span class="p">:</span>
 <a id="__codelineno-0-394" name="__codelineno-0-394"></a>            <span class="c1"># Preserve existing PhotometricInterpretation (e.g. MONOCHROME1)</span>
 <a id="__codelineno-0-395" name="__codelineno-0-395"></a>            <span class="c1"># Only set default if missing</span>
-<a id="__codelineno-0-396" name="__codelineno-0-396"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0004&quot;</span><span class="p">):</span>
-<a id="__codelineno-0-397" name="__codelineno-0-397"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0004&quot;</span><span class="p">,</span> <span class="s2">&quot;MONOCHROME2&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-396" name="__codelineno-0-396"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0004"</span><span class="p">):</span>
+<a id="__codelineno-0-397" name="__codelineno-0-397"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0004"</span><span class="p">,</span> <span class="s2">"MONOCHROME2"</span><span class="p">)</span>
 <a id="__codelineno-0-398" name="__codelineno-0-398"></a>
 <a id="__codelineno-0-399" name="__codelineno-0-399"></a>        <span class="c1"># Ensure BitsAllocated matches array data type</span>
 <a id="__codelineno-0-400" name="__codelineno-0-400"></a>        <span class="c1"># SidecarPixelLoader relies on this to determine uint8 vs uint16</span>
 <a id="__codelineno-0-401" name="__codelineno-0-401"></a>        <span class="n">bits</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">itemsize</span> <span class="o">*</span> <span class="mi">8</span>
-<a id="__codelineno-0-402" name="__codelineno-0-402"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0100&quot;</span><span class="p">,</span> <span class="n">bits</span><span class="p">)</span>
+<a id="__codelineno-0-402" name="__codelineno-0-402"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0100"</span><span class="p">,</span> <span class="n">bits</span><span class="p">)</span>
 <a id="__codelineno-0-403" name="__codelineno-0-403"></a>
 <a id="__codelineno-0-404" name="__codelineno-0-404"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span> <span class="o">+=</span> <span class="mi">1</span>
 </code></pre></div></td></tr></table></div>
@@ -3344,7 +3344,7 @@ Manages lazy loading of pixel data.</p>
 <span class="normal"><a href="#__codelineno-0-311">311</a></span>
 <span class="normal"><a href="#__codelineno-0-312">312</a></span>
 <span class="normal"><a href="#__codelineno-0-313">313</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-225" name="__codelineno-0-225"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_pixel_data</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]:</span>
-<a id="__codelineno-0-226" name="__codelineno-0-226"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-226" name="__codelineno-0-226"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-227" name="__codelineno-0-227"></a><span class="sd">    Returns pixel_array. Loads from disk if not in memory.</span>
 <a id="__codelineno-0-228" name="__codelineno-0-228"></a>
 <a id="__codelineno-0-229" name="__codelineno-0-229"></a><span class="sd">    This method attempts to:</span>
@@ -3359,7 +3359,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-238" name="__codelineno-0-238"></a><span class="sd">    Raises:</span>
 <a id="__codelineno-0-239" name="__codelineno-0-239"></a><span class="sd">        RuntimeError: If loading fails due to transfer syntax issues or missing codecs.</span>
 <a id="__codelineno-0-240" name="__codelineno-0-240"></a><span class="sd">        FileNotFoundError: If the file path does not exist.</span>
-<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">    """</span>
 <a id="__codelineno-0-242" name="__codelineno-0-242"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-243" name="__codelineno-0-243"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span>
 <a id="__codelineno-0-244" name="__codelineno-0-244"></a>
@@ -3373,7 +3373,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-252" name="__codelineno-0-252"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_pixel_data</span><span class="p">(</span><span class="n">arr</span><span class="p">)</span>
 <a id="__codelineno-0-253" name="__codelineno-0-253"></a>            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span>
 <a id="__codelineno-0-254" name="__codelineno-0-254"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a>            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Pixel Loader failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a>            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Pixel Loader failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
 <a id="__codelineno-0-256" name="__codelineno-0-256"></a>
 <a id="__codelineno-0-257" name="__codelineno-0-257"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">file_path</span> <span class="ow">and</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="p">):</span>
 <a id="__codelineno-0-258" name="__codelineno-0-258"></a>        <span class="k">try</span><span class="p">:</span>
@@ -3388,7 +3388,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-267" name="__codelineno-0-267"></a>                <span class="c1"># No pixel data element</span>
 <a id="__codelineno-0-268" name="__codelineno-0-268"></a>                <span class="k">return</span> <span class="kc">None</span>
 <a id="__codelineno-0-269" name="__codelineno-0-269"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-270" name="__codelineno-0-270"></a>                <span class="k">if</span> <span class="s2">&quot;no pixel data&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
+<a id="__codelineno-0-270" name="__codelineno-0-270"></a>                <span class="k">if</span> <span class="s2">"no pixel data"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">():</span>
 <a id="__codelineno-0-271" name="__codelineno-0-271"></a>                    <span class="k">return</span> <span class="kc">None</span>
 <a id="__codelineno-0-272" name="__codelineno-0-272"></a>                <span class="c1"># Re-raise to be handled by outer except</span>
 <a id="__codelineno-0-273" name="__codelineno-0-273"></a>                <span class="k">raise</span> <span class="n">e</span>
@@ -3406,11 +3406,11 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-285" name="__codelineno-0-285"></a>                <span class="k">pass</span>
 <a id="__codelineno-0-286" name="__codelineno-0-286"></a>
 <a id="__codelineno-0-287" name="__codelineno-0-287"></a>            <span class="c1"># Try to get Transfer Syntax UID for better debugging</span>
-<a id="__codelineno-0-288" name="__codelineno-0-288"></a>            <span class="n">ts_uid</span> <span class="o">=</span> <span class="s2">&quot;Unknown&quot;</span>
-<a id="__codelineno-0-289" name="__codelineno-0-289"></a>            <span class="k">if</span> <span class="n">ds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="s2">&quot;file_meta&quot;</span><span class="p">):</span>
-<a id="__codelineno-0-290" name="__codelineno-0-290"></a>                <span class="n">ts_uid</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">file_meta</span><span class="p">,</span> <span class="s2">&quot;TransferSyntaxUID&quot;</span><span class="p">,</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-288" name="__codelineno-0-288"></a>            <span class="n">ts_uid</span> <span class="o">=</span> <span class="s2">"Unknown"</span>
+<a id="__codelineno-0-289" name="__codelineno-0-289"></a>            <span class="k">if</span> <span class="n">ds</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">ds</span><span class="p">,</span> <span class="s2">"file_meta"</span><span class="p">):</span>
+<a id="__codelineno-0-290" name="__codelineno-0-290"></a>                <span class="n">ts_uid</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">file_meta</span><span class="p">,</span> <span class="s2">"TransferSyntaxUID"</span><span class="p">,</span> <span class="s2">"Unknown"</span><span class="p">)</span>
 <a id="__codelineno-0-291" name="__codelineno-0-291"></a>
-<a id="__codelineno-0-292" name="__codelineno-0-292"></a>            <span class="k">if</span> <span class="s2">&quot;missing dependencies&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;decompress&quot;</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
+<a id="__codelineno-0-292" name="__codelineno-0-292"></a>            <span class="k">if</span> <span class="s2">"missing dependencies"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">"decompress"</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
 <a id="__codelineno-0-293" name="__codelineno-0-293"></a>                <span class="c1"># Enhanced debug output</span>
 <a id="__codelineno-0-294" name="__codelineno-0-294"></a>                <span class="n">handlers</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-295" name="__codelineno-0-295"></a>                <span class="k">try</span><span class="p">:</span>
@@ -3420,18 +3420,18 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-299" name="__codelineno-0-299"></a>                    <span class="k">pass</span>
 <a id="__codelineno-0-300" name="__codelineno-0-300"></a>
 <a id="__codelineno-0-301" name="__codelineno-0-301"></a>                <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span>
-<a id="__codelineno-0-302" name="__codelineno-0-302"></a>                    <span class="sa">f</span><span class="s2">&quot;Failed to decompress pixel data for </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="p">)</span><span class="si">}</span><span class="s2"> &quot;</span>
-<a id="__codelineno-0-303" name="__codelineno-0-303"></a>                    <span class="sa">f</span><span class="s2">&quot;(Transfer Syntax: </span><span class="si">{</span><span class="n">ts_uid</span><span class="si">}</span><span class="s2">).</span><span class="se">\n</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-304" name="__codelineno-0-304"></a>                    <span class="sa">f</span><span class="s2">&quot;Underlying Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-305" name="__codelineno-0-305"></a>                    <span class="sa">f</span><span class="s2">&quot;Active pydicom handlers: </span><span class="si">{</span><span class="n">handlers</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-306" name="__codelineno-0-306"></a>                    <span class="s2">&quot;Missing image codecs. Please ensure &#39;pillow&#39;, &#39;pylibjpeg&#39;, or &#39;gdcm&#39; are installed.&quot;</span>
+<a id="__codelineno-0-302" name="__codelineno-0-302"></a>                    <span class="sa">f</span><span class="s2">"Failed to decompress pixel data for </span><span class="si">{</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="p">)</span><span class="si">}</span><span class="s2"> "</span>
+<a id="__codelineno-0-303" name="__codelineno-0-303"></a>                    <span class="sa">f</span><span class="s2">"(Transfer Syntax: </span><span class="si">{</span><span class="n">ts_uid</span><span class="si">}</span><span class="s2">).</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-0-304" name="__codelineno-0-304"></a>                    <span class="sa">f</span><span class="s2">"Underlying Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-0-305" name="__codelineno-0-305"></a>                    <span class="sa">f</span><span class="s2">"Active pydicom handlers: </span><span class="si">{</span><span class="n">handlers</span><span class="si">}</span><span class="se">\n</span><span class="s2">"</span>
+<a id="__codelineno-0-306" name="__codelineno-0-306"></a>                    <span class="s2">"Missing image codecs. Please ensure 'pillow', 'pylibjpeg', or 'gdcm' are installed."</span>
 <a id="__codelineno-0-307" name="__codelineno-0-307"></a>                <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
 <a id="__codelineno-0-308" name="__codelineno-0-308"></a>
-<a id="__codelineno-0-309" name="__codelineno-0-309"></a>            <span class="c1"># If we just caught the re-raised &quot;no pixel data&quot; exception, it would be handled above,</span>
+<a id="__codelineno-0-309" name="__codelineno-0-309"></a>            <span class="c1"># If we just caught the re-raised "no pixel data" exception, it would be handled above,</span>
 <a id="__codelineno-0-310" name="__codelineno-0-310"></a>            <span class="c1"># but if dcmread fails completely or something else happens:</span>
-<a id="__codelineno-0-311" name="__codelineno-0-311"></a>            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Lazy load failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
+<a id="__codelineno-0-311" name="__codelineno-0-311"></a>            <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Lazy load failed for </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">e</span>
 <a id="__codelineno-0-312" name="__codelineno-0-312"></a>
-<a id="__codelineno-0-313" name="__codelineno-0-313"></a>    <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Pixels missing and file not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-313" name="__codelineno-0-313"></a>    <span class="k">raise</span> <span class="ne">FileNotFoundError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Pixels missing and file not found: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">file_path</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -3494,7 +3494,7 @@ as a new distinct entity, preventing collisions with the original data.</p>
 <span class="normal"><a href="#__codelineno-0-198">198</a></span>
 <span class="normal"><a href="#__codelineno-0-199">199</a></span>
 <span class="normal"><a href="#__codelineno-0-200">200</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="k">def</span><span class="w"> </span><span class="nf">regenerate_uid</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">    Generates a new, globally unique SOP Instance UID.</span>
 <a id="__codelineno-0-176" name="__codelineno-0-176"></a>
 <a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">    Call this whenever pixel data is modified to ensure the instance is treated</span>
@@ -3503,24 +3503,24 @@ as a new distinct entity, preventing collisions with the original data.</p>
 <a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">    This method:</span>
 <a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">        1. Generates a new SOP Instance UID.</span>
 <a id="__codelineno-0-182" name="__codelineno-0-182"></a><span class="sd">        2. Updates the internal object property.</span>
-<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="sd">        3. Updates the &#39;0008,0018&#39; DICOM attribute.</span>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="sd">        3. Updates the '0008,0018' DICOM attribute.</span>
 <a id="__codelineno-0-184" name="__codelineno-0-184"></a><span class="sd">        4. Detaches the instance from its physical file path (since consistent hash changed).</span>
-<a id="__codelineno-0-185" name="__codelineno-0-185"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="c1"># 1. Generate new UID using pydicom&#39;s generator (or your org root)</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a><span class="sd">    """</span>
+<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="c1"># 1. Generate new UID using pydicom's generator (or your org root)</span>
 <a id="__codelineno-0-187" name="__codelineno-0-187"></a>    <span class="n">new_uid</span> <span class="o">=</span> <span class="n">generate_uid</span><span class="p">()</span>
 <a id="__codelineno-0-188" name="__codelineno-0-188"></a>
 <a id="__codelineno-0-189" name="__codelineno-0-189"></a>    <span class="c1"># 2. Update the Object Property</span>
 <a id="__codelineno-0-190" name="__codelineno-0-190"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span> <span class="o">=</span> <span class="n">new_uid</span>
 <a id="__codelineno-0-191" name="__codelineno-0-191"></a>
 <a id="__codelineno-0-192" name="__codelineno-0-192"></a>    <span class="c1"># 3. Update the DICOM Attribute Dictionary</span>
-<a id="__codelineno-0-193" name="__codelineno-0-193"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0008,0018&quot;</span><span class="p">,</span> <span class="n">new_uid</span><span class="p">)</span>
+<a id="__codelineno-0-193" name="__codelineno-0-193"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0008,0018"</span><span class="p">,</span> <span class="n">new_uid</span><span class="p">)</span>
 <a id="__codelineno-0-194" name="__codelineno-0-194"></a>
 <a id="__codelineno-0-195" name="__codelineno-0-195"></a>    <span class="c1"># 4. Detach from physical file</span>
-<a id="__codelineno-0-196" name="__codelineno-0-196"></a>    <span class="c1"># Since this object is now a &quot;new&quot; instance in memory,</span>
+<a id="__codelineno-0-196" name="__codelineno-0-196"></a>    <span class="c1"># Since this object is now a "new" instance in memory,</span>
 <a id="__codelineno-0-197" name="__codelineno-0-197"></a>    <span class="c1"># it no longer matches the file on disk.</span>
 <a id="__codelineno-0-198" name="__codelineno-0-198"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">file_path</span> <span class="o">=</span> <span class="kc">None</span>
 <a id="__codelineno-0-199" name="__codelineno-0-199"></a>
-<a id="__codelineno-0-200" name="__codelineno-0-200"></a>    <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  -&gt; Identity regenerated: </span><span class="si">{</span><span class="n">new_uid</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-200" name="__codelineno-0-200"></a>    <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">"  -&gt; Identity regenerated: </span><span class="si">{</span><span class="n">new_uid</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -3676,7 +3676,7 @@ as a new distinct entity, preventing collisions with the original data.</p>
 <span class="normal"><a href="#__codelineno-0-402">402</a></span>
 <span class="normal"><a href="#__codelineno-0-403">403</a></span>
 <span class="normal"><a href="#__codelineno-0-404">404</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-315" name="__codelineno-0-315"></a><span class="k">def</span><span class="w"> </span><span class="nf">set_pixel_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">array</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">):</span>
-<a id="__codelineno-0-316" name="__codelineno-0-316"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-316" name="__codelineno-0-316"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-317" name="__codelineno-0-317"></a><span class="sd">    Sets the pixel array and automatically updates metadata tags.</span>
 <a id="__codelineno-0-318" name="__codelineno-0-318"></a>
 <a id="__codelineno-0-319" name="__codelineno-0-319"></a><span class="sd">    Updates tags:</span>
@@ -3689,7 +3689,7 @@ as a new distinct entity, preventing collisions with the original data.</p>
 <a id="__codelineno-0-326" name="__codelineno-0-326"></a>
 <a id="__codelineno-0-327" name="__codelineno-0-327"></a><span class="sd">    Args:</span>
 <a id="__codelineno-0-328" name="__codelineno-0-328"></a><span class="sd">        array (np.ndarray): The pixel data to set. Can be 1D, 2D, 3D, or 4D.</span>
-<a id="__codelineno-0-329" name="__codelineno-0-329"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-329" name="__codelineno-0-329"></a><span class="sd">    """</span>
 <a id="__codelineno-0-330" name="__codelineno-0-330"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="o">=</span> <span class="n">array</span>
 <a id="__codelineno-0-331" name="__codelineno-0-331"></a>    <span class="n">shape</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">shape</span>
 <a id="__codelineno-0-332" name="__codelineno-0-332"></a>    <span class="n">ndim</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">shape</span><span class="p">)</span>
@@ -3702,10 +3702,10 @@ as a new distinct entity, preventing collisions with the original data.</p>
 <a id="__codelineno-0-339" name="__codelineno-0-339"></a>        <span class="c1"># Flattened array (e.g. from Sidecar loader)</span>
 <a id="__codelineno-0-340" name="__codelineno-0-340"></a>        <span class="c1"># Attempt to reshape using existing metadata if available</span>
 <a id="__codelineno-0-341" name="__codelineno-0-341"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-342" name="__codelineno-0-342"></a>            <span class="n">r</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0010&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-<a id="__codelineno-0-343" name="__codelineno-0-343"></a>            <span class="n">c</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0011&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-<a id="__codelineno-0-344" name="__codelineno-0-344"></a>            <span class="n">s</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0002&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
-<a id="__codelineno-0-345" name="__codelineno-0-345"></a>            <span class="n">f</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0008&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<a id="__codelineno-0-342" name="__codelineno-0-342"></a>            <span class="n">r</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0010"</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+<a id="__codelineno-0-343" name="__codelineno-0-343"></a>            <span class="n">c</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0011"</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+<a id="__codelineno-0-344" name="__codelineno-0-344"></a>            <span class="n">s</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0002"</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<a id="__codelineno-0-345" name="__codelineno-0-345"></a>            <span class="n">f</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0008"</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
 <a id="__codelineno-0-346" name="__codelineno-0-346"></a>
 <a id="__codelineno-0-347" name="__codelineno-0-347"></a>            <span class="n">expected_size</span> <span class="o">=</span> <span class="n">r</span> <span class="o">*</span> <span class="n">c</span> <span class="o">*</span> <span class="n">s</span> <span class="o">*</span> <span class="n">f</span>
 <a id="__codelineno-0-348" name="__codelineno-0-348"></a>            <span class="k">if</span> <span class="n">expected_size</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">array</span><span class="o">.</span><span class="n">size</span> <span class="o">&gt;=</span> <span class="n">expected_size</span><span class="p">:</span>
@@ -3729,7 +3729,7 @@ as a new distinct entity, preventing collisions with the original data.</p>
 <a id="__codelineno-0-366" name="__codelineno-0-366"></a>        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
 <a id="__codelineno-0-367" name="__codelineno-0-367"></a>            <span class="k">pass</span>
 <a id="__codelineno-0-368" name="__codelineno-0-368"></a>
-<a id="__codelineno-0-369" name="__codelineno-0-369"></a>        <span class="c1"># Only raise if we couldn&#39;t resolve it</span>
+<a id="__codelineno-0-369" name="__codelineno-0-369"></a>        <span class="c1"># Only raise if we couldn't resolve it</span>
 <a id="__codelineno-0-370" name="__codelineno-0-370"></a>        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">array</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># Still 1D</span>
 <a id="__codelineno-0-371" name="__codelineno-0-371"></a>            <span class="n">rows</span><span class="p">,</span> <span class="n">cols</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
 <a id="__codelineno-0-372" name="__codelineno-0-372"></a>
@@ -3743,26 +3743,26 @@ as a new distinct entity, preventing collisions with the original data.</p>
 <a id="__codelineno-0-380" name="__codelineno-0-380"></a>    <span class="k">elif</span> <span class="n">ndim</span> <span class="o">==</span> <span class="mi">4</span><span class="p">:</span>
 <a id="__codelineno-0-381" name="__codelineno-0-381"></a>        <span class="n">frames</span><span class="p">,</span> <span class="n">rows</span><span class="p">,</span> <span class="n">cols</span><span class="p">,</span> <span class="n">samples</span> <span class="o">=</span> <span class="n">shape</span>
 <a id="__codelineno-0-382" name="__codelineno-0-382"></a>    <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-383" name="__codelineno-0-383"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown shape: </span><span class="si">{</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-383" name="__codelineno-0-383"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Unknown shape: </span><span class="si">{</span><span class="n">shape</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 <a id="__codelineno-0-384" name="__codelineno-0-384"></a>
-<a id="__codelineno-0-385" name="__codelineno-0-385"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0010&quot;</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
-<a id="__codelineno-0-386" name="__codelineno-0-386"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0011&quot;</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span>
-<a id="__codelineno-0-387" name="__codelineno-0-387"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0002&quot;</span><span class="p">,</span> <span class="n">samples</span><span class="p">)</span>
+<a id="__codelineno-0-385" name="__codelineno-0-385"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0010"</span><span class="p">,</span> <span class="n">rows</span><span class="p">)</span>
+<a id="__codelineno-0-386" name="__codelineno-0-386"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0011"</span><span class="p">,</span> <span class="n">cols</span><span class="p">)</span>
+<a id="__codelineno-0-387" name="__codelineno-0-387"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0002"</span><span class="p">,</span> <span class="n">samples</span><span class="p">)</span>
 <a id="__codelineno-0-388" name="__codelineno-0-388"></a>    <span class="k">if</span> <span class="n">frames</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-<a id="__codelineno-0-389" name="__codelineno-0-389"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0008&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">frames</span><span class="p">))</span>
+<a id="__codelineno-0-389" name="__codelineno-0-389"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0008"</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">frames</span><span class="p">))</span>
 <a id="__codelineno-0-390" name="__codelineno-0-390"></a>    <span class="k">if</span> <span class="n">samples</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">:</span>
-<a id="__codelineno-0-391" name="__codelineno-0-391"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0004&quot;</span><span class="p">,</span> <span class="s2">&quot;RGB&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-392" name="__codelineno-0-392"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0006&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>  <span class="c1"># Force Interleaved (standard numpy)</span>
+<a id="__codelineno-0-391" name="__codelineno-0-391"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0004"</span><span class="p">,</span> <span class="s2">"RGB"</span><span class="p">)</span>
+<a id="__codelineno-0-392" name="__codelineno-0-392"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0006"</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>  <span class="c1"># Force Interleaved (standard numpy)</span>
 <a id="__codelineno-0-393" name="__codelineno-0-393"></a>    <span class="k">else</span><span class="p">:</span>
 <a id="__codelineno-0-394" name="__codelineno-0-394"></a>        <span class="c1"># Preserve existing PhotometricInterpretation (e.g. MONOCHROME1)</span>
 <a id="__codelineno-0-395" name="__codelineno-0-395"></a>        <span class="c1"># Only set default if missing</span>
-<a id="__codelineno-0-396" name="__codelineno-0-396"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;0028,0004&quot;</span><span class="p">):</span>
-<a id="__codelineno-0-397" name="__codelineno-0-397"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0004&quot;</span><span class="p">,</span> <span class="s2">&quot;MONOCHROME2&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-396" name="__codelineno-0-396"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"0028,0004"</span><span class="p">):</span>
+<a id="__codelineno-0-397" name="__codelineno-0-397"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0004"</span><span class="p">,</span> <span class="s2">"MONOCHROME2"</span><span class="p">)</span>
 <a id="__codelineno-0-398" name="__codelineno-0-398"></a>
 <a id="__codelineno-0-399" name="__codelineno-0-399"></a>    <span class="c1"># Ensure BitsAllocated matches array data type</span>
 <a id="__codelineno-0-400" name="__codelineno-0-400"></a>    <span class="c1"># SidecarPixelLoader relies on this to determine uint8 vs uint16</span>
 <a id="__codelineno-0-401" name="__codelineno-0-401"></a>    <span class="n">bits</span> <span class="o">=</span> <span class="n">array</span><span class="o">.</span><span class="n">itemsize</span> <span class="o">*</span> <span class="mi">8</span>
-<a id="__codelineno-0-402" name="__codelineno-0-402"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">&quot;0028,0100&quot;</span><span class="p">,</span> <span class="n">bits</span><span class="p">)</span>
+<a id="__codelineno-0-402" name="__codelineno-0-402"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">set_attr</span><span class="p">(</span><span class="s2">"0028,0100"</span><span class="p">,</span> <span class="n">bits</span><span class="p">)</span>
 <a id="__codelineno-0-403" name="__codelineno-0-403"></a>
 <a id="__codelineno-0-404" name="__codelineno-0-404"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_mod_count</span> <span class="o">+=</span> <span class="mi">1</span>
 </code></pre></div></td></tr></table></div>
@@ -3835,7 +3835,7 @@ or <code>_pixel_loader</code> is present).</p>
 <span class="normal"><a href="#__codelineno-0-221">221</a></span>
 <span class="normal"><a href="#__codelineno-0-222">222</a></span>
 <span class="normal"><a href="#__codelineno-0-223">223</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-202" name="__codelineno-0-202"></a><span class="k">def</span><span class="w"> </span><span class="nf">unload_pixel_data</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-204" name="__codelineno-0-204"></a><span class="sd">    Clears the cached pixel_array from memory to free resources.</span>
 <a id="__codelineno-0-205" name="__codelineno-0-205"></a>
 <a id="__codelineno-0-206" name="__codelineno-0-206"></a><span class="sd">    Only performs the clear if the data can be re-loaded (i.e., `file_path`</span>
@@ -3844,17 +3844,17 @@ or <code>_pixel_loader</code> is present).</p>
 <a id="__codelineno-0-209" name="__codelineno-0-209"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-210" name="__codelineno-0-210"></a><span class="sd">        bool: True if unloaded successfully,</span>
 <a id="__codelineno-0-211" name="__codelineno-0-211"></a><span class="sd">             False if it was unsafe to unload (data would be lost).</span>
-<a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="sd">    """</span>
 <a id="__codelineno-0-213" name="__codelineno-0-213"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-214" name="__codelineno-0-214"></a>        <span class="k">return</span> <span class="kc">True</span>
 <a id="__codelineno-0-215" name="__codelineno-0-215"></a>
 <a id="__codelineno-0-216" name="__codelineno-0-216"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">file_path</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pixel_loader</span><span class="p">:</span>
 <a id="__codelineno-0-217" name="__codelineno-0-217"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">pixel_array</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-218" name="__codelineno-0-218"></a>        <span class="c1"># print(f&quot;DEBUG: Unloaded pixels for {self.sop_instance_uid}&quot;)</span>
+<a id="__codelineno-0-218" name="__codelineno-0-218"></a>        <span class="c1"># print(f"DEBUG: Unloaded pixels for {self.sop_instance_uid}")</span>
 <a id="__codelineno-0-219" name="__codelineno-0-219"></a>        <span class="k">return</span> <span class="kc">True</span>
 <a id="__codelineno-0-220" name="__codelineno-0-220"></a>    <span class="k">else</span><span class="p">:</span>
 <a id="__codelineno-0-221" name="__codelineno-0-221"></a>        <span class="c1"># Data is in memory only (e.g. modified but not saved)</span>
-<a id="__codelineno-0-222" name="__codelineno-0-222"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DEBUG: FAILED TO UNLOAD </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2"> - No file path or loader!&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-222" name="__codelineno-0-222"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"DEBUG: FAILED TO UNLOAD </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2"> - No file path or loader!"</span><span class="p">)</span>
 <a id="__codelineno-0-223" name="__codelineno-0-223"></a>        <span class="k">return</span> <span class="kc">False</span>
 </code></pre></div></td></tr></table></div>
             </details>
@@ -3981,14 +3981,14 @@ or <code>_pixel_loader</code> is present).</p>
 <span class="normal"><a href="#__codelineno-0-497">497</a></span>
 <span class="normal"><a href="#__codelineno-0-498">498</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-471" name="__codelineno-0-471"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-0-472" name="__codelineno-0-472"></a><span class="k">class</span><span class="w"> </span><span class="nc">Patient</span><span class="p">:</span>
-<a id="__codelineno-0-473" name="__codelineno-0-473"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-473" name="__codelineno-0-473"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-474" name="__codelineno-0-474"></a><span class="sd">    Root of the object hierarchy. Groups Studies by Patient ID.</span>
 <a id="__codelineno-0-475" name="__codelineno-0-475"></a>
 <a id="__codelineno-0-476" name="__codelineno-0-476"></a><span class="sd">    Attributes:</span>
 <a id="__codelineno-0-477" name="__codelineno-0-477"></a><span class="sd">        patient_id (str): The primary patient identifier.</span>
-<a id="__codelineno-0-478" name="__codelineno-0-478"></a><span class="sd">        patient_name (str): The patient&#39;s name.</span>
+<a id="__codelineno-0-478" name="__codelineno-0-478"></a><span class="sd">        patient_name (str): The patient's name.</span>
 <a id="__codelineno-0-479" name="__codelineno-0-479"></a><span class="sd">        studies (List[Study]): List of studies belonging to this patient.</span>
-<a id="__codelineno-0-480" name="__codelineno-0-480"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-480" name="__codelineno-0-480"></a><span class="sd">    """</span>
 <a id="__codelineno-0-481" name="__codelineno-0-481"></a>    <span class="n">patient_id</span><span class="p">:</span> <span class="nb">str</span>
 <a id="__codelineno-0-482" name="__codelineno-0-482"></a>    <span class="n">patient_name</span><span class="p">:</span> <span class="nb">str</span>
 <a id="__codelineno-0-483" name="__codelineno-0-483"></a>    <span class="n">studies</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Study</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
@@ -3998,12 +3998,12 @@ or <code>_pixel_loader</code> is present).</p>
 <a id="__codelineno-0-487" name="__codelineno-0-487"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">True</span>
 <a id="__codelineno-0-488" name="__codelineno-0-488"></a>
 <a id="__codelineno-0-489" name="__codelineno-0-489"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-490" name="__codelineno-0-490"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-490" name="__codelineno-0-490"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-491" name="__codelineno-0-491"></a><span class="sd">        Marks the current entity and all associated studies as clean.</span>
 <a id="__codelineno-0-492" name="__codelineno-0-492"></a>
-<a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">        Resets the &#39;_dirty&#39; flag to False for this entity and recursively calls</span>
-<a id="__codelineno-0-494" name="__codelineno-0-494"></a><span class="sd">        &#39;mark_clean&#39; on all studies to ensure their &#39;_dirty&#39; flags are also reset.</span>
-<a id="__codelineno-0-495" name="__codelineno-0-495"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">        Resets the '_dirty' flag to False for this entity and recursively calls</span>
+<a id="__codelineno-0-494" name="__codelineno-0-494"></a><span class="sd">        'mark_clean' on all studies to ensure their '_dirty' flags are also reset.</span>
+<a id="__codelineno-0-495" name="__codelineno-0-495"></a><span class="sd">        """</span>
 <a id="__codelineno-0-496" name="__codelineno-0-496"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-497" name="__codelineno-0-497"></a>        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">studies</span><span class="p">:</span>
 <a id="__codelineno-0-498" name="__codelineno-0-498"></a>            <span class="n">s</span><span class="o">.</span><span class="n">mark_clean</span><span class="p">()</span>
@@ -4051,12 +4051,12 @@ or <code>_pixel_loader</code> is present).</p>
 <span class="normal"><a href="#__codelineno-0-496">496</a></span>
 <span class="normal"><a href="#__codelineno-0-497">497</a></span>
 <span class="normal"><a href="#__codelineno-0-498">498</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-489" name="__codelineno-0-489"></a><span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-490" name="__codelineno-0-490"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-490" name="__codelineno-0-490"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-491" name="__codelineno-0-491"></a><span class="sd">    Marks the current entity and all associated studies as clean.</span>
 <a id="__codelineno-0-492" name="__codelineno-0-492"></a>
-<a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">    Resets the &#39;_dirty&#39; flag to False for this entity and recursively calls</span>
-<a id="__codelineno-0-494" name="__codelineno-0-494"></a><span class="sd">    &#39;mark_clean&#39; on all studies to ensure their &#39;_dirty&#39; flags are also reset.</span>
-<a id="__codelineno-0-495" name="__codelineno-0-495"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">    Resets the '_dirty' flag to False for this entity and recursively calls</span>
+<a id="__codelineno-0-494" name="__codelineno-0-494"></a><span class="sd">    'mark_clean' on all studies to ensure their '_dirty' flags are also reset.</span>
+<a id="__codelineno-0-495" name="__codelineno-0-495"></a><span class="sd">    """</span>
 <a id="__codelineno-0-496" name="__codelineno-0-496"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-497" name="__codelineno-0-497"></a>    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">studies</span><span class="p">:</span>
 <a id="__codelineno-0-498" name="__codelineno-0-498"></a>        <span class="n">s</span><span class="o">.</span><span class="n">mark_clean</span><span class="p">()</span>
@@ -4215,17 +4215,17 @@ Typically represents a single scan or reconstruction.</p>
 <span class="normal"><a href="#__codelineno-0-435">435</a></span>
 <span class="normal"><a href="#__codelineno-0-436">436</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-407" name="__codelineno-0-407"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-0-408" name="__codelineno-0-408"></a><span class="k">class</span><span class="w"> </span><span class="nc">Series</span><span class="p">:</span>
-<a id="__codelineno-0-409" name="__codelineno-0-409"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-409" name="__codelineno-0-409"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-410" name="__codelineno-0-410"></a><span class="sd">    Groups Instances by Series Instance UID.</span>
 <a id="__codelineno-0-411" name="__codelineno-0-411"></a><span class="sd">    Typically represents a single scan or reconstruction.</span>
 <a id="__codelineno-0-412" name="__codelineno-0-412"></a>
 <a id="__codelineno-0-413" name="__codelineno-0-413"></a><span class="sd">    Attributes:</span>
 <a id="__codelineno-0-414" name="__codelineno-0-414"></a><span class="sd">        series_instance_uid (str): The unique identifier for the series.</span>
-<a id="__codelineno-0-415" name="__codelineno-0-415"></a><span class="sd">        modality (str): The modality type (e.g., &#39;CT&#39;, &#39;MR&#39;).</span>
+<a id="__codelineno-0-415" name="__codelineno-0-415"></a><span class="sd">        modality (str): The modality type (e.g., 'CT', 'MR').</span>
 <a id="__codelineno-0-416" name="__codelineno-0-416"></a><span class="sd">        series_number (int): The series number.</span>
 <a id="__codelineno-0-417" name="__codelineno-0-417"></a><span class="sd">        equipment (Optional[Equipment]): The equipment used for this series.</span>
 <a id="__codelineno-0-418" name="__codelineno-0-418"></a><span class="sd">        instances (List[Instance]): List of instances belonging to this series.</span>
-<a id="__codelineno-0-419" name="__codelineno-0-419"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-419" name="__codelineno-0-419"></a><span class="sd">    """</span>
 <a id="__codelineno-0-420" name="__codelineno-0-420"></a>    <span class="n">series_instance_uid</span><span class="p">:</span> <span class="nb">str</span>
 <a id="__codelineno-0-421" name="__codelineno-0-421"></a>    <span class="n">modality</span><span class="p">:</span> <span class="nb">str</span>
 <a id="__codelineno-0-422" name="__codelineno-0-422"></a>    <span class="n">series_number</span><span class="p">:</span> <span class="nb">int</span>
@@ -4237,9 +4237,9 @@ Typically represents a single scan or reconstruction.</p>
 <a id="__codelineno-0-428" name="__codelineno-0-428"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">True</span>
 <a id="__codelineno-0-429" name="__codelineno-0-429"></a>
 <a id="__codelineno-0-430" name="__codelineno-0-430"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-431" name="__codelineno-0-431"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-432" name="__codelineno-0-432"></a><span class="sd">        Marks the current object and all its instances as clean by setting their &#39;_dirty&#39; attribute to False.</span>
-<a id="__codelineno-0-433" name="__codelineno-0-433"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-431" name="__codelineno-0-431"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-432" name="__codelineno-0-432"></a><span class="sd">        Marks the current object and all its instances as clean by setting their '_dirty' attribute to False.</span>
+<a id="__codelineno-0-433" name="__codelineno-0-433"></a><span class="sd">        """</span>
 <a id="__codelineno-0-434" name="__codelineno-0-434"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-435" name="__codelineno-0-435"></a>        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">instances</span><span class="p">:</span>
 <a id="__codelineno-0-436" name="__codelineno-0-436"></a>            <span class="n">i</span><span class="o">.</span><span class="n">mark_clean</span><span class="p">()</span>
@@ -4282,9 +4282,9 @@ Typically represents a single scan or reconstruction.</p>
 <span class="normal"><a href="#__codelineno-0-434">434</a></span>
 <span class="normal"><a href="#__codelineno-0-435">435</a></span>
 <span class="normal"><a href="#__codelineno-0-436">436</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-430" name="__codelineno-0-430"></a><span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-431" name="__codelineno-0-431"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-432" name="__codelineno-0-432"></a><span class="sd">    Marks the current object and all its instances as clean by setting their &#39;_dirty&#39; attribute to False.</span>
-<a id="__codelineno-0-433" name="__codelineno-0-433"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-431" name="__codelineno-0-431"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-432" name="__codelineno-0-432"></a><span class="sd">    Marks the current object and all its instances as clean by setting their '_dirty' attribute to False.</span>
+<a id="__codelineno-0-433" name="__codelineno-0-433"></a><span class="sd">    """</span>
 <a id="__codelineno-0-434" name="__codelineno-0-434"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-435" name="__codelineno-0-435"></a>    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">instances</span><span class="p">:</span>
 <a id="__codelineno-0-436" name="__codelineno-0-436"></a>        <span class="n">i</span><span class="o">.</span><span class="n">mark_clean</span><span class="p">()</span>
@@ -4438,7 +4438,7 @@ Represents a single patient visit or examination.</p>
 <span class="normal"><a href="#__codelineno-0-467">467</a></span>
 <span class="normal"><a href="#__codelineno-0-468">468</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-439" name="__codelineno-0-439"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">slots</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 <a id="__codelineno-0-440" name="__codelineno-0-440"></a><span class="k">class</span><span class="w"> </span><span class="nc">Study</span><span class="p">:</span>
-<a id="__codelineno-0-441" name="__codelineno-0-441"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-441" name="__codelineno-0-441"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-442" name="__codelineno-0-442"></a><span class="sd">    Groups Series by Study Instance UID.</span>
 <a id="__codelineno-0-443" name="__codelineno-0-443"></a><span class="sd">    Represents a single patient visit or examination.</span>
 <a id="__codelineno-0-444" name="__codelineno-0-444"></a>
@@ -4448,7 +4448,7 @@ Represents a single patient visit or examination.</p>
 <a id="__codelineno-0-448" name="__codelineno-0-448"></a><span class="sd">        series (List[Series]): List of series belonging to this study.</span>
 <a id="__codelineno-0-449" name="__codelineno-0-449"></a><span class="sd">        date_shifted (bool): Whether dates in this study have been shifted.</span>
 <a id="__codelineno-0-450" name="__codelineno-0-450"></a><span class="sd">        study_time (Optional[str]): The time of the study.</span>
-<a id="__codelineno-0-451" name="__codelineno-0-451"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-451" name="__codelineno-0-451"></a><span class="sd">    """</span>
 <a id="__codelineno-0-452" name="__codelineno-0-452"></a>    <span class="n">study_instance_uid</span><span class="p">:</span> <span class="nb">str</span>
 <a id="__codelineno-0-453" name="__codelineno-0-453"></a>    <span class="n">study_date</span><span class="p">:</span> <span class="n">Any</span>
 <a id="__codelineno-0-454" name="__codelineno-0-454"></a>    <span class="n">series</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Series</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
@@ -4460,9 +4460,9 @@ Represents a single patient visit or examination.</p>
 <a id="__codelineno-0-460" name="__codelineno-0-460"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">True</span>
 <a id="__codelineno-0-461" name="__codelineno-0-461"></a>
 <a id="__codelineno-0-462" name="__codelineno-0-462"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-463" name="__codelineno-0-463"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-464" name="__codelineno-0-464"></a><span class="sd">        Marks the current object and all associated series as clean by setting their &#39;_dirty&#39; attribute to False.</span>
-<a id="__codelineno-0-465" name="__codelineno-0-465"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-463" name="__codelineno-0-463"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-464" name="__codelineno-0-464"></a><span class="sd">        Marks the current object and all associated series as clean by setting their '_dirty' attribute to False.</span>
+<a id="__codelineno-0-465" name="__codelineno-0-465"></a><span class="sd">        """</span>
 <a id="__codelineno-0-466" name="__codelineno-0-466"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-467" name="__codelineno-0-467"></a>        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">series</span><span class="p">:</span>
 <a id="__codelineno-0-468" name="__codelineno-0-468"></a>            <span class="n">s</span><span class="o">.</span><span class="n">mark_clean</span><span class="p">()</span>
@@ -4505,9 +4505,9 @@ Represents a single patient visit or examination.</p>
 <span class="normal"><a href="#__codelineno-0-466">466</a></span>
 <span class="normal"><a href="#__codelineno-0-467">467</a></span>
 <span class="normal"><a href="#__codelineno-0-468">468</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-462" name="__codelineno-0-462"></a><span class="k">def</span><span class="w"> </span><span class="nf">mark_clean</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-463" name="__codelineno-0-463"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-464" name="__codelineno-0-464"></a><span class="sd">    Marks the current object and all associated series as clean by setting their &#39;_dirty&#39; attribute to False.</span>
-<a id="__codelineno-0-465" name="__codelineno-0-465"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-463" name="__codelineno-0-463"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-464" name="__codelineno-0-464"></a><span class="sd">    Marks the current object and all associated series as clean by setting their '_dirty' attribute to False.</span>
+<a id="__codelineno-0-465" name="__codelineno-0-465"></a><span class="sd">    """</span>
 <a id="__codelineno-0-466" name="__codelineno-0-466"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_dirty</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-467" name="__codelineno-0-467"></a>    <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">series</span><span class="p">:</span>
 <a id="__codelineno-0-468" name="__codelineno-0-468"></a>        <span class="n">s</span><span class="o">.</span><span class="n">mark_clean</span><span class="p">()</span>
@@ -4650,7 +4650,7 @@ Represents a single patient visit or examination.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

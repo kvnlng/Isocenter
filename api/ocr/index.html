@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1849,58 +1849,58 @@
 <span class="normal"><a href="#__codelineno-0-334">334</a></span>
 <span class="normal"><a href="#__codelineno-0-335">335</a></span>
 <span class="normal"><a href="#__codelineno-0-336">336</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-226" name="__codelineno-0-226"></a><span class="k">class</span><span class="w"> </span><span class="nc">ZoneDiscoverer</span><span class="p">:</span>
-<a id="__codelineno-0-227" name="__codelineno-0-227"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-227" name="__codelineno-0-227"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-228" name="__codelineno-0-228"></a><span class="sd">    Utilities for analyzing text regions and classifying them.</span>
-<a id="__codelineno-0-229" name="__codelineno-0-229"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-229" name="__codelineno-0-229"></a><span class="sd">    """</span>
 <a id="__codelineno-0-230" name="__codelineno-0-230"></a>    <span class="n">_nlp_model</span> <span class="o">=</span> <span class="kc">None</span>
 <a id="__codelineno-0-231" name="__codelineno-0-231"></a>    <span class="n">_nlp_model_failed</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-232" name="__codelineno-0-232"></a>
 <a id="__codelineno-0-233" name="__codelineno-0-233"></a>    <span class="nd">@staticmethod</span>
 <a id="__codelineno-0-234" name="__codelineno-0-234"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_classify_text</span><span class="p">(</span><span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-235" name="__codelineno-0-235"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-236" name="__codelineno-0-236"></a><span class="sd">        Classifies text as &#39;NAME_PATTERN&#39;, &#39;PROPER_NOUN&#39;, or &#39;TEXT&#39;.</span>
-<a id="__codelineno-0-237" name="__codelineno-0-237"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-235" name="__codelineno-0-235"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-236" name="__codelineno-0-236"></a><span class="sd">        Classifies text as 'NAME_PATTERN', 'PROPER_NOUN', or 'TEXT'.</span>
+<a id="__codelineno-0-237" name="__codelineno-0-237"></a><span class="sd">        """</span>
 <a id="__codelineno-0-238" name="__codelineno-0-238"></a>        <span class="n">clean</span> <span class="o">=</span> <span class="n">text</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
 <a id="__codelineno-0-239" name="__codelineno-0-239"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">clean</span><span class="p">:</span>
-<a id="__codelineno-0-240" name="__codelineno-0-240"></a>            <span class="k">return</span> <span class="s2">&quot;TEXT&quot;</span>
+<a id="__codelineno-0-240" name="__codelineno-0-240"></a>            <span class="k">return</span> <span class="s2">"TEXT"</span>
 <a id="__codelineno-0-241" name="__codelineno-0-241"></a>
 <a id="__codelineno-0-242" name="__codelineno-0-242"></a>        <span class="c1"># 1. Explicit DICOM Name Pattern</span>
-<a id="__codelineno-0-243" name="__codelineno-0-243"></a>        <span class="k">if</span> <span class="s1">&#39;^&#39;</span> <span class="ow">in</span> <span class="n">clean</span> <span class="ow">and</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">isalpha</span><span class="p">()</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">clean</span><span class="p">):</span>
-<a id="__codelineno-0-244" name="__codelineno-0-244"></a>            <span class="k">return</span> <span class="s2">&quot;NAME_PATTERN&quot;</span>
+<a id="__codelineno-0-243" name="__codelineno-0-243"></a>        <span class="k">if</span> <span class="s1">'^'</span> <span class="ow">in</span> <span class="n">clean</span> <span class="ow">and</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">isalpha</span><span class="p">()</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">clean</span><span class="p">):</span>
+<a id="__codelineno-0-244" name="__codelineno-0-244"></a>            <span class="k">return</span> <span class="s2">"NAME_PATTERN"</span>
 <a id="__codelineno-0-245" name="__codelineno-0-245"></a>
 <a id="__codelineno-0-246" name="__codelineno-0-246"></a>        <span class="c1"># 2. NLP (spaCy) - Optional</span>
 <a id="__codelineno-0-247" name="__codelineno-0-247"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_nlp_model_failed</span><span class="p">:</span>
 <a id="__codelineno-0-248" name="__codelineno-0-248"></a>            <span class="k">if</span> <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_nlp_model</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-249" name="__codelineno-0-249"></a>                <span class="k">try</span><span class="p">:</span>
 <a id="__codelineno-0-250" name="__codelineno-0-250"></a>                    <span class="kn">import</span><span class="w"> </span><span class="nn">spacy</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a>                    <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_nlp_model</span> <span class="o">=</span> <span class="n">spacy</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">&quot;en_core_web_sm&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a>                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Loaded spaCy NLP model.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-251" name="__codelineno-0-251"></a>                    <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_nlp_model</span> <span class="o">=</span> <span class="n">spacy</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="s2">"en_core_web_sm"</span><span class="p">)</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a>                    <span class="n">logger</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Loaded spaCy NLP model."</span><span class="p">)</span>
 <a id="__codelineno-0-253" name="__codelineno-0-253"></a>                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a>                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to load or import spaCy: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">. Fallback to regex.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a>                    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Failed to load or import spaCy: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">. Fallback to regex."</span><span class="p">)</span>
 <a id="__codelineno-0-255" name="__codelineno-0-255"></a>                    <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_nlp_model_failed</span> <span class="o">=</span> <span class="kc">True</span>
 <a id="__codelineno-0-256" name="__codelineno-0-256"></a>
 <a id="__codelineno-0-257" name="__codelineno-0-257"></a>        <span class="k">if</span> <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_nlp_model</span><span class="p">:</span>
 <a id="__codelineno-0-258" name="__codelineno-0-258"></a>            <span class="n">doc</span> <span class="o">=</span> <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_nlp_model</span><span class="p">(</span><span class="n">clean</span><span class="p">)</span>
 <a id="__codelineno-0-259" name="__codelineno-0-259"></a>            <span class="k">for</span> <span class="n">ent</span> <span class="ow">in</span> <span class="n">doc</span><span class="o">.</span><span class="n">ents</span><span class="p">:</span>
-<a id="__codelineno-0-260" name="__codelineno-0-260"></a>                <span class="k">if</span> <span class="n">ent</span><span class="o">.</span><span class="n">label_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;PERSON&quot;</span><span class="p">,</span> <span class="s2">&quot;ORG&quot;</span><span class="p">):</span> <span class="c1"># Accept ORG too</span>
-<a id="__codelineno-0-261" name="__codelineno-0-261"></a>                    <span class="k">return</span> <span class="s2">&quot;PROPER_NOUN&quot;</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a>                <span class="k">if</span> <span class="n">ent</span><span class="o">.</span><span class="n">label_</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"PERSON"</span><span class="p">,</span> <span class="s2">"ORG"</span><span class="p">):</span> <span class="c1"># Accept ORG too</span>
+<a id="__codelineno-0-261" name="__codelineno-0-261"></a>                    <span class="k">return</span> <span class="s2">"PROPER_NOUN"</span>
 <a id="__codelineno-0-262" name="__codelineno-0-262"></a>
 <a id="__codelineno-0-263" name="__codelineno-0-263"></a>        <span class="c1"># 3. Fallback Heuristic</span>
 <a id="__codelineno-0-264" name="__codelineno-0-264"></a>        <span class="n">words</span> <span class="o">=</span> <span class="n">clean</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
 <a id="__codelineno-0-265" name="__codelineno-0-265"></a>        <span class="n">cap_count</span> <span class="o">=</span> <span class="mi">0</span>
 <a id="__codelineno-0-266" name="__codelineno-0-266"></a>        <span class="k">for</span> <span class="n">w</span> <span class="ow">in</span> <span class="n">words</span><span class="p">:</span>
-<a id="__codelineno-0-267" name="__codelineno-0-267"></a>            <span class="n">w_clean</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;[^\w\s]&#39;</span><span class="p">,</span> <span class="s1">&#39;&#39;</span><span class="p">,</span> <span class="n">w</span><span class="p">)</span>
+<a id="__codelineno-0-267" name="__codelineno-0-267"></a>            <span class="n">w_clean</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s1">'[^\w\s]'</span><span class="p">,</span> <span class="s1">''</span><span class="p">,</span> <span class="n">w</span><span class="p">)</span>
 <a id="__codelineno-0-268" name="__codelineno-0-268"></a>            <span class="k">if</span> <span class="n">w_clean</span> <span class="ow">and</span> <span class="n">w_clean</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">isupper</span><span class="p">()</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">w_clean</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
 <a id="__codelineno-0-269" name="__codelineno-0-269"></a>                <span class="n">cap_count</span> <span class="o">+=</span> <span class="mi">1</span>
 <a id="__codelineno-0-270" name="__codelineno-0-270"></a>
 <a id="__codelineno-0-271" name="__codelineno-0-271"></a>        <span class="k">if</span> <span class="n">cap_count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-<a id="__codelineno-0-272" name="__codelineno-0-272"></a>            <span class="k">return</span> <span class="s2">&quot;PROPER_NOUN_CANDIDATE&quot;</span>
+<a id="__codelineno-0-272" name="__codelineno-0-272"></a>            <span class="k">return</span> <span class="s2">"PROPER_NOUN_CANDIDATE"</span>
 <a id="__codelineno-0-273" name="__codelineno-0-273"></a>
-<a id="__codelineno-0-274" name="__codelineno-0-274"></a>        <span class="k">return</span> <span class="s2">&quot;TEXT&quot;</span>
+<a id="__codelineno-0-274" name="__codelineno-0-274"></a>        <span class="k">return</span> <span class="s2">"TEXT"</span>
 <a id="__codelineno-0-275" name="__codelineno-0-275"></a>
 <a id="__codelineno-0-276" name="__codelineno-0-276"></a>    <span class="nd">@staticmethod</span>
 <a id="__codelineno-0-277" name="__codelineno-0-277"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">group_boxes</span><span class="p">(</span><span class="n">boxes</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]],</span> <span class="n">padding</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">pad_x</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">pad_y</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]:</span>
-<a id="__codelineno-0-278" name="__codelineno-0-278"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Groups boxes into overlapping clusters.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-278" name="__codelineno-0-278"></a><span class="w">        </span><span class="sd">"""Groups boxes into overlapping clusters."""</span>
 <a id="__codelineno-0-279" name="__codelineno-0-279"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">boxes</span><span class="p">:</span>
 <a id="__codelineno-0-280" name="__codelineno-0-280"></a>            <span class="k">return</span> <span class="p">[]</span>
 <a id="__codelineno-0-281" name="__codelineno-0-281"></a>
@@ -1956,7 +1956,7 @@
 <a id="__codelineno-0-331" name="__codelineno-0-331"></a>
 <a id="__codelineno-0-332" name="__codelineno-0-332"></a>    <span class="nd">@staticmethod</span>
 <a id="__codelineno-0-333" name="__codelineno-0-333"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_merge_overlapping_boxes</span><span class="p">(</span><span class="n">boxes</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]],</span> <span class="n">padding</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]:</span>
-<a id="__codelineno-0-334" name="__codelineno-0-334"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Legacy helper.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-334" name="__codelineno-0-334"></a><span class="w">        </span><span class="sd">"""Legacy helper."""</span>
 <a id="__codelineno-0-335" name="__codelineno-0-335"></a>        <span class="n">clusters</span> <span class="o">=</span> <span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">group_boxes</span><span class="p">(</span><span class="n">boxes</span><span class="p">,</span> <span class="n">padding</span><span class="o">=</span><span class="n">padding</span><span class="p">)</span>
 <a id="__codelineno-0-336" name="__codelineno-0-336"></a>        <span class="k">return</span> <span class="p">[</span><span class="n">ZoneDiscoverer</span><span class="o">.</span><span class="n">_union_box_list</span><span class="p">([</span><span class="n">boxes</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">cluster</span><span class="p">])</span> <span class="k">for</span> <span class="n">cluster</span> <span class="ow">in</span> <span class="n">clusters</span><span class="p">]</span>
 </code></pre></div></td></tr></table></div>
@@ -2031,7 +2031,7 @@
 <span class="normal"><a href="#__codelineno-0-309">309</a></span>
 <span class="normal"><a href="#__codelineno-0-310">310</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-276" name="__codelineno-0-276"></a><span class="nd">@staticmethod</span>
 <a id="__codelineno-0-277" name="__codelineno-0-277"></a><span class="k">def</span><span class="w"> </span><span class="nf">group_boxes</span><span class="p">(</span><span class="n">boxes</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]],</span> <span class="n">padding</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">pad_x</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">pad_y</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]:</span>
-<a id="__codelineno-0-278" name="__codelineno-0-278"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Groups boxes into overlapping clusters.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-278" name="__codelineno-0-278"></a><span class="w">    </span><span class="sd">"""Groups boxes into overlapping clusters."""</span>
 <a id="__codelineno-0-279" name="__codelineno-0-279"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">boxes</span><span class="p">:</span>
 <a id="__codelineno-0-280" name="__codelineno-0-280"></a>        <span class="k">return</span> <span class="p">[]</span>
 <a id="__codelineno-0-281" name="__codelineno-0-281"></a>
@@ -2306,10 +2306,10 @@ and group them into actionable redaction zones.</p>
 <span class="normal"><a href="#__codelineno-0-222">222</a></span>
 <span class="normal"><a href="#__codelineno-0-223">223</a></span>
 <span class="normal"><a href="#__codelineno-0-224">224</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-24" name="__codelineno-0-24"></a><span class="k">class</span><span class="w"> </span><span class="nc">DiscoveryResult</span><span class="p">:</span>
-<a id="__codelineno-0-25" name="__codelineno-0-25"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-26" name="__codelineno-0-26"></a><span class="sd">    Holds the raw results of a discovery scan and provides methods to filter</span>
 <a id="__codelineno-0-27" name="__codelineno-0-27"></a><span class="sd">    and group them into actionable redaction zones.</span>
-<a id="__codelineno-0-28" name="__codelineno-0-28"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28"></a><span class="sd">    """</span>
 <a id="__codelineno-0-29" name="__codelineno-0-29"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">candidates</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">DiscoveryCandidate</span><span class="p">],</span> <span class="n">n_sources</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
 <a id="__codelineno-0-30" name="__codelineno-0-30"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span> <span class="o">=</span> <span class="n">candidates</span>
 <a id="__codelineno-0-31" name="__codelineno-0-31"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">n_sources</span> <span class="o">=</span> <span class="n">n_sources</span>
@@ -2320,13 +2320,13 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-36" name="__codelineno-0-36"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__iter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <a id="__codelineno-0-37" name="__codelineno-0-37"></a>        <span class="k">return</span> <span class="nb">iter</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">)</span>
 <a id="__codelineno-0-38" name="__codelineno-0-38"></a>
-<a id="__codelineno-0-39" name="__codelineno-0-39"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">filter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">predicate</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">&#39;DiscoveryResult&#39;</span><span class="p">:</span>
-<a id="__codelineno-0-40" name="__codelineno-0-40"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-39" name="__codelineno-0-39"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">filter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">predicate</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">'DiscoveryResult'</span><span class="p">:</span>
+<a id="__codelineno-0-40" name="__codelineno-0-40"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-41" name="__codelineno-0-41"></a><span class="sd">        Returns a new result with filtered candidates.</span>
 <a id="__codelineno-0-42" name="__codelineno-0-42"></a>
 <a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-44" name="__codelineno-0-44"></a><span class="sd">            predicate: Either a float (min_confidence) or a callable accepting a DiscoveryCandidate.</span>
-<a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">        """</span>
 <a id="__codelineno-0-46" name="__codelineno-0-46"></a>        <span class="k">if</span> <span class="nb">callable</span><span class="p">(</span><span class="n">predicate</span><span class="p">):</span>
 <a id="__codelineno-0-47" name="__codelineno-0-47"></a>            <span class="n">filtered</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span> <span class="k">if</span> <span class="n">predicate</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span>
 <a id="__codelineno-0-48" name="__codelineno-0-48"></a>        <span class="k">else</span><span class="p">:</span>
@@ -2334,24 +2334,24 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-50" name="__codelineno-0-50"></a>        <span class="k">return</span> <span class="n">DiscoveryResult</span><span class="p">(</span><span class="n">filtered</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_sources</span><span class="p">)</span>
 <a id="__codelineno-0-51" name="__codelineno-0-51"></a>
 <a id="__codelineno-0-52" name="__codelineno-0-52"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">to_dataframe</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-54" name="__codelineno-0-54"></a><span class="sd">        Returns a pandas DataFrame of the candidates.</span>
-<a id="__codelineno-0-55" name="__codelineno-0-55"></a><span class="sd">        Requires &#39;pandas&#39; to be installed.</span>
-<a id="__codelineno-0-56" name="__codelineno-0-56"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55"></a><span class="sd">        Requires 'pandas' to be installed.</span>
+<a id="__codelineno-0-56" name="__codelineno-0-56"></a><span class="sd">        """</span>
 <a id="__codelineno-0-57" name="__codelineno-0-57"></a>        <span class="k">try</span><span class="p">:</span>
 <a id="__codelineno-0-58" name="__codelineno-0-58"></a>            <span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
 <a id="__codelineno-0-59" name="__codelineno-0-59"></a>            <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">([</span><span class="nb">vars</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">])</span>
 <a id="__codelineno-0-60" name="__codelineno-0-60"></a>        <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
-<a id="__codelineno-0-61" name="__codelineno-0-61"></a>            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;Pandas is required for to_dataframe()&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-61" name="__codelineno-0-61"></a>            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">"Pandas is required for to_dataframe()"</span><span class="p">)</span>
 <a id="__codelineno-0-62" name="__codelineno-0-62"></a>
 <a id="__codelineno-0-63" name="__codelineno-0-63"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_density_matrix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bins</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">))</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]]:</span>
-<a id="__codelineno-0-64" name="__codelineno-0-64"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-64" name="__codelineno-0-64"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-65" name="__codelineno-0-65"></a><span class="sd">        Returns a 2D matrix (list of lists) representing candidate density.</span>
 <a id="__codelineno-0-66" name="__codelineno-0-66"></a><span class="sd">        Ideal for plotting with matplotlib (e.g., plt.imshow).</span>
 <a id="__codelineno-0-67" name="__codelineno-0-67"></a>
 <a id="__codelineno-0-68" name="__codelineno-0-68"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-69" name="__codelineno-0-69"></a><span class="sd">            bins: Tuple of (rows, cols) for the grid.</span>
-<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-70" name="__codelineno-0-70"></a><span class="sd">        """</span>
 <a id="__codelineno-0-71" name="__codelineno-0-71"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">:</span>
 <a id="__codelineno-0-72" name="__codelineno-0-72"></a>            <span class="k">return</span> <span class="p">[[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="n">bins</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">bins</span><span class="p">[</span><span class="mi">0</span><span class="p">])]</span>
 <a id="__codelineno-0-73" name="__codelineno-0-73"></a>
@@ -2380,65 +2380,65 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-96" name="__codelineno-0-96"></a>        <span class="k">return</span> <span class="n">grid</span>
 <a id="__codelineno-0-97" name="__codelineno-0-97"></a>
 <a id="__codelineno-0-98" name="__codelineno-0-98"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">visualize_heatmap</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bins</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">))</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-99" name="__codelineno-0-99"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-99" name="__codelineno-0-99"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-100" name="__codelineno-0-100"></a><span class="sd">        Returns an ASCII heatmap of candidate distribution.</span>
 <a id="__codelineno-0-101" name="__codelineno-0-101"></a>
 <a id="__codelineno-0-102" name="__codelineno-0-102"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-103" name="__codelineno-0-103"></a><span class="sd">            bins: Tuple of (rows, cols) for the grid.</span>
-<a id="__codelineno-0-104" name="__codelineno-0-104"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-104" name="__codelineno-0-104"></a><span class="sd">        """</span>
 <a id="__codelineno-0-105" name="__codelineno-0-105"></a>        <span class="n">grid</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_density_matrix</span><span class="p">(</span><span class="n">bins</span><span class="p">)</span>
 <a id="__codelineno-0-106" name="__codelineno-0-106"></a>        <span class="n">rows</span><span class="p">,</span> <span class="n">cols</span> <span class="o">=</span> <span class="n">bins</span>
 <a id="__codelineno-0-107" name="__codelineno-0-107"></a>
 <a id="__codelineno-0-108" name="__codelineno-0-108"></a>        <span class="c1"># Render</span>
-<a id="__codelineno-0-109" name="__codelineno-0-109"></a>        <span class="n">output</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;Discovery Heatmap (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">)</span><span class="si">}</span><span class="s2"> candidates):&quot;</span><span class="p">]</span>
+<a id="__codelineno-0-109" name="__codelineno-0-109"></a>        <span class="n">output</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">"Discovery Heatmap (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">)</span><span class="si">}</span><span class="s2"> candidates):"</span><span class="p">]</span>
 <a id="__codelineno-0-110" name="__codelineno-0-110"></a>        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">rows</span><span class="p">):</span>
-<a id="__codelineno-0-111" name="__codelineno-0-111"></a>            <span class="n">line</span> <span class="o">=</span> <span class="s2">&quot;|&quot;</span>
+<a id="__codelineno-0-111" name="__codelineno-0-111"></a>            <span class="n">line</span> <span class="o">=</span> <span class="s2">"|"</span>
 <a id="__codelineno-0-112" name="__codelineno-0-112"></a>            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">cols</span><span class="p">):</span>
 <a id="__codelineno-0-113" name="__codelineno-0-113"></a>                <span class="n">count</span> <span class="o">=</span> <span class="n">grid</span><span class="p">[</span><span class="n">r</span><span class="p">][</span><span class="n">c</span><span class="p">]</span>
-<a id="__codelineno-0-114" name="__codelineno-0-114"></a>                <span class="n">char</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span>
-<a id="__codelineno-0-115" name="__codelineno-0-115"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">&quot;.&quot;</span>
-<a id="__codelineno-0-116" name="__codelineno-0-116"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">5</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">&quot;o&quot;</span>
-<a id="__codelineno-0-117" name="__codelineno-0-117"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">10</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">&quot;O&quot;</span>
-<a id="__codelineno-0-118" name="__codelineno-0-118"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">50</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">&quot;#&quot;</span>
+<a id="__codelineno-0-114" name="__codelineno-0-114"></a>                <span class="n">char</span> <span class="o">=</span> <span class="s2">" "</span>
+<a id="__codelineno-0-115" name="__codelineno-0-115"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">"."</span>
+<a id="__codelineno-0-116" name="__codelineno-0-116"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">5</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">"o"</span>
+<a id="__codelineno-0-117" name="__codelineno-0-117"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">10</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">"O"</span>
+<a id="__codelineno-0-118" name="__codelineno-0-118"></a>                <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">50</span><span class="p">:</span> <span class="n">char</span> <span class="o">=</span> <span class="s2">"#"</span>
 <a id="__codelineno-0-119" name="__codelineno-0-119"></a>                <span class="n">line</span> <span class="o">+=</span> <span class="n">char</span>
-<a id="__codelineno-0-120" name="__codelineno-0-120"></a>            <span class="n">line</span> <span class="o">+=</span> <span class="s2">&quot;|&quot;</span>
+<a id="__codelineno-0-120" name="__codelineno-0-120"></a>            <span class="n">line</span> <span class="o">+=</span> <span class="s2">"|"</span>
 <a id="__codelineno-0-121" name="__codelineno-0-121"></a>            <span class="n">output</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
-<a id="__codelineno-0-122" name="__codelineno-0-122"></a>        <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+<a id="__codelineno-0-122" name="__codelineno-0-122"></a>        <span class="k">return</span> <span class="s2">"</span><span class="se">\n</span><span class="s2">"</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
 <a id="__codelineno-0-123" name="__codelineno-0-123"></a>
 <a id="__codelineno-0-124" name="__codelineno-0-124"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">analyze_temporal_stability</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-125" name="__codelineno-0-125"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-125" name="__codelineno-0-125"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-126" name="__codelineno-0-126"></a><span class="sd">        Analyzes candidates to determine if they are static (overlay) or transient (noise).</span>
 <a id="__codelineno-0-127" name="__codelineno-0-127"></a>
 <a id="__codelineno-0-128" name="__codelineno-0-128"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-129" name="__codelineno-0-129"></a><span class="sd">            List of dicts describing stability of grouped regions.</span>
-<a id="__codelineno-0-130" name="__codelineno-0-130"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-130" name="__codelineno-0-130"></a><span class="sd">        """</span>
 <a id="__codelineno-0-131" name="__codelineno-0-131"></a>        <span class="n">zones</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">to_zones</span><span class="p">(</span><span class="n">min_occurrence</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span> <span class="c1"># a relaxed clustering</span>
 <a id="__codelineno-0-132" name="__codelineno-0-132"></a>        <span class="n">stability_report</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-133" name="__codelineno-0-133"></a>
 <a id="__codelineno-0-134" name="__codelineno-0-134"></a>        <span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">:</span>
-<a id="__codelineno-0-135" name="__codelineno-0-135"></a>            <span class="n">zone_rect</span> <span class="o">=</span> <span class="n">z</span><span class="p">[</span><span class="s1">&#39;zone&#39;</span><span class="p">]</span>
-<a id="__codelineno-0-136" name="__codelineno-0-136"></a>            <span class="n">occurrence</span> <span class="o">=</span> <span class="n">z</span><span class="p">[</span><span class="s1">&#39;occurrence&#39;</span><span class="p">]</span>
+<a id="__codelineno-0-135" name="__codelineno-0-135"></a>            <span class="n">zone_rect</span> <span class="o">=</span> <span class="n">z</span><span class="p">[</span><span class="s1">'zone'</span><span class="p">]</span>
+<a id="__codelineno-0-136" name="__codelineno-0-136"></a>            <span class="n">occurrence</span> <span class="o">=</span> <span class="n">z</span><span class="p">[</span><span class="s1">'occurrence'</span><span class="p">]</span>
 <a id="__codelineno-0-137" name="__codelineno-0-137"></a>
-<a id="__codelineno-0-138" name="__codelineno-0-138"></a>            <span class="n">status</span> <span class="o">=</span> <span class="s2">&quot;TRANSIENT&quot;</span>
+<a id="__codelineno-0-138" name="__codelineno-0-138"></a>            <span class="n">status</span> <span class="o">=</span> <span class="s2">"TRANSIENT"</span>
 <a id="__codelineno-0-139" name="__codelineno-0-139"></a>            <span class="k">if</span> <span class="n">occurrence</span> <span class="o">&gt;</span> <span class="mf">0.9</span><span class="p">:</span>
-<a id="__codelineno-0-140" name="__codelineno-0-140"></a>                <span class="n">status</span> <span class="o">=</span> <span class="s2">&quot;STATIC_ALWAYS&quot;</span>
+<a id="__codelineno-0-140" name="__codelineno-0-140"></a>                <span class="n">status</span> <span class="o">=</span> <span class="s2">"STATIC_ALWAYS"</span>
 <a id="__codelineno-0-141" name="__codelineno-0-141"></a>            <span class="k">elif</span> <span class="n">occurrence</span> <span class="o">&gt;</span> <span class="mf">0.5</span><span class="p">:</span>
-<a id="__codelineno-0-142" name="__codelineno-0-142"></a>                <span class="n">status</span> <span class="o">=</span> <span class="s2">&quot;STATIC_FREQUENT&quot;</span>
+<a id="__codelineno-0-142" name="__codelineno-0-142"></a>                <span class="n">status</span> <span class="o">=</span> <span class="s2">"STATIC_FREQUENT"</span>
 <a id="__codelineno-0-143" name="__codelineno-0-143"></a>
 <a id="__codelineno-0-144" name="__codelineno-0-144"></a>            <span class="n">stability_report</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-<a id="__codelineno-0-145" name="__codelineno-0-145"></a>                <span class="s2">&quot;zone&quot;</span><span class="p">:</span> <span class="n">zone_rect</span><span class="p">,</span>
-<a id="__codelineno-0-146" name="__codelineno-0-146"></a>                <span class="s2">&quot;occurrence&quot;</span><span class="p">:</span> <span class="n">occurrence</span><span class="p">,</span>
-<a id="__codelineno-0-147" name="__codelineno-0-147"></a>                <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">status</span><span class="p">,</span>
-<a id="__codelineno-0-148" name="__codelineno-0-148"></a>                <span class="s2">&quot;example&quot;</span><span class="p">:</span> <span class="n">z</span><span class="p">[</span><span class="s1">&#39;examples&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">z</span><span class="p">[</span><span class="s1">&#39;examples&#39;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+<a id="__codelineno-0-145" name="__codelineno-0-145"></a>                <span class="s2">"zone"</span><span class="p">:</span> <span class="n">zone_rect</span><span class="p">,</span>
+<a id="__codelineno-0-146" name="__codelineno-0-146"></a>                <span class="s2">"occurrence"</span><span class="p">:</span> <span class="n">occurrence</span><span class="p">,</span>
+<a id="__codelineno-0-147" name="__codelineno-0-147"></a>                <span class="s2">"status"</span><span class="p">:</span> <span class="n">status</span><span class="p">,</span>
+<a id="__codelineno-0-148" name="__codelineno-0-148"></a>                <span class="s2">"example"</span><span class="p">:</span> <span class="n">z</span><span class="p">[</span><span class="s1">'examples'</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="n">z</span><span class="p">[</span><span class="s1">'examples'</span><span class="p">]</span> <span class="k">else</span> <span class="s2">""</span>
 <a id="__codelineno-0-149" name="__codelineno-0-149"></a>            <span class="p">})</span>
 <a id="__codelineno-0-150" name="__codelineno-0-150"></a>
 <a id="__codelineno-0-151" name="__codelineno-0-151"></a>        <span class="k">return</span> <span class="n">stability_report</span>
 <a id="__codelineno-0-152" name="__codelineno-0-152"></a>
 <a id="__codelineno-0-153" name="__codelineno-0-153"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">inspect_clusters</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pad_x</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span><span class="p">,</span> <span class="n">pad_y</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">DiscoveryCandidate</span><span class="p">]]:</span>
-<a id="__codelineno-0-154" name="__codelineno-0-154"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-154" name="__codelineno-0-154"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-155" name="__codelineno-0-155"></a><span class="sd">        Returns the raw clusters of candidates before they are merged.</span>
 <a id="__codelineno-0-156" name="__codelineno-0-156"></a><span class="sd">        Useful for debugging why certain words are grouping together.</span>
-<a id="__codelineno-0-157" name="__codelineno-0-157"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-157" name="__codelineno-0-157"></a><span class="sd">        """</span>
 <a id="__codelineno-0-158" name="__codelineno-0-158"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">:</span>
 <a id="__codelineno-0-159" name="__codelineno-0-159"></a>            <span class="k">return</span> <span class="p">[]</span>
 <a id="__codelineno-0-160" name="__codelineno-0-160"></a>
@@ -2448,14 +2448,14 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-164" name="__codelineno-0-164"></a>        <span class="k">return</span> <span class="p">[[</span><span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">indices</span><span class="p">]</span> <span class="k">for</span> <span class="n">indices</span> <span class="ow">in</span> <span class="n">cluster_indices</span><span class="p">]</span>
 <a id="__codelineno-0-165" name="__codelineno-0-165"></a>
 <a id="__codelineno-0-166" name="__codelineno-0-166"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">to_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pad_x</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span><span class="p">,</span> <span class="n">pad_y</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="n">min_occurrence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">        Groups candidates into suggested redaction zones.</span>
 <a id="__codelineno-0-169" name="__codelineno-0-169"></a>
 <a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">        Args:</span>
 <a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">            pad_x: Horizontal padding for merging (higher values merge words on same line).</span>
 <a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">            pad_y: Vertical padding.</span>
 <a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">            min_occurrence: Fraction of valid sources (0.0-1.0) required to suggest a zone.</span>
-<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">        """</span>
 <a id="__codelineno-0-175" name="__codelineno-0-175"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">:</span>
 <a id="__codelineno-0-176" name="__codelineno-0-176"></a>            <span class="k">return</span> <span class="p">[]</span>
 <a id="__codelineno-0-177" name="__codelineno-0-177"></a>
@@ -2484,11 +2484,11 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-200" name="__codelineno-0-200"></a>            <span class="n">texts</span> <span class="o">=</span> <span class="nb">list</span><span class="p">({</span><span class="n">c</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">})</span> <span class="c1"># Dedup</span>
 <a id="__codelineno-0-201" name="__codelineno-0-201"></a>
 <a id="__codelineno-0-202" name="__codelineno-0-202"></a>            <span class="c1"># Smart Type Classification based on the group</span>
-<a id="__codelineno-0-203" name="__codelineno-0-203"></a>            <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">&quot;TEXT&quot;</span>
-<a id="__codelineno-0-204" name="__codelineno-0-204"></a>            <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="o">==</span> <span class="s2">&quot;NAME_PATTERN&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
-<a id="__codelineno-0-205" name="__codelineno-0-205"></a>                <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">&quot;LIKELY_NAME&quot;</span>
-<a id="__codelineno-0-206" name="__codelineno-0-206"></a>            <span class="k">elif</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;PROPER_NOUN&quot;</span><span class="p">,</span> <span class="s2">&quot;PROPER_NOUN_CANDIDATE&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
-<a id="__codelineno-0-207" name="__codelineno-0-207"></a>                <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">&quot;PROPER_NOUN&quot;</span>
+<a id="__codelineno-0-203" name="__codelineno-0-203"></a>            <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">"TEXT"</span>
+<a id="__codelineno-0-204" name="__codelineno-0-204"></a>            <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="o">==</span> <span class="s2">"NAME_PATTERN"</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
+<a id="__codelineno-0-205" name="__codelineno-0-205"></a>                <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">"LIKELY_NAME"</span>
+<a id="__codelineno-0-206" name="__codelineno-0-206"></a>            <span class="k">elif</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"PROPER_NOUN"</span><span class="p">,</span> <span class="s2">"PROPER_NOUN_CANDIDATE"</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
+<a id="__codelineno-0-207" name="__codelineno-0-207"></a>                <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">"PROPER_NOUN"</span>
 <a id="__codelineno-0-208" name="__codelineno-0-208"></a>
 <a id="__codelineno-0-209" name="__codelineno-0-209"></a>            <span class="c1"># Average Confidence</span>
 <a id="__codelineno-0-210" name="__codelineno-0-210"></a>            <span class="n">avg_conf</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">confidence</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">subset</span><span class="p">)</span>
@@ -2498,11 +2498,11 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-214" name="__codelineno-0-214"></a>                <span class="c1"># Convert to [y1, y2, x1, x2] for Gantry Config</span>
 <a id="__codelineno-0-215" name="__codelineno-0-215"></a>                <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span> <span class="o">=</span> <span class="n">merged_box</span>
 <a id="__codelineno-0-216" name="__codelineno-0-216"></a>                <span class="n">final_zones</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-<a id="__codelineno-0-217" name="__codelineno-0-217"></a>                    <span class="s2">&quot;zone&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">y</span><span class="p">,</span> <span class="n">y</span> <span class="o">+</span> <span class="n">h</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">w</span><span class="p">],</span>
-<a id="__codelineno-0-218" name="__codelineno-0-218"></a>                    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="n">zone_type</span><span class="p">,</span>
-<a id="__codelineno-0-219" name="__codelineno-0-219"></a>                    <span class="s2">&quot;occurrence&quot;</span><span class="p">:</span> <span class="n">occurrence_rate</span><span class="p">,</span>
-<a id="__codelineno-0-220" name="__codelineno-0-220"></a>                    <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="n">avg_conf</span><span class="p">,</span>
-<a id="__codelineno-0-221" name="__codelineno-0-221"></a>                    <span class="s2">&quot;examples&quot;</span><span class="p">:</span> <span class="n">texts</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span>
+<a id="__codelineno-0-217" name="__codelineno-0-217"></a>                    <span class="s2">"zone"</span><span class="p">:</span> <span class="p">[</span><span class="n">y</span><span class="p">,</span> <span class="n">y</span> <span class="o">+</span> <span class="n">h</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">w</span><span class="p">],</span>
+<a id="__codelineno-0-218" name="__codelineno-0-218"></a>                    <span class="s2">"type"</span><span class="p">:</span> <span class="n">zone_type</span><span class="p">,</span>
+<a id="__codelineno-0-219" name="__codelineno-0-219"></a>                    <span class="s2">"occurrence"</span><span class="p">:</span> <span class="n">occurrence_rate</span><span class="p">,</span>
+<a id="__codelineno-0-220" name="__codelineno-0-220"></a>                    <span class="s2">"confidence"</span><span class="p">:</span> <span class="n">avg_conf</span><span class="p">,</span>
+<a id="__codelineno-0-221" name="__codelineno-0-221"></a>                    <span class="s2">"examples"</span><span class="p">:</span> <span class="n">texts</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span>
 <a id="__codelineno-0-222" name="__codelineno-0-222"></a>                <span class="p">})</span>
 <a id="__codelineno-0-223" name="__codelineno-0-223"></a>
 <a id="__codelineno-0-224" name="__codelineno-0-224"></a>        <span class="k">return</span> <span class="n">final_zones</span>
@@ -2580,13 +2580,13 @@ and group them into actionable redaction zones.</p>
 <span class="normal"><a href="#__codelineno-0-47">47</a></span>
 <span class="normal"><a href="#__codelineno-0-48">48</a></span>
 <span class="normal"><a href="#__codelineno-0-49">49</a></span>
-<span class="normal"><a href="#__codelineno-0-50">50</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-39" name="__codelineno-0-39"></a><span class="k">def</span><span class="w"> </span><span class="nf">filter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">predicate</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">&#39;DiscoveryResult&#39;</span><span class="p">:</span>
-<a id="__codelineno-0-40" name="__codelineno-0-40"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="normal"><a href="#__codelineno-0-50">50</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-39" name="__codelineno-0-39"></a><span class="k">def</span><span class="w"> </span><span class="nf">filter</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">predicate</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="n">Callable</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">'DiscoveryResult'</span><span class="p">:</span>
+<a id="__codelineno-0-40" name="__codelineno-0-40"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-41" name="__codelineno-0-41"></a><span class="sd">    Returns a new result with filtered candidates.</span>
 <a id="__codelineno-0-42" name="__codelineno-0-42"></a>
 <a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="sd">    Args:</span>
 <a id="__codelineno-0-44" name="__codelineno-0-44"></a><span class="sd">        predicate: Either a float (min_confidence) or a callable accepting a DiscoveryCandidate.</span>
-<a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-45" name="__codelineno-0-45"></a><span class="sd">    """</span>
 <a id="__codelineno-0-46" name="__codelineno-0-46"></a>    <span class="k">if</span> <span class="nb">callable</span><span class="p">(</span><span class="n">predicate</span><span class="p">):</span>
 <a id="__codelineno-0-47" name="__codelineno-0-47"></a>        <span class="n">filtered</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span> <span class="k">if</span> <span class="n">predicate</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span>
 <a id="__codelineno-0-48" name="__codelineno-0-48"></a>    <span class="k">else</span><span class="p">:</span>
@@ -2736,14 +2736,14 @@ and group them into actionable redaction zones.</p>
 <span class="normal"><a href="#__codelineno-0-222">222</a></span>
 <span class="normal"><a href="#__codelineno-0-223">223</a></span>
 <span class="normal"><a href="#__codelineno-0-224">224</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="k">def</span><span class="w"> </span><span class="nf">to_zones</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">pad_x</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span><span class="p">,</span> <span class="n">pad_y</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> <span class="n">min_occurrence</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.1</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">    Groups candidates into suggested redaction zones.</span>
 <a id="__codelineno-0-169" name="__codelineno-0-169"></a>
 <a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">    Args:</span>
 <a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">        pad_x: Horizontal padding for merging (higher values merge words on same line).</span>
 <a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">        pad_y: Vertical padding.</span>
 <a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">        min_occurrence: Fraction of valid sources (0.0-1.0) required to suggest a zone.</span>
-<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">    """</span>
 <a id="__codelineno-0-175" name="__codelineno-0-175"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">candidates</span><span class="p">:</span>
 <a id="__codelineno-0-176" name="__codelineno-0-176"></a>        <span class="k">return</span> <span class="p">[]</span>
 <a id="__codelineno-0-177" name="__codelineno-0-177"></a>
@@ -2772,11 +2772,11 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-200" name="__codelineno-0-200"></a>        <span class="n">texts</span> <span class="o">=</span> <span class="nb">list</span><span class="p">({</span><span class="n">c</span><span class="o">.</span><span class="n">text</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">})</span> <span class="c1"># Dedup</span>
 <a id="__codelineno-0-201" name="__codelineno-0-201"></a>
 <a id="__codelineno-0-202" name="__codelineno-0-202"></a>        <span class="c1"># Smart Type Classification based on the group</span>
-<a id="__codelineno-0-203" name="__codelineno-0-203"></a>        <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">&quot;TEXT&quot;</span>
-<a id="__codelineno-0-204" name="__codelineno-0-204"></a>        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="o">==</span> <span class="s2">&quot;NAME_PATTERN&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
-<a id="__codelineno-0-205" name="__codelineno-0-205"></a>            <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">&quot;LIKELY_NAME&quot;</span>
-<a id="__codelineno-0-206" name="__codelineno-0-206"></a>        <span class="k">elif</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;PROPER_NOUN&quot;</span><span class="p">,</span> <span class="s2">&quot;PROPER_NOUN_CANDIDATE&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
-<a id="__codelineno-0-207" name="__codelineno-0-207"></a>            <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">&quot;PROPER_NOUN&quot;</span>
+<a id="__codelineno-0-203" name="__codelineno-0-203"></a>        <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">"TEXT"</span>
+<a id="__codelineno-0-204" name="__codelineno-0-204"></a>        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="o">==</span> <span class="s2">"NAME_PATTERN"</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
+<a id="__codelineno-0-205" name="__codelineno-0-205"></a>            <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">"LIKELY_NAME"</span>
+<a id="__codelineno-0-206" name="__codelineno-0-206"></a>        <span class="k">elif</span> <span class="nb">any</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">classification</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">"PROPER_NOUN"</span><span class="p">,</span> <span class="s2">"PROPER_NOUN_CANDIDATE"</span><span class="p">)</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">):</span>
+<a id="__codelineno-0-207" name="__codelineno-0-207"></a>            <span class="n">zone_type</span> <span class="o">=</span> <span class="s2">"PROPER_NOUN"</span>
 <a id="__codelineno-0-208" name="__codelineno-0-208"></a>
 <a id="__codelineno-0-209" name="__codelineno-0-209"></a>        <span class="c1"># Average Confidence</span>
 <a id="__codelineno-0-210" name="__codelineno-0-210"></a>        <span class="n">avg_conf</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">confidence</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">subset</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">subset</span><span class="p">)</span>
@@ -2786,11 +2786,11 @@ and group them into actionable redaction zones.</p>
 <a id="__codelineno-0-214" name="__codelineno-0-214"></a>            <span class="c1"># Convert to [y1, y2, x1, x2] for Gantry Config</span>
 <a id="__codelineno-0-215" name="__codelineno-0-215"></a>            <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span> <span class="o">=</span> <span class="n">merged_box</span>
 <a id="__codelineno-0-216" name="__codelineno-0-216"></a>            <span class="n">final_zones</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-<a id="__codelineno-0-217" name="__codelineno-0-217"></a>                <span class="s2">&quot;zone&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">y</span><span class="p">,</span> <span class="n">y</span> <span class="o">+</span> <span class="n">h</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">w</span><span class="p">],</span>
-<a id="__codelineno-0-218" name="__codelineno-0-218"></a>                <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="n">zone_type</span><span class="p">,</span>
-<a id="__codelineno-0-219" name="__codelineno-0-219"></a>                <span class="s2">&quot;occurrence&quot;</span><span class="p">:</span> <span class="n">occurrence_rate</span><span class="p">,</span>
-<a id="__codelineno-0-220" name="__codelineno-0-220"></a>                <span class="s2">&quot;confidence&quot;</span><span class="p">:</span> <span class="n">avg_conf</span><span class="p">,</span>
-<a id="__codelineno-0-221" name="__codelineno-0-221"></a>                <span class="s2">&quot;examples&quot;</span><span class="p">:</span> <span class="n">texts</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span>
+<a id="__codelineno-0-217" name="__codelineno-0-217"></a>                <span class="s2">"zone"</span><span class="p">:</span> <span class="p">[</span><span class="n">y</span><span class="p">,</span> <span class="n">y</span> <span class="o">+</span> <span class="n">h</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">w</span><span class="p">],</span>
+<a id="__codelineno-0-218" name="__codelineno-0-218"></a>                <span class="s2">"type"</span><span class="p">:</span> <span class="n">zone_type</span><span class="p">,</span>
+<a id="__codelineno-0-219" name="__codelineno-0-219"></a>                <span class="s2">"occurrence"</span><span class="p">:</span> <span class="n">occurrence_rate</span><span class="p">,</span>
+<a id="__codelineno-0-220" name="__codelineno-0-220"></a>                <span class="s2">"confidence"</span><span class="p">:</span> <span class="n">avg_conf</span><span class="p">,</span>
+<a id="__codelineno-0-221" name="__codelineno-0-221"></a>                <span class="s2">"examples"</span><span class="p">:</span> <span class="n">texts</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span>
 <a id="__codelineno-0-222" name="__codelineno-0-222"></a>            <span class="p">})</span>
 <a id="__codelineno-0-223" name="__codelineno-0-223"></a>
 <a id="__codelineno-0-224" name="__codelineno-0-224"></a>    <span class="k">return</span> <span class="n">final_zones</span>
@@ -2991,23 +2991,23 @@ against configured redaction zones.</p>
 <span class="normal"><a href="#__codelineno-0-158">158</a></span>
 <span class="normal"><a href="#__codelineno-0-159">159</a></span>
 <span class="normal"><a href="#__codelineno-0-160">160</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-6" name="__codelineno-0-6"></a><span class="k">class</span><span class="w"> </span><span class="nc">RedactionVerifier</span><span class="p">:</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8"></a><span class="sd">    Verifies pixel redaction strategies by comparing OCR results</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9"></a><span class="sd">    against configured redaction zones.</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10"></a><span class="sd">    """</span>
 <a id="__codelineno-0-11" name="__codelineno-0-11"></a>
 <a id="__codelineno-0-12" name="__codelineno-0-12"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rules</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-14" name="__codelineno-0-14"></a><span class="sd">        Args:</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15"></a><span class="sd">            rules (List[Dict]): A list of redaction rules (config[&#39;machines&#39;]).</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15"></a><span class="sd">            rules (List[Dict]): A list of redaction rules (config['machines']).</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="sd">        """</span>
 <a id="__codelineno-0-17" name="__codelineno-0-17"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">rules</span> <span class="o">=</span> <span class="n">rules</span> <span class="ow">or</span> <span class="p">[]</span>
 <a id="__codelineno-0-18" name="__codelineno-0-18"></a>
 <a id="__codelineno-0-19" name="__codelineno-0-19"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_matching_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">equipment</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-21" name="__codelineno-0-21"></a><span class="sd">        Finds the redaction rule that applies to this equipment.</span>
 <a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="sd">        Uses exact Serial Number match first, then Model/Manufacturer logic.</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">        """</span>
 <a id="__codelineno-0-24" name="__codelineno-0-24"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">equipment</span><span class="p">:</span>
 <a id="__codelineno-0-25" name="__codelineno-0-25"></a>            <span class="k">return</span> <span class="kc">None</span>
 <a id="__codelineno-0-26" name="__codelineno-0-26"></a>
@@ -3017,17 +3017,17 @@ against configured redaction zones.</p>
 <a id="__codelineno-0-30" name="__codelineno-0-30"></a>
 <a id="__codelineno-0-31" name="__codelineno-0-31"></a>        <span class="c1"># 1. Exact Serial Match</span>
 <a id="__codelineno-0-32" name="__codelineno-0-32"></a>        <span class="k">for</span> <span class="n">rule</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
-<a id="__codelineno-0-33" name="__codelineno-0-33"></a>            <span class="k">if</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">target_serial</span><span class="p">:</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33"></a>            <span class="k">if</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">target_serial</span><span class="p">:</span>
 <a id="__codelineno-0-34" name="__codelineno-0-34"></a>                <span class="k">return</span> <span class="n">rule</span>
 <a id="__codelineno-0-35" name="__codelineno-0-35"></a>
 <a id="__codelineno-0-36" name="__codelineno-0-36"></a>        <span class="c1"># 2. Check Model/Manufacturer (if serial not found or not required by rule?)</span>
 <a id="__codelineno-0-37" name="__codelineno-0-37"></a>        <span class="c1"># For verification, we stick to strict serial matching as per current architecture</span>
-<a id="__codelineno-0-38" name="__codelineno-0-38"></a>        <span class="c1"># unless there&#39;s a fallback mechanism.</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38"></a>        <span class="c1"># unless there's a fallback mechanism.</span>
 <a id="__codelineno-0-39" name="__codelineno-0-39"></a>        <span class="c1"># For now, strict match.</span>
 <a id="__codelineno-0-40" name="__codelineno-0-40"></a>        <span class="k">return</span> <span class="kc">None</span>
 <a id="__codelineno-0-41" name="__codelineno-0-41"></a>
 <a id="__codelineno-0-42" name="__codelineno-0-42"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">is_covered</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text_box</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">zone_box</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">0.50</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-44" name="__codelineno-0-44"></a><span class="sd">        Checks if the text_box is significantly covered by the zone_box.</span>
 <a id="__codelineno-0-45" name="__codelineno-0-45"></a>
 <a id="__codelineno-0-46" name="__codelineno-0-46"></a><span class="sd">        Args:</span>
@@ -3037,7 +3037,7 @@ against configured redaction zones.</p>
 <a id="__codelineno-0-50" name="__codelineno-0-50"></a>
 <a id="__codelineno-0-51" name="__codelineno-0-51"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-52" name="__codelineno-0-52"></a><span class="sd">            bool: True if covered.</span>
-<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="sd">        """</span>
 <a id="__codelineno-0-54" name="__codelineno-0-54"></a>        <span class="n">tx</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="n">tw</span><span class="p">,</span> <span class="n">th</span> <span class="o">=</span> <span class="n">text_box</span>
 <a id="__codelineno-0-55" name="__codelineno-0-55"></a>        <span class="n">zx</span><span class="p">,</span> <span class="n">zy</span><span class="p">,</span> <span class="n">zw</span><span class="p">,</span> <span class="n">zh</span> <span class="o">=</span> <span class="n">zone_box</span>
 <a id="__codelineno-0-56" name="__codelineno-0-56"></a>
@@ -3060,12 +3060,12 @@ against configured redaction zones.</p>
 <a id="__codelineno-0-73" name="__codelineno-0-73"></a>        <span class="k">return</span> <span class="n">coverage</span> <span class="o">&gt;=</span> <span class="n">threshold</span>
 <a id="__codelineno-0-74" name="__codelineno-0-74"></a>
 <a id="__codelineno-0-75" name="__codelineno-0-75"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">verify_instance</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance</span><span class="p">:</span> <span class="n">Instance</span><span class="p">,</span> <span class="n">equipment</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">PhiFinding</span><span class="p">]:</span>
-<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-77" name="__codelineno-0-77"></a><span class="sd">        Runs OCR on the instance.</span>
 <a id="__codelineno-0-78" name="__codelineno-0-78"></a><span class="sd">        - If text is fully matched (&gt;= 80% coverage): considered Safe (Ignored).</span>
 <a id="__codelineno-0-79" name="__codelineno-0-79"></a><span class="sd">        - If text is partially matched (&gt; 0% but &lt; 80%): Reported as PARTIAL_LEAK.</span>
 <a id="__codelineno-0-80" name="__codelineno-0-80"></a><span class="sd">        - If text is not matched (0%): Reported as NEW_LEAK.</span>
-<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">        """</span>
 <a id="__codelineno-0-82" name="__codelineno-0-82"></a>        <span class="n">text_regions</span> <span class="o">=</span> <span class="n">analyze_pixels</span><span class="p">(</span><span class="n">instance</span><span class="p">)</span>
 <a id="__codelineno-0-83" name="__codelineno-0-83"></a>
 <a id="__codelineno-0-84" name="__codelineno-0-84"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">text_regions</span><span class="p">:</span>
@@ -3074,7 +3074,7 @@ against configured redaction zones.</p>
 <a id="__codelineno-0-87" name="__codelineno-0-87"></a>        <span class="n">rule</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_matching_rule</span><span class="p">(</span><span class="n">equipment</span><span class="p">)</span>
 <a id="__codelineno-0-88" name="__codelineno-0-88"></a>        <span class="n">zones</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-89" name="__codelineno-0-89"></a>        <span class="k">if</span> <span class="n">rule</span><span class="p">:</span>
-<a id="__codelineno-0-90" name="__codelineno-0-90"></a>            <span class="n">raw_zones</span> <span class="o">=</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;redaction_zones&quot;</span><span class="p">,</span> <span class="p">[])</span>
+<a id="__codelineno-0-90" name="__codelineno-0-90"></a>            <span class="n">raw_zones</span> <span class="o">=</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"redaction_zones"</span><span class="p">,</span> <span class="p">[])</span>
 <a id="__codelineno-0-91" name="__codelineno-0-91"></a>            <span class="n">zones</span> <span class="o">=</span> <span class="n">raw_zones</span>
 <a id="__codelineno-0-92" name="__codelineno-0-92"></a>
 <a id="__codelineno-0-93" name="__codelineno-0-93"></a>        <span class="n">findings</span> <span class="o">=</span> <span class="p">[]</span>
@@ -3089,7 +3089,7 @@ against configured redaction zones.</p>
 <a id="__codelineno-0-102" name="__codelineno-0-102"></a>                    <span class="n">z_box</span> <span class="o">=</span> <span class="p">(</span><span class="n">zone</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">zone</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">zone</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">zone</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span>
 <a id="__codelineno-0-103" name="__codelineno-0-103"></a>
 <a id="__codelineno-0-104" name="__codelineno-0-104"></a>                    <span class="c1"># Calculate logic manually here or reuse is_covered logic but return float?</span>
-<a id="__codelineno-0-105" name="__codelineno-0-105"></a>                    <span class="c1"># Let&#39;s inline the area math or split helper.</span>
+<a id="__codelineno-0-105" name="__codelineno-0-105"></a>                    <span class="c1"># Let's inline the area math or split helper.</span>
 <a id="__codelineno-0-106" name="__codelineno-0-106"></a>
 <a id="__codelineno-0-107" name="__codelineno-0-107"></a>                    <span class="n">tx</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="n">tw</span><span class="p">,</span> <span class="n">th</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">box</span>
 <a id="__codelineno-0-108" name="__codelineno-0-108"></a>                    <span class="n">zx</span><span class="p">,</span> <span class="n">zy</span><span class="p">,</span> <span class="n">zw</span><span class="p">,</span> <span class="n">zh</span> <span class="o">=</span> <span class="n">z_box</span>
@@ -3111,7 +3111,7 @@ against configured redaction zones.</p>
 <a id="__codelineno-0-124" name="__codelineno-0-124"></a>            <span class="c1"># Decision Logic</span>
 <a id="__codelineno-0-125" name="__codelineno-0-125"></a>            <span class="n">threshold_safe</span> <span class="o">=</span> <span class="mf">0.80</span>  <span class="c1"># Configurable?</span>
 <a id="__codelineno-0-126" name="__codelineno-0-126"></a>
-<a id="__codelineno-0-127" name="__codelineno-0-127"></a>            <span class="n">clean_text</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">text</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39; &#39;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+<a id="__codelineno-0-127" name="__codelineno-0-127"></a>            <span class="n">clean_text</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">text</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">'</span><span class="se">\n</span><span class="s1">'</span><span class="p">,</span> <span class="s1">' '</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
 <a id="__codelineno-0-128" name="__codelineno-0-128"></a>            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">clean_text</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
 <a id="__codelineno-0-129" name="__codelineno-0-129"></a>                <span class="k">continue</span> <span class="c1"># Skip noise</span>
 <a id="__codelineno-0-130" name="__codelineno-0-130"></a>
@@ -3119,27 +3119,27 @@ against configured redaction zones.</p>
 <a id="__codelineno-0-132" name="__codelineno-0-132"></a>                <span class="c1"># Safe, ignore</span>
 <a id="__codelineno-0-133" name="__codelineno-0-133"></a>                <span class="k">continue</span>
 <a id="__codelineno-0-134" name="__codelineno-0-134"></a>
-<a id="__codelineno-0-135" name="__codelineno-0-135"></a>            <span class="c1"># It&#39;s a finding</span>
+<a id="__codelineno-0-135" name="__codelineno-0-135"></a>            <span class="c1"># It's a finding</span>
 <a id="__codelineno-0-136" name="__codelineno-0-136"></a>            <span class="k">if</span> <span class="n">best_coverage</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">:</span>
-<a id="__codelineno-0-137" name="__codelineno-0-137"></a>                <span class="n">reason</span> <span class="o">=</span> <span class="s2">&quot;Partial Leak&quot;</span>
-<a id="__codelineno-0-138" name="__codelineno-0-138"></a>                <span class="n">f_type</span> <span class="o">=</span> <span class="s2">&quot;PARTIAL_LEAK&quot;</span>
+<a id="__codelineno-0-137" name="__codelineno-0-137"></a>                <span class="n">reason</span> <span class="o">=</span> <span class="s2">"Partial Leak"</span>
+<a id="__codelineno-0-138" name="__codelineno-0-138"></a>                <span class="n">f_type</span> <span class="o">=</span> <span class="s2">"PARTIAL_LEAK"</span>
 <a id="__codelineno-0-139" name="__codelineno-0-139"></a>            <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-140" name="__codelineno-0-140"></a>                <span class="n">reason</span> <span class="o">=</span> <span class="s2">&quot;New Leak (Uncovered)&quot;</span>
-<a id="__codelineno-0-141" name="__codelineno-0-141"></a>                <span class="n">f_type</span> <span class="o">=</span> <span class="s2">&quot;NEW_LEAK&quot;</span>
+<a id="__codelineno-0-140" name="__codelineno-0-140"></a>                <span class="n">reason</span> <span class="o">=</span> <span class="s2">"New Leak (Uncovered)"</span>
+<a id="__codelineno-0-141" name="__codelineno-0-141"></a>                <span class="n">f_type</span> <span class="o">=</span> <span class="s2">"NEW_LEAK"</span>
 <a id="__codelineno-0-142" name="__codelineno-0-142"></a>
 <a id="__codelineno-0-143" name="__codelineno-0-143"></a>            <span class="n">f</span> <span class="o">=</span> <span class="n">PhiFinding</span><span class="p">(</span>
 <a id="__codelineno-0-144" name="__codelineno-0-144"></a>                <span class="n">entity_uid</span><span class="o">=</span><span class="n">instance</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">,</span>
-<a id="__codelineno-0-145" name="__codelineno-0-145"></a>                <span class="n">entity_type</span><span class="o">=</span><span class="s2">&quot;Instance&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-146" name="__codelineno-0-146"></a>                <span class="n">field_name</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PixelData[Frame=</span><span class="si">{</span><span class="n">region</span><span class="o">.</span><span class="n">frame_index</span><span class="si">}</span><span class="s2">]&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-145" name="__codelineno-0-145"></a>                <span class="n">entity_type</span><span class="o">=</span><span class="s2">"Instance"</span><span class="p">,</span>
+<a id="__codelineno-0-146" name="__codelineno-0-146"></a>                <span class="n">field_name</span><span class="o">=</span><span class="sa">f</span><span class="s2">"PixelData[Frame=</span><span class="si">{</span><span class="n">region</span><span class="o">.</span><span class="n">frame_index</span><span class="si">}</span><span class="s2">]"</span><span class="p">,</span>
 <a id="__codelineno-0-147" name="__codelineno-0-147"></a>                <span class="n">value</span><span class="o">=</span><span class="n">clean_text</span><span class="p">,</span>
-<a id="__codelineno-0-148" name="__codelineno-0-148"></a>                <span class="n">reason</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">reason</span><span class="si">}</span><span class="s2"> (Cov: </span><span class="si">{</span><span class="n">best_coverage</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-148" name="__codelineno-0-148"></a>                <span class="n">reason</span><span class="o">=</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">reason</span><span class="si">}</span><span class="s2"> (Cov: </span><span class="si">{</span><span class="n">best_coverage</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">)"</span><span class="p">,</span>
 <a id="__codelineno-0-149" name="__codelineno-0-149"></a>                <span class="n">entity</span><span class="o">=</span><span class="n">instance</span><span class="p">,</span>
 <a id="__codelineno-0-150" name="__codelineno-0-150"></a>                <span class="n">metadata</span><span class="o">=</span><span class="p">{</span>
-<a id="__codelineno-0-151" name="__codelineno-0-151"></a>                    <span class="s2">&quot;leak_type&quot;</span><span class="p">:</span> <span class="n">f_type</span><span class="p">,</span>
-<a id="__codelineno-0-152" name="__codelineno-0-152"></a>                    <span class="s2">&quot;coverage_score&quot;</span><span class="p">:</span> <span class="n">best_coverage</span><span class="p">,</span>
-<a id="__codelineno-0-153" name="__codelineno-0-153"></a>                    <span class="s2">&quot;text_box&quot;</span><span class="p">:</span> <span class="n">region</span><span class="o">.</span><span class="n">box</span><span class="p">,</span>  <span class="c1"># (x, y, w, h)</span>
-<a id="__codelineno-0-154" name="__codelineno-0-154"></a>                    <span class="s2">&quot;best_zone&quot;</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
-<a id="__codelineno-0-155" name="__codelineno-0-155"></a>                    <span class="s2">&quot;rule_serial&quot;</span><span class="p">:</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">rule</span> <span class="k">else</span> <span class="kc">None</span>
+<a id="__codelineno-0-151" name="__codelineno-0-151"></a>                    <span class="s2">"leak_type"</span><span class="p">:</span> <span class="n">f_type</span><span class="p">,</span>
+<a id="__codelineno-0-152" name="__codelineno-0-152"></a>                    <span class="s2">"coverage_score"</span><span class="p">:</span> <span class="n">best_coverage</span><span class="p">,</span>
+<a id="__codelineno-0-153" name="__codelineno-0-153"></a>                    <span class="s2">"text_box"</span><span class="p">:</span> <span class="n">region</span><span class="o">.</span><span class="n">box</span><span class="p">,</span>  <span class="c1"># (x, y, w, h)</span>
+<a id="__codelineno-0-154" name="__codelineno-0-154"></a>                    <span class="s2">"best_zone"</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
+<a id="__codelineno-0-155" name="__codelineno-0-155"></a>                    <span class="s2">"rule_serial"</span><span class="p">:</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="k">if</span> <span class="n">rule</span> <span class="k">else</span> <span class="kc">None</span>
 <a id="__codelineno-0-156" name="__codelineno-0-156"></a>                <span class="p">}</span>
 <a id="__codelineno-0-157" name="__codelineno-0-157"></a>            <span class="p">)</span>
 <a id="__codelineno-0-158" name="__codelineno-0-158"></a>            <span class="n">findings</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
@@ -3213,10 +3213,10 @@ against configured redaction zones.</p>
 <span class="normal"><a href="#__codelineno-0-15">15</a></span>
 <span class="normal"><a href="#__codelineno-0-16">16</a></span>
 <span class="normal"><a href="#__codelineno-0-17">17</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-12" name="__codelineno-0-12"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">rules</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-14" name="__codelineno-0-14"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15"></a><span class="sd">        rules (List[Dict]): A list of redaction rules (config[&#39;machines&#39;]).</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15"></a><span class="sd">        rules (List[Dict]): A list of redaction rules (config['machines']).</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="sd">    """</span>
 <a id="__codelineno-0-17" name="__codelineno-0-17"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">rules</span> <span class="o">=</span> <span class="n">rules</span> <span class="ow">or</span> <span class="p">[]</span>
 </code></pre></div></td></tr></table></div>
             </details>
@@ -3263,10 +3263,10 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <span class="normal"><a href="#__codelineno-0-38">38</a></span>
 <span class="normal"><a href="#__codelineno-0-39">39</a></span>
 <span class="normal"><a href="#__codelineno-0-40">40</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-19" name="__codelineno-0-19"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_matching_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">equipment</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-21" name="__codelineno-0-21"></a><span class="sd">    Finds the redaction rule that applies to this equipment.</span>
 <a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="sd">    Uses exact Serial Number match first, then Model/Manufacturer logic.</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">    """</span>
 <a id="__codelineno-0-24" name="__codelineno-0-24"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">equipment</span><span class="p">:</span>
 <a id="__codelineno-0-25" name="__codelineno-0-25"></a>        <span class="k">return</span> <span class="kc">None</span>
 <a id="__codelineno-0-26" name="__codelineno-0-26"></a>
@@ -3276,12 +3276,12 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-30" name="__codelineno-0-30"></a>
 <a id="__codelineno-0-31" name="__codelineno-0-31"></a>    <span class="c1"># 1. Exact Serial Match</span>
 <a id="__codelineno-0-32" name="__codelineno-0-32"></a>    <span class="k">for</span> <span class="n">rule</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
-<a id="__codelineno-0-33" name="__codelineno-0-33"></a>        <span class="k">if</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">target_serial</span><span class="p">:</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33"></a>        <span class="k">if</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">target_serial</span><span class="p">:</span>
 <a id="__codelineno-0-34" name="__codelineno-0-34"></a>            <span class="k">return</span> <span class="n">rule</span>
 <a id="__codelineno-0-35" name="__codelineno-0-35"></a>
 <a id="__codelineno-0-36" name="__codelineno-0-36"></a>    <span class="c1"># 2. Check Model/Manufacturer (if serial not found or not required by rule?)</span>
 <a id="__codelineno-0-37" name="__codelineno-0-37"></a>    <span class="c1"># For verification, we stick to strict serial matching as per current architecture</span>
-<a id="__codelineno-0-38" name="__codelineno-0-38"></a>    <span class="c1"># unless there&#39;s a fallback mechanism.</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38"></a>    <span class="c1"># unless there's a fallback mechanism.</span>
 <a id="__codelineno-0-39" name="__codelineno-0-39"></a>    <span class="c1"># For now, strict match.</span>
 <a id="__codelineno-0-40" name="__codelineno-0-40"></a>    <span class="k">return</span> <span class="kc">None</span>
 </code></pre></div></td></tr></table></div>
@@ -3423,7 +3423,7 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <span class="normal"><a href="#__codelineno-0-71">71</a></span>
 <span class="normal"><a href="#__codelineno-0-72">72</a></span>
 <span class="normal"><a href="#__codelineno-0-73">73</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-42" name="__codelineno-0-42"></a><span class="k">def</span><span class="w"> </span><span class="nf">is_covered</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text_box</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">zone_box</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">0.50</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-43" name="__codelineno-0-43"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-44" name="__codelineno-0-44"></a><span class="sd">    Checks if the text_box is significantly covered by the zone_box.</span>
 <a id="__codelineno-0-45" name="__codelineno-0-45"></a>
 <a id="__codelineno-0-46" name="__codelineno-0-46"></a><span class="sd">    Args:</span>
@@ -3433,7 +3433,7 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-50" name="__codelineno-0-50"></a>
 <a id="__codelineno-0-51" name="__codelineno-0-51"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-52" name="__codelineno-0-52"></a><span class="sd">        bool: True if covered.</span>
-<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-53" name="__codelineno-0-53"></a><span class="sd">    """</span>
 <a id="__codelineno-0-54" name="__codelineno-0-54"></a>    <span class="n">tx</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="n">tw</span><span class="p">,</span> <span class="n">th</span> <span class="o">=</span> <span class="n">text_box</span>
 <a id="__codelineno-0-55" name="__codelineno-0-55"></a>    <span class="n">zx</span><span class="p">,</span> <span class="n">zy</span><span class="p">,</span> <span class="n">zw</span><span class="p">,</span> <span class="n">zh</span> <span class="o">=</span> <span class="n">zone_box</span>
 <a id="__codelineno-0-56" name="__codelineno-0-56"></a>
@@ -3565,12 +3565,12 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <span class="normal"><a href="#__codelineno-0-158">158</a></span>
 <span class="normal"><a href="#__codelineno-0-159">159</a></span>
 <span class="normal"><a href="#__codelineno-0-160">160</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-75" name="__codelineno-0-75"></a><span class="k">def</span><span class="w"> </span><span class="nf">verify_instance</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance</span><span class="p">:</span> <span class="n">Instance</span><span class="p">,</span> <span class="n">equipment</span><span class="p">:</span> <span class="n">Any</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">PhiFinding</span><span class="p">]:</span>
-<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-76" name="__codelineno-0-76"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-77" name="__codelineno-0-77"></a><span class="sd">    Runs OCR on the instance.</span>
 <a id="__codelineno-0-78" name="__codelineno-0-78"></a><span class="sd">    - If text is fully matched (&gt;= 80% coverage): considered Safe (Ignored).</span>
 <a id="__codelineno-0-79" name="__codelineno-0-79"></a><span class="sd">    - If text is partially matched (&gt; 0% but &lt; 80%): Reported as PARTIAL_LEAK.</span>
 <a id="__codelineno-0-80" name="__codelineno-0-80"></a><span class="sd">    - If text is not matched (0%): Reported as NEW_LEAK.</span>
-<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="sd">    """</span>
 <a id="__codelineno-0-82" name="__codelineno-0-82"></a>    <span class="n">text_regions</span> <span class="o">=</span> <span class="n">analyze_pixels</span><span class="p">(</span><span class="n">instance</span><span class="p">)</span>
 <a id="__codelineno-0-83" name="__codelineno-0-83"></a>
 <a id="__codelineno-0-84" name="__codelineno-0-84"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">text_regions</span><span class="p">:</span>
@@ -3579,7 +3579,7 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-87" name="__codelineno-0-87"></a>    <span class="n">rule</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_matching_rule</span><span class="p">(</span><span class="n">equipment</span><span class="p">)</span>
 <a id="__codelineno-0-88" name="__codelineno-0-88"></a>    <span class="n">zones</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-89" name="__codelineno-0-89"></a>    <span class="k">if</span> <span class="n">rule</span><span class="p">:</span>
-<a id="__codelineno-0-90" name="__codelineno-0-90"></a>        <span class="n">raw_zones</span> <span class="o">=</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;redaction_zones&quot;</span><span class="p">,</span> <span class="p">[])</span>
+<a id="__codelineno-0-90" name="__codelineno-0-90"></a>        <span class="n">raw_zones</span> <span class="o">=</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"redaction_zones"</span><span class="p">,</span> <span class="p">[])</span>
 <a id="__codelineno-0-91" name="__codelineno-0-91"></a>        <span class="n">zones</span> <span class="o">=</span> <span class="n">raw_zones</span>
 <a id="__codelineno-0-92" name="__codelineno-0-92"></a>
 <a id="__codelineno-0-93" name="__codelineno-0-93"></a>    <span class="n">findings</span> <span class="o">=</span> <span class="p">[]</span>
@@ -3594,7 +3594,7 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-102" name="__codelineno-0-102"></a>                <span class="n">z_box</span> <span class="o">=</span> <span class="p">(</span><span class="n">zone</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">zone</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">zone</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">zone</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span>
 <a id="__codelineno-0-103" name="__codelineno-0-103"></a>
 <a id="__codelineno-0-104" name="__codelineno-0-104"></a>                <span class="c1"># Calculate logic manually here or reuse is_covered logic but return float?</span>
-<a id="__codelineno-0-105" name="__codelineno-0-105"></a>                <span class="c1"># Let&#39;s inline the area math or split helper.</span>
+<a id="__codelineno-0-105" name="__codelineno-0-105"></a>                <span class="c1"># Let's inline the area math or split helper.</span>
 <a id="__codelineno-0-106" name="__codelineno-0-106"></a>
 <a id="__codelineno-0-107" name="__codelineno-0-107"></a>                <span class="n">tx</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="n">tw</span><span class="p">,</span> <span class="n">th</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">box</span>
 <a id="__codelineno-0-108" name="__codelineno-0-108"></a>                <span class="n">zx</span><span class="p">,</span> <span class="n">zy</span><span class="p">,</span> <span class="n">zw</span><span class="p">,</span> <span class="n">zh</span> <span class="o">=</span> <span class="n">z_box</span>
@@ -3616,7 +3616,7 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-124" name="__codelineno-0-124"></a>        <span class="c1"># Decision Logic</span>
 <a id="__codelineno-0-125" name="__codelineno-0-125"></a>        <span class="n">threshold_safe</span> <span class="o">=</span> <span class="mf">0.80</span>  <span class="c1"># Configurable?</span>
 <a id="__codelineno-0-126" name="__codelineno-0-126"></a>
-<a id="__codelineno-0-127" name="__codelineno-0-127"></a>        <span class="n">clean_text</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">text</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">,</span> <span class="s1">&#39; &#39;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+<a id="__codelineno-0-127" name="__codelineno-0-127"></a>        <span class="n">clean_text</span> <span class="o">=</span> <span class="n">region</span><span class="o">.</span><span class="n">text</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">'</span><span class="se">\n</span><span class="s1">'</span><span class="p">,</span> <span class="s1">' '</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
 <a id="__codelineno-0-128" name="__codelineno-0-128"></a>        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">clean_text</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">2</span><span class="p">:</span>
 <a id="__codelineno-0-129" name="__codelineno-0-129"></a>            <span class="k">continue</span> <span class="c1"># Skip noise</span>
 <a id="__codelineno-0-130" name="__codelineno-0-130"></a>
@@ -3624,27 +3624,27 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-132" name="__codelineno-0-132"></a>            <span class="c1"># Safe, ignore</span>
 <a id="__codelineno-0-133" name="__codelineno-0-133"></a>            <span class="k">continue</span>
 <a id="__codelineno-0-134" name="__codelineno-0-134"></a>
-<a id="__codelineno-0-135" name="__codelineno-0-135"></a>        <span class="c1"># It&#39;s a finding</span>
+<a id="__codelineno-0-135" name="__codelineno-0-135"></a>        <span class="c1"># It's a finding</span>
 <a id="__codelineno-0-136" name="__codelineno-0-136"></a>        <span class="k">if</span> <span class="n">best_coverage</span> <span class="o">&gt;</span> <span class="mf">0.0</span><span class="p">:</span>
-<a id="__codelineno-0-137" name="__codelineno-0-137"></a>            <span class="n">reason</span> <span class="o">=</span> <span class="s2">&quot;Partial Leak&quot;</span>
-<a id="__codelineno-0-138" name="__codelineno-0-138"></a>            <span class="n">f_type</span> <span class="o">=</span> <span class="s2">&quot;PARTIAL_LEAK&quot;</span>
+<a id="__codelineno-0-137" name="__codelineno-0-137"></a>            <span class="n">reason</span> <span class="o">=</span> <span class="s2">"Partial Leak"</span>
+<a id="__codelineno-0-138" name="__codelineno-0-138"></a>            <span class="n">f_type</span> <span class="o">=</span> <span class="s2">"PARTIAL_LEAK"</span>
 <a id="__codelineno-0-139" name="__codelineno-0-139"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-140" name="__codelineno-0-140"></a>            <span class="n">reason</span> <span class="o">=</span> <span class="s2">&quot;New Leak (Uncovered)&quot;</span>
-<a id="__codelineno-0-141" name="__codelineno-0-141"></a>            <span class="n">f_type</span> <span class="o">=</span> <span class="s2">&quot;NEW_LEAK&quot;</span>
+<a id="__codelineno-0-140" name="__codelineno-0-140"></a>            <span class="n">reason</span> <span class="o">=</span> <span class="s2">"New Leak (Uncovered)"</span>
+<a id="__codelineno-0-141" name="__codelineno-0-141"></a>            <span class="n">f_type</span> <span class="o">=</span> <span class="s2">"NEW_LEAK"</span>
 <a id="__codelineno-0-142" name="__codelineno-0-142"></a>
 <a id="__codelineno-0-143" name="__codelineno-0-143"></a>        <span class="n">f</span> <span class="o">=</span> <span class="n">PhiFinding</span><span class="p">(</span>
 <a id="__codelineno-0-144" name="__codelineno-0-144"></a>            <span class="n">entity_uid</span><span class="o">=</span><span class="n">instance</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">,</span>
-<a id="__codelineno-0-145" name="__codelineno-0-145"></a>            <span class="n">entity_type</span><span class="o">=</span><span class="s2">&quot;Instance&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-146" name="__codelineno-0-146"></a>            <span class="n">field_name</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;PixelData[Frame=</span><span class="si">{</span><span class="n">region</span><span class="o">.</span><span class="n">frame_index</span><span class="si">}</span><span class="s2">]&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-145" name="__codelineno-0-145"></a>            <span class="n">entity_type</span><span class="o">=</span><span class="s2">"Instance"</span><span class="p">,</span>
+<a id="__codelineno-0-146" name="__codelineno-0-146"></a>            <span class="n">field_name</span><span class="o">=</span><span class="sa">f</span><span class="s2">"PixelData[Frame=</span><span class="si">{</span><span class="n">region</span><span class="o">.</span><span class="n">frame_index</span><span class="si">}</span><span class="s2">]"</span><span class="p">,</span>
 <a id="__codelineno-0-147" name="__codelineno-0-147"></a>            <span class="n">value</span><span class="o">=</span><span class="n">clean_text</span><span class="p">,</span>
-<a id="__codelineno-0-148" name="__codelineno-0-148"></a>            <span class="n">reason</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">reason</span><span class="si">}</span><span class="s2"> (Cov: </span><span class="si">{</span><span class="n">best_coverage</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-148" name="__codelineno-0-148"></a>            <span class="n">reason</span><span class="o">=</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">reason</span><span class="si">}</span><span class="s2"> (Cov: </span><span class="si">{</span><span class="n">best_coverage</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">)"</span><span class="p">,</span>
 <a id="__codelineno-0-149" name="__codelineno-0-149"></a>            <span class="n">entity</span><span class="o">=</span><span class="n">instance</span><span class="p">,</span>
 <a id="__codelineno-0-150" name="__codelineno-0-150"></a>            <span class="n">metadata</span><span class="o">=</span><span class="p">{</span>
-<a id="__codelineno-0-151" name="__codelineno-0-151"></a>                <span class="s2">&quot;leak_type&quot;</span><span class="p">:</span> <span class="n">f_type</span><span class="p">,</span>
-<a id="__codelineno-0-152" name="__codelineno-0-152"></a>                <span class="s2">&quot;coverage_score&quot;</span><span class="p">:</span> <span class="n">best_coverage</span><span class="p">,</span>
-<a id="__codelineno-0-153" name="__codelineno-0-153"></a>                <span class="s2">&quot;text_box&quot;</span><span class="p">:</span> <span class="n">region</span><span class="o">.</span><span class="n">box</span><span class="p">,</span>  <span class="c1"># (x, y, w, h)</span>
-<a id="__codelineno-0-154" name="__codelineno-0-154"></a>                <span class="s2">&quot;best_zone&quot;</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
-<a id="__codelineno-0-155" name="__codelineno-0-155"></a>                <span class="s2">&quot;rule_serial&quot;</span><span class="p">:</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)</span> <span class="k">if</span> <span class="n">rule</span> <span class="k">else</span> <span class="kc">None</span>
+<a id="__codelineno-0-151" name="__codelineno-0-151"></a>                <span class="s2">"leak_type"</span><span class="p">:</span> <span class="n">f_type</span><span class="p">,</span>
+<a id="__codelineno-0-152" name="__codelineno-0-152"></a>                <span class="s2">"coverage_score"</span><span class="p">:</span> <span class="n">best_coverage</span><span class="p">,</span>
+<a id="__codelineno-0-153" name="__codelineno-0-153"></a>                <span class="s2">"text_box"</span><span class="p">:</span> <span class="n">region</span><span class="o">.</span><span class="n">box</span><span class="p">,</span>  <span class="c1"># (x, y, w, h)</span>
+<a id="__codelineno-0-154" name="__codelineno-0-154"></a>                <span class="s2">"best_zone"</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
+<a id="__codelineno-0-155" name="__codelineno-0-155"></a>                <span class="s2">"rule_serial"</span><span class="p">:</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="k">if</span> <span class="n">rule</span> <span class="k">else</span> <span class="kc">None</span>
 <a id="__codelineno-0-156" name="__codelineno-0-156"></a>            <span class="p">}</span>
 <a id="__codelineno-0-157" name="__codelineno-0-157"></a>        <span class="p">)</span>
 <a id="__codelineno-0-158" name="__codelineno-0-158"></a>        <span class="n">findings</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
@@ -3826,24 +3826,24 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <span class="normal"><a href="#__codelineno-0-141">141</a></span>
 <span class="normal"><a href="#__codelineno-0-142">142</a></span>
 <span class="normal"><a href="#__codelineno-0-143">143</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-9" name="__codelineno-0-9"></a><span class="k">class</span><span class="w"> </span><span class="nc">ConfigAutomator</span><span class="p">:</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-11" name="__codelineno-0-11"></a><span class="sd">    Analyzes OCR findings and generates suggestions to update the redaction configuration.</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12"></a><span class="sd">    """</span>
 <a id="__codelineno-0-13" name="__codelineno-0-13"></a>
 <a id="__codelineno-0-14" name="__codelineno-0-14"></a>    <span class="nd">@staticmethod</span>
 <a id="__codelineno-0-15" name="__codelineno-0-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">suggest_config_updates</span><span class="p">(</span><span class="n">report</span><span class="p">:</span> <span class="n">PhiReport</span><span class="p">,</span> <span class="n">_current_config</span><span class="p">:</span> <span class="n">GantryConfiguration</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-17" name="__codelineno-0-17"></a><span class="sd">        Generates a list of suggested configuration changes.</span>
 <a id="__codelineno-0-18" name="__codelineno-0-18"></a>
 <a id="__codelineno-0-19" name="__codelineno-0-19"></a><span class="sd">        Returns:</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="sd">            List[Dict]: A list of &#39;suggestion&#39; objects:</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="sd">            List[Dict]: A list of 'suggestion' objects:</span>
 <a id="__codelineno-0-21" name="__codelineno-0-21"></a><span class="sd">            {</span>
-<a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="sd">                &quot;serial&quot;: str,</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">                &quot;action&quot;: &quot;ADD_ZONE&quot; | &quot;EXPAND_ZONE&quot;,</span>
-<a id="__codelineno-0-24" name="__codelineno-0-24"></a><span class="sd">                &quot;zone&quot;: [x, y, w, h],</span>
-<a id="__codelineno-0-25" name="__codelineno-0-25"></a><span class="sd">                &quot;reason&quot;: str</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="sd">                "serial": str,</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">                "action": "ADD_ZONE" | "EXPAND_ZONE",</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24"></a><span class="sd">                "zone": [x, y, w, h],</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25"></a><span class="sd">                "reason": str</span>
 <a id="__codelineno-0-26" name="__codelineno-0-26"></a><span class="sd">            }</span>
-<a id="__codelineno-0-27" name="__codelineno-0-27"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27"></a><span class="sd">        """</span>
 <a id="__codelineno-0-28" name="__codelineno-0-28"></a>        <span class="n">suggestions</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-29" name="__codelineno-0-29"></a>
 <a id="__codelineno-0-30" name="__codelineno-0-30"></a>        <span class="c1"># Group findings by machine serial</span>
@@ -3854,7 +3854,7 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-35" name="__codelineno-0-35"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">meta</span><span class="p">:</span>
 <a id="__codelineno-0-36" name="__codelineno-0-36"></a>                <span class="k">continue</span>
 <a id="__codelineno-0-37" name="__codelineno-0-37"></a>
-<a id="__codelineno-0-38" name="__codelineno-0-38"></a>            <span class="n">serial</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rule_serial&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38"></a>            <span class="n">serial</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"rule_serial"</span><span class="p">)</span>
 <a id="__codelineno-0-39" name="__codelineno-0-39"></a>            <span class="k">if</span> <span class="n">serial</span><span class="p">:</span>
 <a id="__codelineno-0-40" name="__codelineno-0-40"></a>                <span class="n">findings_by_serial</span><span class="p">[</span><span class="n">serial</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">finding</span><span class="p">)</span>
 <a id="__codelineno-0-41" name="__codelineno-0-41"></a>            <span class="k">else</span><span class="p">:</span>
@@ -3865,15 +3865,15 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-46" name="__codelineno-0-46"></a>            <span class="c1"># In a real system we might merge zones here.</span>
 <a id="__codelineno-0-47" name="__codelineno-0-47"></a>            <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">findings</span><span class="p">:</span>
 <a id="__codelineno-0-48" name="__codelineno-0-48"></a>                <span class="n">meta</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">metadata</span>
-<a id="__codelineno-0-49" name="__codelineno-0-49"></a>                <span class="n">l_type</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;leak_type&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-50" name="__codelineno-0-50"></a>                <span class="n">text_box</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_box&quot;</span><span class="p">)</span> <span class="c1"># x,y,w,h</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49"></a>                <span class="n">l_type</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"leak_type"</span><span class="p">)</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50"></a>                <span class="n">text_box</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"text_box"</span><span class="p">)</span> <span class="c1"># x,y,w,h</span>
 <a id="__codelineno-0-51" name="__codelineno-0-51"></a>
 <a id="__codelineno-0-52" name="__codelineno-0-52"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="n">text_box</span><span class="p">:</span>
 <a id="__codelineno-0-53" name="__codelineno-0-53"></a>                    <span class="k">continue</span>
 <a id="__codelineno-0-54" name="__codelineno-0-54"></a>
-<a id="__codelineno-0-55" name="__codelineno-0-55"></a>                <span class="k">if</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">&quot;PARTIAL_LEAK&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55"></a>                <span class="k">if</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">"PARTIAL_LEAK"</span><span class="p">:</span>
 <a id="__codelineno-0-56" name="__codelineno-0-56"></a>                    <span class="c1"># Suggest expanding the best_zone to cover text_box</span>
-<a id="__codelineno-0-57" name="__codelineno-0-57"></a>                    <span class="n">best_zone</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;best_zone&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57"></a>                    <span class="n">best_zone</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"best_zone"</span><span class="p">)</span>
 <a id="__codelineno-0-58" name="__codelineno-0-58"></a>                    <span class="k">if</span> <span class="n">best_zone</span><span class="p">:</span>
 <a id="__codelineno-0-59" name="__codelineno-0-59"></a>                        <span class="c1"># Calculate union box</span>
 <a id="__codelineno-0-60" name="__codelineno-0-60"></a>                        <span class="n">tx</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="n">tw</span><span class="p">,</span> <span class="n">th</span> <span class="o">=</span> <span class="n">text_box</span>
@@ -3887,64 +3887,64 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-68" name="__codelineno-0-68"></a>                        <span class="n">union_zone</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">ux</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">uy</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">ur</span><span class="o">-</span><span class="n">ux</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">ub</span><span class="o">-</span><span class="n">uy</span><span class="p">)]</span>
 <a id="__codelineno-0-69" name="__codelineno-0-69"></a>
 <a id="__codelineno-0-70" name="__codelineno-0-70"></a>                        <span class="n">suggestions</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-<a id="__codelineno-0-71" name="__codelineno-0-71"></a>                            <span class="s2">&quot;serial&quot;</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
-<a id="__codelineno-0-72" name="__codelineno-0-72"></a>                            <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;EXPAND_ZONE&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-73" name="__codelineno-0-73"></a>                            <span class="s2">&quot;original_zone&quot;</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
-<a id="__codelineno-0-74" name="__codelineno-0-74"></a>                            <span class="s2">&quot;new_zone&quot;</span><span class="p">:</span> <span class="n">union_zone</span><span class="p">,</span>
-<a id="__codelineno-0-75" name="__codelineno-0-75"></a>                            <span class="s2">&quot;reason&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Partial leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Expanded to cover.&quot;</span>
+<a id="__codelineno-0-71" name="__codelineno-0-71"></a>                            <span class="s2">"serial"</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
+<a id="__codelineno-0-72" name="__codelineno-0-72"></a>                            <span class="s2">"action"</span><span class="p">:</span> <span class="s2">"EXPAND_ZONE"</span><span class="p">,</span>
+<a id="__codelineno-0-73" name="__codelineno-0-73"></a>                            <span class="s2">"original_zone"</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
+<a id="__codelineno-0-74" name="__codelineno-0-74"></a>                            <span class="s2">"new_zone"</span><span class="p">:</span> <span class="n">union_zone</span><span class="p">,</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75"></a>                            <span class="s2">"reason"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"Partial leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Expanded to cover."</span>
 <a id="__codelineno-0-76" name="__codelineno-0-76"></a>                        <span class="p">})</span>
 <a id="__codelineno-0-77" name="__codelineno-0-77"></a>
-<a id="__codelineno-0-78" name="__codelineno-0-78"></a>                <span class="k">elif</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">&quot;NEW_LEAK&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-78" name="__codelineno-0-78"></a>                <span class="k">elif</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">"NEW_LEAK"</span><span class="p">:</span>
 <a id="__codelineno-0-79" name="__codelineno-0-79"></a>                    <span class="c1"># Suggest adding the text box as a new zone</span>
 <a id="__codelineno-0-80" name="__codelineno-0-80"></a>                    <span class="c1"># Add some padding?</span>
 <a id="__codelineno-0-81" name="__codelineno-0-81"></a>                    <span class="c1"># Ensure ints</span>
 <a id="__codelineno-0-82" name="__codelineno-0-82"></a>                    <span class="n">zone</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">text_box</span><span class="p">]</span>
 <a id="__codelineno-0-83" name="__codelineno-0-83"></a>
 <a id="__codelineno-0-84" name="__codelineno-0-84"></a>                    <span class="n">suggestions</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-<a id="__codelineno-0-85" name="__codelineno-0-85"></a>                        <span class="s2">&quot;serial&quot;</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
-<a id="__codelineno-0-86" name="__codelineno-0-86"></a>                        <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;ADD_ZONE&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-87" name="__codelineno-0-87"></a>                        <span class="s2">&quot;zone&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">zone</span><span class="p">),</span>
-<a id="__codelineno-0-88" name="__codelineno-0-88"></a>                        <span class="s2">&quot;reason&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;New leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Added new zone.&quot;</span>
+<a id="__codelineno-0-85" name="__codelineno-0-85"></a>                        <span class="s2">"serial"</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
+<a id="__codelineno-0-86" name="__codelineno-0-86"></a>                        <span class="s2">"action"</span><span class="p">:</span> <span class="s2">"ADD_ZONE"</span><span class="p">,</span>
+<a id="__codelineno-0-87" name="__codelineno-0-87"></a>                        <span class="s2">"zone"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">zone</span><span class="p">),</span>
+<a id="__codelineno-0-88" name="__codelineno-0-88"></a>                        <span class="s2">"reason"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"New leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Added new zone."</span>
 <a id="__codelineno-0-89" name="__codelineno-0-89"></a>                    <span class="p">})</span>
 <a id="__codelineno-0-90" name="__codelineno-0-90"></a>
 <a id="__codelineno-0-91" name="__codelineno-0-91"></a>        <span class="k">return</span> <span class="n">suggestions</span>
 <a id="__codelineno-0-92" name="__codelineno-0-92"></a>
 <a id="__codelineno-0-93" name="__codelineno-0-93"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-0-94" name="__codelineno-0-94"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">apply_suggestions</span><span class="p">(</span><span class="n">session</span><span class="p">:</span> <span class="s1">&#39;DicomSession&#39;</span><span class="p">,</span> <span class="n">suggestions</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<a id="__codelineno-0-95" name="__codelineno-0-95"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-96" name="__codelineno-0-96"></a><span class="sd">        Applies the suggestions to the session&#39;s in-memory configuration.</span>
+<a id="__codelineno-0-94" name="__codelineno-0-94"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">apply_suggestions</span><span class="p">(</span><span class="n">session</span><span class="p">:</span> <span class="s1">'DicomSession'</span><span class="p">,</span> <span class="n">suggestions</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]])</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<a id="__codelineno-0-95" name="__codelineno-0-95"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-96" name="__codelineno-0-96"></a><span class="sd">        Applies the suggestions to the session's in-memory configuration.</span>
 <a id="__codelineno-0-97" name="__codelineno-0-97"></a><span class="sd">        Returns: Number of changes applied.</span>
-<a id="__codelineno-0-98" name="__codelineno-0-98"></a><span class="sd">        &quot;&quot;&quot;</span>
+<a id="__codelineno-0-98" name="__codelineno-0-98"></a><span class="sd">        """</span>
 <a id="__codelineno-0-99" name="__codelineno-0-99"></a>        <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
 <a id="__codelineno-0-100" name="__codelineno-0-100"></a>        <span class="n">rules</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">rules</span>
 <a id="__codelineno-0-101" name="__codelineno-0-101"></a>
 <a id="__codelineno-0-102" name="__codelineno-0-102"></a>        <span class="k">for</span> <span class="n">sug</span> <span class="ow">in</span> <span class="n">suggestions</span><span class="p">:</span>
-<a id="__codelineno-0-103" name="__codelineno-0-103"></a>            <span class="n">serial</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">&quot;serial&quot;</span><span class="p">]</span>
-<a id="__codelineno-0-104" name="__codelineno-0-104"></a>            <span class="n">action</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">&quot;action&quot;</span><span class="p">]</span>
+<a id="__codelineno-0-103" name="__codelineno-0-103"></a>            <span class="n">serial</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">"serial"</span><span class="p">]</span>
+<a id="__codelineno-0-104" name="__codelineno-0-104"></a>            <span class="n">action</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">"action"</span><span class="p">]</span>
 <a id="__codelineno-0-105" name="__codelineno-0-105"></a>
 <a id="__codelineno-0-106" name="__codelineno-0-106"></a>            <span class="c1"># Find the rule object</span>
 <a id="__codelineno-0-107" name="__codelineno-0-107"></a>            <span class="n">target_rule</span> <span class="o">=</span> <span class="kc">None</span>
 <a id="__codelineno-0-108" name="__codelineno-0-108"></a>            <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">rules</span><span class="p">:</span>
-<a id="__codelineno-0-109" name="__codelineno-0-109"></a>                <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial</span><span class="p">:</span>
+<a id="__codelineno-0-109" name="__codelineno-0-109"></a>                <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial</span><span class="p">:</span>
 <a id="__codelineno-0-110" name="__codelineno-0-110"></a>                    <span class="n">target_rule</span> <span class="o">=</span> <span class="n">r</span>
 <a id="__codelineno-0-111" name="__codelineno-0-111"></a>                    <span class="k">break</span>
 <a id="__codelineno-0-112" name="__codelineno-0-112"></a>
 <a id="__codelineno-0-113" name="__codelineno-0-113"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">target_rule</span><span class="p">:</span>
 <a id="__codelineno-0-114" name="__codelineno-0-114"></a>                <span class="k">continue</span>
 <a id="__codelineno-0-115" name="__codelineno-0-115"></a>
-<a id="__codelineno-0-116" name="__codelineno-0-116"></a>            <span class="k">if</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">&quot;ADD_ZONE&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-117" name="__codelineno-0-117"></a>                <span class="n">zone</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">&quot;zone&quot;</span><span class="p">]</span>
+<a id="__codelineno-0-116" name="__codelineno-0-116"></a>            <span class="k">if</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">"ADD_ZONE"</span><span class="p">:</span>
+<a id="__codelineno-0-117" name="__codelineno-0-117"></a>                <span class="n">zone</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">"zone"</span><span class="p">]</span>
 <a id="__codelineno-0-118" name="__codelineno-0-118"></a>                <span class="c1"># Check duplicates?</span>
-<a id="__codelineno-0-119" name="__codelineno-0-119"></a>                <span class="k">if</span> <span class="n">zone</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">target_rule</span><span class="p">[</span><span class="s2">&quot;redaction_zones&quot;</span><span class="p">]:</span>
-<a id="__codelineno-0-120" name="__codelineno-0-120"></a>                    <span class="n">target_rule</span><span class="p">[</span><span class="s2">&quot;redaction_zones&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">zone</span><span class="p">)</span>
+<a id="__codelineno-0-119" name="__codelineno-0-119"></a>                <span class="k">if</span> <span class="n">zone</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">target_rule</span><span class="p">[</span><span class="s2">"redaction_zones"</span><span class="p">]:</span>
+<a id="__codelineno-0-120" name="__codelineno-0-120"></a>                    <span class="n">target_rule</span><span class="p">[</span><span class="s2">"redaction_zones"</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">zone</span><span class="p">)</span>
 <a id="__codelineno-0-121" name="__codelineno-0-121"></a>                    <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
 <a id="__codelineno-0-122" name="__codelineno-0-122"></a>
-<a id="__codelineno-0-123" name="__codelineno-0-123"></a>            <span class="k">elif</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">&quot;EXPAND_ZONE&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-124" name="__codelineno-0-124"></a>                <span class="n">old_zone</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">&quot;original_zone&quot;</span><span class="p">]</span>
-<a id="__codelineno-0-125" name="__codelineno-0-125"></a>                <span class="n">new_zone</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">&quot;new_zone&quot;</span><span class="p">]</span>
+<a id="__codelineno-0-123" name="__codelineno-0-123"></a>            <span class="k">elif</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">"EXPAND_ZONE"</span><span class="p">:</span>
+<a id="__codelineno-0-124" name="__codelineno-0-124"></a>                <span class="n">old_zone</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">"original_zone"</span><span class="p">]</span>
+<a id="__codelineno-0-125" name="__codelineno-0-125"></a>                <span class="n">new_zone</span> <span class="o">=</span> <span class="n">sug</span><span class="p">[</span><span class="s2">"new_zone"</span><span class="p">]</span>
 <a id="__codelineno-0-126" name="__codelineno-0-126"></a>
 <a id="__codelineno-0-127" name="__codelineno-0-127"></a>                <span class="c1"># Find index of old_zone</span>
-<a id="__codelineno-0-128" name="__codelineno-0-128"></a>                <span class="n">zones</span> <span class="o">=</span> <span class="n">target_rule</span><span class="p">[</span><span class="s2">&quot;redaction_zones&quot;</span><span class="p">]</span>
+<a id="__codelineno-0-128" name="__codelineno-0-128"></a>                <span class="n">zones</span> <span class="o">=</span> <span class="n">target_rule</span><span class="p">[</span><span class="s2">"redaction_zones"</span><span class="p">]</span>
 <a id="__codelineno-0-129" name="__codelineno-0-129"></a>                <span class="k">try</span><span class="p">:</span>
 <a id="__codelineno-0-130" name="__codelineno-0-130"></a>                    <span class="c1"># Convert to list for comparison just in case</span>
 <a id="__codelineno-0-131" name="__codelineno-0-131"></a>                    <span class="n">idx</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
@@ -4122,18 +4122,18 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <span class="normal"><a href="#__codelineno-0-90">90</a></span>
 <span class="normal"><a href="#__codelineno-0-91">91</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-14" name="__codelineno-0-14"></a><span class="nd">@staticmethod</span>
 <a id="__codelineno-0-15" name="__codelineno-0-15"></a><span class="k">def</span><span class="w"> </span><span class="nf">suggest_config_updates</span><span class="p">(</span><span class="n">report</span><span class="p">:</span> <span class="n">PhiReport</span><span class="p">,</span> <span class="n">_current_config</span><span class="p">:</span> <span class="n">GantryConfiguration</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-17" name="__codelineno-0-17"></a><span class="sd">    Generates a list of suggested configuration changes.</span>
 <a id="__codelineno-0-18" name="__codelineno-0-18"></a>
 <a id="__codelineno-0-19" name="__codelineno-0-19"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="sd">        List[Dict]: A list of &#39;suggestion&#39; objects:</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20"></a><span class="sd">        List[Dict]: A list of 'suggestion' objects:</span>
 <a id="__codelineno-0-21" name="__codelineno-0-21"></a><span class="sd">        {</span>
-<a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="sd">            &quot;serial&quot;: str,</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">            &quot;action&quot;: &quot;ADD_ZONE&quot; | &quot;EXPAND_ZONE&quot;,</span>
-<a id="__codelineno-0-24" name="__codelineno-0-24"></a><span class="sd">            &quot;zone&quot;: [x, y, w, h],</span>
-<a id="__codelineno-0-25" name="__codelineno-0-25"></a><span class="sd">            &quot;reason&quot;: str</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22"></a><span class="sd">            "serial": str,</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23"></a><span class="sd">            "action": "ADD_ZONE" | "EXPAND_ZONE",</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24"></a><span class="sd">            "zone": [x, y, w, h],</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25"></a><span class="sd">            "reason": str</span>
 <a id="__codelineno-0-26" name="__codelineno-0-26"></a><span class="sd">        }</span>
-<a id="__codelineno-0-27" name="__codelineno-0-27"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27"></a><span class="sd">    """</span>
 <a id="__codelineno-0-28" name="__codelineno-0-28"></a>    <span class="n">suggestions</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-29" name="__codelineno-0-29"></a>
 <a id="__codelineno-0-30" name="__codelineno-0-30"></a>    <span class="c1"># Group findings by machine serial</span>
@@ -4144,7 +4144,7 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-35" name="__codelineno-0-35"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">meta</span><span class="p">:</span>
 <a id="__codelineno-0-36" name="__codelineno-0-36"></a>            <span class="k">continue</span>
 <a id="__codelineno-0-37" name="__codelineno-0-37"></a>
-<a id="__codelineno-0-38" name="__codelineno-0-38"></a>        <span class="n">serial</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;rule_serial&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38"></a>        <span class="n">serial</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"rule_serial"</span><span class="p">)</span>
 <a id="__codelineno-0-39" name="__codelineno-0-39"></a>        <span class="k">if</span> <span class="n">serial</span><span class="p">:</span>
 <a id="__codelineno-0-40" name="__codelineno-0-40"></a>            <span class="n">findings_by_serial</span><span class="p">[</span><span class="n">serial</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">finding</span><span class="p">)</span>
 <a id="__codelineno-0-41" name="__codelineno-0-41"></a>        <span class="k">else</span><span class="p">:</span>
@@ -4155,15 +4155,15 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-46" name="__codelineno-0-46"></a>        <span class="c1"># In a real system we might merge zones here.</span>
 <a id="__codelineno-0-47" name="__codelineno-0-47"></a>        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">findings</span><span class="p">:</span>
 <a id="__codelineno-0-48" name="__codelineno-0-48"></a>            <span class="n">meta</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">metadata</span>
-<a id="__codelineno-0-49" name="__codelineno-0-49"></a>            <span class="n">l_type</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;leak_type&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-50" name="__codelineno-0-50"></a>            <span class="n">text_box</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;text_box&quot;</span><span class="p">)</span> <span class="c1"># x,y,w,h</span>
+<a id="__codelineno-0-49" name="__codelineno-0-49"></a>            <span class="n">l_type</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"leak_type"</span><span class="p">)</span>
+<a id="__codelineno-0-50" name="__codelineno-0-50"></a>            <span class="n">text_box</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"text_box"</span><span class="p">)</span> <span class="c1"># x,y,w,h</span>
 <a id="__codelineno-0-51" name="__codelineno-0-51"></a>
 <a id="__codelineno-0-52" name="__codelineno-0-52"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">text_box</span><span class="p">:</span>
 <a id="__codelineno-0-53" name="__codelineno-0-53"></a>                <span class="k">continue</span>
 <a id="__codelineno-0-54" name="__codelineno-0-54"></a>
-<a id="__codelineno-0-55" name="__codelineno-0-55"></a>            <span class="k">if</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">&quot;PARTIAL_LEAK&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-55" name="__codelineno-0-55"></a>            <span class="k">if</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">"PARTIAL_LEAK"</span><span class="p">:</span>
 <a id="__codelineno-0-56" name="__codelineno-0-56"></a>                <span class="c1"># Suggest expanding the best_zone to cover text_box</span>
-<a id="__codelineno-0-57" name="__codelineno-0-57"></a>                <span class="n">best_zone</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;best_zone&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-57" name="__codelineno-0-57"></a>                <span class="n">best_zone</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"best_zone"</span><span class="p">)</span>
 <a id="__codelineno-0-58" name="__codelineno-0-58"></a>                <span class="k">if</span> <span class="n">best_zone</span><span class="p">:</span>
 <a id="__codelineno-0-59" name="__codelineno-0-59"></a>                    <span class="c1"># Calculate union box</span>
 <a id="__codelineno-0-60" name="__codelineno-0-60"></a>                    <span class="n">tx</span><span class="p">,</span> <span class="n">ty</span><span class="p">,</span> <span class="n">tw</span><span class="p">,</span> <span class="n">th</span> <span class="o">=</span> <span class="n">text_box</span>
@@ -4177,24 +4177,24 @@ Uses exact Serial Number match first, then Model/Manufacturer logic.</p>
 <a id="__codelineno-0-68" name="__codelineno-0-68"></a>                    <span class="n">union_zone</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">ux</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">uy</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">ur</span><span class="o">-</span><span class="n">ux</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">ub</span><span class="o">-</span><span class="n">uy</span><span class="p">)]</span>
 <a id="__codelineno-0-69" name="__codelineno-0-69"></a>
 <a id="__codelineno-0-70" name="__codelineno-0-70"></a>                    <span class="n">suggestions</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-<a id="__codelineno-0-71" name="__codelineno-0-71"></a>                        <span class="s2">&quot;serial&quot;</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
-<a id="__codelineno-0-72" name="__codelineno-0-72"></a>                        <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;EXPAND_ZONE&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-73" name="__codelineno-0-73"></a>                        <span class="s2">&quot;original_zone&quot;</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
-<a id="__codelineno-0-74" name="__codelineno-0-74"></a>                        <span class="s2">&quot;new_zone&quot;</span><span class="p">:</span> <span class="n">union_zone</span><span class="p">,</span>
-<a id="__codelineno-0-75" name="__codelineno-0-75"></a>                        <span class="s2">&quot;reason&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Partial leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Expanded to cover.&quot;</span>
+<a id="__codelineno-0-71" name="__codelineno-0-71"></a>                        <span class="s2">"serial"</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
+<a id="__codelineno-0-72" name="__codelineno-0-72"></a>                        <span class="s2">"action"</span><span class="p">:</span> <span class="s2">"EXPAND_ZONE"</span><span class="p">,</span>
+<a id="__codelineno-0-73" name="__codelineno-0-73"></a>                        <span class="s2">"original_zone"</span><span class="p">:</span> <span class="n">best_zone</span><span class="p">,</span>
+<a id="__codelineno-0-74" name="__codelineno-0-74"></a>                        <span class="s2">"new_zone"</span><span class="p">:</span> <span class="n">union_zone</span><span class="p">,</span>
+<a id="__codelineno-0-75" name="__codelineno-0-75"></a>                        <span class="s2">"reason"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"Partial leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Expanded to cover."</span>
 <a id="__codelineno-0-76" name="__codelineno-0-76"></a>                    <span class="p">})</span>
 <a id="__codelineno-0-77" name="__codelineno-0-77"></a>
-<a id="__codelineno-0-78" name="__codelineno-0-78"></a>            <span class="k">elif</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">&quot;NEW_LEAK&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-78" name="__codelineno-0-78"></a>            <span class="k">elif</span> <span class="n">l_type</span> <span class="o">==</span> <span class="s2">"NEW_LEAK"</span><span class="p">:</span>
 <a id="__codelineno-0-79" name="__codelineno-0-79"></a>                <span class="c1"># Suggest adding the text box as a new zone</span>
 <a id="__codelineno-0-80" name="__codelineno-0-80"></a>                <span class="c1"># Add some padding?</span>
 <a id="__codelineno-0-81" name="__codelineno-0-81"></a>                <span class="c1"># Ensure ints</span>
 <a id="__codelineno-0-82" name="__codelineno-0-82"></a>                <span class="n">zone</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">text_box</span><span class="p">]</span>
 <a id="__codelineno-0-83" name="__codelineno-0-83"></a>
 <a id="__codelineno-0-84" name="__codelineno-0-84"></a>                <span class="n">suggestions</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-<a id="__codelineno-0-85" name="__codelineno-0-85"></a>                    <span class="s2">&quot;serial&quot;</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
-<a id="__codelineno-0-86" name="__codelineno-0-86"></a>                    <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;ADD_ZONE&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-87" name="__codelineno-0-87"></a>                    <span class="s2">&quot;zone&quot;</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">zone</span><span class="p">),</span>
-<a id="__codelineno-0-88" name="__codelineno-0-88"></a>                    <span class="s2">&quot;reason&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;New leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Added new zone.&quot;</span>
+<a id="__codelineno-0-85" name="__codelineno-0-85"></a>                    <span class="s2">"serial"</span><span class="p">:</span> <span class="n">serial</span><span class="p">,</span>
+<a id="__codelineno-0-86" name="__codelineno-0-86"></a>                    <span class="s2">"action"</span><span class="p">:</span> <span class="s2">"ADD_ZONE"</span><span class="p">,</span>
+<a id="__codelineno-0-87" name="__codelineno-0-87"></a>                    <span class="s2">"zone"</span><span class="p">:</span> <span class="nb">list</span><span class="p">(</span><span class="n">zone</span><span class="p">),</span>
+<a id="__codelineno-0-88" name="__codelineno-0-88"></a>                    <span class="s2">"reason"</span><span class="p">:</span> <span class="sa">f</span><span class="s2">"New leak detected (</span><span class="si">{</span><span class="n">f</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2">). Added new zone."</span>
 <a id="__codelineno-0-89" name="__codelineno-0-89"></a>                <span class="p">})</span>
 <a id="__codelineno-0-90" name="__codelineno-0-90"></a>
 <a id="__codelineno-0-91" name="__codelineno-0-91"></a>    <span class="k">return</span> <span class="n">suggestions</span>
@@ -4322,11 +4322,11 @@ Caller is responsible for filtered results.</p>
 <span class="normal"><a href="#__codelineno-0-204">204</a></span>
 <span class="normal"><a href="#__codelineno-0-205">205</a></span>
 <span class="normal"><a href="#__codelineno-0-206">206</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-148" name="__codelineno-0-148"></a><span class="k">def</span><span class="w"> </span><span class="nf">analyze_pixels</span><span class="p">(</span><span class="n">instance</span><span class="p">:</span> <span class="n">Instance</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">TextRegion</span><span class="p">]:</span>
-<a id="__codelineno-0-149" name="__codelineno-0-149"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-149" name="__codelineno-0-149"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-150" name="__codelineno-0-150"></a><span class="sd">    Analyzes the pixel data of a DICOM Instance for burned-in text.</span>
 <a id="__codelineno-0-151" name="__codelineno-0-151"></a><span class="sd">    Returns list of TextRegion objects (raw findings, not filtered).</span>
 <a id="__codelineno-0-152" name="__codelineno-0-152"></a><span class="sd">    Caller is responsible for filtered results.</span>
-<a id="__codelineno-0-153" name="__codelineno-0-153"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-153" name="__codelineno-0-153"></a><span class="sd">    """</span>
 <a id="__codelineno-0-154" name="__codelineno-0-154"></a>    <span class="n">all_regions</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-155" name="__codelineno-0-155"></a>
 <a id="__codelineno-0-156" name="__codelineno-0-156"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">HAS_OCR</span><span class="p">:</span>
@@ -4343,13 +4343,13 @@ Caller is responsible for filtered results.</p>
 <a id="__codelineno-0-167" name="__codelineno-0-167"></a>           <span class="n">ds_voi</span> <span class="o">=</span> <span class="n">_get_voi_lut_dataset</span><span class="p">(</span><span class="n">instance</span><span class="p">)</span>
 <a id="__codelineno-0-168" name="__codelineno-0-168"></a>           <span class="c1"># apply_voi_lut handles the math. It returns float64 or int usually.</span>
 <a id="__codelineno-0-169" name="__codelineno-0-169"></a>           <span class="c1"># index=0 is default, but we might want to apply per frame if WindowWidth differs per frame </span>
-<a id="__codelineno-0-170" name="__codelineno-0-170"></a>           <span class="c1"># (though usually it&#39;s per series/image). </span>
+<a id="__codelineno-0-170" name="__codelineno-0-170"></a>           <span class="c1"># (though usually it's per series/image). </span>
 <a id="__codelineno-0-171" name="__codelineno-0-171"></a>           <span class="c1"># If pixel_array is 3D/4D, apply_voi_lut might work on the whole array if implemented, </span>
-<a id="__codelineno-0-172" name="__codelineno-0-172"></a>           <span class="c1"># but safer to do it. pydicom&#39;s apply_voi_lut expects array + ds.</span>
+<a id="__codelineno-0-172" name="__codelineno-0-172"></a>           <span class="c1"># but safer to do it. pydicom's apply_voi_lut expects array + ds.</span>
 <a id="__codelineno-0-173" name="__codelineno-0-173"></a>           <span class="n">pixel_array</span> <span class="o">=</span> <span class="n">apply_voi_lut</span><span class="p">(</span><span class="n">pixel_array</span><span class="p">,</span> <span class="n">ds_voi</span><span class="p">)</span>
 <a id="__codelineno-0-174" name="__codelineno-0-174"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
 <a id="__codelineno-0-175" name="__codelineno-0-175"></a>            <span class="c1"># Fallback to raw data if VOI fails (e.g. missing tags)</span>
-<a id="__codelineno-0-176" name="__codelineno-0-176"></a>            <span class="c1"># logger.debug(f&quot;VOI LUT application failed: {e}&quot;)</span>
+<a id="__codelineno-0-176" name="__codelineno-0-176"></a>            <span class="c1"># logger.debug(f"VOI LUT application failed: {e}")</span>
 <a id="__codelineno-0-177" name="__codelineno-0-177"></a>            <span class="k">pass</span>
 <a id="__codelineno-0-178" name="__codelineno-0-178"></a>
 <a id="__codelineno-0-179" name="__codelineno-0-179"></a>        <span class="n">frames</span> <span class="o">=</span> <span class="p">[]</span>
@@ -4377,7 +4377,7 @@ Caller is responsible for filtered results.</p>
 <a id="__codelineno-0-201" name="__codelineno-0-201"></a>            <span class="n">all_regions</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">regions</span><span class="p">)</span>
 <a id="__codelineno-0-202" name="__codelineno-0-202"></a>
 <a id="__codelineno-0-203" name="__codelineno-0-203"></a>    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-204" name="__codelineno-0-204"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to analyze pixels for </span><span class="si">{</span><span class="n">instance</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-204" name="__codelineno-0-204"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Failed to analyze pixels for </span><span class="si">{</span><span class="n">instance</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 <a id="__codelineno-0-205" name="__codelineno-0-205"></a>
 <a id="__codelineno-0-206" name="__codelineno-0-206"></a>    <span class="k">return</span> <span class="n">all_regions</span>
 </code></pre></div></td></tr></table></div>
@@ -4531,7 +4531,7 @@ Caller is responsible for filtered results.</p>
 <span class="normal"><a href="#__codelineno-0-137">137</a></span>
 <span class="normal"><a href="#__codelineno-0-138">138</a></span>
 <span class="normal"><a href="#__codelineno-0-139">139</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-81" name="__codelineno-0-81"></a><span class="k">def</span><span class="w"> </span><span class="nf">detect_text_regions</span><span class="p">(</span><span class="n">pixel_data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">frame_idx</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">TextRegion</span><span class="p">]:</span>
-<a id="__codelineno-0-82" name="__codelineno-0-82"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-82" name="__codelineno-0-82"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-83" name="__codelineno-0-83"></a><span class="sd">    Runs OCR on the provided pixel data and returns text regions with bounding boxes.</span>
 <a id="__codelineno-0-84" name="__codelineno-0-84"></a>
 <a id="__codelineno-0-85" name="__codelineno-0-85"></a><span class="sd">    Args:</span>
@@ -4540,7 +4540,7 @@ Caller is responsible for filtered results.</p>
 <a id="__codelineno-0-88" name="__codelineno-0-88"></a>
 <a id="__codelineno-0-89" name="__codelineno-0-89"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-90" name="__codelineno-0-90"></a><span class="sd">        List[TextRegion]: Detected text regions.</span>
-<a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-91" name="__codelineno-0-91"></a><span class="sd">    """</span>
 <a id="__codelineno-0-92" name="__codelineno-0-92"></a>    <span class="n">regions</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-93" name="__codelineno-0-93"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">HAS_OCR</span><span class="p">:</span>
 <a id="__codelineno-0-94" name="__codelineno-0-94"></a>        <span class="k">return</span> <span class="n">regions</span>
@@ -4565,19 +4565,19 @@ Caller is responsible for filtered results.</p>
 <a id="__codelineno-0-113" name="__codelineno-0-113"></a>
 <a id="__codelineno-0-114" name="__codelineno-0-114"></a>        <span class="c1"># Use image_to_data for detailed box info</span>
 <a id="__codelineno-0-115" name="__codelineno-0-115"></a>        <span class="c1"># config optimized for sparse text</span>
-<a id="__codelineno-0-116" name="__codelineno-0-116"></a>        <span class="n">config</span> <span class="o">=</span> <span class="sa">r</span><span class="s1">&#39;--oem 3 --psm 11&#39;</span>
+<a id="__codelineno-0-116" name="__codelineno-0-116"></a>        <span class="n">config</span> <span class="o">=</span> <span class="sa">r</span><span class="s1">'--oem 3 --psm 11'</span>
 <a id="__codelineno-0-117" name="__codelineno-0-117"></a>
 <a id="__codelineno-0-118" name="__codelineno-0-118"></a>        <span class="c1"># Output is a dict with lists</span>
 <a id="__codelineno-0-119" name="__codelineno-0-119"></a>        <span class="n">data</span> <span class="o">=</span> <span class="n">pytesseract</span><span class="o">.</span><span class="n">image_to_data</span><span class="p">(</span><span class="n">img</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">output_type</span><span class="o">=</span><span class="n">pytesseract</span><span class="o">.</span><span class="n">Output</span><span class="o">.</span><span class="n">DICT</span><span class="p">)</span>
 <a id="__codelineno-0-120" name="__codelineno-0-120"></a>
-<a id="__codelineno-0-121" name="__codelineno-0-121"></a>        <span class="n">n_boxes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">])</span>
+<a id="__codelineno-0-121" name="__codelineno-0-121"></a>        <span class="n">n_boxes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s1">'text'</span><span class="p">])</span>
 <a id="__codelineno-0-122" name="__codelineno-0-122"></a>        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_boxes</span><span class="p">):</span>
-<a id="__codelineno-0-123" name="__codelineno-0-123"></a>            <span class="n">text</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
-<a id="__codelineno-0-124" name="__codelineno-0-124"></a>            <span class="n">conf</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;conf&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">])</span>
+<a id="__codelineno-0-123" name="__codelineno-0-123"></a>            <span class="n">text</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="s1">'text'</span><span class="p">][</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+<a id="__codelineno-0-124" name="__codelineno-0-124"></a>            <span class="n">conf</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s1">'conf'</span><span class="p">][</span><span class="n">i</span><span class="p">])</span>
 <a id="__codelineno-0-125" name="__codelineno-0-125"></a>
 <a id="__codelineno-0-126" name="__codelineno-0-126"></a>            <span class="c1"># Filter low confidence and empty text</span>
 <a id="__codelineno-0-127" name="__codelineno-0-127"></a>            <span class="k">if</span> <span class="n">conf</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-<a id="__codelineno-0-128" name="__codelineno-0-128"></a>                <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span><span class="p">)</span> <span class="o">=</span> <span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;left&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;top&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;width&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;height&#39;</span><span class="p">][</span><span class="n">i</span><span class="p">])</span>
+<a id="__codelineno-0-128" name="__codelineno-0-128"></a>                <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span><span class="p">)</span> <span class="o">=</span> <span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s1">'left'</span><span class="p">][</span><span class="n">i</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">'top'</span><span class="p">][</span><span class="n">i</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">'width'</span><span class="p">][</span><span class="n">i</span><span class="p">],</span> <span class="n">data</span><span class="p">[</span><span class="s1">'height'</span><span class="p">][</span><span class="n">i</span><span class="p">])</span>
 <a id="__codelineno-0-129" name="__codelineno-0-129"></a>                <span class="n">regions</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">TextRegion</span><span class="p">(</span>
 <a id="__codelineno-0-130" name="__codelineno-0-130"></a>                    <span class="n">text</span><span class="o">=</span><span class="n">text</span><span class="p">,</span>
 <a id="__codelineno-0-131" name="__codelineno-0-131"></a>                    <span class="n">box</span><span class="o">=</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span><span class="p">),</span>
@@ -4586,7 +4586,7 @@ Caller is responsible for filtered results.</p>
 <a id="__codelineno-0-134" name="__codelineno-0-134"></a>                <span class="p">))</span>
 <a id="__codelineno-0-135" name="__codelineno-0-135"></a>
 <a id="__codelineno-0-136" name="__codelineno-0-136"></a>    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-137" name="__codelineno-0-137"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;OCR failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-137" name="__codelineno-0-137"></a>        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"OCR failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 <a id="__codelineno-0-138" name="__codelineno-0-138"></a>
 <a id="__codelineno-0-139" name="__codelineno-0-139"></a>    <span class="k">return</span> <span class="n">regions</span>
 </code></pre></div></td></tr></table></div>
@@ -4719,7 +4719,7 @@ Caller is responsible for filtered results.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

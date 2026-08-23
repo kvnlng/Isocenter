@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1781,18 +1781,18 @@
 <p>You can also focus the scan on a single machine:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gantry.session</span><span class="w"> </span><span class="kn">import</span> <span class="n">DicomSession</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">DicomSession</span><span class="p">(</span><span class="s2">&quot;my_project.db&quot;</span><span class="p">)</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">&quot;dicom_data/&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">DicomSession</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"dicom_data/"</span><span class="p">)</span>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Run the intelligent scan (only configured machines)</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">()</span>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
 <a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="c1"># OR: Focus on a specific serial number</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">(</span><span class="n">serial_number</span><span class="o">=</span><span class="s2">&quot;SN-12345&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">(</span><span class="n">serial_number</span><span class="o">=</span><span class="s2">"SN-12345"</span><span class="p">)</span>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report</span><span class="p">)</span><span class="si">}</span><span class="s2"> leaks.&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report</span><span class="p">)</span><span class="si">}</span><span class="s2"> leaks."</span><span class="p">)</span>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="k">for</span> <span class="n">finding</span> <span class="ow">in</span> <span class="n">report</span><span class="p">:</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">metadata</span><span class="p">[</span><span class="s1">&#39;leak_type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">metadata</span><span class="p">[</span><span class="s1">'leak_type'</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">value</span><span class="si">}</span><span class="s2"> in </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="setting-up-new-machines-zone-discovery">Setting Up New Machines (Zone Discovery)</h2>
 <p>When you add a new machine to your configuration (Scaffolding), it typically has no redaction zones defined. Gantry uses <strong>Zone Discovery</strong> to analyze a sample of images and find repeating "hotspots" of burned-in text.</p>
@@ -1801,7 +1801,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># 1. Run Discovery</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># Returns a DiscoveryResult object containing all detected text</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">result</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">discover_redaction_zones</span><span class="p">(</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">&quot;SN-NEW&quot;</span><span class="p">,</span> 
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"SN-NEW"</span><span class="p">,</span> 
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">sample_size</span><span class="o">=</span><span class="mi">50</span><span class="p">,</span> 
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">min_confidence</span><span class="o">=</span><span class="mf">60.0</span>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p">)</span>
@@ -1812,10 +1812,10 @@
 <a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="c1"># 3. Inspect Results (Rich Metadata)</span>
 <a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="k">for</span> <span class="n">z</span> <span class="ow">in</span> <span class="n">zones</span><span class="p">:</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Type: </span><span class="si">{</span><span class="n">z</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>         <span class="c1"># PROPER_NOUN, LIKELY_NAME, or TEXT</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Zone: </span><span class="si">{</span><span class="n">z</span><span class="p">[</span><span class="s1">&#39;zone&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>         <span class="c1"># [y1, y2, x1, x2]</span>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Examples: </span><span class="si">{</span><span class="n">z</span><span class="p">[</span><span class="s1">&#39;examples&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="c1"># [&#39;Smith^John&#39;, &#39;Hospital A&#39;, ...]</span>
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">20</span><span class="p">)</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Type: </span><span class="si">{</span><span class="n">z</span><span class="p">[</span><span class="s1">'type'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>         <span class="c1"># PROPER_NOUN, LIKELY_NAME, or TEXT</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Zone: </span><span class="si">{</span><span class="n">z</span><span class="p">[</span><span class="s1">'zone'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>         <span class="c1"># [y1, y2, x1, x2]</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Examples: </span><span class="si">{</span><span class="n">z</span><span class="p">[</span><span class="s1">'examples'</span><span class="p">]</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span> <span class="c1"># ['Smith^John', 'Hospital A', ...]</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"-"</span> <span class="o">*</span> <span class="mi">20</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="advanced-usage-power-users-data-scientists">Advanced Usage: Power Users &amp; Data Scientists</h3>
 <p>Gantry's <code>DiscoveryResult</code> provides powerful tools for deep inspection, ideal for data science workflows.</p>
@@ -1826,20 +1826,20 @@
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Export to Pandas</span>
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">df</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">to_dataframe</span><span class="p">()</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">high_conf</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s1">&#39;confidence&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mf">90.0</span><span class="p">]</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="nb">print</span><span class="p">(</span><span class="n">high_conf</span><span class="p">[</span><span class="s1">&#39;text&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">high_conf</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s1">'confidence'</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mf">90.0</span><span class="p">]</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="nb">print</span><span class="p">(</span><span class="n">high_conf</span><span class="p">[</span><span class="s1">'text'</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">()</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
 <a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
 <a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="c1"># Export Density Matrix (for Heatmaps)</span>
 <a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="n">matrix</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get_density_matrix</span><span class="p">(</span><span class="n">bins</span><span class="o">=</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="mi">100</span><span class="p">))</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">plt</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">matrix</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;hot&#39;</span><span class="p">,</span> <span class="n">interpolation</span><span class="o">=</span><span class="s1">&#39;nearest&#39;</span><span class="p">)</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s2">&quot;Burned-in Text Heatmap&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">plt</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">matrix</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">'hot'</span><span class="p">,</span> <span class="n">interpolation</span><span class="o">=</span><span class="s1">'nearest'</span><span class="p">)</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s2">"Burned-in Text Heatmap"</span><span class="p">)</span>
 <a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
 </code></pre></div>
 <h4 id="2-lambda-filtering">2. Lambda Filtering</h4>
 <p>Apply arbitrary logic to filter candidates using Python lambdas.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Keep candidates that look like dates OR appear in the first 10 frames</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">filtered</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="k">lambda</span> <span class="n">c</span><span class="p">:</span> 
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\d</span><span class="si">{4}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">text</span><span class="p">)</span> <span class="ow">or</span> <span class="n">c</span><span class="o">.</span><span class="n">source_index</span> <span class="o">&lt;</span> <span class="mi">10</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">"\d</span><span class="si">{4}</span><span class="s2">"</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">text</span><span class="p">)</span> <span class="ow">or</span> <span class="n">c</span><span class="o">.</span><span class="n">source_index</span> <span class="o">&lt;</span> <span class="mi">10</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">)</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">zones</span> <span class="o">=</span> <span class="n">filtered</span><span class="o">.</span><span class="n">to_zones</span><span class="p">()</span>
 </code></pre></div>
@@ -1847,7 +1847,7 @@
 <p>Identify whether a zone is static (overlay) or transient (noise/motion).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">report</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">analyze_temporal_stability</span><span class="p">()</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">report</span><span class="p">:</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Zone: </span><span class="si">{</span><span class="n">item</span><span class="p">[</span><span class="s1">&#39;zone&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> | Status: </span><span class="si">{</span><span class="n">item</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">item</span><span class="p">[</span><span class="s1">&#39;occurrence&#39;</span><span class="p">]</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Zone: </span><span class="si">{</span><span class="n">item</span><span class="p">[</span><span class="s1">'zone'</span><span class="p">]</span><span class="si">}</span><span class="s2"> | Status: </span><span class="si">{</span><span class="n">item</span><span class="p">[</span><span class="s1">'status'</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">item</span><span class="p">[</span><span class="s1">'occurrence'</span><span class="p">]</span><span class="o">*</span><span class="mi">100</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)"</span><span class="p">)</span>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Output:</span>
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># Zone: [10, 10, 100, 20] | Status: STATIC_ALWAYS (100.0%)</span>
 </code></pre></div>
@@ -1868,14 +1868,14 @@
 <h3 id="applying-zones">Applying Zones</h3>
 <p>Once identified, add the <code>zone</code> coordinates to your <code>priv_config.yaml</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SN-NEW&quot;</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-NEW"</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">      </span><span class="c1"># Found: PROPER_NOUN [&#39;Smith^John&#39;]</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">      </span><span class="c1"># Found: PROPER_NOUN ['Smith^John']</span>
 <a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">20</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">50</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">30</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <h3 id="validation">Validation</h3>
 <p>After updating the config, run a scan to confirm coverage:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">(</span><span class="s2">&quot;SN-NEW&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">report</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">scan_pixel_content</span><span class="p">(</span><span class="s2">"SN-NEW"</span><span class="p">)</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># Should be 0 findings if zones are correct</span>
 </code></pre></div>
 <h2 id="automated-remediation">Automated Remediation</h2>
@@ -1889,7 +1889,7 @@
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">count</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">auto_remediate_config</span><span class="p">(</span><span class="n">report</span><span class="p">)</span>
 <a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
 <a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Applied </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> fixes.&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Applied </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> fixes."</span><span class="p">)</span>
 <a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
 <a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="c1"># 3. Validation Scan (Optional)</span>
 <a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="c1"># Re-run to confirm leaks are gone</span>
@@ -1897,13 +1897,13 @@
 <a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">report_v2</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span>
 <a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>
 <a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>    <span class="c1"># 4. Save Config</span>
-<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save_config</span><span class="p">(</span><span class="s2">&quot;updated_priv_config.yaml&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">save_config</span><span class="p">(</span><span class="s2">"updated_priv_config.yaml"</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="configuration-reference">Configuration Reference</h2>
 <p>Your <code>priv_config.yaml</code> defines the zones used for verification.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SN-12345&quot;</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;CT-Scanner-X&quot;</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-12345"</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"CT-Scanner-X"</span>
 <a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
 <a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">      </span><span class="c1"># [x, y, width, height]</span>
 <a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">200</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># Top-Left Info Box</span>
@@ -2064,11 +2064,11 @@ in the current configuration. Unconfigured machines are skipped.</p>
 <span class="normal"><a href="#__codelineno-0-911">911</a></span>
 <span class="normal"><a href="#__codelineno-0-912">912</a></span>
 <span class="normal"><a href="#__codelineno-0-913">913</a></span>
-<span class="normal"><a href="#__codelineno-0-914">914</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-836" name="__codelineno-0-836"></a><span class="k">def</span><span class="w"> </span><span class="nf">scan_pixel_content</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;PhiReport&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-837" name="__codelineno-0-837"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="normal"><a href="#__codelineno-0-914">914</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-836" name="__codelineno-0-836"></a><span class="k">def</span><span class="w"> </span><span class="nf">scan_pixel_content</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">"PhiReport"</span><span class="p">:</span>
+<a id="__codelineno-0-837" name="__codelineno-0-837"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-838" name="__codelineno-0-838"></a><span class="sd">    Scans instances in the session for burned-in text using OCR.</span>
 <a id="__codelineno-0-839" name="__codelineno-0-839"></a>
-<a id="__codelineno-0-840" name="__codelineno-0-840"></a><span class="sd">    Performs &quot;Intelligent Verification&quot;:.</span>
+<a id="__codelineno-0-840" name="__codelineno-0-840"></a><span class="sd">    Performs "Intelligent Verification":.</span>
 <a id="__codelineno-0-841" name="__codelineno-0-841"></a><span class="sd">    Only scans instances belonging to machines (Serial Numbers) that are present</span>
 <a id="__codelineno-0-842" name="__codelineno-0-842"></a><span class="sd">    in the current configuration. Unconfigured machines are skipped.</span>
 <a id="__codelineno-0-843" name="__codelineno-0-843"></a>
@@ -2078,15 +2078,15 @@ in the current configuration. Unconfigured machines are skipped.</p>
 <a id="__codelineno-0-847" name="__codelineno-0-847"></a>
 <a id="__codelineno-0-848" name="__codelineno-0-848"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-849" name="__codelineno-0-849"></a><span class="sd">        PhiReport: A report containing findings of filtered (uncovered) burned-in text.</span>
-<a id="__codelineno-0-850" name="__codelineno-0-850"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-851" name="__codelineno-0-851"></a>    <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Scanning pixel content for text (OCR)...&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-852" name="__codelineno-0-852"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Scanning pixel content for text (OCR)...&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-850" name="__codelineno-0-850"></a><span class="sd">    """</span>
+<a id="__codelineno-0-851" name="__codelineno-0-851"></a>    <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Scanning pixel content for text (OCR)..."</span><span class="p">)</span>
+<a id="__codelineno-0-852" name="__codelineno-0-852"></a>    <span class="nb">print</span><span class="p">(</span><span class="s2">"Scanning pixel content for text (OCR)..."</span><span class="p">)</span>
 <a id="__codelineno-0-853" name="__codelineno-0-853"></a>
 <a id="__codelineno-0-854" name="__codelineno-0-854"></a>    <span class="c1"># Gather all instances with their equipment context</span>
 <a id="__codelineno-0-855" name="__codelineno-0-855"></a>    <span class="n">current_rules</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">rules</span>
 <a id="__codelineno-0-856" name="__codelineno-0-856"></a>
 <a id="__codelineno-0-857" name="__codelineno-0-857"></a>    <span class="c1"># Build set of valid serials from config</span>
-<a id="__codelineno-0-858" name="__codelineno-0-858"></a>    <span class="n">configured_serials</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">current_rules</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)}</span>
+<a id="__codelineno-0-858" name="__codelineno-0-858"></a>    <span class="n">configured_serials</span> <span class="o">=</span> <span class="p">{</span><span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">current_rules</span> <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)}</span>
 <a id="__codelineno-0-859" name="__codelineno-0-859"></a>
 <a id="__codelineno-0-860" name="__codelineno-0-860"></a>    <span class="n">worker_items</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-861" name="__codelineno-0-861"></a>    <span class="n">skipped_count</span> <span class="o">=</span> <span class="mi">0</span>
@@ -2105,7 +2105,7 @@ in the current configuration. Unconfigured machines are skipped.</p>
 <a id="__codelineno-0-874" name="__codelineno-0-874"></a>                <span class="c1"># We check if we have a rule for this serial</span>
 <a id="__codelineno-0-875" name="__codelineno-0-875"></a>                <span class="n">matched_rule</span> <span class="o">=</span> <span class="kc">None</span>
 <a id="__codelineno-0-876" name="__codelineno-0-876"></a>                <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">current_rules</span><span class="p">:</span>
-<a id="__codelineno-0-877" name="__codelineno-0-877"></a>                    <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;serial_number&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">sn</span><span class="p">:</span>
+<a id="__codelineno-0-877" name="__codelineno-0-877"></a>                    <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">sn</span><span class="p">:</span>
 <a id="__codelineno-0-878" name="__codelineno-0-878"></a>                        <span class="n">matched_rule</span> <span class="o">=</span> <span class="n">r</span>
 <a id="__codelineno-0-879" name="__codelineno-0-879"></a>                        <span class="k">break</span>
 <a id="__codelineno-0-880" name="__codelineno-0-880"></a>
@@ -2115,7 +2115,7 @@ in the current configuration. Unconfigured machines are skipped.</p>
 <a id="__codelineno-0-884" name="__codelineno-0-884"></a>
 <a id="__codelineno-0-885" name="__codelineno-0-885"></a>                <span class="c1"># Rule Refinement: Skip if NO ZONES defined (Scaffolded state)</span>
 <a id="__codelineno-0-886" name="__codelineno-0-886"></a>                <span class="c1"># Unless user explicitly wants to scan? No, user req says skip.</span>
-<a id="__codelineno-0-887" name="__codelineno-0-887"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="n">matched_rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;redaction_zones&quot;</span><span class="p">):</span>
+<a id="__codelineno-0-887" name="__codelineno-0-887"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="n">matched_rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"redaction_zones"</span><span class="p">):</span>
 <a id="__codelineno-0-888" name="__codelineno-0-888"></a>                     <span class="c1"># Log once per serial?</span>
 <a id="__codelineno-0-889" name="__codelineno-0-889"></a>                     <span class="c1"># For now just skip</span>
 <a id="__codelineno-0-890" name="__codelineno-0-890"></a>                     <span class="n">skipped_count</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">se</span><span class="o">.</span><span class="n">instances</span><span class="p">)</span>
@@ -2129,19 +2129,19 @@ in the current configuration. Unconfigured machines are skipped.</p>
 <a id="__codelineno-0-898" name="__codelineno-0-898"></a>                    <span class="n">worker_items</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">inst</span><span class="p">,</span> <span class="n">equip</span><span class="p">,</span> <span class="n">current_rules</span><span class="p">))</span>
 <a id="__codelineno-0-899" name="__codelineno-0-899"></a>
 <a id="__codelineno-0-900" name="__codelineno-0-900"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">worker_items</span><span class="p">:</span>
-<a id="__codelineno-0-901" name="__codelineno-0-901"></a>        <span class="n">msg</span> <span class="o">=</span> <span class="s2">&quot;No matching configured instances found to scan.&quot;</span>
+<a id="__codelineno-0-901" name="__codelineno-0-901"></a>        <span class="n">msg</span> <span class="o">=</span> <span class="s2">"No matching configured instances found to scan."</span>
 <a id="__codelineno-0-902" name="__codelineno-0-902"></a>        <span class="k">if</span> <span class="n">skipped_count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-<a id="__codelineno-0-903" name="__codelineno-0-903"></a>            <span class="n">msg</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot; (Skipped </span><span class="si">{</span><span class="n">skipped_count</span><span class="si">}</span><span class="s2"> unconfigured instances)&quot;</span>
+<a id="__codelineno-0-903" name="__codelineno-0-903"></a>            <span class="n">msg</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">" (Skipped </span><span class="si">{</span><span class="n">skipped_count</span><span class="si">}</span><span class="s2"> unconfigured instances)"</span>
 <a id="__codelineno-0-904" name="__codelineno-0-904"></a>        <span class="nb">print</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
 <a id="__codelineno-0-905" name="__codelineno-0-905"></a>        <span class="k">return</span> <span class="n">PhiReport</span><span class="p">([])</span>
 <a id="__codelineno-0-906" name="__codelineno-0-906"></a>
-<a id="__codelineno-0-907" name="__codelineno-0-907"></a>    <span class="n">results</span> <span class="o">=</span> <span class="n">run_parallel</span><span class="p">(</span><span class="n">_verify_worker</span><span class="p">,</span> <span class="n">worker_items</span><span class="p">,</span> <span class="n">desc</span><span class="o">=</span><span class="s2">&quot;OCR Verification&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-907" name="__codelineno-0-907"></a>    <span class="n">results</span> <span class="o">=</span> <span class="n">run_parallel</span><span class="p">(</span><span class="n">_verify_worker</span><span class="p">,</span> <span class="n">worker_items</span><span class="p">,</span> <span class="n">desc</span><span class="o">=</span><span class="s2">"OCR Verification"</span><span class="p">)</span>
 <a id="__codelineno-0-908" name="__codelineno-0-908"></a>
 <a id="__codelineno-0-909" name="__codelineno-0-909"></a>    <span class="n">all_findings</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-910" name="__codelineno-0-910"></a>    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">:</span>
 <a id="__codelineno-0-911" name="__codelineno-0-911"></a>        <span class="n">all_findings</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
 <a id="__codelineno-0-912" name="__codelineno-0-912"></a>
-<a id="__codelineno-0-913" name="__codelineno-0-913"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;OCR Scan Complete. Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">all_findings</span><span class="p">)</span><span class="si">}</span><span class="s2"> suspicious regions (Uncovered).&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-913" name="__codelineno-0-913"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"OCR Scan Complete. Found </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">all_findings</span><span class="p">)</span><span class="si">}</span><span class="s2"> suspicious regions (Uncovered)."</span><span class="p">)</span>
 <a id="__codelineno-0-914" name="__codelineno-0-914"></a>    <span class="k">return</span> <span class="n">PhiReport</span><span class="p">(</span><span class="n">all_findings</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
@@ -2249,9 +2249,9 @@ configuration to fix detected leaks (by expanding zones or adding new ones).</p>
 <span class="normal"><a href="#__codelineno-0-942">942</a></span>
 <span class="normal"><a href="#__codelineno-0-943">943</a></span>
 <span class="normal"><a href="#__codelineno-0-944">944</a></span>
-<span class="normal"><a href="#__codelineno-0-945">945</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-916" name="__codelineno-0-916"></a><span class="k">def</span><span class="w"> </span><span class="nf">auto_remediate_config</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">report</span><span class="p">:</span> <span class="s2">&quot;PhiReport&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<a id="__codelineno-0-917" name="__codelineno-0-917"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-918" name="__codelineno-0-918"></a><span class="sd">    Analyzes the provided OCR report and automatically updates the session&#39;s</span>
+<span class="normal"><a href="#__codelineno-0-945">945</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-916" name="__codelineno-0-916"></a><span class="k">def</span><span class="w"> </span><span class="nf">auto_remediate_config</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">report</span><span class="p">:</span> <span class="s2">"PhiReport"</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<a id="__codelineno-0-917" name="__codelineno-0-917"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-918" name="__codelineno-0-918"></a><span class="sd">    Analyzes the provided OCR report and automatically updates the session's</span>
 <a id="__codelineno-0-919" name="__codelineno-0-919"></a><span class="sd">    configuration to fix detected leaks (by expanding zones or adding new ones).</span>
 <a id="__codelineno-0-920" name="__codelineno-0-920"></a>
 <a id="__codelineno-0-921" name="__codelineno-0-921"></a><span class="sd">    Args:</span>
@@ -2259,22 +2259,22 @@ configuration to fix detected leaks (by expanding zones or adding new ones).</p>
 <a id="__codelineno-0-923" name="__codelineno-0-923"></a>
 <a id="__codelineno-0-924" name="__codelineno-0-924"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-925" name="__codelineno-0-925"></a><span class="sd">        int: The number of rules updated.</span>
-<a id="__codelineno-0-926" name="__codelineno-0-926"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-927" name="__codelineno-0-927"></a>    <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Analyzing report for auto-remediation...&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-926" name="__codelineno-0-926"></a><span class="sd">    """</span>
+<a id="__codelineno-0-927" name="__codelineno-0-927"></a>    <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Analyzing report for auto-remediation..."</span><span class="p">)</span>
 <a id="__codelineno-0-928" name="__codelineno-0-928"></a>
 <a id="__codelineno-0-929" name="__codelineno-0-929"></a>    <span class="n">suggestions</span> <span class="o">=</span> <span class="n">ConfigAutomator</span><span class="o">.</span><span class="n">suggest_config_updates</span><span class="p">(</span><span class="n">report</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">configuration</span><span class="p">)</span>
 <a id="__codelineno-0-930" name="__codelineno-0-930"></a>
 <a id="__codelineno-0-931" name="__codelineno-0-931"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">suggestions</span><span class="p">:</span>
-<a id="__codelineno-0-932" name="__codelineno-0-932"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No configuration updates suggested.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-932" name="__codelineno-0-932"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"No configuration updates suggested."</span><span class="p">)</span>
 <a id="__codelineno-0-933" name="__codelineno-0-933"></a>        <span class="k">return</span> <span class="mi">0</span>
 <a id="__codelineno-0-934" name="__codelineno-0-934"></a>
-<a id="__codelineno-0-935" name="__codelineno-0-935"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Generated </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">suggestions</span><span class="p">)</span><span class="si">}</span><span class="s2"> suggestions for config updates.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-935" name="__codelineno-0-935"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Generated </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">suggestions</span><span class="p">)</span><span class="si">}</span><span class="s2"> suggestions for config updates."</span><span class="p">)</span>
 <a id="__codelineno-0-936" name="__codelineno-0-936"></a>
 <a id="__codelineno-0-937" name="__codelineno-0-937"></a>    <span class="n">count</span> <span class="o">=</span> <span class="n">ConfigAutomator</span><span class="o">.</span><span class="n">apply_suggestions</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">suggestions</span><span class="p">)</span>
 <a id="__codelineno-0-938" name="__codelineno-0-938"></a>
 <a id="__codelineno-0-939" name="__codelineno-0-939"></a>    <span class="k">if</span> <span class="n">count</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
-<a id="__codelineno-0-940" name="__codelineno-0-940"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Applied </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> updates to in-memory configuration.&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-941" name="__codelineno-0-941"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Tip: Run .scan_pixel_content() again to verify fix, then .configuration.save_config() to persist.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-940" name="__codelineno-0-940"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Applied </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> updates to in-memory configuration."</span><span class="p">)</span>
+<a id="__codelineno-0-941" name="__codelineno-0-941"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Tip: Run .scan_pixel_content() again to verify fix, then .configuration.save_config() to persist."</span><span class="p">)</span>
 <a id="__codelineno-0-942" name="__codelineno-0-942"></a>
 <a id="__codelineno-0-943" name="__codelineno-0-943"></a>    <span class="k">return</span> <span class="n">count</span>
 <a id="__codelineno-0-944" name="__codelineno-0-944"></a>
@@ -2401,7 +2401,7 @@ configuration to fix detected leaks (by expanding zones or adding new ones).</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

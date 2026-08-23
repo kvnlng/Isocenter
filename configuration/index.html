@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -31,7 +31,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1678,8 +1678,8 @@
 <h2 id="complete-example">Complete Example</h2>
 <p>Save this as <code>gantry_config.yaml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. Privacy Profile (Base Rules)</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># Options: &quot;basic&quot;, &quot;comprehensive&quot;, or path to external YAML</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;basic&quot;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># Options: "basic", "comprehensive", or path to external YAML</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="s">"basic"</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># 2. Date Jitter</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Shifts all dates by a random amount within this range.</span>
@@ -1694,22 +1694,22 @@
 <a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
 <a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="c1"># 4. Custom PHI Tags (Overrides Profile)</span>
 <a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="nt">phi_tags</span><span class="p">:</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="s">&quot;0010,0010&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;REMOVE&quot;</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;PatientName&quot;</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="s">"0010,0010"</span><span class="p p-Indicator">:</span><span class="w"> </span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"REMOVE"</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"PatientName"</span>
 <a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">  </span><span class="s">&quot;0010,0020&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span>
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;REPLACE&quot;</span>
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;PatientID&quot;</span>
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;ANONYMIZED&quot;</span><span class="w"> </span><span class="c1"># Matches default if omitted</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">  </span><span class="s">"0010,0020"</span><span class="p p-Indicator">:</span><span class="w"> </span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"REPLACE"</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"PatientID"</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">    </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s">"ANONYMIZED"</span><span class="w"> </span><span class="c1"># Matches default if omitted</span>
 <a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">  </span><span class="s">&quot;0008,0080&quot;</span><span class="p p-Indicator">:</span>
-<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;KEEP&quot;</span><span class="w"> </span><span class="c1"># Exception: Keep InstitutionName</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">  </span><span class="s">"0008,0080"</span><span class="p p-Indicator">:</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"KEEP"</span><span class="w"> </span><span class="c1"># Exception: Keep InstitutionName</span>
 <a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>
 <a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="c1"># 5. Pixel Redaction Rules (Machine Specific)</span>
 <a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;US-12345&quot;</span>
-<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Voluson</span><span class="nv"> </span><span class="s">E10&quot;</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"US-12345"</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Voluson</span><span class="nv"> </span><span class="s">E10"</span>
 <a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
 <a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">      </span><span class="c1"># [row_start, row_end, col_start, col_end]</span>
 <a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">50</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">800</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># Top Banner</span>
@@ -1719,7 +1719,7 @@
 <h2 id="detailed-options">Detailed Options</h2>
 <h3 id="privacy-profile">Privacy Profile</h3>
 <p>Sets the baseline behavior for thousands of DICOM tags.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;comprehensive&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="s">"comprehensive"</span>
 </code></pre></div>
 <ul>
 <li><strong><code>basic</code></strong>: Implements the <em>DICOM PS3.15 Annex E Basic Profile</em>. Retains some descriptors but removes direct identifiers.</li>
@@ -1787,14 +1787,14 @@
 </table>
 <p><strong>Example:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">phi_tags</span><span class="p">:</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="s">&quot;0008,1030&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">&quot;action&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;EMPTY&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;name&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;StudyDescription&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="s">&quot;0010,0030&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">&quot;action&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;SHIFT&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;name&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&quot;PatientBirthDate&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="s">"0008,1030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"EMPTY"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"StudyDescription"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="s">"0010,0030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"SHIFT"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"PatientBirthDate"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <h3 id="pixel-redaction-machines">Pixel Redaction (Machines)</h3>
 <p>Automatically scrubs burned-in text (pixels) for specific devices. Gantry identifies the machine using the <code>DeviceSerialNumber</code> (0018,1000) tag.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;SN-9999&quot;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Documentation</span><span class="nv"> </span><span class="s">Only&quot;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"SN-9999"</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Documentation</span><span class="nv"> </span><span class="s">Only"</span>
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">]</span>
 </code></pre></div>
@@ -1807,7 +1807,7 @@
 <h3 id="generating-configuration-templates">Generating Configuration Templates</h3>
 <p>You can generate a starter <code>gantry_config.yaml</code> based on your current session inventory. This is useful for bootstrapping a new configuration file that includes all detected machines.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Inspects data, finds all unique machine serials, and writes a config file</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">&quot;my_new_policy.yaml&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"my_new_policy.yaml"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="programmatic-configuration">Programmatic Configuration</h2>
@@ -1815,7 +1815,7 @@
 <h3 id="accessing-configuration">Accessing Configuration</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">gantry</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">gantry</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="n">data_directory</span><span class="o">=</span><span class="s2">&quot;./dicom_data&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">gantry</span><span class="o">.</span><span class="n">Session</span><span class="p">(</span><span class="n">data_directory</span><span class="o">=</span><span class="s2">"./dicom_data"</span><span class="p">)</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># improved: Access the GantryConfiguration object directly</span>
 <a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">configuration</span>
@@ -1829,16 +1829,16 @@
 <p>Add a new machine redaction rule dynamically.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Add a rule for a specific ultrasound machine</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">&quot;US-5555&quot;</span><span class="p">,</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">manufacturer</span><span class="o">=</span><span class="s2">&quot;GE&quot;</span><span class="p">,</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;Voluson&quot;</span><span class="p">,</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-5555"</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">manufacturer</span><span class="o">=</span><span class="s2">"GE"</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">"Voluson"</span><span class="p">,</span>
 <a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">zones</span><span class="o">=</span><span class="p">[[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">800</span><span class="p">]]</span> <span class="c1"># [y1, y2, x1, x2]</span>
 <a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="p">)</span>
 </code></pre></div>
 <h4 id="delete_rule">delete_rule()</h4>
 <p><code>delete_rule(serial_number)</code></p>
 <p>Remove a rule by serial number.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">delete_rule</span><span class="p">(</span><span class="s2">&quot;US-5555&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">delete_rule</span><span class="p">(</span><span class="s2">"US-5555"</span><span class="p">)</span>
 </code></pre></div>
 <h4 id="update_rule">update_rule()</h4>
 <p><code>update_rule(serial_number, updates)</code></p>
@@ -1847,25 +1847,25 @@
 <p><code>set_phi_tag(tag, action, replacement=None)</code></p>
 <p>Update the policy for a specific DICOM tag.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Force removal of PatientWeight</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">&quot;0010,1030&quot;</span><span class="p">,</span> <span class="s2">&quot;REMOVE&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0010,1030"</span><span class="p">,</span> <span class="s2">"REMOVE"</span><span class="p">)</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Replace StudyDescription with a constant</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">&quot;0008,1030&quot;</span><span class="p">,</span> <span class="s2">&quot;REPLACE&quot;</span><span class="p">,</span> <span class="n">replacement</span><span class="o">=</span><span class="s2">&quot;RESEARCH STUDY&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0008,1030"</span><span class="p">,</span> <span class="s2">"REPLACE"</span><span class="p">,</span> <span class="n">replacement</span><span class="o">=</span><span class="s2">"RESEARCH STUDY"</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="auto-discovery-of-redaction-zones">Auto-Discovery of Redaction Zones</h2>
 <p>To help identify pixel redaction zones (e.g., for burned-in PHI), Gantry provides a discovery tool that analyzes a sample of images from a specific machine to find common text "hotspots".</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Discover potential redaction zones for a machine</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">suggested_zones</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">discover_redaction_zones</span><span class="p">(</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">&quot;US-12345&quot;</span><span class="p">,</span> 
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span> 
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">sample_size</span><span class="o">=</span><span class="mi">50</span>
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="p">)</span>
 <a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Discovered </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">suggested_zones</span><span class="p">)</span><span class="si">}</span><span class="s2"> zones: </span><span class="si">{</span><span class="n">suggested_zones</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Discovered </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">suggested_zones</span><span class="p">)</span><span class="si">}</span><span class="s2"> zones: </span><span class="si">{</span><span class="n">suggested_zones</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 <a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>
 <a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="c1"># Apply these zones to your configuration</span>
 <a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="k">if</span> <span class="n">suggested_zones</span><span class="p">:</span>
 <a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">add_rule</span><span class="p">(</span>
-<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>        <span class="n">serial_number</span><span class="o">=</span><span class="s2">&quot;US-12345&quot;</span><span class="p">,</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>        <span class="n">serial_number</span><span class="o">=</span><span class="s2">"US-12345"</span><span class="p">,</span>
 <a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>        <span class="n">zones</span><span class="o">=</span><span class="n">suggested_zones</span>
 <a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>    <span class="p">)</span>
 </code></pre></div>
@@ -1986,7 +1986,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.path", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
