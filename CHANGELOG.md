@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Planning Moved to GitHub Issues**: `ROADMAP.md` and `docs/roadmap.md` are now pointers to the issue tracker. Open work is tracked under versioned milestones; `CHANGELOG.md` remains the canonical record of shipped features.
 - **Pylint Compliance**: Addressed hundreds of linting issues across `gantry/` and `tests/`.
   - Enforced `encoding='utf-8'` on all file operations.
   - Standardized import ordering.

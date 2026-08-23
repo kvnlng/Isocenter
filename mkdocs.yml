@@ -72,6 +72,10 @@ markdown_extensions:
 
 docs_dir: docs
 
+# Internal design specs live under docs/ by convention but are not site content.
+exclude_docs: |
+  superpowers/
+
 nav:
   - Home: index.md
   - Features:
