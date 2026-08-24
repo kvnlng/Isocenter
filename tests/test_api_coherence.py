@@ -152,9 +152,10 @@ def test_clean_filename_does_not_treat_a_falsy_value_like_0_as_missing():
     like the integer `0` as missing.
 
     This does NOT pin a series-number regression: the deleted
-    `DicomExporter._sanitize` was applied only to Study/Series
-    Description strings in the legacy folder-naming path, never to the
-    series number itself (which was inserted into the folder name
+    `DicomExporter._sanitize` was applied to the PatientID and to the
+    Study/Series Description strings in the legacy folder-naming path,
+    never to the series number itself (which was inserted into the
+    folder name
     unsanitized), so there is no historical "series number 0 renamed to
     Unknown" bug to regress against. This pins a general property of
     `clean_filename` in isolation.
