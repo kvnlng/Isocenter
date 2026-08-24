@@ -228,3 +228,64 @@ def test_optional_dependencies_are_imported_defensively(module):
         f"{module} is imported unguarded at {sorted(hard_sites or [])}, but is "
         "treated as optional. Either guard it with try/except ImportError or "
         "declare it in install_requires.")
+
+
+def _setup_keyword(name):
+    """The literal value passed to setup() for `name`, or None."""
+    tree = ast.parse((REPO / "setup.py").read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg == name:
+                    return ast.literal_eval(keyword.value)
+    return None
+
+
+def test_distribution_metadata_matches_the_shipped_licence():
+    """PyPI needs the licence declared, and it must match the LICENSE file.
+
+    Gantry moved from MIT to AGPLv3, and a distribution that ships an
+    AGPL LICENSE while declaring nothing (or MIT) misstates the terms
+    under which it is published -- the one piece of packaging metadata
+    with legal weight rather than merely operational.
+    """
+    licence_text = (REPO / "LICENSE").read_text()
+    assert "AFFERO GENERAL PUBLIC LICENSE" in licence_text, (
+        "LICENSE is no longer AGPL; this test pins the two together and "
+        "needs updating alongside the licence change")
+
+    declared = _setup_keyword("license")
+    assert declared, "setup.py declares no license; PyPI would show 'UNKNOWN'"
+    assert "AGPL" in declared.upper() or "AFFERO" in declared.upper(), (
+        f"setup.py declares license={declared!r} but LICENSE is AGPLv3")
+
+    classifiers = _setup_keyword("classifiers") or []
+    assert any("Affero" in item for item in classifiers), (
+        "no AGPL licence classifier; PyPI categorises by classifier, not by "
+        "the license field")
+
+
+def test_classifiers_do_not_advertise_unsupported_python_versions():
+    """A `Programming Language :: Python` classifier is a support claim.
+
+    Advertising a version below `python_requires`, or one CI does not
+    run, is the same defect as the old `>=3.9`: a promise nothing tests.
+    """
+    classifiers = _setup_keyword("classifiers") or []
+    declared = _setup_keyword("python_requires") or ""
+    floor = tuple(int(p) for p in declared.replace(">=", "").split("."))
+
+    advertised = []
+    for item in classifiers:
+        prefix = "Programming Language :: Python :: "
+        if item.startswith(prefix):
+            suffix = item[len(prefix):]
+            if suffix[0].isdigit() and "." in suffix:
+                advertised.append(
+                    tuple(int(p) for p in suffix.split(".")))
+
+    assert advertised, "no specific Python version classifiers declared"
+    below_floor = [v for v in advertised if v < floor]
+    assert not below_floor, (
+        f"classifiers advertise {below_floor} but python_requires is "
+        f"{declared!r}; pip would refuse to install there")

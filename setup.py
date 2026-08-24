@@ -1,10 +1,39 @@
+import pathlib
+
 from setuptools import setup, find_packages
+
+README = (pathlib.Path(__file__).parent / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="gantry",
     version="0.6.0",
     description="A Python DICOM Object Model and Redaction Toolkit",
+    long_description=README,
+    long_description_content_type="text/markdown",
     author="Kevin Long",
+    url="https://github.com/kvnlng/Gantry",
+    project_urls={
+        "Documentation": "https://kvnlng.github.io/Gantry/",
+        "Issues": "https://github.com/kvnlng/Gantry/issues",
+        "Changelog": "https://github.com/kvnlng/Gantry/blob/main/CHANGELOG.md",
+    },
+    license="AGPL-3.0-or-later",
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Healthcare Industry",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+        "Operating System :: OS Independent",
+        # Only versions CI actually runs. Advertising more is the same
+        # unbacked promise the old python_requires=">=3.9" was.
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
+        "Topic :: Scientific/Engineering :: Medical Science Apps.",
+        "Topic :: Security",
+    ],
+    keywords=["dicom", "de-identification", "anonymization", "phi", "wfdb",
+              "ecg", "medical-imaging", "research"],
     packages=find_packages(),
     # Single source of truth for dependencies. There is deliberately no
     # requirements.txt: two lists drift, and `pip install gantry` only ever
