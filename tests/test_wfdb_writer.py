@@ -104,18 +104,23 @@ def test_gain_is_never_zero_for_a_calibrated_channel():
 
 def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
     """The brief requires WFDB records to land in the same
-    Patient/Study/Series tree the DICOM exporter builds. Proves it by
-    running BOTH exporters over the same session and asserting the .hea
-    file and the .dcm file end up in the identical directory -- not just
-    that some file exists somewhere.
+    Patient/Study/Series tree the DICOM exporter builds -- meaning the
+    tree users actually get from `session.export(folder)` /
+    `session.export(folder, format="dicom")`, not any other DICOM
+    folder-naming code path in this codebase. Proves it by exporting the
+    SAME session as both "dicom" and "wfdb" through the real exporter
+    registry and asserting the .hea file's parent directory is exactly
+    the directory holding the .dcm file for that series -- not just that
+    some file exists somewhere, and without hardcoding the expected
+    folder names (so this test cannot drift out of step with the naming
+    logic the way an earlier version of it did).
     """
     import datetime
     import os
     from unittest.mock import patch
 
     from gantry.entities import DicomItem, Instance, Patient, Series, Study
-    from gantry.exporters import get_exporter
-    from gantry.io_handlers import DicomExporter, populate_attrs
+    from gantry.io_handlers import populate_attrs
     from gantry.session import DicomSession
     from gantry.validation import IODValidator
     from scripts.generate_waveform_test_data import build_ecg_dataset
@@ -129,7 +134,11 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
     instance = Instance("1.2.3.4.SOP", ds.SOPClassUID, 1)
     instance.attributes.update({
         "0008,1030": "Cardiology Study",  # Study Description
-        "0008,103E": "12-Lead ECG",       # Series Description
+        "0008,103e": "12-Lead ECG",       # Series Description (lowercase
+                                           # tag key -- matches how
+                                           # `session._export_dicom` reads
+                                           # it, and how real attribute
+                                           # dicts are actually keyed).
     })
     # Only needed so the DICOM export worker's pixel-data check is
     # satisfied; unrelated to the WFDB path, which reads waveform_array.
@@ -152,18 +161,21 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
     out_dir = tmp_path / "colocation"
 
     # Mirrors tests/test_structured_export.py's known-good pattern for
-    # exercising DicomExporter.save_patient without parallel-worker /
-    # IOD-validation noise unrelated to folder placement.
+    # exercising a real export without parallel-worker / IOD-validation
+    # noise unrelated to folder placement. `session.export(folder)` (the
+    # "dicom" format, default) is the actual production path: it goes
+    # through `DicomSession._export_dicom`, not the legacy
+    # `DicomExporter.save_patient` API.
     with patch('gantry.io_handlers.run_parallel',
               side_effect=lambda func, items, *a, **k: [func(i) for i in items]), \
          patch.object(IODValidator, "validate", lambda ds: []):
-        DicomExporter.save_patient(patient, str(out_dir))
+        sess.export(str(out_dir), format="dicom")
 
     dcm_files = list(out_dir.rglob("*.dcm"))
     assert len(dcm_files) == 1
     dcm_dir = os.path.dirname(str(dcm_files[0]))
 
-    hea_paths = get_exporter("wfdb").export(sess, str(out_dir))
+    hea_paths = sess.export(str(out_dir), format="wfdb")
     assert len(hea_paths) == 1
     hea_dir = os.path.dirname(hea_paths[0])
 
@@ -172,7 +184,11 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
         f"tree for the same series is {dcm_dir!r} -- the two exporters "
         "must share one folder-naming helper so their trees co-locate.")
 
+    # Confirm this actually exercised the real "Hybrid Naming" scheme
+    # (UID suffix + modality component) rather than two exporters
+    # trivially agreeing on some degenerate/empty path.
     rel_parts = os.path.relpath(hea_dir, str(out_dir)).split(os.sep)
-    assert rel_parts[0] == "Subject_COLOC01"
-    assert rel_parts[1].startswith("Study_20260101_")
-    assert rel_parts[2].startswith("Series_3_")
+    assert rel_parts[0].startswith("Subject_COLOC01")
+    assert rel_parts[1].startswith("Study_")
+    assert "STUDY" in rel_parts[1]  # UID suffix of "1.2.3.4.STUDY"
+    assert rel_parts[2].startswith("Series_3_ECG_")  # num + modality

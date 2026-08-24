@@ -47,6 +47,7 @@ from .sidecar import SidecarManager
 
 
 from .store import DicomStore
+from .config_manager import ConfigLoader
 
 
 def populate_attrs(ds: Any, item: "DicomItem", text_index: list = None):
@@ -784,9 +785,9 @@ class SidecarWaveformLoader:
 
 
 def format_study_date(study_date) -> str:
-    """Render a Study's date the way `DicomExporter._generate_export_contexts`
-    does, for use both in exported DICOM attributes and in the shared
-    export folder-naming logic below.
+    """Render a Study's date the way `_legacy_generate_export_contexts_folder_names`
+    does, for use both in exported DICOM attributes and in that legacy
+    folder-naming logic.
 
     Args:
         study_date: `Study.study_date` -- a `date`/`datetime`-like object,
@@ -803,29 +804,87 @@ def format_study_date(study_date) -> str:
     return str(study_date)
 
 
-def export_folder_names(patient, s_date_str: str, series, instance):
-    """Build the Subject/Study/Series folder names used by the exported
-    file tree.
+def export_folder_names(patient, study, series):
+    """Build the Subject/Study/Series folder names for the exported file
+    tree, reproducing `DicomSession._export_dicom`'s "Hybrid Naming"
+    scheme -- the naming every user actually gets from
+    `session.export(folder)` / `session.export(folder, format="dicom")`
+    via the registered `"dicom"` exporter.
 
     This is the single source of truth for that naming so every export
-    format lands in the same `Patient/Study/Series` tree as the DICOM
-    exporter -- callers must not reimplement this logic locally, or the
-    trees will drift apart on the next edit to either one.
+    format lands in the same `Patient/Study/Series` tree -- callers must
+    not reimplement this logic locally, or the trees will drift apart on
+    the next edit to either one.
+
+    Uses `ConfigLoader.clean_filename`, the sanitizer `_export_dicom`
+    itself uses -- NOT `DicomExporter._sanitize` (stricter, used
+    elsewhere for legacy folder naming) and NOT the even-stricter
+    per-format record-*name* sanitizers such as
+    `gantry.exporters.wfdb._sanitize` (which forbids spaces, appropriate
+    for a bare record-name token but not for a folder name that must
+    match `_export_dicom`'s output character-for-character).
+
+    Args:
+        patient (Patient): Patient root.
+        study (Study): Study whose folder name is being built.
+        series (Series): Series whose folder name is being built.
+
+    Returns:
+        tuple[str, str, str]: (subject_folder, study_folder, series_folder)
+    """
+    subj_name = "Subject_" + ConfigLoader.clean_filename(patient.patient_id or "UnknownPatient")
+
+    # Study/Series descriptions are read from the FIRST series' FIRST
+    # instance -- not from whichever instance a caller happens to be
+    # iterating -- matching `_export_dicom`'s "peek" exactly, so every
+    # instance in a series lands under the same folder name.
+    st_desc = "Study"
+    try:
+        if study.series and study.series[0].instances:
+            st_desc = study.series[0].instances[0].attributes.get("0008,1030", "Study")
+    except BaseException:
+        pass
+    st_date = str(study.study_date or "NoDate")
+    st_uid_suffix = (study.study_instance_uid or "Unknown")[-5:]
+    study_folder = ConfigLoader.clean_filename(f"Study_{st_date}_{st_desc}_{st_uid_suffix}")
+
+    se_desc = "Series"
+    try:
+        if series.instances:
+            se_desc = series.instances[0].attributes.get("0008,103e", "Series")
+    except BaseException:
+        pass
+    se_num = str(series.series_number)
+    se_mod = series.modality or "OT"
+    se_uid_suffix = (series.series_instance_uid or "Unknown")[-5:]
+    series_folder = ConfigLoader.clean_filename(
+        f"Series_{se_num}_{se_mod}_{se_desc}_{se_uid_suffix}")
+
+    return subj_name, study_folder, series_folder
+
+
+def _legacy_generate_export_contexts_folder_names(patient, s_date_str: str, series, instance):
+    """Folder-naming logic for `DicomExporter._generate_export_contexts`
+    only -- NOT the scheme used by `session.export()` (see
+    `export_folder_names` above, which IS shared across export formats).
+
+    `_generate_export_contexts` is reached only via the legacy/direct
+    `DicomExporter.save_patient`/`save_studies` API, which several tests
+    call directly; it is not part of the `session.export()` path any
+    production user goes through. Kept as its own function, unshared,
+    purely to preserve its long-standing exact output for those tests --
+    see the module's export-format co-location fix history for why this
+    is deliberately NOT unified with `export_folder_names`.
 
     Args:
         patient (Patient): Patient root.
         s_date_str (str): Study date already formatted via
-            `format_study_date`. Passed in rather than recomputed here so
-            every caller uses the exact same value the DICOM exporter
-            also writes into the Study Date attribute.
+            `format_study_date`.
         series (Series): Series whose folder name is being built.
         instance (Instance): Instance whose attributes carry the
             Study/Series Description tags (0008,1030 / 0008,103E) that
-            the folder names are drawn from. Deliberately read from the
-            INSTANCE, not from `series`/a Study object -- that is where
-            the existing DICOM export path reads them from, and reading
-            them from the Study/Series objects instead would produce
-            different folder names.
+            the folder names are drawn from. Read from the INSTANCE, not
+            from `series`/a Study object.
 
     Returns:
         tuple[str, str, str]: (subject_folder, study_folder, series_folder)
@@ -1046,9 +1105,17 @@ class DicomExporter:
                         series_attrs["0018,1000"] = se.equipment.device_serial_number
 
                     # Calculate Output Path
-                    # 1-3. Subject/Study/Series folders -- shared with every
-                    # other export format so trees stay co-located.
-                    subj_name, study_folder, series_folder = export_folder_names(
+                    # 1-3. Subject/Study/Series folders. Deliberately NOT the
+                    # shared hybrid `export_folder_names` used by every other
+                    # export format: migrating this call onto it changes
+                    # `_generate_export_contexts`'s long-standing output
+                    # (adds a UID suffix and modality component, and formats
+                    # the date differently), which breaks
+                    # tests/test_structured_export.py's hardcoded assertions
+                    # against the pre-existing scheme. See
+                    # `_legacy_generate_export_contexts_folder_names`'s
+                    # docstring for why this stays unshared.
+                    subj_name, study_folder, series_folder = _legacy_generate_export_contexts_folder_names(
                         patient, s_date_str, se, inst)
 
                     # 4. Filename

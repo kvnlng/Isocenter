@@ -11,7 +11,7 @@ from typing import List, Optional
 import numpy as np
 
 from . import Exporter, register
-from ..io_handlers import export_folder_names, format_study_date
+from ..io_handlers import export_folder_names
 from ..logger import get_logger
 from ..waveform import Waveform
 
@@ -43,14 +43,15 @@ def signal_checksum(channel_samples) -> int:
 def _sanitize(name: str) -> str:
     """Reduce a string to characters safe in a WFDB *record name*.
 
-    This is deliberately stricter than `DicomExporter._sanitize` (which
-    permits spaces): a WFDB record name is a bare token, not a filename
-    component, so it must not contain whitespace. It is used only for
-    `record_name_for` below -- the *folder* names this module writes into
-    come from `export_folder_names` in `io_handlers.py`, which uses
-    `DicomExporter._sanitize` so the two exporters land in character-for-
-    character identical directories. Do not use this function for folder
-    names, or the WFDB and DICOM trees will diverge again.
+    This is deliberately stricter than `ConfigLoader.clean_filename`
+    (which permits spaces): a WFDB record name is a bare token, not a
+    filename component, so it must not contain whitespace. It is used
+    only for `record_name_for` below -- the *folder* names this module
+    writes into come from `export_folder_names` in `io_handlers.py`,
+    which uses `ConfigLoader.clean_filename` (the same sanitizer
+    `DicomSession._export_dicom` uses) so the WFDB and DICOM exporters
+    land in character-for-character identical directories. Do not use
+    this function for folder names, or the two trees will diverge again.
     """
     cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", str(name or ""))
     cleaned = re.sub(r"_+", "_", cleaned).strip("_")
@@ -195,9 +196,7 @@ class WfdbExporter(Exporter):
         # Co-locate with the DICOM exporter's tree: same Subject_/Study_/
         # Series_ folder names, built by the one shared helper both
         # exporters call, so the two trees cannot drift apart.
-        s_date_str = format_study_date(study.study_date)
-        subj_name, study_folder, series_folder = export_folder_names(
-            patient, s_date_str, series, instance)
+        subj_name, study_folder, series_folder = export_folder_names(patient, study, series)
         out_dir = os.path.join(folder, subj_name, study_folder, series_folder)
         os.makedirs(out_dir, exist_ok=True)
 

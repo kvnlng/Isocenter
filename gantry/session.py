@@ -1812,15 +1812,13 @@ class DicomSession:
         # Structure: Folder / Patient / Study / Series / Instance
 
         # Optimization: We can generate the plan using minimal metadata
-        from .io_handlers import ExportContext
+        from .io_handlers import ExportContext, export_folder_names
 
         for p in self.store.patients:
             if p.patient_id not in target_ids:
                 continue
 
             count_p += 1
-            p_clean = "Subject_" + ConfigLoader.clean_filename(p.patient_id or "UnknownPatient")
-            p_path = os.path.join(folder, p_clean)
 
             pat_attrs = {
                 "0010,0010": p.patient_name,
@@ -1832,22 +1830,6 @@ class DicomSession:
                 pat_attrs["0010,0040"] = p.sex
 
             for st in p.studies:
-                # Hybrid Naming: Study_YYYYMMDD_Description_UIDSuffix
-                st_desc = "Study"
-                # Peek at first series->instance for description
-                try:
-                    if st.series and st.series[0].instances:
-                        st_desc = st.series[0].instances[0].attributes.get("0008,1030", "Study")
-                except BaseException:
-                    pass
-
-                st_date = str(st.study_date or "NoDate")
-                st_uid_suffix = (st.study_instance_uid or "Unknown")[-5:]
-
-                st_folder_name = f"Study_{st_date}_{st_desc}_{st_uid_suffix}"
-                st_clean = ConfigLoader.clean_filename(st_folder_name)
-                st_path = os.path.join(p_path, st_clean)
-
                 study_attrs = {
                     "0020,000D": st.study_instance_uid,
                     "0008,0020": st.study_date,
@@ -1858,21 +1840,11 @@ class DicomSession:
                     study_attrs["0008,0050"] = st.accession_number
 
                 for se in st.series:
-                    # Hybrid Naming: Series_NUM_Modality_Description_UIDSuffix
-                    se_desc = "Series"
-                    try:
-                        if se.instances:
-                            se_desc = se.instances[0].attributes.get("0008,103e", "Series")
-                    except BaseException:
-                        pass
-
-                    se_num = str(se.series_number)
-                    se_mod = se.modality or "OT"
-                    se_uid_suffix = (se.series_instance_uid or "Unknown")[-5:]
-
-                    se_folder_name = f"Series_{se_num}_{se_mod}_{se_desc}_{se_uid_suffix}"
-                    se_clean = ConfigLoader.clean_filename(se_folder_name)
-                    se_path = os.path.join(st_path, se_clean)
+                    # Hybrid Naming: shared with every other export format
+                    # (see `export_folder_names` in io_handlers.py) so
+                    # trees stay co-located.
+                    subj_name, study_folder, series_folder = export_folder_names(p, st, se)
+                    se_path = os.path.join(folder, subj_name, study_folder, series_folder)
 
                     series_attrs = {
                         "0020,000E": se.series_instance_uid,
