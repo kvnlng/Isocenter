@@ -8,6 +8,34 @@ import time
 from gantry.session import DicomSession
 from gantry.entities import Instance, Series, Study, Patient, Equipment
 
+class ConstantPixelLoader:
+    """A picklable stand-in for a real pixel loader.
+
+    Must be a module-level callable, NOT a closure or lambda: redaction
+    runs in a ProcessPoolExecutor, which pickles each task by qualified
+    name. A local lambda raises "Can't get local object ...<locals>.<lambda>",
+    the redaction worker dies, and -- because execute() swallows worker
+    failures (issue #48) -- the run reports success having redacted
+    nothing.
+
+    These tests previously used a local lambda and still passed in CI only
+    because tests/test_export_sql.py set GANTRY_FORCE_THREADS=1 in a
+    fixture and never unset it. That leaked into every later test in the
+    session and silently swapped the process pool for a thread pool, which
+    does not pickle. Deleting that file (it covered the removed
+    generate_export_from_db) removed the leak and exposed this. So these
+    tests never actually exercised the process isolation they are named
+    for.
+    """
+
+    def __init__(self, size=50, fill=255):
+        self.size = size
+        self.fill = fill
+
+    def __call__(self):
+        return np.full((self.size, self.size), self.fill, dtype=np.uint8)
+
+
 class TestRedactionParallel(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
@@ -44,11 +72,7 @@ class TestRedactionParallel(unittest.TestCase):
             # Mock Pixel Data Loader
             # We create a unique array for each to verify modification
             # In a real threading scenario, we want to ensure no race conditions on shared resources (like the DB/Log)
-            def make_loader():
-                arr = np.zeros((50, 50), dtype=np.uint8) + 255
-                return lambda: arr
-
-            inst._pixel_loader = make_loader()
+            inst._pixel_loader = ConstantPixelLoader()
 
             se.instances.append(inst)
             st.series.append(se)
@@ -69,7 +93,6 @@ class TestRedactionParallel(unittest.TestCase):
         self.session.configuration.rules = rules
 
         # Execute
-        # This will use ThreadPoolExecutor inside
         self.session.redact()
 
         # Verify Results
@@ -105,13 +128,7 @@ class TestRedactionParallel(unittest.TestCase):
         for i in range(50):
             inst = Instance(f"I{i}", f"1.2.3.{i}", 1)
 
-            # Mock loader
-            def make_loader():
-                # Randomize slightly to simulating work? No need for correctness.
-                arr = np.zeros((50, 50), dtype=np.uint8) + 255
-                return lambda: arr
-
-            inst._pixel_loader = make_loader()
+            inst._pixel_loader = ConstantPixelLoader()
             se.instances.append(inst)
 
         st.series.append(se)
