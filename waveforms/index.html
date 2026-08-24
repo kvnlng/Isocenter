@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://kevinlong.github.io/Gantry/architecture/">
+        <link rel="canonical" href="https://kevinlong.github.io/Gantry/waveforms/">
       
       
-        <link rel="prev" href="../performance/">
+        <link rel="prev" href="../analytics/">
       
       
-        <link rel="next" href="../ocr/">
+        <link rel="next" href="../api/session/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Architecture - Gantry</title>
+        <title>Waveforms & WFDB - Gantry</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#architecture" class="md-skip">
+        <a href="#waveforms-and-wfdb-export" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Architecture
+              Waveforms & WFDB
             
           </span>
         </div>
@@ -238,12 +238,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../performance/" class="md-tabs__link">
           
   
@@ -260,10 +258,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../installation/" class="md-tabs__link">
           
   
@@ -398,31 +398,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   
@@ -440,7 +437,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -483,37 +480,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Architecture
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
         
   
   
@@ -529,120 +499,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#1-the-session-facade" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. The Session Facade
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2-object-model" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Object Model
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-safety-pipeline-the-8-checkpoints" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Safety Pipeline (The 8 Checkpoints)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-persistence-architecture-hybrid-storage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Persistence Architecture (Hybrid Storage)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="4. Persistence Architecture (Hybrid Storage)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#the-problem" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Problem
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#the-solution-core-json-vertical-split" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Solution: Core JSON + Vertical Split
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#database-schema-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Database Schema Reference
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#schema-visualization" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Schema Visualization
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -687,28 +543,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -726,7 +585,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -909,10 +768,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../waveforms/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Waveforms & WFDB
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -928,6 +814,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick start
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-exported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is exported
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-and-isnt-de-identified" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is and isn't de-identified
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1285,10 +1235,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-the-session-facade" class="md-nav__link">
+  <a href="#quick-start" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. The Session Facade
+        Quick start
       
     </span>
   </a>
@@ -1296,10 +1246,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-object-model" class="md-nav__link">
+  <a href="#what-is-exported" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Object Model
+        What is exported
       
     </span>
   </a>
@@ -1307,10 +1257,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-safety-pipeline-the-8-checkpoints" class="md-nav__link">
+  <a href="#what-is-and-isnt-de-identified" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Safety Pipeline (The 8 Checkpoints)
+        What is and isn't de-identified
       
     </span>
   </a>
@@ -1318,63 +1268,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-persistence-architecture-hybrid-storage" class="md-nav__link">
+  <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Persistence Architecture (Hybrid Storage)
+        Limitations
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="4. Persistence Architecture (Hybrid Storage)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#the-problem" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Problem
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#the-solution-core-json-vertical-split" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Solution: Core JSON + Vertical Split
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#database-schema-reference" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Database Schema Reference
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#schema-visualization" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Schema Visualization
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1421,10 +1321,10 @@
     
     
       <li class="md-path__item">
-        <a href="../performance/" class="md-path__link">
+        <a href="../installation/" class="md-path__link">
           
   <span class="md-ellipsis">
-    Features
+    Guides
   </span>
 
         </a>
@@ -1446,188 +1346,156 @@
   
 
 
-<h1 id="architecture">Architecture</h1>
-<p>Gantry acts as a smart indexing layer over your raw DICOM files. It does <em>not</em> modify your original data. Instead, it builds a lightweight metadata index (SQLite) and exposes a clean Python Object Model for manipulation.</p>
-<h2 id="1-the-session-facade">1. The Session Facade</h2>
-<p>The <code>Session</code> object is your single entry point. It manages:</p>
-<ul>
-<li><strong>Persistence</strong>: Auto-saving state to <code>gantry.db</code>.</li>
-<li><strong>Inventory</strong>: Tracking Patients, Studies, and Series.</li>
-<li><strong>Transactions</strong>: Atomic persistence of changes.</li>
-</ul>
-<h2 id="2-object-model">2. Object Model</h2>
-<p>Gantry abstracts DICOM into a semantic hierarchy, removing the pain of manual tag iteration.</p>
-<pre class="mermaid"><code>graph LR
-    Patient --&gt; Study
-    Study --&gt; Series
-    Series --&gt; Instance
-    Instance --&gt; Pixels((Pixel Data))</code></pre>
-<ul>
-<li><strong>Patient</strong>: Root entity (Name, ID).</li>
-<li><strong>Study</strong>: A distinct visit/exam.</li>
-<li><strong>Series</strong>: A scan or reconstruction (e.g., "ct_soft_kernel").</li>
-<li><strong>Instance</strong>: A single DICOM slice. <strong>Pixel data is extracted upfront</strong>; the heavyweight pixel array is sequestered in a binary sidecar immediately upon ingestion and loaded into memory only when needed.</li>
-</ul>
-<h2 id="3-safety-pipeline-the-8-checkpoints">3. Safety Pipeline (The 8 Checkpoints)</h2>
-<p>Gantry enforces a strict checkpoint system to ensure data safety:</p>
-<ol>
-<li><strong>Ingest</strong>: Load raw data into the managed session index.</li>
-<li><strong>Examine</strong>: Inventory the cohort and equipment.</li>
-<li><strong>Configure</strong>: Define privacy tags and redaction rules.</li>
-<li><strong>Audit (Target)</strong>: Measure PHI risks against the configuration.</li>
-<li><strong>Backup</strong>: (Optional) Securely lock original identities for reversibility.</li>
-<li><strong>Anonymize</strong>: Apply remediation to metadata (in-memory).</li>
-<li><strong>Redact</strong>: Scrub pixel data for specific machines (in-memory).</li>
-<li><strong>Verify</strong>: Re-audit the session to ensure a clean state.</li>
-<li><strong>Export</strong>: Write clean DICOM files to disk.</li>
-</ol>
-<h2 id="4-persistence-architecture-hybrid-storage">4. Persistence Architecture (Hybrid Storage)</h2>
-<p>Gantry uses <code>sqlite3</code> for metadata management, employing a <strong>Hybrid Storage Model</strong> to balance query performance with schema flexibility.</p>
-<h3 id="the-problem">The Problem</h3>
-<p>DICOM data effectively comes in two shapes:</p>
-<ol>
-<li><strong>Standard Tags</strong>: Always present, well-defined (e.g., <code>Modality</code>, <code>StudyDate</code>).</li>
-<li><strong>Private Tags</strong>: Manufacturer-specific, sparse, and extremely numerous.</li>
-</ol>
-<p>Storing everything in a single table with 3000 columns is impossible. Storing everything in a vertical Entity-Attribute-Value (EAV) table is too slow for bulk loading.</p>
-<h3 id="the-solution-core-json-vertical-split">The Solution: Core JSON + Vertical Split</h3>
-<p>Values are automatically split during persistence based on their Group ID:</p>
+<h1 id="waveforms-and-wfdb-export">Waveforms and WFDB Export</h1>
+<p>Gantry ingests any DICOM instance carrying a Waveform Sequence
+<code>(5400,0100)</code> — 12-Lead ECG, General ECG, Hemodynamic, and similar
+Waveform Storage IODs — alongside image data, and exports them as
+PhysioNet WFDB records. The bridge is one-way: DICOM waveforms go out
+as WFDB, for tools like <a href="https://github.com/kvnlng/Murmur">Murmur Studio</a>
+to read. Gantry does not read WFDB back in.</p>
+<h2 id="quick-start">Quick start</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">gantry</span><span class="w"> </span><span class="kn">import</span> <span class="n">Session</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">session</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"ecg_study.db"</span><span class="p">)</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"/data/ecg"</span><span class="p">)</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Load a PHI tag configuration before auditing -- an unconfigured</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># session only checks the hardcoded baseline (see "Privacy" below).</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">session</span><span class="o">.</span><span class="n">create_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">session</span><span class="o">.</span><span class="n">load_config</span><span class="p">(</span><span class="s2">"config.yaml"</span><span class="p">)</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">session</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">()</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"/out"</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s2">"wfdb"</span><span class="p">)</span>
+</code></pre></div>
+<p>Each waveform instance becomes one WFDB record, written into the same
+<code>Subject_/Study_/Series_</code> directory tree the DICOM exporter uses --
+so a record's <code>.hea</code>/<code>.dat</code> files sit alongside that series' <code>.dcm</code>
+files if you also export <code>format="dicom"</code> into the same folder:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>out/&lt;patient&gt;/&lt;study&gt;/&lt;series&gt;/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ &lt;record&gt;.hea               header
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├─ &lt;record&gt;.dat               format-16 samples
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>└─ &lt;record&gt;.annotations.json  cart findings, when present
+</code></pre></div>
+<h2 id="what-is-exported">What is exported</h2>
 <table>
 <thead>
 <tr>
-<th style="text-align: left;">Storage Location</th>
-<th style="text-align: left;">Table</th>
-<th style="text-align: left;">Column</th>
-<th style="text-align: left;">Content</th>
-<th style="text-align: left;">Rationale</th>
+<th>WFDB field</th>
+<th>DICOM source</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><strong>Core Attributes</strong></td>
-<td style="text-align: left;"><code>instances</code></td>
-<td style="text-align: left;"><code>attributes_json</code></td>
-<td style="text-align: left;">All Standard Tags (Even Groups) + Binary Placeholders</td>
-<td style="text-align: left;"><strong>Speed</strong>. SQLite's JSONB operators allow us to load 10,000 instances in sub-second time without performing 10,000+ joins.</td>
+<td><code>fs</code></td>
+<td>Sampling Frequency <code>(003A,001A)</code></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Vertical Attributes</strong></td>
-<td style="text-align: left;"><code>instance_attributes</code></td>
-<td style="text-align: left;"><code>tag_group</code>, <code>tag_elem</code>, <code>value</code></td>
-<td style="text-align: left;">Private Tags (Odd Groups)</td>
-<td style="text-align: left;"><strong>Flexibility</strong>. Private tags are sparse. This EAV storage prevents the Core JSON from becoming bloated with garbage data while keeping private tags queryable.</td>
+<td><code>gain</code></td>
+<td>Derived from Channel Sensitivity <code>(003A,0210)</code> and its correction factor</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Pixel Data</strong></td>
-<td style="text-align: left;"><code>[name]_pixels.bin</code></td>
-<td style="text-align: left;">Comparison to DB via Offset/Length</td>
-<td style="text-align: left;">Raw Byte Stream</td>
-<td style="text-align: left;"><strong>Offloading</strong>. Gigabytes of pixel data are kept out of the DB to prevent bloating and ensure the index remains lightweight.</td>
+<td><code>units</code></td>
+<td>Channel Sensitivity Units Sequence <code>(003A,0211)</code></td>
+</tr>
+<tr>
+<td>signal description</td>
+<td>Channel Source Sequence <code>(003A,0208)</code>, falling back to Channel Label <code>(003A,0203)</code> when no coded source is present</td>
 </tr>
 </tbody>
 </table>
-<h3 id="database-schema-reference">Database Schema Reference</h3>
-<table>
-<thead>
-<tr>
-<th style="text-align: left;">Table</th>
-<th style="text-align: left;">Purpose</th>
-<th style="text-align: left;">Key Columns</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align: left;"><code>patients</code></td>
-<td style="text-align: left;">Root entity.</td>
-<td style="text-align: left;"><code>patient_id</code> (PK), <code>patient_name</code></td>
-</tr>
-<tr>
-<td style="text-align: left;"><code>studies</code></td>
-<td style="text-align: left;">Represents a patient visit.</td>
-<td style="text-align: left;"><code>study_instance_uid</code> (PK), <code>study_date</code>, <code>patient_id_fk</code></td>
-</tr>
-<tr>
-<td style="text-align: left;"><code>series</code></td>
-<td style="text-align: left;">Represents a scan/sequence.</td>
-<td style="text-align: left;"><code>series_instance_uid</code> (PK), <code>modality</code>, <code>manufacturer</code>, <code>model_name</code>, <code>device_serial_number</code>, <code>study_id_fk</code></td>
-</tr>
-<tr>
-<td style="text-align: left;"><code>instances</code></td>
-<td style="text-align: left;">Represents a single DICOM file.</td>
-<td style="text-align: left;"><code>sop_instance_uid</code> (PK), <code>attributes_json</code>, <code>pixel_hash</code>, <code>file_path</code>, <code>series_id_fk</code></td>
-</tr>
-<tr>
-<td style="text-align: left;"><code>instance_attributes</code></td>
-<td style="text-align: left;">Storage for Private/Odd Group tags.</td>
-<td style="text-align: left;"><code>instance_uid</code> (FK), <code>group_id</code>, <code>element_id</code>, <code>value</code></td>
-</tr>
-<tr>
-<td style="text-align: left;"><code>audit_log</code></td>
-<td style="text-align: left;">Logs all modification actions.</td>
-<td style="text-align: left;"><code>timestamp</code>, <code>action_type</code>, <code>entity_uid</code>, <code>details</code></td>
-</tr>
-<tr>
-<td style="text-align: left;"><code>phi_findings</code></td>
-<td style="text-align: left;">Stores potential PHI detected during audit.</td>
-<td style="text-align: left;"><code>entity_uid</code>, <code>field_name</code>, <code>value</code>, <code>remediation_action</code></td>
-</tr>
-</tbody>
-</table>
-<h3 id="schema-visualization">Schema Visualization</h3>
-<pre class="mermaid"><code>erDiagram
-    PATIENTS ||--|{ STUDIES : contains
-    STUDIES ||--|{ SERIES : contains
-    SERIES ||--|{ INSTANCES : contains
-
-    PATIENTS {
-        string patient_id PK
-        string patient_name
-    }
-
-    STUDIES {
-        string study_instance_uid PK
-        date study_date
-    }
-
-    SERIES {
-        string series_instance_uid PK
-        string modality
-        string manufacturer
-        string model_name
-    }
-
-    INSTANCES {
-        string sop_instance_uid PK
-        json attributes_json "Core Metadata"
-        string pixel_hash "Integrity Check"
-    }
-
-    INSTANCES ||--o{ INSTANCE_ATTRIBUTES : "owns private tags"
-    INSTANCE_ATTRIBUTES {
-        string instance_uid FK
-        hex group_id
-        hex element_id
-        string value
-    }
-
-    INSTANCES ||--|| SIDECAR_FILE : "references pixels"
-    SIDECAR_FILE {
-        binary pixel_bytes
-    }
-
-    INSTANCES ||--o{ PHI_FINDINGS : "triggers"
-    PHI_FINDINGS {
-        string field_name
-        string value
-        string remediation
-    }
-
-    INSTANCES ||--o{ AUDIT_LOG : "generates"
-    AUDIT_LOG {
-        timestamp time
-        string action
-        string details
-    }</code></pre>
+<p>Signals are written as WFDB format 16 (16-bit, little-endian,
+channel-interleaved) -- the same layout DICOM already stores them in,
+so no sample transcoding happens. The gain field is written in
+spec-conformant <code>header(5)</code> form, <code>gain(baseline)/units</code>; if you see a
+downstream tool mis-parse that field, check the tool's parser first --
+this is a known issue already filed against Murmur, not a Gantry
+nonconformance.</p>
+<p>When present, Waveform Annotation Sequence <code>(0040,B020)</code> items --
+cart-generated findings such as rhythm calls -- are exported as
+<code>&lt;record&gt;.annotations.json</code>, in the schema
+<a href="https://github.com/kvnlng/Murmur">Murmur Studio</a> expects.</p>
+<h2 id="what-is-and-isnt-de-identified">What is and isn't de-identified</h2>
+<p>Gantry's PHI scan is <strong>tag-gated, not content-based</strong>: a tag gets
+flagged only if it's named by your loaded configuration -- explicit
+<code>phi_tags</code> entries, or a privacy profile expanded into them. A tag
+outside that set is never inspected for what it contains, no matter
+how identifying the text inside it is. Separately, odd-group private
+tags are removed whenever <code>remove_private_tags</code> is <code>True</code> (the
+default) -- that check is unconditional and is not gated by
+<code>phi_tags</code> at all.</p>
+<p>There are three configurations a reader of this guide can be in:</p>
+<ul>
+<li><strong>A bare <code>Session()</code>, never <code>load_config()</code>-ed.</strong> <code>phi_tags</code> is
+  empty. Only the hardcoded baseline scan runs: Patient Name and
+  Patient ID get replaced, Study Date gets shifted. Nothing else is
+  touched.</li>
+<li><strong>The Quick Start above.</strong> <code>create_config()</code> scaffolds a config with
+  <code>privacy_profile: basic</code>; <code>load_config()</code> expands that into
+  <code>PRIVACY_PROFILES["basic"]</code> (<code>gantry/profiles.py</code>) -- <strong>28 tags</strong>
+  covering patient identity, study/series dates and times, and
+  institution/physician fields, based on DICOM PS3.15 Annex E's Basic
+  Profile. This is what actually runs on the documented path.
+  <code>gantry/resources/phi_tags.json</code>, a separate 6-tag file, is <em>not</em>
+  reached from this flow: <code>create_config()</code> deliberately drops its
+  REMOVE-action tags from the scaffold, on the assumption the Basic
+  profile already covers them.</li>
+<li><strong>Your own <code>phi_tags</code> configuration</strong>, loaded standalone or layered
+  on top of a profile -- your explicit tags win over the profile's.</li>
+</ul>
+<p><strong>None of the three cover the two free-text fields specific to
+waveform export.</strong> Neither the hardcoded baseline nor the 28-tag Basic
+profile includes Channel Label or Unformatted Text Value, so on every
+documented path both are written verbatim into every WFDB record:</p>
+<ul>
+<li><strong>Channel Label <code>(003A,0203)</code></strong> -- becomes the <code>.hea</code> signal-line
+  description whenever a channel has no coded Channel Source Sequence
+  to prefer instead. This is an operator-typed field.</li>
+<li><strong>Unformatted Text Value <code>(0070,0006)</code></strong> -- becomes the <code>note</code> field
+  of <code>annotations.json</code> whenever an annotation carries one. This is
+  also operator-typed, and routinely holds free-text clinical
+  commentary.</li>
+</ul>
+<p>Both are DICOM tags an operator can type identifying information
+into. If your workflow needs them scrubbed, add <code>003A,0203</code> and/or
+<code>0070,0006</code> to your own PHI tag configuration before running
+<code>audit()</code> / <code>anonymize()</code>; Gantry will not do this for you by default.</p>
+<p>One more gap worth flagging in the Basic profile itself: it REMOVEs
+Study Date <code>(0008,0020)</code>, Study Time <code>(0008,0030)</code>, Acquisition Date
+<code>(0008,0022)</code>, and Content Date <code>(0008,0023)</code>, but it does <strong>not</strong>
+include Acquisition DateTime <code>(0008,002A)</code> -- easy to assume is
+covered alongside the separate date tag it duplicates, but it isn't,
+under any of the three configurations above unless you add it
+yourself.</p>
+<p><strong>Record timing</strong> in the <code>.hea</code> file combines two independently
+sourced parts. The <em>date</em> comes from <code>study.study_date</code>, which <em>is</em>
+shifted by <code>anonymize()</code> (the same per-patient date shift applied to
+the rest of the DICOM metadata). The <em>time-of-day</em> comes from the
+instance's own timestamp tags -- Acquisition DateTime <code>(0008,002A)</code>
+when present, else Study Time <code>(0008,0030)</code> -- and the date shift
+never touches it, whether or not <code>anonymize()</code> ran: when Acquisition
+DateTime is present (the common case), it isn't covered by the Basic
+profile either (see above), so the real acquisition time-of-day ends
+up in the header either way. If you export without running
+<code>anonymize()</code> at all, the date is real too -- exactly like every
+other un-remediated field in Gantry.</p>
+<p>Beyond content, the export path itself avoids two structural PHI
+paths a WFDB writer could otherwise open:</p>
+<ul>
+<li><strong>No <code>#</code> comment lines are ever written.</strong> WFDB readers render
+  header comments verbatim, and MIT-BIH convention places age, sex,
+  and diagnosis there -- Gantry never emits this line at all.</li>
+<li><strong>Record names derive from anonymized identifiers only</strong> (the
+  patient pseudonym, series number, instance number) -- never from
+  raw patient identifiers, and lead identity in the header prefers the
+  coded channel source over the free-text label wherever a coded
+  source exists.</li>
+</ul>
+<h2 id="limitations">Limitations</h2>
+<p>Format 16 only. The exporter also does not support: multi-rate
+records (only the first Waveform Sequence item of an instance is
+exported), WFDB ingest, <code>.atr</code> annotation output, or mu-law/A-law
+companded audio sample interpretations.</p>
 
 
 
@@ -1665,7 +1533,7 @@
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../performance/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Performance">
+          <a href="../analytics/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Analytics &amp; Reporting">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1675,20 +1543,20 @@
                 Previous
               </span>
               <div class="md-ellipsis">
-                Performance
+                Analytics & Reporting
               </div>
             </div>
           </a>
         
         
           
-          <a href="../ocr/" class="md-footer__link md-footer__link--next" aria-label="Next: Intelligent OCR">
+          <a href="../api/session/" class="md-footer__link md-footer__link--next" aria-label="Next: Session">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Intelligent OCR
+                Session
               </div>
             </div>
             <div class="md-footer__button md-icon">
