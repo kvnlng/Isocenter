@@ -98,6 +98,34 @@ def test_instance_waveform_accessors_roundtrip():
     np.testing.assert_array_equal(inst.get_waveform_data(), arr)
 
 
+def test_unload_waveform_refuses_when_only_a_file_path_backs_it():
+    """A file_path is not a recovery route for waveforms.
+
+    `get_waveform_data` has no dcmread fallback -- it returns the cached
+    array, else the loader, else None. So treating `file_path` as proof the
+    samples are recoverable would report a safe unload and then hand back
+    None forever. The two methods must agree on the one route that exists.
+    """
+    from gantry.entities import Instance
+    inst = Instance("1.2.4", "1.2.840.10008.5.1.4.1.1.9.1.1", 1,
+                    file_path="/nonexistent/ecg.dcm")
+    arr = np.arange(8, dtype=np.int16).reshape(4, 2)
+    inst.waveform_array = arr
+
+    # Preconditions: the only thing that could justify unloading is the
+    # file path, and there is genuinely no loader to fall back on.
+    assert inst.file_path
+    assert inst._waveform_loader is None
+    assert inst.waveform_array is arr
+
+    assert inst.unload_waveform_data() is False
+    assert inst.waveform_array is arr
+
+    # And the reason it must refuse: nothing would have restored it.
+    inst.waveform_array = None
+    assert inst.get_waveform_data() is None
+
+
 def test_ingest_registers_the_waveform_blob_reference(tmp_path):
     """Without a blob-table row, compaction reclaims the waveform."""
     from gantry.session import DicomSession

@@ -324,17 +324,23 @@ class Instance(DicomItem):
     def unload_waveform_data(self) -> bool:
         """Clear cached waveform samples to free memory.
 
-        Mirrors `unload_pixel_data`: only unloads when the data can be
-        recovered, so `release_memory()` can never silently discard
-        unexported waveforms.
+        Unloads only when a `_waveform_loader` can restore the samples.
+        Deliberately narrower than `unload_pixel_data`, which also accepts
+        `file_path` as a recovery route: `get_pixel_data` re-reads the file
+        with pydicom as a fallback, but `get_waveform_data` has no such
+        fallback -- it returns the cached array, else the loader, else None.
+        Accepting `file_path` here would report a safe unload and then hand
+        back None forever, which is exactly the silent discard this guard
+        exists to prevent.
 
         Returns:
-            bool: True if unloaded (or already absent), False if unsafe.
+            bool: True if unloaded (or already absent), False if unsafe --
+            i.e. the samples are in memory only and nothing could reload them.
         """
         if self.waveform_array is None:
             return True
 
-        if self.file_path or self._waveform_loader:
+        if self._waveform_loader:
             self.waveform_array = None
             return True
         return False
