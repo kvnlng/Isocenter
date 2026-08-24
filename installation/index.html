@@ -685,8 +685,30 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#optical-character-recognition-ocr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optical Character Recognition (OCR)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1252,8 +1274,30 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#optical-character-recognition-ocr" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optical Character Recognition (OCR)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1337,7 +1381,7 @@
 
 
 <h1 id="installation">Installation</h1>
-<p>Gantry requires <strong>Python 3.9+</strong>.</p>
+<p>Gantry requires <strong>Python 3.12+</strong>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/kvnlng/Gantry.git"</span>
 </code></pre></div>
 <h2 id="optional-features">Optional Features</h2>
@@ -1349,10 +1393,29 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span>spacy
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>-m<span class="w"> </span>spacy<span class="w"> </span>download<span class="w"> </span>en_core_web_sm
 </code></pre></div>
+<h3 id="optical-character-recognition-ocr">Optical Character Recognition (OCR)</h3>
+<p>To detect burned-in text in pixel data, install the <code>ocr</code> extra:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/kvnlng/Gantry.git#egg=gantry[ocr]"</span>
+</code></pre></div>
+<p>This also needs the Tesseract binary itself, which is not a Python
+package:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>brew<span class="w"> </span>install<span class="w"> </span>tesseract<span class="w">        </span><span class="c1"># macOS</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>apt-get<span class="w"> </span>install<span class="w"> </span>tesseract-ocr<span class="w"> </span><span class="c1"># Debian/Ubuntu</span>
+</code></pre></div>
+<p>Without it, <code>gantry.pixel_analysis</code> sets <code>HAS_OCR = False</code> and the rest
+of Gantry works normally — OCR-dependent features are simply skipped.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
 <p>The <code>imagecodecs</code> dependency is included and strongly recommended for handling JPEG Lossless and other compressed Transfer Syntaxes.</p>
 </div>
+<h2 id="dependencies">Dependencies</h2>
+<p>Dependencies are declared in one place, <code>setup.py</code>. There is deliberately
+no <code>requirements.txt</code>: two lists drift apart, and only <code>install_requires</code>
+is consulted when you <code>pip install</code>.</p>
+<p>To set up a development environment, install the package with its test
+extra:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[tests]"</span>
+</code></pre></div>
 <h2 id="system-requirements">System Requirements</h2>
 <p>Gantry's parallel processing engine is designed to maximize CPU utilization. However, heavy operations like JPEG 2000 compression require significant memory per worker.</p>
 <ul>
