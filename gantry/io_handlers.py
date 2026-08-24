@@ -785,9 +785,8 @@ class SidecarWaveformLoader:
 
 
 def format_study_date(study_date) -> str:
-    """Render a Study's date the way `_legacy_generate_export_contexts_folder_names`
-    does, for use both in exported DICOM attributes and in that legacy
-    folder-naming logic.
+    """Render a Study's date as "YYYYMMDD" for use in exported DICOM
+    attributes.
 
     Args:
         study_date: `Study.study_date` -- a `date`/`datetime`-like object,
@@ -863,49 +862,6 @@ def export_folder_names(patient, study, series):
     return subj_name, study_folder, series_folder
 
 
-def _legacy_generate_export_contexts_folder_names(patient, s_date_str: str, series, instance):
-    """Folder-naming logic for `DicomExporter._generate_export_contexts`
-    only -- NOT the scheme used by `session.export()` (see
-    `export_folder_names` above, which IS shared across export formats).
-
-    `_generate_export_contexts` is reached only via the legacy/direct
-    `DicomExporter.save_patient`/`save_studies` API, which several tests
-    call directly; it is not part of the `session.export()` path any
-    production user goes through. Kept as its own function, unshared,
-    purely to preserve its long-standing exact output for those tests --
-    see the module's export-format co-location fix history for why this
-    is deliberately NOT unified with `export_folder_names`.
-
-    Args:
-        patient (Patient): Patient root.
-        s_date_str (str): Study date already formatted via
-            `format_study_date`.
-        series (Series): Series whose folder name is being built.
-        instance (Instance): Instance whose attributes carry the
-            Study/Series Description tags (0008,1030 / 0008,103E) that
-            the folder names are drawn from. Read from the INSTANCE, not
-            from `series`/a Study object.
-
-    Returns:
-        tuple[str, str, str]: (subject_folder, study_folder, series_folder)
-    """
-    subj_name = f"Subject_{DicomExporter._sanitize(patient.patient_id)}"
-
-    s_date_clean = s_date_str.replace("-", "") or "UnknownDate"
-    s_desc = "Study"
-    if "0008,1030" in instance.attributes:
-        s_desc = instance.attributes["0008,1030"]
-    study_folder = f"Study_{s_date_clean}_{DicomExporter._sanitize(s_desc)}"
-
-    ser_num = series.series_number if series.series_number is not None else "0"
-    ser_desc = "Series"
-    if "0008,103E" in instance.attributes:
-        ser_desc = instance.attributes["0008,103E"]
-    series_folder = f"Series_{ser_num}_{DicomExporter._sanitize(ser_desc)}"
-
-    return subj_name, study_folder, series_folder
-
-
 class DicomExporter:
     """
     Handles writing the Object Graph back to standard DICOM files.
@@ -977,18 +933,11 @@ class DicomExporter:
                         series_attrs["0018,1000"] = se.equipment.device_serial_number
 
                     # Calculate Output Path
-                    # 1-3. Subject/Study/Series folders. Deliberately NOT the
-                    # shared hybrid `export_folder_names` used by every other
-                    # export format: migrating this call onto it changes
-                    # `_generate_export_contexts`'s long-standing output
-                    # (adds a UID suffix and modality component, and formats
-                    # the date differently), which breaks
-                    # tests/test_structured_export.py's hardcoded assertions
-                    # against the pre-existing scheme. See
-                    # `_legacy_generate_export_contexts_folder_names`'s
-                    # docstring for why this stays unshared.
-                    subj_name, study_folder, series_folder = _legacy_generate_export_contexts_folder_names(
-                        patient, s_date_str, se, inst)
+                    # 1-3. Subject/Study/Series folders, via the shared
+                    # hybrid naming used by every other export format --
+                    # see `export_folder_names` for the scheme.
+                    subj_name, study_folder, series_folder = export_folder_names(
+                        patient, st, se)
 
                     # 4. Filename
                     fname = f"{inst.sop_instance_uid}.dcm"

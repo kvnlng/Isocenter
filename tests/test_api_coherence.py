@@ -31,3 +31,49 @@ def test_only_one_public_export_entry_point_builds_directory_trees():
     assert not hasattr(DicomExporter, "generate_export_from_db"), (
         "generate_export_from_db still exists; it is a third, "
         "independently-maintained directory layout with no production caller")
+
+
+def test_both_public_export_paths_produce_the_same_tree(tmp_path):
+    """`DicomExporter.save_patient` and `session.export()` must agree.
+
+    Both are public and shipped. Two layouts means "where does Gantry put
+    files" has no single answer for a library user.
+
+    Derives both trees from real exports rather than hardcoding names, so
+    it cannot drift out of step with the naming logic it guards.
+    """
+    from gantry.io_handlers import DicomExporter
+    from gantry.session import DicomSession
+    from scripts.generate_waveform_test_data import write_fixture
+
+    source = tmp_path / "src"
+    source.mkdir()
+    write_fixture(str(source / "ecg.dcm"), num_samples=50)
+
+    session = DicomSession(persistence_file=str(tmp_path / "s.db"))
+    try:
+        session.ingest(str(source))
+        patient = session.store.patients[0]
+
+        via_session = tmp_path / "via_session"
+        session.export(str(via_session), format="dicom")
+
+        via_exporter = tmp_path / "via_exporter"
+        DicomExporter.save_patient(patient, str(via_exporter))
+    finally:
+        session.close()
+
+    def tree(root):
+        return sorted(
+            str(p.relative_to(root).parent)
+            for p in root.rglob("*.dcm"))
+
+    session_tree = tree(via_session)
+    exporter_tree = tree(via_exporter)
+
+    assert session_tree, "session.export() produced no .dcm files"
+    assert exporter_tree, "save_patient produced no .dcm files"
+    assert session_tree == exporter_tree, (
+        f"the two public export paths disagree:\n"
+        f"  session.export(): {session_tree}\n"
+        f"  save_patient():   {exporter_tree}")
