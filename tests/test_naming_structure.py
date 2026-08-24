@@ -63,7 +63,7 @@ def test_folder_naming_structure():
     session.export(EXPORT_DIR)
 
     # Verify Structure
-    # Should be: Subject_PAT001 / Study_20250101_Brain_Scan_XXXXX / Series_1_MR_Axial_T1_XXXXX
+    # Should be: Subject_PAT001 / Study_2025-01-01_Brain_Scan_XXXXX / Series_1_MR_Axial_T1_XXXXX
 
     # 1. Patient Folder
     pat_folder = os.path.join(EXPORT_DIR, "Subject_PAT001")

@@ -131,9 +131,7 @@ phi_tags:
     # [9] Verify & Export (Cut Once)
     print("\n[Step 9] Export (Verify & Write)")
     t0 = time.time()
-    # Default to j2k if compress requested, else None
-    comp_method = 'j2k' if compress_export else None
-    sess.export(output_dir, use_compression=comp_method, show_progress=False)
+    sess.export(output_dir, use_compression=compress_export, show_progress=False)
     duration_export = time.time() - t0
     print(f"Export Duration: {duration_export:.2f}s")
     report_resource_usage("Post-Export")

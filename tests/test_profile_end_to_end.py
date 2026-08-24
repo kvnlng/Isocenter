@@ -74,9 +74,9 @@ def test_profile_remediation_end_to_end(tmp_path):
 
     # 5. Export (Applying Remediation)
     export_dir = tmp_path / "clean_export"
-    # Note: 'audit()' or 'export(safe=True)' usually warns.
+    # Note: 'audit()' or 'export(check_burned_in=True)' usually warns.
     # Here we want to see if applying remediation actually works.
-    # We'll use apply_remediation directly or just check if safe export flags it.
+    # We'll use apply_remediation directly or just check if a burned-in-safe export flags it.
 
     # Method A: Check if scan finds it (Verification of config load + Privacy Inspector)
     report = session.scan_for_phi()

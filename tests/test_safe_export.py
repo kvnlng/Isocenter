@@ -93,19 +93,9 @@ def test_safe_export_skips_phi(tmp_path):
     # Wait, privacy.py hardcodes "ANONYMIZED" check?
     # Yes: if patient.patient_name != "ANONYMIZED" -> Finding.
 
-    # Pass config path manually if session export supports it?
-    # Session export signature change: (folder, safe=True, config_path=...)
-    # Or session relies on default config load?
-    # For now, let's assume we pass config_path to export if we implement that, or set it on session.
-    # Current plan: export(folder, safe=True). But scan_for_phi() takes optional config_path.
-    # We should probably allow passing it, or rely on internal defaults if available.
-
-    # Let's call scan_for_phi explicitly first to ensure it finds things?
-    # Test assumes export calls scan_for_phi.
-
-    # We will modify DicomSession to handle this.
-
-    # NOTE: The test will FAIL initially because 'safe' arg doesn't exist.
+    # No config_path is loaded on `sess`, so this relies on the hardcoded
+    # baseline PHI check in privacy.py. check_burned_in=True makes export()
+    # run scan_for_phi() first and skip any patient with a finding.
 
     sess.export(str(out_dir), check_burned_in=True)
 

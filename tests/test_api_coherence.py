@@ -147,10 +147,17 @@ def test_one_sanitizer_for_folder_names():
         "ConfigLoader.clean_filename; both sanitize folder names")
 
 
-def test_a_zero_series_number_is_not_renamed_to_unknown():
-    """`_sanitize(0)` returned 'Unknown' because `0` is falsy.
+def test_clean_filename_does_not_treat_a_falsy_value_like_0_as_missing():
+    """`ConfigLoader.clean_filename` must not treat a falsy-but-real value
+    like the integer `0` as missing.
 
-    A series number of 0 is a real value, not a missing one.
+    This does NOT pin a series-number regression: the deleted
+    `DicomExporter._sanitize` was applied only to Study/Series
+    Description strings in the legacy folder-naming path, never to the
+    series number itself (which was inserted into the folder name
+    unsanitized), so there is no historical "series number 0 renamed to
+    Unknown" bug to regress against. This pins a general property of
+    `clean_filename` in isolation.
     """
     from gantry.config_manager import ConfigLoader
 

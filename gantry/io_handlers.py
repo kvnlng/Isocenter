@@ -15,10 +15,8 @@ import sys
 import shutil
 import hashlib
 import io
-import base64
 from typing import List, Set, Dict, Any, Optional, Tuple, NamedTuple, Iterable
 from datetime import datetime, date
-import json
 from dataclasses import dataclass, field
 
 import pydicom
@@ -617,12 +615,6 @@ def _compress_j2k(ds, pixel_array=None):
         raise RuntimeError("Pillow or pydicom not installed/configured for JPEG 2000.")
     except Exception as e:
         raise RuntimeError(f"Compression failed: {e}")
-
-
-def gantry_json_object_hook(d):
-    if "__type__" in d and d["__type__"] == "bytes":
-        return base64.b64decode(d["data"])
-    return d
 
 
 class SidecarPixelLoader:

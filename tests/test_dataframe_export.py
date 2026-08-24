@@ -70,3 +70,26 @@ def test_export_dataframe_expand_metadata(session_with_data):
 
     assert 'SliceThickness' in df.columns
     assert df.iloc[0]['SliceThickness'] == 1.5
+
+def test_export_to_parquet_streams_via_get_flattened_instances(session_with_data, tmp_path):
+    """`DicomSession.export_to_parquet` is the only production caller of
+    `SqliteStore.get_flattened_instances` (`gantry/persistence.py`).
+
+    `DicomExporter.generate_export_from_db` -- deleted as dead code with
+    no production caller -- reached `get_flattened_instances` too, and
+    its own test was the only thing exercising that method. Deleting the
+    dead method took the coverage with it, even though the method itself
+    is still live and reachable through this public API. This test
+    exercises it directly so `export_to_parquet` (and, transitively,
+    `get_flattened_instances`) has real coverage again.
+    """
+    output_path = tmp_path / "flattened.parquet"
+    session_with_data.export_to_parquet(str(output_path))
+
+    assert os.path.exists(output_path)
+
+    df = pd.read_parquet(output_path)
+    assert len(df) == 1
+    assert df.iloc[0]['patient_id'] == "P1"
+    assert df.iloc[0]['sop_instance_uid'] == "I1"
+    assert df.iloc[0]['modality'] == "CT"
