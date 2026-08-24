@@ -1648,7 +1648,7 @@ class DicomSession:
         exporter = exporters.get_exporter(format)
         return exporter.export(self, folder, **options)
 
-    def _export_dicom(self, folder: str, version=None, use_compression=True,
+    def _export_dicom(self, folder: str, use_compression=True,
                check_burned_in=False, check_reversibility=True, patient_ids: List[str] = None, show_progress=True,
                # Legacy/Test Support arguments
                compression=None, safe=False, subset=None):
@@ -1657,7 +1657,6 @@ class DicomSession:
 
         Args:
             folder (str): The output directory path.
-            version (str, optional): Deprecated/Unused.
             use_compression (bool): If True, compresses output images using JPEG2000 (Lossless).
             check_burned_in (bool): If True, performs a safety scan for 'Burned In Annotation' flags before export.
             check_reversibility (bool): If True, checks if reversibility is enabled (informational).
