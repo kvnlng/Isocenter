@@ -62,4 +62,4 @@ def available_formats() -> List[str]:
     return sorted(_REGISTRY)
 
 
-from . import dicom  # noqa: E402,F401  (registers the built-in format)
+from . import dicom, wfdb  # noqa: E402,F401  (registers the built-in formats)
