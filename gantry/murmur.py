@@ -121,13 +121,18 @@ def _concept(item):
     return category, (meaning or None)
 
 
-def build_annotations(instance, waveform, source: str) -> Dict[str, Any]:
+def build_annotations(instance, waveform, source: str, include_text: bool = False) -> Dict[str, Any]:
     """Build a Murmur annotations document from an instance's annotations.
 
     Args:
         instance (Instance): The waveform instance, post-remediation.
         waveform (Waveform): Parsed geometry, used for lead and time lookup.
         source (str): Producer identifier written to the document.
+        include_text (bool): If True, write Unformatted Text Value
+            (0070,0006) into each finding's `note`. Defaults to False
+            because that tag routinely holds free-text clinical
+            commentary, and the PHI scan is tag-gated -- so a bare
+            Session() would otherwise write it out unremediated.
 
     Returns:
         dict: A `schemaVersion: 1` document. `findings` is empty when the
@@ -166,9 +171,10 @@ def build_annotations(instance, waveform, source: str) -> Dict[str, Any]:
         if lead:
             finding["lead"] = lead
 
-        note = item.attributes.get(TAG_UNFORMATTED_TEXT)
-        if note:
-            finding["note"] = str(note)
+        if include_text:
+            note = item.attributes.get(TAG_UNFORMATTED_TEXT)
+            if note:
+                finding["note"] = str(note)
 
         findings.append(finding)
 

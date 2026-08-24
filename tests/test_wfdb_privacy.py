@@ -3,7 +3,7 @@ import os
 import pytest
 
 from gantry.session import DicomSession
-from scripts.generate_waveform_test_data import build_ecg_dataset, write_fixture
+from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation, write_fixture
 
 
 @pytest.fixture
@@ -468,3 +468,111 @@ def test_acquisition_datetime_is_remediated_end_to_end(tmp_path):
     assert raw_datetime not in remaining, (
         "Acquisition DateTime survived anonymize(); the BASIC_PROFILE entry "
         f"is present but not firing. Remaining values: {remaining!r}")
+
+
+# --- Annotation free text omitted from annotations.json by default (#39) ---
+
+
+def _write_annotated_fixture(directory, note, patient_id="WFTEST001",
+                             patient_name="Waveform^Test"):
+    """Build+write an ECG dataset carrying one point annotation whose
+    Unformatted Text Value (0070,0006) is `note`.
+    """
+    import pydicom
+
+    ds = build_ecg_dataset(num_samples=500, patient_id=patient_id,
+                           patient_name=patient_name)
+    add_annotation(ds, start_sample=101, text=note)
+
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, "ecg.dcm")
+    pydicom.dcmwrite(path, ds, enforce_file_format=True)
+    return path
+
+
+def test_annotation_text_is_absent_from_exported_json_by_default(tmp_path):
+    """The default must hold through the real export path, not just the
+    helper -- an option that is never threaded through is the same bug as
+    a profile entry that never fires (#41).
+    """
+    import json
+    import glob
+    from gantry.session import DicomSession
+
+    secret = "Reviewed by Dr Jane Doe, MRN-12345678"
+    _write_annotated_fixture(tmp_path / "in", note=secret)
+
+    out = tmp_path / "out"
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path / "in"))
+
+        # Positive precondition: prove the secret genuinely reached the
+        # ingested object graph before asserting it is absent from the
+        # export. Without this, a fixture that never carried the secret in
+        # the first place (e.g. build_ecg_dataset's own default field
+        # values, see scripts/generate_waveform_test_data.py:96) would make
+        # the negative assertion below pass vacuously.
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        ann_seq = instance.sequences.get("0040,b020")  # Waveform Annotation Sequence
+        assert ann_seq is not None and ann_seq.items, (
+            "fixture produced no Waveform Annotation Sequence; the ingested "
+            "object graph never carried the secret in the first place")
+        notes = [str(item.attributes.get("0070,0006", "")) for item in ann_seq.items]
+        assert secret in notes, (
+            f"fixture's Unformatted Text Value {notes!r} does not contain the "
+            "secret; the absence assertion below would be vacuous")
+
+        session.export(str(out), format="wfdb")
+    finally:
+        session.close()
+
+    payloads = []
+    for path in glob.glob(str(out / "**" / "*.annotations.json"), recursive=True):
+        with open(path, encoding="utf-8") as handle:
+            payloads.append(handle.read())
+
+    assert payloads, "no annotations.json was written; fixture is not exercising the path"
+    for payload in payloads:
+        assert secret not in payload, "annotation free text reached annotations.json by default"
+        for finding in json.loads(payload)["findings"]:
+            assert "note" not in finding
+
+
+def test_annotation_text_is_present_when_opted_in_end_to_end(tmp_path):
+    """The opt-in must ALSO hold through the real export path.
+
+    The default-omission test above cannot, by itself, prove
+    include_annotation_text is threaded from session.export() through to
+    build_annotations(): build_annotations's own default is False, so a
+    call site that silently drops the option (never forwards it) falls
+    back to that same safe default and the default-path test above would
+    still pass -- the bug would be invisible. Only exercising the opt-in
+    path distinguishes "wired correctly" from "never wired at all".
+    """
+    import json
+    import glob
+    from gantry.session import DicomSession
+
+    secret = "sinus rhythm"
+    _write_annotated_fixture(tmp_path / "in", note=secret)
+
+    out = tmp_path / "out"
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path / "in"))
+        session.export(str(out), format="wfdb", include_annotation_text=True)
+    finally:
+        session.close()
+
+    payloads = []
+    for path in glob.glob(str(out / "**" / "*.annotations.json"), recursive=True):
+        with open(path, encoding="utf-8") as handle:
+            payloads.append(json.loads(handle.read()))
+
+    assert payloads, "no annotations.json was written; fixture is not exercising the path"
+    notes = [f.get("note") for payload in payloads for f in payload["findings"]]
+    assert secret in notes, (
+        "opting in via include_annotation_text=True did not reach "
+        "annotations.json -- the option is not threaded through "
+        "export() -> _write_instance() -> build_annotations()")

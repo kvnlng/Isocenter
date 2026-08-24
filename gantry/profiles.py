@@ -61,6 +61,10 @@ BASIC_PROFILE = {
     "0008,1040": {"action": "REMOVE", "name": "Institutional Department Name"},
     "0008,1050": {"action": "REMOVE", "name": "Performing Physician's Name"},
     "0008,1070": {"action": "REMOVE", "name": "Operators' Name"},
+    # Free-text annotation commentary. Reaches annotations.json `note` when
+    # a caller opts in via include_annotation_text; remediated here so that
+    # opting in on a configured session still does not surface raw text.
+    "0070,0006": {"action": "EMPTY", "name": "Unformatted Text Value"},
 }
 
 PRIVACY_PROFILES = {

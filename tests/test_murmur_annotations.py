@@ -73,12 +73,43 @@ def test_lead_comes_from_the_coded_channel_source():
     assert finding["lead"] == "MDC_ECG_LEAD_II"
 
 
-def test_free_text_becomes_the_note():
+def test_free_text_note_is_written_only_when_opted_in():
+    """Covers the note mapping itself (not the default): with
+    include_text=True, Unformatted Text Value must still land in `note`.
+    Renamed from test_free_text_becomes_the_note now that omission is the
+    default -- see test_note_is_omitted_by_default below.
+    """
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, text="Onset preceded by R-on-T")
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "gantry/test", include_text=True)["findings"][0]
     assert finding["note"] == "Onset preceded by R-on-T"
+
+
+def test_note_is_omitted_by_default():
+    """(0070,0006) is free-text clinical commentary and must not be written
+    unless the caller asks for it.
+
+    The PHI scan is tag-gated, so a bare Session() scans almost nothing.
+    Defaulting to omit is what makes this safe regardless of configuration.
+    """
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, text="Reviewed by Dr Jane Doe, MRN-12345678")
+    document = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    assert document["findings"], "fixture produced no findings"
+    for finding in document["findings"]:
+        assert "note" not in finding, (
+            "annotation note text was written without the caller opting in")
+
+
+def test_note_is_written_when_explicitly_requested():
+    """Opting in is a deliberate act, and must actually work."""
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, text="sinus rhythm")
+    document = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                 "gantry/test", include_text=True)
+    notes = [f.get("note") for f in document["findings"]]
+    assert "sinus rhythm" in notes
 
 
 def test_absolute_time_is_never_emitted():

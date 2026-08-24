@@ -220,12 +220,18 @@ class WfdbExporter(Exporter):
             session (DicomSession): Active session.
             folder (str): Output root.
             **options: `patient_ids` (list, optional) limits the export.
+                `include_annotation_text` (bool, default False) writes
+                Unformatted Text Value (0070,0006) into annotations.json
+                `note` fields; off by default because it is free-text
+                clinical commentary.
 
         Returns:
             List[str]: Paths of the `.hea` files written.
         """
         logger = get_logger()
         patient_ids = options.get("patient_ids")
+        # Off by default: (0070,0006) is free-text clinical commentary.
+        include_annotation_text = bool(options.get("include_annotation_text", False))
         written = []
         used_names = {}  # out_dir -> set of record names already claimed
 
@@ -246,7 +252,8 @@ class WfdbExporter(Exporter):
                         # run was partial.
                         try:
                             path = self._write_instance(
-                                folder, patient, study, series, instance, logger, used_names)
+                                folder, patient, study, series, instance, logger,
+                                used_names, include_annotation_text)
                         except Exception as e:
                             logger.error(
                                 f"WFDB export failed for instance "
@@ -280,7 +287,8 @@ class WfdbExporter(Exporter):
         seen.add(candidate)
         return candidate
 
-    def _write_instance(self, folder, patient, study, series, instance, logger, used_names):
+    def _write_instance(self, folder, patient, study, series, instance, logger,
+                        used_names, include_annotation_text=False):
         """Write one record. Returns the .hea path, or None if not a waveform.
 
         `used_names` is REQUIRED (not `=None`): its absence used to
@@ -343,7 +351,7 @@ class WfdbExporter(Exporter):
 
         write_annotations(
             os.path.join(out_dir, f"{record_name}.annotations.json"),
-            build_annotations(instance, waveform, source))
+            build_annotations(instance, waveform, source, include_annotation_text))
 
         return hea_path
 
