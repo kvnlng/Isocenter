@@ -839,7 +839,27 @@ class SqliteStore:
             conn (sqlite3.Connection, optional): An existing connection to
                 enlist in. When given, no new connection is opened and the
                 write joins the caller's transaction.
+
+        Raises:
+            ValueError: If exactly one of `offset`/`length` is None. A
+                half-specified reference is never recoverable: it would pair
+                a real offset with a missing or stale length. Callers with
+                nothing to record must skip the call, not pass NULLs.
         """
+        if (offset is None) != (length is None):
+            raise ValueError(
+                "Blob reference for {!r}/{!r} must supply both offset and "
+                "length, got offset={!r} length={!r}".format(
+                    instance_uid, kind, offset, length))
+        # offset/length/compress_alg describe ONE generation of the blob and
+        # are assigned together -- COALESCE-ing any of them could pair a new
+        # offset with a stale length or algorithm, which decodes garbage
+        # rather than failing. `hash` is different: it is knowledge ABOUT the
+        # payload, and a caller that does not happen to have it (a hydrated
+        # instance re-saved after a tag edit carries no `_pixel_hash`) means
+        # "unknown", not "none". Erasing a recorded hash there would leave
+        # this row disagreeing with instances.pixel_hash, so it is COALESCEd,
+        # matching the sibling `instances` upsert in save_all.
         sql = """
             INSERT INTO instance_blobs
                 (instance_uid, kind, file_id, offset, length, hash, compress_alg)
@@ -847,7 +867,7 @@ class SqliteStore:
             ON CONFLICT(instance_uid, kind) DO UPDATE SET
                 offset=excluded.offset,
                 length=excluded.length,
-                hash=excluded.hash,
+                hash=COALESCE(excluded.hash, instance_blobs.hash),
                 compress_alg=excluded.compress_alg
         """
         params = (instance_uid, kind, offset, length, blob_hash, compress_alg)
@@ -1190,6 +1210,7 @@ class SqliteStore:
                                     if p_offset is not None and p_length is not None:
                                         blob_batch.append((
                                             inst.sop_instance_uid,
+                                            'pixels',
                                             p_offset,
                                             p_length,
                                             p_hash,
@@ -1212,17 +1233,14 @@ class SqliteStore:
                                         compress_alg=COALESCE(excluded.compress_alg, instances.compress_alg)
                                 """, i_batch)
 
-                                if blob_batch:
-                                    cur.executemany("""
-                                        INSERT INTO instance_blobs
-                                            (instance_uid, kind, file_id, offset, length, hash, compress_alg)
-                                        VALUES (?, 'pixels', 0, ?, ?, ?, ?)
-                                        ON CONFLICT(instance_uid, kind) DO UPDATE SET
-                                            offset=excluded.offset,
-                                            length=excluded.length,
-                                            hash=excluded.hash,
-                                            compress_alg=excluded.compress_alg
-                                    """, blob_batch)
+                                # Routed through record_blob_ref rather than
+                                # inlined, so that exactly one place knows how
+                                # an instance_blobs row is written. Duplicating
+                                # the SQL here is what let this mirror's
+                                # conflict clause drift away from its sibling.
+                                # `conn=conn` keeps it in this transaction.
+                                for b_row in blob_batch:
+                                    self.record_blob_ref(*b_row, conn=conn)
 
                                 # Process Deferred Vertical Updates (Now that Instances exist)
                                 if vert_updates:

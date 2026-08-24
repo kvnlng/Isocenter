@@ -603,3 +603,82 @@ def test_failed_compaction_commit_rolls_the_file_back(tmp_path):
         assert not [f for f in os.listdir(str(tmp_path)) if ".compact." in f]
     finally:
         s.stop()
+
+
+def test_resaving_a_hydrated_instance_does_not_erase_the_blob_hash(tmp_path):
+    """The mirror must never NULL a recorded hash.
+
+    Hydration wires up `_pixel_loader` but never `_pixel_hash`. Both load
+    paths mark instances saved, so the trigger is the first save after a
+    load in which the instance was dirtied by something OTHER than a pixel
+    change -- a tag edit, which is exactly what de-identification does. Such
+    an instance takes the `_pixel_loader` branch with `p_hash = None`. The
+    `instances` upsert COALESCEs that away; if the blob mirror assigns it
+    unconditionally, instance_blobs.hash is erased while
+    instances.pixel_hash survives -- two writers of the same fact
+    disagreeing, which is the shape that caused the resurrection bug.
+    """
+    import sqlite3
+
+    db_path = str(tmp_path / "rehash.db")
+    arr = np.full((16, 16), 9, dtype=np.uint8)
+
+    s = SqliteStore(db_path)
+    pat, _ = _graph("rehash.1", arr)
+    s.save_all([pat])
+    original = s.get_blob_ref("rehash.1", "pixels")
+    assert original["hash"], "setup: first save should record a hash"
+    original_hash = original["hash"]
+    s.stop()
+
+    # Reopen and hydrate: the instance comes back with a loader but no
+    # _pixel_hash and no pixel_array.
+    s2 = SqliteStore(db_path)
+    try:
+        pat2 = s2.load_patient("P1")
+        inst2 = pat2.studies[0].series[0].instances[0]
+        assert inst2.pixel_array is None
+        assert getattr(inst2, "_pixel_hash", None) is None, (
+            "setup: hydration unexpectedly restored _pixel_hash")
+
+        # Dirty it the way de-identification does: edit a tag, leave the
+        # pixels alone. Without this the instance is clean and save_all
+        # skips it entirely, so the test would pass vacuously.
+        inst2.set_attr("0010,0010", "ANON^PATIENT")
+        assert inst2._dirty, "setup: instance must be dirty to be re-saved"
+
+        s2.save_all([pat2])
+
+        ref = s2.get_blob_ref("rehash.1", "pixels")
+        with sqlite3.connect(db_path) as c:
+            c.row_factory = sqlite3.Row
+            row = c.execute(
+                "SELECT pixel_hash, pixel_offset, pixel_length FROM instances"
+                " WHERE sop_instance_uid='rehash.1'").fetchone()
+
+        assert ref["hash"] == original_hash, (
+            "re-saving a hydrated instance erased instance_blobs.hash")
+        assert ref["hash"] == row["pixel_hash"], (
+            "instance_blobs.hash and instances.pixel_hash diverged")
+        # The reference itself must still be intact and correct.
+        assert (ref["offset"], ref["length"]) == (
+            row["pixel_offset"], row["pixel_length"])
+        assert s2.sidecar.read_frame(
+            ref["offset"], ref["length"], ref["compress_alg"]) == arr.tobytes()
+    finally:
+        s2.stop()
+
+
+def test_record_blob_ref_rejects_a_half_specified_reference(store):
+    """offset and length must travel together or not at all.
+
+    A row with a real offset and a missing length pairs a new frame with a
+    stale or absent length -- the truncated-read failure mode. There is no
+    safe interpretation, so the single writer refuses it rather than
+    recording something unrecoverable.
+    """
+    with pytest.raises(ValueError):
+        store.record_blob_ref("half.1", "pixels", 10, None, "h", "zlib")
+    with pytest.raises(ValueError):
+        store.record_blob_ref("half.1", "pixels", None, 10, "h", "zlib")
+    assert store.get_blob_ref("half.1", "pixels") is None
