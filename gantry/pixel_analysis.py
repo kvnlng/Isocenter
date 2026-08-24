@@ -10,13 +10,26 @@ from gantry.privacy import PhiFinding
 
 logger = logging.getLogger(__name__)
 
+# Pillow is a hard dependency; pytesseract is the optional `ocr` extra.
+# These were previously imported in one `try`, so a missing pytesseract
+# also left `Image` unbound and silently disabled every Pillow-backed code
+# path -- an optional package taking a required one down with it.
+from PIL import Image
+
 try:
     import pytesseract
-    from PIL import Image
     HAS_OCR = True
 except ImportError:
+    # Bind the name anyway, as gantry/imagecodecs_handler.py does. OCR is
+    # a supported optional configuration, not an edge case, and a module
+    # attribute that exists only sometimes is a trap for anything that
+    # reaches for it -- including `mock.patch`, which raises
+    # AttributeError rather than skipping.
+    pytesseract = None
     HAS_OCR = False
-    logger.warning("pytesseract or PIL not installed. OCR features will be disabled.")
+    logger.warning(
+        "pytesseract not installed. OCR features are disabled; "
+        "install with `pip install gantry[ocr]`.")
 
 @dataclass
 class TextRegion:

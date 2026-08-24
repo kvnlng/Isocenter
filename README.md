@@ -83,7 +83,7 @@ Gantry provides a system to ensure data safety:
 
 ## Installation
 
-Gantry requires **Python 3.9+**.
+Gantry requires **Python 3.12+**.
 
 ```bash
 # Install directly from GitHub (Recommended for users)

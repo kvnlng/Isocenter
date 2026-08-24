@@ -1,6 +1,6 @@
 # Installation
 
-Gantry requires **Python 3.9+**.
+Gantry requires **Python 3.12+**.
 
 ```bash
 pip install "git+https://github.com/kvnlng/Gantry.git"
@@ -23,8 +23,40 @@ pip install spacy
 python -m spacy download en_core_web_sm
 ```
 
+### Optical Character Recognition (OCR)
+
+To detect burned-in text in pixel data, install the `ocr` extra:
+
+```bash
+pip install "git+https://github.com/kvnlng/Gantry.git#egg=gantry[ocr]"
+```
+
+This also needs the Tesseract binary itself, which is not a Python
+package:
+
+```bash
+brew install tesseract        # macOS
+apt-get install tesseract-ocr # Debian/Ubuntu
+```
+
+Without it, `gantry.pixel_analysis` sets `HAS_OCR = False` and the rest
+of Gantry works normally — OCR-dependent features are simply skipped.
+
 !!! note
     The `imagecodecs` dependency is included and strongly recommended for handling JPEG Lossless and other compressed Transfer Syntaxes.
+
+## Dependencies
+
+Dependencies are declared in one place, `setup.py`. There is deliberately
+no `requirements.txt`: two lists drift apart, and only `install_requires`
+is consulted when you `pip install`.
+
+To set up a development environment, install the package with its test
+extra:
+
+```bash
+pip install -e ".[tests]"
+```
 
 ## System Requirements
 
