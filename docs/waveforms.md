@@ -78,7 +78,8 @@ There are three configurations a reader of this guide can be in:
   touched.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic`; `load_config()` expands that into
-  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **28 tags**
+  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **28 keys, but
+  only 27 are effective** (see the Series Description gap below)
   covering patient identity, study/series dates and times, and
   institution/physician fields, based on DICOM PS3.15 Annex E's Basic
   Profile. This is what actually runs on the documented path.
@@ -89,10 +90,32 @@ There are three configurations a reader of this guide can be in:
 - **Your own `phi_tags` configuration**, loaded standalone or layered
   on top of a profile -- your explicit tags win over the profile's.
 
-**None of the three cover the two free-text fields specific to
-waveform export.** Neither the hardcoded baseline nor the 28-tag Basic
-profile includes Channel Label or Unformatted Text Value, so on every
-documented path both are written verbatim into every WFDB record:
+**One of the Basic profile's 28 keys never matches, and it happens to
+be Series Description.** `PRIVACY_PROFILES["basic"]` keys Series
+Description as `0008,103E` -- the *only* one of the 28 keys with an
+uppercase hex letter. Every ingested attribute key is lowercased
+(`gantry/io_handlers.py`'s `populate_attrs`, `f"{elem.tag.group:04x},
+{elem.tag.element:04x}"`), and the PHI scan gates strictly on exact tag
+key equality, so `0008,103E` never matches the real `0008,103e` key and
+Series Description is **never remediated on any documented path** --
+Study Description *is* correctly emptied (`0008,1030`, no hex letter,
+no casing problem). This is not a hypothetical edge case for waveform
+export: the series description becomes a **directory name**, and every
+`.hea`/`.dat`/`.annotations.json` this exporter writes lives inside it
+-- so an un-redacted, operator-typed series description (e.g. "Rhythm
+strip Jane Doe") ends up in the export path itself, even though the
+record name and header content are correctly pseudonymized. This is a
+pre-existing `gantry/profiles.py` issue, not introduced by this
+exporter, and is not fixed here -- changing the tag casing changes
+de-identification output for every existing deployment, which is a
+product decision tracked separately. It is documented here because
+this exporter is what makes the leaking value load-bearing as a path
+component.
+
+**None of the three configurations cover the two free-text fields
+specific to waveform export.** Neither the hardcoded baseline nor the
+Basic profile includes Channel Label or Unformatted Text Value, so on
+every documented path both are written verbatim into every WFDB record:
 
 - **Channel Label `(003A,0203)`** -- becomes the `.hea` signal-line
   description whenever a channel has no coded Channel Source Sequence

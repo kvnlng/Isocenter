@@ -133,3 +133,134 @@ def test_dat_file_sits_next_to_the_header(exported):
     directory = os.path.dirname(exported)
     name = os.path.splitext(os.path.basename(exported))[0]
     assert os.path.exists(os.path.join(directory, f"{name}.dat"))
+
+
+# --- Final review Important 1/2/3, end-to-end against the reference reader ---
+#
+# `test_no_comment_lines_reach_the_output` and `test_units_are_reported_
+# correctly` above only ever build a header from benign fixture channels;
+# no input in either test can produce the defects below. These three
+# reproduce the final-review findings through a real
+# session.ingest() -> session.export() and read the result back with
+# PhysioNet's own `wfdb.rdheader`/`rdrecord`, not Gantry's own code.
+
+
+def test_channel_label_newline_cannot_manufacture_a_hea_comment(tmp_path):
+    """A Channel Label containing a newline must not be surfaced by the
+    reference reader as a real header comment.
+
+    Pre-fix, `wfdb.rdheader` returned
+    `comments=['Patient Jane Doe MRN9988776']` for exactly this input --
+    a PHI escape route, since this module's own docstring and
+    docs/waveforms.md both assert no comment lines are ever written.
+    """
+    import pydicom
+
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")], num_samples=50)
+    chdef = ds.WaveformSequence[0].ChannelDefinitionSequence[0]
+    del chdef.ChannelSourceSequence
+    chdef.ChannelLabel = "Lead I\n# Patient Jane Doe MRN9988776"
+
+    src = tmp_path / "src"
+    src.mkdir()
+    pydicom.dcmwrite(str(src / "ecg.dcm"), ds, enforce_file_format=True)
+
+    session = DicomSession(persistence_file=str(tmp_path / "inject.db"))
+    try:
+        session.ingest(str(src))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    record = _read(paths[0])
+    assert record.comments == [], (
+        "a newline embedded in Channel Label reached the reference "
+        f"reader as a real header comment: {record.comments!r}")
+
+    with open(paths[0], encoding="utf-8") as f:
+        raw_lines = f.readlines()
+    assert not any(line.startswith("#") for line in raw_lines)
+    assert "Patient Jane Doe MRN9988776" in "".join(raw_lines), (
+        "the description text should still be readable -- just not on "
+        "its own comment line")
+
+
+def test_units_with_embedded_whitespace_does_not_shift_fields_via_reference_reader(tmp_path):
+    """Embedded whitespace in `units` (field 3 of 9, NOT the last field)
+    must not shift every subsequent signal-line field for a conformant
+    reader.
+
+    Pre-fix, `wfdb.rdheader` returned `units=['mV']` and
+    `sig_name=['per s 16 0 0 1225 0 MDC_ECG_LEAD_I']` for CodeValue
+    "mV per s" -- a silently wrong signal name, no error raised.
+    """
+    import pydicom
+
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                           num_samples=50, units="mV per s")
+    src = tmp_path / "src"
+    src.mkdir()
+    pydicom.dcmwrite(str(src / "ecg.dcm"), ds, enforce_file_format=True)
+
+    session = DicomSession(persistence_file=str(tmp_path / "units.db"))
+    try:
+        session.ingest(str(src))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    record = _read(paths[0])
+    assert record.sig_name == ["MDC_ECG_LEAD_I"], (
+        "embedded whitespace in units shifted the signal-line fields: "
+        f"sig_name={record.sig_name!r} units={record.units!r}")
+
+
+def test_missing_channel_definitions_do_not_abort_the_export(tmp_path):
+    """NumberOfWaveformChannels > 0 with an empty Channel Definition
+    Sequence (non-conformant source) must not raise out of
+    session.export() and abort the whole batch.
+
+    Pre-fix: IndexError: list index out of range, propagating out of
+    session.export(folder, format="wfdb") with no per-instance guard.
+    """
+    import datetime
+
+    from gantry.entities import DicomItem, Instance, Patient, Series, Study
+    from gantry.io_handlers import populate_attrs
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")], num_samples=50)
+
+    patient = Patient("MISSING01", "ANON_MISSING01")
+    study = Study("1.2.3.MISSING.STUDY", datetime.date(2026, 1, 1))
+    series = Series("1.2.3.MISSING.SERIES", "ECG", 1)
+    instance = Instance("1.2.3.MISSING.SOP", ds.SOPClassUID, 1)
+
+    wf_item = DicomItem()
+    populate_attrs(ds.WaveformSequence[0], wf_item)
+    wf_item.sequences["003a,0200"].items = []  # non-conformant: empty
+    instance.add_sequence_item("5400,0100", wf_item)
+    instance.waveform_array = np.frombuffer(
+        ds.WaveformSequence[0].WaveformData, dtype="<i2"
+    ).reshape(50, 1).copy()
+
+    series.instances.append(instance)
+    study.series.append(series)
+    patient.studies.append(study)
+
+    session = DicomSession(":memory:")
+    session.store.patients.append(patient)
+
+    # Must not raise. Whatever the (fallback-calibrated) record looks
+    # like, if it was written at all it must be real WFDB the reference
+    # reader accepts -- not silent corruption.
+    paths = session.export(str(tmp_path / "out"), format="wfdb")
+    if paths:
+        record = _read(paths[0])
+        assert record.n_sig == 1

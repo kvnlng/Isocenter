@@ -11,7 +11,13 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # No continue-on-error: this job only runs on a weekly schedule (or
+    # manual dispatch), never on pull_request, so a real failure here
+    # cannot block anyone's PR -- it can only signal the thing it exists
+    # to signal. Previously it had BOTH continue-on-error: true AND
+    # `exit 1` on drift, which made the job report success regardless
+    # and left the ::warning:: annotation as the only signal, easy to
+    # miss on an unattended scheduled run.
     steps:
       - uses: actions/checkout@v4
 

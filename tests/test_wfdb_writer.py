@@ -192,3 +192,232 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
     assert rel_parts[1].startswith("Study_")
     assert "STUDY" in rel_parts[1]  # UID suffix of "1.2.3.4.STUDY"
     assert rel_parts[2].startswith("Series_3_ECG_")  # num + modality
+
+
+# --- Final review Important 1/2/3 -------------------------------------
+#
+# Three defects found in the whole-branch final review, reproduced
+# end-to-end through a real session.ingest() -> session.export() before
+# being fixed here:
+#
+# 1. A Channel Label containing a newline (e.g.
+#    "Lead I\n# Patient Jane Doe MRN9988776") made the .hea signal line
+#    embed a literal newline followed by a `#`-prefixed line.
+#    PhysioNet's own reader (`wfdb.rdheader`) surfaces that as a REAL
+#    header comment (`comments=['Patient Jane Doe MRN9988776']`),
+#    falsifying this module's own docstring and docs/waveforms.md's "No
+#    `#` comment lines are ever written" guarantee -- a PHI escape route
+#    on a de-identification product.
+# 2. `units` (Channel Sensitivity Units Sequence CodeValue) is field 3
+#    of 9 inside `gain(baseline)/units`, not the last field. CodeValue
+#    "mV per s" made wfdb.rdheader parse units=['mV'] and
+#    sig_name=['per s 16 0 0 1225 0 MDC_ECG_LEAD_I'] -- every field
+#    after gain silently wrong, no error raised.
+# 3. `channels[-1]` on an empty `waveform.channels` list (NumberOfWaveform
+#    Channels > 0 but an absent/empty Channel Definition Sequence) raised
+#    IndexError with no per-instance guard, aborting session.export()
+#    entirely -- one bad instance in a 500-patient batch would silently
+#    drop the other 499.
+
+
+def test_description_with_embedded_newline_cannot_inject_a_comment_line():
+    """Pre-fix, this failed with:
+
+        AssertionError: assert not True
+         +  where True = any(<genexpr>)
+
+    because `header.splitlines()` split the embedded '\\n' inside the
+    unsanitized description into its own '#...' line. PhysioNet's
+    `wfdb.rdheader` treats that line as a real header comment (verified
+    directly: `comments=['Patient Jane Doe MRN9988776']`) -- see
+    tests/test_wfdb_conformance.py for the reference-reader-level proof.
+    """
+    wf = _waveform(n_channels=1)
+    wf.channels[0].source_code = ""
+    wf.channels[0].label = "Lead I\n# Patient Jane Doe MRN9988776"
+    samples = np.zeros((100, 1), dtype=np.int16)
+    header = format_header("REC", wf, samples, "REC.dat")
+
+    lines = header.splitlines()
+    assert not any(line.startswith("#") for line in lines), (
+        f"a newline embedded in the channel description injected a "
+        f"'#' comment line; header was:\n{header}")
+    # The description must still be readable text, not silently dropped.
+    assert "Patient Jane Doe MRN9988776" in lines[1]
+
+
+def test_units_with_embedded_whitespace_does_not_shift_signal_line_fields():
+    """Pre-fix, this failed with:
+
+        AssertionError: assert '200(0)/mV' == '200(0)/mVpers'
+
+    because unsanitized "mV per s" left embedded spaces inside the
+    gain(baseline)/units field, which PhysioNet's reader parses as
+    units=['mV'] and shifts every subsequent field (sig_name became
+    'per s 16 0 0 1225 0 MDC_ECG_LEAD_I' instead of the real lead code)
+    -- see tests/test_wfdb_conformance.py for the reference-reader-level
+    proof.
+    """
+    wf = _waveform(n_channels=1, units="mV per s")
+    samples = np.zeros((100, 1), dtype=np.int16)
+    line = format_header("REC", wf, samples, "REC.dat").splitlines()[1].split()
+
+    assert line[2] == "200(0)/mVpers", (
+        "whitespace survived in the units field, which would shift "
+        f"every later field for a naive/spec-conformant parser: {line!r}")
+    # Field alignment intact: description is still the last, correct field.
+    assert line[-1] == "MDC_ECG_LEAD_0"
+
+
+def test_empty_channel_definitions_do_not_raise():
+    """NumberOfWaveformChannels > 0 but an absent/empty Channel
+    Definition Sequence (non-conformant source) must not crash via
+    `waveform.channels[-1]` on an empty list.
+
+    Pre-fix, this failed with:
+
+        IndexError: list index out of range
+
+    With no per-instance guard around the caller in
+    `WfdbExporter.export`, that exception propagated out of
+    `session.export(folder, format="wfdb")` and aborted the entire run
+    -- see test_one_failing_instance_does_not_abort_the_whole_export
+    below for the batch-level containment half of this fix.
+    """
+    wf = Waveform(sampling_frequency=500.0, num_channels=1, num_samples=100,
+                 bits_allocated=16, sample_interpretation="SS", channels=[])
+    samples = np.zeros((100, 1), dtype=np.int16)
+
+    header = format_header("REC", wf, samples, "REC.dat")
+
+    line = header.splitlines()[1].split()
+    assert line[0] == "REC.dat"
+    assert len(line) == 9, f"malformed signal line: {line!r}"
+
+
+def test_one_failing_instance_does_not_abort_the_whole_export(tmp_path, monkeypatch):
+    """A single instance whose write raises must not abort the whole
+    batch -- `WfdbExporter.export` must catch, log, and continue per
+    instance, the same containment `DicomExporter._export_instance_worker`
+    already provides for the DICOM format.
+
+    Pre-fix (no try/except around `_write_instance` in the per-instance
+    loop), this failed with the injected RuntimeError propagating all
+    the way out of `session.export()`, and GOOD01's record was never
+    written because BAD01 (first in patient order) aborted the loop
+    before GOOD01 was ever reached.
+    """
+    import datetime
+
+    from gantry.entities import DicomItem, Instance, Patient, Series, Study
+    from gantry.exporters.wfdb import WfdbExporter
+    from gantry.io_handlers import populate_attrs
+    from gantry.session import DicomSession
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    def _make_patient(patient_id):
+        ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                               patient_id=patient_id, num_samples=50)
+        patient = Patient(patient_id, f"ANON_{patient_id}")
+        study = Study(f"1.2.3.{patient_id}.STUDY", datetime.date(2026, 1, 1))
+        series = Series(f"1.2.3.{patient_id}.SERIES", "ECG", 1)
+        instance = Instance(f"1.2.3.{patient_id}.SOP", ds.SOPClassUID, 1)
+        wf_item = DicomItem()
+        populate_attrs(ds.WaveformSequence[0], wf_item)
+        instance.add_sequence_item("5400,0100", wf_item)
+        instance.waveform_array = np.frombuffer(
+            ds.WaveformSequence[0].WaveformData, dtype="<i2"
+        ).reshape(50, 1).copy()
+        series.instances.append(instance)
+        study.series.append(series)
+        patient.studies.append(study)
+        return patient
+
+    sess = DicomSession(":memory:")
+    # BAD01 sorts/iterates first -- if the loop aborts on it, GOOD01 is
+    # never reached, proving containment (not just exception timing).
+    sess.store.patients.append(_make_patient("BAD01"))
+    sess.store.patients.append(_make_patient("GOOD01"))
+
+    original_write_instance = WfdbExporter._write_instance
+
+    def _write_instance_maybe_boom(self, folder, patient, study, series, instance,
+                                   logger, used_names):
+        if patient.patient_id == "BAD01":
+            raise RuntimeError("simulated malformed instance from a non-conformant cart")
+        return original_write_instance(self, folder, patient, study, series,
+                                       instance, logger, used_names)
+
+    monkeypatch.setattr(WfdbExporter, "_write_instance", _write_instance_maybe_boom)
+
+    paths = sess.export(str(tmp_path / "out"), format="wfdb")
+
+    assert len(paths) == 1, (
+        f"expected exactly GOOD01's record despite BAD01 failing, got {paths!r}")
+    assert "GOOD01" in paths[0]
+
+
+def test_sanitize_preserves_falsy_zero():
+    """`_sanitize`'s `name if name is not None else ""` must not
+    collapse a legitimate falsy-but-meaningful value like the int 0
+    (InstanceNumber 0 is valid DICOM) to the empty string.
+
+    Pinned directly, not just through `_unique_record_name` (which
+    would otherwise mask a regression to the old `name or ""` -- see
+    the final review: reverting the falsy-zero fix alone left the full
+    97-test targeted suite green).
+    """
+    from gantry.exporters.wfdb import _sanitize
+
+    assert _sanitize(0) == "0"
+    assert _sanitize(None) == "record"
+    assert _sanitize("") == "record"
+
+
+def test_write_instance_with_no_sample_data_is_skipped_not_crashed(tmp_path, caplog):
+    """An instance that declares a Waveform Sequence but carries no
+    sample data (`get_waveform_data()` returns None) must be skipped --
+    logged and returned as None -- not crash in
+    `np.ascontiguousarray(None, dtype="<i2")`.
+
+    Calls `WfdbExporter._write_instance` DIRECTLY rather than through
+    `session.export()`: going through `export()` would let the
+    Important-3 per-instance containment fix (try/except around
+    `_write_instance`, added in this same review round) silently mask a
+    reverted guard -- a `TypeError` from `np.ascontiguousarray(None, ...)`
+    would be caught, logged, and skipped either way, so `paths == []`
+    would pass whether or not this specific guard exists. Calling the
+    method directly means a reverted guard raises straight into this
+    test, not into an unrelated safety net.
+    """
+    import datetime
+    import logging
+
+    from gantry.entities import DicomItem, Instance, Patient, Series, Study
+    from gantry.exporters.wfdb import WfdbExporter
+    from gantry.io_handlers import populate_attrs
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                           patient_id="NODATA01", num_samples=50)
+    patient = Patient("NODATA01", "ANON_NODATA01")
+    study = Study("1.2.3.NODATA.STUDY", datetime.date(2026, 1, 1))
+    series = Series("1.2.3.NODATA.SERIES", "ECG", 1)
+    instance = Instance("1.2.3.NODATA.SOP", ds.SOPClassUID, 1)
+    wf_item = DicomItem()
+    populate_attrs(ds.WaveformSequence[0], wf_item)
+    instance.add_sequence_item("5400,0100", wf_item)
+    # Deliberately leave waveform_array unset (None) and give it no
+    # loader -- get_waveform_data() returns None, simulating a Waveform
+    # Sequence with no backing sample data.
+    assert instance.get_waveform_data() is None
+
+    logger = logging.getLogger("gantry.wfdb_no_sample_data_test")
+
+    with caplog.at_level(logging.WARNING):
+        result = WfdbExporter()._write_instance(
+            str(tmp_path / "out"), patient, study, series, instance, logger, {})
+
+    assert result is None, f"expected None (skipped), got {result!r}"
+    assert any("no sample data" in r.message for r in caplog.records), (
+        "expected a warning explaining the instance was skipped")

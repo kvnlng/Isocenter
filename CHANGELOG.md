@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `session.export()` signature**: `export(folder, version=None, use_compression=True, ...)` is now `export(folder, format="dicom", **options)`. Keyword callers (`version="v2"`, etc.) are unaffected, but positional argument 2 now means `format`, not `version` — existing code calling `session.export("/out", "v2")` previously set `version="v2"`; it now raises `ValueError: Unknown export format 'v2'`. Pass `version` as a keyword argument to restore the old behavior: `session.export("/out", version="v2")`.
 - **Planning Moved to GitHub Issues**: `ROADMAP.md` and `docs/roadmap.md` are now pointers to the issue tracker. Open work is tracked under versioned milestones; `CHANGELOG.md` remains the canonical record of shipped features.
 - **Pylint Compliance**: Addressed hundreds of linting issues across `gantry/` and `tests/`.
   - Enforced `encoding='utf-8'` on all file operations.

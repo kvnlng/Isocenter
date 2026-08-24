@@ -7,7 +7,7 @@ jsonschema = pytest.importorskip("jsonschema")
 
 from gantry.entities import DicomItem
 from gantry.io_handlers import populate_attrs
-from gantry.murmur import build_annotations, SCHEMA_VERSION
+from gantry.murmur import build_annotations, write_annotations, SCHEMA_VERSION
 from gantry.waveform import Waveform
 from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation
 
@@ -94,6 +94,47 @@ def test_no_annotation_sequence_yields_no_findings():
     ds = build_ecg_dataset(num_samples=500)
     doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
     assert doc["findings"] == []
+
+
+def test_write_annotations_skips_when_there_are_no_findings(tmp_path):
+    """An annotation-free instance must produce NO `.annotations.json`
+    file -- `test_no_annotation_sequence_yields_no_findings` above only
+    covers `build_annotations` (the document shape); nothing previously
+    asserted `write_annotations`'s own empty-document skip. Mutating
+    `if not document.get("findings"): return None` to `if False:` left
+    every existing test green: an exported record would gain an
+    `annotations.json` with `"findings": []` and nothing would notice.
+    """
+    path = str(tmp_path / "rec.annotations.json")
+    document = {"schemaVersion": SCHEMA_VERSION, "source": "gantry/test", "findings": []}
+
+    result = write_annotations(path, document)
+
+    assert result is None, "empty-findings document should not be written"
+    assert not os.path.exists(path), (
+        "write_annotations wrote a file for a document with no findings")
+
+
+def test_write_annotations_writes_when_findings_are_present(tmp_path):
+    """Positive counterpart to the skip test above: a document that DOES
+    carry findings must actually be written, so the skip test above
+    cannot be satisfied by a `write_annotations` that always returns
+    None.
+    """
+    path = str(tmp_path / "rec.annotations.json")
+    document = {
+        "schemaVersion": SCHEMA_VERSION,
+        "source": "gantry/test",
+        "findings": [{"kind": "point", "startSample": 0, "category": "AFib"}],
+    }
+
+    result = write_annotations(path, document)
+
+    assert result == path
+    assert os.path.exists(path)
+    with open(path, encoding="utf-8") as f:
+        written = json.load(f)
+    assert written == document
 
 
 def test_output_validates_against_murmurs_published_schema():

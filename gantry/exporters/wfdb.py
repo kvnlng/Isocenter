@@ -13,7 +13,7 @@ import numpy as np
 from . import Exporter, register
 from ..io_handlers import export_folder_names, format_study_date
 from ..logger import get_logger
-from ..waveform import Waveform
+from ..waveform import Waveform, WaveformChannel
 
 WAVEFORM_SEQUENCE_TAG = "5400,0100"
 
@@ -88,6 +88,46 @@ def _format_number(value) -> str:
     return repr(round(as_float, 6))
 
 
+# Matches CR, LF, and other control characters a conformant WFDB reader
+# could interpret as ending the current line (vertical tab, form feed,
+# NEL, LINE/PARAGRAPH SEPARATOR). Deliberately narrower than "all
+# whitespace" -- ordinary spaces are legal and preserved.
+_LINE_BREAK_CHARS = re.compile(r"[\r\n\x0b\x0c\x1c-\x1f\x85  ]")
+
+
+def _sanitize_description(value: str) -> str:
+    """Remove characters that could inject a `.hea` comment line.
+
+    The signal-line description is the LAST field on a `header(5)`
+    signal line and legally runs to end of line, including embedded
+    spaces (PhysioNet's own reader parses `... 0 0 Lead I taken by Jane
+    Doe` as one `sig_name`) -- so this must NOT strip spaces. What it
+    must remove is any character a reader could treat as ending the
+    line: raw DICOM text (e.g. Channel Label, SH) is not guaranteed
+    free of control characters, and an embedded newline followed by a
+    line starting with `#` is read by `wfdb.rdheader` as a real header
+    comment (`comments=[...]`) -- a PHI escape route on a
+    de-identification product. Replacing line-breaking characters with
+    a space guarantees the description can never manufacture a second
+    physical line, so a leading `#` anywhere in the collapsed text stays
+    inert (interior text on a signal line, not a comment line).
+    """
+    return _LINE_BREAK_CHARS.sub(" ", str(value)).strip()
+
+
+def _sanitize_units(value: str) -> str:
+    """Remove ALL whitespace/control characters from the `units` field.
+
+    Unlike the description, `units` is field 3 of 9 inside
+    `gain(baseline)/units` -- it is NOT the last field on the line, so
+    any whitespace here (not just newlines) shifts every field after it.
+    Reproduced: CodeValue "mV per s" makes `wfdb.rdheader` parse
+    `units=['mV']` and `sig_name=['per s 16 0 0 1225 0 ...']` -- the
+    signal name and every numeric field after gain are silently wrong.
+    """
+    return re.sub(r"\s+", "", str(value))
+
+
 def format_header(record_name: str,
                   waveform: Waveform,
                   samples: np.ndarray,
@@ -97,7 +137,12 @@ def format_header(record_name: str,
 
     Emits no `#` comment lines. MIT-BIH convention puts age, sex, and
     diagnosis there, and readers render comments verbatim, so a comment
-    line is a PHI escape route.
+    line is a PHI escape route. This holds even when the channel
+    description (Channel Label/Channel Source, raw DICOM SH text) itself
+    contains an embedded CR/LF: `_sanitize_description` collapses any
+    line-breaking character to a space before it reaches the signal
+    line, so it cannot manufacture a second physical line that a
+    conformant reader would surface as a comment.
 
     Args:
         record_name (str): Record name (must match the .hea basename).
@@ -126,14 +171,26 @@ def format_header(record_name: str,
     lines = [" ".join(record_fields)]
 
     for idx in range(n_channels):
-        channel = (waveform.channels[idx]
-                   if idx < len(waveform.channels)
-                   else waveform.channels[-1])
+        if waveform.channels:
+            channel = (waveform.channels[idx]
+                       if idx < len(waveform.channels)
+                       else waveform.channels[-1])
+        else:
+            # Non-conformant source: NumberOfWaveformChannels > 0 but the
+            # Channel Definition Sequence is absent or empty, so there is
+            # no calibration to read. `waveform.channels[-1]` would raise
+            # IndexError here and, with no per-instance guard around the
+            # caller, abort an entire batch export over one bad instance.
+            # Fall back to an uncalibrated placeholder channel (gain 1.0,
+            # baseline 0, "mV") so this instance's other channels/other
+            # instances still export.
+            channel = WaveformChannel(label=f"unknown_channel_{idx}")
+
         column = samples[:, idx]
 
         gain = channel.gain()
         baseline = channel.wfdb_baseline()
-        units = channel.units or "mV"
+        units = _sanitize_units(channel.units or "mV")
 
         # header(5): <gain>(<baseline>)/<units>
         gain_field = f"{_format_number(gain)}({baseline})/{units}"
@@ -147,7 +204,7 @@ def format_header(record_name: str,
             str(int(column[0]) if column.size else 0),
             str(signal_checksum(column)),
             "0",
-            channel.wfdb_description(),
+            _sanitize_description(channel.wfdb_description()),
         ]))
 
     return "\n".join(lines) + "\n"
@@ -179,8 +236,22 @@ class WfdbExporter(Exporter):
             for study in patient.studies:
                 for series in study.series:
                     for instance in series.instances:
-                        path = self._write_instance(
-                            folder, patient, study, series, instance, logger, used_names)
+                        # Contain per-instance failures the way
+                        # `DicomExporter._export_instance_worker` does
+                        # (io_handlers.py): catch, log, continue. Without
+                        # this, one malformed instance out of hundreds
+                        # raises out of `session.export()` and aborts the
+                        # whole run, leaving every later patient silently
+                        # unexported with no indication on disk that the
+                        # run was partial.
+                        try:
+                            path = self._write_instance(
+                                folder, patient, study, series, instance, logger, used_names)
+                        except Exception as e:
+                            logger.error(
+                                f"WFDB export failed for instance "
+                                f"{instance.sop_instance_uid}: {e}")
+                            continue
                         if path:
                             written.append(path)
 
@@ -209,8 +280,17 @@ class WfdbExporter(Exporter):
         seen.add(candidate)
         return candidate
 
-    def _write_instance(self, folder, patient, study, series, instance, logger, used_names=None):
-        """Write one record. Returns the .hea path, or None if not a waveform."""
+    def _write_instance(self, folder, patient, study, series, instance, logger, used_names):
+        """Write one record. Returns the .hea path, or None if not a waveform.
+
+        `used_names` is REQUIRED (not `=None`): its absence used to
+        silently disable `_unique_record_name` deduplication, which is a
+        real data-loss bug (two instances missing InstanceNumber would
+        propose the same record name and the second write would silently
+        overwrite the first's `.hea`/`.dat`). Making it required removes
+        that latent reintroduction path -- a caller that forgets it now
+        gets a loud `TypeError` instead of quiet overwrite corruption.
+        """
         seq = instance.sequences.get(WAVEFORM_SEQUENCE_TAG)
         if seq is None or not seq.items:
             return None
@@ -232,8 +312,7 @@ class WfdbExporter(Exporter):
         os.makedirs(out_dir, exist_ok=True)
 
         base_name = record_name_for(patient, study, series, instance)
-        record_name = (self._unique_record_name(base_name, out_dir, used_names)
-                       if used_names is not None else base_name)
+        record_name = self._unique_record_name(base_name, out_dir, used_names)
         dat_filename = f"{record_name}.dat"
 
         # Format 16 is little-endian, channel-interleaved -- identical to the
@@ -334,8 +413,15 @@ class WfdbExporter(Exporter):
         return None
 
     @staticmethod
-    def _start_datetime(instance, study=None):
+    def _start_datetime(instance, study):
         """Record start time, read after de-identification.
+
+        `study` is REQUIRED (not `=None`): its absence used to silently
+        revert to reading the instance's own (never-shifted) date tags,
+        reinstating a Safe Harbor date leak past a genuine
+        `session.anonymize()` pass (see below). Pass `study=None`
+        explicitly for the documented "no study available" fallback --
+        that is a supported value, just no longer an accidental default.
 
         APPROVED DEVIATION from the brief (Task 9 review round 1,
         coordinator override): the shipped `gantry/resources/phi_tags.json`
