@@ -1,0 +1,28 @@
+name: Murmur Schema Drift
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare pinned schema against the published one
+        run: |
+          curl -fsSL https://kvnlng.github.io/Murmur/annotations.schema.json \
+            -o /tmp/live.json
+          if diff -q tests/fixtures/annotations.schema.json /tmp/live.json; then
+            echo "Pinned schema matches upstream."
+          else
+            echo "::warning::Murmur's published annotations schema has changed."
+            diff -u tests/fixtures/annotations.schema.json /tmp/live.json || true
+            exit 1
+          fi

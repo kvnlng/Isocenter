@@ -250,6 +250,22 @@ class WfdbExporter(Exporter):
         with open(hea_path, "w", encoding="utf-8") as f:
             f.write(header)
 
+        from ..murmur import build_annotations, write_annotations
+
+        try:
+            from .. import __version__ as gantry_version
+        except ImportError:
+            gantry_version = "0.0.0"
+
+        manufacturer = str(instance.attributes.get("0008,0070", "") or "").strip()
+        source = f"gantry/{gantry_version}"
+        if manufacturer:
+            source = f"{source} ({manufacturer})"
+
+        write_annotations(
+            os.path.join(out_dir, f"{record_name}.annotations.json"),
+            build_annotations(instance, waveform, source))
+
         return hea_path
 
     @staticmethod

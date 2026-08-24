@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kvnlng.github.io/Murmur/annotations.schema.json",
+  "title": "Murmur Studio annotations file",
+  "description": "Producer-facing wire format for <recordName>.annotations.json files consumed by Murmur Studio. Producers (analysis pipelines, classifiers, beat detectors) emit this file next to a WFDB .hea/.dat record; Murmur Studio resolves time fields into sample indices at import.",
+  "type": "object",
+  "required": ["schemaVersion", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "description": "Schema version. Currently only 1 is supported. The viewer rejects unknown versions at import."
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Default 'source' applied to findings that omit their own. Producer identifier — e.g. 'vf-onset-detector-v2', 'team-x.classifier.v1'. Free-form."
+    },
+    "findings": {
+      "type": "array",
+      "description": "The findings list. Empty arrays are valid (means: no findings detected).",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["kind", "category"],
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["startSample"] },
+        { "required": ["startUnixMS"] }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Stable identifier (UUID). The viewer mints one if absent, but if you want the analyst's confirm/dismiss state (in dispositions.json) to stick across producer re-runs you must supply a stable id here."
+        },
+        "kind": {
+          "enum": ["point", "range"],
+          "description": "Geometry. 'point' is a single sample (vertical rule at startSample). 'range' spans a half-open [startSample, endSample) interval (translucent fill)."
+        },
+        "startSample": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sample index (relative to the WFDB record's sample 0). Wins over startUnixMS when both are present — no precision loss."
+        },
+        "endSample": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "End sample, exclusive. Required for kind=='range' if you want the span rendered; otherwise the range collapses to a single sample at startSample."
+        },
+        "startUnixMS": {
+          "type": "integer",
+          "description": "Start time as UTC milliseconds since epoch. Resolved to a sample index at import using the recording's startUnixMS + sampleRate. Useful when the cluster works in absolute time."
+        },
+        "endUnixMS": {
+          "type": "integer",
+          "description": "End time as UTC milliseconds. Pairs with endSample semantics."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Semantic category. Drives color in the viewer. Common clinical categories (PVC, VT, VF, AFib, VF_onset, …) have hand-tuned colors; unknown categories get a deterministic FNV-1a → HSV hue so each new category stays stable across runs."
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional short display token rendered in the findings list. Falls back to category when omitted."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Producer model confidence, 0…1. Used by the findings panel's confidence-threshold filter."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Per-finding producer ID. Overrides the file-level 'source'. Lets a single file mix outputs from multiple producers."
+        },
+        "note": {
+          "type": "string",
+          "description": "Free-form analyst-readable text shown under the finding in the panel. No length limit, but keep it scannable."
+        },
+        "lead": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Channel/lead label the finding applies to (e.g. 'II', 'V1', 'aVR'). When set, the viewer can scope rendering to that lead only."
+        },
+        "evidenceContextSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Hint to the viewer for how many seconds of context to show when the analyst jumps to this finding from the panel."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schemaVersion": 1,
+      "source": "vf-onset-detector-v2",
+      "findings": [
+        {
+          "id": "B8A4E2C8-6C9A-4B0F-9E0E-1F2E3A4B5C6D",
+          "kind": "point",
+          "startSample": 12345,
+          "category": "PVC",
+          "confidence": 0.92
+        },
+        {
+          "id": "1D7F4A9C-2E5B-4C8E-9F1A-0B2D3E4F5A6B",
+          "kind": "range",
+          "startSample": 50000,
+          "endSample": 65000,
+          "category": "VF_onset",
+          "note": "Onset preceded by R-on-T",
+          "lead": "II",
+          "evidenceContextSeconds": 8.0
+        },
+        {
+          "kind": "point",
+          "startUnixMS": 1717854312500,
+          "category": "AFib",
+          "source": "rhythm-classifier-v1"
+        }
+      ]
+    }
+  ]
+}

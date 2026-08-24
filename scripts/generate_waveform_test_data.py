@@ -127,6 +127,44 @@ def build_ecg_dataset(num_samples=5000,
     return ds
 
 
+def add_annotation(ds, start_sample=100, end_sample=None,
+                   code_value="164889003", code_meaning="Atrial fibrillation",
+                   scheme="SCT", text=None, channel=1):
+    """Attach a Waveform Annotation Sequence item to `ds`.
+
+    Args:
+        ds (Dataset): Dataset to modify in place.
+        start_sample (int): 1-based Referenced Sample Position, per DICOM.
+        end_sample (int, optional): Second position, making this a SEGMENT.
+        code_value (str): Concept Name code value.
+        code_meaning (str): Concept Name code meaning.
+        scheme (str): Coding scheme designator.
+        text (str, optional): Unformatted Text Value.
+        channel (int): 1-based Referenced Waveform Channel.
+
+    Returns:
+        Dataset: The same dataset, for chaining.
+    """
+    ann = Dataset()
+    ann.ReferencedWaveformChannels = [0, channel]
+    ann.ConceptNameCodeSequence = [_code(code_value, code_meaning, scheme)]
+
+    if end_sample is None:
+        ann.TemporalRangeType = "POINT"
+        ann.ReferencedSamplePositions = [start_sample]
+    else:
+        ann.TemporalRangeType = "SEGMENT"
+        ann.ReferencedSamplePositions = [start_sample, end_sample]
+
+    if text is not None:
+        ann.UnformattedTextValue = text
+
+    existing = list(getattr(ds, "WaveformAnnotationSequence", []))
+    existing.append(ann)
+    ds.WaveformAnnotationSequence = existing
+    return ds
+
+
 def write_fixture(path, **kwargs):
     """Write a generated ECG dataset to `path` and return the path."""
     ds = build_ecg_dataset(**kwargs)
