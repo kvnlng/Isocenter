@@ -1,14 +1,13 @@
 name: Gantry Tests
 
 on:
+  # Post-merge verification only. Without the branch filter this also fires
+  # on every push to a PR branch, producing a second, duplicate run whose
+  # check contexts share the names `main` requires -- ambiguous for branch
+  # protection and twice the CI cost.
   push:
-    paths:
-      - 'gantry/**'
-      - 'tests/**'
-      - 'scripts/**'
-      - 'setup.py'
-      - 'pytest.ini'
-      - '.github/workflows/tests.yml'
+    branches:
+      - main
   # Deliberately NOT path-filtered. `main` requires these checks, and a
   # required check that never runs leaves a PR blocked forever "waiting
   # for status" rather than failing. Every PR into main runs the suite,
