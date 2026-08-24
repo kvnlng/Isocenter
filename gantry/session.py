@@ -1626,7 +1626,29 @@ class DicomSession:
     # EXPORT
     # =========================================================================
 
-    def export(self, folder: str, version=None, use_compression=True,
+    def export(self, folder: str, format: str = "dicom", **options):
+        """Export the session to a directory in the requested format.
+
+        Args:
+            folder (str): Output directory.
+            format (str): Registered format name. "dicom" (default) writes
+                cleaned DICOM files; "wfdb" writes PhysioNet WFDB records.
+            **options: Passed through to the selected exporter. See
+                `_export_dicom` for the DICOM format's options.
+
+        Returns:
+            The exporter's return value. The DICOM exporter returns None
+            for backward compatibility.
+
+        Raises:
+            ValueError: If `format` is not a registered export format.
+        """
+        from . import exporters
+
+        exporter = exporters.get_exporter(format)
+        return exporter.export(self, folder, **options)
+
+    def _export_dicom(self, folder: str, version=None, use_compression=True,
                check_burned_in=False, check_reversibility=True, patient_ids: List[str] = None, show_progress=True,
                # Legacy/Test Support arguments
                compression=None, safe=False, subset=None):
