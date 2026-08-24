@@ -10,13 +10,20 @@ on:
       - 'requirements.txt'
       - 'pytest.ini'
       - '.github/workflows/tests.yml'
+  # Deliberately NOT path-filtered. `main` requires these checks, and a
+  # required check that never runs leaves a PR blocked forever "waiting
+  # for status" rather than failing. Every PR into main runs the suite,
+  # whatever it touches.
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
