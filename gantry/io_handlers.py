@@ -847,13 +847,11 @@ def export_folder_names(patient, study, series):
     not reimplement this logic locally, or the trees will drift apart on
     the next edit to either one.
 
-    Uses `ConfigLoader.clean_filename`, the sanitizer `_export_dicom`
-    itself uses -- NOT `DicomExporter._sanitize` (stricter, used
-    elsewhere for legacy folder naming) and NOT the even-stricter
-    per-format record-*name* sanitizers such as
-    `gantry.exporters.wfdb._sanitize` (which forbids spaces, appropriate
-    for a bare record-name token but not for a folder name that must
-    match `_export_dicom`'s output character-for-character).
+    Uses `ConfigLoader.clean_filename`, the single sanitizer for folder
+    names -- NOT the even-stricter per-format record-*name* sanitizers
+    such as `gantry.exporters.wfdb._sanitize` (which forbids spaces,
+    appropriate for a bare record-name token but not for a folder name
+    that must match `_export_dicom`'s output character-for-character).
 
     Args:
         patient (Patient): Patient root.
@@ -1209,24 +1207,6 @@ class DicomExporter:
                 ds.add_new(Tag(g, e), vr, v)
             except Exception as e:
                 get_logger().warning(f"Failed to merge tag {t} ({v}): {e}")
-
-    @staticmethod
-    def _sanitize(filename: str) -> str:
-        """
-        Removes illegal characters from filenames.
-
-        Args:
-            filename (str): Input filename.
-
-        Returns:
-            str: Sanitized filename string.
-        """
-        if not filename:
-            return "Unknown"
-        # Keep alphanumeric, dashes, underscores, spaces (maybe replace spaces with underscores?)
-        # For strictness:
-        safe = "".join([c for c in str(filename) if c.isalnum() or c in (' ', '.', '-', '_')])
-        return safe.strip().replace(" ", "_")
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any]):

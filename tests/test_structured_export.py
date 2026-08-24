@@ -6,6 +6,7 @@ import datetime
 import numpy as np
 from gantry.io_handlers import DicomExporter
 from gantry.entities import Patient, Study, Series, Instance
+from gantry.config_manager import ConfigLoader
 
 @pytest.fixture
 def mock_patient(tmp_path):
@@ -83,7 +84,7 @@ def test_structured_export(mock_patient, mock_validator, tmp_path):
 
 def test_sanitization():
     unsafe = "Bad/Name: With * Characters?"
-    safe = DicomExporter._sanitize(unsafe)
+    safe = ConfigLoader.clean_filename(unsafe)
     assert "/" not in safe
     assert ":" not in safe
     assert "*" not in safe

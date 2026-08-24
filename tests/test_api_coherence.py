@@ -129,3 +129,26 @@ def test_export_folder_naming_is_case_insensitive_to_description_tag_keys():
     assert folder_lower == folder_upper, (
         f"same Series Description under different tag-key casing produced "
         f"different folder names: {folder_lower!r} != {folder_upper!r}")
+
+
+def test_one_sanitizer_for_folder_names():
+    """Two folder-name sanitizers is one too many.
+
+    `wfdb._sanitize` is deliberately excluded -- WFDB record names are
+    bare ASCII tokens with different rules, documented as such.
+    """
+    from gantry.io_handlers import DicomExporter
+
+    assert not hasattr(DicomExporter, "_sanitize"), (
+        "DicomExporter._sanitize still exists alongside "
+        "ConfigLoader.clean_filename; both sanitize folder names")
+
+
+def test_a_zero_series_number_is_not_renamed_to_unknown():
+    """`_sanitize(0)` returned 'Unknown' because `0` is falsy.
+
+    A series number of 0 is a real value, not a missing one.
+    """
+    from gantry.config_manager import ConfigLoader
+
+    assert ConfigLoader.clean_filename(0) == "0"
