@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: Python 3.12 or newer is now required.** `python_requires` previously claimed `>=3.9`, which was not merely untested but false: `gantry/entities.py` and `gantry/privacy.py` use `@dataclass(slots=True)` (Python 3.10+), so a 3.9 install succeeded and then raised at import. The declared dependency set (numpy, imagecodecs) resolves only on 3.12+. CI now tests 3.12, 3.13, 3.14 and 3.14t, so the floor is a tested claim rather than an assertion.
+- **BREAKING: `pytesseract` moved from a hard dependency to the `ocr` extra.** It was already imported defensively (`gantry/pixel_analysis.py` sets `HAS_OCR = False` when absent), so it was never truly required. Install with `pip install "gantry[ocr]"` to keep burned-in-text detection.
+- **BREAKING: `requirements.txt` removed.** `setup.py` is now the single source of truth for dependencies. The two lists had drifted — `python-dotenv` was in one and `pytesseract` in the other — and CI installed both, which hid the drift. Use `pip install -e ".[tests]"` for a development environment.
+- **`pydicom` is now capped below 4.0.** `gantry/__init__.py` assigns `pydicom.config.pixel_data_handlers`, which 3.x deprecates and 4.0 removes. The cap prevents a silent break on a future pydicom release.
 - **BREAKING: `session.export()` signature**: `export(folder, version=None, use_compression=True, ...)` is now `export(folder, format="dicom", **options)`. Keyword callers (`version="v2"`, etc.) are unaffected, but positional argument 2 now means `format`, not `version` — existing code calling `session.export("/out", "v2")` previously set `version="v2"`; it now raises `ValueError: Unknown export format 'v2'`. Pass `version` as a keyword argument to restore the old behavior: `session.export("/out", version="v2")`.
 - **Planning Moved to GitHub Issues**: `ROADMAP.md` and `docs/roadmap.md` are now pointers to the issue tracker. Open work is tracked under versioned milestones; `CHANGELOG.md` remains the canonical record of shipped features.
 - **Pylint Compliance**: Addressed hundreds of linting issues across `gantry/` and `tests/`.
@@ -31,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Waveform Data Loss**: Waveform Data `(5400,1010)` was silently discarded at ingest because `populate_attrs` skips all `OB`/`OW` VRs. Waveform IODs now round-trip intact.
+- **Broken install from `setup.py` alone**: `gantry/config_manager.py` imports `python-dotenv` unguarded, but it was declared only in `requirements.txt`. A `pip install` therefore succeeded and then failed with `ModuleNotFoundError: No module named 'dotenv'` on `import gantry`. CI installed both files, so it never saw this. `tests/test_packaging_contract.py` now asserts that every unguarded module-scope import is declared.
 
 ## [0.6.1] - 2026-01-23
 
