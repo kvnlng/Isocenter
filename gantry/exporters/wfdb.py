@@ -11,7 +11,7 @@ from typing import List, Optional
 import numpy as np
 
 from . import Exporter, register
-from ..io_handlers import export_folder_names
+from ..io_handlers import export_folder_names, format_study_date
 from ..logger import get_logger
 from ..waveform import Waveform
 
@@ -53,7 +53,10 @@ def _sanitize(name: str) -> str:
     land in character-for-character identical directories. Do not use
     this function for folder names, or the two trees will diverge again.
     """
-    cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", str(name or ""))
+    # NOTE: `name or ""` would discard a legitimate falsy-but-meaningful
+    # value like the int 0 (InstanceNumber 0 is valid DICOM), collapsing
+    # it to the "record" fallback below. Test for None explicitly instead.
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", str(name if name is not None else ""))
     cleaned = re.sub(r"_+", "_", cleaned).strip("_")
     return cleaned or "record"
 
@@ -63,7 +66,12 @@ def record_name_for(patient, study, series, instance) -> str:
 
     Called after anonymization, so `patient.patient_id` is the pseudonym,
     not the source MRN. The instance number disambiguates multiple
-    acquisitions within one series.
+    acquisitions within one series -- but InstanceNumber is frequently
+    absent (`io_handlers.py` defaults it to 0), and multiple instances
+    missing it all produce the SAME base name here. This function does
+    not resolve that collision by itself; callers that write more than
+    one instance into the same directory must disambiguate the result
+    (see `WfdbExporter._unique_record_name`).
     """
     return "_".join([
         _sanitize(patient.patient_id),
@@ -162,6 +170,7 @@ class WfdbExporter(Exporter):
         logger = get_logger()
         patient_ids = options.get("patient_ids")
         written = []
+        used_names = {}  # out_dir -> set of record names already claimed
 
         for patient in session.store.patients:
             if patient_ids and patient.patient_id not in patient_ids:
@@ -171,14 +180,36 @@ class WfdbExporter(Exporter):
                 for series in study.series:
                     for instance in series.instances:
                         path = self._write_instance(
-                            folder, patient, study, series, instance, logger)
+                            folder, patient, study, series, instance, logger, used_names)
                         if path:
                             written.append(path)
 
         logger.info(f"WFDB export complete. {len(written)} records written.")
         return written
 
-    def _write_instance(self, folder, patient, study, series, instance, logger):
+    @staticmethod
+    def _unique_record_name(base_name, out_dir, used_names):
+        """Disambiguate record names that collide within one output directory.
+
+        `record_name_for` derives its instance component from
+        InstanceNumber, which is frequently absent -- `io_handlers.py`
+        defaults it to 0, and `_sanitize` used to collapse that (and now
+        renders it as the literal digit "0", still identical across every
+        instance missing InstanceNumber). Two instances proposing the
+        same record name in the same directory would otherwise silently
+        overwrite each other's `.hea`/`.dat` files. This guarantees a
+        unique name per directory deterministically, in write order.
+        """
+        seen = used_names.setdefault(out_dir, set())
+        candidate = base_name
+        suffix = 2
+        while candidate in seen:
+            candidate = f"{base_name}_{suffix}"
+            suffix += 1
+        seen.add(candidate)
+        return candidate
+
+    def _write_instance(self, folder, patient, study, series, instance, logger, used_names=None):
         """Write one record. Returns the .hea path, or None if not a waveform."""
         seq = instance.sequences.get(WAVEFORM_SEQUENCE_TAG)
         if seq is None or not seq.items:
@@ -200,7 +231,9 @@ class WfdbExporter(Exporter):
         out_dir = os.path.join(folder, subj_name, study_folder, series_folder)
         os.makedirs(out_dir, exist_ok=True)
 
-        record_name = record_name_for(patient, study, series, instance)
+        base_name = record_name_for(patient, study, series, instance)
+        record_name = (self._unique_record_name(base_name, out_dir, used_names)
+                       if used_names is not None else base_name)
         dat_filename = f"{record_name}.dat"
 
         # Format 16 is little-endian, channel-interleaved -- identical to the
@@ -211,7 +244,7 @@ class WfdbExporter(Exporter):
 
         header = format_header(
             record_name, waveform, samples, dat_filename,
-            start_datetime=self._start_datetime(instance))
+            start_datetime=self._start_datetime(instance, study))
 
         hea_path = os.path.join(out_dir, f"{record_name}.hea")
         with open(hea_path, "w", encoding="utf-8") as f:
@@ -220,16 +253,47 @@ class WfdbExporter(Exporter):
         return hea_path
 
     @staticmethod
-    def _start_datetime(instance):
-        """Record start time, read after de-identification.
+    def _instance_time_of_day(instance):
+        """Best-effort time-of-day from the instance's own timestamp tags.
 
-        Uses Acquisition DateTime (0008,002A), falling back to Study Date +
-        Study Time. This runs post-remediation, so the values are already
-        shifted by the per-patient offset -- the header carries shifted
-        timing, never a source timestamp.
+        SHIFT_DATE (see `_start_datetime` below) only ever moves a date,
+        never a time-of-day, so the time component always comes from here
+        regardless of whether the session has been anonymized.
 
-        Returns None when no usable value exists, which omits the timing
-        fields from the record line entirely.
+        Returns a `datetime.time`, or None if no usable value exists.
+        """
+        from datetime import datetime
+
+        raw = str(instance.attributes.get("0008,002a", "") or "").strip()
+        if raw:
+            stamp = raw.split("+")[0].split("-")[0].strip()
+            for fmt in ("%Y%m%d%H%M%S.%f", "%Y%m%d%H%M%S", "%Y%m%d%H%M"):
+                try:
+                    return datetime.strptime(stamp, fmt).time()
+                except ValueError:
+                    continue
+
+        time_part = str(instance.attributes.get("0008,0030", "") or "").strip()
+        if time_part:
+            stamp = time_part.split(".")[0]
+            for fmt in ("%H%M%S", "%H%M"):
+                try:
+                    return datetime.strptime(stamp, fmt).time()
+                except ValueError:
+                    continue
+
+        return None
+
+    @staticmethod
+    def _instance_only_datetime(instance):
+        """Fallback datetime built purely from instance tags.
+
+        Used when no `Study` is available, or the Study has no usable
+        date. This is real (possibly un-shifted) timing, and that is
+        correct here, not a leak: it mirrors how every other field this
+        tool does not touch behaves before `session.anonymize()` runs.
+        Suppressing timing on an un-anonymized session would be a design
+        change, not a bug fix.
         """
         from datetime import datetime
 
@@ -252,6 +316,55 @@ class WfdbExporter(Exporter):
                 return None
 
         return None
+
+    @staticmethod
+    def _start_datetime(instance, study=None):
+        """Record start time, read after de-identification.
+
+        APPROVED DEVIATION from the brief (Task 9 review round 1,
+        coordinator override): the shipped `gantry/resources/phi_tags.json`
+        contains no date tags, so instance-level Acquisition DateTime
+        (0008,002A), Study Date (0008,0020), and Study Time (0008,0030)
+        are NEVER covered by the default remediation config and are
+        NEVER shifted by `session.anonymize()`. The date shift that
+        actually runs is a Study-level scan (`gantry/privacy.py`,
+        `PhiScanner._scan_study`) whose SHIFT_DATE remediation
+        (`gantry/remediation.py`) writes the new date onto
+        `study.study_date` and sets `study.date_shifted = True`. Reading
+        the instance tags as "post-remediation" (the original Task 9
+        Step 3 approach) was therefore reading a field that is never
+        remediated -- a real Safe Harbor date leak past a genuine
+        anonymize() pass.
+
+        This reads the DATE from `study.study_date` -- the field SHIFT_DATE
+        actually writes -- and combines it with the instance's own
+        time-of-day (SHIFT_DATE never touches time-of-day, so that part is
+        always sourced from the instance, shifted session or not).
+
+        Falls back to instance-only date+time when `study` is not
+        supplied, or has no usable `study_date`: on an un-anonymized
+        session (or a session with no date at all), the header carries
+        real timing, exactly like every other un-remediated field. This
+        function does not suppress timing on an un-anonymized session --
+        that would be a design change, not a bug fix.
+
+        Returns None when no usable value exists anywhere.
+        """
+        from datetime import datetime
+
+        time_of_day = WfdbExporter._instance_time_of_day(instance)
+
+        if study is not None:
+            normalized = format_study_date(getattr(study, "study_date", None))
+            if normalized:
+                try:
+                    shifted_date = datetime.strptime(normalized, "%Y%m%d").date()
+                    return datetime.combine(
+                        shifted_date, time_of_day or datetime.min.time())
+                except ValueError:
+                    pass
+
+        return WfdbExporter._instance_only_datetime(instance)
 
 
 register("wfdb", WfdbExporter)

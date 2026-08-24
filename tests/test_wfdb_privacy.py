@@ -46,7 +46,17 @@ def test_channel_label_is_indexed_for_phi_scanning(session_with_ecg):
 def test_header_contains_no_comment_lines(session_with_ecg):
     session, tmp_path = session_with_ecg
     paths = session.export(str(tmp_path / "out"), format="wfdb")
-    assert not any(line.startswith("#") for line in _header_text(paths).splitlines())
+    header = _header_text(paths)
+    # Positive precondition: guard against a vacuous pass. An empty (or
+    # missing) header would also contain no "#" lines, so first prove the
+    # header is real and has the shape we expect -- a record line plus at
+    # least one signal line -- before trusting the negative assertion.
+    assert paths, "export produced no .hea files"
+    assert header.strip(), "header file was empty"
+    lines = header.splitlines()
+    assert len(lines) >= 2, "header has no signal line beyond the record line"
+    assert len(lines[0].split()) >= 4, "record line missing expected leading fields"
+    assert not any(line.startswith("#") for line in lines)
 
 
 def test_record_name_excludes_the_source_patient_id(session_with_ecg):
@@ -85,44 +95,115 @@ def test_patient_name_never_appears_in_output(session_with_ecg):
     assert "Jane" not in header
 
 
-def test_start_datetime_reflects_the_shifted_acquisition_time(tmp_path):
-    """The header must carry shifted timing, not the source timestamp."""
+def test_header_date_reflects_the_real_shifted_study_date(tmp_path):
+    """The header date must come from a REAL `session.anonymize()` shift,
+    not merely an injected instance tag.
+
+    ROUND-1 DEFECT (coordinator CRITICAL 1, fixed here): the shipped
+    `gantry/resources/phi_tags.json` has no date tags, so instance-level
+    Acquisition DateTime (0008,002A) / Study Date (0008,0020) / Study
+    Time (0008,0030) are never covered by the default remediation config
+    and are NEVER shifted by `session.anonymize()`. The date shift that
+    actually runs is a Study-level scan (`gantry/privacy.py:_scan_study`)
+    whose SHIFT_DATE remediation (`gantry/remediation.py`) writes the new
+    date onto `study.study_date` and sets `study.date_shifted = True`.
+    `_start_datetime` must read THAT field, not the instance tags, or the
+    header silently leaks the real source date past a genuine anonymize
+    pass -- a real Safe Harbor violation, not a hypothetical one.
+
+    This test runs a REAL `session.anonymize()` (no hand-injected tags)
+    and asserts the header date equals the shifted `study.study_date`
+    AND differs from the untouched source date.
+    """
     src = tmp_path / "src"
     src.mkdir()
     write_fixture(str(src / "ecg.dcm"), num_samples=100)
+    # Fixture source date: scripts.generate_waveform_test_data sets
+    # StudyDate="20260101" / AcquisitionDateTime="20260101101530.000000".
+    source_date_token = "01/01/2026"
 
     session = DicomSession(persistence_file=str(tmp_path / "shift.db"))
     try:
         session.ingest(str(src))
+        session.anonymize()
+        study = session.store.patients[0].studies[0]
+
+        # Positive precondition: anonymize() really shifted the Study, so
+        # a passing date-comparison below reflects real remediation, not
+        # an unrelated no-op.
+        assert study.date_shifted is True, (
+            "study was not marked date_shifted; anonymize() did not run "
+            "the SHIFT_DATE remediation this test depends on")
+        assert study.study_date is not None, "study_date is missing after anonymize()"
+        expected_date_token = study.study_date.strftime("%d/%m/%Y")
+        assert expected_date_token != source_date_token, (
+            "shifted study_date coincides with the source date by chance; "
+            "this test cannot distinguish shifted from unshifted timing")
+
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+        assert paths, "export produced no .hea files"
+        header = _header_text(paths)
+        assert header.strip(), "header file was empty"
+        record_line = header.splitlines()[0].split()
+        assert len(record_line) == 6, (
+            f"expected record line with timing fields, got: {record_line!r}")
+    finally:
+        session.close()
+
+    assert record_line[5] == expected_date_token
+    assert record_line[5] != source_date_token
+    assert source_date_token not in " ".join(record_line)
+
+
+def test_start_datetime_falls_back_to_instance_tags_without_study_date(tmp_path):
+    """Fall back to instance tags only when `study.study_date` is absent.
+
+    Un-anonymized session (no `session.anonymize()` call): `study.study_date`
+    still holds real (un-shifted) timing like every other un-remediated
+    field, so `_start_datetime` uses it -- there is no policy of
+    suppressing timing on un-anonymized sessions (that would be a design
+    change per the coordinator, not a bug fix). To exercise the true
+    "study has no date at all" fallback path, this test clears
+    `study.study_date` directly and confirms the instance's own Acquisition
+    DateTime is used instead.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    write_fixture(str(src / "ecg.dcm"), num_samples=100)
+
+    session = DicomSession(persistence_file=str(tmp_path / "fallback.db"))
+    try:
+        session.ingest(str(src))
+        study = session.store.patients[0].studies[0]
+        study.study_date = None
         instance = session.store.patients[0].studies[0].series[0].instances[0]
-        # Simulate the remediation pipeline having shifted the acquisition time.
         instance.set_attr("0008,002a", "20250615081500.000000")
 
         paths = session.export(str(tmp_path / "out"), format="wfdb")
-        record_line = _header_text(paths).splitlines()[0].split()
+        assert paths, "export produced no .hea files"
+        header = _header_text(paths)
+        assert header.strip(), "header file was empty"
+        record_line = header.splitlines()[0].split()
+        assert len(record_line) == 6, (
+            f"expected record line with timing fields, got: {record_line!r}")
     finally:
         session.close()
 
     assert record_line[4] == "08:15:00"
     assert record_line[5] == "15/06/2025"
-    assert "2026" not in " ".join(record_line)
 
 
 def test_missing_acquisition_datetime_omits_timing_fields(tmp_path):
     """No usable date anywhere -> timing fields are omitted entirely.
 
     DEVIATION FROM BRIEF: the brief's Step 1 version of this test clears
-    only Acquisition DateTime (0008,002A). But `_start_datetime`'s own
-    Step-3-specified fallback reads Study Date (0008,0020) + Study Time
-    (0008,0030) when Acquisition DateTime is absent -- and the fixture
-    (scripts.generate_waveform_test_data) always populates both. So the
-    brief's version of this test exercises the *fallback* path (and
-    correctly produces 6 fields, not 4), contradicting its own name and
-    the asserted `len(record_line) == 4`. This is a genuine mismatch
-    between the brief's test and the brief's own implementation, not a
-    production bug: see the Task 9 report. Clearing Study Date too is
-    required to reach the "no usable value at all" path this test's name
-    describes.
+    only Acquisition DateTime (0008,002A). But timing now also has a
+    `study.study_date` source (coordinator CRITICAL 1 fix), and the
+    original instance-tag fallback (Study Date (0008,0020) + Study Time
+    (0008,0030)) still applies beneath that -- and the fixture
+    (scripts.generate_waveform_test_data) always populates both. So
+    reaching "no usable value anywhere" requires clearing all three:
+    `study.study_date`, Acquisition DateTime, and Study Date.
     """
     src = tmp_path / "src"
     src.mkdir()
@@ -131,6 +212,8 @@ def test_missing_acquisition_datetime_omits_timing_fields(tmp_path):
     session = DicomSession(persistence_file=str(tmp_path / "nodate.db"))
     try:
         session.ingest(str(src))
+        study = session.store.patients[0].studies[0]
+        study.study_date = None
         instance = session.store.patients[0].studies[0].series[0].instances[0]
         instance.set_attr("0008,002a", "")
         instance.set_attr("0008,0020", "")
@@ -221,36 +304,120 @@ def test_uncoded_channel_label_fallback_characterization(tmp_path):
         assert len(lines) >= 2, "header has no signal line to inspect"
         signal_line = lines[1]
         # header(5) signal lines are 9 whitespace-delimited fields, with
-        # the description as the final (9th) field. FREE_TEXT_MARKER
-        # itself contains spaces, so split(maxsplit=8) is required to
-        # capture it whole; a naive split() would fragment it.
-        naive_fields = signal_line.split()
+        # the description as the final (9th) field, legally running to
+        # end of line -- the PhysioNet `wfdb` 4.3.1 reference reader
+        # parses a line ending "... 0 0 Lead I taken by Jane Doe" as
+        # sig_name=['Lead I taken by Jane Doe']. FREE_TEXT_MARKER itself
+        # contains spaces, so split(maxsplit=8) is required to capture it
+        # whole and matches how a spec-conformant reader treats it.
         description_field = signal_line.split(maxsplit=8)[-1]
     finally:
         session.close()
 
     # CHARACTERIZATION (evidence, not a safety guarantee -- see module
-    # docstring above; report, do not silently "fix"):
-    #
-    # (1) wfdb_description() falls back to the raw ChannelLabel when
-    #     source_code is empty, so the free-text marker DOES reach the
-    #     .hea signal line's description field verbatim.
+    # docstring above; report, do not silently "fix"): wfdb_description()
+    # falls back to the raw ChannelLabel when source_code is empty, so
+    # the free-text marker DOES reach the .hea signal line's description
+    # field verbatim. Embedded whitespace in that field is spec-conformant
+    # header(5) (see reference-reader evidence above), not a format
+    # defect -- only the PHI question is live here.
     assert description_field == FREE_TEXT_MARKER, (
         "characterization assumption changed: expected the free-text "
         "ChannelLabel fallback to reach the .hea description field "
         f"verbatim; got {description_field!r} instead. If this fallback "
         "was fixed, update this test to match the new (safer) behaviour "
         "instead of deleting the assertion.")
-    # (2) Because format_header() does not sanitize or quote the
-    #     description field, free text containing spaces also fragments
-    #     the header(5) *field count* itself for any reader that
-    #     whitespace-splits the signal line (the conventional way to
-    #     parse header(5)) -- a second-order structural defect riding on
-    #     top of the PHI leak.
-    assert len(naive_fields) != 9, (
-        "expected the free-text description to fragment the naive "
-        "whitespace split away from 9 fields (demonstrating header(5) "
-        f"field-count corruption); got exactly 9: {naive_fields!r}. If "
-        "the field count is now stable, the fragmentation concern in the "
-        "Task 9 report may no longer apply -- update this assertion to "
-        "match.")
+
+
+# --- Record-name collision: instances missing InstanceNumber (Task 9 round 2, IMPORTANT 6) ---
+#
+# `record_name_for` (gantry/exporters/wfdb.py) derives its instance
+# component from `instance.instance_number`, but `io_handlers.py` defaults
+# a missing InstanceNumber to 0 (`row['instance_number'] or 0`), and
+# `_sanitize(0)` collapsed to the literal token "record" (0 is falsy, so
+# `name or ""` discarded it) -- so every instance lacking InstanceNumber in
+# one series proposed the SAME record name. The second instance's write
+# would silently clobber the first's `.hea`/`.dat` files: real data loss,
+# not just a cosmetic naming collision.
+
+
+def _write_series_with_two_uncounted_instances(root, patient_id="WFTEST001",
+                                               patient_name="Waveform^Test"):
+    """Two instances in the same Study+Series, both missing InstanceNumber,
+    with different sample counts so a collision (one overwriting the
+    other) is unambiguously detectable after the fact.
+    """
+    ds1 = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                            patient_id=patient_id, patient_name=patient_name,
+                            num_samples=40)
+    ds2 = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                            patient_id=patient_id, patient_name=patient_name,
+                            num_samples=60)
+    ds2.StudyInstanceUID = ds1.StudyInstanceUID
+    ds2.SeriesInstanceUID = ds1.SeriesInstanceUID
+    del ds1.InstanceNumber
+    del ds2.InstanceNumber
+
+    import pydicom
+    os.makedirs(root, exist_ok=True)
+    p1 = os.path.join(root, "a.dcm")
+    p2 = os.path.join(root, "b.dcm")
+    pydicom.dcmwrite(p1, ds1, enforce_file_format=True)
+    pydicom.dcmwrite(p2, ds2, enforce_file_format=True)
+    return p1, p2
+
+
+def test_two_instances_missing_instance_number_get_distinct_records(tmp_path):
+    """Two instances that both default to instance_number=0 must not
+    overwrite each other's WFDB record.
+    """
+    src = tmp_path / "src"
+    dcm1, dcm2 = _write_series_with_two_uncounted_instances(str(src))
+
+    # Precondition: both source files really lack InstanceNumber, so a
+    # collision below reflects export behaviour, not a broken fixture.
+    import pydicom
+    for p in (dcm1, dcm2):
+        raw = pydicom.dcmread(p)
+        assert not hasattr(raw, "InstanceNumber"), f"{p} unexpectedly has InstanceNumber"
+
+    session = DicomSession(persistence_file=str(tmp_path / "dupnum.db"))
+    try:
+        session.ingest(str(src))
+        series = session.store.patients[0].studies[0].series[0]
+        # Precondition: ingestion really produced two instances in one
+        # series, both defaulted to instance_number 0 -- the exact
+        # collision this test targets.
+        assert len(series.instances) == 2, (
+            f"expected 2 instances in one series, got {len(series.instances)}")
+        assert {i.instance_number for i in series.instances} == {0}, (
+            "expected both instances to default instance_number to 0; "
+            f"got {[i.instance_number for i in series.instances]!r}")
+
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert len(paths) == 2, (
+        f"expected 2 distinct .hea files, got {len(paths)}: {paths!r} "
+        "-- a naming collision silently dropped one record")
+    assert len(set(paths)) == 2, "the two .hea paths were not actually distinct"
+
+    sample_counts = []
+    for hea_path in paths:
+        with open(hea_path, encoding="utf-8") as f:
+            record_line = f.readline().split()
+        assert len(record_line) >= 4, f"malformed record line in {hea_path}: {record_line!r}"
+        n_samples = int(record_line[3])
+        dat_path = os.path.join(os.path.dirname(hea_path), record_line[0] + ".dat")
+        assert os.path.exists(dat_path), f"{dat_path} referenced by header but missing"
+        dat_size = os.path.getsize(dat_path)
+        assert dat_size == n_samples * 2, (
+            f"{dat_path} size {dat_size} does not match header's declared "
+            f"{n_samples} samples (16-bit mono) -- data was overwritten/truncated")
+        sample_counts.append(n_samples)
+
+    # The two source instances had 40 and 60 samples respectively; both
+    # must survive independently, proving no overwrite occurred.
+    assert sorted(sample_counts) == [40, 60], (
+        f"expected one 40-sample and one 60-sample record; got {sample_counts!r}")
