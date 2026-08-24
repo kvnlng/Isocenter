@@ -3,6 +3,7 @@ import pytest
 import os
 import json
 from gantry.config_manager import load_unified_config, ConfigLoader
+from gantry.profiles import BASIC_PROFILE
 
 def test_load_basic_profile(tmp_path):
     # 1. Create config using "privacy_profile": "basic"
@@ -70,3 +71,35 @@ def test_unknown_profile(tmp_path):
     config = load_unified_config(str(config_path))
     # Should just ignore and load empty/rules
     assert config.get("phi_tags", {}) == {}
+
+
+def test_basic_profile_covers_datetime_twins_of_the_dates_it_removes():
+    """Every date/time tag the profile removes must have its DT-valued twin
+    covered too.
+
+    (0008,002A) Acquisition DateTime carries the same information as
+    (0008,0022) Acquisition Date, which the profile removes. Leaving the DT
+    twin out means raw acquisition timing survives anonymize() while the
+    plain date is stripped -- the profile looks complete and is not.
+    """
+    required = {
+        "0008,002a": "Acquisition DateTime",
+        "0040,0244": "Performed Procedure Step Start Date",
+        "0040,0245": "Performed Procedure Step Start Time",
+        "0040,0250": "Performed Procedure Step End Date",
+        "0040,0251": "Performed Procedure Step End Time",
+    }
+    missing = [tag for tag in required if tag not in BASIC_PROFILE]
+    assert not missing, (
+        f"Basic profile is missing date/time tags: {missing}. These carry "
+        "acquisition and procedure timing that survives anonymize().")
+
+
+def test_basic_profile_keys_are_all_lowercase():
+    """Ingested attribute keys are lowercased, so an uppercase profile key
+    never matches and silently disables that tag (see #41, where
+    0008,103E shipped uppercase and Series Description was never
+    remediated on any documented path).
+    """
+    uppercase = [k for k in BASIC_PROFILE if k != k.lower()]
+    assert not uppercase, f"profile keys must be lowercase: {uppercase}"

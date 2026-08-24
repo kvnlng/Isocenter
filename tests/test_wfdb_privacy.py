@@ -421,3 +421,51 @@ def test_two_instances_missing_instance_number_get_distinct_records(tmp_path):
     # must survive independently, proving no overwrite occurred.
     assert sorted(sample_counts) == [40, 60], (
         f"expected one 40-sample and one 60-sample record; got {sample_counts!r}")
+
+
+def test_acquisition_datetime_is_remediated_end_to_end(tmp_path):
+    """The profile entry must actually fire on a real ingest->anonymize pass.
+
+    A tag can sit in BASIC_PROFILE and still never be remediated if the key
+    casing does not match the lowercased ingested keys (#41). This asserts
+    the value is gone from the object graph, not merely that the profile
+    mentions it. Runs the real, documented Quick Start flow end-to-end:
+    create_config() -> load_config() -> audit() -> anonymize().
+    """
+    import pydicom
+
+    raw_datetime = "20260101101530.000000"
+    path = tmp_path / "wf.dcm"
+    ds = build_ecg_dataset(
+        channels=[("MDC_ECG_LEAD_I", "Lead I")],
+        patient_id="DTTEST001",
+        patient_name="Waveform^Test",
+    )
+    ds.AcquisitionDateTime = raw_datetime
+    pydicom.dcmwrite(str(path), ds, write_like_original=False)
+
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path))
+
+        config_path = tmp_path / "config.yaml"
+        session.create_config(str(config_path))
+        session.load_config(str(config_path))
+
+        findings = session.audit()
+        session.anonymize(findings)
+
+        remaining = []
+        for patient in session.store.patients:
+            for study in patient.studies:
+                for series in study.series:
+                    for instance in series.instances:
+                        value = instance.attributes.get("0008,002a")
+                        if value:
+                            remaining.append(str(value))
+    finally:
+        session.close()
+
+    assert raw_datetime not in remaining, (
+        "Acquisition DateTime survived anonymize(); the BASIC_PROFILE entry "
+        f"is present but not firing. Remaining values: {remaining!r}")
