@@ -89,6 +89,7 @@ nav:
       - 'Environment Variables': environment.md
       - 'Migration Tools': migration.md
       - 'Analytics & Reporting': analytics.md
+      - 'Waveforms & WFDB': waveforms.md
   - API Reference:
       - 'Session': api/session.md
       - 'Configuration': api/configuration.md
