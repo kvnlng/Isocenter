@@ -261,6 +261,14 @@ def test_missing_channel_definitions_do_not_abort_the_export(tmp_path):
     # like, if it was written at all it must be real WFDB the reference
     # reader accepts -- not silent corruption.
     paths = session.export(str(tmp_path / "out"), format="wfdb")
-    if paths:
-        record = _read(paths[0])
-        assert record.n_sig == 1
+
+    # NOT `if paths:` -- the per-instance containment this test exercises
+    # swallows the IndexError and returns [], which would skip every
+    # assertion below and leave the test unable to fail. Assert the record
+    # was actually written, then assert it is real WFDB the reference
+    # reader accepts -- not silent corruption.
+    assert paths, (
+        "export produced no record: the instance was skipped rather than "
+        "written with fallback calibration")
+    record = _read(paths[0])
+    assert record.n_sig == 1

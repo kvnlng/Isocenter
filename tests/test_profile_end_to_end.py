@@ -155,3 +155,29 @@ def test_series_description_is_remediated_by_the_basic_profile_via_documented_pa
         f"got {series_description!r}")
     assert "Jane Doe" not in series_description
     assert "Rhythm strip" not in series_description
+
+
+def test_uppercase_tag_keys_are_normalized_at_the_inspector_boundary():
+    """The casing backstop itself must be pinned.
+
+    `gantry/profiles.py` now spells Series Description lowercase, so the
+    end-to-end test above passes on the corrected key alone and would stay
+    green if `_normalize_tag_keys` were deleted. This test targets the
+    backstop directly: a config source that spells a tag with an uppercase
+    hex letter -- a user's own YAML, or a future profile entry -- must still
+    match the lowercased keys the object graph actually uses.
+    """
+    from gantry.privacy import PhiInspector
+
+    inspector = PhiInspector(config_tags={
+        "0008,103E": {"action": "EMPTY", "name": "Series Description"},
+        "0010,0010": {"action": "REMOVE", "name": "Patient's Name"},
+    })
+
+    assert "0008,103e" in inspector.phi_tags, (
+        "uppercase hex key was not normalized; it would never match the "
+        "lowercased 'gggg,eeee' keys populate_attrs produces")
+    assert "0008,103E" not in inspector.phi_tags
+    assert inspector.phi_tags["0008,103e"]["action"] == "EMPTY"
+    # A key with no hex letters must survive untouched.
+    assert inspector.phi_tags["0010,0010"]["action"] == "REMOVE"
