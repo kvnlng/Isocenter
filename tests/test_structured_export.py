@@ -22,11 +22,17 @@ def mock_patient(tmp_path):
     inst = Instance("SOP_UID_1", "1.2.840.10008.5.1.4.1.1.2", 0)
     inst.attributes = {
         "0008,1030": "Chest CT",       # Study Description
-        "0008,103e": "Axial 3mm",      # Series Description (lowercase hex,
-                                        # matching how ingested attribute
-                                        # keys are actually cased -- see
-                                        # io_handlers.populate_attrs's
-                                        # f"{elem.tag.group:04x},{elem.tag.element:04x}")
+        "0008,103E": "Axial 3mm",      # Series Description -- uppercase hex,
+                                        # deliberately: object graphs built
+                                        # directly by a caller (as
+                                        # scripts/generate_test_dataset.py
+                                        # does via
+                                        # inst_builder.set_attribute("0008,103E", ...))
+                                        # may spell this tag either way, and
+                                        # export_folder_names must find the
+                                        # description regardless -- see
+                                        # `_get_attr_case_insensitive` in
+                                        # io_handlers.py.
         "0020,0013": "10",             # Instance Number
         "0028,0010": 512,              # Rows
         "0028,0011": 512,              # Cols

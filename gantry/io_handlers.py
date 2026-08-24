@@ -803,6 +803,38 @@ def format_study_date(study_date) -> str:
     return str(study_date)
 
 
+def _get_attr_case_insensitive(attributes: dict, tag: str, default):
+    """Look up a DICOM attribute tag tolerating either hex-letter casing.
+
+    Real ingested attribute keys are always lowercased
+    (`populate_attrs`'s `f"{elem.tag.group:04x},{elem.tag.element:04x}"`),
+    but object graphs built directly by a caller -- test fixtures,
+    `scripts/generate_test_dataset.py`'s `inst_builder.set_attribute(
+    "0008,103E", ...)` -- are free to spell a tag with uppercase hex
+    letters. Checking only one casing silently drops values set under the
+    other; this is the same trap `privacy.py`'s
+    `PHIRedactor._normalize_tag_keys` normalizes away for PHI-tag config
+    keys (see its comment naming this exact tag, "0008,103E"). Callers of
+    this function should look up a tag through it rather than re-adding a
+    `.lower()`/`.upper()` at their own call site.
+
+    Args:
+        attributes (dict): A `DicomItem.attributes`-shaped dict.
+        tag (str): The tag to look up, e.g. `"0008,103e"`.
+        default: Returned if `tag` is absent under every casing.
+
+    Returns:
+        The attribute value, or `default`.
+    """
+    if tag in attributes:
+        return attributes[tag]
+    tag_lower = tag.lower()
+    for key, value in attributes.items():
+        if isinstance(key, str) and key.lower() == tag_lower:
+            return value
+    return default
+
+
 def export_folder_names(patient, study, series):
     """Build the Subject/Study/Series folder names for the exported file
     tree, reproducing `DicomSession._export_dicom`'s "Hybrid Naming"
@@ -840,7 +872,8 @@ def export_folder_names(patient, study, series):
     st_desc = "Study"
     try:
         if study.series and study.series[0].instances:
-            st_desc = study.series[0].instances[0].attributes.get("0008,1030", "Study")
+            st_desc = _get_attr_case_insensitive(
+                study.series[0].instances[0].attributes, "0008,1030", "Study")
     except BaseException:
         pass
     st_date = str(study.study_date or "NoDate")
@@ -850,7 +883,8 @@ def export_folder_names(patient, study, series):
     se_desc = "Series"
     try:
         if series.instances:
-            se_desc = series.instances[0].attributes.get("0008,103e", "Series")
+            se_desc = _get_attr_case_insensitive(
+                series.instances[0].attributes, "0008,103e", "Series")
     except BaseException:
         pass
     se_num = str(series.series_number)
