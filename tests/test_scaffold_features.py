@@ -109,7 +109,7 @@ def test_scaffold_comments(tmp_path):
     # No, CTP parser logic is for machines.
 
     # Alternative: Inject a rule into `session.configuration.rules` MANUALLY with a comment, then scaffold.
-    # scaffold_config includes `self.active_rules` in output.
+    # create_config (aka "scaffold_config") includes `session.configuration.rules` in its output.
 
     session.configuration.rules.append({
         "serial_number": "SN-MANUAL",

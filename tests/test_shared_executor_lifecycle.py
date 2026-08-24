@@ -33,6 +33,50 @@ class TestSharedExecutorLifecycle(unittest.TestCase):
             executor.submit(sum, [1, 2])
 
     @patch('gantry.io_handlers.run_parallel')
+    @patch('gantry.session.DicomSession.save')
+    def test_export_uses_fresh_recycled_pool_not_shared_executor(self, mock_save, mock_run_parallel):
+        """Verify that export builds its own recycling pool instead of reusing the shared executor.
+
+        ProcessPoolExecutor (the shared self._executor used by ingest) doesn't support
+        worker recycling, so long export batches would leak memory across workers if they
+        reused it. Export must always pass its own maxtasksperchild-bounded pool to
+        run_parallel rather than the shared executor.
+        """
+        mock_run_parallel.return_value = []
+
+        # Construct Object Graph to make total_instances > 0
+        p = MagicMock()
+        p.patient_id = "P1"
+        st = MagicMock()
+        se = MagicMock()
+        inst = MagicMock()
+        inst.instance_number = 1
+        inst.sop_instance_uid = "1.2.3.4.5"
+
+        # Link them
+        p.studies = [st]
+        st.series = [se]
+        se.instances = [inst]
+
+        # Add to store
+        self.session.store.patients.append(p)
+
+        # Act
+        self.session.export("out_folder")
+
+        # Assert
+        self.assertTrue(mock_run_parallel.called)
+        args, kwargs = mock_run_parallel.call_args
+
+        # Export must request a recycled pool (bounds memory growth over long batches).
+        self.assertIn('maxtasksperchild', kwargs)
+        self.assertEqual(kwargs['maxtasksperchild'], 25)
+
+        # ...and that pool must NOT be the shared, non-recycling self._executor.
+        passed_executor = kwargs.get('executor')
+        self.assertNotEqual(passed_executor, self.session._executor)
+
+    @patch('gantry.io_handlers.run_parallel')
     @patch('os.path.isfile')
     @patch('os.path.isdir')
     def test_ingest_uses_executor(self, mock_isdir, mock_isfile, mock_run_parallel):
@@ -55,57 +99,6 @@ class TestSharedExecutorLifecycle(unittest.TestCase):
         args, kwargs = mock_run_parallel.call_args
         self.assertIn('executor', kwargs)
         self.assertEqual(kwargs['executor'], self.session._executor)
-
-    @patch('gantry.io_handlers.run_parallel')
-    @patch('gantry.session.DicomSession.save')
-    def test_export_uses_executor(self, mock_save, mock_run_parallel):
-        """Verify that export passes the executor to run_parallel."""
-
-        # Setup
-        mock_run_parallel.return_value = []
-
-        # Construct Object Graph to make total_instances > 0
-        p = MagicMock()
-        p.patient_id = "P1"
-        st = MagicMock()
-        se = MagicMock()
-        inst = MagicMock()
-        inst.instance_number = 1
-        inst.sop_instance_uid = "1.2.3.4.5"
-
-        # Link them
-        p.studies = [st]
-        st.series = [se]
-        se.instances = [inst]
-
-        # Add to store
-        self.session.store.patients.append(p)
-
-        # Patch generator to avoid SQL errors
-        with patch('gantry.io_handlers.DicomExporter.generate_export_from_db') as mock_gen:
-            mock_gen.return_value = ["task1"]
-
-            # Act
-            self.session.export("out_folder", safe=False)
-
-            # Assert
-            # Assert
-            self.assertTrue(mock_run_parallel.called)
-            args, kwargs = mock_run_parallel.call_args
-
-            # MEMORY LEAK FIX: We now use maxtasksperchild=10, which requires a FRESH pool.
-            # So checking that it matches self.session._executor is now WRONG.
-            # We should check that maxtasksperchild passed is 10.
-
-            self.assertIn('maxtasksperchild', kwargs)
-            self.assertEqual(kwargs['maxtasksperchild'], 25)
-
-            # If executor IS passed, it might be ignored or handled differently, but
-            # our session logic explicitly does NOT pass self._executor for export_batch w/ recycling.
-            # In session.py we call export_batch(..., maxtasksperchild=10) and NO executor arg.
-
-            passed_executor = kwargs.get('executor')
-            self.assertNotEqual(passed_executor, self.session._executor)
 
     @patch('gantry.io_handlers.run_parallel')
     @patch('os.path.isfile')

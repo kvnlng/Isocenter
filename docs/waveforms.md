@@ -12,17 +12,17 @@ to read. Gantry does not read WFDB back in.
 ```python
 from gantry import Session
 
-session = Session("ecg_study.db")
-session.ingest("/data/ecg")
+with Session("ecg_study.db") as session:
+    session.ingest("/data/ecg")
 
-# Load a PHI tag configuration before auditing -- an unconfigured
-# session only checks the hardcoded baseline (see "Privacy" below).
-session.create_config("config.yaml")
-session.load_config("config.yaml")
+    # Load a PHI tag configuration before auditing -- an unconfigured
+    # session only checks the hardcoded baseline (see "Privacy" below).
+    session.create_config("config.yaml")
+    session.load_config("config.yaml")
 
-session.audit()
-session.anonymize()
-session.export("/out", format="wfdb")
+    session.audit()
+    session.anonymize()
+    session.export("/out", format="wfdb")
 ```
 
 Each waveform instance becomes one WFDB record, written into the same

@@ -11,6 +11,9 @@ from gantry import Session
 session = Session("my_project.db")
 ```
 
+!!! tip "Context Manager"
+    `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()` for you, releasing the background threads and worker pool the session holds -- steps 2-5 below work the same way indented inside that block. Step 6 ("Recover Identity") opens a *separate* `Session`, so it needs its own `with` block (or its own `close()` call) rather than being nested inside the first one.
+
 ## 2. Ingest & Examine
 
 Ingestion builds a lightweight **metadata index** of your DICOM files. Gantry scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.
@@ -61,7 +64,7 @@ Remediation is a multi-stage process performed in-memory:
 
 1. **Anonymize**: Strips or replaces metadata tags (PatientID, Names, Dates) based on your config.
 2. **Redact**: Loads pixel data and scrubs burned-in PHI from defined regions.
-3. **Export**: The final "Gatekeeper". Writes clean files to a new directory. Setting `safe=True` ensures the export halts if any verification checks fail (e.g., corrupt images or missing codecs).
+3. **Export**: The final "Gatekeeper". Writes clean files to a new directory. Setting `check_burned_in=True` ensures the export halts if any verification checks fail (e.g., corrupt images or missing codecs).
 
 ```python
 # Apply metadata remediation (anonymization) using the findings
@@ -71,8 +74,8 @@ session.anonymize(report)
 session.redact()
 
 # Export only safe (clean) data to a new folder
-# Compression="j2k" optionally compresses output to JPEG 2000
-session.export("/path/to/export_clean", safe=True, compression="j2k")
+# use_compression=True optionally compresses output to JPEG 2000
+session.export("/path/to/export_clean", check_burned_in=True, use_compression=True)
 ```
 
 Progress for the save, memory release, and export phases will be displayed:
@@ -83,7 +86,7 @@ Releasing Memory: 100%|██████████| 5000/5000 [00:02<00:00, 2
 Memory Cleanup: Released 5000 images from RAM.
 Executing Redaction Rules...
 Redacting: 100%|██████████| 150/150 [00:05<00:00, 28.00img/s]
-Exporting session to output_folder (safe=True)...
+Exporting session to: /path/to/export_clean
 Exporting:  15%|██▌       | 15/100 [00:05<00:30,  2.80patient/s]
 ```
 

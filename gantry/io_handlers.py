@@ -15,10 +15,8 @@ import sys
 import shutil
 import hashlib
 import io
-import base64
 from typing import List, Set, Dict, Any, Optional, Tuple, NamedTuple, Iterable
 from datetime import datetime, date
-import json
 from dataclasses import dataclass, field
 
 import pydicom
@@ -619,12 +617,6 @@ def _compress_j2k(ds, pixel_array=None):
         raise RuntimeError(f"Compression failed: {e}")
 
 
-def gantry_json_object_hook(d):
-    if "__type__" in d and d["__type__"] == "bytes":
-        return base64.b64decode(d["data"])
-    return d
-
-
 class SidecarPixelLoader:
     """
     Functor for lazy loading of pixel data from sidecar.
@@ -785,9 +777,8 @@ class SidecarWaveformLoader:
 
 
 def format_study_date(study_date) -> str:
-    """Render a Study's date the way `_legacy_generate_export_contexts_folder_names`
-    does, for use both in exported DICOM attributes and in that legacy
-    folder-naming logic.
+    """Render a Study's date as "YYYYMMDD" for use in exported DICOM
+    attributes.
 
     Args:
         study_date: `Study.study_date` -- a `date`/`datetime`-like object,
@@ -804,6 +795,38 @@ def format_study_date(study_date) -> str:
     return str(study_date)
 
 
+def _get_attr_case_insensitive(attributes: dict, tag: str, default):
+    """Look up a DICOM attribute tag tolerating either hex-letter casing.
+
+    Real ingested attribute keys are always lowercased
+    (`populate_attrs`'s `f"{elem.tag.group:04x},{elem.tag.element:04x}"`),
+    but object graphs built directly by a caller -- test fixtures,
+    `scripts/generate_test_dataset.py`'s `inst_builder.set_attribute(
+    "0008,103E", ...)` -- are free to spell a tag with uppercase hex
+    letters. Checking only one casing silently drops values set under the
+    other; this is the same trap `privacy.py`'s
+    `PHIRedactor._normalize_tag_keys` normalizes away for PHI-tag config
+    keys (see its comment naming this exact tag, "0008,103E"). Callers of
+    this function should look up a tag through it rather than re-adding a
+    `.lower()`/`.upper()` at their own call site.
+
+    Args:
+        attributes (dict): A `DicomItem.attributes`-shaped dict.
+        tag (str): The tag to look up, e.g. `"0008,103e"`.
+        default: Returned if `tag` is absent under every casing.
+
+    Returns:
+        The attribute value, or `default`.
+    """
+    if tag in attributes:
+        return attributes[tag]
+    tag_lower = tag.lower()
+    for key, value in attributes.items():
+        if isinstance(key, str) and key.lower() == tag_lower:
+            return value
+    return default
+
+
 def export_folder_names(patient, study, series):
     """Build the Subject/Study/Series folder names for the exported file
     tree, reproducing `DicomSession._export_dicom`'s "Hybrid Naming"
@@ -816,13 +839,11 @@ def export_folder_names(patient, study, series):
     not reimplement this logic locally, or the trees will drift apart on
     the next edit to either one.
 
-    Uses `ConfigLoader.clean_filename`, the sanitizer `_export_dicom`
-    itself uses -- NOT `DicomExporter._sanitize` (stricter, used
-    elsewhere for legacy folder naming) and NOT the even-stricter
-    per-format record-*name* sanitizers such as
-    `gantry.exporters.wfdb._sanitize` (which forbids spaces, appropriate
-    for a bare record-name token but not for a folder name that must
-    match `_export_dicom`'s output character-for-character).
+    Uses `ConfigLoader.clean_filename`, the single sanitizer for folder
+    names -- NOT the even-stricter per-format record-*name* sanitizers
+    such as `gantry.exporters.wfdb._sanitize` (which forbids spaces,
+    appropriate for a bare record-name token but not for a folder name
+    that must match `_export_dicom`'s output character-for-character).
 
     Args:
         patient (Patient): Patient root.
@@ -841,7 +862,8 @@ def export_folder_names(patient, study, series):
     st_desc = "Study"
     try:
         if study.series and study.series[0].instances:
-            st_desc = study.series[0].instances[0].attributes.get("0008,1030", "Study")
+            st_desc = _get_attr_case_insensitive(
+                study.series[0].instances[0].attributes, "0008,1030", "Study")
     except BaseException:
         pass
     st_date = str(study.study_date or "NoDate")
@@ -851,7 +873,8 @@ def export_folder_names(patient, study, series):
     se_desc = "Series"
     try:
         if series.instances:
-            se_desc = series.instances[0].attributes.get("0008,103e", "Series")
+            se_desc = _get_attr_case_insensitive(
+                series.instances[0].attributes, "0008,103e", "Series")
     except BaseException:
         pass
     se_num = str(series.series_number)
@@ -859,49 +882,6 @@ def export_folder_names(patient, study, series):
     se_uid_suffix = (series.series_instance_uid or "Unknown")[-5:]
     series_folder = ConfigLoader.clean_filename(
         f"Series_{se_num}_{se_mod}_{se_desc}_{se_uid_suffix}")
-
-    return subj_name, study_folder, series_folder
-
-
-def _legacy_generate_export_contexts_folder_names(patient, s_date_str: str, series, instance):
-    """Folder-naming logic for `DicomExporter._generate_export_contexts`
-    only -- NOT the scheme used by `session.export()` (see
-    `export_folder_names` above, which IS shared across export formats).
-
-    `_generate_export_contexts` is reached only via the legacy/direct
-    `DicomExporter.save_patient`/`save_studies` API, which several tests
-    call directly; it is not part of the `session.export()` path any
-    production user goes through. Kept as its own function, unshared,
-    purely to preserve its long-standing exact output for those tests --
-    see the module's export-format co-location fix history for why this
-    is deliberately NOT unified with `export_folder_names`.
-
-    Args:
-        patient (Patient): Patient root.
-        s_date_str (str): Study date already formatted via
-            `format_study_date`.
-        series (Series): Series whose folder name is being built.
-        instance (Instance): Instance whose attributes carry the
-            Study/Series Description tags (0008,1030 / 0008,103E) that
-            the folder names are drawn from. Read from the INSTANCE, not
-            from `series`/a Study object.
-
-    Returns:
-        tuple[str, str, str]: (subject_folder, study_folder, series_folder)
-    """
-    subj_name = f"Subject_{DicomExporter._sanitize(patient.patient_id)}"
-
-    s_date_clean = s_date_str.replace("-", "") or "UnknownDate"
-    s_desc = "Study"
-    if "0008,1030" in instance.attributes:
-        s_desc = instance.attributes["0008,1030"]
-    study_folder = f"Study_{s_date_clean}_{DicomExporter._sanitize(s_desc)}"
-
-    ser_num = series.series_number if series.series_number is not None else "0"
-    ser_desc = "Series"
-    if "0008,103E" in instance.attributes:
-        ser_desc = instance.attributes["0008,103E"]
-    series_folder = f"Series_{ser_num}_{DicomExporter._sanitize(ser_desc)}"
 
     return subj_name, study_folder, series_folder
 
@@ -922,134 +902,6 @@ class DicomExporter:
             out_dir (str): The destination directory.
         """
         DicomExporter.save_studies(patient, patient.studies, out_dir)
-
-    @staticmethod
-    def generate_export_from_db(
-            store_backend,
-            out_dir: str,
-            patient_ids: List[str] = None,
-            compression: str = None,
-            instance_uids: List[str] = None):
-        """
-        Generator that yields ExportContext objects directly from the DB.
-
-        Designed for O(1) Memory usage during massive exports. Streamingly reconstructs
-        lightweight Instance objects from the database rows without loading the full Graph.
-
-        Args:
-            store_backend: The persistence backend (SqliteStore).
-            out_dir (str): Destination directory.
-            patient_ids (List[str], optional): Filter by Patient IDs.
-            compression (str, optional): Compression format (e.g., 'j2k').
-            instance_uids (List[str], optional): Filter by SOP Instance UIDs.
-
-        Yields:
-            ExportContext: A prepared context for exporting a single file.
-        """
-        for row in store_backend.get_flattened_instances(patient_ids, instance_uids):
-            # 1. Rehydrate Attributes
-            attrs = {}
-            if row['attributes_json']:
-                try:
-                    attrs = json.loads(row['attributes_json'], object_hook=gantry_json_object_hook)
-                except BaseException:
-                    pass
-
-            # 2. Construct Lightweight Instance
-            inst = Instance(
-                sop_instance_uid=row['sop_instance_uid'],
-                sop_class_uid=row['sop_class_uid'],
-                instance_number=row['instance_number'] or 0,
-                file_path=row['file_path']
-            )
-
-            # 3. Handle Sequences
-            if '__sequences__' in attrs:
-                seq_data = attrs.pop('__sequences__')
-
-                # Recursive rehydration helper
-                # Recursive rehydration helper
-
-                def rehydrate_seq(seq_dict):
-                    rehydrated = {}
-                    for tag, items in seq_dict.items():
-                        ds = DicomSequence(tag=tag)
-                        for item_data in items:
-                            di = DicomItem()
-                            # Item data is a dict (serialized item)
-                            # recursion
-                            if '__sequences__' in item_data:
-                                sub_seqs = item_data.pop('__sequences__')
-                                di.sequences = rehydrate_seq(sub_seqs)
-                            di.attributes = item_data
-                            ds.items.append(di)
-                        rehydrated[tag] = ds
-                    return rehydrated
-
-                inst.sequences = rehydrate_seq(seq_data)
-
-            inst.attributes = attrs
-
-            # 4. Pixel Loader
-            if row['pixel_offset'] is not None:
-                # Use the store's sidecar path, not the instance's original file path
-                # Note: This assumes single sidecar file or current one.
-                # If using multiple sidecars, we'd need pixel_file_id lookup.
-                sc_path = getattr(store_backend, 'sidecar_path', None)
-                if not sc_path and row.get('file_path'):
-                    # Fallback if pixel data is in original file but we have offset (e.g. partial read?)
-                    # But usually offset implies SidecarManager format.
-                    # If store_backend doesn't expose sidecar_path, we might be in trouble.
-                    # But SqliteStore does.
-                    sc_path = row['file_path']
-
-                inst._pixel_loader = SidecarPixelLoader(
-                    sidecar_path=sc_path,
-                    offset=row['pixel_offset'],
-                    length=row['pixel_length'],
-                    alg=row['compress_alg'],
-                    instance=inst
-                )
-
-            # 5. Metadata Overrides (from DB columns)
-            pat_attrs = {"PatientName": row['patient_name'], "PatientID": row['patient_id']}
-
-            s_date = row['study_date'] or ""
-            study_attrs = {
-                "StudyInstanceUID": row['study_instance_uid'],
-                "StudyDate": s_date,
-                "StudyTime": "120000"
-            }
-
-            series_attrs = {
-                "SeriesInstanceUID": row['series_instance_uid'],
-                "Modality": row['modality'],
-                "SeriesNumber": row['series_number'],
-                "Manufacturer": row['manufacturer'],
-                "ManufacturerModelName": row['model_name'],
-                "DeviceSerialNumber": row['device_serial_number']
-            }
-
-            # 6. Output Path Logic
-            subj_name = f"Subject_{DicomExporter._sanitize(row['patient_id'])}"
-            st_desc = attrs.get("0008,1030", "Study")
-            study_folder = f"Study_{s_date}_{DicomExporter._sanitize(st_desc)}"
-            se_desc = attrs.get("0008,103E", "Series")
-            se_num = row['series_number'] or "0"
-            series_folder = f"Series_{se_num}_{DicomExporter._sanitize(se_desc)}"
-            fname = f"{row['sop_instance_uid']}.dcm"
-
-            full_out_path = os.path.join(out_dir, subj_name, study_folder, series_folder, fname)
-
-            yield ExportContext(
-                instance=inst,
-                output_path=full_out_path,
-                patient_attributes=pat_attrs,
-                study_attributes=study_attrs,
-                series_attributes=series_attrs,
-                pixel_array=None,
-                compression=compression
-            )
 
     @staticmethod
     def _generate_export_contexts(
@@ -1105,18 +957,11 @@ class DicomExporter:
                         series_attrs["0018,1000"] = se.equipment.device_serial_number
 
                     # Calculate Output Path
-                    # 1-3. Subject/Study/Series folders. Deliberately NOT the
-                    # shared hybrid `export_folder_names` used by every other
-                    # export format: migrating this call onto it changes
-                    # `_generate_export_contexts`'s long-standing output
-                    # (adds a UID suffix and modality component, and formats
-                    # the date differently), which breaks
-                    # tests/test_structured_export.py's hardcoded assertions
-                    # against the pre-existing scheme. See
-                    # `_legacy_generate_export_contexts_folder_names`'s
-                    # docstring for why this stays unshared.
-                    subj_name, study_folder, series_folder = _legacy_generate_export_contexts_folder_names(
-                        patient, s_date_str, se, inst)
+                    # 1-3. Subject/Study/Series folders, via the shared
+                    # hybrid naming used by every other export format --
+                    # see `export_folder_names` for the scheme.
+                    subj_name, study_folder, series_folder = export_folder_names(
+                        patient, st, se)
 
                     # 4. Filename
                     fname = f"{inst.sop_instance_uid}.dcm"
@@ -1354,24 +1199,6 @@ class DicomExporter:
                 ds.add_new(Tag(g, e), vr, v)
             except Exception as e:
                 get_logger().warning(f"Failed to merge tag {t} ({v}): {e}")
-
-    @staticmethod
-    def _sanitize(filename: str) -> str:
-        """
-        Removes illegal characters from filenames.
-
-        Args:
-            filename (str): Input filename.
-
-        Returns:
-            str: Sanitized filename string.
-        """
-        if not filename:
-            return "Unknown"
-        # Keep alphanumeric, dashes, underscores, spaces (maybe replace spaces with underscores?)
-        # For strictness:
-        safe = "".join([c for c in str(filename) if c.isalnum() or c in (' ', '.', '-', '_')])
-        return safe.strip().replace(" ", "_")
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any]):

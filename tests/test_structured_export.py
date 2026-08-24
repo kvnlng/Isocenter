@@ -6,6 +6,7 @@ import datetime
 import numpy as np
 from gantry.io_handlers import DicomExporter
 from gantry.entities import Patient, Study, Series, Instance
+from gantry.config_manager import ConfigLoader
 
 @pytest.fixture
 def mock_patient(tmp_path):
@@ -22,7 +23,17 @@ def mock_patient(tmp_path):
     inst = Instance("SOP_UID_1", "1.2.840.10008.5.1.4.1.1.2", 0)
     inst.attributes = {
         "0008,1030": "Chest CT",       # Study Description
-        "0008,103E": "Axial 3mm",      # Series Description
+        "0008,103E": "Axial 3mm",      # Series Description -- uppercase hex,
+                                        # deliberately: object graphs built
+                                        # directly by a caller (as
+                                        # scripts/generate_test_dataset.py
+                                        # does via
+                                        # inst_builder.set_attribute("0008,103E", ...))
+                                        # may spell this tag either way, and
+                                        # export_folder_names must find the
+                                        # description regardless -- see
+                                        # `_get_attr_case_insensitive` in
+                                        # io_handlers.py.
         "0020,0013": "10",             # Instance Number
         "0028,0010": 512,              # Rows
         "0028,0011": 512,              # Cols
@@ -51,19 +62,21 @@ def test_structured_export(mock_patient, mock_validator, tmp_path):
     with patch('gantry.io_handlers.run_parallel', side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
         DicomExporter.save_patient(mock_patient, str(out_dir))
 
-    # Expected Structure:
-    # out_dir / Subject_PID_001 / Study_20250101_Chest_CT / Series_1_Axial_3mm / 0010.dcm
+    # Expected Structure (the shared `export_folder_names` scheme -- same
+    # as `session.export()` -- date as-rendered plus a UID suffix on the
+    # Study folder, modality plus a UID suffix on the Series folder):
+    # out_dir / Subject_PID_001 / Study_2025-01-01_Chest_CT_UID_1 / Series_1_CT_Axial_3mm_UID_1 / 0010.dcm
 
     subject_dir = out_dir / "Subject_PID_001"
     assert subject_dir.exists(), "Subject directory missing"
 
     study_dirs = list(subject_dir.glob("Study_*"))
     assert len(study_dirs) == 1
-    assert "20250101_Chest_CT" in study_dirs[0].name
+    assert "2025-01-01_Chest_CT" in study_dirs[0].name
 
     series_dirs = list(study_dirs[0].glob("Series_*"))
     assert len(series_dirs) == 1
-    assert "1_Axial_3mm" in series_dirs[0].name
+    assert "1_CT_Axial_3mm" in series_dirs[0].name
 
     files = list(series_dirs[0].glob("*.dcm"))
     assert len(files) == 1
@@ -71,7 +84,7 @@ def test_structured_export(mock_patient, mock_validator, tmp_path):
 
 def test_sanitization():
     unsafe = "Bad/Name: With * Characters?"
-    safe = DicomExporter._sanitize(unsafe)
+    safe = ConfigLoader.clean_filename(unsafe)
     assert "/" not in safe
     assert ":" not in safe
     assert "*" not in safe

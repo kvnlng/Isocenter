@@ -162,19 +162,64 @@ class DicomSession:
 
         get_logger().info(f"Session started. {len(self.store.patients)} patients loaded.")
 
+    def __enter__(self) -> "DicomSession":
+        """Support `with DicomSession(...) as session:`.
+
+        `close()` releases a ProcessPoolExecutor and two threads holding
+        sqlite handles. Without this, forgetting it leaks worker
+        subprocesses for the life of the process.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        """Always close, including when the body raised.
+
+        Returns None so exceptions propagate -- a session manager that
+        swallowed them would hide the caller's failure.
+        """
+        self.close()
+
     def close(self):
         """
-        Cleanly shuts down the session, stopping background threads and flushing queues.
+        Cleanly shuts down the session, stopping background threads and
+        flushing queues.
+
+        Runs all three shutdown steps -- the persistence-manager thread,
+        the audit thread owning the sqlite connection, and the
+        ProcessPoolExecutor -- even if an earlier step raises. Without
+        this, a single exception (e.g. a failed flush) would abort the
+        sequence partway through and leak whatever hadn't been shut down
+        yet, most notably the executor's worker subprocesses, for the
+        life of the interpreter.
+
+        If more than one step fails, the first failure is raised (later
+        failures are logged, not swallowed) since it is usually the root
+        cause; a later step failing on an already-broken resource is
+        typically a consequence of the first failure, not new information.
         """
         print("Closing session persistence...")
+        first_exception = None
+
+        def _run_step(step):
+            nonlocal first_exception
+            try:
+                step()
+            except Exception as exc:  # pylint: disable=broad-except
+                get_logger().error(f"Error during session close(): {exc}", exc_info=True)
+                if first_exception is None:
+                    first_exception = exc
+
         if hasattr(self, 'persistence_manager'):
-            self.persistence_manager.shutdown()
+            _run_step(self.persistence_manager.shutdown)
         if hasattr(self, 'store_backend'):
-            self.store_backend.stop()  # Stops audit thread
+            _run_step(self.store_backend.stop)  # Stops audit thread
 
         if hasattr(self, '_executor'):
             print("Shutting down process pool...")
-            self._executor.shutdown(wait=True)
+            _run_step(lambda: self._executor.shutdown(wait=True))
+
+        if first_exception is not None:
+            raise first_exception
 
     def save(self, sync: bool = False):
         """
@@ -1576,9 +1621,8 @@ class DicomSession:
             serial_number (str): The device serial number to target.
             roi (List[int]): The Region of Interest as [y1, y2, x1, x2].
         """
-        # This Helper is tricky. It modifies the ACTIVE configuration temporarily?
-        # Or just runs temporary logic?
-        # Original logic modified active_rules. Let's keep that behavior on our config object.
+        # Swap in a single-rule configuration, run redact() against it, then
+        # restore the original rules in `finally` regardless of outcome.
         original = list(self.configuration.rules)  # Shallow copy
         try:
             self.configuration.rules = [{"serial_number": serial_number, "redaction_zones": [roi]}]
@@ -1648,25 +1692,19 @@ class DicomSession:
         exporter = exporters.get_exporter(format)
         return exporter.export(self, folder, **options)
 
-    def _export_dicom(self, folder: str, version=None, use_compression=True,
+    def _export_dicom(self, folder: str, use_compression=True,
                check_burned_in=False, check_reversibility=True, patient_ids: List[str] = None, show_progress=True,
-               # Legacy/Test Support arguments
-               compression=None, safe=False, subset=None):
+               subset=None):
         """
         Exports the current session to a directory, structured by Patient/Study/Series.
 
         Args:
             folder (str): The output directory path.
-            version (str, optional): Deprecated/Unused.
             use_compression (bool): If True, compresses output images using JPEG2000 (Lossless).
             check_burned_in (bool): If True, performs a safety scan for 'Burned In Annotation' flags before export.
             check_reversibility (bool): If True, checks if reversibility is enabled (informational).
             patient_ids (List[str], optional): Limit export to specific Patient IDs.
             show_progress (bool): If True, shows progress bar.
-
-            # Legacy Arguments
-            compression (bool): Alias for `use_compression`.
-            safe (bool): Alias for `check_burned_in`.
             subset (Union[str, list, pd.DataFrame]): Filter export using a query string, list of UIDs, or DataFrame.
         """
         import os
@@ -1681,12 +1719,6 @@ class DicomSession:
         target_ids = patient_ids
         if target_ids is None:
             target_ids = [p.patient_id for p in self.store.patients]
-
-        # Legacy Argument Mapping
-        if compression is not None:
-            use_compression = compression
-        if safe:
-            check_burned_in = True
 
         # SAFETY CHECK & FEEDBACK LOOP
         # If running in safe mode, run a full scan first to give aggregated feedback

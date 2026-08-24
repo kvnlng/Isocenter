@@ -49,7 +49,7 @@ def test_safe_export_allows_jittered_dates(tmp_path):
 
     # 4. Perform Safe Export
     export_dir = tmp_path / "export_success"
-    session.export(str(export_dir), safe=True)
+    session.export(str(export_dir), check_burned_in=True)
 
     # 5. Verify Export Succeeded
     # The folder should be Subject_{PatientID} (which is anonymized/remediated)

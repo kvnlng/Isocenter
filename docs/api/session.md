@@ -6,6 +6,7 @@
       members:
         - ingest
         - save
+        - close
         - export
         - audit
         - redact

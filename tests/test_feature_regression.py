@@ -72,7 +72,7 @@ class TestNewFeatures(unittest.TestCase):
         s.ingest(self.input_dir)
 
         out = os.path.join(self.output_dir, "compressed")
-        s.export(out, compression='j2k')
+        s.export(out, use_compression=True)
 
         # Find the exported file
         exported_file = None
