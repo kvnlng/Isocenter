@@ -18,3 +18,16 @@ def test_export_does_not_accept_a_dead_version_parameter():
     assert "version" not in signature.parameters, (
         "`version` is still accepted by _export_dicom; it is never read, so "
         "any caller passing it is silently ignored")
+
+
+def test_only_one_public_export_entry_point_builds_directory_trees():
+    """`generate_export_from_db` was a third folder-naming scheme.
+
+    It duplicated the format strings inline rather than sharing a helper,
+    and nothing but a test ever called it.
+    """
+    from gantry.io_handlers import DicomExporter
+
+    assert not hasattr(DicomExporter, "generate_export_from_db"), (
+        "generate_export_from_db still exists; it is a third, "
+        "independently-maintained directory layout with no production caller")
