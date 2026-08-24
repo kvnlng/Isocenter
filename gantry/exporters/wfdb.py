@@ -221,7 +221,36 @@ class WfdbExporter(Exporter):
 
     @staticmethod
     def _start_datetime(instance):
-        """Record start time. Overridden with shifted timing in Task 9."""
+        """Record start time, read after de-identification.
+
+        Uses Acquisition DateTime (0008,002A), falling back to Study Date +
+        Study Time. This runs post-remediation, so the values are already
+        shifted by the per-patient offset -- the header carries shifted
+        timing, never a source timestamp.
+
+        Returns None when no usable value exists, which omits the timing
+        fields from the record line entirely.
+        """
+        from datetime import datetime
+
+        raw = str(instance.attributes.get("0008,002a", "") or "").strip()
+        if raw:
+            stamp = raw.split("+")[0].split("-")[0].strip()
+            for fmt in ("%Y%m%d%H%M%S.%f", "%Y%m%d%H%M%S", "%Y%m%d%H%M"):
+                try:
+                    return datetime.strptime(stamp, fmt)
+                except ValueError:
+                    continue
+
+        date_part = str(instance.attributes.get("0008,0020", "") or "").strip()
+        time_part = str(instance.attributes.get("0008,0030", "") or "").strip()
+        if date_part:
+            combined = date_part + (time_part.split(".")[0] or "000000")
+            try:
+                return datetime.strptime(combined, "%Y%m%d%H%M%S")
+            except ValueError:
+                return None
+
         return None
 
 
