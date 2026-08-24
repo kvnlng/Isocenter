@@ -62,7 +62,7 @@ class TestSharedExecutorLifecycle(unittest.TestCase):
         self.session.store.patients.append(p)
 
         # Act
-        self.session.export("out_folder", safe=False)
+        self.session.export("out_folder")
 
         # Assert
         self.assertTrue(mock_run_parallel.called)

@@ -107,7 +107,7 @@ def test_safe_export_skips_phi(tmp_path):
 
     # NOTE: The test will FAIL initially because 'safe' arg doesn't exist.
 
-    sess.export(str(out_dir), safe=True)
+    sess.export(str(out_dir), check_burned_in=True)
 
     # 4. Assertions
     # Dirty Patient file I1 should NOT exist

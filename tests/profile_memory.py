@@ -30,7 +30,7 @@ class TestMemoryProfile(unittest.TestCase):
             sess.store.patients = [mock_p]
 
             # Execute Export
-            sess.export("dummy_out", safe=False)
+            sess.export("dummy_out")
 
             # Assert that export_batch was called with maxtasksperchild=10
             mock_export_batch.assert_called_once()

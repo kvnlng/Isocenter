@@ -23,7 +23,7 @@ def test_safe_export_feedback(tmp_path, capsys):
 
     # 2. Attempt Safe Export (Should find PHI)
     export_dir = tmp_path / "export"
-    session.export(str(export_dir), safe=True)
+    session.export(str(export_dir), check_burned_in=True)
 
     # 3. Capture Output
     captured = capsys.readouterr()

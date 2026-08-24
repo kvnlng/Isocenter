@@ -4,6 +4,7 @@ Pre-1.0 cleanup: duplicate export layouts, duplicate sanitizers, and dead
 parameters are removed rather than deprecated.
 """
 import inspect
+import os
 
 from gantry.session import DicomSession
 
@@ -152,3 +153,87 @@ def test_a_zero_series_number_is_not_renamed_to_unknown():
     from gantry.config_manager import ConfigLoader
 
     assert ConfigLoader.clean_filename(0) == "0"
+
+
+def test_export_offers_one_name_per_behaviour():
+    """`safe` and `compression` were aliases for parameters that already
+    existed, so two spellings produced the same effect."""
+    signature = inspect.signature(DicomSession._export_dicom)
+    for alias, canonical in (("safe", "check_burned_in"),
+                             ("compression", "use_compression")):
+        assert alias not in signature.parameters, (
+            f"`{alias}` is still accepted; it is an alias for `{canonical}`")
+        assert canonical in signature.parameters, (
+            f"`{canonical}` is missing -- the alias was removed but the "
+            "canonical parameter did not survive")
+
+
+def test_use_compression_none_means_no_compression(tmp_path):
+    """`use_compression=None` must mean "do not compress", not "compress".
+
+    Under the old legacy-mapping block, `compression=None` failed the
+    `if compression is not None` guard and fell through, leaving
+    `use_compression` at its default of `True` -- so a caller who typed
+    `None` for "no compression" silently got JPEG2000 compression anyway
+    (this is exactly what `tests/benchmarks/run_stress_test.py` did: its
+    "uncompressed" arm computed `compression=None` and got J2K anyway).
+    Now that `compression`/`use_compression` are one parameter, `None` is
+    simply falsy and must produce an uncompressed export.
+    """
+    import numpy as np
+    import pydicom
+    from pydicom.dataset import Dataset, FileMetaDataset
+    from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ImplicitVRLittleEndian
+    ds.file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.7'
+    ds.file_meta.MediaStorageSOPInstanceUID = '1.2.3.4.5.6'
+
+    ds.SOPClassUID = '1.2.840.10008.5.1.4.1.1.7'
+    ds.SOPInstanceUID = '1.2.3.4.5.6'
+    ds.PatientName = "Test^Patient"
+    ds.PatientID = "123456"
+    ds.StudyInstanceUID = "1.2.3.4.5"
+    ds.SeriesInstanceUID = "1.2.3.4.5.1"
+
+    ds.Rows = 64
+    ds.Columns = 64
+    ds.SamplesPerPixel = 1
+    ds.BitsAllocated = 8
+    ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    ds.PhotometricInterpretation = "MONOCHROME2"
+
+    arr = np.random.randint(0, 255, (64, 64), dtype=np.uint8)
+    ds.PixelData = arr.tobytes()
+
+    ds.is_little_endian = True
+    ds.is_implicit_VR = True
+    ds.preamble = b"\0" * 128
+    pydicom.dcmwrite(str(input_dir / "test.dcm"), ds, write_like_original=False)
+
+    session = DicomSession(":memory:")
+    session.ingest(str(input_dir))
+
+    out = tmp_path / "output"
+    session.export(str(out), use_compression=None, show_progress=False)
+
+    exported_file = None
+    for root, _, files in os.walk(out):
+        for f in files:
+            if f.endswith(".dcm"):
+                exported_file = os.path.join(root, f)
+                break
+
+    assert exported_file is not None, "Exported file not found"
+
+    out_ds = pydicom.dcmread(exported_file)
+    assert out_ds.file_meta.TransferSyntaxUID != JPEG2000Lossless, (
+        "use_compression=None produced a JPEG2000-compressed export; "
+        "None must mean 'no compression', not 'use the default'")

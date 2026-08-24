@@ -1650,8 +1650,7 @@ class DicomSession:
 
     def _export_dicom(self, folder: str, use_compression=True,
                check_burned_in=False, check_reversibility=True, patient_ids: List[str] = None, show_progress=True,
-               # Legacy/Test Support arguments
-               compression=None, safe=False, subset=None):
+               subset=None):
         """
         Exports the current session to a directory, structured by Patient/Study/Series.
 
@@ -1662,10 +1661,6 @@ class DicomSession:
             check_reversibility (bool): If True, checks if reversibility is enabled (informational).
             patient_ids (List[str], optional): Limit export to specific Patient IDs.
             show_progress (bool): If True, shows progress bar.
-
-            # Legacy Arguments
-            compression (bool): Alias for `use_compression`.
-            safe (bool): Alias for `check_burned_in`.
             subset (Union[str, list, pd.DataFrame]): Filter export using a query string, list of UIDs, or DataFrame.
         """
         import os
@@ -1680,12 +1675,6 @@ class DicomSession:
         target_ids = patient_ids
         if target_ids is None:
             target_ids = [p.patient_id for p in self.store.patients]
-
-        # Legacy Argument Mapping
-        if compression is not None:
-            use_compression = compression
-        if safe:
-            check_burned_in = True
 
         # SAFETY CHECK & FEEDBACK LOOP
         # If running in safe mode, run a full scan first to give aggregated feedback

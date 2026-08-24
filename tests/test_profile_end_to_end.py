@@ -92,7 +92,7 @@ def test_profile_remediation_end_to_end(tmp_path):
     # Use RemediationService to apply (mocking internal flow if needed, but session usually has helpers)
     session.anonymize(risk_report)
 
-    session.export(str(export_dir), safe=False)
+    session.export(str(export_dir))
 
     # 6. Verify Exported File
     out_files = list(export_dir.rglob("*.dcm"))
@@ -142,7 +142,7 @@ def test_series_description_is_remediated_by_the_basic_profile_via_documented_pa
     session.anonymize(findings)
 
     export_dir = tmp_path / "clean_export"
-    session.export(str(export_dir), safe=False)
+    session.export(str(export_dir))
 
     out_files = list(export_dir.rglob("*.dcm"))
     assert len(out_files) == 1

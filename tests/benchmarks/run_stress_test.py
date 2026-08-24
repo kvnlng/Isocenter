@@ -133,7 +133,7 @@ phi_tags:
     t0 = time.time()
     # Default to j2k if compress requested, else None
     comp_method = 'j2k' if compress_export else None
-    sess.export(output_dir, safe=False, compression=comp_method, show_progress=False)
+    sess.export(output_dir, use_compression=comp_method, show_progress=False)
     duration_export = time.time() - t0
     print(f"Export Duration: {duration_export:.2f}s")
     report_resource_usage("Post-Export")
