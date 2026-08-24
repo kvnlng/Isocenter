@@ -6,6 +6,8 @@ parameters are removed rather than deprecated.
 import inspect
 import os
 
+import pytest
+
 from gantry.session import DicomSession
 
 
@@ -237,3 +239,102 @@ def test_use_compression_none_means_no_compression(tmp_path):
     assert out_ds.file_meta.TransferSyntaxUID != JPEG2000Lossless, (
         "use_compression=None produced a JPEG2000-compressed export; "
         "None must mean 'no compression', not 'use the default'")
+
+
+def test_session_can_be_used_as_a_context_manager(tmp_path):
+    """close() releases a process pool and two threads; forgetting it
+    leaks worker subprocesses. `with` is how Python spells that."""
+    from concurrent.futures import BrokenExecutor
+
+    with DicomSession(persistence_file=str(tmp_path / "ctx.db")) as session:
+        assert session.store is not None, "session unusable inside `with`"
+        executor = session._executor
+
+    try:
+        executor.submit(int, "1")
+        raised = None
+    except (RuntimeError, BrokenExecutor) as exc:
+        raised = exc
+
+    assert raised is not None, (
+        "the process pool still accepts work after the `with` block; "
+        "__exit__ did not call close()")
+
+
+def test_context_manager_closes_the_session_when_the_body_raises(tmp_path):
+    """A leak on the error path is the one that matters -- that is
+    precisely when a caller's own `close()` gets skipped."""
+    from concurrent.futures import BrokenExecutor
+
+    session = DicomSession(persistence_file=str(tmp_path / "boom.db"))
+    executor = session._executor
+
+    class Boom(Exception):
+        pass
+
+    try:
+        with session:
+            raise Boom("failure inside the with-body")
+    except Boom:
+        pass
+    else:
+        raise AssertionError("__exit__ swallowed the exception; it must not")
+
+    try:
+        executor.submit(int, "1")
+        raised = None
+    except (RuntimeError, BrokenExecutor) as exc:
+        raised = exc
+
+    assert raised is not None, (
+        "the process pool survived an exception in the with-body")
+
+
+def test_close_is_idempotent(tmp_path):
+    """Calling close() a second time must not raise.
+
+    `PersistenceManager.shutdown()`, `SqliteStore.stop()`, and
+    `ProcessPoolExecutor.shutdown()` already guard against redundant
+    shutdown internally, so close() itself is already safe to call twice.
+    This pins that property explicitly: a caller who calls close() inside
+    a `with DicomSession(...) as session:` block must not get an error
+    when `__exit__` calls close() again on the way out.
+    """
+    session = DicomSession(persistence_file=str(tmp_path / "idempotent.db"))
+    session.close()
+    session.close()  # must not raise
+
+
+def test_close_still_shuts_down_the_executor_if_an_earlier_step_raises(tmp_path):
+    """close() runs persistence_manager.shutdown(), store_backend.stop(),
+    and _executor.shutdown() as a bare sequence. If the first step raises
+    and the other two never run, the ProcessPoolExecutor leaks its worker
+    processes for the life of the interpreter -- a `with` block does not
+    help, because __exit__ just calls the same broken close().
+
+    This forces a failure in the FIRST step and asserts the executor was
+    still shut down, which only passes if close() is internally
+    exception-safe (every step runs regardless of an earlier failure).
+    """
+    from concurrent.futures import BrokenExecutor
+
+    session = DicomSession(persistence_file=str(tmp_path / "leak.db"))
+    executor = session._executor
+
+    def boom():
+        raise RuntimeError("persistence shutdown exploded")
+
+    session.persistence_manager.shutdown = boom
+
+    with pytest.raises(RuntimeError, match="persistence shutdown exploded"):
+        session.close()
+
+    try:
+        executor.submit(int, "1")
+        raised = None
+    except (RuntimeError, BrokenExecutor) as exc:
+        raised = exc
+
+    assert raised is not None, (
+        "the process pool survived close() after an earlier shutdown "
+        "step raised -- close() is not exception-safe")

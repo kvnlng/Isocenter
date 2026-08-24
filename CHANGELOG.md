@@ -16,8 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **WFDB Export**: `session.export(folder, format="wfdb")` writes `header(5)`-conformant PhysioNet WFDB records (format 16).
 - **Murmur Annotation Bridge**: Waveform Annotation Sequence `(0040,B020)` is exported as `<record>.annotations.json` for [Murmur Studio](https://github.com/kvnlng/Murmur).
 - **Export Format Registry**: `gantry.exporters` provides a pluggable `Exporter` seam; `session.export()` dispatches on `format`.
+- **Context Manager Support**: `DicomSession` now supports `with DicomSession(...) as session:`. `close()` releases a `ProcessPoolExecutor` and two threads holding sqlite handles; forgetting to call it leaks worker subprocesses. `__exit__` returns `None`, so an exception raised inside the `with` body still propagates.
 
 ### Changed
+
+- **`DicomSession.close()` now runs every shutdown step even if an earlier one raises.** Previously the persistence-manager shutdown, the audit-thread stop, and the `ProcessPoolExecutor` shutdown ran as a bare sequence with no `try`/`finally`; an exception from the first step aborted the rest, leaking the executor's worker processes for the life of the interpreter. Each step now runs independently and any failures are logged; if more than one step fails, `close()` raises the first failure (treated as the likely root cause) rather than the last.
 
 - **BREAKING: Python 3.12 or newer is now required.** `python_requires` previously claimed `>=3.9`, which was not merely untested but false: `gantry/entities.py` and `gantry/privacy.py` use `@dataclass(slots=True)` (Python 3.10+), so a 3.9 install succeeded and then raised at import. The declared dependency set (numpy, imagecodecs) resolves only on 3.12+. CI now tests 3.12, 3.13, 3.14 and 3.14t, so the floor is a tested claim rather than an assertion.
 - **BREAKING: `pytesseract` moved from a hard dependency to the `ocr` extra.** It was already imported defensively (`gantry/pixel_analysis.py` sets `HAS_OCR = False` when absent), so it was never truly required. Install with `pip install "gantry[ocr]"` to keep burned-in-text detection.

@@ -162,19 +162,64 @@ class DicomSession:
 
         get_logger().info(f"Session started. {len(self.store.patients)} patients loaded.")
 
+    def __enter__(self) -> "DicomSession":
+        """Support `with DicomSession(...) as session:`.
+
+        `close()` releases a ProcessPoolExecutor and two threads holding
+        sqlite handles. Without this, forgetting it leaks worker
+        subprocesses for the life of the process.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        """Always close, including when the body raised.
+
+        Returns None so exceptions propagate -- a session manager that
+        swallowed them would hide the caller's failure.
+        """
+        self.close()
+
     def close(self):
         """
-        Cleanly shuts down the session, stopping background threads and flushing queues.
+        Cleanly shuts down the session, stopping background threads and
+        flushing queues.
+
+        Runs all three shutdown steps -- the persistence-manager thread,
+        the audit thread owning the sqlite connection, and the
+        ProcessPoolExecutor -- even if an earlier step raises. Without
+        this, a single exception (e.g. a failed flush) would abort the
+        sequence partway through and leak whatever hadn't been shut down
+        yet, most notably the executor's worker subprocesses, for the
+        life of the interpreter.
+
+        If more than one step fails, the first failure is raised (later
+        failures are logged, not swallowed) since it is usually the root
+        cause; a later step failing on an already-broken resource is
+        typically a consequence of the first failure, not new information.
         """
         print("Closing session persistence...")
+        first_exception = None
+
+        def _run_step(step):
+            nonlocal first_exception
+            try:
+                step()
+            except Exception as exc:  # pylint: disable=broad-except
+                get_logger().error(f"Error during session close(): {exc}")
+                if first_exception is None:
+                    first_exception = exc
+
         if hasattr(self, 'persistence_manager'):
-            self.persistence_manager.shutdown()
+            _run_step(self.persistence_manager.shutdown)
         if hasattr(self, 'store_backend'):
-            self.store_backend.stop()  # Stops audit thread
+            _run_step(self.store_backend.stop)  # Stops audit thread
 
         if hasattr(self, '_executor'):
             print("Shutting down process pool...")
-            self._executor.shutdown(wait=True)
+            _run_step(lambda: self._executor.shutdown(wait=True))
+
+        if first_exception is not None:
+            raise first_exception
 
     def save(self, sync: bool = False):
         """
