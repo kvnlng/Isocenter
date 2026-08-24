@@ -1400,7 +1400,7 @@ files if you also export <code>format="dicom"</code> into the same folder:</p>
 </tr>
 <tr>
 <td>signal description</td>
-<td>Channel Source Sequence <code>(003A,0208)</code>, falling back to Channel Label <code>(003A,0203)</code> when no coded source is present</td>
+<td>Channel Source Sequence <code>(003A,0208)</code>, falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token (see "What is and isn't de-identified" below)</td>
 </tr>
 </tbody>
 </table>
@@ -1453,42 +1453,46 @@ this class of bug can't recur regardless of how a tag is spelled in a
 profile or config file.) This matters for waveform export specifically
 because the series description becomes a <strong>directory name</strong> -- every
 <code>.hea</code>/<code>.dat</code>/<code>.annotations.json</code> this exporter writes lives inside it.</p>
-<p><strong>None of the three configurations cover the two free-text fields
-specific to waveform export.</strong> Neither the hardcoded baseline nor the
-Basic profile includes Channel Label or Unformatted Text Value, so on
-every documented path both are written verbatim into every WFDB record:</p>
+<p><strong>The two free-text fields specific to waveform export are now
+remediated in the exporter itself, not by profile membership</strong> -- the
+PHI scan is tag-gated (see above), so a profile entry alone would not
+protect a bare <code>Session()</code> that never called <code>load_config()</code>. Both are
+handled unconditionally, regardless of which of the three
+configurations above you're in:</p>
 <ul>
-<li><strong>Channel Label <code>(003A,0203)</code></strong> -- becomes the <code>.hea</code> signal-line
-  description whenever a channel has no coded Channel Source Sequence
-  to prefer instead. This is an operator-typed field.</li>
-<li><strong>Unformatted Text Value <code>(0070,0006)</code></strong> -- becomes the <code>note</code> field
-  of <code>annotations.json</code> whenever an annotation carries one. This is
-  also operator-typed, and routinely holds free-text clinical
-  commentary.</li>
+<li><strong>Channel Label <code>(003A,0203)</code></strong> -- reaches the <code>.hea</code> signal-line
+  description and the <code>annotations.json</code> <code>lead</code> field <strong>only</strong> when it
+  is a recognisable signal name, checked against the module-level
+  <code>KNOWN_LEAD_NAMES</code> set in <code>gantry/waveform.py</code>. Anything else --
+  including genuinely operator-typed text -- is replaced with a
+  positional <code>ch&lt;N&gt;</code> token instead of being written verbatim.</li>
+<li><strong>Unformatted Text Value <code>(0070,0006)</code></strong> -- is omitted from the
+  <code>note</code> field of <code>annotations.json</code> by default. It routinely holds
+  free-text clinical commentary, so exporting it is opt-in: pass
+  <code>session.export(folder, format="wfdb", include_annotation_text=True)</code>
+  to restore it. <code>(0070,0006)</code> was also added to the Basic profile, so
+  a configured session that opts in still receives the profile's
+  remediated (emptied) value rather than raw text.</li>
 </ul>
-<p>Both are DICOM tags an operator can type identifying information
-into. If your workflow needs them scrubbed, add <code>003A,0203</code> and/or
-<code>0070,0006</code> to your own PHI tag configuration before running
-<code>audit()</code> / <code>anonymize()</code>; Gantry will not do this for you by default.</p>
-<p>One more gap worth flagging in the Basic profile itself: it REMOVEs
-Study Date <code>(0008,0020)</code>, Study Time <code>(0008,0030)</code>, Acquisition Date
-<code>(0008,0022)</code>, and Content Date <code>(0008,0023)</code>, but it does <strong>not</strong>
-include Acquisition DateTime <code>(0008,002A)</code> -- easy to assume is
-covered alongside the separate date tag it duplicates, but it isn't,
-under any of the three configurations above unless you add it
-yourself.</p>
+<p>Both are safe by default: no PHI tag configuration is required to get
+this behaviour, and it applies even to a bare <code>Session()</code>.</p>
+<p><code>annotations.json</code>'s <code>source</code> field is producer provenance only: the
+running gantry version plus Manufacturer <code>(0008,0070)</code>, e.g.
+<code>gantry/0.6.0 (AcmeCart)</code>. It does not read Device Serial Number
+<code>(0018,1000)</code> or any other equipment identifier.</p>
 <p><strong>Record timing</strong> in the <code>.hea</code> file combines two independently
 sourced parts. The <em>date</em> comes from <code>study.study_date</code>, which <em>is</em>
 shifted by <code>anonymize()</code> (the same per-patient date shift applied to
 the rest of the DICOM metadata). The <em>time-of-day</em> comes from the
 instance's own timestamp tags -- Acquisition DateTime <code>(0008,002A)</code>
 when present, else Study Time <code>(0008,0030)</code> -- and the date shift
-never touches it, whether or not <code>anonymize()</code> ran: when Acquisition
-DateTime is present (the common case), it isn't covered by the Basic
-profile either (see above), so the real acquisition time-of-day ends
-up in the header either way. If you export without running
-<code>anonymize()</code> at all, the date is real too -- exactly like every
-other un-remediated field in Gantry.</p>
+never touches it, whether or not <code>anonymize()</code> ran: <code>SHIFT_DATE</code> is a
+Study-level remediation that writes <code>study.study_date</code>, and time-of-day
+is sourced from the instance, so it is genuinely not shifted by that
+mechanism. This is deliberate, not a gap: time-of-day alone is not a
+Safe Harbor identifier. If you export without running <code>anonymize()</code> at
+all, the date is real too -- exactly like every other un-remediated
+field in Gantry.</p>
 <p>Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:</p>
 <ul>
