@@ -92,22 +92,17 @@ def test_burned_in_safety_check(capsys):
     p.studies.append(st)
     session.store.patients.append(p)
 
-    # Run Execute Config (with no rules) -> Should trigger scan
-    # execute_config calls scan at end.
+    # Run redact() with no rules loaded -- it should NOT trigger the scan,
+    # since redact() returns early ("if not self.configuration.rules: return")
+    # before it ever constructs a RedactionService.
     session.configuration.rules = [] # No rules
 
     # Capture output/logs
     # Usage of print in services.py should be captured by capsys
     session.redact()
-    # Wait, execute_config returns early if no active_rules?
-    # Yes: "if not self.active_rules: return"
 
-    # So we must call service method directly or force rules?
-    # Or modify execute_config to ALWAYS scan?
-    # User said "execute_config returns early".
-    # If no rules, we might still want to scan?
-    # But for now let's call service direct to test logic.
-
+    # So the burned-in-annotation scan has to be exercised directly against
+    # a service instance instead of through redact().
     service = RedactionService(session.store)
     service.scan_burned_in_annotations()
 

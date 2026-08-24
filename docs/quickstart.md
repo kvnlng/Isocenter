@@ -11,6 +11,9 @@ from gantry import Session
 session = Session("my_project.db")
 ```
 
+!!! tip "Context Manager"
+    `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()` for you, releasing the background threads and worker pool the session holds -- steps 2-6 below work the same way indented inside that block.
+
 ## 2. Ingest & Examine
 
 Ingestion builds a lightweight **metadata index** of your DICOM files. Gantry scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.

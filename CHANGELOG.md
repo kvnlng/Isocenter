@@ -28,6 +28,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`pydicom` is now capped below 4.0.** `gantry/__init__.py` assigns `pydicom.config.pixel_data_handlers`, which 3.x deprecates and 4.0 removes. The cap prevents a silent break on a future pydicom release.
 - **BREAKING: `session.export()` signature**: `export(folder, version=None, use_compression=True, ...)` is now `export(folder, format="dicom", **options)`. Keyword callers (`version="v2"`, etc.) are unaffected, but positional argument 2 now means `format`, not `version` — existing code calling `session.export("/out", "v2")` previously set `version="v2"`; it now raises `ValueError: Unknown export format 'v2'`. Pass `version` as a keyword argument to restore the old behavior: `session.export("/out", version="v2")`.
 - **BREAKING: `compression`/`safe` aliases removed from `session.export()`.** Each aliased a parameter that already existed, so two spellings produced one effect: `compression=` is now `use_compression=`, and `safe=` is now `check_burned_in=`. `_export_dicom` carried a "Legacy Argument Mapping" block that translated the alias to the canonical parameter at call time; that block is gone, and the alias keyword arguments now raise `TypeError: unexpected keyword argument`.
+- **BREAKING: `DicomExporter.generate_export_from_db` removed.** A public staticmethod that streamed `ExportContext` objects directly from the database for O(1)-memory export; it had no production caller and was reached only by its own test. There is no drop-in replacement — use `session.export(folder, ...)`, which already streams from the database via the registered `"dicom"` exporter.
+- **BREAKING: `DicomExporter.save_patient`/`save_studies` now write the same folder layout as `session.export()`.** Both methods previously built their tree with a private, unshared naming helper; that helper is deleted and both now call the same `gantry.io_handlers.export_folder_names` that `session.export()` has always used, so a `save_patient`/`save_studies` caller gets files in new locations:
+
+  Before:
+  ```
+  Subject_<PatientID>/
+    Study_<YYYYMMDD>_<StudyDescription>/
+      Series_<SeriesNumber>_<SeriesDescription>/
+  ```
+  (`"UnknownDate"` when the study date was empty, `"Study"`/`"Series"` as description fallbacks, `"0"` as the series-number fallback, sanitized by the now-deleted `DicomExporter._sanitize`: keep only alphanumerics/space/`.`/`-`/`_`, then `.strip()`, then replace spaces with `_`.)
+
+  After:
+  ```
+  Subject_<PatientID>/
+    Study_<YYYYMMDD>_<StudyDescription>_<last 5 chars of StudyInstanceUID>/
+      Series_<SeriesNumber>_<Modality>_<SeriesDescription>_<last 5 chars of SeriesInstanceUID>/
+  ```
+  (`"Study"`/`"Series"` description fallbacks, `"Unknown"` UID fallback before the 5-char slice, sanitized by `ConfigLoader.clean_filename`: `.strip()`, replace spaces with `_`, then drop every character that isn't a word character, `-`, or `.`.)
+
+  The sanitizer change matters independently of the template: the two functions filter and collapse whitespace in the opposite order and diverge on punctuation adjacent to whitespace — e.g. `"*  foo"` became `"foo"` under the old sanitizer but becomes `"__foo"` under `ConfigLoader.clean_filename`. A folder name can differ even where the template above looks unchanged.
 - **Planning Moved to GitHub Issues**: `ROADMAP.md` and `docs/roadmap.md` are now pointers to the issue tracker. Open work is tracked under versioned milestones; `CHANGELOG.md` remains the canonical record of shipped features.
 - **Pylint Compliance**: Addressed hundreds of linting issues across `gantry/` and `tests/`.
   - Enforced `encoding='utf-8'` on all file operations.

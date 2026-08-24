@@ -205,7 +205,7 @@ class DicomSession:
             try:
                 step()
             except Exception as exc:  # pylint: disable=broad-except
-                get_logger().error(f"Error during session close(): {exc}")
+                get_logger().error(f"Error during session close(): {exc}", exc_info=True)
                 if first_exception is None:
                     first_exception = exc
 
@@ -1621,9 +1621,8 @@ class DicomSession:
             serial_number (str): The device serial number to target.
             roi (List[int]): The Region of Interest as [y1, y2, x1, x2].
         """
-        # This Helper is tricky. It modifies the ACTIVE configuration temporarily?
-        # Or just runs temporary logic?
-        # Original logic modified active_rules. Let's keep that behavior on our config object.
+        # Swap in a single-rule configuration, run redact() against it, then
+        # restore the original rules in `finally` regardless of outcome.
         original = list(self.configuration.rules)  # Shallow copy
         try:
             self.configuration.rules = [{"serial_number": serial_number, "redaction_zones": [roi]}]
