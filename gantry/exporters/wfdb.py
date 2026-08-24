@@ -204,7 +204,7 @@ def format_header(record_name: str,
             str(int(column[0]) if column.size else 0),
             str(signal_checksum(column)),
             "0",
-            _sanitize_description(channel.wfdb_description()),
+            _sanitize_description(channel.wfdb_description(idx)),
         ]))
 
     return "\n".join(lines) + "\n"

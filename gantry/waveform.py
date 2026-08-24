@@ -39,6 +39,42 @@ _DTYPES = {
 
 _COMPANDED = {"MB", "AB"}
 
+# Recognisable physiological signal names. Channel Label (003A,0203) is
+# operator-typed SH text, so anything NOT on this list is treated as free
+# text and replaced with a positional token rather than written into the
+# .hea header or annotations.json. Compared case-insensitively after
+# stripping an optional "lead " prefix, so "Lead I", "lead I" and "I" all
+# match.
+KNOWN_LEAD_NAMES = frozenset({
+    # 12-lead ECG
+    "i", "ii", "iii", "avr", "avl", "avf",
+    "v1", "v2", "v3", "v4", "v5", "v6",
+    # Extended / posterior / right-sided
+    "v7", "v8", "v9", "v3r", "v4r", "v5r",
+    # Monitoring
+    "mcl1", "mcl6",
+    # Frank orthogonal (vectorcardiography)
+    "x", "y", "z",
+    # EASI
+    "es", "as", "ai",
+    # Common non-ECG physiological channels
+    "resp", "pleth", "spo2", "co2",
+    "abp", "art", "cvp", "pap", "icp",
+})
+
+
+def _is_known_lead_name(label: str) -> bool:
+    """True if `label` is a recognisable signal name rather than free text.
+
+    Normalises case, collapses internal whitespace, and drops an optional
+    "lead " prefix before comparing, because DICOM sources write the same
+    lead as "I", "Lead I" and "LEAD  I" interchangeably.
+    """
+    normalized = " ".join(str(label or "").split()).lower()
+    if normalized.startswith("lead "):
+        normalized = normalized[len("lead "):]
+    return normalized in KNOWN_LEAD_NAMES
+
 
 class UnsupportedInterpretation(ValueError):
     """Raised for Waveform Sample Interpretations Gantry cannot decode."""
@@ -170,13 +206,29 @@ class WaveformChannel:
             baseline=_as_float(attrs.get(TAG_CHANNEL_BASELINE), 0.0),
         )
 
-    def wfdb_description(self) -> str:
-        """Signal description for the .hea signal line.
+    def wfdb_description(self, index: Optional[int] = None) -> str:
+        """Signal description for the .hea signal line and annotations `lead`.
 
-        Prefers the coded channel source over the free-text label: a coded
-        value cannot contain an operator-typed patient name.
+        Prefers the coded channel source, which cannot contain
+        operator-typed text. Falls back to the free-text Channel Label
+        ONLY when that label is a recognisable lead name; anything else is
+        replaced with a positional token, because (003A,0203) is
+        operator-typed SH and has been observed carrying names, MRNs and
+        clinical commentary.
+
+        The check lives here rather than in the privacy profile on purpose:
+        the PHI scan is tag-gated, so a profile entry protects only sessions
+        that loaded a configuration. A bare Session() would still leak.
+
+        Args:
+            index (int, optional): Zero-based channel index, used for the
+                positional token. Callers without one get "signal".
         """
-        return self.source_code or self.label or "signal"
+        if self.source_code:
+            return self.source_code
+        if self.label and _is_known_lead_name(self.label):
+            return self.label.strip()
+        return f"ch{index}" if index is not None else "signal"
 
 
 @dataclass

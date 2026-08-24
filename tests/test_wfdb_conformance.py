@@ -153,6 +153,12 @@ def test_channel_label_newline_cannot_manufacture_a_hea_comment(tmp_path):
     `comments=['Patient Jane Doe MRN9988776']` for exactly this input --
     a PHI escape route, since this module's own docstring and
     docs/waveforms.md both assert no comment lines are ever written.
+
+    Also exercises the lead-name allowlist (#39): "Lead I\\n# Patient Jane
+    Doe MRN9988776" is not a recognisable lead name, so besides not
+    manufacturing a fake comment line, none of this operator text -- name,
+    MRN, or the embedded newline -- should reach the header at all; it is
+    replaced with a positional token.
     """
     import pydicom
 
@@ -183,9 +189,13 @@ def test_channel_label_newline_cannot_manufacture_a_hea_comment(tmp_path):
     with open(paths[0], encoding="utf-8") as f:
         raw_lines = f.readlines()
     assert not any(line.startswith("#") for line in raw_lines)
-    assert "Patient Jane Doe MRN9988776" in "".join(raw_lines), (
-        "the description text should still be readable -- just not on "
-        "its own comment line")
+    assert record.sig_name == ["ch0"], (
+        "expected the free-text Channel Label to be replaced with a "
+        f"positional token; got sig_name={record.sig_name!r}")
+    assert "Patient Jane Doe MRN9988776" not in "".join(raw_lines), (
+        "operator text embedded in Channel Label reached the header; "
+        "expected the lead-name allowlist to replace it with a positional "
+        "token instead")
 
 
 def test_units_with_embedded_whitespace_does_not_shift_fields_via_reference_reader(tmp_path):

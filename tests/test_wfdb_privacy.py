@@ -231,21 +231,25 @@ def test_missing_acquisition_datetime_omits_timing_fields(tmp_path):
     assert len(record_line) == 4
 
 
-# --- Characterization: ChannelLabel free-text fallback (Task 4 carry-forward) ---
+# --- Safety assertion: ChannelLabel free-text fallback (fixed under #39) ---
 #
 # WaveformChannel.wfdb_description() (gantry/waveform.py) prefers the coded
-# Channel Source Sequence value, but falls back to the free-text ChannelLabel
-# when no source code is present. ChannelLabel is operator-typed SH text, so
-# this fallback is a plausible PHI carrier. The brief's fixture always
-# populates ChannelSourceSequence, so that fallback path is never exercised
-# by the tests above. This test builds a dataset with an EMPTY/ABSENT Channel
-# Source Sequence and a recognisable free-text marker in ChannelLabel, then
-# asserts what actually reaches the .hea signal line.
+# Channel Source Sequence value, but previously fell back to the raw,
+# free-text ChannelLabel verbatim whenever no source code was present.
+# ChannelLabel is operator-typed SH text and was observed carrying names,
+# MRNs and clinical commentary, so that unconditional fallback was a PHI
+# leak -- including for a bare Session() that loads no PHI configuration,
+# since this check lives in the exporter rather than the (tag-gated)
+# privacy profile.
 #
-# This test does NOT assert the fallback is safe or unsafe -- it documents
-# current behaviour so a reviewer can see it directly. Do not change
-# wfdb_description() to make this test "pass differently" without sign-off;
-# see the Task 9 report for the CONCERN this raises.
+# Fixed by a lead-name allowlist: the label reaches the header only when it
+# is a recognisable signal name (e.g. "II", "V5", "aVR"); anything else is
+# replaced with a positional token ch<N>. This test used to be a
+# characterization of the unsafe behaviour ("this is what happens, not
+# whether it's OK"); it is now a safety assertion that the free-text marker
+# below never reaches the .hea description field. If it goes red, the
+# allowlist in gantry/waveform.py has stopped firing and operator text is
+# reaching the header again.
 FREE_TEXT_MARKER = "OPERATOR NOTE Smith^John DOB19800101"
 
 
@@ -271,11 +275,9 @@ def _write_fixture_with_uncoded_channel(path, patient_id="WFTEST001",
     return path
 
 
-def test_uncoded_channel_label_fallback_characterization(tmp_path):
-    """Characterize: with no coded channel source, does free-text
-    ChannelLabel reach the .hea signal line?
-
-    This is evidence, not a safety guarantee -- see module docstring above.
+def test_uncoded_channel_label_free_text_never_reaches_the_header(tmp_path):
+    """With no coded channel source, free-text ChannelLabel must NOT reach
+    the .hea signal line -- see module comment above.
     """
     src = tmp_path / "src"
     src.mkdir()
@@ -314,19 +316,16 @@ def test_uncoded_channel_label_fallback_characterization(tmp_path):
     finally:
         session.close()
 
-    # CHARACTERIZATION (evidence, not a safety guarantee -- see module
-    # docstring above; report, do not silently "fix"): wfdb_description()
-    # falls back to the raw ChannelLabel when source_code is empty, so
-    # the free-text marker DOES reach the .hea signal line's description
-    # field verbatim. Embedded whitespace in that field is spec-conformant
-    # header(5) (see reference-reader evidence above), not a format
-    # defect -- only the PHI question is live here.
-    assert description_field == FREE_TEXT_MARKER, (
-        "characterization assumption changed: expected the free-text "
-        "ChannelLabel fallback to reach the .hea description field "
-        f"verbatim; got {description_field!r} instead. If this fallback "
-        "was fixed, update this test to match the new (safer) behaviour "
-        "instead of deleting the assertion.")
+    # SAFETY ASSERTION (converted from characterization once the lead-name
+    # allowlist landed): FREE_TEXT_MARKER is not a recognisable lead name,
+    # so wfdb_description() replaces it with a positional token and the
+    # operator text never reaches the .hea description field.
+    assert description_field == "ch0", (
+        "expected the free-text ChannelLabel to be replaced with a "
+        f"positional token; got {description_field!r}. If this reverted to "
+        "the raw label, the allowlist in gantry/waveform.py stopped firing "
+        "and operator text is reaching the header again.")
+    assert FREE_TEXT_MARKER not in description_field
 
 
 # --- Record-name collision: instances missing InstanceNumber (Task 9 round 2, IMPORTANT 6) ---

@@ -71,7 +71,7 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
 
     index = channel_number - 1
     if 0 <= index < len(waveform.channels):
-        return waveform.channels[index].wfdb_description()
+        return waveform.channels[index].wfdb_description(index)
     return None
 
 

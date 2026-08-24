@@ -231,6 +231,11 @@ def test_description_with_embedded_newline_cannot_inject_a_comment_line():
     `wfdb.rdheader` treats that line as a real header comment (verified
     directly: `comments=['Patient Jane Doe MRN9988776']`) -- see
     tests/test_wfdb_conformance.py for the reference-reader-level proof.
+
+    Since the lead-name allowlist (#39) landed, "Lead I\\n# Patient Jane
+    Doe MRN9988776" is not a recognisable lead name at all, so besides not
+    injecting a fake comment line, none of this operator text should reach
+    the header -- it is replaced outright with a positional token.
     """
     wf = _waveform(n_channels=1)
     wf.channels[0].source_code = ""
@@ -242,8 +247,10 @@ def test_description_with_embedded_newline_cannot_inject_a_comment_line():
     assert not any(line.startswith("#") for line in lines), (
         f"a newline embedded in the channel description injected a "
         f"'#' comment line; header was:\n{header}")
-    # The description must still be readable text, not silently dropped.
-    assert "Patient Jane Doe MRN9988776" in lines[1]
+    # The free-text label is not a recognisable lead name, so it must be
+    # replaced with a positional token rather than reach the header at all.
+    assert lines[1].split()[-1] == "ch0"
+    assert "Patient Jane Doe MRN9988776" not in lines[1]
 
 
 def test_units_with_embedded_whitespace_does_not_shift_signal_line_fields():
