@@ -812,13 +812,22 @@ class SqliteStore:
         instance._mod_count += 1
 
     def record_blob_ref(self, instance_uid: str, kind: str, offset: int,
-                        length: int, blob_hash: str, compress_alg: str) -> None:
+                        length: int, blob_hash: str, compress_alg: str,
+                        conn: sqlite3.Connection = None) -> None:
         """Record a sidecar reference without writing to the sidecar.
 
         The ingest path writes frames itself via SidecarManager, so it needs
         to register the resulting reference separately. Without this, the
         blob is invisible to `compact_sidecar` and would be reclaimed as
         dead space.
+
+        Callers already inside a transaction MUST pass their connection.
+        Opening a nested one is not merely untidy: on a file-backed DB the
+        inner write blocks on the outer write lock for the full 900 s
+        `timeout` (see `_get_connection`) before failing, and on a `:memory:`
+        store `_memory_lock` is a plain, non-reentrant `threading.Lock`, so
+        it deadlocks outright. Follows the same `conn=None` convention as
+        `save_vertical_attributes`.
 
         Args:
             instance_uid (str): Owning SOP Instance UID.
@@ -827,18 +836,28 @@ class SqliteStore:
             length (int): On-disk (post-compression) length in bytes.
             blob_hash (str): SHA-256 of the raw (uncompressed) payload.
             compress_alg (str): Compression used, e.g. 'zlib' or 'raw'.
+            conn (sqlite3.Connection, optional): An existing connection to
+                enlist in. When given, no new connection is opened and the
+                write joins the caller's transaction.
         """
-        with self._get_connection() as conn:
-            conn.execute("""
-                INSERT INTO instance_blobs
-                    (instance_uid, kind, file_id, offset, length, hash, compress_alg)
-                VALUES (?, ?, 0, ?, ?, ?, ?)
-                ON CONFLICT(instance_uid, kind) DO UPDATE SET
-                    offset=excluded.offset,
-                    length=excluded.length,
-                    hash=excluded.hash,
-                    compress_alg=excluded.compress_alg
-            """, (instance_uid, kind, offset, length, blob_hash, compress_alg))
+        sql = """
+            INSERT INTO instance_blobs
+                (instance_uid, kind, file_id, offset, length, hash, compress_alg)
+            VALUES (?, ?, 0, ?, ?, ?, ?)
+            ON CONFLICT(instance_uid, kind) DO UPDATE SET
+                offset=excluded.offset,
+                length=excluded.length,
+                hash=excluded.hash,
+                compress_alg=excluded.compress_alg
+        """
+        params = (instance_uid, kind, offset, length, blob_hash, compress_alg)
+
+        if conn is not None:
+            conn.execute(sql, params)
+            return
+
+        with self._get_connection() as own_conn:
+            own_conn.execute(sql, params)
 
     def get_blob_ref(self, instance_uid: str, kind: str):
         """Return the sidecar reference for a blob, or None if absent.
@@ -1061,6 +1080,7 @@ class SqliteStore:
 
                             if dirty_items:
                                 i_batch = []
+                                blob_batch = []  # Mirrored into instance_blobs
                                 vert_updates = []  # Defer vertical updates to satisfy foreign key
                                 for inst, ver in dirty_items:
                                     full_data = self._serialize_item(inst)
@@ -1154,6 +1174,28 @@ class SqliteStore:
                                         attrs_json
                                     ))
 
+                                    # instance_blobs is what compaction reads,
+                                    # so it must never lag behind `instances`.
+                                    # If it did, compaction would copy the
+                                    # STALE frame forward and discard the
+                                    # current one -- silently resurrecting
+                                    # pre-redaction pixels. Mirrored inside the
+                                    # same transaction as the upsert below,
+                                    # from the same values.
+                                    #
+                                    # Skipping NULL offsets mirrors the
+                                    # COALESCE(...) semantics of that upsert:
+                                    # "no new frame" must leave the stored
+                                    # reference alone, not clear it.
+                                    if p_offset is not None and p_length is not None:
+                                        blob_batch.append((
+                                            inst.sop_instance_uid,
+                                            p_offset,
+                                            p_length,
+                                            p_hash,
+                                            p_alg
+                                        ))
+
                                 cur.executemany("""
                                     INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
                                                            pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json)
@@ -1169,6 +1211,18 @@ class SqliteStore:
                                         pixel_hash=COALESCE(excluded.pixel_hash, instances.pixel_hash),
                                         compress_alg=COALESCE(excluded.compress_alg, instances.compress_alg)
                                 """, i_batch)
+
+                                if blob_batch:
+                                    cur.executemany("""
+                                        INSERT INTO instance_blobs
+                                            (instance_uid, kind, file_id, offset, length, hash, compress_alg)
+                                        VALUES (?, 'pixels', 0, ?, ?, ?, ?)
+                                        ON CONFLICT(instance_uid, kind) DO UPDATE SET
+                                            offset=excluded.offset,
+                                            length=excluded.length,
+                                            hash=excluded.hash,
+                                            compress_alg=excluded.compress_alg
+                                    """, blob_batch)
 
                                 # Process Deferred Vertical Updates (Now that Instances exist)
                                 if vert_updates:
@@ -1543,9 +1597,11 @@ class SqliteStore:
                     f_out.write(data)
                     length = len(data)
 
-                    # Record change
-                    # (new_offset, instance_blobs.id)
-                    updates.append((current_out_pos, r['id']))
+                    # Record change.
+                    # (new_offset, new_length, instance_blobs.id) -- offset and
+                    # length always travel together so the pair can never be
+                    # assembled from two different generations of the blob.
+                    updates.append((current_out_pos, length, r['id']))
 
                     # uid_map is keyed by UID alone and is consumed by
                     # DicomSession.compact() to patch _pixel_loader. Adding a
@@ -1558,28 +1614,57 @@ class SqliteStore:
 
                 written_bytes = current_out_pos
 
-            # 3. Update DB (Transaction)
-            # NOTE: `updates` holds (new_offset, instance_blobs.id) -- NOT
-            # instances.id. Updating `instances` by that id would corrupt
-            # unrelated rows, so the legacy columns are patched by UID via a
-            # lookup on the blob table instead.
-            with self._get_connection() as conn:
-                if orphan_ids:
-                    conn.executemany(
-                        "DELETE FROM instance_blobs WHERE id = ?", orphan_ids)
-                conn.executemany("""
-                    UPDATE instance_blobs SET offset = ? WHERE id = ?
-                """, updates)
-                conn.executemany("""
-                    UPDATE instances SET pixel_offset = ?
-                    WHERE sop_instance_uid = (
-                        SELECT instance_uid FROM instance_blobs
-                        WHERE id = ? AND kind = 'pixels'
-                    )
-                """, updates)
+            # 3. Swap Files -- BEFORE the DB write.
+            # The DB step below is irreversible (it deletes orphan rows and
+            # rewrites every offset). If it committed first and this swap then
+            # failed, the DB would describe a compacted layout while the file
+            # on disk was still the old one -- every offset wrong, silently.
+            # Swapping first, and rolling the swap back if the DB write fails,
+            # keeps file and DB on the same generation in both directions.
+            # The paths share a directory by construction, so os.replace is
+            # atomic and these renames cost nothing.
+            backup_path = self.sidecar_path + ".compact.bak"
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            os.replace(self.sidecar_path, backup_path)
+            try:
+                os.replace(temp_path, self.sidecar_path)
+            except BaseException:
+                os.replace(backup_path, self.sidecar_path)
+                raise
 
-            # 4. Swap Files
-            shutil.move(temp_path, self.sidecar_path)
+            # 4. Update DB (Transaction)
+            # NOTE: `updates` holds (new_offset, new_length, instance_blobs.id)
+            # -- NOT instances.id. Updating `instances` by that id would
+            # corrupt unrelated rows, so the legacy columns are patched by UID
+            # via a lookup on the blob table instead. Both columns are written
+            # together: patching only the offset would leave `instances` with
+            # an offset from the new generation and a length from the old one,
+            # producing a truncated read rather than an error.
+            try:
+                with self._get_connection() as conn:
+                    if orphan_ids:
+                        conn.executemany(
+                            "DELETE FROM instance_blobs WHERE id = ?", orphan_ids)
+                    conn.executemany("""
+                        UPDATE instance_blobs SET offset = ?, length = ?
+                        WHERE id = ?
+                    """, updates)
+                    conn.executemany("""
+                        UPDATE instances SET pixel_offset = ?, pixel_length = ?
+                        WHERE sop_instance_uid = (
+                            SELECT instance_uid FROM instance_blobs
+                            WHERE id = ? AND kind = 'pixels'
+                        )
+                    """, updates)
+            except BaseException:
+                # Put the original file back so the DB is never left
+                # describing a generation the sidecar does not hold.
+                os.replace(self.sidecar_path, temp_path)
+                os.replace(backup_path, self.sidecar_path)
+                raise
+
+            os.remove(backup_path)
 
             # 5. Reset Manager
             self.sidecar = SidecarManager(self.sidecar_path)
@@ -1608,6 +1693,14 @@ class SqliteStore:
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
+                except BaseException:
+                    pass
+            # Only ever discard the backup once the real sidecar is back in
+            # place -- otherwise it is the last copy of the data.
+            stale_backup = self.sidecar_path + ".compact.bak"
+            if os.path.exists(stale_backup) and os.path.exists(self.sidecar_path):
+                try:
+                    os.remove(stale_backup)
                 except BaseException:
                     pass
             raise e
