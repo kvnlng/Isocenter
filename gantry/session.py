@@ -7,7 +7,8 @@ from typing import List, Union, Dict, Any
 import yaml
 from tqdm import tqdm
 
-from .io_handlers import DicomImporter, DicomExporter, SidecarPixelLoader
+from .io_handlers import (DicomImporter, DicomExporter, SidecarPixelLoader,
+                          SidecarWaveformLoader)
 from .store import DicomStore
 from .services import RedactionService
 from .config_manager import ConfigLoader
@@ -250,7 +251,15 @@ class DicomSession:
             # Returns Dict[sop_instance_uid, (new_offset, new_length)]
             updates = self.store_backend.compact_sidecar()
 
-            if not updates:
+            # compact_sidecar's uid_map is pixels-only by design: it is keyed
+            # by UID alone, so a waveform entry would be handed to a pixel
+            # loader. Waveform offsets are re-read from the blob table
+            # instead -- they moved in the same rewrite, and a loader left on
+            # a pre-compaction offset reads the wrong bytes or runs off the
+            # end of the file.
+            wave_updates = self.store_backend.get_blob_refs('waveform')
+
+            if not updates and not wave_updates:
                 print("Compaction finished (no changes or empty).")
                 return
 
@@ -284,6 +293,15 @@ class DicomSession:
                                 # BUT if it has pixel_array, does it have a loader?
                                 # persist_pixel_data ensures loader is created.
                                 # So if it was persisted, it has a loader.
+
+                            # Waveform loaders are patched from the blob
+                            # table, not from `updates`: see the note above.
+                            w_ref = wave_updates.get(inst.sop_instance_uid)
+                            if w_ref is not None and isinstance(
+                                    inst._waveform_loader, SidecarWaveformLoader):
+                                inst._waveform_loader.offset = w_ref[0]
+                                inst._waveform_loader.length = w_ref[1]
+                                count += 1
 
             print(f"Patched {count} active objects.")
 
@@ -346,7 +364,8 @@ class DicomSession:
             [directory],
             self.store,
             executor=self._executor,
-            sidecar_manager=self.store_backend.sidecar)
+            sidecar_manager=self.store_backend.sidecar,
+            store_backend=self.store_backend)
 
         self.save(sync=True)
 
@@ -1607,7 +1626,29 @@ class DicomSession:
     # EXPORT
     # =========================================================================
 
-    def export(self, folder: str, version=None, use_compression=True,
+    def export(self, folder: str, format: str = "dicom", **options):
+        """Export the session to a directory in the requested format.
+
+        Args:
+            folder (str): Output directory.
+            format (str): Registered format name. "dicom" (default) writes
+                cleaned DICOM files; "wfdb" writes PhysioNet WFDB records.
+            **options: Passed through to the selected exporter. See
+                `_export_dicom` for the DICOM format's options.
+
+        Returns:
+            The exporter's return value. The DICOM exporter returns None
+            for backward compatibility.
+
+        Raises:
+            ValueError: If `format` is not a registered export format.
+        """
+        from . import exporters
+
+        exporter = exporters.get_exporter(format)
+        return exporter.export(self, folder, **options)
+
+    def _export_dicom(self, folder: str, version=None, use_compression=True,
                check_burned_in=False, check_reversibility=True, patient_ids: List[str] = None, show_progress=True,
                # Legacy/Test Support arguments
                compression=None, safe=False, subset=None):
@@ -1771,15 +1812,13 @@ class DicomSession:
         # Structure: Folder / Patient / Study / Series / Instance
 
         # Optimization: We can generate the plan using minimal metadata
-        from .io_handlers import ExportContext
+        from .io_handlers import ExportContext, export_folder_names
 
         for p in self.store.patients:
             if p.patient_id not in target_ids:
                 continue
 
             count_p += 1
-            p_clean = "Subject_" + ConfigLoader.clean_filename(p.patient_id or "UnknownPatient")
-            p_path = os.path.join(folder, p_clean)
 
             pat_attrs = {
                 "0010,0010": p.patient_name,
@@ -1791,22 +1830,6 @@ class DicomSession:
                 pat_attrs["0010,0040"] = p.sex
 
             for st in p.studies:
-                # Hybrid Naming: Study_YYYYMMDD_Description_UIDSuffix
-                st_desc = "Study"
-                # Peek at first series->instance for description
-                try:
-                    if st.series and st.series[0].instances:
-                        st_desc = st.series[0].instances[0].attributes.get("0008,1030", "Study")
-                except BaseException:
-                    pass
-
-                st_date = str(st.study_date or "NoDate")
-                st_uid_suffix = (st.study_instance_uid or "Unknown")[-5:]
-
-                st_folder_name = f"Study_{st_date}_{st_desc}_{st_uid_suffix}"
-                st_clean = ConfigLoader.clean_filename(st_folder_name)
-                st_path = os.path.join(p_path, st_clean)
-
                 study_attrs = {
                     "0020,000D": st.study_instance_uid,
                     "0008,0020": st.study_date,
@@ -1817,21 +1840,11 @@ class DicomSession:
                     study_attrs["0008,0050"] = st.accession_number
 
                 for se in st.series:
-                    # Hybrid Naming: Series_NUM_Modality_Description_UIDSuffix
-                    se_desc = "Series"
-                    try:
-                        if se.instances:
-                            se_desc = se.instances[0].attributes.get("0008,103e", "Series")
-                    except BaseException:
-                        pass
-
-                    se_num = str(se.series_number)
-                    se_mod = se.modality or "OT"
-                    se_uid_suffix = (se.series_instance_uid or "Unknown")[-5:]
-
-                    se_folder_name = f"Series_{se_num}_{se_mod}_{se_desc}_{se_uid_suffix}"
-                    se_clean = ConfigLoader.clean_filename(se_folder_name)
-                    se_path = os.path.join(st_path, se_clean)
+                    # Hybrid Naming: shared with every other export format
+                    # (see `export_folder_names` in io_handlers.py) so
+                    # trees stay co-located.
+                    subj_name, study_folder, series_folder = export_folder_names(p, st, se)
+                    se_path = os.path.join(folder, subj_name, study_folder, series_folder)
 
                     series_attrs = {
                         "0020,000E": se.series_instance_uid,

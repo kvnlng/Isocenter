@@ -150,6 +150,15 @@ class Instance(DicomItem):
     # Transient: Hash for Integrity Check
     _pixel_hash: Optional[str] = field(default=None, repr=False)
 
+    # Transient: Decoded waveform samples, shape (num_samples, num_channels)
+    waveform_array: Optional[np.ndarray] = field(default=None, repr=False)
+
+    # Transient: Lazy loader for waveform samples (sidecar-backed)
+    _waveform_loader: Optional[Callable[[], np.ndarray]] = field(default=None, repr=False)
+
+    # Transient: Integrity hash for the raw waveform bytes
+    _waveform_hash: Optional[str] = field(default=None, repr=False)
+
     # Transient: Track if dates have been shifted in memory
     date_shifted: bool = field(default=False, init=False)
 
@@ -311,6 +320,47 @@ class Instance(DicomItem):
                 raise RuntimeError(f"Lazy load failed for {self.file_path}: {e}") from e
 
         raise FileNotFoundError(f"Pixels missing and file not found: {self.file_path}")
+
+    def unload_waveform_data(self) -> bool:
+        """Clear cached waveform samples to free memory.
+
+        Unloads only when a `_waveform_loader` can restore the samples.
+        Deliberately narrower than `unload_pixel_data`, which also accepts
+        `file_path` as a recovery route: `get_pixel_data` re-reads the file
+        with pydicom as a fallback, but `get_waveform_data` has no such
+        fallback -- it returns the cached array, else the loader, else None.
+        Accepting `file_path` here would report a safe unload and then hand
+        back None forever, which is exactly the silent discard this guard
+        exists to prevent.
+
+        Returns:
+            bool: True if unloaded (or already absent), False if unsafe --
+            i.e. the samples are in memory only and nothing could reload them.
+        """
+        if self.waveform_array is None:
+            return True
+
+        if self._waveform_loader:
+            self.waveform_array = None
+            return True
+        return False
+
+    def get_waveform_data(self) -> Optional[np.ndarray]:
+        """Return decoded waveform samples, loading from the sidecar if needed.
+
+        Returns:
+            Optional[np.ndarray]: int16 array of shape
+            (num_samples, num_channels), or None if this instance has no
+            waveform.
+        """
+        if self.waveform_array is not None:
+            return self.waveform_array
+
+        if self._waveform_loader is not None:
+            self.waveform_array = self._waveform_loader()
+            return self.waveform_array
+
+        return None
 
     def set_pixel_data(self, array: np.ndarray):
         """

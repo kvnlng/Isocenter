@@ -72,6 +72,10 @@ markdown_extensions:
 
 docs_dir: docs
 
+# Internal design specs live under docs/ by convention but are not site content.
+exclude_docs: |
+  superpowers/
+
 nav:
   - Home: index.md
   - Features:
@@ -85,6 +89,7 @@ nav:
       - 'Environment Variables': environment.md
       - 'Migration Tools': migration.md
       - 'Analytics & Reporting': analytics.md
+      - 'Waveforms & WFDB': waveforms.md
   - API Reference:
       - 'Session': api/session.md
       - 'Configuration': api/configuration.md

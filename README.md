@@ -14,6 +14,7 @@ Gantry provides a high-performance, object-oriented interface for managing, anal
   - **Pixel Data**: Machine-specific redaction zones (ROI) to scrub burned-in PHI.
   - **Reversibility**: Optional cryptographic identity preservation.
 - **Codecs**: Robust support for JPEG Lossless, JPEG 2000, and other compressed formats via `imagecodecs`.
+- **Waveforms**: Ingest DICOM waveform IODs (ECG, hemodynamic) and export PhysioNet WFDB records, bridging to [Murmur Studio](https://github.com/kvnlng/Murmur).
 - **Free-threaded Python Ready**: Fully compatible with Python 3.13t+ (no-GIL) for true parallelism.
 - **Enterprise-Grade Scalability**:
   - **Process-Isolated Redaction**: Guarantees zero memory leaks by isolating heavy pixel operations.

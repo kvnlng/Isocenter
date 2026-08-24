@@ -1,0 +1,34 @@
+name: Murmur Schema Drift
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # No continue-on-error: this job only runs on a weekly schedule (or
+    # manual dispatch), never on pull_request, so a real failure here
+    # cannot block anyone's PR -- it can only signal the thing it exists
+    # to signal. Previously it had BOTH continue-on-error: true AND
+    # `exit 1` on drift, which made the job report success regardless
+    # and left the ::warning:: annotation as the only signal, easy to
+    # miss on an unattended scheduled run.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare pinned schema against the published one
+        run: |
+          curl -fsSL https://kvnlng.github.io/Murmur/annotations.schema.json \
+            -o /tmp/live.json
+          if diff -q tests/fixtures/annotations.schema.json /tmp/live.json; then
+            echo "Pinned schema matches upstream."
+          else
+            echo "::warning::Murmur's published annotations schema has changed."
+            diff -u tests/fixtures/annotations.schema.json /tmp/live.json || true
+            exit 1
+          fi

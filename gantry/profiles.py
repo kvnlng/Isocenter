@@ -9,6 +9,15 @@ overridden by the user's specific "phi_tags" configuration.
 """
 
 # Based on DICOM PS3.15 Annex E (Basic Profile) - Reduced for common usage
+#
+# NOTE: keys must be lowercase 'gggg,eeee'. Ingested attribute keys on the
+# object graph are always lowercased (gantry/io_handlers.py's populate_attrs),
+# and PhiInspector.__init__ (gantry/privacy.py) now normalizes any phi_tags
+# dict to lowercase keys as a defensive backstop -- but do not rely on that
+# backstop when adding new entries here; write them lowercase directly so
+# a mismatch never has a chance to silently disable a tag. (0008,103E,
+# Series Description, shipped uppercase for a while and was never
+# remediated on any documented path as a result.)
 BASIC_PROFILE = {
     # Patient Identity
     "0010,0010": {"action": "REMOVE", "name": "Patient's Name"},
@@ -35,7 +44,7 @@ BASIC_PROFILE = {
     "0008,0090": {"action": "REMOVE", "name": "Referring Physician's Name"},
     # Often contains PHI, but structural
     "0008,1030": {"action": "EMPTY", "name": "Study Description"},
-    "0008,103E": {"action": "EMPTY", "name": "Series Description"},
+    "0008,103e": {"action": "EMPTY", "name": "Series Description"},
     "0020,0010": {"action": "REMOVE", "name": "Study ID"},
     "0008,0080": {"action": "REMOVE", "name": "Institution Name"},
     "0008,0081": {"action": "REMOVE", "name": "Institution Address"},

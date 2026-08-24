@@ -101,6 +101,18 @@ class SqliteStore:
         UNIQUE(instance_uid, group_id, element_id, atom_index)
     );
 
+    CREATE TABLE IF NOT EXISTS instance_blobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_uid TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        file_id INTEGER DEFAULT 0,
+        offset INTEGER,
+        length INTEGER,
+        hash TEXT,
+        compress_alg TEXT,
+        UNIQUE(instance_uid, kind)
+    );
+
     CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp TEXT,
@@ -129,6 +141,7 @@ class SqliteStore:
     CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_uid);
     CREATE INDEX IF NOT EXISTS idx_findings_entity ON phi_findings(entity_uid);
     CREATE INDEX IF NOT EXISTS idx_inst_attr_uid ON instance_attributes(instance_uid);
+    CREATE INDEX IF NOT EXISTS idx_blobs_uid_kind ON instance_blobs(instance_uid, kind);
     """
 
     def __init__(self, db_path: str):
@@ -240,11 +253,65 @@ class SqliteStore:
             conn.execute("PRAGMA auto_vacuum = FULL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
             conn.executescript(self.SCHEMA)
+            self._backfill_legacy_blobs(conn)
+
+    def _backfill_legacy_blobs(self, conn):
+        """Migrate 0.6.x pixel_* columns into instance_blobs.
+
+        Idempotent: INSERT OR IGNORE means rows already migrated, or written
+        by the current code path, are left untouched. The legacy columns are
+        deliberately left in place so a downgrade still reads correctly.
+
+        Args:
+            conn (sqlite3.Connection): An already-open connection. Passed in
+                rather than acquired here because callers run inside their own
+                transaction (and the :memory: connection lock is not
+                re-entrant).
+        """
+        conn.execute("""
+            INSERT OR IGNORE INTO instance_blobs
+                (instance_uid, kind, file_id, offset, length, hash, compress_alg)
+            SELECT sop_instance_uid, 'pixels', COALESCE(pixel_file_id, 0),
+                   pixel_offset, pixel_length, pixel_hash, compress_alg
+            FROM instances
+            WHERE pixel_offset IS NOT NULL AND pixel_length IS NOT NULL
+        """)
 
     def _create_pixel_loader(self, offset, length, alg, instance, pixel_hash=None):
         """Helper to create a lazy pixel loader for the sidecar."""
         # Use instance to populate primitives
         return SidecarPixelLoader(self.sidecar_path, offset, length, alg, instance=instance, pixel_hash=pixel_hash)
+
+    def _wire_waveform_loader(self, instance, wref):
+        """Attach a lazy waveform loader to a freshly hydrated Instance.
+
+        Shared by `load_all` and `load_patient`, which hydrate the same rows
+        through two separate loops.
+
+        Args:
+            instance (Instance): The hydrated instance; its attributes and
+                sequences must already be restored, because the loader reads
+                its geometry out of the Waveform Sequence.
+            wref: A row from `instance_blobs` (kind 'waveform'), or None.
+        """
+        if wref is None:
+            return
+
+        from .io_handlers import SidecarWaveformLoader
+
+        instance._waveform_hash = wref['hash']
+        try:
+            instance._waveform_loader = SidecarWaveformLoader(
+                self.sidecar_path, wref['offset'], wref['length'],
+                wref['compress_alg'], instance=instance,
+                waveform_hash=wref['hash'])
+        except ValueError:
+            # Geometry lives in the Waveform Sequence, which is restored
+            # from attributes_json above. A missing sequence means a
+            # corrupt row, not a fatal error.
+            self.logger.warning(
+                f"Waveform blob for {instance.sop_instance_uid} has no "
+                "Waveform Sequence; skipping loader.")
 
     def _audit_worker(self):
         """Background thread to batch write audit logs."""
@@ -445,6 +512,16 @@ class SqliteStore:
                     if r['patient_id_fk'] in p_map:
                         p_map[r['patient_id_fk']].studies.append(st)
 
+                # Waveforms have no columns on `instances`, so their only
+                # record is the blob table. Fetched once here rather than
+                # per instance to keep hydration a fixed number of queries.
+                wave_refs = {
+                    row['instance_uid']: row
+                    for row in cur.execute(
+                        "SELECT instance_uid, offset, length, compress_alg, hash"
+                        " FROM instance_blobs WHERE kind = 'waveform'").fetchall()
+                }
+
                 se_map = {}
                 for r in se_rows:
                     se = Series(r['series_instance_uid'], r['modality'], r['series_number'])
@@ -488,6 +565,8 @@ class SqliteStore:
                         inst._pixel_loader = self._create_pixel_loader(
                             r['pixel_offset'], r['pixel_length'], r['compress_alg'], inst)
 
+                    self._wire_waveform_loader(inst, wave_refs.get(r['sop_instance_uid']))
+
                     if r['series_id_fk'] in se_map:
                         se_map[r['series_id_fk']].instances.append(inst)
 
@@ -529,6 +608,14 @@ class SqliteStore:
 
                 p = Patient(p_row['patient_id'], p_row['patient_name'])
                 p_pk = p_row['id']
+
+                # Same one-query pre-fetch as load_all; see the note there.
+                wave_refs = {
+                    row['instance_uid']: row
+                    for row in cur.execute(
+                        "SELECT instance_uid, offset, length, compress_alg, hash"
+                        " FROM instance_blobs WHERE kind = 'waveform'").fetchall()
+                }
 
                 # Fetch Studies
                 st_rows = cur.execute(
@@ -574,6 +661,9 @@ class SqliteStore:
                                 offset, length, alg = r['pixel_offset'], r['pixel_length'], r['compress_alg']
                                 inst._pixel_loader = self._create_pixel_loader(
                                     r['pixel_offset'], r['pixel_length'], r['compress_alg'], inst)
+
+                            self._wire_waveform_loader(
+                                inst, wave_refs.get(r['sop_instance_uid']))
 
                             se.instances.append(inst)
 
@@ -744,6 +834,158 @@ class SqliteStore:
             self.logger.error(f"Failed to load vertical attributes for {instance_uid}: {e}")
             return {}
 
+    def persist_blob(self, instance, kind: str, data) -> None:
+        """Write a binary blob to the sidecar and record its reference.
+
+        Args:
+            instance (Instance): Owning instance.
+            kind (str): 'pixels' or 'waveform'.
+            data (bytes | np.ndarray): Payload. Arrays are passed to the
+                sidecar directly to avoid a full copy.
+
+        Raises:
+            ValueError: If `kind` is not a recognised blob kind.
+        """
+        import hashlib
+
+        if kind not in ("pixels", "waveform"):
+            raise ValueError("Unknown blob kind: {!r}".format(kind))
+
+        if data is None:
+            return
+
+        raw = data.tobytes() if hasattr(data, "tobytes") else data
+        digest = hashlib.sha256(raw).hexdigest()
+
+        c_alg = 'zlib'
+        offset, length = self.sidecar.write_frame(data, c_alg)
+
+        self.record_blob_ref(
+            instance.sop_instance_uid, kind, offset, length, digest, c_alg)
+
+        instance._mod_count += 1
+
+    def record_blob_ref(self, instance_uid: str, kind: str, offset: int,
+                        length: int, blob_hash: str, compress_alg: str,
+                        conn: sqlite3.Connection = None) -> None:
+        """Record a sidecar reference without writing to the sidecar.
+
+        The ingest path writes frames itself via SidecarManager, so it needs
+        to register the resulting reference separately. Without this, the
+        blob is invisible to `compact_sidecar` and would be reclaimed as
+        dead space.
+
+        Callers already inside a transaction MUST pass their connection.
+        Opening a nested one is not merely untidy: on a file-backed DB the
+        inner write blocks on the outer write lock for the full 900 s
+        `timeout` (see `_get_connection`) before failing, and on a `:memory:`
+        store `_memory_lock` is a plain, non-reentrant `threading.Lock`, so
+        it deadlocks outright. Follows the same `conn=None` convention as
+        `save_vertical_attributes`.
+
+        Args:
+            instance_uid (str): Owning SOP Instance UID.
+            kind (str): 'pixels' or 'waveform'.
+            offset (int): Byte offset of the blob within the sidecar.
+            length (int): On-disk (post-compression) length in bytes.
+            blob_hash (str): SHA-256 of the raw (uncompressed) payload.
+            compress_alg (str): Compression used, e.g. 'zlib' or 'raw'.
+            conn (sqlite3.Connection, optional): An existing connection to
+                enlist in. When given, no new connection is opened and the
+                write joins the caller's transaction.
+
+        Raises:
+            ValueError: If exactly one of `offset`/`length` is None. A
+                half-specified reference is never recoverable: it would pair
+                a real offset with a missing or stale length. Callers with
+                nothing to record must skip the call, not pass NULLs.
+        """
+        if (offset is None) != (length is None):
+            raise ValueError(
+                "Blob reference for {!r}/{!r} must supply both offset and "
+                "length, got offset={!r} length={!r}".format(
+                    instance_uid, kind, offset, length))
+        # offset/length/compress_alg describe ONE generation of the blob and
+        # are assigned together -- COALESCE-ing any of them could pair a new
+        # offset with a stale length or algorithm, which decodes garbage
+        # rather than failing. `hash` is different: it is knowledge ABOUT the
+        # payload, and a caller that does not happen to have it (a hydrated
+        # instance re-saved after a tag edit carries no `_pixel_hash`) means
+        # "unknown", not "none". Erasing a recorded hash there would leave
+        # this row disagreeing with instances.pixel_hash, so it is COALESCEd,
+        # matching the sibling `instances` upsert in save_all.
+        sql = """
+            INSERT INTO instance_blobs
+                (instance_uid, kind, file_id, offset, length, hash, compress_alg)
+            VALUES (?, ?, 0, ?, ?, ?, ?)
+            ON CONFLICT(instance_uid, kind) DO UPDATE SET
+                offset=excluded.offset,
+                length=excluded.length,
+                hash=COALESCE(excluded.hash, instance_blobs.hash),
+                compress_alg=excluded.compress_alg
+        """
+        params = (instance_uid, kind, offset, length, blob_hash, compress_alg)
+
+        if conn is not None:
+            conn.execute(sql, params)
+            return
+
+        with self._get_connection() as own_conn:
+            own_conn.execute(sql, params)
+
+    def get_blob_ref(self, instance_uid: str, kind: str):
+        """Return the sidecar reference for a blob, or None if absent.
+
+        Args:
+            instance_uid (str): Owning SOP Instance UID.
+            kind (str): 'pixels' or 'waveform'.
+
+        Returns:
+            Optional[dict]: Keys `offset`, `length`, `hash`, `compress_alg`.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute("""
+                SELECT offset, length, hash, compress_alg
+                FROM instance_blobs
+                WHERE instance_uid = ? AND kind = ?
+            """, (instance_uid, kind)).fetchone()
+
+        if row is None:
+            return None
+        return {
+            "offset": row["offset"],
+            "length": row["length"],
+            "hash": row["hash"],
+            "compress_alg": row["compress_alg"],
+        }
+
+    def get_blob_refs(self, kind: str) -> Dict[str, Tuple[int, int]]:
+        """Return every sidecar reference of one kind, in a single query.
+
+        `compact_sidecar` returns a pixels-only uid_map on purpose (keying by
+        UID alone cannot distinguish kinds, and a waveform offset handed to a
+        pixel loader decodes garbage). Callers that need to repoint non-pixel
+        loaders after a compaction read the post-compaction truth from here
+        instead.
+
+        Args:
+            kind (str): 'pixels' or 'waveform'.
+
+        Returns:
+            Dict[str, Tuple[int, int]]: instance_uid -> (offset, length), for
+            rows that have both. Half-specified rows are impossible via
+            `record_blob_ref`, but are skipped defensively rather than
+            yielding a None-bearing pair.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT instance_uid, offset, length
+                FROM instance_blobs
+                WHERE kind = ? AND offset IS NOT NULL AND length IS NOT NULL
+            """, (kind,)).fetchall()
+
+        return {r["instance_uid"]: (r["offset"], r["length"]) for r in rows}
+
     def persist_pixel_data(self, instance: Instance):
         """
         Immediately persists pixel data to the sidecar to allow memory offloading.
@@ -795,6 +1037,11 @@ class SqliteStore:
             # So updating the object state in memory (step 2) is sufficient for unload_pixel_data() to return True.
             # The final session.save() will record the new offset/length into the DB
             # instances table.
+
+            # Mirror the reference into the kind-keyed blob table so
+            # compaction and waveform storage share one index.
+            self.record_blob_ref(
+                instance.sop_instance_uid, 'pixels', offset, length, p_hash, c_alg)
 
             # CRITICAL: Mark instance as dirty so save_all() knows to update the DB with the new loader/hash!
             # If we don't do this, save_all might skip this instance if it was otherwise clean,
@@ -934,6 +1181,7 @@ class SqliteStore:
 
                             if dirty_items:
                                 i_batch = []
+                                blob_batch = []  # Mirrored into instance_blobs
                                 vert_updates = []  # Defer vertical updates to satisfy foreign key
                                 for inst, ver in dirty_items:
                                     full_data = self._serialize_item(inst)
@@ -1027,6 +1275,29 @@ class SqliteStore:
                                         attrs_json
                                     ))
 
+                                    # instance_blobs is what compaction reads,
+                                    # so it must never lag behind `instances`.
+                                    # If it did, compaction would copy the
+                                    # STALE frame forward and discard the
+                                    # current one -- silently resurrecting
+                                    # pre-redaction pixels. Mirrored inside the
+                                    # same transaction as the upsert below,
+                                    # from the same values.
+                                    #
+                                    # Skipping NULL offsets mirrors the
+                                    # COALESCE(...) semantics of that upsert:
+                                    # "no new frame" must leave the stored
+                                    # reference alone, not clear it.
+                                    if p_offset is not None and p_length is not None:
+                                        blob_batch.append((
+                                            inst.sop_instance_uid,
+                                            'pixels',
+                                            p_offset,
+                                            p_length,
+                                            p_hash,
+                                            p_alg
+                                        ))
+
                                 cur.executemany("""
                                     INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
                                                            pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json)
@@ -1042,6 +1313,15 @@ class SqliteStore:
                                         pixel_hash=COALESCE(excluded.pixel_hash, instances.pixel_hash),
                                         compress_alg=COALESCE(excluded.compress_alg, instances.compress_alg)
                                 """, i_batch)
+
+                                # Routed through record_blob_ref rather than
+                                # inlined, so that exactly one place knows how
+                                # an instance_blobs row is written. Duplicating
+                                # the SQL here is what let this mirror's
+                                # conflict clause drift away from its sibling.
+                                # `conn=conn` keeps it in this transaction.
+                                for b_row in blob_batch:
+                                    self.record_blob_ref(*b_row, conn=conn)
 
                                 # Process Deferred Vertical Updates (Now that Instances exist)
                                 if vert_updates:
@@ -1340,12 +1620,45 @@ class SqliteStore:
         try:
             with self._get_connection() as conn:
                 cur = conn.cursor()
+
+                # The ingest path writes pixel frames through SidecarManager
+                # directly and never calls persist_pixel_data(), so
+                # instances.pixel_offset can hold references instance_blobs
+                # has never seen. Back-fill BEFORE the SELECT or compaction
+                # silently discards every such blob as dead space.
+                self._backfill_legacy_blobs(conn)
+
+                # A blob is live only while its owning instance row exists.
+                # This preserves the pre-blob-table orphan semantics: deleting
+                # an instance must let compaction reclaim its bytes.
                 rows = cur.execute("""
-                    SELECT id, sop_instance_uid, pixel_offset, pixel_length
-                    FROM instances
-                    WHERE pixel_offset IS NOT NULL
-                    ORDER BY pixel_offset ASC
+                    SELECT b.id AS id,
+                           b.instance_uid AS sop_instance_uid,
+                           b.kind AS kind,
+                           b.offset AS pixel_offset,
+                           b.length AS pixel_length
+                    FROM instance_blobs b
+                    WHERE b.offset IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1 FROM instances i
+                          WHERE i.sop_instance_uid = b.instance_uid
+                      )
+                    ORDER BY b.offset ASC
                 """).fetchall()
+
+                # Bytes for these rows are about to be discarded, so their
+                # offsets would dangle into the rewritten file. Collect the
+                # exact ids now and drop them only if the rewrite succeeds.
+                orphan_ids = [
+                    (o['id'],) for o in cur.execute("""
+                        SELECT b.id AS id
+                        FROM instance_blobs b
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM instances i
+                            WHERE i.sop_instance_uid = b.instance_uid
+                        )
+                    """).fetchall()
+                ]
         except sqlite3.Error as e:
             self.logger.error(f"Compaction Failed (Query): {e}")
             raise e
@@ -1383,21 +1696,74 @@ class SqliteStore:
                     f_out.write(data)
                     length = len(data)
 
-                    # Record change
-                    # (new_offset, instance_id)
-                    updates.append((current_out_pos, r['id']))
-                    uid_map[r['sop_instance_uid']] = (current_out_pos, length)
+                    # Record change.
+                    # (new_offset, new_length, instance_blobs.id) -- offset and
+                    # length always travel together so the pair can never be
+                    # assembled from two different generations of the blob.
+                    updates.append((current_out_pos, length, r['id']))
+
+                    # uid_map is keyed by UID alone and is consumed by
+                    # DicomSession.compact() to patch _pixel_loader. Adding a
+                    # non-pixel kind here would point the pixel loader at the
+                    # wrong blob, so only pixel rows are published.
+                    if r['kind'] == 'pixels':
+                        uid_map[r['sop_instance_uid']] = (current_out_pos, length)
 
                     current_out_pos += length
 
                 written_bytes = current_out_pos
 
-            # 3. Update DB (Transaction)
-            with self._get_connection() as conn:
-                conn.executemany("UPDATE instances SET pixel_offset=? WHERE id=?", updates)
+            # 3. Swap Files -- BEFORE the DB write.
+            # The DB step below is irreversible (it deletes orphan rows and
+            # rewrites every offset). If it committed first and this swap then
+            # failed, the DB would describe a compacted layout while the file
+            # on disk was still the old one -- every offset wrong, silently.
+            # Swapping first, and rolling the swap back if the DB write fails,
+            # keeps file and DB on the same generation in both directions.
+            # The paths share a directory by construction, so os.replace is
+            # atomic and these renames cost nothing.
+            backup_path = self.sidecar_path + ".compact.bak"
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            os.replace(self.sidecar_path, backup_path)
+            try:
+                os.replace(temp_path, self.sidecar_path)
+            except BaseException:
+                os.replace(backup_path, self.sidecar_path)
+                raise
 
-            # 4. Swap Files
-            shutil.move(temp_path, self.sidecar_path)
+            # 4. Update DB (Transaction)
+            # NOTE: `updates` holds (new_offset, new_length, instance_blobs.id)
+            # -- NOT instances.id. Updating `instances` by that id would
+            # corrupt unrelated rows, so the legacy columns are patched by UID
+            # via a lookup on the blob table instead. Both columns are written
+            # together: patching only the offset would leave `instances` with
+            # an offset from the new generation and a length from the old one,
+            # producing a truncated read rather than an error.
+            try:
+                with self._get_connection() as conn:
+                    if orphan_ids:
+                        conn.executemany(
+                            "DELETE FROM instance_blobs WHERE id = ?", orphan_ids)
+                    conn.executemany("""
+                        UPDATE instance_blobs SET offset = ?, length = ?
+                        WHERE id = ?
+                    """, updates)
+                    conn.executemany("""
+                        UPDATE instances SET pixel_offset = ?, pixel_length = ?
+                        WHERE sop_instance_uid = (
+                            SELECT instance_uid FROM instance_blobs
+                            WHERE id = ? AND kind = 'pixels'
+                        )
+                    """, updates)
+            except BaseException:
+                # Put the original file back so the DB is never left
+                # describing a generation the sidecar does not hold.
+                os.replace(self.sidecar_path, temp_path)
+                os.replace(backup_path, self.sidecar_path)
+                raise
+
+            os.remove(backup_path)
 
             # 5. Reset Manager
             self.sidecar = SidecarManager(self.sidecar_path)
@@ -1426,6 +1792,14 @@ class SqliteStore:
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
+                except BaseException:
+                    pass
+            # Only ever discard the backup once the real sidecar is back in
+            # place -- otherwise it is the last copy of the data.
+            stale_backup = self.sidecar_path + ".compact.bak"
+            if os.path.exists(stale_backup) and os.path.exists(self.sidecar_path):
+                try:
+                    os.remove(stale_backup)
                 except BaseException:
                     pass
             raise e

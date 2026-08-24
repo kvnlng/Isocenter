@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Any, Optional, Union, Dict
 import hashlib
 from .entities import Patient, Study, Series, Instance
+from .logger import get_logger
 
 
 @dataclass(slots=True)
@@ -137,6 +138,51 @@ class PhiInspector:
             self.phi_tags = ConfigLoader.load_phi_config(config_path)
         else:
             self.phi_tags = ConfigLoader.load_phi_config()
+
+        # Normalize tag-key casing HERE, once, at the boundary between
+        # "however phi_tags got built" (a built-in PRIVACY_PROFILES entry,
+        # a user's own YAML, an external custom-profile file, or the
+        # shipped default resource) and "how it's looked up"
+        # (`_scan_instance`'s `self.phi_tags.get(tag)` below). Every
+        # ingested attribute key on the object graph is lowercased
+        # (`io_handlers.py`'s `populate_attrs`,
+        # `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), so a config
+        # source that spells a tag with an uppercase hex letter (A-F) --
+        # as `gantry/profiles.py`'s Basic profile did for Series
+        # Description, `0008,103E` -- would otherwise never match and
+        # silently disable a declared policy with no error anywhere.
+        # Normalizing at this single choke point, rather than fixing the
+        # one known offending key, means this class of bug cannot recur
+        # regardless of which future profile or config file introduces it.
+        self.phi_tags = self._normalize_tag_keys(self.phi_tags)
+
+    @staticmethod
+    def _normalize_tag_keys(phi_tags: Dict[str, Any]) -> Dict[str, Any]:
+        """Lowercase every string PHI-tag key so it matches the
+        lowercased 'gggg,eeee' keys the object graph actually uses.
+
+        Non-string keys (defensive only -- config_tags is caller-supplied
+        and its shape isn't strictly validated elsewhere) pass through
+        unchanged.
+        """
+        if not phi_tags:
+            return phi_tags
+
+        normalized: Dict[str, Any] = {}
+        for key, value in phi_tags.items():
+            norm_key = key.lower() if isinstance(key, str) else key
+            if norm_key in normalized:
+                # Two source keys collided after lowercasing (e.g. both
+                # "0008,103E" and "0008,103e" were present). Last one
+                # wins, matching ordinary dict.update()/dict-literal
+                # overwrite semantics -- but log it, since a silent
+                # overwrite here is exactly the kind of thing this
+                # normalization exists to make loud.
+                get_logger().warning(
+                    "PHI tag key collision after case normalization: "
+                    "%r overwrites the earlier entry for %r.", key, norm_key)
+            normalized[norm_key] = value
+        return normalized
 
     def scan_patient(self, patient: Patient) -> List[PhiFinding]:
         """

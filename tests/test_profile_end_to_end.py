@@ -7,7 +7,7 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian
 from gantry.session import DicomSession
 
-def create_simple_dicom(path, patient_name="Test^Patient"):
+def create_simple_dicom(path, patient_name="Test^Patient", series_description=None):
     file_meta = FileMetaDataset()
     file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.7" # Secondary Capture (Lenient)
     file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
@@ -30,6 +30,8 @@ def create_simple_dicom(path, patient_name="Test^Patient"):
     ds.StudyDate = "20230101"
     ds.StudyTime = "120000" # Type 2 for SC
     ds.ConversionType = "WSD" # Type 1 for SC
+    if series_description is not None:
+        ds.SeriesDescription = series_description
 
     # Minimal pixel data to pass validation if any
     ds.is_little_endian = True
@@ -106,3 +108,76 @@ def test_profile_remediation_end_to_end(tmp_path):
 
     # BirthDate has no hardcoded semantic override, so strictly REMOVE should work
     assert "PatientBirthDate" not in ds_out or ds_out.PatientBirthDate == ""
+
+
+def test_series_description_is_remediated_by_the_basic_profile_via_documented_path(tmp_path):
+    """Regression test for the `0008,103E` / `0008,103e` casing bug.
+
+    `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) keys Series
+    Description as `0008,103E` -- the only one of the profile's 28 keys
+    with an uppercase hex letter. Every ingested attribute key is
+    lowercased (`gantry/io_handlers.py`'s `populate_attrs`,
+    `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), so the lookup in
+    `PhiInspector._scan_instance` (`self.phi_tags.get(tag)`) never
+    matched `0008,103e` and Series Description was silently never
+    remediated on ANY documented path -- even though the Basic profile
+    declares `0008,103E: EMPTY`. Study Description (`0008,1030`, no hex
+    letter) WAS correctly emptied the whole time, which is what made
+    this easy to miss.
+
+    Runs the real, documented Quick Start flow end-to-end:
+    create_config() -> load_config() -> audit() -> anonymize() -> export().
+    """
+    dcm_path = tmp_path / "phi.dcm"
+    create_simple_dicom(dcm_path, "John^Doe", series_description="Rhythm strip Jane Doe")
+
+    session = DicomSession(":memory:")
+    session.ingest(str(tmp_path))
+
+    config_path = tmp_path / "config.yaml"
+    session.create_config(str(config_path))
+    session.load_config(str(config_path))
+
+    findings = session.audit()
+    session.anonymize(findings)
+
+    export_dir = tmp_path / "clean_export"
+    session.export(str(export_dir), safe=False)
+
+    out_files = list(export_dir.rglob("*.dcm"))
+    assert len(out_files) == 1
+    ds_out = pydicom.dcmread(out_files[0])
+
+    series_description = str(getattr(ds_out, "SeriesDescription", "<missing>"))
+    assert series_description == "", (
+        "SeriesDescription survived anonymize() unredacted -- the Basic "
+        f"profile's 0008,103E key never matched the lowercased graph key: "
+        f"got {series_description!r}")
+    assert "Jane Doe" not in series_description
+    assert "Rhythm strip" not in series_description
+
+
+def test_uppercase_tag_keys_are_normalized_at_the_inspector_boundary():
+    """The casing backstop itself must be pinned.
+
+    `gantry/profiles.py` now spells Series Description lowercase, so the
+    end-to-end test above passes on the corrected key alone and would stay
+    green if `_normalize_tag_keys` were deleted. This test targets the
+    backstop directly: a config source that spells a tag with an uppercase
+    hex letter -- a user's own YAML, or a future profile entry -- must still
+    match the lowercased keys the object graph actually uses.
+    """
+    from gantry.privacy import PhiInspector
+
+    inspector = PhiInspector(config_tags={
+        "0008,103E": {"action": "EMPTY", "name": "Series Description"},
+        "0010,0010": {"action": "REMOVE", "name": "Patient's Name"},
+    })
+
+    assert "0008,103e" in inspector.phi_tags, (
+        "uppercase hex key was not normalized; it would never match the "
+        "lowercased 'gggg,eeee' keys populate_attrs produces")
+    assert "0008,103E" not in inspector.phi_tags
+    assert inspector.phi_tags["0008,103e"]["action"] == "EMPTY"
+    # A key with no hex letters must survive untouched.
+    assert inspector.phi_tags["0010,0010"]["action"] == "REMOVE"

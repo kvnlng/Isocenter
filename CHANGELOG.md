@@ -12,15 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Developer Guide**: Added `docs/developer_guide.md` covering linting and testing standards.
 - **Advanced Discovery**: Added `DiscoveryResult.to_dataframe()` and `get_density_matrix()` for data science integration.
 - **Iterability**: Made `DiscoveryResult` iterable, yielding `(tag_string, count)` tuples.
+- **DICOM Waveform Support**: Waveform IODs are now ingested, persisted, and de-identified as a first-class data type alongside pixel data.
+- **WFDB Export**: `session.export(folder, format="wfdb")` writes `header(5)`-conformant PhysioNet WFDB records (format 16).
+- **Murmur Annotation Bridge**: Waveform Annotation Sequence `(0040,B020)` is exported as `<record>.annotations.json` for [Murmur Studio](https://github.com/kvnlng/Murmur).
+- **Export Format Registry**: `gantry.exporters` provides a pluggable `Exporter` seam; `session.export()` dispatches on `format`.
 
 ### Changed
 
+- **BREAKING: `session.export()` signature**: `export(folder, version=None, use_compression=True, ...)` is now `export(folder, format="dicom", **options)`. Keyword callers (`version="v2"`, etc.) are unaffected, but positional argument 2 now means `format`, not `version` — existing code calling `session.export("/out", "v2")` previously set `version="v2"`; it now raises `ValueError: Unknown export format 'v2'`. Pass `version` as a keyword argument to restore the old behavior: `session.export("/out", version="v2")`.
+- **Planning Moved to GitHub Issues**: `ROADMAP.md` and `docs/roadmap.md` are now pointers to the issue tracker. Open work is tracked under versioned milestones; `CHANGELOG.md` remains the canonical record of shipped features.
 - **Pylint Compliance**: Addressed hundreds of linting issues across `gantry/` and `tests/`.
   - Enforced `encoding='utf-8'` on all file operations.
   - Standardized import ordering.
   - Added missing docstrings.
   - Refactored `gantry/discovery.py` lazy imports.
 - **Testing**: Cleaned up test suite (whitespace, indentation, imports) to achieve a clean lint score (7.62/10).
+
+### Fixed
+
+- **Waveform Data Loss**: Waveform Data `(5400,1010)` was silently discarded at ingest because `populate_attrs` skips all `OB`/`OW` VRs. Waveform IODs now round-trip intact.
 
 ## [0.6.1] - 2026-01-23
 
