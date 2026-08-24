@@ -282,6 +282,37 @@ class SqliteStore:
         # Use instance to populate primitives
         return SidecarPixelLoader(self.sidecar_path, offset, length, alg, instance=instance, pixel_hash=pixel_hash)
 
+    def _wire_waveform_loader(self, instance, wref):
+        """Attach a lazy waveform loader to a freshly hydrated Instance.
+
+        Shared by `load_all` and `load_patient`, which hydrate the same rows
+        through two separate loops.
+
+        Args:
+            instance (Instance): The hydrated instance; its attributes and
+                sequences must already be restored, because the loader reads
+                its geometry out of the Waveform Sequence.
+            wref: A row from `instance_blobs` (kind 'waveform'), or None.
+        """
+        if wref is None:
+            return
+
+        from .io_handlers import SidecarWaveformLoader
+
+        instance._waveform_hash = wref['hash']
+        try:
+            instance._waveform_loader = SidecarWaveformLoader(
+                self.sidecar_path, wref['offset'], wref['length'],
+                wref['compress_alg'], instance=instance,
+                waveform_hash=wref['hash'])
+        except ValueError:
+            # Geometry lives in the Waveform Sequence, which is restored
+            # from attributes_json above. A missing sequence means a
+            # corrupt row, not a fatal error.
+            self.logger.warning(
+                f"Waveform blob for {instance.sop_instance_uid} has no "
+                "Waveform Sequence; skipping loader.")
+
     def _audit_worker(self):
         """Background thread to batch write audit logs."""
         batch = []
@@ -481,6 +512,16 @@ class SqliteStore:
                     if r['patient_id_fk'] in p_map:
                         p_map[r['patient_id_fk']].studies.append(st)
 
+                # Waveforms have no columns on `instances`, so their only
+                # record is the blob table. Fetched once here rather than
+                # per instance to keep hydration a fixed number of queries.
+                wave_refs = {
+                    row['instance_uid']: row
+                    for row in cur.execute(
+                        "SELECT instance_uid, offset, length, compress_alg, hash"
+                        " FROM instance_blobs WHERE kind = 'waveform'").fetchall()
+                }
+
                 se_map = {}
                 for r in se_rows:
                     se = Series(r['series_instance_uid'], r['modality'], r['series_number'])
@@ -524,6 +565,8 @@ class SqliteStore:
                         inst._pixel_loader = self._create_pixel_loader(
                             r['pixel_offset'], r['pixel_length'], r['compress_alg'], inst)
 
+                    self._wire_waveform_loader(inst, wave_refs.get(r['sop_instance_uid']))
+
                     if r['series_id_fk'] in se_map:
                         se_map[r['series_id_fk']].instances.append(inst)
 
@@ -565,6 +608,14 @@ class SqliteStore:
 
                 p = Patient(p_row['patient_id'], p_row['patient_name'])
                 p_pk = p_row['id']
+
+                # Same one-query pre-fetch as load_all; see the note there.
+                wave_refs = {
+                    row['instance_uid']: row
+                    for row in cur.execute(
+                        "SELECT instance_uid, offset, length, compress_alg, hash"
+                        " FROM instance_blobs WHERE kind = 'waveform'").fetchall()
+                }
 
                 # Fetch Studies
                 st_rows = cur.execute(
@@ -610,6 +661,9 @@ class SqliteStore:
                                 offset, length, alg = r['pixel_offset'], r['pixel_length'], r['compress_alg']
                                 inst._pixel_loader = self._create_pixel_loader(
                                     r['pixel_offset'], r['pixel_length'], r['compress_alg'], inst)
+
+                            self._wire_waveform_loader(
+                                inst, wave_refs.get(r['sop_instance_uid']))
 
                             se.instances.append(inst)
 
@@ -904,6 +958,33 @@ class SqliteStore:
             "hash": row["hash"],
             "compress_alg": row["compress_alg"],
         }
+
+    def get_blob_refs(self, kind: str) -> Dict[str, Tuple[int, int]]:
+        """Return every sidecar reference of one kind, in a single query.
+
+        `compact_sidecar` returns a pixels-only uid_map on purpose (keying by
+        UID alone cannot distinguish kinds, and a waveform offset handed to a
+        pixel loader decodes garbage). Callers that need to repoint non-pixel
+        loaders after a compaction read the post-compaction truth from here
+        instead.
+
+        Args:
+            kind (str): 'pixels' or 'waveform'.
+
+        Returns:
+            Dict[str, Tuple[int, int]]: instance_uid -> (offset, length), for
+            rows that have both. Half-specified rows are impossible via
+            `record_blob_ref`, but are skipped defensively rather than
+            yielding a None-bearing pair.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT instance_uid, offset, length
+                FROM instance_blobs
+                WHERE kind = ? AND offset IS NOT NULL AND length IS NOT NULL
+            """, (kind,)).fetchall()
+
+        return {r["instance_uid"]: (r["offset"], r["length"]) for r in rows}
 
     def persist_pixel_data(self, instance: Instance):
         """

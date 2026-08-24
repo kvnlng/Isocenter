@@ -7,7 +7,8 @@ from typing import List, Union, Dict, Any
 import yaml
 from tqdm import tqdm
 
-from .io_handlers import DicomImporter, DicomExporter, SidecarPixelLoader
+from .io_handlers import (DicomImporter, DicomExporter, SidecarPixelLoader,
+                          SidecarWaveformLoader)
 from .store import DicomStore
 from .services import RedactionService
 from .config_manager import ConfigLoader
@@ -250,7 +251,15 @@ class DicomSession:
             # Returns Dict[sop_instance_uid, (new_offset, new_length)]
             updates = self.store_backend.compact_sidecar()
 
-            if not updates:
+            # compact_sidecar's uid_map is pixels-only by design: it is keyed
+            # by UID alone, so a waveform entry would be handed to a pixel
+            # loader. Waveform offsets are re-read from the blob table
+            # instead -- they moved in the same rewrite, and a loader left on
+            # a pre-compaction offset reads the wrong bytes or runs off the
+            # end of the file.
+            wave_updates = self.store_backend.get_blob_refs('waveform')
+
+            if not updates and not wave_updates:
                 print("Compaction finished (no changes or empty).")
                 return
 
@@ -284,6 +293,15 @@ class DicomSession:
                                 # BUT if it has pixel_array, does it have a loader?
                                 # persist_pixel_data ensures loader is created.
                                 # So if it was persisted, it has a loader.
+
+                            # Waveform loaders are patched from the blob
+                            # table, not from `updates`: see the note above.
+                            w_ref = wave_updates.get(inst.sop_instance_uid)
+                            if w_ref is not None and isinstance(
+                                    inst._waveform_loader, SidecarWaveformLoader):
+                                inst._waveform_loader.offset = w_ref[0]
+                                inst._waveform_loader.length = w_ref[1]
+                                count += 1
 
             print(f"Patched {count} active objects.")
 
@@ -346,7 +364,8 @@ class DicomSession:
             [directory],
             self.store,
             executor=self._executor,
-            sidecar_manager=self.store_backend.sidecar)
+            sidecar_manager=self.store_backend.sidecar,
+            store_backend=self.store_backend)
 
         self.save(sync=True)
 

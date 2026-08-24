@@ -6,6 +6,7 @@ This module provides classes for:
 - DicomImporter: Parallel file ingestion.
 - DicomExporter: Writing DICOM files to disk.
 - SidecarPixelLoader: Lazy loading of pixel data.
+- SidecarWaveformLoader: Lazy loading of waveform samples.
 """
 
 import os
@@ -99,23 +100,20 @@ def process_sequence(tag, elem, parent_item, text_index: list = None):
         parent_item.add_sequence_item(tag, seq_item)
 
 
-def ingest_worker(fp: str) -> Tuple[Optional[Dict],
-                                    Optional[Instance],
-                                    Optional[bytes],
-                                    Optional[str],
-                                    Optional[str],
-                                    Optional[str]]:
+def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
 
     Designed for parallel execution. Reads a file, extracts metadata, constructs
-    an Instance object, and optionally extracts raw pixel data for eager sidecar loading.
+    an Instance object, and optionally extracts raw pixel data and raw waveform
+    data for eager sidecar loading.
 
     Args:
         fp (str): File path to read.
 
     Returns:
-        tuple: (metadata_dict, instance_object, pixel_bytes, pixel_hash, pixel_alg, error_string)
+        tuple: (metadata_dict, instance_object, pixel_bytes, pixel_hash,
+        pixel_alg, waveform_bytes, waveform_hash, error_string)
     """
     try:
         # Eager load (read pixels)
@@ -169,15 +167,32 @@ def ingest_worker(fp: str) -> Tuple[Optional[Dict],
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
                 # Could log warning, but for now raise or return error.
-                return (None, None, None, None, None, f"Decompression Failed: {e}")
+                return (None, None, None, None, None, None, None,
+                        f"Decompression Failed: {e}")
 
             if p_bytes:
                 # Hash the RAW bytes (stable hash)
                 p_hash = hashlib.sha256(p_bytes).hexdigest()
 
-        return (meta, inst, p_bytes, p_hash, p_alg, None)
+        # Extract Waveform Data
+        # populate_attrs skips all OB/OW VRs, so (5400,1010) never reaches the
+        # object graph on its own. Pull it out explicitly, exactly as PixelData
+        # is handled above, and offload the bytes to the sidecar.
+        # Only the first Waveform Sequence item is handled; multi-item
+        # sequences (e.g. multiplexed rhythm + median) keep item 0 only.
+        w_bytes = None
+        w_hash = None
+
+        if "WaveformSequence" in ds and len(ds.WaveformSequence) > 0:
+            wf_item = ds.WaveformSequence[0]
+            raw = getattr(wf_item, "WaveformData", None)
+            if raw:
+                w_bytes = bytes(raw)
+                w_hash = hashlib.sha256(w_bytes).hexdigest()
+
+        return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
-        return (None, None, None, None, None, str(e))
+        return (None, None, None, None, None, None, None, str(e))
 
 
 class DicomImporter:
@@ -187,7 +202,8 @@ class DicomImporter:
     Optimized for parallel processing using `run_parallel` and Eager Ingestion methods.
     """
     @staticmethod
-    def import_files(file_paths: List[str], store: DicomStore, executor=None, sidecar_manager=None):
+    def import_files(file_paths: List[str], store: DicomStore, executor=None,
+                     sidecar_manager=None, store_backend=None):
         """
         Parses a list of files or directories. Recurses into directories to find all files.
 
@@ -199,6 +215,9 @@ class DicomImporter:
             store (DicomStore): The active store to populate.
             executor (optional): Shared ProcessPoolExecutor.
             sidecar_manager (optional): Manager for persisting pixel data immediately.
+            store_backend (optional): SqliteStore used to register sidecar
+                blob references. Waveform blobs are invisible to compaction
+                unless recorded here.
         """
         all_files = []
         for path in file_paths:
@@ -251,7 +270,7 @@ class DicomImporter:
 
         # 3. Aggregation (Streaming)
         count = 0
-        for meta, inst, p_bytes, p_hash, p_alg, err in results:
+        for meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, err in results:
             # Clear result components from scope as soon as possible after use to help GC
             # But the loop variable holds them. Next iteration clears them.
             if err:
@@ -265,6 +284,26 @@ class DicomImporter:
                         inst._pixel_loader = SidecarPixelLoader(
                             sidecar_manager.filepath, off, leng, p_alg, instance=inst)
                         inst._pixel_hash = p_hash
+
+                    # Persist Waveform Samples to Sidecar
+                    if w_bytes and sidecar_manager:
+                        w_off, w_len = sidecar_manager.write_frame(w_bytes, 'zlib')
+                        inst._waveform_hash = w_hash
+                        inst._waveform_loader = SidecarWaveformLoader(
+                            sidecar_manager.filepath, w_off, w_len, 'zlib',
+                            instance=inst, waveform_hash=w_hash)
+
+                        # Unlike pixels, waveform offsets have no column on
+                        # `instances`, so the blob table is their only record.
+                        # Skipping this makes compaction reclaim them.
+                        #
+                        # Called without `conn=`: this loop runs outside any
+                        # open SqliteStore transaction, so record_blob_ref is
+                        # free to open (and commit) its own connection here.
+                        if store_backend is not None:
+                            store_backend.record_blob_ref(
+                                inst.sop_instance_uid, 'waveform',
+                                w_off, w_len, w_hash, 'zlib')
 
                     # Linkage Logic
                     pid = meta['pid']
@@ -690,6 +729,58 @@ class SidecarPixelLoader:
         if samples > 1 and frames <= 1 and planar_conf == 1:
             arr_reshaped = arr_reshaped.transpose(1, 2, 0)
         return arr_reshaped
+
+
+class SidecarWaveformLoader:
+    """Functor for lazy loading of waveform samples from the sidecar.
+
+    Top-level class so it stays picklable across process boundaries.
+    Stores primitive geometry rather than an Instance reference, which
+    avoids a reference cycle and keeps IPC payloads small.
+    """
+
+    def __init__(self, sidecar_path, offset, length, alg,
+                 instance=None, metadata=None, waveform_hash=None):
+        self.sidecar_path = sidecar_path
+        self.offset = offset
+        self.length = length
+        self.alg = alg
+
+        if metadata:
+            self.num_samples = metadata.get("num_samples", 0)
+            self.num_channels = metadata.get("num_channels", 0)
+            self.interpretation = metadata.get("interpretation", "SS")
+            self.waveform_hash = metadata.get("waveform_hash")
+        elif instance is not None:
+            from .waveform import Waveform
+            seq = instance.sequences.get("5400,0100")
+            if seq is None or not seq.items:
+                raise ValueError(
+                    "SidecarWaveformLoader requires a Waveform Sequence on the instance")
+            wf = Waveform.from_dicom_item(seq.items[0])
+            self.num_samples = wf.num_samples
+            self.num_channels = wf.num_channels
+            self.interpretation = wf.sample_interpretation
+            self.waveform_hash = waveform_hash or getattr(instance, "_waveform_hash", None)
+        else:
+            raise ValueError(
+                "SidecarWaveformLoader requires either 'instance' or 'metadata'")
+
+    def __call__(self):
+        from .waveform import decode_samples
+
+        mgr = SidecarManager(self.sidecar_path)
+        raw = mgr.read_frame(self.offset, self.length, self.alg)
+
+        if self.waveform_hash:
+            actual = hashlib.sha256(raw).hexdigest()
+            if actual != self.waveform_hash:
+                raise ValueError(
+                    f"Waveform integrity check failed: expected "
+                    f"{self.waveform_hash}, got {actual}")
+
+        return decode_samples(raw, self.interpretation,
+                              self.num_samples, self.num_channels)
 
 
 class DicomExporter:

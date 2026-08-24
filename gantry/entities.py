@@ -150,6 +150,15 @@ class Instance(DicomItem):
     # Transient: Hash for Integrity Check
     _pixel_hash: Optional[str] = field(default=None, repr=False)
 
+    # Transient: Decoded waveform samples, shape (num_samples, num_channels)
+    waveform_array: Optional[np.ndarray] = field(default=None, repr=False)
+
+    # Transient: Lazy loader for waveform samples (sidecar-backed)
+    _waveform_loader: Optional[Callable[[], np.ndarray]] = field(default=None, repr=False)
+
+    # Transient: Integrity hash for the raw waveform bytes
+    _waveform_hash: Optional[str] = field(default=None, repr=False)
+
     # Transient: Track if dates have been shifted in memory
     date_shifted: bool = field(default=False, init=False)
 
@@ -311,6 +320,41 @@ class Instance(DicomItem):
                 raise RuntimeError(f"Lazy load failed for {self.file_path}: {e}") from e
 
         raise FileNotFoundError(f"Pixels missing and file not found: {self.file_path}")
+
+    def unload_waveform_data(self) -> bool:
+        """Clear cached waveform samples to free memory.
+
+        Mirrors `unload_pixel_data`: only unloads when the data can be
+        recovered, so `release_memory()` can never silently discard
+        unexported waveforms.
+
+        Returns:
+            bool: True if unloaded (or already absent), False if unsafe.
+        """
+        if self.waveform_array is None:
+            return True
+
+        if self.file_path or self._waveform_loader:
+            self.waveform_array = None
+            return True
+        return False
+
+    def get_waveform_data(self) -> Optional[np.ndarray]:
+        """Return decoded waveform samples, loading from the sidecar if needed.
+
+        Returns:
+            Optional[np.ndarray]: int16 array of shape
+            (num_samples, num_channels), or None if this instance has no
+            waveform.
+        """
+        if self.waveform_array is not None:
+            return self.waveform_array
+
+        if self._waveform_loader is not None:
+            self.waveform_array = self._waveform_loader()
+            return self.waveform_array
+
+        return None
 
     def set_pixel_data(self, array: np.ndarray):
         """
