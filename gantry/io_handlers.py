@@ -783,6 +783,70 @@ class SidecarWaveformLoader:
                               self.num_samples, self.num_channels)
 
 
+def format_study_date(study_date) -> str:
+    """Render a Study's date the way `DicomExporter._generate_export_contexts`
+    does, for use both in exported DICOM attributes and in the shared
+    export folder-naming logic below.
+
+    Args:
+        study_date: `Study.study_date` -- a `date`/`datetime`-like object,
+            a preformatted string, or falsy/None.
+
+    Returns:
+        str: "YYYYMMDD" when `study_date` supports `strftime`, else
+        `str(study_date)`, else "".
+    """
+    if not study_date:
+        return ""
+    if hasattr(study_date, 'strftime'):
+        return study_date.strftime("%Y%m%d")
+    return str(study_date)
+
+
+def export_folder_names(patient, s_date_str: str, series, instance):
+    """Build the Subject/Study/Series folder names used by the exported
+    file tree.
+
+    This is the single source of truth for that naming so every export
+    format lands in the same `Patient/Study/Series` tree as the DICOM
+    exporter -- callers must not reimplement this logic locally, or the
+    trees will drift apart on the next edit to either one.
+
+    Args:
+        patient (Patient): Patient root.
+        s_date_str (str): Study date already formatted via
+            `format_study_date`. Passed in rather than recomputed here so
+            every caller uses the exact same value the DICOM exporter
+            also writes into the Study Date attribute.
+        series (Series): Series whose folder name is being built.
+        instance (Instance): Instance whose attributes carry the
+            Study/Series Description tags (0008,1030 / 0008,103E) that
+            the folder names are drawn from. Deliberately read from the
+            INSTANCE, not from `series`/a Study object -- that is where
+            the existing DICOM export path reads them from, and reading
+            them from the Study/Series objects instead would produce
+            different folder names.
+
+    Returns:
+        tuple[str, str, str]: (subject_folder, study_folder, series_folder)
+    """
+    subj_name = f"Subject_{DicomExporter._sanitize(patient.patient_id)}"
+
+    s_date_clean = s_date_str.replace("-", "") or "UnknownDate"
+    s_desc = "Study"
+    if "0008,1030" in instance.attributes:
+        s_desc = instance.attributes["0008,1030"]
+    study_folder = f"Study_{s_date_clean}_{DicomExporter._sanitize(s_desc)}"
+
+    ser_num = series.series_number if series.series_number is not None else "0"
+    ser_desc = "Series"
+    if "0008,103E" in instance.attributes:
+        ser_desc = instance.attributes["0008,103E"]
+    series_folder = f"Series_{ser_num}_{DicomExporter._sanitize(ser_desc)}"
+
+    return subj_name, study_folder, series_folder
+
+
 class DicomExporter:
     """
     Handles writing the Object Graph back to standard DICOM files.
@@ -962,12 +1026,7 @@ class DicomExporter:
                     }
 
                     # Study Attributes
-                    s_date_str = ""
-                    if st.study_date:
-                        if hasattr(st.study_date, 'strftime'):
-                            s_date_str = st.study_date.strftime("%Y%m%d")
-                        else:
-                            s_date_str = str(st.study_date)
+                    s_date_str = format_study_date(st.study_date)
 
                     study_attrs = {
                         "0020,000D": st.study_instance_uid,
@@ -987,23 +1046,10 @@ class DicomExporter:
                         series_attrs["0018,1000"] = se.equipment.device_serial_number
 
                     # Calculate Output Path
-                    # 1. Subject Folder
-                    subj_name = f"Subject_{DicomExporter._sanitize(patient.patient_id)}"
-
-                    # 2. Study Folder
-                    s_date_clean = s_date_str.replace("-", "") or "UnknownDate"
-
-                    s_desc = "Study"
-                    if "0008,1030" in inst.attributes:
-                        s_desc = inst.attributes["0008,1030"]
-                    study_folder = f"Study_{s_date_clean}_{DicomExporter._sanitize(s_desc)}"
-
-                    # 3. Series Folder
-                    ser_num = se.series_number if se.series_number is not None else "0"
-                    ser_desc = "Series"
-                    if "0008,103E" in inst.attributes:
-                        ser_desc = inst.attributes["0008,103E"]
-                    series_folder = f"Series_{ser_num}_{DicomExporter._sanitize(ser_desc)}"
+                    # 1-3. Subject/Study/Series folders -- shared with every
+                    # other export format so trees stay co-located.
+                    subj_name, study_folder, series_folder = export_folder_names(
+                        patient, s_date_str, se, inst)
 
                     # 4. Filename
                     fname = f"{inst.sop_instance_uid}.dcm"

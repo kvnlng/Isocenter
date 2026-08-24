@@ -100,3 +100,79 @@ def test_gain_is_never_zero_for_a_calibrated_channel():
     samples = np.zeros((100, 1), dtype=np.int16)
     line = format_header("REC", wf, samples, "REC.dat").splitlines()[1].split()
     assert not line[2].startswith("0(")
+
+
+def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
+    """The brief requires WFDB records to land in the same
+    Patient/Study/Series tree the DICOM exporter builds. Proves it by
+    running BOTH exporters over the same session and asserting the .hea
+    file and the .dcm file end up in the identical directory -- not just
+    that some file exists somewhere.
+    """
+    import datetime
+    import os
+    from unittest.mock import patch
+
+    from gantry.entities import DicomItem, Instance, Patient, Series, Study
+    from gantry.exporters import get_exporter
+    from gantry.io_handlers import DicomExporter, populate_attrs
+    from gantry.session import DicomSession
+    from gantry.validation import IODValidator
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(num_samples=50, patient_id="COLOC01")
+    n_channels = len(ds.WaveformSequence[0].ChannelDefinitionSequence)
+
+    patient = Patient("COLOC01", "ANON")
+    study = Study("1.2.3.4.STUDY", datetime.date(2026, 1, 1))
+    series = Series("1.2.3.4.SERIES", "ECG", 3)
+    instance = Instance("1.2.3.4.SOP", ds.SOPClassUID, 1)
+    instance.attributes.update({
+        "0008,1030": "Cardiology Study",  # Study Description
+        "0008,103E": "12-Lead ECG",       # Series Description
+    })
+    # Only needed so the DICOM export worker's pixel-data check is
+    # satisfied; unrelated to the WFDB path, which reads waveform_array.
+    instance.pixel_array = np.zeros((1, 1), dtype=np.uint8)
+
+    wf_item = DicomItem()
+    populate_attrs(ds.WaveformSequence[0], wf_item)
+    instance.add_sequence_item("5400,0100", wf_item)
+    instance.waveform_array = np.frombuffer(
+        ds.WaveformSequence[0].WaveformData, dtype="<i2"
+    ).reshape(50, n_channels).copy()
+
+    series.instances.append(instance)
+    study.series.append(series)
+    patient.studies.append(study)
+
+    sess = DicomSession(":memory:")
+    sess.store.patients.append(patient)
+
+    out_dir = tmp_path / "colocation"
+
+    # Mirrors tests/test_structured_export.py's known-good pattern for
+    # exercising DicomExporter.save_patient without parallel-worker /
+    # IOD-validation noise unrelated to folder placement.
+    with patch('gantry.io_handlers.run_parallel',
+              side_effect=lambda func, items, *a, **k: [func(i) for i in items]), \
+         patch.object(IODValidator, "validate", lambda ds: []):
+        DicomExporter.save_patient(patient, str(out_dir))
+
+    dcm_files = list(out_dir.rglob("*.dcm"))
+    assert len(dcm_files) == 1
+    dcm_dir = os.path.dirname(str(dcm_files[0]))
+
+    hea_paths = get_exporter("wfdb").export(sess, str(out_dir))
+    assert len(hea_paths) == 1
+    hea_dir = os.path.dirname(hea_paths[0])
+
+    assert hea_dir == dcm_dir, (
+        f"WFDB record landed in {hea_dir!r} but the DICOM exporter's "
+        f"tree for the same series is {dcm_dir!r} -- the two exporters "
+        "must share one folder-naming helper so their trees co-locate.")
+
+    rel_parts = os.path.relpath(hea_dir, str(out_dir)).split(os.sep)
+    assert rel_parts[0] == "Subject_COLOC01"
+    assert rel_parts[1].startswith("Study_20260101_")
+    assert rel_parts[2].startswith("Series_3_")
