@@ -198,6 +198,64 @@ def test_channel_label_newline_cannot_manufacture_a_hea_comment(tmp_path):
         "token instead")
 
 
+def test_coded_channel_source_newline_cannot_manufacture_a_hea_comment(tmp_path):
+    """A coded Channel Source Sequence value containing a newline must not
+    be surfaced by the reference reader as a real header comment.
+
+    The lead-name allowlist (#39) only filters the free-text Channel
+    Label fallback: `wfdb_description()` returns a coded `source_code`
+    verbatim and unconditionally, on the assumption that "a coded value
+    cannot contain an operator-typed patient name." That assumption holds
+    for the DICOM standard's own SH VR, which forbids embedded control
+    characters -- but pydicom does not enforce that on read or write.
+    Verified directly: `pydicom.dcmwrite`/`dcmread` round-trip a CodeValue
+    containing an embedded newline and a leading "#" completely unchanged,
+    with no error and no warning. So a non-conformant (or malicious)
+    source can still put a newline into `source_code`, and this test
+    exercises the one remaining production path where
+    `_sanitize_description` -- not the allowlist -- is what stops that
+    from forging a `.hea` comment line.
+    """
+    import pydicom
+
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")], num_samples=50)
+    chdef = ds.WaveformSequence[0].ChannelDefinitionSequence[0]
+    chdef.ChannelSourceSequence[0].CodeValue = "MDC\n# Patient Jane Doe MRN9988776"
+
+    src = tmp_path / "src"
+    src.mkdir()
+    pydicom.dcmwrite(str(src / "ecg.dcm"), ds, enforce_file_format=True)
+
+    session = DicomSession(persistence_file=str(tmp_path / "inject_source.db"))
+    try:
+        session.ingest(str(src))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    record = _read(paths[0])
+    assert record.comments == [], (
+        "a newline embedded in a coded Channel Source value reached the "
+        f"reference reader as a real header comment: {record.comments!r}")
+
+    with open(paths[0], encoding="utf-8") as f:
+        raw_lines = f.readlines()
+    assert len(raw_lines) == 2, (
+        "the embedded newline manufactured an extra physical line in the "
+        f".hea file: {raw_lines!r}")
+    assert not any(line.startswith("#") for line in raw_lines)
+    # Unlike the free-text Channel Label case, a coded source value is
+    # trusted content -- not run through the lead-name allowlist -- so
+    # the text itself is expected to survive; only the line-breaking
+    # character that could forge a comment line is replaced.
+    assert "MDC # Patient Jane Doe MRN9988776" in "".join(raw_lines), (
+        f"expected the newline to be replaced with a space, not stripped "
+        f"or otherwise mangled: {raw_lines!r}")
+
+
 def test_units_with_embedded_whitespace_does_not_shift_fields_via_reference_reader(tmp_path):
     """Embedded whitespace in `units` (field 3 of 9, NOT the last field)
     must not shift every subsequent signal-line field for a conformant

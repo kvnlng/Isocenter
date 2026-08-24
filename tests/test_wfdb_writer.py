@@ -381,6 +381,48 @@ def test_sanitize_preserves_falsy_zero():
     assert _sanitize("") == "record"
 
 
+def test_sanitize_description_strips_line_breaking_control_characters():
+    """`_sanitize_description` must remove every character class its own
+    docstring promises to strip -- CR, LF, vertical tab, form feed, the
+    C1 file/group/record/unit separators (\\x1c-\\x1f), NEL (\\x85), and
+    the Unicode LINE/PARAGRAPH SEPARATORS (U+2028/U+2029) -- replacing
+    each with a space (not deleting it, which would silently glue
+    adjacent words together) and trimming the ends.
+
+    Pinned directly against the function, not only through a channel
+    label/source fixture: mutating `_sanitize_description` to a no-op
+    (`return str(value)`) left the full suite green before this test
+    existed, because every fixture that reached it via the lead-name
+    allowlist either failed the allowlist first (label replaced with a
+    positional token before the sanitizer ever saw the injected
+    character) or never carried a control character at all. See
+    test_wfdb_conformance.py::test_coded_channel_source_newline_cannot_manufacture_a_hea_comment
+    for the one production path (a coded Channel Source value) that
+    still reaches this function with attacker-controlled text.
+    """
+    from gantry.exporters.wfdb import _sanitize_description
+
+    assert _sanitize_description("Lead I\nJane Doe") == "Lead I Jane Doe"
+    assert _sanitize_description("Lead I\rJane Doe") == "Lead I Jane Doe"
+    assert _sanitize_description("Lead I\x0bJane Doe") == "Lead I Jane Doe"  # vertical tab
+    assert _sanitize_description("Lead I\x0cJane Doe") == "Lead I Jane Doe"  # form feed
+    assert _sanitize_description("Lead I\x1cJane Doe") == "Lead I Jane Doe"  # file separator
+    assert _sanitize_description("Lead I\x1dJane Doe") == "Lead I Jane Doe"  # group separator
+    assert _sanitize_description("Lead I\x1eJane Doe") == "Lead I Jane Doe"  # record separator
+    assert _sanitize_description("Lead I\x1fJane Doe") == "Lead I Jane Doe"  # unit separator
+    assert _sanitize_description("Lead I\x85Jane Doe") == "Lead I Jane Doe"  # NEL
+    assert _sanitize_description("Lead I\u2028Jane Doe") == "Lead I Jane Doe"  # LINE SEPARATOR
+    assert _sanitize_description("Lead I\u2029Jane Doe") == "Lead I Jane Doe"  # PARAGRAPH SEPARATOR
+
+    # Leading/trailing control characters are stripped away entirely.
+    assert _sanitize_description("\nLead I\n") == "Lead I"
+
+    # Ordinary spaces are NOT stripped: the description is the last (9th)
+    # field on a header(5) signal line and legally runs to end of line,
+    # embedded spaces and all.
+    assert _sanitize_description("Lead I taken by Jane Doe") == "Lead I taken by Jane Doe"
+
+
 def test_write_instance_with_no_sample_data_is_skipped_not_crashed(tmp_path, caplog):
     """An instance that declares a Waveform Sequence but carries no
     sample data (`get_waveform_data()` returns None) must be skipped --
