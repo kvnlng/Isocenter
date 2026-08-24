@@ -474,15 +474,25 @@ def test_acquisition_datetime_is_remediated_end_to_end(tmp_path):
 
 
 def _write_annotated_fixture(directory, note, patient_id="WFTEST001",
-                             patient_name="Waveform^Test"):
+                             patient_name="Waveform^Test",
+                             manufacturer=None, device_serial_number=None):
     """Build+write an ECG dataset carrying one point annotation whose
     Unformatted Text Value (0070,0006) is `note`.
+
+    `manufacturer` and `device_serial_number` are optional and, when given,
+    are set directly on the dataset before it is written -- used by the
+    `source` provenance tests, which need both Manufacturer (0008,0070) and
+    Device Serial Number (0018,1000) present.
     """
     import pydicom
 
     ds = build_ecg_dataset(num_samples=500, patient_id=patient_id,
                            patient_name=patient_name)
     add_annotation(ds, start_sample=101, text=note)
+    if manufacturer is not None:
+        ds.Manufacturer = manufacturer
+    if device_serial_number is not None:
+        ds.DeviceSerialNumber = device_serial_number
 
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, "ecg.dcm")
@@ -576,3 +586,52 @@ def test_annotation_text_is_present_when_opted_in_end_to_end(tmp_path):
         "opting in via include_annotation_text=True did not reach "
         "annotations.json -- the option is not threaded through "
         "export() -> _write_instance() -> build_annotations()")
+
+
+# --- annotations.json `source` carries no device serial (#39) ---
+
+
+def test_annotations_source_carries_no_device_serial(tmp_path):
+    """`source` is producer provenance: gantry version plus Manufacturer.
+
+    Device Serial Number (0018,1000) is a stable identifier that can link
+    records across exports back to one machine and site. It is not read
+    today; this pins that so it cannot be added casually.
+    """
+    import json
+    import glob
+    from gantry.session import DicomSession
+
+    serial = "SN-DEADBEEF-12345"
+    _write_annotated_fixture(tmp_path / "in", note="sinus rhythm",
+                             manufacturer="AcmeCart",
+                             device_serial_number=serial)
+
+    out = tmp_path / "out"
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path / "in"))
+
+        # Positive precondition: prove the serial genuinely reached the
+        # ingested object graph before asserting it is absent from the
+        # export, so the negative assertion below cannot pass vacuously.
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        assert str(instance.attributes.get("0018,1000", "")) == serial, (
+            "fixture did not carry the device serial into the ingested "
+            "object graph; the absence assertion below would be vacuous")
+
+        session.export(str(out), format="wfdb")
+    finally:
+        session.close()
+
+    documents = []
+    for path in glob.glob(str(out / "**" / "*.annotations.json"), recursive=True):
+        with open(path, encoding="utf-8") as handle:
+            documents.append(json.load(handle))
+
+    assert documents, "no annotations.json written; fixture is not exercising the path"
+    for document in documents:
+        source = document["source"]
+        assert serial not in source, f"device serial leaked into source: {source!r}"
+        assert "AcmeCart" in source, (
+            f"manufacturer provenance was lost from source: {source!r}")

@@ -44,7 +44,7 @@ out/<patient>/<study>/<series>/
 | `fs` | Sampling Frequency `(003A,001A)` |
 | `gain` | Derived from Channel Sensitivity `(003A,0210)` and its correction factor |
 | `units` | Channel Sensitivity Units Sequence `(003A,0211)` |
-| signal description | Channel Source Sequence `(003A,0208)`, falling back to Channel Label `(003A,0203)` when no coded source is present |
+| signal description | Channel Source Sequence `(003A,0208)`, falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token (see "What is and isn't de-identified" below) |
 
 Signals are written as WFDB format 16 (16-bit, little-endian,
 channel-interleaved) -- the same layout DICOM already stores them in,
@@ -100,31 +100,34 @@ profile or config file.) This matters for waveform export specifically
 because the series description becomes a **directory name** -- every
 `.hea`/`.dat`/`.annotations.json` this exporter writes lives inside it.
 
-**None of the three configurations cover the two free-text fields
-specific to waveform export.** Neither the hardcoded baseline nor the
-Basic profile includes Channel Label or Unformatted Text Value, so on
-every documented path both are written verbatim into every WFDB record:
+**The two free-text fields specific to waveform export are now
+remediated in the exporter itself, not by profile membership** -- the
+PHI scan is tag-gated (see above), so a profile entry alone would not
+protect a bare `Session()` that never called `load_config()`. Both are
+handled unconditionally, regardless of which of the three
+configurations above you're in:
 
-- **Channel Label `(003A,0203)`** -- becomes the `.hea` signal-line
-  description whenever a channel has no coded Channel Source Sequence
-  to prefer instead. This is an operator-typed field.
-- **Unformatted Text Value `(0070,0006)`** -- becomes the `note` field
-  of `annotations.json` whenever an annotation carries one. This is
-  also operator-typed, and routinely holds free-text clinical
-  commentary.
+- **Channel Label `(003A,0203)`** -- reaches the `.hea` signal-line
+  description and the `annotations.json` `lead` field **only** when it
+  is a recognisable signal name, checked against the module-level
+  `KNOWN_LEAD_NAMES` set in `gantry/waveform.py`. Anything else --
+  including genuinely operator-typed text -- is replaced with a
+  positional `ch<N>` token instead of being written verbatim.
+- **Unformatted Text Value `(0070,0006)`** -- is omitted from the
+  `note` field of `annotations.json` by default. It routinely holds
+  free-text clinical commentary, so exporting it is opt-in: pass
+  `session.export(folder, format="wfdb", include_annotation_text=True)`
+  to restore it. `(0070,0006)` was also added to the Basic profile, so
+  a configured session that opts in still receives the profile's
+  remediated (emptied) value rather than raw text.
 
-Both are DICOM tags an operator can type identifying information
-into. If your workflow needs them scrubbed, add `003A,0203` and/or
-`0070,0006` to your own PHI tag configuration before running
-`audit()` / `anonymize()`; Gantry will not do this for you by default.
+Both are safe by default: no PHI tag configuration is required to get
+this behaviour, and it applies even to a bare `Session()`.
 
-One more gap worth flagging in the Basic profile itself: it REMOVEs
-Study Date `(0008,0020)`, Study Time `(0008,0030)`, Acquisition Date
-`(0008,0022)`, and Content Date `(0008,0023)`, but it does **not**
-include Acquisition DateTime `(0008,002A)` -- easy to assume is
-covered alongside the separate date tag it duplicates, but it isn't,
-under any of the three configurations above unless you add it
-yourself.
+`annotations.json`'s `source` field is producer provenance only: the
+running gantry version plus Manufacturer `(0008,0070)`, e.g.
+`gantry/0.6.0 (AcmeCart)`. It does not read Device Serial Number
+`(0018,1000)` or any other equipment identifier.
 
 **Record timing** in the `.hea` file combines two independently
 sourced parts. The *date* comes from `study.study_date`, which *is*
@@ -132,12 +135,13 @@ shifted by `anonymize()` (the same per-patient date shift applied to
 the rest of the DICOM metadata). The *time-of-day* comes from the
 instance's own timestamp tags -- Acquisition DateTime `(0008,002A)`
 when present, else Study Time `(0008,0030)` -- and the date shift
-never touches it, whether or not `anonymize()` ran: when Acquisition
-DateTime is present (the common case), it isn't covered by the Basic
-profile either (see above), so the real acquisition time-of-day ends
-up in the header either way. If you export without running
-`anonymize()` at all, the date is real too -- exactly like every
-other un-remediated field in Gantry.
+never touches it, whether or not `anonymize()` ran: `SHIFT_DATE` is a
+Study-level remediation that writes `study.study_date`, and time-of-day
+is sourced from the instance, so it is genuinely not shifted by that
+mechanism. This is deliberate, not a gap: time-of-day alone is not a
+Safe Harbor identifier. If you export without running `anonymize()` at
+all, the date is real too -- exactly like every other un-remediated
+field in Gantry.
 
 Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:
