@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Refactored `gantry/discovery.py` lazy imports.
 - **Testing**: Cleaned up test suite (whitespace, indentation, imports) to achieve a clean lint score (7.62/10).
 
+### Fixed
+
+- **Safe-Export Feedback**: Removed a duplicated closing-brace pair in the suggested-config output of `DicomSession.export()` and made the printed JSON valid by dropping the `// Found N times` suffixes (counts already appear in the findings table). Added a regression test that parses the printed block with `json.loads`.
+
 ## [0.6.1] - 2026-01-23
 
 ### Fixed

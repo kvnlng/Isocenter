@@ -1689,11 +1689,8 @@ class DicomSession:
                         name = "study_date"
 
                     rows.append(
-                        f'        "{tag}": {{ "name": "{name}", "action": "REMOVE" }} , // Found {counts[tag]} times')
+                        f'        "{tag}": {{ "name": "{name}", "action": "REMOVE" }}')
                 print(",\n".join(rows))
-                print('    }')
-                print("}")
-
                 print('    }')
                 print("}")
 

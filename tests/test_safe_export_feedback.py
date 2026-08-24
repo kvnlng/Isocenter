@@ -52,3 +52,17 @@ def test_safe_export_feedback(tmp_path, capsys):
     assert "Suggested Config Update:" in stdout
     assert '"action": "REMOVE"' in stdout
     assert '"name": "patient_name"' in stdout
+
+    # 5. The suggested config block must be valid, parseable JSON,
+    # printed exactly once (no duplicated closing braces).
+    import json as _json
+
+    block = stdout.split("Suggested Config Update:")[-1]
+    start = block.index("{")
+    end = block.rindex("}")
+    parsed = _json.loads(block[start:end + 1])
+    assert parsed["phi_tags"]["0010,0010"]["action"] == "REMOVE"
+    # counts live in the findings table, not in the JSON block
+    assert "//" not in block[start:end + 1]
+    # exactly one closing pair, not the previous duplicate
+    assert stdout.count('    }') == 1
