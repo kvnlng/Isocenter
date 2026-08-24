@@ -1398,6 +1398,10 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># Initialize a new session (creates 'gantry.db' by default)</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">session</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"my_project.db"</span><span class="p">)</span>
 </code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Context Manager</p>
+<p><code>Session</code> supports the <code>with</code> statement: <code>with Session("my_project.db") as session:</code>. On exit it calls <code>session.close()</code> for you, releasing the background threads and worker pool the session holds -- steps 2-5 below work the same way indented inside that block. Step 6 ("Recover Identity") opens a <em>separate</em> <code>Session</code>, so it needs its own <code>with</code> block (or its own <code>close()</code> call) rather than being nested inside the first one.</p>
+</div>
 <h2 id="2-ingest-examine">2. Ingest &amp; Examine</h2>
 <p>Ingestion builds a lightweight <strong>metadata index</strong> of your DICOM files. Gantry scans your folders recursively, extracting patient/study/series information into the database <em>without moving or modifying your original files</em>. It is resilient to nested directories and non-DICOM clutter.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">session</span><span class="o">.</span><span class="n">ingest</span><span class="p">(</span><span class="s2">"/path/to/dicom/data"</span><span class="p">)</span>
@@ -1435,7 +1439,7 @@
 <ol>
 <li><strong>Anonymize</strong>: Strips or replaces metadata tags (PatientID, Names, Dates) based on your config.</li>
 <li><strong>Redact</strong>: Loads pixel data and scrubs burned-in PHI from defined regions.</li>
-<li><strong>Export</strong>: The final "Gatekeeper". Writes clean files to a new directory. Setting <code>safe=True</code> ensures the export halts if any verification checks fail (e.g., corrupt images or missing codecs).</li>
+<li><strong>Export</strong>: The final "Gatekeeper". Writes clean files to a new directory. Setting <code>check_burned_in=True</code> ensures the export halts if any verification checks fail (e.g., corrupt images or missing codecs).</li>
 </ol>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Apply metadata remediation (anonymization) using the findings</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">(</span><span class="n">report</span><span class="p">)</span>
@@ -1444,8 +1448,8 @@
 <a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">session</span><span class="o">.</span><span class="n">redact</span><span class="p">()</span>
 <a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
 <a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Export only safe (clean) data to a new folder</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1"># Compression="j2k" optionally compresses output to JPEG 2000</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"/path/to/export_clean"</span><span class="p">,</span> <span class="n">safe</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">compression</span><span class="o">=</span><span class="s2">"j2k"</span><span class="p">)</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1"># use_compression=True optionally compresses output to JPEG 2000</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">session</span><span class="o">.</span><span class="n">export</span><span class="p">(</span><span class="s2">"/path/to/export_clean"</span><span class="p">,</span> <span class="n">check_burned_in</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">use_compression</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div>
 <p>Progress for the save, memory release, and export phases will be displayed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Preparing for export (Auto-Save &amp; Memory Release)...
@@ -1453,7 +1457,7 @@
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>Memory Cleanup: Released 5000 images from RAM.
 <a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>Executing Redaction Rules...
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>Redacting: 100%|██████████| 150/150 [00:05&lt;00:00, 28.00img/s]
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>Exporting session to output_folder (safe=True)...
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>Exporting session to: /path/to/export_clean
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>Exporting:  15%|██▌       | 15/100 [00:05&lt;00:30,  2.80patient/s]
 </code></pre></div>
 <h2 id="6-recover-identity-optional">6. Recover Identity (Optional)</h2>
