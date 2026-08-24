@@ -12,7 +12,7 @@ session = Session("my_project.db")
 ```
 
 !!! tip "Context Manager"
-    `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()` for you, releasing the background threads and worker pool the session holds -- steps 2-6 below work the same way indented inside that block.
+    `Session` supports the `with` statement: `with Session("my_project.db") as session:`. On exit it calls `session.close()` for you, releasing the background threads and worker pool the session holds -- steps 2-5 below work the same way indented inside that block. Step 6 ("Recover Identity") opens a *separate* `Session`, so it needs its own `with` block (or its own `close()` call) rather than being nested inside the first one.
 
 ## 2. Ingest & Examine
 

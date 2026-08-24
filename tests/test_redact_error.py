@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 def test_execute_config_crash_repro(tmp_path):
     """
-    Reproduces 'list object has no attribute get' when active_rules contains a list instead of dict.
+    Reproduces 'list object has no attribute get' when configuration.rules contains a list instead of dict.
     This simulates a malformed YAML load where the list formatting might be ambiguous.
     """
     session = DicomSession(persistence_file=":memory:")
