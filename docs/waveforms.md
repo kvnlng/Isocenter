@@ -61,31 +61,38 @@ cart-generated findings such as rhythm calls -- are exported as
 
 ## What is and isn't de-identified
 
-Gantry's PHI scan is **tag-gated, not content-based**: it only ever
-flags a tag that appears in your loaded PHI tag configuration. A tag
-absent from that list is never inspected for what it contains, no
-matter how identifying the text inside it is.
+Gantry's PHI scan is **tag-gated, not content-based**: a tag gets
+flagged only if it's named by your loaded configuration -- explicit
+`phi_tags` entries, or a privacy profile expanded into them. A tag
+outside that set is never inspected for what it contains, no matter
+how identifying the text inside it is. Separately, odd-group private
+tags are removed whenever `remove_private_tags` is `True` (the
+default) -- that check is unconditional and is not gated by
+`phi_tags` at all.
 
-The **shipped default** configuration
-(`gantry/resources/phi_tags.json`, loaded via `create_config()` /
-`load_config()` as in the Quick Start above) covers exactly six tags:
+There are three configurations a reader of this guide can be in:
 
-- Patient Name `(0010,0010)`
-- Patient ID `(0010,0020)`
-- Patient Birth Date `(0010,0030)`
-- Institution Name `(0008,0080)`
-- Referring Physician Name `(0008,0090)`
-- Accession Number `(0008,0050)`
+- **A bare `Session()`, never `load_config()`-ed.** `phi_tags` is
+  empty. Only the hardcoded baseline scan runs: Patient Name and
+  Patient ID get replaced, Study Date gets shifted. Nothing else is
+  touched.
+- **The Quick Start above.** `create_config()` scaffolds a config with
+  `privacy_profile: basic`; `load_config()` expands that into
+  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **28 tags**
+  covering patient identity, study/series dates and times, and
+  institution/physician fields, based on DICOM PS3.15 Annex E's Basic
+  Profile. This is what actually runs on the documented path.
+  `gantry/resources/phi_tags.json`, a separate 6-tag file, is *not*
+  reached from this flow: `create_config()` deliberately drops its
+  REMOVE-action tags from the scaffold, on the assumption the Basic
+  profile already covers them.
+- **Your own `phi_tags` configuration**, loaded standalone or layered
+  on top of a profile -- your explicit tags win over the profile's.
 
-(Patient Name, Patient ID, and Study Date are additionally checked by
-a hardcoded baseline scan that runs regardless of configuration --
-Gantry always proposes replacing the first two and shifting the
-third. Everything else, including the six tags above, is scanned only
-if your loaded configuration names it.)
-
-**None of those six tags cover the two free-text fields specific to
-waveform export.** Under the default configuration, both are written
-verbatim into every WFDB record:
+**None of the three cover the two free-text fields specific to
+waveform export.** Neither the hardcoded baseline nor the 28-tag Basic
+profile includes Channel Label or Unformatted Text Value, so on every
+documented path both are written verbatim into every WFDB record:
 
 - **Channel Label `(003A,0203)`** -- becomes the `.hea` signal-line
   description whenever a channel has no coded Channel Source Sequence
@@ -100,12 +107,26 @@ into. If your workflow needs them scrubbed, add `003A,0203` and/or
 `0070,0006` to your own PHI tag configuration before running
 `audit()` / `anonymize()`; Gantry will not do this for you by default.
 
-**Record timing** in the `.hea` file is sourced from the study date,
-which *is* shifted by `anonymize()` (using the same per-patient date
-shift applied to the rest of the DICOM metadata). If you export
-without running `anonymize()` first, the header carries the real,
-un-shifted acquisition date and time -- exactly as every other
-un-remediated field in Gantry behaves.
+One more gap worth flagging in the Basic profile itself: it REMOVEs
+Study Date `(0008,0020)`, Study Time `(0008,0030)`, Acquisition Date
+`(0008,0022)`, and Content Date `(0008,0023)`, but it does **not**
+include Acquisition DateTime `(0008,002A)` -- easy to assume is
+covered alongside the separate date tag it duplicates, but it isn't,
+under any of the three configurations above unless you add it
+yourself.
+
+**Record timing** in the `.hea` file combines two independently
+sourced parts. The *date* comes from `study.study_date`, which *is*
+shifted by `anonymize()` (the same per-patient date shift applied to
+the rest of the DICOM metadata). The *time-of-day* comes from the
+instance's own timestamp tags -- Acquisition DateTime `(0008,002A)`
+when present, else Study Time `(0008,0030)` -- and the date shift
+never touches it, whether or not `anonymize()` ran: when Acquisition
+DateTime is present (the common case), it isn't covered by the Basic
+profile either (see above), so the real acquisition time-of-day ends
+up in the header either way. If you export without running
+`anonymize()` at all, the date is real too -- exactly like every
+other un-remediated field in Gantry.
 
 Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:
