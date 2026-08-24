@@ -1432,10 +1432,10 @@ default) -- that check is unconditional and is not gated by
   touched.</li>
 <li><strong>The Quick Start above.</strong> <code>create_config()</code> scaffolds a config with
   <code>privacy_profile: basic</code>; <code>load_config()</code> expands that into
-  <code>PRIVACY_PROFILES["basic"]</code> (<code>gantry/profiles.py</code>) -- <strong>28 tags</strong>
-  covering patient identity, study/series dates and times, and
-  institution/physician fields, based on DICOM PS3.15 Annex E's Basic
-  Profile. This is what actually runs on the documented path.
+  <code>PRIVACY_PROFILES["basic"]</code> (<code>gantry/profiles.py</code>) -- <strong>28 tags, all
+  28 effective</strong> -- covering patient identity, study/series dates and
+  times, and institution/physician fields, based on DICOM PS3.15 Annex
+  E's Basic Profile. This is what actually runs on the documented path.
   <code>gantry/resources/phi_tags.json</code>, a separate 6-tag file, is <em>not</em>
   reached from this flow: <code>create_config()</code> deliberately drops its
   REMOVE-action tags from the scaffold, on the assumption the Basic
@@ -1443,10 +1443,20 @@ default) -- that check is unconditional and is not gated by
 <li><strong>Your own <code>phi_tags</code> configuration</strong>, loaded standalone or layered
   on top of a profile -- your explicit tags win over the profile's.</li>
 </ul>
-<p><strong>None of the three cover the two free-text fields specific to
-waveform export.</strong> Neither the hardcoded baseline nor the 28-tag Basic
-profile includes Channel Label or Unformatted Text Value, so on every
-documented path both are written verbatim into every WFDB record:</p>
+<p>Series Description <code>(0008,103E)</code> -- and the Study Description it sits
+alongside -- are both correctly emptied on the documented path. (A
+casing mismatch between the profile's key and the lowercased attribute
+keys the object graph actually uses briefly made Series Description
+the one exception during this branch's review; <code>PhiInspector</code> now
+normalizes PHI-tag key casing at load time, in <code>gantry/privacy.py</code>, so
+this class of bug can't recur regardless of how a tag is spelled in a
+profile or config file.) This matters for waveform export specifically
+because the series description becomes a <strong>directory name</strong> -- every
+<code>.hea</code>/<code>.dat</code>/<code>.annotations.json</code> this exporter writes lives inside it.</p>
+<p><strong>None of the three configurations cover the two free-text fields
+specific to waveform export.</strong> Neither the hardcoded baseline nor the
+Basic profile includes Channel Label or Unformatted Text Value, so on
+every documented path both are written verbatim into every WFDB record:</p>
 <ul>
 <li><strong>Channel Label <code>(003A,0203)</code></strong> -- becomes the <code>.hea</code> signal-line
   description whenever a channel has no coded Channel Source Sequence
