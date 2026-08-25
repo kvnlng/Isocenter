@@ -76,6 +76,50 @@ python -m tests.benchmarks.run_stress_test
 
 ## 4. Release Process
 
-1. Update `CHANGELOG.md`.
-2. Bump version in `setup.py`.
-3. Tag the release in git.
+Releases publish themselves. `.github/workflows/publish.yml` uploads to
+PyPI by Trusted Publishing -- GitHub authenticates over OIDC and PyPI
+matches the request against a publisher pinned to this repository, the
+workflow's *filename*, and its environment name. There is no API token
+in repository secrets, in CI, or on anyone's machine. Renaming
+`publish.yml` or its environments breaks publishing until PyPI's
+publisher configuration is updated to match.
+
+1. Move `[Unreleased]` in `CHANGELOG.md` to a new `[x.y.z] - YYYY-MM-DD`
+   section.
+2. Bump `version` in `setup.py`.
+3. Update `version` and `date-released` in `CITATION.cff`.
+4. Merge to `main` with CI green.
+5. Tag `vx.y.z`. **The tag must match `setup.py` exactly** -- the build
+   job compares them and refuses to publish a mismatch. Publishing
+   `v0.7.1` from a tree that still says `0.7.0` would produce a release
+   nobody can install under the name they were given, and permanently
+   spend the version it did claim, since PyPI never allows reuse.
+6. **Publish a GitHub Release.** This is the trigger; pushing a tag alone
+   does nothing. That is deliberate -- a release is a decision someone
+   makes, whereas a mistyped `git push --tags` should not be able to burn
+   a version number.
+
+The build job then runs two gates before anything is uploaded: the tag
+check above, and an installation of the built wheel into a clean
+environment *outside the source tree*, asserting it carries its own
+`resources/*.json`. That second gate exists because those resources once
+shipped in no distribution at all and nothing failed -- every loader
+guards on `os.path.exists` and degrades to a default, so a published
+release audited against an empty PHI policy and reported clean.
+
+To rehearse against TestPyPI, run the workflow manually
+(`workflow_dispatch`) with `target: testpypi`. Note that neither index
+allows re-uploading a version, so a rehearsal consumes that version
+number on TestPyPI.
+
+### Archiving and DOIs
+
+Once the Zenodo GitHub integration is enabled for this repository, each
+published GitHub Release is archived and issued a version DOI, under a
+concept DOI that always resolves to the latest. `.zenodo.json` supplies
+the deposit metadata and `CITATION.cff` is what GitHub's "Cite this
+repository" button reads.
+
+Zenodo only archives releases created *after* the integration is
+switched on; it does not backfill. After the first deposit, add the
+concept DOI to `CITATION.cff` and the badge to `README.md`.

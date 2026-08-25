@@ -100,6 +100,17 @@ cd Isocenter
 pip install -e ".[dev]"
 ```
 
+## Citing Isocenter
+
+If Isocenter's de-identification is part of how a dataset was prepared,
+it belongs in the methods section rather than the acknowledgements. Use
+GitHub's **Cite this repository** button, which reads `CITATION.cff`.
+
+Isocenter is the upstream half of a pair: it builds and de-identifies the
+corpus that [Murmur Studio](https://github.com/kvnlng/Murmur)
+([10.5281/zenodo.21077528](https://doi.org/10.5281/zenodo.21077528))
+reviews. Work that used both should cite both.
+
 ## System Requirements
 
 Isocenter's parallel processing engine is designed to maximize CPU utilization. However, heavy operations like JPEG 2000 compression require significant memory per worker.
