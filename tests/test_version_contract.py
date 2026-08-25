@@ -91,3 +91,22 @@ def test_the_version_is_a_release_number_not_a_placeholder():
     assert isocenter.__version__ != "0.0.0"
     assert re.fullmatch(r"\d+\.\d+\.\d+([.-]?\w+)?", isocenter.__version__), (
         f"{isocenter.__version__!r} is not a recognisable version number")
+
+
+def test_the_release_runbook_points_at_the_file_that_declares_the_version():
+    """The runbook is a file that says where the version lives.
+
+    It said "Bump `version` in `setup.py`" for as long as that was true,
+    and stayed saying it after the declaration moved to `_version.py`.
+    Following it would edit a file that no longer holds the number, and
+    produce a tag the build job rejects. Same drift this module exists to
+    catch, one level up: the instruction and the code disagreed.
+    """
+    runbook = (ROOT / "docs" / "developer_guide.md").read_text(encoding="utf-8")
+
+    assert "isocenter/_version.py" in runbook, (
+        "the release runbook does not name the file that declares the "
+        "version; if the declaration moved again, move this line with it")
+    assert "Bump `version` in `setup.py`" not in runbook, (
+        "the release runbook still tells you to bump the version in "
+        "setup.py, which no longer declares it")
