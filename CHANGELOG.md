@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`SqliteStore.compact_sidecar()` split into named pieces.** 211 lines holding the blob-index queries, the file rewrite, the atomic swap, the offset update and two rollback paths; now 61 lines of ordering plus seven helpers. The logic was already carefully reasoned -- this moves nothing, it just puts the reasoning where it applies. `tests/test_compaction_recovery.py` pins the failure behaviour first, since none of the rollback paths were covered: a database write that fails after the file has been swapped must put the original file back, and must leave no `.compact.tmp` or `.compact.bak` beside the sidecar.
+
 - **BREAKING: one vocabulary for persistence state, and one mechanism behind it.** A session tracked two unrelated things about an item -- whether it held changes not yet written, and whether it still carried identifiers -- and called both of them *dirty*. The first now says what it means, on every entity, through one shared `TrackedEntity` base:
 
   | before | now |

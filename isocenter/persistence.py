@@ -1838,8 +1838,16 @@ class SqliteStore:
         """
         Reclaims disk space by rewriting the sidecar file.
 
-        Removes unreferenced (orphaned) pixel data that might exist due to deletions
-        or updates. Updates the database pointers efficiently.
+        Removes unreferenced (orphaned) pixel data left by deletions or
+        updates, then rewrites the database offsets to match.
+
+        The file is rewritten first and the database updated second. Those
+        two hold the same fact in two places, and the window between them is
+        the whole risk of this operation: a database describing a layout the
+        file does not hold produces silent garbage rather than an error,
+        because every read lands at a plausible-looking wrong offset. The
+        ordering here, and the rollback in each direction, exist to keep the
+        two on the same generation whatever fails.
 
         Returns:
             Dict[str, Tuple[int, int]]: A map of SOP Instance UIDs to their new (offset, length).
@@ -1847,8 +1855,54 @@ class SqliteStore:
         self.logger.info("Starting Sidecar Compaction...")
         start_time = time.time()
 
-        # 1. Get Live Index (Sorted)
-        # We only care about instances that actully point to the sidecar (pixel_offset IS NOT NULL)
+        live_rows, orphan_ids = self._read_blob_index()
+        if not live_rows:
+            self.logger.info("No live pixels found in sidecar. Compaction skipped.")
+            return {}
+
+        temp_path = self.sidecar_path + ".compact.tmp"
+        backup_path = self.sidecar_path + ".compact.bak"
+        original_size = os.path.getsize(self.sidecar_path)
+
+        try:
+            updates, uid_map, written_bytes = self._rewrite_live_frames(
+                live_rows, temp_path)
+
+            # Swap before the database write, never after. The database step
+            # is irreversible -- it deletes orphan rows and rewrites every
+            # offset -- so if it committed first and this swap then failed,
+            # the database would describe a compacted layout while the file
+            # on disk was still the old one. Swapping first, and rolling the
+            # swap back if the database write fails, keeps the two together
+            # in both directions.
+            self._swap_in_compacted_sidecar(temp_path, backup_path)
+            try:
+                self._apply_new_offsets(orphan_ids, updates)
+            # BaseException deliberately: the offsets in the database and the
+            # bytes in the sidecar must not be left disagreeing, whatever
+            # interrupted us -- including a KeyboardInterrupt.
+            except BaseException:
+                self._restore_original_sidecar(temp_path, backup_path)
+                raise
+
+            os.remove(backup_path)
+
+            self.sidecar = SidecarManager(self.sidecar_path)
+            self._log_compaction_result(start_time, original_size, written_bytes)
+            return uid_map
+
+        except Exception as exc:
+            self.logger.error(f"Compaction Failed: {exc}")
+            self._discard_compaction_artefacts(temp_path, backup_path)
+            raise
+
+    def _read_blob_index(self):
+        """Reads which sidecar blobs are still live, and which are orphans.
+
+        Returns:
+            Tuple of (live rows ordered by offset, orphan `instance_blobs.id`
+            values as single-element tuples ready for `executemany`).
+        """
         try:
             with self._get_connection() as conn:
                 cur = conn.cursor()
@@ -1863,7 +1917,7 @@ class SqliteStore:
                 # A blob is live only while its owning instance row exists.
                 # This preserves the pre-blob-table orphan semantics: deleting
                 # an instance must let compaction reclaim its bytes.
-                rows = cur.execute("""
+                live_rows = cur.execute("""
                     SELECT b.id AS id,
                            b.instance_uid AS sop_instance_uid,
                            b.kind AS kind,
@@ -1882,7 +1936,7 @@ class SqliteStore:
                 # offsets would dangle into the rewritten file. Collect the
                 # exact ids now and drop them only if the rewrite succeeds.
                 orphan_ids = [
-                    (o['id'],) for o in cur.execute("""
+                    (row['id'],) for row in cur.execute("""
                         SELECT b.id AS id
                         FROM instance_blobs b
                         WHERE NOT EXISTS (
@@ -1891,160 +1945,140 @@ class SqliteStore:
                         )
                     """).fetchall()
                 ]
-        except sqlite3.Error as e:
-            self.logger.error(f"Compaction Failed (Query): {e}")
-            raise e
+            return live_rows, orphan_ids
+        except sqlite3.Error as exc:
+            self.logger.error(f"Compaction Failed (Query): {exc}")
+            raise
 
-        if not rows:
-            self.logger.info("No live pixels found in sidecar. Compaction skipped.")
-            return {}
+    def _rewrite_live_frames(self, rows, temp_path):
+        """Copies every live frame into a new file, back to back.
 
+        Rows arrive ordered by their current offset, so the read head only
+        moves forward through a file that may be many gigabytes.
 
-        temp_path = self.sidecar_path + ".compact.tmp"
+        Returns:
+            Tuple of (updates, uid_map, bytes written), where `updates` is
+            (new_offset, new_length, instance_blobs.id) per row.
+        """
         updates = []
-        uid_map = {}  # sop_instance_uid -> (offset, length)
-        original_size = os.path.getsize(self.sidecar_path)
-        written_bytes = 0
+        uid_map = {}
+        current_out_pos = 0
 
-        try:
-            # 2. Rewrite
-            with open(self.sidecar_path, "rb") as f_in, open(temp_path, "wb") as f_out:
-                current_out_pos = 0
+        with open(self.sidecar_path, "rb") as f_in, open(temp_path, "wb") as f_out:
+            for row in rows:
+                if row['pixel_length'] <= 0:
+                    continue
 
-                for r in rows:
-                    if r['pixel_length'] <= 0:
-                        continue
+                f_in.seek(row['pixel_offset'])
+                data = f_in.read(row['pixel_length'])
 
-                    # Read
-                    f_in.seek(r['pixel_offset'])
-                    data = f_in.read(r['pixel_length'])
+                if len(data) != row['pixel_length']:
+                    self.logger.warning(
+                        "Compaction Warning: Unexpected EOF for instance ID %s",
+                        row['id'])
 
-                    if len(data) != r['pixel_length']:
-                        self.logger.warning(
-                            f"Compaction Warning: Unexpected EOF for instance ID {
-                                r['id']}")
+                f_out.write(data)
+                length = len(data)
 
-                    # Write
-                    f_out.write(data)
-                    length = len(data)
+                # Offset and length always travel together, so the pair can
+                # never be assembled from two different generations.
+                updates.append((current_out_pos, length, row['id']))
 
-                    # Record change.
-                    # (new_offset, new_length, instance_blobs.id) -- offset and
-                    # length always travel together so the pair can never be
-                    # assembled from two different generations of the blob.
-                    updates.append((current_out_pos, length, r['id']))
+                # uid_map is keyed by UID alone and is consumed by
+                # DicomSession.compact() to patch _pixel_loader. Adding a
+                # non-pixel kind here would point the pixel loader at the
+                # wrong blob, so only pixel rows are published.
+                if row['kind'] == 'pixels':
+                    uid_map[row['sop_instance_uid']] = (current_out_pos, length)
 
-                    # uid_map is keyed by UID alone and is consumed by
-                    # DicomSession.compact() to patch _pixel_loader. Adding a
-                    # non-pixel kind here would point the pixel loader at the
-                    # wrong blob, so only pixel rows are published.
-                    if r['kind'] == 'pixels':
-                        uid_map[r['sop_instance_uid']] = (current_out_pos, length)
+                current_out_pos += length
 
-                    current_out_pos += length
+        return updates, uid_map, current_out_pos
 
-                written_bytes = current_out_pos
+    def _swap_in_compacted_sidecar(self, temp_path, backup_path):
+        """Moves the rewritten file into place, keeping the original aside.
 
-            # 3. Swap Files -- BEFORE the DB write.
-            # The DB step below is irreversible (it deletes orphan rows and
-            # rewrites every offset). If it committed first and this swap then
-            # failed, the DB would describe a compacted layout while the file
-            # on disk was still the old one -- every offset wrong, silently.
-            # Swapping first, and rolling the swap back if the DB write fails,
-            # keeps file and DB on the same generation in both directions.
-            # The paths share a directory by construction, so os.replace is
-            # atomic and these renames cost nothing.
-            backup_path = self.sidecar_path + ".compact.bak"
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
-            os.replace(self.sidecar_path, backup_path)
-            try:
-                os.replace(temp_path, self.sidecar_path)
-            # BaseException deliberately: a KeyboardInterrupt landing
-            # between these two renames would otherwise leave the sidecar
-            # missing entirely. Restore first, then let it propagate.
-            except BaseException:
-                os.replace(backup_path, self.sidecar_path)
-                raise
-
-            # 4. Update DB (Transaction)
-            # NOTE: `updates` holds (new_offset, new_length, instance_blobs.id)
-            # -- NOT instances.id. Updating `instances` by that id would
-            # corrupt unrelated rows, so the legacy columns are patched by UID
-            # via a lookup on the blob table instead. Both columns are written
-            # together: patching only the offset would leave `instances` with
-            # an offset from the new generation and a length from the old one,
-            # producing a truncated read rather than an error.
-            try:
-                with self._get_connection() as conn:
-                    if orphan_ids:
-                        conn.executemany(
-                            "DELETE FROM instance_blobs WHERE id = ?", orphan_ids)
-                    conn.executemany("""
-                        UPDATE instance_blobs SET offset = ?, length = ?
-                        WHERE id = ?
-                    """, updates)
-                    conn.executemany("""
-                        UPDATE instances SET pixel_offset = ?, pixel_length = ?
-                        WHERE sop_instance_uid = (
-                            SELECT instance_uid FROM instance_blobs
-                            WHERE id = ? AND kind = 'pixels'
-                        )
-                    """, updates)
-            # BaseException deliberately, as above: the offsets in the DB
-            # and the bytes in the sidecar must not be left disagreeing,
-            # whatever interrupted us.
-            except BaseException:
-                # Put the original file back so the DB is never left
-                # describing a generation the sidecar does not hold.
-                os.replace(self.sidecar_path, temp_path)
-                os.replace(backup_path, self.sidecar_path)
-                raise
-
+        The paths share a directory by construction, so `os.replace` is
+        atomic and these renames cost nothing.
+        """
+        if os.path.exists(backup_path):
             os.remove(backup_path)
+        os.replace(self.sidecar_path, backup_path)
+        try:
+            os.replace(temp_path, self.sidecar_path)
+        # BaseException deliberately: a KeyboardInterrupt landing between
+        # these two renames would otherwise leave the sidecar missing
+        # entirely. Restore first, then let it propagate.
+        except BaseException:
+            os.replace(backup_path, self.sidecar_path)
+            raise
 
-            # 5. Reset Manager
-            self.sidecar = SidecarManager(self.sidecar_path)
+    def _restore_original_sidecar(self, temp_path, backup_path):
+        """Undoes the swap, so the database never describes a file it lost."""
+        os.replace(self.sidecar_path, temp_path)
+        os.replace(backup_path, self.sidecar_path)
 
-            duration = time.time() - start_time
-            saved_space = original_size - written_bytes
-            self.logger.info(
-                f"Compaction Complete in {
-                    duration:.2f}s. Size: {original_size} -> {written_bytes} bytes. Reclaimed: {saved_space} bytes.")
-            print(
-                f"Compaction Complete. Size: {
-                    original_size /
-                    1024 /
-                    1024:.2f}MB -> {
-                    written_bytes /
-                    1024 /
-                    1024:.2f}MB. Reclaimed: {
-                    saved_space /
-                    1024 /
-                    1024:.2f}MB.")
+    def _apply_new_offsets(self, orphan_ids, updates):
+        """Points the database at the rewritten file, in one transaction.
 
-            return uid_map
+        `updates` holds (new_offset, new_length, **instance_blobs.id**) --
+        not `instances.id`. Updating `instances` by that id would corrupt
+        unrelated rows, so the legacy columns are patched by UID through a
+        lookup on the blob table instead. Both columns are written together:
+        patching only the offset would leave `instances` with an offset from
+        the new generation and a length from the old one, which reads as
+        truncated data rather than as an error.
+        """
+        with self._get_connection() as conn:
+            if orphan_ids:
+                conn.executemany(
+                    "DELETE FROM instance_blobs WHERE id = ?", orphan_ids)
+            conn.executemany("""
+                UPDATE instance_blobs SET offset = ?, length = ?
+                WHERE id = ?
+            """, updates)
+            conn.executemany("""
+                UPDATE instances SET pixel_offset = ?, pixel_length = ?
+                WHERE sop_instance_uid = (
+                    SELECT instance_uid FROM instance_blobs
+                    WHERE id = ? AND kind = 'pixels'
+                )
+            """, updates)
 
-        except Exception as e:
-            self.logger.error(f"Compaction Failed: {e}")
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError as exc:
-                    self.logger.warning(
-                        "Could not remove temporary sidecar %s: %s",
-                        temp_path, exc)
-            # Only ever discard the backup once the real sidecar is back in
-            # place -- otherwise it is the last copy of the data.
-            stale_backup = self.sidecar_path + ".compact.bak"
-            if os.path.exists(stale_backup) and os.path.exists(self.sidecar_path):
-                try:
-                    os.remove(stale_backup)
-                except OSError as exc:
-                    self.logger.warning(
-                        "Could not remove stale sidecar backup %s: %s",
-                        stale_backup, exc)
-            raise e
+    def _discard_compaction_artefacts(self, temp_path, backup_path):
+        """Removes the working files a failed compaction left behind."""
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError as exc:
+                self.logger.warning(
+                    "Could not remove temporary sidecar %s: %s", temp_path, exc)
+
+        # Only ever discard the backup once the real sidecar is back in
+        # place -- otherwise it is the last copy of the data.
+        if os.path.exists(backup_path) and os.path.exists(self.sidecar_path):
+            try:
+                os.remove(backup_path)
+            except OSError as exc:
+                self.logger.warning(
+                    "Could not remove stale sidecar backup %s: %s",
+                    backup_path, exc)
+
+    def _log_compaction_result(self, start_time, original_size, written_bytes):
+        """Reports how much space the rewrite reclaimed."""
+        duration = time.time() - start_time
+        saved = original_size - written_bytes
+
+        self.logger.info(
+            "Compaction Complete in %.2fs. Size: %d -> %d bytes. "
+            "Reclaimed: %d bytes.",
+            duration, original_size, written_bytes, saved)
+
+        megabyte = 1024 * 1024
+        print(f"Compaction Complete. "
+              f"Size: {original_size / megabyte:.2f}MB -> "
+              f"{written_bytes / megabyte:.2f}MB. "
+              f"Reclaimed: {saved / megabyte:.2f}MB.")
 
 
 class IsocenterJSONEncoder(json.JSONEncoder):
