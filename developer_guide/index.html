@@ -1221,6 +1221,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="4. Release Process">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#archiving-and-dois" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Archiving and DOIs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1300,11 +1317,49 @@ dependency set resolves only on 3.12 and later.</p>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.run_stress_test
 </code></pre></div>
 <h2 id="4-release-process">4. Release Process</h2>
+<p>Releases publish themselves. <code>.github/workflows/publish.yml</code> uploads to
+PyPI by Trusted Publishing -- GitHub authenticates over OIDC and PyPI
+matches the request against a publisher pinned to this repository, the
+workflow's <em>filename</em>, and its environment name. There is no API token
+in repository secrets, in CI, or on anyone's machine. Renaming
+<code>publish.yml</code> or its environments breaks publishing until PyPI's
+publisher configuration is updated to match.</p>
 <ol>
-<li>Update <code>CHANGELOG.md</code>.</li>
-<li>Bump version in <code>setup.py</code>.</li>
-<li>Tag the release in git.</li>
+<li>Move <code>[Unreleased]</code> in <code>CHANGELOG.md</code> to a new <code>[x.y.z] - YYYY-MM-DD</code>
+   section.</li>
+<li>Bump <code>version</code> in <code>setup.py</code>.</li>
+<li>Update <code>version</code> and <code>date-released</code> in <code>CITATION.cff</code>.</li>
+<li>Merge to <code>main</code> with CI green.</li>
+<li>Tag <code>vx.y.z</code>. <strong>The tag must match <code>setup.py</code> exactly</strong> -- the build
+   job compares them and refuses to publish a mismatch. Publishing
+   <code>v0.7.1</code> from a tree that still says <code>0.7.0</code> would produce a release
+   nobody can install under the name they were given, and permanently
+   spend the version it did claim, since PyPI never allows reuse.</li>
+<li><strong>Publish a GitHub Release.</strong> This is the trigger; pushing a tag alone
+   does nothing. That is deliberate -- a release is a decision someone
+   makes, whereas a mistyped <code>git push --tags</code> should not be able to burn
+   a version number.</li>
 </ol>
+<p>The build job then runs two gates before anything is uploaded: the tag
+check above, and an installation of the built wheel into a clean
+environment <em>outside the source tree</em>, asserting it carries its own
+<code>resources/*.json</code>. That second gate exists because those resources once
+shipped in no distribution at all and nothing failed -- every loader
+guards on <code>os.path.exists</code> and degrades to a default, so a published
+release audited against an empty PHI policy and reported clean.</p>
+<p>To rehearse against TestPyPI, run the workflow manually
+(<code>workflow_dispatch</code>) with <code>target: testpypi</code>. Note that neither index
+allows re-uploading a version, so a rehearsal consumes that version
+number on TestPyPI.</p>
+<h3 id="archiving-and-dois">Archiving and DOIs</h3>
+<p>Once the Zenodo GitHub integration is enabled for this repository, each
+published GitHub Release is archived and issued a version DOI, under a
+concept DOI that always resolves to the latest. <code>.zenodo.json</code> supplies
+the deposit metadata and <code>CITATION.cff</code> is what GitHub's "Cite this
+repository" button reads.</p>
+<p>Zenodo only archives releases created <em>after</em> the integration is
+switched on; it does not backfill. After the first deposit, add the
+concept DOI to <code>CITATION.cff</code> and the badge to <code>README.md</code>.</p>
 
 
 
