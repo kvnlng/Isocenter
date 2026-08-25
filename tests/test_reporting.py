@@ -135,3 +135,88 @@ def test_burned_in_annotation_check(clean_env):
     assert "BurnedInAnnotation FLAGGED as YES" in content
 
     s.close()
+
+
+# --- What the report is allowed to claim -----------------------------
+#
+# The compliance report ends with a Data Protection Officer signature
+# line, so every claim above it is one somebody signs. `deid_method`
+# used to be a dataclass default of "Safe Harbor (Basic Profile)" that
+# nothing ever assigned, and the methodology paragraph hardcoded "the
+# Isocenter Safe Harbor pipeline" -- both printed unconditionally, on a
+# bare session whose PHI scan covers six tags, and while issue #57
+# leaves nested-sequence rules unfired. The report may describe what was
+# configured and what was recorded. It may not assert a standard.
+
+from isocenter.profiles import BASIC_PROFILE
+
+
+def _render_report(session, tmp_path):
+    """Generate a markdown report and hand back its text."""
+    output = tmp_path / "compliance.md"
+    session.generate_report(str(output), format="markdown")
+    return output.read_text(encoding="utf-8")
+
+
+def test_a_default_session_report_claims_no_compliance_standard(tmp_path):
+    """A bare session scans six tags. That is not Safe Harbor.
+
+    The standard may still be *named* -- the methodology section points at
+    it as the open question the signer has to answer. What it may not do
+    is appear in the summary rows, which are read as findings.
+    """
+    with Session(str(tmp_path / "bare.db")) as session:
+        content = _render_report(session, tmp_path)
+
+    claims = [line for line in content.splitlines()
+              if line.startswith(("| Privacy Profile", "| De-ID Method"))]
+    assert claims, "the summary rows this test guards have been renamed"
+    for row in claims:
+        assert "Safe Harbor" not in row, (
+            f"the report asserts a compliance standard it did not verify: {row}")
+
+    assert "determination for the data steward" in content, (
+        "the report drops the standard entirely instead of handing the "
+        "question to the person signing it")
+
+
+def test_the_report_names_the_profile_that_was_actually_applied(tmp_path):
+    """'See Config' told the reader nothing; name the profile."""
+    config = tmp_path / "config.yaml"
+    config.write_text("privacy_profile: basic\nmachines: []\n", encoding="utf-8")
+
+    with Session(str(tmp_path / "profiled.db")) as session:
+        session.load_config(str(config))
+        content = _render_report(session, tmp_path)
+
+    assert "basic" in content
+    assert f"{len(BASIC_PROFILE)} tag rules" in content, (
+        "the report does not state how many tag rules were in force")
+
+
+def test_the_report_states_when_no_profile_was_applied(tmp_path):
+    """Silence reads as 'a profile was applied'. Say the opposite."""
+    with Session(str(tmp_path / "bare.db")) as session:
+        content = _render_report(session, tmp_path)
+
+    assert "session defaults" in content.lower()
+    assert "6 tag rules" in content
+
+
+def test_an_unresolvable_profile_is_not_reported_as_applied(tmp_path):
+    """A misspelled profile name is warned about and ignored at load.
+
+    Reporting it anyway would describe protection that never ran -- the
+    most dangerous line the report could carry.
+    """
+    config = tmp_path / "config.yaml"
+    config.write_text("privacy_profile: no_such_profile\nmachines: []\n",
+                      encoding="utf-8")
+
+    with Session(str(tmp_path / "unknown.db")) as session:
+        session.load_config(str(config))
+        content = _render_report(session, tmp_path)
+
+    assert "no_such_profile" not in content, (
+        "the report names a profile that failed to resolve and was never "
+        "applied")

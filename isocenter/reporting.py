@@ -12,8 +12,13 @@ class ComplianceReport:
         generated_at (datetime.datetime): Timestamp of generation.
         isocenter_version (str): Version of the system.
         project_name (str): Name of the session/project.
-        privacy_profile (str): The active privacy profile used.
-        deid_method (str): Description of the de-identification method.
+        privacy_profile (str): The profile that was actually applied, or a
+            statement that none was.
+        deid_method (str): Factual description of what was configured --
+            profile, tag-rule count, pixel-rule count. Never the name of a
+            compliance standard: whether the output satisfies one is a
+            determination for the data steward, and this report carries a
+            DPO signature line beneath whatever it claims.
         total_patients (int): Total patients processed.
         total_studies (int): Total studies processed.
         total_series (int): Total series processed.
@@ -30,7 +35,12 @@ class ComplianceReport:
 
     # Configuration / Context
     privacy_profile: str = "Unknown"
-    deid_method: str = "Safe Harbor (Basic Profile)"  # Default, can be overridden
+    # Not a compliance claim. This used to default to "Safe Harbor (Basic
+    # Profile)" and no caller ever assigned it, so every report asserted
+    # HIPAA Safe Harbor -- including for a session whose PHI scan covers
+    # the six shipped default tags. DicomSession.generate_report now
+    # always passes a description derived from the live configuration.
+    deid_method: str = "Not recorded"
 
     # Cohort Statistics
     total_patients: int = 0
@@ -125,7 +135,7 @@ The following actions were recorded in the secure audit trail:
 ## 4. Validation & Verification
 
 *   **Identified Issues:** {report.validation_issues}
-*   **Methodology:** The dataset was processed using the Isocenter Safe Harbor pipeline. Pixel data was scanned against machine-specific redaction zones. Metadata was remediated according to DICOM PS3.15 {report.privacy_profile} profile.
+*   **Methodology:** {report.deid_method}. Metadata was remediated according to the tag policy in force; pixel data was scanned against the configured machine redaction zones. This section records what the tooling was configured to do and what it logged doing -- whether the result meets HIPAA Safe Harbor, a Limited Data Set, or any other standard is a determination for the data steward, not for Isocenter.
 *   **Verification Details:** {report.verification_details if report.verification_details else "Standard automated checks performed."}
 
 ---

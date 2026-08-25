@@ -9,7 +9,7 @@ legacy formats, and privacy profile management.
 import os
 import logging
 import copy
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import json
 import re
 import yaml
@@ -82,6 +82,12 @@ def load_unified_config(path: str) -> Dict[str, Any]:
         else:
             get_logger().warning("Unknown privacy profile reference '%s' (not a built-in or file). Ignoring.", profile_name)
 
+        if not profile_rules:
+            # Ignoring it means ignoring it everywhere. Leaving the name in
+            # the config would let the compliance report name a profile that
+            # contributed no rules -- protection that never ran.
+            config.pop("privacy_profile", None)
+
         if profile_rules:
             # User rules override profile rules
             user_rules = config.get("phi_tags", {})
@@ -109,7 +115,8 @@ class ConfigLoader:
 
     @staticmethod
     def load_unified_config(
-            filepath: str) -> tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any], bool]:
+            filepath: str) -> tuple[Dict[str, Any], List[Dict[str, Any]],
+                                    Dict[str, Any], bool, Optional[str]]:
         """
         Parses the unified YAML config (v2.0).
 
@@ -120,7 +127,11 @@ class ConfigLoader:
             filepath (str): Path to the config file.
 
         Returns:
-            tuple: (phi_tags, machine_rules, date_jitter_config, remove_private_tags)
+            tuple: (phi_tags, machine_rules, date_jitter_config,
+            remove_private_tags, privacy_profile). The last element is the
+            name of the profile whose rules were merged, or None -- an
+            unknown reference resolves to None rather than to its own name,
+            because it contributed nothing.
         """
         # Call the top-level loader which handles YAML, Legacy List, and Privacy Profiles
         data = load_unified_config(filepath)
@@ -143,7 +154,8 @@ class ConfigLoader:
         for i, rule in enumerate(machine_rules):
             ConfigLoader._validate_rule(rule, i)
 
-        return phi_tags, machine_rules, date_jitter_config, remove_private_tags
+        return (phi_tags, machine_rules, date_jitter_config,
+                remove_private_tags, data.get("privacy_profile"))
 
     @staticmethod
     def load_redaction_rules(filepath: str) -> List[Dict[str, Any]]:

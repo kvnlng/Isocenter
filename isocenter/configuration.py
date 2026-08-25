@@ -22,12 +22,18 @@ class IsocenterConfiguration:
         date_jitter (Dict[str, int]): Date shifting parameters.
         remove_private_tags (bool): Global flag to strip private tags.
         config_path (Optional[str]): Path to the backing YAML file for auto-save.
+        privacy_profile (Optional[str]): Name of the profile whose rules were
+            merged into `phi_tags`, or None when none was applied. Only ever
+            set to a profile that actually resolved -- an unknown reference is
+            warned about and dropped at load, so the compliance report cannot
+            name protection that never ran.
     """
     rules: List[Dict[str, Any]] = field(default_factory=list)
     phi_tags: Dict[str, Any] = field(default_factory=dict)
     date_jitter: Dict[str, int] = field(default_factory=lambda: {"min_days": -365, "max_days": -1})
     remove_private_tags: bool = True
     config_path: Optional[str] = None
+    privacy_profile: Optional[str] = None
 
     def save(self) -> None:
         """
@@ -76,11 +82,9 @@ class IsocenterConfiguration:
 
         data = {
             "version": "2.0",
-            # We don't store privacy_profile name in the object currently,
-            # so we might lose that metadata if we overwrite.
-            # For now, let's assume 'custom' or omit if not tracked.
-            # OR we should add it to the dataclass. For this task, we'll omit or keep basic.
-            "privacy_profile": "custom",
+            # The profile that actually produced these tags, so a round-trip
+            # through save() does not relabel a 'basic' config as 'custom'.
+            "privacy_profile": self.privacy_profile or "custom",
             "phi_tags": self.phi_tags,
             "date_jitter": self.date_jitter,
             "remove_private_tags": self.remove_private_tags,

@@ -57,7 +57,7 @@ def test_legacy_loader_integration(tmp_path):
             "privacy_profile": "basic"
         }, f)
 
-    phi_tags, _, _, _ = ConfigLoader.load_unified_config(str(config_path))
+    phi_tags, _, _, _, _ = ConfigLoader.load_unified_config(str(config_path))
 
     assert isinstance(phi_tags, dict)
     assert phi_tags["0010,0010"]["action"] == "REMOVE"
