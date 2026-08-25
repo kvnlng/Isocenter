@@ -49,14 +49,22 @@ class RemediationService:
             if not finding.remediation_proposal:
                 continue
 
-            # Deduping key. The path is part of it because a finding
-            # raised inside a sequence carries the *instance's* UID --
-            # nested items have none of their own -- so two annotation
-            # items on one instance holding the same tag produced one key
-            # between them and the second was dropped, leaving its text in
-            # place. Unreachable until the scan started opening sequences
-            # (#57), and the same failure that fix was about.
-            key = (finding.entity_uid, finding.entity_path, finding.field_name)
+            # Deduping key: what is being changed, and where it lives.
+            #
+            # It used to be `(entity_uid, field_name)`, and both halves
+            # were wrong. `field_name` is a display string from the
+            # config's `name`, falling back to the literal "Unknown Tag"
+            # -- so two config entries without names collapsed into one
+            # key and the second tag was never remediated. And a finding
+            # raised inside a sequence carries the *instance's* UID,
+            # nested items having none of their own, so two annotation
+            # items holding the same tag collapsed too (reachable once the
+            # scan began opening sequences, #57).
+            #
+            # `target_attr` is the attribute the proposal actually writes,
+            # which is what "already handled" should mean.
+            key = (finding.entity_uid, finding.entity_path,
+                   finding.remediation_proposal.target_attr)
             if key in processed_entities:
                 continue
 

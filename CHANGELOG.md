@@ -65,7 +65,13 @@ individual entries below say what was affected.
 
 ### Fixed
 
-- **Only the first item of a sequence was remediated.** The key deciding whether a finding had already been handled was `(entity_uid, field_name)`, and a finding raised inside a sequence carries the *instance's* UID -- nested items have none of their own. Two annotation items on one instance holding the same tag therefore produced one key between them, and the second was skipped: its text survived a run that reported success. Unreachable until the scan started opening sequences, and the same failure that fix was about, so it is fixed in the same release. The path to the item is now part of the key.
+- **Remediation deduplicated on a display name, so some findings were silently dropped.** The key deciding whether a finding had already been handled was `(entity_uid, field_name)`, and both halves were wrong.
+
+  `field_name` comes from the config entry's `name` and falls back to the literal `"Unknown Tag"` when one is omitted -- so two hand-written config entries without names collapsed into a single key and the second tag was never remediated. That is reachable in every released version; `create_config()` and the shipped profiles always write names, which is why it went unnoticed.
+
+  And a finding raised inside a sequence carries the *instance's* UID, nested items having none of their own, so two annotation items on one instance holding the same tag collapsed as well. That half became reachable only when the scan started opening sequences, in this same release.
+
+  The key is now the attribute the proposal actually writes, plus the path to the item holding it.
 
 - **`anonymize()` reported a count of `None`.** `apply_remediation` returned nothing, so every run printed the literal `Anonymized/Remediated None tags according to policy.` -- the line an operator reads after de-identifying, carrying no information. It now returns the number applied, `anonymize()` returns it too, and remediations that fail are excluded from the count and summarised in one warning rather than only appearing as individual errors.
 
