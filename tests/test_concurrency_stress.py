@@ -4,9 +4,9 @@ import threading
 import time
 import random
 from queue import Queue
-from gantry.persistence_manager import PersistenceManager
-from gantry.persistence import SqliteStore
-from gantry.entities import Patient
+from isocenter.persistence_manager import PersistenceManager
+from isocenter.persistence import SqliteStore
+from isocenter.entities import Patient
 
 @pytest.fixture
 def pm_stress(tmp_path):

@@ -1,13 +1,13 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import numpy as np
-from gantry.entities import Instance
-from gantry import pixel_analysis
+from isocenter.entities import Instance
+from isocenter import pixel_analysis
 
 class TestPixelAnalysis(unittest.TestCase):
 
-    @patch('gantry.pixel_analysis.HAS_OCR', True)
-    @patch('gantry.pixel_analysis.pytesseract')
+    @patch('isocenter.pixel_analysis.HAS_OCR', True)
+    @patch('isocenter.pixel_analysis.pytesseract')
     def test_detect_text_simple(self, mock_pytesseract):
         # Setup: Mock image_to_data returning a DICT
         # Keys: level, page_num, block_num, par_num, line_num, word_num, left, top, width, height, conf, text
@@ -29,8 +29,8 @@ class TestPixelAnalysis(unittest.TestCase):
         self.assertEqual(result, "DETECTED TEXT")
         mock_pytesseract.image_to_data.assert_called_once()
 
-    @patch('gantry.pixel_analysis.HAS_OCR', True)
-    @patch('gantry.pixel_analysis.pytesseract')
+    @patch('isocenter.pixel_analysis.HAS_OCR', True)
+    @patch('isocenter.pixel_analysis.pytesseract')
     def test_analyze_pixels_integration(self, mock_pytesseract):
         # Setup
         mock_data = {
@@ -56,7 +56,7 @@ class TestPixelAnalysis(unittest.TestCase):
         # TextRegion doesn't have entity_uid, that's added later when creating PhiFinding
         # self.assertEqual(findings[0].entity_uid, "1.2.3.4")
 
-    @patch('gantry.pixel_analysis.HAS_OCR', False)
+    @patch('isocenter.pixel_analysis.HAS_OCR', False)
     def test_graceful_degradation(self):
         instance = MagicMock(spec=Instance)
         instance.get_pixel_data.return_value = np.zeros((100, 100), dtype=np.uint8)

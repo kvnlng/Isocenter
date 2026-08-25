@@ -7,8 +7,8 @@ import numpy as np
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from gantry.session import DicomSession
-from gantry.configuration import GantryConfiguration
+from isocenter.session import DicomSession
+from isocenter.configuration import IsocenterConfiguration
 
 def create_synthetic_dicom(filepath, rows=100, cols=100):
     """Creates a simple synthetic DICOM for testing."""
@@ -80,7 +80,7 @@ def test_export_compressed_redaction(tmp_path):
     db_path = tmp_path / "test.db"
 
     # Initialize Configuration with a Rule
-    config = GantryConfiguration()
+    config = IsocenterConfiguration()
     # Redact the 2000 value region [20:40, 20:40]
     # We use a slightly larger zone to be sure
     config.add_rule(

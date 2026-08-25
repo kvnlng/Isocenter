@@ -3,7 +3,7 @@ import pydicom
 import numpy as np
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def test_ingest_planar_normalization(tmp_path):
     """
@@ -61,7 +61,7 @@ def test_ingest_planar_normalization(tmp_path):
     metrics = pat.studies[0].series[0].instances[0]
 
     # The CRITICAL ASSERTION:
-    # Gantry should have updated the metadata to match the numpy array (Interleaved)
+    # Isocenter should have updated the metadata to match the numpy array (Interleaved)
     # So PlanarConfiguration should be 0, not 1.
     assert metrics.attributes["0028,0006"] == 0, "Ingestion failed to normalize PlanarConfiguration to 0"
 

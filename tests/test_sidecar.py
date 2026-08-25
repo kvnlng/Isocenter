@@ -4,9 +4,9 @@ import shutil
 import glob
 import pytest
 import numpy as np
-from gantry.session import DicomSession
-from gantry.entities import Instance, Patient, Study, Series
-from gantry.sidecar import SidecarManager
+from isocenter.session import DicomSession
+from isocenter.entities import Instance, Patient, Study, Series
+from isocenter.sidecar import SidecarManager
 
 TEST_DB = "test_sidecar_suite.db"
 TEST_PIXELS = "test_sidecar_suite_pixels.bin"

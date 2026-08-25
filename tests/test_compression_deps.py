@@ -1,7 +1,7 @@
 
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
-from gantry.entities import Instance
+from isocenter.entities import Instance
 
 def test_missing_compression_deps_error(tmp_path):
     """
@@ -14,7 +14,7 @@ def test_missing_compression_deps_error(tmp_path):
     inst = Instance("1.2.3", "1.2.3.4", 1, file_path=str(dcm_path))
 
     # Mock pydicom.dcmread to return a dataset that fails on .pixel_array access
-    with patch("gantry.entities.pydicom.dcmread") as mock_read:
+    with patch("isocenter.entities.pydicom.dcmread") as mock_read:
         mock_ds = MagicMock()
         # Define a property that raises the specific RuntimeError
         type(mock_ds).pixel_array = PropertyMock(side_effect=RuntimeError(

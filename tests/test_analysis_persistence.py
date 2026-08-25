@@ -1,8 +1,8 @@
 import pytest
 import os
 import sqlite3
-from gantry.session import DicomSession
-from gantry.privacy import PhiFinding, PhiRemediation, PhiReport
+from isocenter.session import DicomSession
+from isocenter.privacy import PhiFinding, PhiRemediation, PhiReport
 
 def test_persist_phi_findings(tmp_path):
     db_path = str(tmp_path / "phi.db")

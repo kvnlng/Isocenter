@@ -2,11 +2,11 @@
 import pytest
 import os
 import json
-from gantry.session import DicomSession
-from gantry.config_manager import ConfigLoader
-from gantry.entities import Instance, Patient, Study, Series
-from gantry.privacy import PhiInspector, PhiFinding, PhiRemediation
-from gantry.remediation import RemediationService
+from isocenter.session import DicomSession
+from isocenter.config_manager import ConfigLoader
+from isocenter.entities import Instance, Patient, Study, Series
+from isocenter.privacy import PhiInspector, PhiFinding, PhiRemediation
+from isocenter.remediation import RemediationService
 
 def test_scaffold_config_structure(tmp_path):
     """Verify that scaffold_config produces valid JSON with new fields."""
@@ -46,7 +46,7 @@ def test_private_tag_removal():
     # Even group = Public
     inst.attributes["0010,0010"] = "PublicData"
     # Whitelisted Private
-    inst.attributes["0099,0010"] = "GANTRY_SECURE"
+    inst.attributes["0099,0010"] = "ISOCENTER_SECURE"
 
     findings = inspector._scan_instance(inst, "PAT1")
 
@@ -101,7 +101,7 @@ def test_scaffold_comments(tmp_path):
 
     # So we need to match a rule.
     # Method: Create a fake CTP rule file so it matches SN1.
-    ctp_path = "gantry/resources/ctp_rules.yaml"
+    ctp_path = "isocenter/resources/ctp_rules.yaml"
     import yaml
     # Back up existing if needed, but in test env we might mock?
     # Since we can't easily overwrite source in a safe way for parallel tests,
@@ -171,7 +171,7 @@ def test_scaffold_burned_in_warning(tmp_path):
     session = DicomSession(persistence_file=":memory:")
 
     # Create Risk Instance
-    from gantry.entities import Equipment
+    from isocenter.entities import Equipment
     # Inject unknown equipment -> Falls back to empty scaffold
     # But now we expect a comment
     # session.store.equipment.append(Equipment("RISK_MAN", "RISK_MOD", "SN-RISK")) # Invalid
@@ -180,7 +180,7 @@ def test_scaffold_burned_in_warning(tmp_path):
     # Inject instance into session (need to link to patient/study/series)
     # Actually, scaffold checks `service.index.get_by_machine`.
     # So we need full object graph.
-    from gantry.entities import Patient, Study, Series, Instance
+    from isocenter.entities import Patient, Study, Series, Instance
     p = Patient("P1", "N1")
     st = Study("S1", None)
     se = Series("SE1", "OT", 1)

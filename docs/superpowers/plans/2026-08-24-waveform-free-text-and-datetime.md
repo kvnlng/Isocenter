@@ -10,9 +10,9 @@
 
 ## Context you need
 
-Gantry ingests DICOM into an object graph, remediates PHI, and exports. The WFDB exporter (`gantry/exporters/wfdb.py`) writes PhysioNet `header(5)` records plus a Murmur-facing `annotations.json` (`gantry/murmur.py`).
+Isocenter ingests DICOM into an object graph, remediates PHI, and exports. The WFDB exporter (`isocenter/exporters/wfdb.py`) writes PhysioNet `header(5)` records plus a Murmur-facing `annotations.json` (`isocenter/murmur.py`).
 
-**The PHI scan is tag-gated, not content-based.** `gantry/privacy.py` only inspects a tag if the loaded configuration names it (`config_val = self.phi_tags.get(tag); if not config_val: continue`). There are three reachable configurations:
+**The PHI scan is tag-gated, not content-based.** `isocenter/privacy.py` only inspects a tag if the loaded configuration names it (`config_val = self.phi_tags.get(tag); if not config_val: continue`). There are three reachable configurations:
 
 | How the session is set up | What gets scanned |
 |---|---|
@@ -26,7 +26,7 @@ This is why Task 2 fixes the Channel Label in the exporter and not only in the p
 
 - Python floor is **3.12**. CI runs 3.12, 3.13, 3.14, 3.14t.
 - Dependencies are declared **only** in `setup.py`. There is deliberately no `requirements.txt` — do not create one.
-- Profile keys **must be lowercase** `gggg,eeee`. Ingested attribute keys are lowercased at ingest (`gantry/io_handlers.py` `populate_attrs`). `0008,103E` shipped uppercase once and was silently never remediated (#41). Write new entries lowercase directly.
+- Profile keys **must be lowercase** `gggg,eeee`. Ingested attribute keys are lowercased at ingest (`isocenter/io_handlers.py` `populate_attrs`). `0008,103E` shipped uppercase once and was silently never remediated (#41). Write new entries lowercase directly.
 - **TDD.** Write the failing test first and show it RED before implementing. Every test must be demonstrated capable of failing against broken code — this project has already found nine false-passing tests plus a plan-authored test that raised `NameError` instead of asserting.
 - Run the full suite in the **FOREGROUND** with the Bash tool's `timeout` parameter set to `300000`. The suite takes ~157s; the tool's default cutoff is 120s and will kill it. Never set `run_in_background: true`, never spawn a poller.
 - Baseline at branch point (`main` @ `dc61148`): **381 passed, 1 skipped, 0 failed.**
@@ -38,10 +38,10 @@ This is why Task 2 fixes the Channel Label in the exporter and not only in the p
 
 | File | Responsibility | Task |
 |---|---|---|
-| `gantry/profiles.py` | The Basic profile tag table | 1, 3 |
-| `gantry/waveform.py` | `WaveformChannel.wfdb_description()` and the new lead-name allowlist | 2 |
-| `gantry/exporters/wfdb.py` | Passes the channel index; threads the `include_annotation_text` option | 2, 3 |
-| `gantry/murmur.py` | `build_annotations()` — the `note`/`lead`/`source` fields | 2, 3, 4 |
+| `isocenter/profiles.py` | The Basic profile tag table | 1, 3 |
+| `isocenter/waveform.py` | `WaveformChannel.wfdb_description()` and the new lead-name allowlist | 2 |
+| `isocenter/exporters/wfdb.py` | Passes the channel index; threads the `include_annotation_text` option | 2, 3 |
+| `isocenter/murmur.py` | `build_annotations()` — the `note`/`lead`/`source` fields | 2, 3, 4 |
 | `tests/test_wfdb_privacy.py` | Existing characterization tests that must be **converted**, not deleted | 2 |
 | `docs/waveforms.md` | The "What is and isn't de-identified" disclosure section | 4 |
 
@@ -52,7 +52,7 @@ This is why Task 2 fixes the Channel Label in the exporter and not only in the p
 `(0008,002A)` Acquisition DateTime is the DT-valued twin of `(0008,0022)` Acquisition Date, which the profile *does* remove. A reader would reasonably assume it is covered. It is not, so raw acquisition timing survives a full `audit()` / `anonymize()` pass.
 
 **Files:**
-- Modify: `gantry/profiles.py` (the `BASIC_PROFILE` dict, "Study / Series Information" block, around line 35-42)
+- Modify: `isocenter/profiles.py` (the `BASIC_PROFILE` dict, "Study / Series Information" block, around line 35-42)
 - Test: `tests/test_profiles.py`
 
 **Interfaces:**
@@ -64,7 +64,7 @@ This is why Task 2 fixes the Channel Label in the exporter and not only in the p
 Add to `tests/test_profiles.py`:
 
 ```python
-from gantry.profiles import BASIC_PROFILE
+from isocenter.profiles import BASIC_PROFILE
 
 
 def test_basic_profile_covers_datetime_twins_of_the_dates_it_removes():
@@ -107,7 +107,7 @@ Expected: `test_basic_profile_covers_datetime_twins_of_the_dates_it_removes` FAI
 
 - [ ] **Step 3: Add the tags**
 
-In `gantry/profiles.py`, inside `BASIC_PROFILE`, immediately after the `"0008,0023"` Content Date line:
+In `isocenter/profiles.py`, inside `BASIC_PROFILE`, immediately after the `"0008,0023"` Content Date line:
 
 ```python
     # DT-valued twins of the dates above. (0008,002A) carries the same
@@ -146,7 +146,7 @@ def test_acquisition_datetime_is_remediated_end_to_end(tmp_path):
     mentions it.
     """
     import pydicom
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     raw_datetime = "20260101101530.000000"
     path = tmp_path / "wf.dcm"
@@ -198,7 +198,7 @@ Expected: 384 passed (381 + 3 new), 1 skipped, 0 failed.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add gantry/profiles.py tests/test_profiles.py tests/test_wfdb_privacy.py
+git add isocenter/profiles.py tests/test_profiles.py tests/test_wfdb_privacy.py
 git commit -m "fix: remediate Acquisition DateTime and procedure step timing
 
 (0008,002A) is the DT-valued twin of (0008,0022) Acquisition Date, which
@@ -223,9 +223,9 @@ Closes #38"
 **The decision (already made, do not re-litigate):** emit the label only when it is a recognisable lead name; otherwise emit a positional token `ch<N>`. This keeps headers usable for real leads like `II` and `V5` while making it impossible for operator free text to reach either output — including for a bare `Session()` that loads no PHI configuration.
 
 **Files:**
-- Modify: `gantry/waveform.py` (`WaveformChannel.wfdb_description`, currently line 173-179; add `KNOWN_LEAD_NAMES` and `_is_known_lead_name` at module scope)
-- Modify: `gantry/exporters/wfdb.py:207` (pass the loop index)
-- Modify: `gantry/murmur.py:74` (pass the index)
+- Modify: `isocenter/waveform.py` (`WaveformChannel.wfdb_description`, currently line 173-179; add `KNOWN_LEAD_NAMES` and `_is_known_lead_name` at module scope)
+- Modify: `isocenter/exporters/wfdb.py:207` (pass the loop index)
+- Modify: `isocenter/murmur.py:74` (pass the index)
 - Test: `tests/test_waveform_model.py`, `tests/test_wfdb_privacy.py`
 
 **Interfaces:**
@@ -237,7 +237,7 @@ Closes #38"
 Add to `tests/test_waveform_model.py`:
 
 ```python
-from gantry.waveform import WaveformChannel
+from isocenter.waveform import WaveformChannel
 
 
 def test_coded_source_still_wins():
@@ -284,7 +284,7 @@ Expected: `test_free_text_label_is_replaced_with_a_positional_token` and the pos
 
 - [ ] **Step 3: Implement the allowlist**
 
-In `gantry/waveform.py`, at module scope above `class WaveformChannel`:
+In `isocenter/waveform.py`, at module scope above `class WaveformChannel`:
 
 ```python
 # Recognisable physiological signal names. Channel Label (003A,0203) is
@@ -352,17 +352,17 @@ Replace `wfdb_description` (currently line 173-179) with:
         return f"ch{index}" if index is not None else "signal"
 ```
 
-`Optional` is already imported in `gantry/waveform.py`; confirm before adding an import.
+`Optional` is already imported in `isocenter/waveform.py`; confirm before adding an import.
 
 - [ ] **Step 4: Update both call sites to pass the index**
 
-`gantry/exporters/wfdb.py:207` — inside the `for idx in range(n_channels):` loop that starts at line 173:
+`isocenter/exporters/wfdb.py:207` — inside the `for idx in range(n_channels):` loop that starts at line 173:
 
 ```python
             _sanitize_description(channel.wfdb_description(idx)),
 ```
 
-`gantry/murmur.py:74` — inside `_lead_for`, where `index` is already computed:
+`isocenter/murmur.py:74` — inside `_lead_for`, where `index` is already computed:
 
 ```python
         return waveform.channels[index].wfdb_description(index)
@@ -387,7 +387,7 @@ Expected: PASS.
     assert description_field == "ch0", (
         "expected the free-text ChannelLabel to be replaced with a "
         f"positional token; got {description_field!r}. If this reverted to "
-        "the raw label, the allowlist in gantry/waveform.py stopped firing "
+        "the raw label, the allowlist in isocenter/waveform.py stopped firing "
         "and operator text is reaching the header again.")
     assert FREE_TEXT_MARKER not in description_field
 ```
@@ -411,7 +411,7 @@ Expected: 389 passed (384 + 5 new), 1 skipped, 0 failed. If any *other* test fai
 - [ ] **Step 9: Commit**
 
 ```bash
-git add gantry/waveform.py gantry/exporters/wfdb.py gantry/murmur.py tests/test_waveform_model.py tests/test_wfdb_privacy.py
+git add isocenter/waveform.py isocenter/exporters/wfdb.py isocenter/murmur.py tests/test_waveform_model.py tests/test_wfdb_privacy.py
 git commit -m "fix: never write operator free text into a WFDB header
 
 Channel Label (003A,0203) is operator-typed SH text and was written
@@ -441,9 +441,9 @@ Refs #39"
 **The decision (already made):** omit `note` unless the caller explicitly opts in, **and** add `0070,0006` to the Basic profile. Both layers, because the exporter default protects a bare `Session()` while the profile entry means the value is actually remediated on the object graph for configured sessions.
 
 **Files:**
-- Modify: `gantry/murmur.py` (`build_annotations` signature and the `note` block at lines 169-171)
-- Modify: `gantry/exporters/wfdb.py` (`export()` reads the option; `_write_instance` accepts and forwards it)
-- Modify: `gantry/profiles.py` (one more `BASIC_PROFILE` entry)
+- Modify: `isocenter/murmur.py` (`build_annotations` signature and the `note` block at lines 169-171)
+- Modify: `isocenter/exporters/wfdb.py` (`export()` reads the option; `_write_instance` accepts and forwards it)
+- Modify: `isocenter/profiles.py` (one more `BASIC_PROFILE` entry)
 - Test: `tests/test_murmur_annotations.py`
 
 **Interfaces:**
@@ -463,7 +463,7 @@ def test_note_is_omitted_by_default():
     Defaulting to omit is what makes this safe regardless of configuration.
     """
     instance, waveform = _annotated_instance(note="Reviewed by Dr Jane Doe, MRN-12345678")
-    document = build_annotations(instance, waveform, "gantry/test")
+    document = build_annotations(instance, waveform, "isocenter/test")
     assert document["findings"], "fixture produced no findings"
     for finding in document["findings"]:
         assert "note" not in finding, (
@@ -473,7 +473,7 @@ def test_note_is_omitted_by_default():
 def test_note_is_written_when_explicitly_requested():
     """Opting in is a deliberate act, and must actually work."""
     instance, waveform = _annotated_instance(note="sinus rhythm")
-    document = build_annotations(instance, waveform, "gantry/test", include_text=True)
+    document = build_annotations(instance, waveform, "isocenter/test", include_text=True)
     notes = [f.get("note") for f in document["findings"]]
     assert "sinus rhythm" in notes
 ```
@@ -487,7 +487,7 @@ Expected: `test_note_is_omitted_by_default` FAILS (the note is currently always 
 
 - [ ] **Step 3: Add the parameter**
 
-In `gantry/murmur.py`, change the signature at line 124:
+In `isocenter/murmur.py`, change the signature at line 124:
 
 ```python
 def build_annotations(instance, waveform, source: str, include_text: bool = False) -> Dict[str, Any]:
@@ -514,7 +514,7 @@ Replace the `note` block at lines 169-171:
 
 - [ ] **Step 4: Thread the option through the exporter**
 
-In `gantry/exporters/wfdb.py`, in `export()` (line 216), after `patient_ids = options.get("patient_ids")`:
+In `isocenter/exporters/wfdb.py`, in `export()` (line 216), after `patient_ids = options.get("patient_ids")`:
 
 ```python
         # Off by default: (0070,0006) is free-text clinical commentary.
@@ -554,7 +554,7 @@ And the `build_annotations` call (line ~346):
 
 - [ ] **Step 5: Add the profile entry**
 
-In `gantry/profiles.py`, at the end of `BASIC_PROFILE`, after the `"0008,1070"` Operators' Name line:
+In `isocenter/profiles.py`, at the end of `BASIC_PROFILE`, after the `"0008,1070"` Operators' Name line:
 
 ```python
     # Free-text annotation commentary. Reaches annotations.json `note` when
@@ -580,7 +580,7 @@ def test_annotation_text_is_absent_from_exported_json_by_default(tmp_path):
     """
     import json
     import glob
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     secret = "Reviewed by Dr Jane Doe, MRN-12345678"
     _write_annotated_fixture(tmp_path / "in", note=secret)
@@ -622,7 +622,7 @@ Expected: 392 passed (389 + 3 new), 1 skipped, 0 failed.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add gantry/murmur.py gantry/exporters/wfdb.py gantry/profiles.py tests/test_murmur_annotations.py tests/test_wfdb_privacy.py
+git add isocenter/murmur.py isocenter/exporters/wfdb.py isocenter/profiles.py tests/test_murmur_annotations.py tests/test_wfdb_privacy.py
 git commit -m "fix: omit annotation free text from annotations.json by default
 
 Unformatted Text Value (0070,0006) routinely holds free-text clinical
@@ -645,7 +645,7 @@ Refs #39"
 
 ### Task 4: Pin the `source` field and update the disclosure docs
 
-Issue #39 claims `annotations.json` `source` embeds a device serial, giving `gantry/0.6.0 (AcmeCart SN-12345)` as the example. **That is wrong.** `gantry/exporters/wfdb.py:339` reads only `(0008,0070)` Manufacturer; the serial would be `(0018,1000)` and nothing in `murmur.py` or `wfdb.py` reads it. There is no serial leak to fix — so pin the current behaviour with a test and correct the record.
+Issue #39 claims `annotations.json` `source` embeds a device serial, giving `isocenter/0.6.0 (AcmeCart SN-12345)` as the example. **That is wrong.** `isocenter/exporters/wfdb.py:339` reads only `(0008,0070)` Manufacturer; the serial would be `(0018,1000)` and nothing in `murmur.py` or `wfdb.py` reads it. There is no serial leak to fix — so pin the current behaviour with a test and correct the record.
 
 **Files:**
 - Test: `tests/test_wfdb_privacy.py`
@@ -659,7 +659,7 @@ Issue #39 claims `annotations.json` `source` embeds a device serial, giving `gan
 
 ```python
 def test_annotations_source_carries_no_device_serial(tmp_path):
-    """`source` is producer provenance: gantry version plus Manufacturer.
+    """`source` is producer provenance: isocenter version plus Manufacturer.
 
     Device Serial Number (0018,1000) is a stable identifier that can link
     records across exports back to one machine and site. It is not read
@@ -668,7 +668,7 @@ def test_annotations_source_carries_no_device_serial(tmp_path):
     import json
     import glob
     import pydicom
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     serial = "SN-DEADBEEF-12345"
     in_dir = tmp_path / "in"
@@ -710,7 +710,7 @@ If this fixture produces no annotations (because `build_ecg_dataset` has no anno
 Run: `.venv/bin/python -m pytest tests/test_wfdb_privacy.py::test_annotations_source_carries_no_device_serial -v`
 Expected: PASS immediately — it pins existing behaviour.
 
-Then prove it can fail: temporarily change `gantry/exporters/wfdb.py:339-342` to append `instance.attributes.get("0018,1000")` to `source`, re-run, confirm FAIL, restore, confirm `git status --porcelain` clean. A test that has never been seen red is not evidence. Record it.
+Then prove it can fail: temporarily change `isocenter/exporters/wfdb.py:339-342` to append `instance.attributes.get("0018,1000")` to `source`, re-run, confirm FAIL, restore, confirm `git status --porcelain` clean. A test that has never been seen red is not evidence. Record it.
 
 - [ ] **Step 3: Update the disclosure docs**
 
@@ -718,9 +718,9 @@ Then prove it can fail: temporarily change `gantry/exporters/wfdb.py:339-342` to
 
 Rewrite that section to state:
 
-- Channel Label reaches `.hea` and `annotations.json` `lead` **only** when it is a recognisable signal name; anything else becomes `ch<N>`. Name the module-level `KNOWN_LEAD_NAMES` in `gantry/waveform.py` as the list, so a reader can check it.
+- Channel Label reaches `.hea` and `annotations.json` `lead` **only** when it is a recognisable signal name; anything else becomes `ch<N>`. Name the module-level `KNOWN_LEAD_NAMES` in `isocenter/waveform.py` as the list, so a reader can check it.
 - `annotations.json` carries `note` **only** when `session.export(..., format="wfdb", include_annotation_text=True)` is passed. State that `(0070,0006)` is also in the Basic profile, so a configured session that opts in still gets the remediated value.
-- `source` carries the gantry version and `(0008,0070)` Manufacturer. No device serial.
+- `source` carries the isocenter version and `(0008,0070)` Manufacturer. No device serial.
 - Acquisition DateTime `(0008,002A)` is now removed by the Basic profile — remove any text saying it survives.
 - **Keep** the existing disclosure that the WFDB header's time-of-day is not shifted. That is still true and still deliberate: `SHIFT_DATE` is a Study-level remediation that writes `study.study_date`, and time-of-day is sourced from the instance. Time-of-day alone is not a Safe Harbor identifier. Do not delete this — it is the one disclosure that remains accurate.
 
@@ -734,7 +734,7 @@ Under `### Fixed`:
 
 ```markdown
 - **Acquisition DateTime survived `anonymize()`.** `(0008,002A)` was absent from `PRIVACY_PROFILES["basic"]` while the plain `(0008,0022)` Acquisition Date it duplicates was removed, so raw acquisition timing reached exported DICOM after a full audit/anonymize pass. The four Performed Procedure Step date/time tags had the same gap. (#38)
-- **Operator free text reached the WFDB header.** Channel Label `(003A,0203)` is operator-typed and was written verbatim into the `.hea` signal description and the `annotations.json` `lead` field whenever a channel carried no coded Channel Source Sequence. It is now emitted only when it is a recognisable signal name (see `KNOWN_LEAD_NAMES` in `gantry/waveform.py`); anything else becomes a positional `ch<N>` token. Fixed in the exporter rather than the privacy profile because the PHI scan is tag-gated, so a profile entry would not protect a bare `Session()`. (#39)
+- **Operator free text reached the WFDB header.** Channel Label `(003A,0203)` is operator-typed and was written verbatim into the `.hea` signal description and the `annotations.json` `lead` field whenever a channel carried no coded Channel Source Sequence. It is now emitted only when it is a recognisable signal name (see `KNOWN_LEAD_NAMES` in `isocenter/waveform.py`); anything else becomes a positional `ch<N>` token. Fixed in the exporter rather than the privacy profile because the PHI scan is tag-gated, so a profile entry would not protect a bare `Session()`. (#39)
 ```
 
 Under `### Changed`:
@@ -759,7 +759,7 @@ Label and annotation-note passthroughs as known behaviour. Both are now
 fixed, so the section described leaks that no longer exist.
 
 Also pins that annotations.json `source` carries no device serial.
-Issue #39 claimed it embedded one, giving 'gantry/0.6.0 (AcmeCart
+Issue #39 claimed it embedded one, giving 'isocenter/0.6.0 (AcmeCart
 SN-12345)' as an example; the code reads only (0008,0070) Manufacturer
 and never (0018,1000). Nothing to remove, so the behaviour is pinned
 with a test that was demonstrated red against a deliberate leak.

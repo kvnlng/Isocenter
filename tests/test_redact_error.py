@@ -1,7 +1,7 @@
 
 import pytest
-from gantry.session import DicomSession
-from gantry.services import RedactionService
+from isocenter.session import DicomSession
+from isocenter.services import RedactionService
 from unittest.mock import MagicMock
 
 def test_execute_config_crash_repro(tmp_path):
@@ -23,7 +23,7 @@ def test_execute_config_crash_repro(tmp_path):
     }
     # Mock index so it actually runs
     # We need a dummy instance to match "123"
-    from gantry.entities import Patient, Study, Series, Instance, Equipment
+    from isocenter.entities import Patient, Study, Series, Instance, Equipment
     p = Patient("P1", "N1")
     st = Study("S1", None)
     se = Series("SE1", "OT", 1)
@@ -68,7 +68,7 @@ def test_burned_in_safety_check(capsys):
     session = DicomSession(persistence_file=":memory:")
 
     # Create Risk Instance: Burned In = YES, No Rule
-    from gantry.entities import Patient, Study, Series, Instance
+    from isocenter.entities import Patient, Study, Series, Instance
     inst_risk = Instance("Risk1", "SOP_RISK", 1)
     inst_risk.attributes["0028,0301"] = "YES"
     inst_risk.attributes["0008,0008"] = ["ORIGINAL", "PRIMARY"] # Not DERIVED

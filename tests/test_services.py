@@ -1,5 +1,5 @@
-from gantry.services import MachinePixelIndex, RedactionService
-from gantry.io_handlers import DicomStore
+from isocenter.services import MachinePixelIndex, RedactionService
+from isocenter.io_handlers import DicomStore
 import numpy as np
 
 
@@ -43,7 +43,7 @@ def test_redaction_service(dummy_patient):
 
     # 3. Description
     desc = inst.attributes.get("0008,2111")
-    assert "Gantry Pixel Redaction" in desc
+    assert "Isocenter Pixel Redaction" in desc
 
     # 4. Burned In Annotation
     assert inst.attributes.get("0028,0301") == "NO"

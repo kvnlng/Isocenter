@@ -1,10 +1,10 @@
 # Analytics & Reporting
 
-Gantry is designed not just for de-identification, but for understanding your data. It includes built-in tools for compliance verification, cohort analysis, and data exploration.
+Isocenter is designed not just for de-identification, but for understanding your data. It includes built-in tools for compliance verification, cohort analysis, and data exploration.
 
 ## Compliance Reports
 
-For regulatory audits (HIPAA/GDPR), Gantry can generate a formal **Compliance Report**. This single-document artifact summarizes the entire session, ensuring transparent documentation of your de-identification process.
+For regulatory audits (HIPAA/GDPR), Isocenter can generate a formal **Compliance Report**. This single-document artifact summarizes the entire session, ensuring transparent documentation of your de-identification process.
 
 ```python
 # Generate a Markdown report
@@ -13,19 +13,19 @@ session.generate_report("compliance_report.md")
 
 The report includes:
 
-1. **Validation Status**: Uses Gantry's internal audit logic to grade the session (PASS / REVIEW_REQUIRED).
+1. **Validation Status**: Uses Isocenter's internal audit logic to grade the session (PASS / REVIEW_REQUIRED).
 2. **Audit Trail**: Aggregated counts of actions taken (e.g., number of patients anonymized, pixels redacted).
 3. **Exceptions**: A detailed list of any warnings or errors encountered (e.g., "Corrupt pixel data in File X", "Burned-In Annotation found").
 4. **Manifest**: A summary of the processed cohort (Top studies by size).
 
 !!! tip "Format Options"
-    Currently, Gantry supports Markdown (`.md`) reports. PDF support is planned for future releases via Pandoc integration.
+    Currently, Isocenter supports Markdown (`.md`) reports. PDF support is planned for future releases via Pandoc integration.
 
 ---
 
 ## Cohort Analysis (EDA)
 
-Gantry treats your DICOM data as a **structured database**, not just a pile of files. You can leverage the `export_dataframe` method to extract a flattened inventory of your cohort for analysis with Pandas, Jupyter, or Tableau.
+Isocenter treats your DICOM data as a **structured database**, not just a pile of files. You can leverage the `export_dataframe` method to extract a flattened inventory of your cohort for analysis with Pandas, Jupyter, or Tableau.
 
 ### 1. Export to Pandas
 
@@ -52,7 +52,7 @@ session.export_to_parquet("cohort_inventory.parquet")
 
 ## Query-Based Export
 
-One of Gantry's most powerful features is **Query-Based Export**. Instead of exporting the entire session, you can filter the export using Pandas-style queries or a subset DataFrame.
+One of Isocenter's most powerful features is **Query-Based Export**. Instead of exporting the entire session, you can filter the export using Pandas-style queries or a subset DataFrame.
 
 ### Use Case: "Export only thick-slice CTs"
 

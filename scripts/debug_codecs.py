@@ -7,12 +7,12 @@ from pydicom.uid import JPEGLosslessSV1
 
 print(f"Python Version: {sys.version}")
 
-# 1. Check Handlers in Gantry
+# 1. Check Handlers in Isocenter
 try:
-    import gantry
-    print("\nGantry imported successfully.")
+    import isocenter
+    print("\nIsocenter imported successfully.")
 except ImportError as e:
-    print(f"\nGantry import failed: {e}")
+    print(f"\nIsocenter import failed: {e}")
 
 print("\n--- Active Pydicom Handlers ---")
 for h in pydicom.config.pixel_data_handlers:
@@ -54,5 +54,5 @@ except Exception as e:
     print(f"Simulation Setup Failed: {e}")
 
 print("\n--- UID Support ---")
-from gantry import imagecodecs_handler
+from isocenter import imagecodecs_handler
 print(f"Handler supports .70: {imagecodecs_handler.supports_transfer_syntax(JPEGLosslessSV1)}")

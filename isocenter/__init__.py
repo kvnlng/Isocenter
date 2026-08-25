@@ -22,7 +22,7 @@ except ImportError as e:
             "CRITICAL ERROR: Broken 'pylibjpeg' installation detected.\n"
             "----------------------------------------------------------\n"
             "This environment contains corrupt 'pylibjpeg' packages from a failed build attempt.\n"
-            "Gantry cannot start because 'pydicom' is attempting to load these broken plugins.\n\n"
+            "Isocenter cannot start because 'pydicom' is attempting to load these broken plugins.\n\n"
             "TO FIX: Run this command to clean your environment:\n"
             "    pip uninstall -y pylibjpeg pylibjpeg-openjpeg pylibjpeg-libjpeg pylibjpeg-rle\n"
             "----------------------------------------------------------\n"
@@ -52,11 +52,11 @@ except ImportError:
 try:
     from importlib.metadata import version, PackageNotFoundError
 except ImportError:
-    # Backport for older Pythons if needed, though Gantry requires 3.9+ where this is standard
+    # Backport for older Pythons if needed, though Isocenter requires 3.9+ where this is standard
     from importlib_metadata import version, PackageNotFoundError
 
 try:
-    __version__ = version("gantry")
+    __version__ = version("isocenter")
 except PackageNotFoundError:
     # Package is not installed
     __version__ = "0.0.0"

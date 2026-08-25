@@ -2,14 +2,14 @@ import pytest
 import pandas as pd
 import os
 import sqlite3
-from gantry.session import DicomSession
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.persistence import GantryJSONEncoder
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.persistence import IsocenterJSONEncoder
 import json
 
 @pytest.fixture
 def session_with_data(tmp_path):
-    db_path = tmp_path / "gantry_test.db"
+    db_path = tmp_path / "isocenter_test.db"
     session = DicomSession(str(db_path))
 
     # Manually populate the database with some hierarchical data
@@ -73,7 +73,7 @@ def test_export_dataframe_expand_metadata(session_with_data):
 
 def test_export_to_parquet_streams_via_get_flattened_instances(session_with_data, tmp_path):
     """`DicomSession.export_to_parquet` is the only production caller of
-    `SqliteStore.get_flattened_instances` (`gantry/persistence.py`).
+    `SqliteStore.get_flattened_instances` (`isocenter/persistence.py`).
 
     `DicomExporter.generate_export_from_db` -- deleted as dead code with
     no production caller -- reached `get_flattened_instances` too, and

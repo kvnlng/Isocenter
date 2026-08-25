@@ -1,9 +1,9 @@
 
 import pytest
 import pandas as pd
-from gantry.session import DicomSession
-from gantry.entities import Patient, Study, Series, Instance, Equipment
-from gantry.io_handlers import DicomStore
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Study, Series, Instance, Equipment
+from isocenter.io_handlers import DicomStore
 from unittest.mock import MagicMock
 
 @pytest.fixture

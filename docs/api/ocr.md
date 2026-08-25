@@ -2,7 +2,7 @@
 
 ## Zone Discovery
 
-::: gantry.discovery.ZoneDiscoverer
+::: isocenter.discovery.ZoneDiscoverer
     handler: python
     options:
       show_root_heading: true
@@ -10,7 +10,7 @@
       members:
         - group_boxes
 
-::: gantry.discovery.DiscoveryResult
+::: isocenter.discovery.DiscoveryResult
     handler: python
     options:
         show_root_heading: true
@@ -20,14 +20,14 @@
 
 ## Verification
 
-::: gantry.verification.RedactionVerifier
+::: isocenter.verification.RedactionVerifier
     handler: python
     options:
       show_root_heading: true
 
 ## Automation
 
-::: gantry.automation.ConfigAutomator
+::: isocenter.automation.ConfigAutomator
     handler: python
     options:
       show_root_heading: true
@@ -36,7 +36,7 @@
 
 ## Pixel Analysis
 
-::: gantry.pixel_analysis
+::: isocenter.pixel_analysis
     handler: python
     options:
       show_root_heading: true

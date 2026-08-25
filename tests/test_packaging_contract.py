@@ -1,12 +1,12 @@
 """The packaging metadata must match what the code actually imports.
 
-Gantry is distributed on PyPI, so `setup.py` is the contract a user gets
-when they `pip install gantry` -- `requirements.txt` is not consulted.
+Isocenter is distributed on PyPI, so `setup.py` is the contract a user gets
+when they `pip install isocenter` -- `requirements.txt` is not consulted.
 Anything imported unguarded at module scope must therefore be declared in
-`install_requires`, or the install succeeds and `import gantry` raises.
+`install_requires`, or the install succeeds and `import isocenter` raises.
 
 That is not hypothetical: `python-dotenv` sat in a `requirements.txt`
-but not in `setup.py`, while `gantry/config_manager.py` imported it
+but not in `setup.py`, while `isocenter/config_manager.py` imported it
 unguarded, so CI passed (it installed both files) and a real install
 would have failed at import. There is now one dependency list.
 """
@@ -16,7 +16,7 @@ import pathlib
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-PACKAGE = REPO / "gantry"
+PACKAGE = REPO / "isocenter"
 
 # Import name -> distribution name, where they differ.
 DISTRIBUTION_NAMES = {
@@ -27,7 +27,7 @@ DISTRIBUTION_NAMES = {
 }
 
 # Modules in the standard library or provided by this package itself.
-LOCAL_PREFIXES = ("gantry", "scripts", "tests")
+LOCAL_PREFIXES = ("isocenter", "scripts", "tests")
 
 
 def _declared_dependencies():
@@ -72,7 +72,7 @@ def _module_level_imports(tree):
 
     Only module-scope statements count. An import inside a function body
     runs when that function is called, so a missing package surfaces there
-    rather than breaking `import gantry` -- that is a lazy import, not a
+    rather than breaking `import isocenter` -- that is a lazy import, not a
     packaging defect.
     """
     for statement in tree.body:
@@ -132,8 +132,8 @@ def test_every_unguarded_third_party_import_is_declared_in_setup_py():
 
     assert not missing, (
         "imported unguarded but not declared in setup.py install_requires, "
-        "so `pip install gantry` would install successfully and then fail at "
-        f"`import gantry`: {missing}")
+        "so `pip install isocenter` would install successfully and then fail at "
+        f"`import isocenter`: {missing}")
 
 
 def test_dependencies_have_exactly_one_source_of_truth():
@@ -162,7 +162,7 @@ def test_optional_dependencies_are_not_also_required():
     """A package cannot be both an extra and a hard requirement.
 
     Listing one in both places is the contradiction that makes `pip install
-    gantry[ocr]` and `pip install gantry` disagree about what is optional.
+    isocenter[ocr]` and `pip install isocenter` disagree about what is optional.
     """
     tree = ast.parse((REPO / "setup.py").read_text())
     extras = set()
@@ -220,7 +220,7 @@ def test_optional_dependencies_are_imported_defensively(module):
     """Optional features must degrade, not explode.
 
     If one of these becomes a hard import, it must move into
-    install_requires -- otherwise `import gantry` breaks for anyone who
+    install_requires -- otherwise `import isocenter` breaks for anyone who
     did not install the extra.
     """
     hard_sites = _unguarded_third_party_imports().get(module)
@@ -244,7 +244,7 @@ def _setup_keyword(name):
 def test_distribution_metadata_matches_the_shipped_licence():
     """PyPI needs the licence declared, and it must match the LICENSE file.
 
-    Gantry moved from MIT to AGPLv3, and a distribution that ships an
+    Isocenter moved from MIT to AGPLv3, and a distribution that ships an
     AGPL LICENSE while declaring nothing (or MIT) misstates the terms
     under which it is published -- the one piece of packaging metadata
     with legal weight rather than merely operational.

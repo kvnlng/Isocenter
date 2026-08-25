@@ -5,8 +5,8 @@ import logging
 import pydicom
 from pydicom.dataset import Dataset
 from pydicom.pixel_data_handlers.util import apply_voi_lut
-from gantry.entities import Instance
-from gantry.privacy import PhiFinding
+from isocenter.entities import Instance
+from isocenter.privacy import PhiFinding
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ try:
     import pytesseract
     HAS_OCR = True
 except ImportError:
-    # Bind the name anyway, as gantry/imagecodecs_handler.py does. OCR is
+    # Bind the name anyway, as isocenter/imagecodecs_handler.py does. OCR is
     # a supported optional configuration, not an edge case, and a module
     # attribute that exists only sometimes is a trap for anything that
     # reaches for it -- including `mock.patch`, which raises
@@ -29,7 +29,7 @@ except ImportError:
     HAS_OCR = False
     logger.warning(
         "pytesseract not installed. OCR features are disabled; "
-        "install with `pip install gantry[ocr]`.")
+        "install with `pip install isocenter[ocr]`.")
 
 @dataclass
 class TextRegion:
@@ -61,7 +61,7 @@ def _get_voi_lut_dataset(instance: Instance) -> Dataset:
         "0028,1052", # RescaleIntercept
         "0028,1053", # RescaleSlope
         "0028,1054", # RescaleType
-        "0028,3010", # VOILUTSequence (If supported by Gantry attributes, likely complex)
+        "0028,3010", # VOILUTSequence (If supported by Isocenter attributes, likely complex)
         "0028,1055", # WindowCenterWidthExplanation
     ]
 

@@ -2,8 +2,8 @@
 import pytest
 import os
 import json
-from gantry.config_manager import load_unified_config, ConfigLoader
-from gantry.profiles import BASIC_PROFILE
+from isocenter.config_manager import load_unified_config, ConfigLoader
+from isocenter.profiles import BASIC_PROFILE
 
 def test_load_basic_profile(tmp_path):
     # 1. Create config using "privacy_profile": "basic"
@@ -142,14 +142,14 @@ def test_documented_basic_profile_tag_count_matches_the_code():
     next person to add a tag is told to update the sentence.
 
     Same failure mode as the requirements.txt/setup.py drift that broke
-    `pip install gantry`, and as docs/changelog.md (#52): the copy people
+    `pip install isocenter`, and as docs/changelog.md (#52): the copy people
     read is not the copy people edit.
 
     The "effective" half of this sentence is NOT `len(BASIC_PROFILE)`: one
     entry, `(0070,0006)`, lives inside a Waveform Annotation Sequence item
     rather than at the top level of the instance, and the worker clone
     `session.audit()`/`session.anonymize()` actually scan against
-    (`_make_lightweight_copy`, `gantry/session.py`) drops the `text_index`
+    (`_make_lightweight_copy`, `isocenter/session.py`) drops the `text_index`
     nested-sequence content needs to be reached through -- so that entry's
     REMOVE/EMPTY action never fires (tracked as #57, out of scope for this
     test). A tag can sit in the profile, present in `BASIC_PROFILE`, and do
@@ -162,7 +162,7 @@ def test_documented_basic_profile_tag_count_matches_the_code():
     import pathlib
     import re
 
-    from gantry.profiles import BASIC_PROFILE
+    from isocenter.profiles import BASIC_PROFILE
 
     doc = pathlib.Path(__file__).resolve().parent.parent / "docs" / "waveforms.md"
     text = doc.read_text(encoding="utf-8")
@@ -179,7 +179,7 @@ def test_documented_basic_profile_tag_count_matches_the_code():
 
     assert claimed == actual, (
         f"docs/waveforms.md says the Basic profile has {claimed} tags but "
-        f"gantry/profiles.py defines {actual}. Update the sentence in "
+        f"isocenter/profiles.py defines {actual}. Update the sentence in "
         "docs/waveforms.md.")
     # Known-inert tags: present in BASIC_PROFILE but not reachable by the
     # worker clone's shallow scan (#57). Update this set, not the

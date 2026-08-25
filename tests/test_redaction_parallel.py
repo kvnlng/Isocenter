@@ -5,8 +5,8 @@ import shutil
 import tempfile
 import numpy as np
 import time
-from gantry.session import DicomSession
-from gantry.entities import Instance, Series, Study, Patient, Equipment
+from isocenter.session import DicomSession
+from isocenter.entities import Instance, Series, Study, Patient, Equipment
 
 class ConstantPixelLoader:
     """A picklable stand-in for a real pixel loader.
@@ -19,7 +19,7 @@ class ConstantPixelLoader:
     nothing.
 
     These tests previously used a local lambda and still passed in CI only
-    because tests/test_export_sql.py set GANTRY_FORCE_THREADS=1 in a
+    because tests/test_export_sql.py set ISOCENTER_FORCE_THREADS=1 in a
     fixture and never unset it. That leaked into every later test in the
     session and silently swapped the process pool for a thread pool, which
     does not pickle. Deleting that file (it covered the removed

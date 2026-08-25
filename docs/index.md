@@ -1,10 +1,10 @@
-# Gantry
+# Isocenter
 
 **A Python DICOM Object Model and Redaction Toolkit.**
 
-![Gantry](images/IMG_0653.jpeg)
+![Isocenter](images/IMG_0653.jpeg)
 
-Gantry provides a high-performance, object-oriented interface for managing, analyzing, and de-identifying DICOM datasets. It is designed for large-scale ingestion, precise pixel redaction, and strict PHI compliance.
+Isocenter provides a high-performance, object-oriented interface for managing, analyzing, and de-identifying DICOM datasets. It is designed for large-scale ingestion, precise pixel redaction, and strict PHI compliance.
 
 ## Features
 

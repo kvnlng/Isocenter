@@ -2,8 +2,8 @@
 import os
 import shutil
 import pytest
-from gantry import Session
-from gantry.reporting import ComplianceReport
+from isocenter import Session
+from isocenter.reporting import ComplianceReport
 
 TEST_DB = "test_reporting.db"
 REPORT_FILE = "test_report.md"
@@ -51,7 +51,7 @@ def test_compliance_reporting_flow(clean_env):
 
     # 5. Verify Content
     assert "# Compliance Report" in content
-    assert "Gantry v" in content
+    assert "Isocenter v" in content
     assert "Processing Audit" in content
 
     # Verify Audit Counts

@@ -1,6 +1,6 @@
 # Performance
 
-Gantry is designed for massive scale. Recent stress tests verify robust linear scaling on datasets up to 100GB.
+Isocenter is designed for massive scale. Recent stress tests verify robust linear scaling on datasets up to 100GB.
 
 ![Benchmark Scaling](images/benchmark_scaling.png)
 
@@ -15,11 +15,11 @@ The architecture uses O(1) memory streaming, ensuring it never runs out of RAM e
 
 ## Memory Management Architecture
 
-Gantry employs a "Deep Memory Management" strategy to handle large-scale datasets on consumer hardware.
+Isocenter employs a "Deep Memory Management" strategy to handle large-scale datasets on consumer hardware.
 
 ### 1. Process Isolation (Redaction)
 
-Pixel redaction is the most memory-intensive operation (loading 500MB+ arrays). Gantry uses **Process Isolation** (`ProcessPoolExecutor`) to execute these tasks.
+Pixel redaction is the most memory-intensive operation (loading 500MB+ arrays). Isocenter uses **Process Isolation** (`ProcessPoolExecutor`) to execute these tasks.
 
 - Each worker process loads the pixel data, applies redactions, and then **exits**.
 - This guarantees that the operating system reclaims all memory resources immediately after each task, preventing fragmentation or reference leaks in the main process.
@@ -49,7 +49,7 @@ Recent stress tests (January 2026) verified robust sub-linear scaling capabiliti
 | **Phase 1** | 10 | ~5 GB | ~3.8 GB | Success | ~7.6x |
 | **Phase 2** | 100 | ~50 GB | ~11.3 GB | **Success** | **<3x** |
 
-**Key Finding:** Increasing the dataset size by **10x** (10 to 100 files) only resulted in a **3x** increase in peak memory usage. This demonstrates that Gantry effectively decouples memory consumption from dataset size.
+**Key Finding:** Increasing the dataset size by **10x** (10 to 100 files) only resulted in a **3x** increase in peak memory usage. This demonstrates that Isocenter effectively decouples memory consumption from dataset size.
 
 Timing results:
 

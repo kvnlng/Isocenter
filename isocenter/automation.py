@@ -3,8 +3,8 @@ Module for analyzing OCR findings and suggesting configuration updates.
 """
 from typing import List, Dict, Any
 from collections import defaultdict
-from gantry.privacy import PhiReport
-from gantry.configuration import GantryConfiguration
+from isocenter.privacy import PhiReport
+from isocenter.configuration import IsocenterConfiguration
 
 class ConfigAutomator:
     """
@@ -12,7 +12,7 @@ class ConfigAutomator:
     """
 
     @staticmethod
-    def suggest_config_updates(report: PhiReport, _current_config: GantryConfiguration) -> List[Dict[str, Any]]:
+    def suggest_config_updates(report: PhiReport, _current_config: IsocenterConfiguration) -> List[Dict[str, Any]]:
         """
         Generates a list of suggested configuration changes.
 

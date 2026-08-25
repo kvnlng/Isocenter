@@ -373,12 +373,12 @@ class WfdbExporter(Exporter):
         from ..murmur import build_annotations, write_annotations
 
         try:
-            from .. import __version__ as gantry_version
+            from .. import __version__ as isocenter_version
         except ImportError:
-            gantry_version = "0.0.0"
+            isocenter_version = "0.0.0"
 
         manufacturer = str(instance.attributes.get("0008,0070", "") or "").strip()
-        source = f"gantry/{gantry_version}"
+        source = f"isocenter/{isocenter_version}"
         if manufacturer:
             source = f"{source} ({manufacturer})"
 
@@ -465,14 +465,14 @@ class WfdbExporter(Exporter):
         that is a supported value, just no longer an accidental default.
 
         APPROVED DEVIATION from the brief (Task 9 review round 1,
-        coordinator override): the shipped `gantry/resources/phi_tags.json`
+        coordinator override): the shipped `isocenter/resources/phi_tags.json`
         contains no date tags, so instance-level Acquisition DateTime
         (0008,002A), Study Date (0008,0020), and Study Time (0008,0030)
         are NEVER covered by the default remediation config and are
         NEVER shifted by `session.anonymize()`. The date shift that
-        actually runs is a Study-level scan (`gantry/privacy.py`,
+        actually runs is a Study-level scan (`isocenter/privacy.py`,
         `PhiScanner._scan_study`) whose SHIFT_DATE remediation
-        (`gantry/remediation.py`) writes the new date onto
+        (`isocenter/remediation.py`) writes the new date onto
         `study.study_date` and sets `study.date_shifted = True`. Reading
         the instance tags as "post-remediation" (the original Task 9
         Step 3 approach) was therefore reading a field that is never

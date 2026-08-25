@@ -5,7 +5,7 @@ import pydicom
 import json
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def create_simple_dicom(path, patient_name="Test^Patient", series_description=None):
     file_meta = FileMetaDataset()
@@ -18,7 +18,7 @@ def create_simple_dicom(path, patient_name="Test^Patient", series_description=No
     ds.PatientID = "12345"
     ds.PatientBirthDate = "19900101"
 
-    # Must have these for Gantry import
+    # Must have these for Isocenter import
     ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
     ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
     if not hasattr(ds.file_meta, "MediaStorageSOPClassUID"):
@@ -99,8 +99,8 @@ def test_profile_remediation_end_to_end(tmp_path):
     assert len(out_files) == 1
     ds_out = pydicom.dcmread(out_files[0])
 
-    # PatientName should be REMOVED or ANONYMIZED (Gantry safety default)
-    # The profile says "REMOVE", but Gantry's semantic layer enforces "ANONYMIZED" for Patient objects
+    # PatientName should be REMOVED or ANONYMIZED (Isocenter safety default)
+    # The profile says "REMOVE", but Isocenter's semantic layer enforces "ANONYMIZED" for Patient objects
     # to ensure validity. Both are safe.
     val = getattr(ds_out, "PatientName", "")
     assert val == "" or str(val) == "ANONYMIZED"
@@ -113,10 +113,10 @@ def test_profile_remediation_end_to_end(tmp_path):
 def test_series_description_is_remediated_by_the_basic_profile_via_documented_path(tmp_path):
     """Regression test for the `0008,103E` / `0008,103e` casing bug.
 
-    `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) keys Series
+    `PRIVACY_PROFILES["basic"]` (`isocenter/profiles.py`) keys Series
     Description as `0008,103E` -- the only one of the profile's 28 keys
     with an uppercase hex letter. Every ingested attribute key is
-    lowercased (`gantry/io_handlers.py`'s `populate_attrs`,
+    lowercased (`isocenter/io_handlers.py`'s `populate_attrs`,
     `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), so the lookup in
     `PhiInspector._scan_instance` (`self.phi_tags.get(tag)`) never
     matched `0008,103e` and Series Description was silently never
@@ -160,14 +160,14 @@ def test_series_description_is_remediated_by_the_basic_profile_via_documented_pa
 def test_uppercase_tag_keys_are_normalized_at_the_inspector_boundary():
     """The casing backstop itself must be pinned.
 
-    `gantry/profiles.py` now spells Series Description lowercase, so the
+    `isocenter/profiles.py` now spells Series Description lowercase, so the
     end-to-end test above passes on the corrected key alone and would stay
     green if `_normalize_tag_keys` were deleted. This test targets the
     backstop directly: a config source that spells a tag with an uppercase
     hex letter -- a user's own YAML, or a future profile entry -- must still
     match the lowercased keys the object graph actually uses.
     """
-    from gantry.privacy import PhiInspector
+    from isocenter.privacy import PhiInspector
 
     inspector = PhiInspector(config_tags={
         "0008,103E": {"action": "EMPTY", "name": "Series Description"},

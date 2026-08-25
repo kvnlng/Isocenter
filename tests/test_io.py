@@ -2,9 +2,9 @@ import os
 import pydicom
 import numpy as np
 from unittest.mock import patch
-from gantry.entities import Instance, Study, Series, Patient
-from gantry.builders import DicomBuilder
-from gantry.io_handlers import DicomExporter, DicomImporter, DicomStore
+from isocenter.entities import Instance, Study, Series, Patient
+from isocenter.builders import DicomBuilder
+from isocenter.io_handlers import DicomExporter, DicomImporter, DicomStore
 
 
 def test_export_import_roundtrip(tmp_path, dummy_patient):
@@ -52,8 +52,8 @@ def test_persistence_priority(tmp_path):
 
     # Mock validator to accept sparse dummy data
     # AND Mock run_parallel to run synchronously so the patch applies!
-    with patch('gantry.validation.IODValidator.validate', return_value=[]), \
-         patch('gantry.io_handlers.run_parallel', side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
+    with patch('isocenter.validation.IODValidator.validate', return_value=[]), \
+         patch('isocenter.io_handlers.run_parallel', side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
         DicomExporter.save_patient(pat, str(out_dir))
 
     # 3. Read back

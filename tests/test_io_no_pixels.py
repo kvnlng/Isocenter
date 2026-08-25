@@ -3,8 +3,8 @@ import pytest
 import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian
-from gantry.session import DicomSession
-from gantry.entities import Instance
+from isocenter.session import DicomSession
+from isocenter.entities import Instance
 
 def test_reproduce_no_pixel_data_crash(tmp_path):
     """

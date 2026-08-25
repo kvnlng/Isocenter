@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from gantry.exporters.wfdb import format_header, signal_checksum
-from gantry.waveform import Waveform, WaveformChannel
+from isocenter.exporters.wfdb import format_header, signal_checksum
+from isocenter.waveform import Waveform, WaveformChannel
 
 
 def _waveform(n_samples=100, n_channels=2, baseline=0.0, units="mV"):
@@ -119,10 +119,10 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
     import os
     from unittest.mock import patch
 
-    from gantry.entities import DicomItem, Instance, Patient, Series, Study
-    from gantry.io_handlers import populate_attrs
-    from gantry.session import DicomSession
-    from gantry.validation import IODValidator
+    from isocenter.entities import DicomItem, Instance, Patient, Series, Study
+    from isocenter.io_handlers import populate_attrs
+    from isocenter.session import DicomSession
+    from isocenter.validation import IODValidator
     from scripts.generate_waveform_test_data import build_ecg_dataset
 
     ds = build_ecg_dataset(num_samples=50, patient_id="COLOC01")
@@ -166,7 +166,7 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
     # "dicom" format, default) is the actual production path: it goes
     # through `DicomSession._export_dicom`, not the legacy
     # `DicomExporter.save_patient` API.
-    with patch('gantry.io_handlers.run_parallel',
+    with patch('isocenter.io_handlers.run_parallel',
               side_effect=lambda func, items, *a, **k: [func(i) for i in items]), \
          patch.object(IODValidator, "validate", lambda ds: []):
         sess.export(str(out_dir), format="dicom")
@@ -316,10 +316,10 @@ def test_one_failing_instance_does_not_abort_the_whole_export(tmp_path, monkeypa
     """
     import datetime
 
-    from gantry.entities import DicomItem, Instance, Patient, Series, Study
-    from gantry.exporters.wfdb import WfdbExporter
-    from gantry.io_handlers import populate_attrs
-    from gantry.session import DicomSession
+    from isocenter.entities import DicomItem, Instance, Patient, Series, Study
+    from isocenter.exporters.wfdb import WfdbExporter
+    from isocenter.io_handlers import populate_attrs
+    from isocenter.session import DicomSession
     from scripts.generate_waveform_test_data import build_ecg_dataset
 
     def _make_patient(patient_id):
@@ -374,7 +374,7 @@ def test_sanitize_preserves_falsy_zero():
     the final review: reverting the falsy-zero fix alone left the full
     97-test targeted suite green).
     """
-    from gantry.exporters.wfdb import _sanitize
+    from isocenter.exporters.wfdb import _sanitize
 
     assert _sanitize(0) == "0"
     assert _sanitize(None) == "record"
@@ -400,7 +400,7 @@ def test_sanitize_description_strips_line_breaking_control_characters():
     for the one production path (a coded Channel Source value) that
     still reaches this function with attacker-controlled text.
     """
-    from gantry.exporters.wfdb import _sanitize_description
+    from isocenter.exporters.wfdb import _sanitize_description
 
     assert _sanitize_description("Lead I\nJane Doe") == "Lead I Jane Doe"
     assert _sanitize_description("Lead I\rJane Doe") == "Lead I Jane Doe"
@@ -442,9 +442,9 @@ def test_write_instance_with_no_sample_data_is_skipped_not_crashed(tmp_path, cap
     import datetime
     import logging
 
-    from gantry.entities import DicomItem, Instance, Patient, Series, Study
-    from gantry.exporters.wfdb import WfdbExporter
-    from gantry.io_handlers import populate_attrs
+    from isocenter.entities import DicomItem, Instance, Patient, Series, Study
+    from isocenter.exporters.wfdb import WfdbExporter
+    from isocenter.io_handlers import populate_attrs
     from scripts.generate_waveform_test_data import build_ecg_dataset
 
     ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
@@ -461,7 +461,7 @@ def test_write_instance_with_no_sample_data_is_skipped_not_crashed(tmp_path, cap
     # Sequence with no backing sample data.
     assert instance.get_waveform_data() is None
 
-    logger = logging.getLogger("gantry.wfdb_no_sample_data_test")
+    logger = logging.getLogger("isocenter.wfdb_no_sample_data_test")
 
     with caplog.at_level(logging.WARNING):
         result = WfdbExporter()._write_instance(

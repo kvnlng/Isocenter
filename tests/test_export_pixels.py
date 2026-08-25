@@ -4,8 +4,8 @@ import os
 import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.io_handlers import DicomExporter
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.io_handlers import DicomExporter
 
 def test_export_silent_pixel_failure(tmp_path):
     # 1. Create a dummy DICOM file to verify normal export works

@@ -1,8 +1,8 @@
 import pytest
 import datetime
-from gantry.entities import Patient, Study
-from gantry.privacy import PhiInspector
-from gantry.remediation import RemediationService
+from isocenter.entities import Patient, Study
+from isocenter.privacy import PhiInspector
+from isocenter.remediation import RemediationService
 
 def test_replace_tag_remediation():
     # Setup
@@ -118,9 +118,9 @@ def test_date_object_remediation():
     assert study.study_date != study_date
 
 from unittest.mock import MagicMock
-from gantry.entities import Patient, Study
-from gantry.privacy import PhiInspector, PhiFinding, PhiRemediation
-from gantry.remediation import RemediationService
+from isocenter.entities import Patient, Study
+from isocenter.privacy import PhiInspector, PhiFinding, PhiRemediation
+from isocenter.remediation import RemediationService
 
 # ... existing tests ...
 

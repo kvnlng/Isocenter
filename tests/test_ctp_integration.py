@@ -2,7 +2,7 @@
 import pytest
 import os
 import json
-from gantry.utils.ctp_parser import CTPParser
+from isocenter.utils.ctp_parser import CTPParser
 
 TEST_SCRIPT_CONTENT = """
 **************
@@ -39,7 +39,7 @@ class TestCTPParser:
 
     def test_ctp_rules_file_exists(self):
         # Verify that the resource generation worked
-        path = "gantry/resources/ctp_rules.json"
+        path = "isocenter/resources/ctp_rules.json"
         assert os.path.exists(path)
         with open(path, 'r') as f:
             import json
@@ -61,7 +61,7 @@ class TestCTPParser:
         import subprocess
         import sys
 
-        cmd = [sys.executable, "-m", "gantry.utils.ctp_parser", str(script_path), str(output_path)]
+        cmd = [sys.executable, "-m", "isocenter.utils.ctp_parser", str(script_path), str(output_path)]
         subprocess.check_call(cmd)
 
         assert os.path.exists(output_path)

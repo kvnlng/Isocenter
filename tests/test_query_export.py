@@ -2,13 +2,13 @@ import pytest
 import pandas as pd
 import os
 import shutil
-from gantry.session import DicomSession
-from gantry.entities import Patient, Study, Series, Instance
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Study, Series, Instance
 import time
 
 @pytest.fixture
 def session_for_query(tmp_path, monkeypatch):
-    db_path = tmp_path / "gantry_query.db"
+    db_path = tmp_path / "isocenter_query.db"
     session = DicomSession(str(db_path))
 
     # Check dependencies

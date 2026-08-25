@@ -1,5 +1,5 @@
 """
-Persistence layer for Gantry.
+Persistence layer for Isocenter.
 
 This module provides the SqliteStore class which manages the storage and retrieval
 of DICOM entities (Patients, Studies, Series, Instances) using a SQLite database.
@@ -544,7 +544,7 @@ class SqliteStore:
                     if r['attributes_json']:
                         try:
                             attrs = json.loads(
-                                r['attributes_json'], object_hook=gantry_json_object_hook)
+                                r['attributes_json'], object_hook=isocenter_json_object_hook)
                             self._deserialize_into(inst, attrs)
                         except BaseException:
                             pass  # JSON error
@@ -651,7 +651,7 @@ class SqliteStore:
                             if r['attributes_json']:
                                 try:
                                     attrs = json.loads(
-                                        r['attributes_json'], object_hook=gantry_json_object_hook)
+                                        r['attributes_json'], object_hook=isocenter_json_object_hook)
                                     self._deserialize_into(inst, attrs)
                                 except BaseException:
                                     pass
@@ -1221,7 +1221,7 @@ class SqliteStore:
                                         vert_updates.append((inst.sop_instance_uid, vert_data))
 
                                     # Serialize Core
-                                    attrs_json = json.dumps(core_data, cls=GantryJSONEncoder)
+                                    attrs_json = json.dumps(core_data, cls=IsocenterJSONEncoder)
 
                                     p_offset, p_length, p_alg, p_hash = None, None, None, None
 
@@ -1489,7 +1489,7 @@ class SqliteStore:
                 for inst in instances:
                     # Serialize attributes AND sequences
                     full_data = self._serialize_item(inst)
-                    attrs_json = json.dumps(full_data, cls=GantryJSONEncoder)
+                    attrs_json = json.dumps(full_data, cls=IsocenterJSONEncoder)
                     data.append((attrs_json, inst.sop_instance_uid))
 
                 cur.executemany("""
@@ -1805,7 +1805,7 @@ class SqliteStore:
             raise e
 
 
-class GantryJSONEncoder(json.JSONEncoder):
+class IsocenterJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, bytes):
             return {"__type__": "bytes", "data": base64.b64encode(obj).decode('ascii')}
@@ -1816,7 +1816,7 @@ class GantryJSONEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-def gantry_json_object_hook(d):
+def isocenter_json_object_hook(d):
     if "__type__" in d and d["__type__"] == "bytes":
         return base64.b64decode(d["data"])
     return d

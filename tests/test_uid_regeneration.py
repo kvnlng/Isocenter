@@ -1,5 +1,5 @@
 import pytest
-from gantry.entities import Instance
+from isocenter.entities import Instance
 
 def test_regenerate_uid_functionality():
     """

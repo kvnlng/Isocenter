@@ -2,12 +2,12 @@
 
 ## 1. Initialize a Session
 
-Gantry uses a **persistent session** to manage your workflow. Unlike scripts that run once and forget, a Session creates a local SQLite database (`gantry.db`) to index your data. This allows you to pause, resume, and audit your work without re-scanning thousands of files.
+Isocenter uses a **persistent session** to manage your workflow. Unlike scripts that run once and forget, a Session creates a local SQLite database (`isocenter.db`) to index your data. This allows you to pause, resume, and audit your work without re-scanning thousands of files.
 
 ```python
-from gantry import Session
+from isocenter import Session
 
-# Initialize a new session (creates 'gantry.db' by default)
+# Initialize a new session (creates 'isocenter.db' by default)
 session = Session("my_project.db")
 ```
 
@@ -16,7 +16,7 @@ session = Session("my_project.db")
 
 ## 2. Ingest & Examine
 
-Ingestion builds a lightweight **metadata index** of your DICOM files. Gantry scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.
+Ingestion builds a lightweight **metadata index** of your DICOM files. Isocenter scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.
 
 ```python
 session.ingest("/path/to/dicom/data")
@@ -49,7 +49,7 @@ print(f"Found {len(report)} potential PHI issues.")
 To enable reversible anonymization, generate a cryptographic key and "lock" the original patient identities into a secure, encrypted DICOM tag. This must be done *before* anonymization.
 
 ```python
-# Enable encryption (generates 'gantry.key')
+# Enable encryption (generates 'isocenter.key')
 session.enable_reversible_anonymization()
 
 # cryptographically lock identities for all patients found in the audit
@@ -92,12 +92,12 @@ Exporting:  15%|██▌       | 15/100 [00:05<00:30,  2.80patient/s]
 
 ## 6. Recover Identity (Optional)
 
-If you have a valid key (`gantry.key`) and need to retrieve the original identity of an anonymized patient:
+If you have a valid key (`isocenter.key`) and need to retrieve the original identity of an anonymized patient:
 
 ```python
 # Load the session containing anonymized data
 session = Session("my_project.db")
-session.enable_reversible_anonymization("gantry.key")
+session.enable_reversible_anonymization("isocenter.key")
 
 # Recover the original PatientName and PatientID
 # Recover the original identity and restore attributes in-memory

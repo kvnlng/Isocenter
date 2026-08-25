@@ -12,19 +12,19 @@ file can do.
 
 | Milestone | Focus |
 |---|---|
-| [v0.7.0 — The Connector](https://github.com/kvnlng/Gantry/milestone/1) | PACS networking, the DICOM waveform → WFDB bridge, audit reporting, research export formats |
-| [v0.8.0 — Cloud Scale](https://github.com/kvnlng/Gantry/milestone/2) | Persistence abstraction and cloud storage adapters |
-| [v1.0.0 — Production Release](https://github.com/kvnlng/Gantry/milestone/3) | API freeze, documentation, PyPI release |
-| [v1.1.0 — Zero Code](https://github.com/kvnlng/Gantry/milestone/4) | Command-line interface |
+| [v0.7.0 — The Connector](https://github.com/kvnlng/Isocenter/milestone/1) | PACS networking, the DICOM waveform → WFDB bridge, audit reporting, research export formats |
+| [v0.8.0 — Cloud Scale](https://github.com/kvnlng/Isocenter/milestone/2) | Persistence abstraction and cloud storage adapters |
+| [v1.0.0 — Production Release](https://github.com/kvnlng/Isocenter/milestone/3) | API freeze, documentation, PyPI release |
+| [v1.1.0 — Zero Code](https://github.com/kvnlng/Isocenter/milestone/4) | Command-line interface |
 
-Longer-term ideas live as [unmilestoned issues](https://github.com/kvnlng/Gantry/issues?q=is%3Aissue+is%3Aopen+no%3Amilestone).
+Longer-term ideas live as [unmilestoned issues](https://github.com/kvnlng/Isocenter/issues?q=is%3Aissue+is%3Aopen+no%3Amilestone).
 
 ## Contributing
 
 We welcome contributions. Good places to start:
 
-- [`good first issue`](https://github.com/kvnlng/Gantry/labels/good%20first%20issue)
-- [`help wanted`](https://github.com/kvnlng/Gantry/labels/help%20wanted)
+- [`good first issue`](https://github.com/kvnlng/Isocenter/labels/good%20first%20issue)
+- [`help wanted`](https://github.com/kvnlng/Isocenter/labels/help%20wanted)
 
 ## Completed work
 

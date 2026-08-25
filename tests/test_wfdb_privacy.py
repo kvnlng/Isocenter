@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation, write_fixture
 
 
@@ -100,12 +100,12 @@ def test_header_date_reflects_the_real_shifted_study_date(tmp_path):
     not merely an injected instance tag.
 
     ROUND-1 DEFECT (coordinator CRITICAL 1, fixed here): the shipped
-    `gantry/resources/phi_tags.json` has no date tags, so instance-level
+    `isocenter/resources/phi_tags.json` has no date tags, so instance-level
     Acquisition DateTime (0008,002A) / Study Date (0008,0020) / Study
     Time (0008,0030) are never covered by the default remediation config
     and are NEVER shifted by `session.anonymize()`. The date shift that
-    actually runs is a Study-level scan (`gantry/privacy.py:_scan_study`)
-    whose SHIFT_DATE remediation (`gantry/remediation.py`) writes the new
+    actually runs is a Study-level scan (`isocenter/privacy.py:_scan_study`)
+    whose SHIFT_DATE remediation (`isocenter/remediation.py`) writes the new
     date onto `study.study_date` and sets `study.date_shifted = True`.
     `_start_datetime` must read THAT field, not the instance tags, or the
     header silently leaks the real source date past a genuine anonymize
@@ -233,7 +233,7 @@ def test_missing_acquisition_datetime_omits_timing_fields(tmp_path):
 
 # --- Safety assertion: ChannelLabel free-text fallback (fixed under #39) ---
 #
-# WaveformChannel.wfdb_description() (gantry/waveform.py) prefers the coded
+# WaveformChannel.wfdb_description() (isocenter/waveform.py) prefers the coded
 # Channel Source Sequence value, but previously fell back to the raw,
 # free-text ChannelLabel verbatim whenever no source code was present.
 # ChannelLabel is operator-typed SH text and was observed carrying names,
@@ -248,7 +248,7 @@ def test_missing_acquisition_datetime_omits_timing_fields(tmp_path):
 # characterization of the unsafe behaviour ("this is what happens, not
 # whether it's OK"); it is now a safety assertion that the free-text marker
 # below never reaches the .hea description field. If it goes red, the
-# allowlist in gantry/waveform.py has stopped firing and operator text is
+# allowlist in isocenter/waveform.py has stopped firing and operator text is
 # reaching the header again.
 FREE_TEXT_MARKER = "OPERATOR NOTE Smith^John DOB19800101"
 
@@ -323,14 +323,14 @@ def test_uncoded_channel_label_free_text_never_reaches_the_header(tmp_path):
     assert description_field == "ch0", (
         "expected the free-text ChannelLabel to be replaced with a "
         f"positional token; got {description_field!r}. If this reverted to "
-        "the raw label, the allowlist in gantry/waveform.py stopped firing "
+        "the raw label, the allowlist in isocenter/waveform.py stopped firing "
         "and operator text is reaching the header again.")
     assert FREE_TEXT_MARKER not in description_field
 
 
 # --- Record-name collision: instances missing InstanceNumber (Task 9 round 2, IMPORTANT 6) ---
 #
-# `record_name_for` (gantry/exporters/wfdb.py) derives its instance
+# `record_name_for` (isocenter/exporters/wfdb.py) derives its instance
 # component from `instance.instance_number`, but `io_handlers.py` defaults
 # a missing InstanceNumber to 0 (`row['instance_number'] or 0`), and
 # `_sanitize(0)` collapsed to the literal token "record" (0 is falsy, so
@@ -533,7 +533,7 @@ def test_non_anonymized_export_still_carries_the_real_acquisition_time(tmp_path)
     """Companion to the fabricated-timestamp fix above: a session that
     never remediates Acquisition DateTime still carries its real,
     un-shifted time-of-day in the header -- exactly like every other
-    un-remediated field in Gantry. This is not a case where timing
+    un-remediated field in Isocenter. This is not a case where timing
     should be suppressed; only a genuinely absent time-of-day must not
     be replaced with a fake one.
     """
@@ -596,7 +596,7 @@ def test_annotation_text_is_absent_from_exported_json_by_default(tmp_path):
     """
     import json
     import glob
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     secret = "Reviewed by Dr Jane Doe, MRN-12345678"
     _write_annotated_fixture(tmp_path / "in", note=secret)
@@ -651,7 +651,7 @@ def test_annotation_text_is_present_when_opted_in_end_to_end(tmp_path):
     """
     import json
     import glob
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     secret = "sinus rhythm"
     _write_annotated_fixture(tmp_path / "in", note=secret)
@@ -681,7 +681,7 @@ def test_annotation_text_is_present_when_opted_in_end_to_end(tmp_path):
 
 
 def test_annotations_source_carries_no_device_serial(tmp_path):
-    """`source` is producer provenance: gantry version plus Manufacturer.
+    """`source` is producer provenance: isocenter version plus Manufacturer.
 
     Device Serial Number (0018,1000) is a stable identifier that can link
     records across exports back to one machine and site. It is not read
@@ -689,7 +689,7 @@ def test_annotations_source_carries_no_device_serial(tmp_path):
     """
     import json
     import glob
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     serial = "SN-DEADBEEF-12345"
     _write_annotated_fixture(tmp_path / "in", note="sinus rhythm",

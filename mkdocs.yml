@@ -1,8 +1,8 @@
-site_name: Gantry
+site_name: Isocenter
 site_description: A high-performance Python DICOM Object Model and Redaction Toolkit.
-site_url: https://kevinlong.github.io/Gantry/
-repo_url: https://github.com/kvnlng/Gantry
-repo_name: kvnlng/Gantry
+site_url: https://kvnlng.github.io/Isocenter/
+repo_url: https://github.com/kvnlng/Isocenter
+repo_name: kvnlng/Isocenter
 edit_uri: edit/main/docs_site/
 
 theme:

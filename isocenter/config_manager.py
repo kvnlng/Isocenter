@@ -1,8 +1,8 @@
 """
-Configuration manager for handling Gantry system settings.
+Configuration manager for handling Isocenter system settings.
 
 This module provides functionality to load, validate, and manage configuration
-files for the Gantry application. It supports unified YAML configurations,
+files for the Isocenter application. It supports unified YAML configurations,
 legacy formats, and privacy profile management.
 """
 
@@ -26,12 +26,12 @@ load_dotenv()
 
 def get_logger() -> logging.Logger:
     """
-    Retrieves the configured logger for the Gantry application.
+    Retrieves the configured logger for the Isocenter application.
 
     Returns:
-        logging.Logger: The 'gantry' logger instance.
+        logging.Logger: The 'isocenter' logger instance.
     """
-    return logging.getLogger("gantry")
+    return logging.getLogger("isocenter")
 
 
 def load_unified_config(path: str) -> Dict[str, Any]:
@@ -93,7 +93,7 @@ def load_unified_config(path: str) -> Dict[str, Any]:
 
 class ConfigLoader:
     """
-    Loads and validates configuration files for the Gantry system.
+    Loads and validates configuration files for the Isocenter system.
 
     This class provides static methods to parse unified YAML configuration files (v2.0),
     legacy configuration formats, and PHI tag definitions. It handles configuration

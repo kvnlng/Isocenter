@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 from cryptography.fernet import Fernet
 import pytest
 
-from gantry.reversibility import ReversibilityService
-from gantry.entities import Instance
+from isocenter.reversibility import ReversibilityService
+from isocenter.entities import Instance
 
 @pytest.fixture
 def mock_key_manager():

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from gantry.io_handlers import ingest_worker
+from isocenter.io_handlers import ingest_worker
 from scripts.generate_waveform_test_data import write_fixture, LEADS
 
 
@@ -27,7 +27,7 @@ def test_waveform_hash_is_sha256_of_raw_bytes(ecg_file):
 
 def test_waveform_metadata_survives_ingest(ecg_file):
     _, inst, _, _, _, _, _, _ = ingest_worker(ecg_file)
-    from gantry.waveform import Waveform
+    from isocenter.waveform import Waveform
     seq = inst.sequences.get("5400,0100")
     assert seq is not None and seq.items
     wf = Waveform.from_dicom_item(seq.items[0])
@@ -81,7 +81,7 @@ def test_pixel_only_file_yields_no_waveform(tmp_path):
 
 
 def test_instance_waveform_accessors_roundtrip():
-    from gantry.entities import Instance
+    from isocenter.entities import Instance
     inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.9.1.1", 1)
     arr = np.arange(12, dtype=np.int16).reshape(6, 2)
 
@@ -106,7 +106,7 @@ def test_unload_waveform_refuses_when_only_a_file_path_backs_it():
     samples are recoverable would report a safe unload and then hand back
     None forever. The two methods must agree on the one route that exists.
     """
-    from gantry.entities import Instance
+    from isocenter.entities import Instance
     inst = Instance("1.2.4", "1.2.840.10008.5.1.4.1.1.9.1.1", 1,
                     file_path="/nonexistent/ecg.dcm")
     arr = np.arange(8, dtype=np.int16).reshape(4, 2)
@@ -128,7 +128,7 @@ def test_unload_waveform_refuses_when_only_a_file_path_backs_it():
 
 def test_ingest_registers_the_waveform_blob_reference(tmp_path):
     """Without a blob-table row, compaction reclaims the waveform."""
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     src = tmp_path / "src"
     src.mkdir()
@@ -146,8 +146,8 @@ def test_ingest_registers_the_waveform_blob_reference(tmp_path):
 
 
 def test_waveform_survives_a_session_reload(tmp_path):
-    """Gantry's pause/resume promise must hold for waveforms, not just pixels."""
-    from gantry.session import DicomSession
+    """Isocenter's pause/resume promise must hold for waveforms, not just pixels."""
+    from isocenter.session import DicomSession
 
     src = tmp_path / "src"
     src.mkdir()
@@ -181,7 +181,7 @@ def test_waveform_loader_is_repointed_by_compaction(tmp_path):
     """
     import hashlib
 
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     src = tmp_path / "src"
     src.mkdir()

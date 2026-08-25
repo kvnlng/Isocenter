@@ -5,8 +5,8 @@ import psutil
 import time
 import numpy as np
 import threading
-from gantry.session import DicomSession
-from gantry.io_handlers import DicomExporter, ExportContext, _export_instance_worker
+from isocenter.session import DicomSession
+from isocenter.io_handlers import DicomExporter, ExportContext, _export_instance_worker
 
 # Mock objects
 class MockInstance:

@@ -1,12 +1,12 @@
 import pytest
 import os
 import json
-from gantry.persistence import SqliteStore, GantryJSONEncoder, gantry_json_object_hook
-from gantry.entities import Patient, Study, Series, Instance
+from isocenter.persistence import SqliteStore, IsocenterJSONEncoder, isocenter_json_object_hook
+from isocenter.entities import Patient, Study, Series, Instance
 
 def test_json_encoder_decoder_bytes():
     data = {"key": b"hello world", "nested": {"other": b"\x00\x01\x02"}}
-    json_str = json.dumps(data, cls=GantryJSONEncoder)
+    json_str = json.dumps(data, cls=IsocenterJSONEncoder)
 
     # Check that it's serializable
     assert isinstance(json_str, str)
@@ -14,7 +14,7 @@ def test_json_encoder_decoder_bytes():
     assert "bytes" in json_str
 
     # Restore
-    loaded = json.loads(json_str, object_hook=gantry_json_object_hook)
+    loaded = json.loads(json_str, object_hook=isocenter_json_object_hook)
     assert loaded["key"] == b"hello world"
     assert loaded["nested"]["other"] == b"\x00\x01\x02"
 

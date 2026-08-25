@@ -2,7 +2,7 @@
 import pytest
 import os
 import json
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def test_scaffold_generates_basic_profile(tmp_path):
     # 1. Setup Session (Mock Store not needed for scaffold structure check, hopefully)

@@ -1,6 +1,6 @@
 import pytest
 import os
-from gantry.crypto import KeyManager, CryptoEngine
+from isocenter.crypto import KeyManager, CryptoEngine
 from cryptography.fernet import InvalidToken
 
 def test_key_manager_lifecycle(tmp_path):

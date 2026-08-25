@@ -1,6 +1,6 @@
-"""Validate Gantry's WFDB output against PhysioNet's own reader.
+"""Validate Isocenter's WFDB output against PhysioNet's own reader.
 
-Deliberately does NOT use any Gantry code to read the output back.
+Deliberately does NOT use any Isocenter code to read the output back.
 """
 import os
 
@@ -9,7 +9,7 @@ import pytest
 
 wfdb = pytest.importorskip("wfdb", reason="conformance tests need the wfdb package")
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 from scripts.generate_waveform_test_data import write_fixture, LEADS
 
 
@@ -142,7 +142,7 @@ def test_dat_file_sits_next_to_the_header(exported):
 # no input in either test can produce the defects below. These three
 # reproduce the final-review findings through a real
 # session.ingest() -> session.export() and read the result back with
-# PhysioNet's own `wfdb.rdheader`/`rdrecord`, not Gantry's own code.
+# PhysioNet's own `wfdb.rdheader`/`rdrecord`, not Isocenter's own code.
 
 
 def test_channel_label_newline_cannot_manufacture_a_hea_comment(tmp_path):
@@ -299,8 +299,8 @@ def test_missing_channel_definitions_do_not_abort_the_export(tmp_path):
     """
     import datetime
 
-    from gantry.entities import DicomItem, Instance, Patient, Series, Study
-    from gantry.io_handlers import populate_attrs
+    from isocenter.entities import DicomItem, Instance, Patient, Series, Study
+    from isocenter.io_handlers import populate_attrs
     from scripts.generate_waveform_test_data import build_ecg_dataset
 
     ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")], num_samples=50)
@@ -347,7 +347,7 @@ def test_missing_channel_definitions_do_not_abort_the_export(tmp_path):
 
 def test_deidentified_date_survives_as_a_comment_when_no_time_of_day_remains(tmp_path):
     """Round-3 review follow-up: dropping the fabricated `00:00:00`
-    timestamp (see gantry/exporters/wfdb.py::WfdbExporter._start_datetime)
+    timestamp (see isocenter/exporters/wfdb.py::WfdbExporter._start_datetime)
     must not also drop the genuine de-identified study date. `SHIFT_DATE`
     produces a real, useful date -- losing it entirely would be a
     research-utility regression, not just a privacy fix.
@@ -356,7 +356,7 @@ def test_deidentified_date_survives_as_a_comment_when_no_time_of_day_remains(tmp
     load_config() -> audit() -> anonymize()), which remediates both
     Acquisition DateTime (0008,002A) and Study Time (0008,0030) via the
     Basic profile, so no real time-of-day survives. Verifies against the
-    PhysioNet reference reader (not just Gantry's own parsing) that:
+    PhysioNet reference reader (not just Isocenter's own parsing) that:
 
     - `record.base_time` and `record.base_date` are both None (no
       fabricated timestamp reintroduced, and no record-line date either

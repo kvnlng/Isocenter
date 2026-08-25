@@ -1,8 +1,8 @@
 import unittest
 import numpy as np
 import logging
-from gantry.entities import Instance
-from gantry.pixel_analysis import analyze_pixels, _get_voi_lut_dataset
+from isocenter.entities import Instance
+from isocenter.pixel_analysis import analyze_pixels, _get_voi_lut_dataset
 
 # Mock pydicom.pixel_data_handlers.util.apply_voi_lut if needed for detailed checks,
 # but better to let it run if installed to verify integration.
@@ -52,9 +52,9 @@ class TestVoiLutIntegration(unittest.TestCase):
         # We can spy on pydicom.pixel_data_handlers.util.apply_voi_lut if we patch it.
         from unittest.mock import patch
 
-        with patch('gantry.pixel_analysis.apply_voi_lut', side_effect=lambda arr, ds: arr) as mock_voi, \
-             patch('gantry.pixel_analysis.HAS_OCR', True), \
-             patch('gantry.pixel_analysis.detect_text_regions', return_value=[]):
+        with patch('isocenter.pixel_analysis.apply_voi_lut', side_effect=lambda arr, ds: arr) as mock_voi, \
+             patch('isocenter.pixel_analysis.HAS_OCR', True), \
+             patch('isocenter.pixel_analysis.detect_text_regions', return_value=[]):
 
              analyze_pixels(inst)
              # Check if called

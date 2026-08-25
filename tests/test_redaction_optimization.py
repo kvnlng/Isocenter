@@ -1,9 +1,9 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from gantry.services import RedactionService
-from gantry.io_handlers import DicomStore
-from gantry.entities import Patient, Study, Series, Instance, Equipment
+from isocenter.services import RedactionService
+from isocenter.io_handlers import DicomStore
+from isocenter.entities import Patient, Study, Series, Instance, Equipment
 
 @pytest.fixture
 def mock_store():
@@ -52,7 +52,7 @@ def test_process_valid_zones(mock_store):
     service.redact_machine_instances.assert_called_once()
 
 
-@patch("gantry.services.tqdm")
+@patch("isocenter.services.tqdm")
 def test_redact_feedback_tqdm(mock_tqdm, mock_store):
     """Verify tqdm is initialized during redaction."""
     service = RedactionService(mock_store)

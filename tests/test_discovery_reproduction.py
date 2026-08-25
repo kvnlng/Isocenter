@@ -1,5 +1,5 @@
 import pytest
-from gantry.discovery import ZoneDiscoverer
+from isocenter.discovery import ZoneDiscoverer
 
 def test_discovery_too_many_zones_with_noise():
     """

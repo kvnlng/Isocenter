@@ -1,14 +1,14 @@
 import pytest
 import os
 import json
-from gantry.session import DicomSession
-from gantry.builders import DicomBuilder
+from isocenter.session import DicomSession
+from isocenter.builders import DicomBuilder
 from datetime import date
 import numpy as np
 
 def test_full_logging_coverage(tmp_path):
     # 1. Setup
-    log_file = os.getenv("GANTRY_LOG_FILE", "gantry.log")
+    log_file = os.getenv("ISOCENTER_LOG_FILE", "isocenter.log")
     if os.path.exists(log_file):
         os.remove(log_file)
 

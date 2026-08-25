@@ -2,10 +2,10 @@ import sys
 import os
 import shutil
 
-# Ensure we use local gantry package
+# Ensure we use local isocenter package
 sys.path.insert(0, os.path.abspath('.'))
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def verify_discovery():
     print("Initializing Discovery Test...")

@@ -2,8 +2,8 @@ import pytest
 import os
 import sqlite3
 import json
-from gantry.session import DicomSession
-from gantry.entities import Patient, Study, Series, Instance
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Study, Series, Instance
 from datetime import date
 
 def test_optimization_preservation(tmp_path):

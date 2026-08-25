@@ -1,6 +1,6 @@
 # Intelligent Pixel Analysis (OCR)
 
-Gantry includes a powerful Optical Character Recognition (OCR) engine designed to detect and verify burned-in text within DICOM pixel data. This feature moves beyond simple text detection, offering **Intelligent Redaction Verification** to validate your anonymization rules.
+Isocenter includes a powerful Optical Character Recognition (OCR) engine designed to detect and verify burned-in text within DICOM pixel data. This feature moves beyond simple text detection, offering **Intelligent Redaction Verification** to validate your anonymization rules.
 
 ## Overview
 
@@ -26,11 +26,11 @@ To use OCR features, you must have the Tesseract binary installed on your system
 
 ## Intelligent Verification
 
-The core workflow is **Verification**. Instead of just finding all text (which includes safe text like anatomical labels), Gantry filters findings based on your **Redaction Rules**.
+The core workflow is **Verification**. Instead of just finding all text (which includes safe text like anatomical labels), Isocenter filters findings based on your **Redaction Rules**.
 
 ### How it Works
 
-1. **Match**: Gantry identifies the Redaction Rule for each instance (matched by Serial Number).
+1. **Match**: Isocenter identifies the Redaction Rule for each instance (matched by Serial Number).
 2. **Scan**: It detects all text regions in the image.
 3. **Filter**: It checks if each text region is covered by a configured `redaction_zone`.
     * **Safe**: Text > 80% covered by a zone. (Ignored)
@@ -39,12 +39,12 @@ The core workflow is **Verification**. Instead of just finding all text (which i
 
 ### Running a Scan
 
-To avoid scanning the entire cohort, Gantry scans **only** machines that are present in your configuration (`priv_config.yaml`). Unconfigured machines are skipped.
+To avoid scanning the entire cohort, Isocenter scans **only** machines that are present in your configuration (`priv_config.yaml`). Unconfigured machines are skipped.
 
 You can also focus the scan on a single machine:
 
 ```python
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 session = DicomSession("my_project.db")
 session.ingest("dicom_data/")
@@ -62,11 +62,11 @@ for finding in report:
 
 ## Setting Up New Machines (Zone Discovery)
 
-When you add a new machine to your configuration (Scaffolding), it typically has no redaction zones defined. Gantry uses **Zone Discovery** to analyze a sample of images and find repeating "hotspots" of burned-in text.
+When you add a new machine to your configuration (Scaffolding), it typically has no redaction zones defined. Isocenter uses **Zone Discovery** to analyze a sample of images and find repeating "hotspots" of burned-in text.
 
 ### Smart Discovery
 
-Gantry 0.6+ introduces smart text classification to help you identify **Proper Nouns** (like Patient Names) versus static text (like "Hospital" or "Slice ID").
+Isocenter 0.6+ introduces smart text classification to help you identify **Proper Nouns** (like Patient Names) versus static text (like "Hospital" or "Slice ID").
 
 ```python
 # 1. Run Discovery
@@ -91,7 +91,7 @@ for z in zones:
 
 ### Advanced Usage: Power Users & Data Scientists
 
-Gantry's `DiscoveryResult` provides powerful tools for deep inspection, ideal for data science workflows.
+Isocenter's `DiscoveryResult` provides powerful tools for deep inspection, ideal for data science workflows.
 
 #### 1. Data Science Integration (Pandas/Matplotlib)
 
@@ -150,10 +150,10 @@ print(result.visualize_heatmap(bins=(20, 20)))
 Discovery uses a tiered approach to classify text:
 
 1. **Regex Heuristics (Default)**: Extremely fast. Detects DICOM name patterns (e.g., `Smith^John`) and capitalized phrases.
-2. **NLP (Optional)**: If you install the optional NLP extras, Gantry uses **spaCy** for high-precision Named Entity Recognition (NER). This improves detection of names in natural formats (e.g., "John Smith" without carets).
+2. **NLP (Optional)**: If you install the optional NLP extras, Isocenter uses **spaCy** for high-precision Named Entity Recognition (NER). This improves detection of names in natural formats (e.g., "John Smith" without carets).
 
     ```bash
-    pip install gantry[nlp]
+    pip install isocenter[nlp]
     ```
 
 ### Applying Zones
@@ -179,7 +179,7 @@ report = session.scan_pixel_content("SN-NEW")
 
 ## Automated Remediation
 
-Gantry can analyze the "Partial" and "New" leaks to suggest updates to your configuration file.
+Isocenter can analyze the "Partial" and "New" leaks to suggest updates to your configuration file.
 
 ### Auto-Remediation Workflow
 
@@ -219,10 +219,10 @@ machines:
 
 ## API Reference
 
-::: gantry.session.DicomSession.scan_pixel_content
+::: isocenter.session.DicomSession.scan_pixel_content
     options:
       show_source: true
 
-::: gantry.session.DicomSession.auto_remediate_config
+::: isocenter.session.DicomSession.auto_remediate_config
     options:
       show_source: true

@@ -63,13 +63,13 @@ def available_formats() -> List[str]:
 
 
 # MUST stay at the bottom of the file, after Exporter/register/get_exporter/
-# available_formats are all defined. gantry/exporters/dicom.py and
-# gantry/exporters/wfdb.py both do `from . import Exporter, register` at
+# available_formats are all defined. isocenter/exporters/dicom.py and
+# isocenter/exporters/wfdb.py both do `from . import Exporter, register` at
 # their own top level, which re-enters this (partially initialized)
 # package module. Moving this import to the top of the file -- before
 # those names exist -- makes that re-entrant import fail with:
 #   ImportError: cannot import name 'Exporter' from partially initialized
-#   module 'gantry.exporters' (most likely due to a circular import)
+#   module 'isocenter.exporters' (most likely due to a circular import)
 # There is no isort/flake8/pre-commit config in this repo enforcing
 # import order, so a routine "tidy up the imports" pass can silently
 # break every export path. Leave it here.

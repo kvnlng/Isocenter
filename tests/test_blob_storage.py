@@ -2,8 +2,8 @@ import os
 import numpy as np
 import pytest
 
-from gantry.persistence import SqliteStore
-from gantry.entities import Instance
+from isocenter.persistence import SqliteStore
+from isocenter.entities import Instance
 
 
 @pytest.fixture
@@ -154,7 +154,7 @@ def test_compaction_preserves_both_kinds(store):
 
 def _graph(uid, arr, pid="P1"):
     """Build a minimal Patient->Study->Series->Instance graph around `arr`."""
-    from gantry.entities import Patient, Study, Series
+    from isocenter.entities import Patient, Study, Series
 
     inst = Instance(uid, "1.2.840.10008.5.1.4.1.1.2", 1)
     inst.set_pixel_data(arr)

@@ -5,11 +5,11 @@ import datetime
 import numpy as np
 from typing import List, Dict, Any, Tuple
 
-# Ensure we can import gantry
+# Ensure we can import isocenter
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from gantry.builders import DicomBuilder
-from gantry.io_handlers import DicomExporter
+from isocenter.builders import DicomBuilder
+from isocenter.io_handlers import DicomExporter
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -363,7 +363,7 @@ def main():
             
             series_uid = f"{study_uid}.{random.randint(1, 99)}"
             series_builder = study_builder.add_series(series_uid, modality, 1)
-            series_builder.set_equipment("GantryCorp", "OCR-Scanner-2000", "SN-9999")
+            series_builder.set_equipment("IsocenterCorp", "OCR-Scanner-2000", "SN-9999")
             
             # Generate Pixels
             if modality == "SC":

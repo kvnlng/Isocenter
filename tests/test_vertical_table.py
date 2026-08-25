@@ -2,7 +2,7 @@ import os
 import unittest
 import threading
 import concurrent.futures
-from gantry.persistence import SqliteStore
+from isocenter.persistence import SqliteStore
 
 class TestVerticalTable(unittest.TestCase):
     def setUp(self):

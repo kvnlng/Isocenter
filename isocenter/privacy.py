@@ -148,7 +148,7 @@ class PhiInspector:
         # (`io_handlers.py`'s `populate_attrs`,
         # `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), so a config
         # source that spells a tag with an uppercase hex letter (A-F) --
-        # as `gantry/profiles.py`'s Basic profile did for Series
+        # as `isocenter/profiles.py`'s Basic profile did for Series
         # Description, `0008,103E` -- would otherwise never match and
         # silently disable a declared policy with no error anywhere.
         # Normalizing at this single choke point, rather than fixing the
@@ -273,9 +273,9 @@ class PhiInspector:
 
         # 1. Private Tag Removal Logic
         if self.remove_private_tags:
-            # Gantry Whitelist for Reversibility
+            # Isocenter Whitelist for Reversibility
             # Usually checking value, but here we check tag if possible?
-            WHITELIST_CREATORS = ["GANTRY_SECURE"]
+            WHITELIST_CREATORS = ["ISOCENTER_SECURE"]
             # Actually, per DICOM, Private Tags are odd groups.
             # We want to remove ALL private tags except our own reversibility ones.
             # Our Reversibility Service uses "0099,0010" (Creator) and "0099,1001" (Data)

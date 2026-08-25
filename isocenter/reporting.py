@@ -10,7 +10,7 @@ class ComplianceReport:
 
     Attributes:
         generated_at (datetime.datetime): Timestamp of generation.
-        gantry_version (str): Version of the system.
+        isocenter_version (str): Version of the system.
         project_name (str): Name of the session/project.
         privacy_profile (str): The active privacy profile used.
         deid_method (str): Description of the de-identification method.
@@ -25,8 +25,8 @@ class ComplianceReport:
         verification_details (str): Additional context on verification.
     """
     generated_at: datetime.datetime = field(default_factory=datetime.datetime.now)
-    gantry_version: str = "Unknown"
-    project_name: str = "Gantry Session"
+    isocenter_version: str = "Unknown"
+    project_name: str = "Isocenter Session"
 
     # Configuration / Context
     privacy_profile: str = "Unknown"
@@ -84,7 +84,7 @@ class MarkdownRenderer:
 
 **Generated At:** {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')}
 **Project:** {report.project_name}
-**System Version:** Gantry v{report.gantry_version}
+**System Version:** Isocenter v{report.isocenter_version}
 
 ## 1. Executive Summary
 
@@ -125,7 +125,7 @@ The following actions were recorded in the secure audit trail:
 ## 4. Validation & Verification
 
 *   **Identified Issues:** {report.validation_issues}
-*   **Methodology:** The dataset was processed using the Gantry Safe Harbor pipeline. Pixel data was scanned against machine-specific redaction zones. Metadata was remediated according to DICOM PS3.15 {report.privacy_profile} profile.
+*   **Methodology:** The dataset was processed using the Isocenter Safe Harbor pipeline. Pixel data was scanned against machine-specific redaction zones. Metadata was remediated according to DICOM PS3.15 {report.privacy_profile} profile.
 *   **Verification Details:** {report.verification_details if report.verification_details else "Standard automated checks performed."}
 
 ---

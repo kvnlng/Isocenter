@@ -3,8 +3,8 @@ import pytest
 import threading
 import concurrent.futures
 import time
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.persistence import SqliteStore
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.persistence import SqliteStore
 
 class TestPersistenceConcurrency:
 

@@ -4,8 +4,8 @@ import os
 import io
 import pytest
 from unittest.mock import patch, mock_open
-from gantry.utils.ctp_parser import CTPParser
-import gantry.utils.ctp_parser as ctp_parser_module
+from isocenter.utils.ctp_parser import CTPParser
+import isocenter.utils.ctp_parser as ctp_parser_module
 
 # Sample CTP content
 SAMPLE_SCRIPT = """

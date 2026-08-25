@@ -5,8 +5,8 @@ import pytest
 import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import generate_uid, ImplicitVRLittleEndian
-from gantry.session import DicomSession
-from gantry.io_handlers import DicomExporter
+from isocenter.session import DicomSession
+from isocenter.io_handlers import DicomExporter
 
 TEST_DIR = "tests_data_naming"
 EXPORT_DIR = "tests_export_naming"
@@ -55,7 +55,7 @@ def test_folder_naming_structure():
     ds = create_dicom(dcm_path, "PAT001", "Brain_Scan", "Axial_T1", "MR")
 
     # Ingest
-    db_path = os.path.join(TEST_DIR, "gantry.db")
+    db_path = os.path.join(TEST_DIR, "isocenter.db")
     session = DicomSession(db_path)
     session.ingest(TEST_DIR)
 

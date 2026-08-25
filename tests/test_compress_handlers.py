@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless
-from gantry.io_handlers import _compress_j2k
+from isocenter.io_handlers import _compress_j2k
 
 class TestCompressHandlers:
     """

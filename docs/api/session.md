@@ -1,6 +1,6 @@
 # Session API
 
-::: gantry.session.DicomSession
+::: isocenter.session.DicomSession
     handler: python
     options:
       members:

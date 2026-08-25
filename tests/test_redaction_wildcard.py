@@ -7,10 +7,10 @@ import numpy as np
 from pydicom.dataset import Dataset, FileDataset
 from pydicom.uid import generate_uid, ImplicitVRLittleEndian
 
-from gantry.session import DicomSession
-from gantry.io_handlers import DicomExporter
-import gantry
-print(f"DEBUG: gantry loaded from: {gantry.__file__}")
+from isocenter.session import DicomSession
+from isocenter.io_handlers import DicomExporter
+import isocenter
+print(f"DEBUG: isocenter loaded from: {isocenter.__file__}")
 
 class TestWildcardRedaction(unittest.TestCase):
     def setUp(self):
@@ -118,7 +118,7 @@ machines:
                         self.assertEqual(arr[9,9], 255, "Redaction area too large/broad.")
 
                         # Verify Redaction Hash attribute is set
-                        self.assertIsNotNone(inst.attributes.get("_GANTRY_REDACTION_HASH"))
+                        self.assertIsNotNone(inst.attributes.get("_ISOCENTER_REDACTION_HASH"))
 
         self.assertEqual(count, 3, "Should represent 3 mocked instances.")
 

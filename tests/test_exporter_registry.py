@@ -1,6 +1,6 @@
 import pytest
 
-from gantry import exporters
+from isocenter import exporters
 
 
 def test_dicom_is_registered_by_default():

@@ -2,8 +2,8 @@
 import pytest
 import os
 import shutil
-from gantry.session import DicomSession
-from gantry.entities import Instance
+from isocenter.session import DicomSession
+from isocenter.entities import Instance
 import numpy as np
 
 class TestCompaction:
@@ -11,7 +11,7 @@ class TestCompaction:
     @pytest.fixture
     def session(self, tmp_path, request):
         """Creates a session with a real file-based DB (required for sidecar)."""
-        db_name = f"gantry_test_compact_{request.node.name}.db"
+        db_name = f"isocenter_test_compact_{request.node.name}.db"
         db_path = str(tmp_path / db_name)
         s = DicomSession(persistence_file=db_path)
         yield s
@@ -38,7 +38,7 @@ class TestCompaction:
 
         # Add to store and save metadata
         p = session.store.patients
-        from gantry.entities import Patient, Study, Series
+        from isocenter.entities import Patient, Study, Series
         pat = Patient("P1", "Test Patient")
         st = Study("ST1", "20230101")
         se = Series("SE1", "CT", 1)
@@ -86,7 +86,7 @@ class TestCompaction:
         """
         i1 = self.create_dummy_instance("2.2.1")
 
-        from gantry.entities import Patient, Study, Series
+        from isocenter.entities import Patient, Study, Series
         pat = Patient("P2", "Redact Patient")
         st = Study("ST2", "20230101")
         se = Series("SE2", "CT", 1)
@@ -129,7 +129,7 @@ class TestCompaction:
         """
         i1 = self.create_dummy_instance("3.3.1")
 
-        from gantry.entities import Patient, Study, Series
+        from isocenter.entities import Patient, Study, Series
         pat = Patient("P3", "Memory Test")
         st = Study("ST3", "20230101")
         se = Series("SE3", "CT", 1)

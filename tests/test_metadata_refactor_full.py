@@ -8,12 +8,12 @@ from pydicom.uid import ExplicitVRLittleEndian
 import numpy as np
 import hashlib
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 class TestMetadataRefactorFull(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
-        self.db_path = os.path.join(self.test_dir, "gantry.db")
+        self.db_path = os.path.join(self.test_dir, "isocenter.db")
         self.session = DicomSession(self.db_path)
 
     def tearDown(self):
@@ -102,7 +102,7 @@ class TestMetadataRefactorFull(unittest.TestCase):
         inst = self.session.store.patients[0].studies[0].series[0].instances[0]
 
         # Ensure loader is SidecarPixelLoader
-        from gantry.io_handlers import SidecarPixelLoader
+        from isocenter.io_handlers import SidecarPixelLoader
         self.assertIsInstance(inst._pixel_loader, SidecarPixelLoader)
         self.assertEqual(inst._pixel_hash, orig_hash)
 

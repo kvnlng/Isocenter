@@ -55,7 +55,7 @@ class Manifest:
     """
     generated_at: str
     items: List[ManifestItem]
-    project_name: str = "Gantry Session"
+    project_name: str = "Isocenter Session"
     total_files: int = 0
     total_size_bytes: int = 0
 
@@ -104,7 +104,7 @@ class HTMLManifestRenderer:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gantry Manifest - {manifest.project_name}</title>
+    <title>Isocenter Manifest - {manifest.project_name}</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 2rem; color: #333; }}
         h1 {{ margin-bottom: 0.5rem; }}

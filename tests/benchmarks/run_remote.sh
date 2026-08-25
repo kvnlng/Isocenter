@@ -1,16 +1,16 @@
 #!/bin/bash
-# Remote Benchmark Runner for Gantry
+# Remote Benchmark Runner for Isocenter
 # Usage: ./tests/benchmarks/run_remote.sh [SCENARIO]
 # Scenarios: A (Baseline), B (Mixed), C (Scalability)
 
 set -e
 
-VM_NAME="gantry-benchmark"
+VM_NAME="isocenter-benchmark"
 ZONE="us-central1-a"
-REMOTE_DIR="Gantry"
+REMOTE_DIR="Isocenter"
 SCENARIO=${1:-A}
 
-echo "--- Gantry Remote Benchmark Runner ---"
+echo "--- Isocenter Remote Benchmark Runner ---"
 echo "VM: $VM_NAME ($ZONE)"
 echo "Scenario: $SCENARIO"
 echo "-------------------------------------"
@@ -18,7 +18,7 @@ echo "-------------------------------------"
 # 1. Sync Code (Local -> Remote)
 echo "[1/3] Packaging and Syncing local code..."
 # Create a temporary tarball, excluding heavy/ignored items
-tar -czf /tmp/gantry_payload.tar.gz \
+tar -czf /tmp/isocenter_payload.tar.gz \
     --exclude='.git' \
     --exclude='venv' \
     --exclude='data' \
@@ -28,7 +28,7 @@ tar -czf /tmp/gantry_payload.tar.gz \
     .
 
 # Upload to VM
-gcloud compute scp --zone=$ZONE /tmp/gantry_payload.tar.gz $VM_NAME:~/
+gcloud compute scp --zone=$ZONE /tmp/isocenter_payload.tar.gz $VM_NAME:~/
 
 # 2. Define Remote Support Function
 # We embed this script to run on the remote machine to handle setup + execution
@@ -41,7 +41,7 @@ if [ ! -d \"$REMOTE_DIR\" ]; then
 fi
 
 echo '[Remote] Extracting updated code...'
-tar -xzf ~/gantry_payload.tar.gz -C $REMOTE_DIR --overwrite
+tar -xzf ~/isocenter_payload.tar.gz -C $REMOTE_DIR --overwrite
 
 cd $REMOTE_DIR
 
@@ -80,7 +80,7 @@ echo '[Remote] Installing Python dependencies...'
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
 pip install -q psutil
-# Install Gantry in editable mode
+# Install Isocenter in editable mode
 pip install -q -e .
 
 # --- Execution ---

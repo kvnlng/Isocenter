@@ -1,6 +1,6 @@
 import pytest
-from gantry.entities import Patient, Study
-from gantry.privacy import PhiInspector
+from isocenter.entities import Patient, Study
+from isocenter.privacy import PhiInspector
 
 def test_phi_detection():
     # Setup

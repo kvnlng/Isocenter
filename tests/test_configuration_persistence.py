@@ -3,8 +3,8 @@ import pytest
 import os
 import yaml
 import stat
-from gantry.configuration import GantryConfiguration
-from gantry.session import DicomSession
+from isocenter.configuration import IsocenterConfiguration
+from isocenter.session import DicomSession
 
 class TestConfigurationPersistence:
 
@@ -21,7 +21,7 @@ class TestConfigurationPersistence:
         return str(p)
 
     def test_save_on_add_rule(self, config_file, tmp_path):
-        db_path = str(tmp_path / "gantry_test.db")
+        db_path = str(tmp_path / "isocenter_test.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
 
@@ -42,7 +42,7 @@ class TestConfigurationPersistence:
         session.close()
 
     def test_save_on_update_rule(self, config_file, tmp_path):
-        db_path = str(tmp_path / "gantry_test_update.db")
+        db_path = str(tmp_path / "isocenter_test_update.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
 
@@ -60,7 +60,7 @@ class TestConfigurationPersistence:
         session.close()
 
     def test_save_on_delete_rule(self, config_file, tmp_path):
-        db_path = str(tmp_path / "gantry_test_del.db")
+        db_path = str(tmp_path / "isocenter_test_del.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
 
@@ -77,7 +77,7 @@ class TestConfigurationPersistence:
         session.close()
 
     def test_save_on_phi_tag(self, config_file, tmp_path):
-        db_path = str(tmp_path / "gantry_test_phi.db")
+        db_path = str(tmp_path / "isocenter_test_phi.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
 
@@ -100,7 +100,7 @@ class TestConfigurationPersistence:
         Ensures that if the file is not writable, the application doesn't crash
         and prints a warning (as per our implementation).
         """
-        db_path = str(tmp_path / "gantry_test_perm.db")
+        db_path = str(tmp_path / "isocenter_test_perm.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
 

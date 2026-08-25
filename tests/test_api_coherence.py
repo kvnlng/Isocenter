@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 
 def test_export_does_not_accept_a_dead_version_parameter():
@@ -29,7 +29,7 @@ def test_only_one_public_export_entry_point_builds_directory_trees():
     It duplicated the format strings inline rather than sharing a helper,
     and nothing but a test ever called it.
     """
-    from gantry.io_handlers import DicomExporter
+    from isocenter.io_handlers import DicomExporter
 
     assert not hasattr(DicomExporter, "generate_export_from_db"), (
         "generate_export_from_db still exists; it is a third, "
@@ -39,14 +39,14 @@ def test_only_one_public_export_entry_point_builds_directory_trees():
 def test_both_public_export_paths_produce_the_same_tree(tmp_path):
     """`DicomExporter.save_patient` and `session.export()` must agree.
 
-    Both are public and shipped. Two layouts means "where does Gantry put
+    Both are public and shipped. Two layouts means "where does Isocenter put
     files" has no single answer for a library user.
 
     Derives both trees from real exports rather than hardcoding names, so
     it cannot drift out of step with the naming logic it guards.
     """
-    from gantry.io_handlers import DicomExporter
-    from gantry.session import DicomSession
+    from isocenter.io_handlers import DicomExporter
+    from isocenter.session import DicomSession
     from scripts.generate_waveform_test_data import write_fixture
 
     source = tmp_path / "src"
@@ -100,8 +100,8 @@ def test_export_folder_naming_is_case_insensitive_to_description_tag_keys():
     exported folder name rather than disabling a redaction rule.
     """
     import datetime
-    from gantry.io_handlers import export_folder_names
-    from gantry.entities import Patient, Study, Series, Instance
+    from isocenter.io_handlers import export_folder_names
+    from isocenter.entities import Patient, Study, Series, Instance
 
     def build(series_desc_tag):
         patient = Patient("PID_CI", "CI Test")
@@ -140,7 +140,7 @@ def test_one_sanitizer_for_folder_names():
     `wfdb._sanitize` is deliberately excluded -- WFDB record names are
     bare ASCII tokens with different rules, documented as such.
     """
-    from gantry.io_handlers import DicomExporter
+    from isocenter.io_handlers import DicomExporter
 
     assert not hasattr(DicomExporter, "_sanitize"), (
         "DicomExporter._sanitize still exists alongside "
@@ -160,7 +160,7 @@ def test_clean_filename_does_not_treat_a_falsy_value_like_0_as_missing():
     Unknown" bug to regress against. This pins a general property of
     `clean_filename` in isolation.
     """
-    from gantry.config_manager import ConfigLoader
+    from isocenter.config_manager import ConfigLoader
 
     assert ConfigLoader.clean_filename(0) == "0"
 

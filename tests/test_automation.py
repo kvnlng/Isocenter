@@ -1,15 +1,15 @@
 import unittest
 from unittest.mock import MagicMock
-from gantry.session import DicomSession
-from gantry.privacy import PhiReport, PhiFinding
-from gantry.configuration import GantryConfiguration
+from isocenter.session import DicomSession
+from isocenter.privacy import PhiReport, PhiFinding
+from isocenter.configuration import IsocenterConfiguration
 
 class TestAutomationIntegration(unittest.TestCase):
 
     def test_auto_remediate(self):
         # Setup Session Mock
         session = MagicMock(spec=DicomSession)
-        session.configuration = GantryConfiguration()
+        session.configuration = IsocenterConfiguration()
         # Initial Rule: Small box
         session.configuration.rules = [{
             "serial_number": "SN-AUTO",
@@ -38,7 +38,7 @@ class TestAutomationIntegration(unittest.TestCase):
         report = PhiReport([f])
 
         # Test remediation logic directly via Automator (since Session method is just valid wrapper)
-        from gantry.automation import ConfigAutomator
+        from isocenter.automation import ConfigAutomator
 
         suggestions = ConfigAutomator.suggest_config_updates(report, session.configuration)
         self.assertEqual(len(suggestions), 1)

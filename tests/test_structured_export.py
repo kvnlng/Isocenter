@@ -4,9 +4,9 @@ import os
 import shutil
 import datetime
 import numpy as np
-from gantry.io_handlers import DicomExporter
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.config_manager import ConfigLoader
+from isocenter.io_handlers import DicomExporter
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.config_manager import ConfigLoader
 
 @pytest.fixture
 def mock_patient(tmp_path):
@@ -48,7 +48,7 @@ def mock_patient(tmp_path):
 
 @pytest.fixture
 def mock_validator(monkeypatch):
-    from gantry.validation import IODValidator
+    from isocenter.validation import IODValidator
     # Monkeypatch validate to always return [] (no errors)
     monkeypatch.setattr(IODValidator, "validate", lambda ds: [])
 
@@ -59,7 +59,7 @@ def test_structured_export(mock_patient, mock_validator, tmp_path):
     # Run export
     # Mock run_parallel to run synchronously so the IODValidator patch applies!
     from unittest.mock import patch
-    with patch('gantry.io_handlers.run_parallel', side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
+    with patch('isocenter.io_handlers.run_parallel', side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
         DicomExporter.save_patient(mock_patient, str(out_dir))
 
     # Expected Structure (the shared `export_folder_names` scheme -- same

@@ -1,18 +1,18 @@
 # Architecture
 
-Gantry acts as a smart indexing layer over your raw DICOM files. It does *not* modify your original data. Instead, it builds a lightweight metadata index (SQLite) and exposes a clean Python Object Model for manipulation.
+Isocenter acts as a smart indexing layer over your raw DICOM files. It does *not* modify your original data. Instead, it builds a lightweight metadata index (SQLite) and exposes a clean Python Object Model for manipulation.
 
 ## 1. The Session Facade
 
 The `Session` object is your single entry point. It manages:
 
-- **Persistence**: Auto-saving state to `gantry.db`.
+- **Persistence**: Auto-saving state to `isocenter.db`.
 - **Inventory**: Tracking Patients, Studies, and Series.
 - **Transactions**: Atomic persistence of changes.
 
 ## 2. Object Model
 
-Gantry abstracts DICOM into a semantic hierarchy, removing the pain of manual tag iteration.
+Isocenter abstracts DICOM into a semantic hierarchy, removing the pain of manual tag iteration.
 
 ```mermaid
 graph LR
@@ -29,7 +29,7 @@ graph LR
 
 ## 3. Safety Pipeline (The 8 Checkpoints)
 
-Gantry enforces a strict checkpoint system to ensure data safety:
+Isocenter enforces a strict checkpoint system to ensure data safety:
 
 1. **Ingest**: Load raw data into the managed session index.
 2. **Examine**: Inventory the cohort and equipment.
@@ -43,7 +43,7 @@ Gantry enforces a strict checkpoint system to ensure data safety:
 
 ## 4. Persistence Architecture (Hybrid Storage)
 
-Gantry uses `sqlite3` for metadata management, employing a **Hybrid Storage Model** to balance query performance with schema flexibility.
+Isocenter uses `sqlite3` for metadata management, employing a **Hybrid Storage Model** to balance query performance with schema flexibility.
 
 ### The Problem
 

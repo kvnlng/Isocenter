@@ -13,7 +13,7 @@ debug_config.yaml
 pylint_report*.txt
 
 data/
-gantry.key
+isocenter.key
 stress_config.yaml
 benchmark_results.csv
 test_export_config.yaml

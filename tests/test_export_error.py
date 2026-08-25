@@ -1,8 +1,8 @@
 
 import pytest
 import os
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.io_handlers import DicomExporter
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.io_handlers import DicomExporter
 
 def test_export_command_set_error(tmp_path):
     # Setup Patient Hierarchy
@@ -40,7 +40,7 @@ def test_export_command_set_error(tmp_path):
     import concurrent.futures
     # We must patch ProcessPoolExecutor to ThreadPoolExecutor because 'spawn'ed processes
     # (default on macOS/Py3.14) do NOT see the mocked IODValidator.
-    with patch("gantry.validation.IODValidator.validate", return_value=[]), \
+    with patch("isocenter.validation.IODValidator.validate", return_value=[]), \
          patch("concurrent.futures.ProcessPoolExecutor", side_effect=concurrent.futures.ThreadPoolExecutor):
         DicomExporter.save_patient(p, str(out_dir))
 
