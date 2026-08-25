@@ -669,7 +669,7 @@ class SqliteStore:
             self.logger.info(f"Loaded {len(patients)} patients from {self.db_path}")
             # Mark all loaded data as clean so we don't save it back immediately
             for p in patients:
-                p.mark_clean()
+                p.mark_subtree_persisted()
             return patients
 
         except sqlite3.Error as e:
@@ -773,7 +773,7 @@ class SqliteStore:
                         st.series.append(se)
                     p.studies.append(st)
 
-                p.mark_clean()
+                p.mark_subtree_persisted()
                 return p
         except sqlite3.Error as e:
             self.logger.error(f"Failed to load patient: {e}")
@@ -966,7 +966,7 @@ class SqliteStore:
         self.record_blob_ref(
             instance.sop_instance_uid, kind, offset, length, digest, c_alg)
 
-        instance._mod_count += 1
+        instance.mark_modified()
 
     def record_blob_ref(self, instance_uid: str, kind: str, offset: int,
                         length: int, blob_hash: str, compress_alg: str,
@@ -1146,10 +1146,11 @@ class SqliteStore:
             self.record_blob_ref(
                 instance.sop_instance_uid, 'pixels', offset, length, p_hash, c_alg)
 
-            # CRITICAL: Mark instance as dirty so save_all() knows to update the DB with the new loader/hash!
-            # If we don't do this, save_all might skip this instance if it was otherwise clean,
-            # leaving the DB pointing to old/original data while memory points to new sidecar data.
-            instance._mod_count += 1
+            # The instance must be marked modified so save_all writes the
+            # new loader and hash. Without this an otherwise-unchanged
+            # instance is skipped, leaving the database pointing at the
+            # original data while memory points at the new sidecar frame.
+            instance.mark_modified()
 
         except Exception as e:
             self.logger.error(f"Failed to persist pixel swap for {instance.sop_instance_uid}: {e}")
@@ -1160,7 +1161,8 @@ class SqliteStore:
         Incrementally persists the provided patients and their graph.
 
         Walks Patient -> Study -> Series -> Instance, upserting anything
-        marked `_dirty` and deleting instances that are in the database but
+        that has unsaved changes, and deleting instances that are in the
+        database but
         no longer in memory. The whole walk runs in one transaction, so a
         failure anywhere leaves the database exactly as it was found.
 
@@ -1197,11 +1199,8 @@ class SqliteStore:
                 "marked clean", exc_info=True)
             raise
 
-        for instance, version in saved_instances:
-            if hasattr(instance, 'mark_saved'):
-                instance.mark_saved(version)
-            else:
-                instance._dirty = False
+        for instance, revision in saved_instances:
+            instance.mark_persisted(revision)
 
         self._log_save_summary(tally)
 
@@ -1223,12 +1222,13 @@ class SqliteStore:
                     continue
                 self._delete_removed_instances(cur, series, series_pk)
                 saved.extend(
-                    self._save_dirty_instances(conn, cur, series, series_pk, tally))
+                    self._save_unsaved_instances(
+                        conn, cur, series, series_pk, tally))
         return saved
 
     def _upsert_patient(self, cur, patient, tally) -> Optional[int]:
         """Writes the patient row if dirty; returns its primary key."""
-        if getattr(patient, '_dirty', True):
+        if patient.has_unsaved_changes:
             cur.execute("""
                 INSERT INTO patients (patient_id, patient_name) VALUES (?, ?)
                 ON CONFLICT(patient_id) DO UPDATE SET patient_name=excluded.patient_name
@@ -1245,7 +1245,7 @@ class SqliteStore:
 
     def _upsert_study(self, cur, study, patient_pk, tally) -> Optional[int]:
         """Writes the study row if dirty; returns its primary key."""
-        if getattr(study, '_dirty', True):
+        if study.has_unsaved_changes:
             cur.execute("""
                 INSERT INTO studies (patient_id_fk, study_instance_uid, study_date) VALUES (?, ?, ?)
                 ON CONFLICT(study_instance_uid) DO UPDATE SET
@@ -1262,7 +1262,7 @@ class SqliteStore:
 
     def _upsert_series(self, cur, series, study_pk, tally) -> Optional[int]:
         """Writes the series row if dirty; returns its primary key."""
-        if getattr(series, '_dirty', True):
+        if series.has_unsaved_changes:
             equipment = series.equipment
             cur.execute("""
                 INSERT INTO series (study_id_fk, series_instance_uid, modality, series_number, manufacturer, model_name, device_serial_number)
@@ -1306,22 +1306,22 @@ class SqliteStore:
                 [(uid,) for uid in removed])
         return len(removed)
 
-    def _save_dirty_instances(self, conn, cur, series, series_pk,
+    def _save_unsaved_instances(self, conn, cur, series, series_pk,
                               tally) -> List[Tuple[Instance, int]]:
-        """Upserts the dirty instances of one series.
+        """Upserts the instances of one series that have unsaved changes.
 
-        Returns the (instance, version) pairs written, for the caller to
-        mark clean once the transaction has actually committed. The
-        version is captured *before* the write so that a concurrent edit
+        Returns the (instance, revision) pairs written, for the caller to
+        mark persisted once the transaction has actually committed. The
+        revision is captured *before* the write, so a concurrent edit
         arriving mid-save is not mistaken for the state that was stored.
         """
-        dirty = [(inst, getattr(inst, '_mod_count', 0))
-                 for inst in series.instances if getattr(inst, '_dirty', True)]
-        if not dirty:
+        unsaved = [(inst, inst._revision)
+                   for inst in series.instances if inst.has_unsaved_changes]
+        if not unsaved:
             return []
 
         rows, blob_rows, vertical_rows = self._build_instance_writes(
-            [inst for inst, _version in dirty], series_pk, tally)
+            [inst for inst, _revision in unsaved], series_pk, tally)
 
         cur.executemany(_UPSERT_INSTANCE_SQL, rows)
 
@@ -1337,8 +1337,8 @@ class SqliteStore:
         for uid, attributes in vertical_rows:
             self.save_vertical_attributes(uid, attributes, conn=conn)
 
-        tally.instances += len(dirty)
-        return dirty
+        tally.instances += len(unsaved)
+        return unsaved
 
     def _build_instance_writes(self, instances, series_pk, tally):
         """Turns instances into the rows three tables need.

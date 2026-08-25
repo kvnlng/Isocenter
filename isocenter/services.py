@@ -245,7 +245,7 @@ class RedactionService:
                 inst.regenerate_uid()
                 # Mark as redacted with this hash
                 inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
-                inst._dirty = True
+                inst.mark_modified()
 
                 # CRITICAL: Persist modified pixel data to sidecar (generate new Loader)
                 if self.store_backend and hasattr(self.store_backend, 'persist_pixel_data'):
@@ -446,7 +446,7 @@ class RedactionService:
                     # Mark as redacted with this hash
                     inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
                     # Force Dirty to persist metadata update
-                    inst._dirty = True
+                    inst.mark_modified()
                     self.logger.debug(f"  Modified {inst.sop_instance_uid}")
 
             except Exception as e:

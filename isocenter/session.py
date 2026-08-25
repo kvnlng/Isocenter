@@ -1779,7 +1779,7 @@ class DicomSession:
                             if mutation.get('pixel_hash'):
                                 inst._pixel_hash = mutation['pixel_hash']
 
-                            inst._dirty = True
+                            inst.mark_modified()
                             print(f"DEBUG: Instance {sop} updated in memory.")
                         else:
                             print(

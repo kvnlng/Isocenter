@@ -91,7 +91,7 @@ def test_a_save_that_never_opened_a_connection_still_reports_its_error(
         store.save_all([make_patient()])
 
 
-def test_instances_stay_dirty_when_the_save_fails(store, monkeypatch):
+def test_instances_stay_unsaved_when_the_save_fails(store, monkeypatch):
     """A rolled-back save must not leave memory believing it was written.
 
     Instances were marked clean inside the loop, one series at a time,
@@ -103,7 +103,7 @@ def test_instances_stay_dirty_when_the_save_fails(store, monkeypatch):
     """
     saved_first, fails_second = make_patient("P_OK"), make_patient("P_BAD")
     survivors = saved_first.studies[0].series[0].instances
-    assert all(i._dirty for i in survivors)
+    assert all(i.has_unsaved_changes for i in survivors)
 
     real_serialize = store._serialize_item
 
@@ -121,8 +121,9 @@ def test_instances_stay_dirty_when_the_save_fails(store, monkeypatch):
         rows = conn.execute("SELECT COUNT(*) FROM instances").fetchone()[0]
     assert rows == 0, "sanity check: the transaction did roll back"
 
-    assert all(i._dirty for i in survivors), (
-        "the failed save marked instances clean, so a retry would skip them")
+    assert all(i.has_unsaved_changes for i in survivors), (
+        "the failed save marked instances persisted, so a retry would "
+        "skip them")
 
 
 # --------------------------------------------------------------------
@@ -159,7 +160,7 @@ def test_unchanged_pixels_are_not_written_to_the_sidecar_twice(store):
     first_size = os.path.getsize(store.sidecar.filepath)
 
     for inst in patient.studies[0].series[0].instances:
-        inst._dirty = True          # dirty, but the pixels are identical
+        inst.mark_modified()        # modified, but the pixels are identical
     store.save_all([patient])
 
     with sqlite3.connect(store.db_path) as conn:

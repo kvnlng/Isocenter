@@ -9,8 +9,8 @@ def test_safe_export_skips_phi(tmp_path):
     # 1. Setup Session & Store
     sess = DicomSession(":memory:")
 
-    # --- Dirty Patient (Has Name) ---
-    p_dirty = Patient("P_DIRTY", "Real Name")
+    # --- Patient still carrying an identifier (a real name) ---
+    p_identifying = Patient("P_DIRTY", "Real Name")
     st1 = Study("S1", "20230101")
     se1 = Series("SE1", "OT", 1)
     # Valid attributes for export
@@ -38,8 +38,8 @@ def test_safe_export_skips_phi(tmp_path):
 
     se1.instances.append(inst1)
     st1.series.append(se1)
-    p_dirty.studies.append(st1)
-    sess.store.patients.append(p_dirty)
+    p_identifying.studies.append(st1)
+    sess.store.patients.append(p_identifying)
 
     # --- Clean Patient (Anonymized Name) ---
     p_clean = Patient("ANON_CLEAN", "ANONYMIZED")

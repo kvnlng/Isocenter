@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: one vocabulary for persistence state, and one mechanism behind it.** A session tracked two unrelated things about an item -- whether it held changes not yet written, and whether it still carried identifiers -- and called both of them *dirty*. The first now says what it means, on every entity, through one shared `TrackedEntity` base:
+
+  | before | now |
+  |---|---|
+  | `entity._dirty` (read) | `entity.has_unsaved_changes` |
+  | `entity._dirty = True` | `entity.mark_modified()` |
+  | `entity._dirty = False` | `entity.mark_persisted()` |
+  | `entity.mark_saved(version)` | `entity.mark_persisted(revision)` |
+  | `entity.mark_clean()` | `entity.mark_subtree_persisted()` |
+  | `_mod_count` / `_saved_mod_count` | `_revision` / `_persisted_revision` |
+
+  There were two implementations of this, not one. `Instance` had a revision counter and a `_dirty` property computed from it; `Patient`, `Study` and `Series` each had a plain boolean field of the same name. That is why `save_all` asked every level with `getattr(entity, '_dirty', True)` rather than simply asking -- and why only instances could survive a concurrent edit during a save, since only instances had a revision to compare. All four now share the counter, so the guarantee is the same everywhere. Behaviour is otherwise unchanged: a new entity still reports unsaved changes, and nothing marks patients, studies or series persisted yet.
+
+  `has_unsaved_changes` is **read-only**. State moves through `mark_modified()` and `mark_persisted()` only, so an entity can be told what happened to it but not told what it is. "Declare this saved" is exactly the operation that let a rolled-back save leave instances claiming they had been written (see the `save_all` entry below).
+
 - **`DicomSession._export_dicom()` split into named pieces, and the PHI report stopped borrowing the word "dirty".** It was a single 306-line method with 45 branches holding the pre-export safety scan, its console report, the suggested-config block, subset resolution, the four-level export-plan walk and the parallel batch. It is now 53 lines plus eight named helpers. `tests/test_export_contract.py` pins what a caller can observe.
 
   The vocabulary change is the user-visible half. `_dirty` means "has unsaved changes" on every entity in a session -- it is `_mod_count > _saved_mod_count`, a persistence flag with no connection to PHI. The safety report used the same word for "still carries identifiers", printing `The following tags were flagged as dirty:` and logging `Skipping dirty`, which made the two indistinguishable to anyone who had read either. The report now says what it means: `The following tags still carry identifiers:`, and `Skipping <uid>: it or one of its parents still carries identifiers.`
