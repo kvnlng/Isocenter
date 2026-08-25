@@ -103,3 +103,44 @@ def test_basic_profile_keys_are_all_lowercase():
     """
     uppercase = [k for k in BASIC_PROFILE if k != k.lower()]
     assert not uppercase, f"profile keys must be lowercase: {uppercase}"
+
+
+def test_documented_basic_profile_tag_count_matches_the_code():
+    """`docs/waveforms.md` states the Basic profile's tag count as a number.
+
+    A hand-written count in prose is a second source of truth for a fact the
+    code already knows, and it drifted silently once: the doc said 28 while
+    the profile had grown to 34 (five date/time tags from #38, one from #39).
+    Nobody noticed because nothing checked. This pins the two together so the
+    next person to add a tag is told to update the sentence.
+
+    Same failure mode as the requirements.txt/setup.py drift that broke
+    `pip install gantry`, and as docs/changelog.md (#52): the copy people
+    read is not the copy people edit.
+    """
+    import pathlib
+    import re
+
+    from gantry.profiles import BASIC_PROFILE
+
+    doc = pathlib.Path(__file__).resolve().parent.parent / "docs" / "waveforms.md"
+    text = doc.read_text(encoding="utf-8")
+
+    # Matches the "**34 tags, all\n  34 effective**" phrasing, tolerating the
+    # line wrap the surrounding prose uses.
+    match = re.search(r"\*\*(\d+) tags, all\s+(\d+)\s+effective\*\*", text)
+    assert match, (
+        "could not find the Basic-profile tag-count sentence in "
+        "docs/waveforms.md; if the wording changed, update this test to "
+        "match rather than deleting it")
+
+    claimed, claimed_effective = int(match.group(1)), int(match.group(2))
+    actual = len(BASIC_PROFILE)
+
+    assert claimed == actual, (
+        f"docs/waveforms.md says the Basic profile has {claimed} tags but "
+        f"gantry/profiles.py defines {actual}. Update the sentence in "
+        "docs/waveforms.md.")
+    assert claimed_effective == actual, (
+        f"docs/waveforms.md claims {claimed_effective} effective tags but "
+        f"the profile defines {actual}.")

@@ -78,8 +78,8 @@ There are three configurations a reader of this guide can be in:
   touched.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic`; `load_config()` expands that into
-  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **28 tags, all
-  28 effective** -- covering patient identity, study/series dates and
+  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **34 tags, all
+  34 effective** -- covering patient identity, study/series dates and
   times, and institution/physician fields, based on DICOM PS3.15 Annex
   E's Basic Profile. This is what actually runs on the documented path.
   `gantry/resources/phi_tags.json`, a separate 6-tag file, is *not*
