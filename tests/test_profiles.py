@@ -95,6 +95,33 @@ def test_basic_profile_covers_datetime_twins_of_the_dates_it_removes():
         "acquisition and procedure timing that survives anonymize().")
 
 
+def test_basic_profile_datetime_twins_are_actually_set_to_remove():
+    """Membership alone does not prove a tag is remediated.
+
+    `test_basic_profile_covers_datetime_twins_of_the_dates_it_removes`
+    above only checks that these five tags are keys in `BASIC_PROFILE` --
+    a tag can sit there with any action, including one that does nothing,
+    and that test would still pass. This is the exact "present but not
+    firing" failure this module's docstring warns about: mutating
+    `"0040,0251"`'s action from `REMOVE` to `KEEP` survived the full suite
+    with no test catching it. Assert the action explicitly for all five
+    tags Task 1 (#38) added.
+    """
+    required = {
+        "0008,002a": "Acquisition DateTime",
+        "0040,0244": "Performed Procedure Step Start Date",
+        "0040,0245": "Performed Procedure Step Start Time",
+        "0040,0250": "Performed Procedure Step End Date",
+        "0040,0251": "Performed Procedure Step End Time",
+    }
+    wrong = {
+        tag: BASIC_PROFILE[tag]["action"]
+        for tag in required
+        if BASIC_PROFILE[tag]["action"] != "REMOVE"
+    }
+    assert not wrong, f"expected action REMOVE for {required}; got {wrong}"
+
+
 def test_basic_profile_keys_are_all_lowercase():
     """Ingested attribute keys are lowercased, so an uppercase profile key
     never matches and silently disables that tag (see #41, where
@@ -117,6 +144,20 @@ def test_documented_basic_profile_tag_count_matches_the_code():
     Same failure mode as the requirements.txt/setup.py drift that broke
     `pip install gantry`, and as docs/changelog.md (#52): the copy people
     read is not the copy people edit.
+
+    The "effective" half of this sentence is NOT `len(BASIC_PROFILE)`: one
+    entry, `(0070,0006)`, lives inside a Waveform Annotation Sequence item
+    rather than at the top level of the instance, and the worker clone
+    `session.audit()`/`session.anonymize()` actually scan against
+    (`_make_lightweight_copy`, `gantry/session.py`) drops the `text_index`
+    nested-sequence content needs to be reached through -- so that entry's
+    REMOVE/EMPTY action never fires (tracked as #57, out of scope for this
+    test). A tag can sit in the profile, present in `BASIC_PROFILE`, and do
+    nothing; asserting effective-count == `len(BASIC_PROFILE)` would pin
+    that as true. Instead this pins the *documented* effective count to a
+    value one less than the tag count, so the doc has to be updated by hand
+    (not silently kept "true" by construction) if a newly added tag turns
+    out to be similarly inert.
     """
     import pathlib
     import re
@@ -126,9 +167,8 @@ def test_documented_basic_profile_tag_count_matches_the_code():
     doc = pathlib.Path(__file__).resolve().parent.parent / "docs" / "waveforms.md"
     text = doc.read_text(encoding="utf-8")
 
-    # Matches the "**34 tags, all\n  34 effective**" phrasing, tolerating the
-    # line wrap the surrounding prose uses.
-    match = re.search(r"\*\*(\d+) tags, all\s+(\d+)\s+effective\*\*", text)
+    # Matches the "**34 tags, 33 effective**" phrasing.
+    match = re.search(r"\*\*(\d+) tags, (\d+)\s+effective\*\*", text)
     assert match, (
         "could not find the Basic-profile tag-count sentence in "
         "docs/waveforms.md; if the wording changed, update this test to "
@@ -141,6 +181,15 @@ def test_documented_basic_profile_tag_count_matches_the_code():
         f"docs/waveforms.md says the Basic profile has {claimed} tags but "
         f"gantry/profiles.py defines {actual}. Update the sentence in "
         "docs/waveforms.md.")
-    assert claimed_effective == actual, (
+    # Known-inert tags: present in BASIC_PROFILE but not reachable by the
+    # worker clone's shallow scan (#57). Update this set, not the
+    # assertion below, if #57 is fixed or another tag is found inert.
+    known_inert = {"0070,0006"}
+    assert known_inert <= set(BASIC_PROFILE), (
+        "a tag documented as known-inert is no longer in BASIC_PROFILE; "
+        "update `known_inert` and the doc sentence together")
+    expected_effective = actual - len(known_inert)
+    assert claimed_effective == expected_effective, (
         f"docs/waveforms.md claims {claimed_effective} effective tags but "
-        f"the profile defines {actual}.")
+        f"the profile defines {actual} tags with {len(known_inert)} known "
+        f"inert (#57), i.e. {expected_effective} effective.")

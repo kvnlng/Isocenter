@@ -44,7 +44,7 @@ out/<patient>/<study>/<series>/
 | `fs` | Sampling Frequency `(003A,001A)` |
 | `gain` | Derived from Channel Sensitivity `(003A,0210)` and its correction factor |
 | `units` | Channel Sensitivity Units Sequence `(003A,0211)` |
-| signal description | Channel Source Sequence `(003A,0208)`, falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token (see "What is and isn't de-identified" below) |
+| signal description | Channel Source Sequence `(003A,0208)`, falling back to Channel Label `(003A,0203)` when no coded source is present *and* the label is a recognisable signal name -- otherwise a positional `ch<N>` token, `N` being the **zero-based** channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below) |
 
 Signals are written as WFDB format 16 (16-bit, little-endian,
 channel-interleaved) -- the same layout DICOM already stores them in,
@@ -78,10 +78,14 @@ There are three configurations a reader of this guide can be in:
   touched.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic`; `load_config()` expands that into
-  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **34 tags, all
-  34 effective** -- covering patient identity, study/series dates and
+  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **34 tags, 33
+  effective** -- covering patient identity, study/series dates and
   times, and institution/physician fields, based on DICOM PS3.15 Annex
   E's Basic Profile. This is what actually runs on the documented path.
+  The 34th, `(0070,0006)`, is present in the profile but not currently
+  remediated by `session.audit()`/`session.anonymize()`; see the
+  Unformatted Text Value entry below for why, and #57 for the tracked
+  engine bug.
   `gantry/resources/phi_tags.json`, a separate 6-tag file, is *not*
   reached from this flow: `create_config()` deliberately drops its
   REMOVE-action tags from the scaffold, on the assumption the Basic
@@ -112,14 +116,28 @@ configurations above you're in:
   is a recognisable signal name, checked against the module-level
   `KNOWN_LEAD_NAMES` set in `gantry/waveform.py`. Anything else --
   including genuinely operator-typed text -- is replaced with a
-  positional `ch<N>` token instead of being written verbatim.
+  positional `ch<N>` token instead of being written verbatim. `N` is
+  the **zero-based** channel index, not DICOM's 1-based ChannelNumber
+  -- `ch1` is the *second* channel.
 - **Unformatted Text Value `(0070,0006)`** -- is omitted from the
   `note` field of `annotations.json` by default. It routinely holds
   free-text clinical commentary, so exporting it is opt-in: pass
   `session.export(folder, format="wfdb", include_annotation_text=True)`
-  to restore it. `(0070,0006)` was also added to the Basic profile, so
-  a configured session that opts in still receives the profile's
-  remediated (emptied) value rather than raw text.
+  to restore it. That default-off behaviour is what actually protects
+  this field today. `(0070,0006)` was also added to the Basic profile,
+  but that profile entry is currently **inert** for this tag: it lives
+  inside each Waveform Annotation Sequence item, not at the top level of
+  the instance, and `PhiInspector._scan_instance`
+  (`gantry/privacy.py`) only reaches nested-sequence content through the
+  instance's `text_index` -- which the multiprocess worker clone
+  `session.audit()`/`session.anonymize()` actually scan against
+  (`_make_lightweight_copy`, `gantry/session.py`) does not carry; only
+  flat `attributes` survive that copy. So a configured session that
+  passes `include_annotation_text=True` currently gets `(0070,0006)`'s
+  **raw** value, not the profile's remediated (emptied) one. This is a
+  known engine bug, tracked separately as #57 -- it affects every
+  sequence-nested tag, not just this one -- and is out of scope for this
+  fix round.
 
 Both are safe by default: no PHI tag configuration is required to get
 this behaviour, and it applies even to a bare `Session()`.
@@ -143,6 +161,18 @@ Safe Harbor identifier. If you export without running `anonymize()` at
 all, the date is real too -- exactly like every other un-remediated
 field in Gantry.
 
+On the documented Quick Start path, both instance-level timestamp tags
+above are in the Basic profile (`(0008,002A)` and `(0008,0030)`), so a
+configured, anonymized session has no real time-of-day left to write.
+Gantry does **not** substitute a fake `00:00:00` in that case: when
+`study.study_date` is real but no real time-of-day is available, the
+record's start time/date fields are omitted from the header entirely.
+This is a deliberate limitation, not an oversight -- `header(5)` does
+not support a date-only start time (PhysioNet's own spec, and
+`wfdb-python`'s reference reader/writer, both treat `base_date` as
+depending on `base_time` being present), so the choice is between
+omitting both fields and fabricating a time; Gantry omits both.
+
 Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:
 
@@ -153,7 +183,14 @@ paths a WFDB writer could otherwise open:
   patient pseudonym, series number, instance number) -- never from
   raw patient identifiers, and lead identity in the header prefers the
   coded channel source over the free-text label wherever a coded
-  source exists.
+  source exists. That preference is a likelihood argument, not a
+  filter: a conformant coded source is far less likely to carry
+  operator-typed text than a free-text label, but the coded value is
+  **not** run through the lead-name allowlist or any content check --
+  a non-conformant source can still put arbitrary text there. Both the
+  `.hea` writer and the Murmur `annotations.json` bridge strip
+  line-break characters out of it regardless, so it can't forge a
+  `.hea` comment line, but the text itself is trusted, not filtered.
 
 ## Limitations
 
