@@ -27,7 +27,7 @@ from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import run_parallel, _env_int
 from .configuration import IsocenterConfiguration, FlowList
-from .entities import PhiStatus
+from .entities import PhiStatus, clone_sequences, resolve_item_path
 from .profiles import PRIVACY_PROFILES
 from . import pixel_analysis
 from .automation import ConfigAutomator
@@ -2312,8 +2312,36 @@ class DicomSession:
                 if f.entity_uid in study_map:
                     f.entity = study_map[f.entity_uid]
             elif f.entity_type == "Instance":
-                if f.entity_uid in instance_map:
-                    f.entity = instance_map[f.entity_uid]
+                f.entity = self._live_target(instance_map.get(f.entity_uid), f)
+
+    @staticmethod
+    def _live_target(instance, finding):
+        """The live object a finding should be remediated against.
+
+        A finding raised inside a sequence carries the path down to its
+        item; a sequence item has no UID, so the path is the only way to
+        find the same item again in this process. Returns None when it
+        cannot be resolved.
+
+        None is the right answer rather than the enclosing instance.
+        Remediation skips a finding with no entity, whereas writing a
+        nested tag onto the instance fabricates a top-level element that
+        was never in the file and leaves the real value untouched inside
+        the sequence -- an export carrying the PHI plus a decoy.
+        """
+        if instance is None:
+            get_logger().warning(
+                f"Finding for {finding.entity_uid} has no matching instance "
+                "in the session; it will not be remediated.")
+            return None
+
+        target = resolve_item_path(instance, finding.entity_path)
+        if target is None:
+            get_logger().warning(
+                f"The sequence item behind {finding.field_name} on "
+                f"{finding.entity_uid} is gone (path {finding.entity_path}); "
+                "it will not be remediated.")
+        return target
 
     def _make_lightweight_copy(self, patient: "Patient") -> "Patient":
         """
@@ -2360,6 +2388,15 @@ class DicomSession:
                     # Key: Ensure attributes are copied so workers can scan tags
                     if hasattr(i, 'attributes'):
                         i_new.attributes = i.attributes.copy()
+
+                    # Sequences travel too. Dropping them was #57: the
+                    # worker got a top-level-only instance, so the scan
+                    # reported clean on every nested tag -- report text,
+                    # annotations, anything below the first level.
+                    i_new.sequences, item_map = clone_sequences(i)
+                    i_new.text_index = [
+                        (item_map.get(id(item), i_new), tag)
+                        for item, tag in i.text_index]
 
                     if hasattr(i, "date_shifted"):
                         i_new.date_shifted = i.date_shifted

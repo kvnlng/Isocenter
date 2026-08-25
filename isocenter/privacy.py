@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from typing import List, Any, Optional, Dict
+from typing import List, Any, Optional, Dict, Tuple
 import hashlib
-from .entities import Patient, Study, Instance
+from .entities import Patient, Study, Instance, iter_item_tree
 from .logger import get_logger
 
 
@@ -25,9 +25,15 @@ class PhiRemediation:
 
 
 @dataclass(slots=True)
-class PhiFinding:
+class PhiFinding:  # pylint: disable=too-many-instance-attributes
     """
     Represents a potential PHI breach discovered during a scan.
+
+    The attribute count is the point of the record -- it is a report line,
+    and every field below is something a reader of that report needs. The
+    same reasoning that disables `too-few-public-methods` for DTOs in
+    `pylintrc.toml` applies here; splitting it would only move fields
+    behind another name.
 
     Attributes:
         entity_uid (str): Unique identifier of the entity (PatientID, SOPInstanceUID).
@@ -39,6 +45,11 @@ class PhiFinding:
         patient_id (Optional[str]): Linkage for context.
         entity (Any): Reference to the Python object for direct remediation.
         remediation_proposal (Optional[PhiRemediation]): The suggested fix.
+        entity_path (Tuple): Route from the Instance to the item this was
+            raised against, as `(sequence_tag, index)` steps. Empty means
+            the Instance itself. Findings cross a process boundary, and a
+            sequence item has no UID to be found again by, so this is the
+            only way to rebind one to the item it actually came from.
     """
     entity_uid: str
     entity_type: str
@@ -50,6 +61,7 @@ class PhiFinding:
     entity: Any = None  # Reference to the actual object (Patient, Study, etc.)
     remediation_proposal: Optional[PhiRemediation] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    entity_path: Tuple = ()  # Route from the Instance down to a sequence item
 
 
 class PhiReport:
@@ -261,15 +273,22 @@ class PhiInspector:
         findings = []
 
         # 0. Determine Scan Targets
-        # If we have a text_index, we use that for targeted scanning.
-        # Otherwise fallback to iterating attributes (shallow scan).
-        scan_targets = []
-        if hasattr(instance, 'text_index') and instance.text_index:
-            # Tuple (item, tag)
-            scan_targets = instance.text_index
-        else:
-            # Fallback: List of (instance, tag) for direct attributes
-            scan_targets = [(instance, t) for t in instance.attributes.keys()]
+        # Walked from the instance itself rather than read off its
+        # `text_index`. That index is built once at ingest and is not
+        # rebuilt when a session is loaded from the store, nor carried
+        # into the worker copies `session.audit()` scans -- so every route
+        # into this method except a direct call arrived with it empty and
+        # took a top-level-only scan, reporting clean on sequence content
+        # it never opened (#57).
+        #
+        # Walking also drops the index's text-VR filter, which the
+        # top-level path never applied either. A configured PHI tag is a
+        # configured PHI tag wherever it sits and whatever its VR.
+        scan_targets = [
+            (item, tag, path)
+            for item, path in iter_item_tree(instance)
+            for tag in list(item.attributes.keys())
+        ]
 
         # 1. Private Tag Removal Logic
         if self.remove_private_tags:
@@ -280,7 +299,7 @@ class PhiInspector:
             # de-anonymize with the key.
             WHITELIST_TAGS = {"0099,0010", "0099,1001"}
 
-            for tag, val in instance.attributes.items():
+            for item, tag, path in scan_targets:
                 try:
                     group_str, _ = tag.split(',')
                     group = int(group_str, 16)
@@ -294,7 +313,8 @@ class PhiInspector:
                                 reason="Private Tag Removal Requested",
                                 tag=tag,
                                 patient_id=patient_id,
-                                entity=instance,
+                                entity=item,
+                                entity_path=path,
                                 remediation_proposal=PhiRemediation(
                                     action_type="REMOVE_TAG",
                                     target_attr=tag
@@ -307,7 +327,7 @@ class PhiInspector:
         if not self.phi_tags:
             return findings
 
-        for item, tag in scan_targets:
+        for item, tag, path in scan_targets:
             # Parse config
             config_val = self.phi_tags.get(tag)
             if not config_val:
@@ -380,6 +400,7 @@ class PhiInspector:
                     tag=tag,
                     patient_id=patient_id,
                     entity=item,  # Point to the specific deep item!
+                    entity_path=path,
                     remediation_proposal=proposal
                 ))
         return findings

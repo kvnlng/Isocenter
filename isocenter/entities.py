@@ -224,6 +224,64 @@ class Equipment:
 
 # --- Core Hierarchy ---
 
+def iter_item_tree(item: 'DicomItem', path: tuple = ()):
+    """Yields `(item, path)` for `item` and every item nested below it.
+
+    `path` is the route from the root: a tuple of `(sequence_tag, index)`
+    steps, empty for the root itself. It is what lets a finding raised
+    against a sequence item be matched back to that same item in another
+    copy of the graph -- nested items carry no UID of their own, so
+    position is the only identity they have.
+
+    Depth-first, and in declaration order, so two copies of the same graph
+    are walked identically.
+    """
+    yield item, path
+    for tag, sequence in item.sequences.items():
+        for index, nested in enumerate(sequence.items):
+            yield from iter_item_tree(nested, path + ((tag, index),))
+
+
+def resolve_item_path(root: 'DicomItem', path: tuple) -> Optional['DicomItem']:
+    """Follows a path from `iter_item_tree` back to an item, or None.
+
+    None means the graph changed after the path was recorded -- an item
+    removed, or a sequence shortened. The caller must treat that as "this
+    item is gone", never as "use the root instead": writing a nested tag
+    onto the root fabricates a top-level element that was never in the
+    file, and leaves the real value in place.
+    """
+    item = root
+    for tag, index in path or ():
+        sequence = item.sequences.get(tag)
+        if sequence is None or index >= len(sequence.items):
+            return None
+        item = sequence.items[index]
+    return item
+
+
+def clone_sequences(item: 'DicomItem'):
+    """Deep-copies an item's sequences; returns them with an id mapping.
+
+    Workers must not share sequence items with the session. The mapping is
+    keyed by `id()` of the original item, which is what `text_index`
+    holds, so a caller can rebuild that index against the copies.
+    """
+    clones = {}
+    mapping = {}
+    for tag, sequence in item.sequences.items():
+        clone = DicomSequence(tag=tag)
+        for nested in sequence.items:
+            nested_clone = DicomItem()
+            nested_clone.attributes = dict(nested.attributes)
+            nested_clone.sequences, nested_map = clone_sequences(nested)
+            mapping[id(nested)] = nested_clone
+            mapping.update(nested_map)
+            clone.items.append(nested_clone)
+        clones[tag] = clone
+    return clones, mapping
+
+
 @dataclass(slots=True)
 class Instance(DicomItem):
     """

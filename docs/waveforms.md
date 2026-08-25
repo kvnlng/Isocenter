@@ -78,14 +78,13 @@ There are three configurations a reader of this guide can be in:
   touched.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic`; `load_config()` expands that into
-  `PRIVACY_PROFILES["basic"]` (`isocenter/profiles.py`) -- **34 tags, 33
+  `PRIVACY_PROFILES["basic"]` (`isocenter/profiles.py`) -- **34 tags, 34
   effective** -- covering patient identity, study/series dates and
   times, and institution/physician fields, based on DICOM PS3.15 Annex
   E's Basic Profile. This is what actually runs on the documented path.
-  The 34th, `(0070,0006)`, is present in the profile but not currently
-  remediated by `session.audit()`/`session.anonymize()`; see the
-  Unformatted Text Value entry below for why, and #57 for the tracked
-  engine bug.
+  `(0070,0006)` was the exception until 0.8.0: it lives inside Waveform
+  Annotation Sequence, and the scan never opened sequences (#57), so it
+  sat in the profile doing nothing. It fires now.
   `isocenter/resources/phi_tags.json`, a separate 6-tag file, is *not*
   reached from this flow: `create_config()` deliberately drops its
   REMOVE-action tags from the scaffold, on the assumption the Basic
@@ -124,20 +123,19 @@ configurations above you're in:
   free-text clinical commentary, so exporting it is opt-in: pass
   `session.export(folder, format="wfdb", include_annotation_text=True)`
   to restore it. That default-off behaviour is what actually protects
-  this field today. `(0070,0006)` was also added to the Basic profile,
-  but that profile entry is currently **inert** for this tag: it lives
-  inside each Waveform Annotation Sequence item, not at the top level of
-  the instance, and `PhiInspector._scan_instance`
-  (`isocenter/privacy.py`) only reaches nested-sequence content through the
-  instance's `text_index` -- which the multiprocess worker clone
-  `session.audit()`/`session.anonymize()` actually scan against
-  (`_make_lightweight_copy`, `isocenter/session.py`) does not carry; only
-  flat `attributes` survive that copy. So a configured session that
-  passes `include_annotation_text=True` currently gets `(0070,0006)`'s
-  **raw** value, not the profile's remediated (emptied) one. This is a
-  known engine bug, tracked separately as #57 -- it affects every
-  sequence-nested tag, not just this one -- and is out of scope for this
-  fix round.
+  this field today. `(0070,0006)` is also in the Basic profile, and
+  since 0.8.0 that entry works: a configured session that passes
+  `include_annotation_text=True` gets the profile's remediated (emptied)
+  value.
+
+  Before 0.8.0 it did not. The tag lives inside each Waveform Annotation
+  Sequence item rather than at the top level, and the scan only reached
+  nested content through the instance's `text_index` -- which the worker
+  clones `session.audit()` scans were not given. So the profile entry sat
+  there doing nothing, and `include_annotation_text=True` exported the
+  **raw** value. That was #57, and it affected every sequence-nested tag,
+  not just this one. If you de-identified waveforms with 0.7.x or
+  earlier, re-audit them.
 
 Both are safe by default: no PHI tag configuration is required to get
 this behaviour, and it applies even to a bare `Session()`.
