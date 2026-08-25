@@ -14,14 +14,13 @@ To enable advanced entity detection (e.g., precise Patient Name recognition) for
 
 ```bash
 pip install "git+https://github.com/kvnlng/Isocenter.git#egg=isocenter[nlp]"
-```
-
-Or manually:
-
-```bash
-pip install spacy
 python -m spacy download en_core_web_sm
 ```
+
+The model download is a separate step, like Tesseract below: spaCy's
+`en_core_web_sm` has no PyPI release, and pinning it in the extra would
+need a direct URL, which PyPI refuses in published metadata. Without the
+model, `ZoneDiscoverer` falls back to its regex heuristics.
 
 ### Optical Character Recognition (OCR)
 

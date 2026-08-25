@@ -154,7 +154,12 @@ Discovery uses a tiered approach to classify text:
 
     ```bash
     pip install isocenter[nlp]
+    python -m spacy download en_core_web_sm
     ```
+
+    The extra installs spaCy; the language model is a separate download
+    (see [Installation](installation.md)). Without it, discovery stays on
+    the regex tier above rather than failing.
 
 ### Applying Zones
 

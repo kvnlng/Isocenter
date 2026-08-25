@@ -34,7 +34,19 @@ setup(
     ],
     keywords=["dicom", "de-identification", "anonymization", "phi", "wfdb",
               "ecg", "medical-imaging", "research"],
-    packages=find_packages(),
+    # `include`, not a bare find_packages(): scripts/ carries an
+    # __init__.py so the benchmarks can import it, and a bare call swept
+    # it into the wheel. Installing Isocenter then dropped a top-level
+    # module called `scripts` into site-packages -- a name we do not own
+    # and half of PyPI also wants.
+    packages=find_packages(include=["isocenter", "isocenter.*"]),
+    # Without this the JSON under isocenter/resources/ ships in neither the
+    # wheel nor the sdist, and nothing fails loudly: every loader guards
+    # on os.path.exists, so `ConfigLoader.load_phi_config()` returns {}
+    # and a pip-installed Isocenter audits against an empty PHI tag list and
+    # reports clean. The .yaml glob covers the ctp_rules.yaml that
+    # session.py prefers over the .json when present.
+    package_data={"isocenter": ["resources/*.json", "resources/*.yaml"]},
     # Single source of truth for dependencies. There is deliberately no
     # requirements.txt: two lists drift, and `pip install isocenter` only ever
     # reads this one -- python-dotenv once lived only in requirements.txt
@@ -74,9 +86,16 @@ setup(
         ],
         # Optional: ZoneDiscoverer imports spacy lazily and falls back to
         # regex when it is unavailable.
+        # The en_core_web_sm model is deliberately NOT listed here. It
+        # has no PyPI release, so pinning it needs a direct URL
+        # (`en_core_web_sm @ https://github.com/explosion/...whl`), and
+        # PyPI refuses any distribution whose metadata contains one --
+        # `twine upload` fails outright with "Can't have direct
+        # dependency". ZoneDiscoverer falls back to regex when the model
+        # is absent, so the extra is still useful without it; install the
+        # model with `python -m spacy download en_core_web_sm`.
         "nlp": [
-            "spacy>=3.7.0",
-            "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl"
+            "spacy>=3.7.0"
         ],
         "tests": [
             "pytest>=7.0.0",

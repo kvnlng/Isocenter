@@ -1,0 +1,19 @@
+# What the sdist carries beyond the package itself.
+#
+# setuptools already picks up README.md, LICENSE and every *.py it finds,
+# which is exactly the trap: it swept in 106 test modules while leaving
+# out conftest.py, tests/fixtures/ and pytest.ini, so `pytest` inside an
+# unpacked sdist died at collection. Ship the suite whole.
+include pytest.ini
+graft tests
+
+# isocenter/resources/*.json reaches the sdist through package_data in
+# setup.py, not from here -- one declaration serves the wheel and the
+# sdist, and two would drift.
+
+# Build residue and test artefacts. Tests write *.db / *_pixels.bin into
+# whatever directory they run from; none of it belongs in a release.
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.db *.db-shm *.db-wal *.bin *.log
+prune tests/.pytest_cache
