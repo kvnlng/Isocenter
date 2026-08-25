@@ -1400,7 +1400,7 @@ files if you also export <code>format="dicom"</code> into the same folder:</p>
 </tr>
 <tr>
 <td>signal description</td>
-<td>Channel Source Sequence <code>(003A,0208)</code>, falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token (see "What is and isn't de-identified" below)</td>
+<td>Channel Source Sequence <code>(003A,0208)</code>, falling back to Channel Label <code>(003A,0203)</code> when no coded source is present <em>and</em> the label is a recognisable signal name -- otherwise a positional <code>ch&lt;N&gt;</code> token, <code>N</code> being the <strong>zero-based</strong> channel index (DICOM ChannelNumber is 1-based) (see "What is and isn't de-identified" below)</td>
 </tr>
 </tbody>
 </table>
@@ -1432,10 +1432,14 @@ default) -- that check is unconditional and is not gated by
   touched.</li>
 <li><strong>The Quick Start above.</strong> <code>create_config()</code> scaffolds a config with
   <code>privacy_profile: basic</code>; <code>load_config()</code> expands that into
-  <code>PRIVACY_PROFILES["basic"]</code> (<code>gantry/profiles.py</code>) -- <strong>34 tags, all
-  34 effective</strong> -- covering patient identity, study/series dates and
+  <code>PRIVACY_PROFILES["basic"]</code> (<code>gantry/profiles.py</code>) -- <strong>34 tags, 33
+  effective</strong> -- covering patient identity, study/series dates and
   times, and institution/physician fields, based on DICOM PS3.15 Annex
   E's Basic Profile. This is what actually runs on the documented path.
+  The 34th, <code>(0070,0006)</code>, is present in the profile but not currently
+  remediated by <code>session.audit()</code>/<code>session.anonymize()</code>; see the
+  Unformatted Text Value entry below for why, and #57 for the tracked
+  engine bug.
   <code>gantry/resources/phi_tags.json</code>, a separate 6-tag file, is <em>not</em>
   reached from this flow: <code>create_config()</code> deliberately drops its
   REMOVE-action tags from the scaffold, on the assumption the Basic
@@ -1465,14 +1469,28 @@ configurations above you're in:</p>
   is a recognisable signal name, checked against the module-level
   <code>KNOWN_LEAD_NAMES</code> set in <code>gantry/waveform.py</code>. Anything else --
   including genuinely operator-typed text -- is replaced with a
-  positional <code>ch&lt;N&gt;</code> token instead of being written verbatim.</li>
+  positional <code>ch&lt;N&gt;</code> token instead of being written verbatim. <code>N</code> is
+  the <strong>zero-based</strong> channel index, not DICOM's 1-based ChannelNumber
+  -- <code>ch1</code> is the <em>second</em> channel.</li>
 <li><strong>Unformatted Text Value <code>(0070,0006)</code></strong> -- is omitted from the
   <code>note</code> field of <code>annotations.json</code> by default. It routinely holds
   free-text clinical commentary, so exporting it is opt-in: pass
   <code>session.export(folder, format="wfdb", include_annotation_text=True)</code>
-  to restore it. <code>(0070,0006)</code> was also added to the Basic profile, so
-  a configured session that opts in still receives the profile's
-  remediated (emptied) value rather than raw text.</li>
+  to restore it. That default-off behaviour is what actually protects
+  this field today. <code>(0070,0006)</code> was also added to the Basic profile,
+  but that profile entry is currently <strong>inert</strong> for this tag: it lives
+  inside each Waveform Annotation Sequence item, not at the top level of
+  the instance, and <code>PhiInspector._scan_instance</code>
+  (<code>gantry/privacy.py</code>) only reaches nested-sequence content through the
+  instance's <code>text_index</code> -- which the multiprocess worker clone
+  <code>session.audit()</code>/<code>session.anonymize()</code> actually scan against
+  (<code>_make_lightweight_copy</code>, <code>gantry/session.py</code>) does not carry; only
+  flat <code>attributes</code> survive that copy. So a configured session that
+  passes <code>include_annotation_text=True</code> currently gets <code>(0070,0006)</code>'s
+  <strong>raw</strong> value, not the profile's remediated (emptied) one. This is a
+  known engine bug, tracked separately as #57 -- it affects every
+  sequence-nested tag, not just this one -- and is out of scope for this
+  fix round.</li>
 </ul>
 <p>Both are safe by default: no PHI tag configuration is required to get
 this behaviour, and it applies even to a bare <code>Session()</code>.</p>
@@ -1493,17 +1511,53 @@ mechanism. This is deliberate, not a gap: time-of-day alone is not a
 Safe Harbor identifier. If you export without running <code>anonymize()</code> at
 all, the date is real too -- exactly like every other un-remediated
 field in Gantry.</p>
+<p>On the documented Quick Start path, both instance-level timestamp tags
+above are in the Basic profile (<code>(0008,002A)</code> and <code>(0008,0030)</code>), so a
+configured, anonymized session has no real time-of-day left to write.
+Gantry does <strong>not</strong> substitute a fake <code>00:00:00</code> in that case: when
+<code>study.study_date</code> is real but no real time-of-day is available, the
+record line's start time/date fields are omitted entirely. This is a
+deliberate limitation, not an oversight -- <code>header(5)</code> does not support
+a date-only start time (PhysioNet's own spec, and <code>wfdb-python</code>'s
+reference reader/writer, both treat <code>base_date</code> as depending on
+<code>base_time</code> being present), so the record line's choice is between
+omitting both fields and fabricating a time; Gantry omits both.</p>
+<p>That real, de-identified date is not simply lost, though: <code>SHIFT_DATE</code>
+produces genuinely useful information (e.g. for ordering records within
+a cohort), and dropping it outright would be a research-utility
+regression on top of the privacy fix. When this happens, the shifted
+date is written instead as a single <code># de-identified start date:
+DD/MM/YYYY</code> comment line -- the one deliberate exception to "no comment
+lines" below -- using the same <code>DD/MM/YYYY</code> format the record line's
+own date field would have used, so the two can never disagree. A
+consumer reading the record line alone sees no timing at all, which is
+correct (there is none to report); a consumer that also reads comments
+gets the real de-identified date, clearly labeled and nowhere near a
+field a parser would mistake for a precise timestamp.</p>
 <p>Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:</p>
 <ul>
-<li><strong>No <code>#</code> comment lines are ever written.</strong> WFDB readers render
-  header comments verbatim, and MIT-BIH convention places age, sex,
-  and diagnosis there -- Gantry never emits this line at all.</li>
+<li><strong>No <code>#</code> comment lines are ever written, with one deliberate
+  exception.</strong> WFDB readers render header comments verbatim, and
+  MIT-BIH convention places age, sex, and diagnosis there -- Gantry
+  never emits one for content. The sole exception is the de-identified
+  start date described above, which is not operator-typed or
+  attacker-controlled text: it is a computed <code>DD/MM/YYYY</code> string
+  written through the exact same sanitizer (<code>_sanitize_description</code>)
+  every other field on the line gets, not a second, separately
+  maintained comment-writing path.</li>
 <li><strong>Record names derive from anonymized identifiers only</strong> (the
   patient pseudonym, series number, instance number) -- never from
   raw patient identifiers, and lead identity in the header prefers the
   coded channel source over the free-text label wherever a coded
-  source exists.</li>
+  source exists. That preference is a likelihood argument, not a
+  filter: a conformant coded source is far less likely to carry
+  operator-typed text than a free-text label, but the coded value is
+  <strong>not</strong> run through the lead-name allowlist or any content check --
+  a non-conformant source can still put arbitrary text there. Both the
+  <code>.hea</code> writer and the Murmur <code>annotations.json</code> bridge strip
+  line-break characters out of it regardless, so it can't forge a
+  <code>.hea</code> comment line, but the text itself is trusted, not filtered.</li>
 </ul>
 <h2 id="limitations">Limitations</h2>
 <p>Format 16 only. The exporter also does not support: multi-rate
