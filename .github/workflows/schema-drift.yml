@@ -19,7 +19,7 @@ jobs:
     # and left the ::warning:: annotation as the only signal, easy to
     # miss on an unattended scheduled run.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compare pinned schema against the published one
         run: |
