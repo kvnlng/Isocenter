@@ -645,7 +645,8 @@ def test_resaving_a_hydrated_instance_does_not_erase_the_blob_hash(tmp_path):
         # pixels alone. Without this the instance is clean and save_all
         # skips it entirely, so the test would pass vacuously.
         inst2.set_attr("0010,0010", "ANON^PATIENT")
-        assert inst2._dirty, "setup: instance must be dirty to be re-saved"
+        assert inst2.has_unsaved_changes, (
+            "setup: instance must have unsaved changes to be re-saved")
 
         s2.save_all([pat2])
 

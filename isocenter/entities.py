@@ -22,12 +22,78 @@ class DicomSequence:
 
 
 @dataclass(slots=True)
-class DicomItem:
+class TrackedEntity:
+    """Tracks whether an entity holds changes the session store does not have.
+
+    This is persistence bookkeeping and nothing else. It says whether the
+    object in memory has been written to the session store -- not whether
+    it still carries identifiers, which is a separate question with its
+    own vocabulary. Both were called "dirty" once, which made them
+    indistinguishable in the code and in the output users read.
+
+    State is read through `has_unsaved_changes` and moved through
+    `mark_modified()` and `mark_persisted()`. There is deliberately no
+    setter: an entity can be told what happened to it, but not told what
+    it is. "Declare this saved" is precisely the operation that let a
+    rolled-back save leave instances claiming they had been written.
+
+    The revision counter is what makes a concurrent edit survive. A save
+    records the revision it actually wrote; an edit arriving while that
+    save was in flight leaves the entity ahead of it, so the entity stays
+    unsaved rather than being written off by a commit that never
+    contained it.
+    """
+
+    # Starts at 1 against 0 persisted: anything built in memory is
+    # unwritten until a store says otherwise.
+    _revision: int = field(init=False, default=1)
+    _persisted_revision: int = field(init=False, default=0)
+
+    @property
+    def has_unsaved_changes(self) -> bool:
+        """Whether this entity holds changes the store does not have."""
+        return self._revision > self._persisted_revision
+
+    def mark_modified(self):
+        """Records that this entity changed and needs writing again."""
+        self._revision += 1
+
+    def mark_persisted(self, revision: Optional[int] = None):
+        """Records that a revision of this entity reached the store.
+
+        Args:
+            revision (int, optional): The revision that was written.
+                Defaults to the current one, which is only correct when
+                nothing can have changed since the write. A save that
+                takes time should capture the revision before it starts
+                and pass that here.
+        """
+        if revision is None:
+            revision = self._revision
+        # Never move backwards: an out-of-order or retried save must not
+        # un-persist a revision that already reached the store.
+        self._persisted_revision = max(self._persisted_revision, revision)
+
+    def mark_subtree_persisted(self):
+        """Marks this entity and everything beneath it as stored.
+
+        Used when a whole graph is hydrated from the store, where the
+        claim is true of every node at once. `mark_persisted()` speaks for
+        one entity only -- committing a single row must not vouch for its
+        unsaved siblings.
+        """
+        self._persisted_revision = self._revision
+
+
+@dataclass(slots=True)
+class DicomItem(TrackedEntity):
     """
     Base class for any entity that holds DICOM attributes and sequences.
 
     This class provides a dictionary-like interface for managing DICOM attributes
-    and handles hierarchical dirty tracking for persistence.
+    Persistence state comes from TrackedEntity. Items nested in
+    sequences are not stored separately, so the subtree form below reaches
+    them.
 
     Attributes:
         attributes (Dict[str, Any]): A dictionary mapping generic DICOM tags to values.
@@ -37,39 +103,9 @@ class DicomItem:
     attributes: Dict[str, Any] = field(init=False)
     sequences: Dict[str, DicomSequence] = field(init=False)
 
-    # Versioning for robust persistence
-    _mod_count: int = field(init=False, default=0)
-    _saved_mod_count: int = field(init=False, default=-1)
-
     def __post_init__(self):
         self.attributes = {}
         self.sequences = {}
-        # Initial state is dirty (1 > 0)
-        self._mod_count = 1
-        self._saved_mod_count = 0
-
-    @property
-    def _dirty(self) -> bool:
-        return self._mod_count > self._saved_mod_count
-
-    @_dirty.setter
-    def _dirty(self, value: bool):
-        # Legacy support: setting True increments version
-        if value:
-            self._mod_count += 1
-        else:
-            # Unsafe clear: assumes current state is saved
-            self._saved_mod_count = self._mod_count
-
-    def mark_saved(self, version_saved: int):
-        """
-        Marks specific version as saved. Robust against concurrent edits.
-
-        Args:
-            version_saved (int): The modification count that was successfully persisted.
-        """
-        if version_saved > self._saved_mod_count:
-            self._saved_mod_count = version_saved
 
     def set_attr(self, tag: str, value: Any):
         """
@@ -80,7 +116,7 @@ class DicomItem:
             value (Any): The value to set.
         """
         self.attributes[tag] = value
-        self._mod_count += 1
+        self.mark_modified()
 
     def add_sequence_item(self, tag: str, item: 'DicomItem'):
         """
@@ -93,20 +129,14 @@ class DicomItem:
         if tag not in self.sequences:
             self.sequences[tag] = DicomSequence(tag=tag)
         self.sequences[tag].items.append(item)
-        self._mod_count += 1
+        self.mark_modified()
 
-    def mark_clean(self):
-        """Mark the entity and all its items as clean by syncing modification counts.
-
-        This is a legacy method that forces the entity to be marked as clean by
-        updating the saved modification count to match the current modification count.
-        Also recursively marks all items in all sequences as clean.
-        """
-        # Legacy: force clean
-        self._saved_mod_count = self._mod_count
+    def mark_subtree_persisted(self):
+        """Marks this item and every item nested in its sequences as stored."""
+        self._persisted_revision = self._revision
         for seq in self.sequences.values():
             for item in seq.items:
-                item.mark_clean()
+                item.mark_subtree_persisted()
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,10 +200,6 @@ class Instance(DicomItem):
         # Inlined from DicomItem to avoid super() mismatch issues with slots/reloads
         self.attributes = {}
         self.sequences = {}
-
-        # Versioning
-        self._mod_count = 1
-        self._saved_mod_count = 0
 
         self.set_attr("0008,0018", self.sop_instance_uid)
         self.set_attr("0008,0016", self.sop_class_uid)
@@ -454,11 +480,11 @@ class Instance(DicomItem):
         bits = array.itemsize * 8
         self.set_attr("0028,0100", bits)
 
-        self._mod_count += 1
+        self.mark_modified()
 
 
 @dataclass(slots=True)
-class Series:
+class Series(TrackedEntity):
     """
     Groups Instances by Series Instance UID.
     Typically represents a single scan or reconstruction.
@@ -475,22 +501,16 @@ class Series:
     series_number: int
     equipment: Optional[Equipment] = None
     instances: List[Instance] = field(default_factory=list)
-    _dirty: bool = field(default=True, init=False)
 
-    def __post_init__(self):
-        self._dirty = True
-
-    def mark_clean(self):
-        """
-        Marks the current object and all its instances as clean by setting their '_dirty' attribute to False.
-        """
-        self._dirty = False
-        for i in self.instances:
-            i.mark_clean()
+    def mark_subtree_persisted(self):
+        """Marks this series and every instance beneath it as stored."""
+        self._persisted_revision = self._revision
+        for instance in self.instances:
+            instance.mark_subtree_persisted()
 
 
 @dataclass(slots=True)
-class Study:
+class Study(TrackedEntity):
     """
     Groups Series by Study Instance UID.
     Represents a single patient visit or examination.
@@ -507,22 +527,16 @@ class Study:
     series: List[Series] = field(default_factory=list)
     date_shifted: bool = False
     study_time: Optional[str] = None
-    _dirty: bool = field(default=True, init=False)
 
-    def __post_init__(self):
-        self._dirty = True
-
-    def mark_clean(self):
-        """
-        Marks the current object and all associated series as clean by setting their '_dirty' attribute to False.
-        """
-        self._dirty = False
-        for s in self.series:
-            s.mark_clean()
+    def mark_subtree_persisted(self):
+        """Marks this study and every series beneath it as stored."""
+        self._persisted_revision = self._revision
+        for series in self.series:
+            series.mark_subtree_persisted()
 
 
 @dataclass(slots=True)
-class Patient:
+class Patient(TrackedEntity):
     """
     Root of the object hierarchy. Groups Studies by Patient ID.
 
@@ -534,18 +548,9 @@ class Patient:
     patient_id: str
     patient_name: str
     studies: List[Study] = field(default_factory=list)
-    _dirty: bool = field(default=True, init=False)
 
-    def __post_init__(self):
-        self._dirty = True
-
-    def mark_clean(self):
-        """
-        Marks the current entity and all associated studies as clean.
-
-        Resets the '_dirty' flag to False for this entity and recursively calls
-        'mark_clean' on all studies to ensure their '_dirty' flags are also reset.
-        """
-        self._dirty = False
-        for s in self.studies:
-            s.mark_clean()
+    def mark_subtree_persisted(self):
+        """Marks this patient and every study beneath it as stored."""
+        self._persisted_revision = self._revision
+        for study in self.studies:
+            study.mark_subtree_persisted()

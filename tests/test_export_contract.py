@@ -83,10 +83,10 @@ def test_the_safety_scan_names_what_it_found_without_borrowing_the_word_dirty(
         session_with_phi, tmp_path, capsys):
     """The report says identifiers, not "dirty".
 
-    "Dirty" already means "has unsaved changes" on every entity in the
-    session -- `_dirty` is `_mod_count > _saved_mod_count`. Using the
-    same word for "still carries PHI" in user-facing output makes the
-    two indistinguishable to a reader who has seen either one.
+    Persistence state already answers a different question about every
+    entity in the session: `has_unsaved_changes`. Using "dirty" for
+    "still carries PHI" in user-facing output made the two
+    indistinguishable to a reader who had seen either one.
     """
     session_with_phi.export(str(tmp_path / "out"), check_burned_in=True)
 

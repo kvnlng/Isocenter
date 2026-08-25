@@ -25,27 +25,27 @@ def create_mock_patient(pid="P1", study_uid="S1", series_uid="SE1", count=1):
         se.instances.append(inst)
     return p
 
-def test_dirty_tracking_initialization():
+def test_unsaved_tracking_initialization():
     """Verify objects start dirty (if new) or assume handling."""
     inst = Instance("1.2.3", "1.2.3", 1)
     # New objects should default to dirty so they get saved? Or default clean?
     # Logic: If I create it in memory, it isn't in DB, so it MUST be dirty/new.
     # We'll assert the behavior we implement.
-    assert inst._dirty is True
+    assert inst.has_unsaved_changes is True
 
-def test_dirty_tracking_attribute_change():
+def test_unsaved_tracking_attribute_change():
     inst = Instance("1.2.3", "1.2.3", 1)
-    inst._dirty = False # Simulate saved state
+    inst.mark_persisted()  # Simulate saved state
 
     inst.set_attr("0010,0010", "New Name")
-    assert inst._dirty is True
+    assert inst.has_unsaved_changes is True
 
-def test_dirty_tracking_pixel_change():
+def test_unsaved_tracking_pixel_change():
     inst = Instance("1.2.3", "1.2.3", 1)
-    inst._dirty = False
+    inst.mark_persisted()
 
     inst.set_pixel_data(np.zeros((10,10)))
-    assert inst._dirty is True
+    assert inst.has_unsaved_changes is True
 
 def test_incremental_insert(store):
     p = create_mock_patient("P_INC", count=5)
@@ -58,7 +58,7 @@ def test_incremental_insert(store):
 
     # Verify Cleanup (objects in memory should mark clean?)
     # ideally save_all marks them clean
-    assert p.studies[0].series[0].instances[0]._dirty is False
+    assert p.studies[0].series[0].instances[0].has_unsaved_changes is False
 
 def test_incremental_no_op(store):
     p = create_mock_patient("P_NOOP", count=5)
@@ -77,7 +77,7 @@ def test_incremental_update(store):
 
     inst = p.studies[0].series[0].instances[0]
     inst.set_attr("0010,0010", "Changed Name")
-    assert inst._dirty is True
+    assert inst.has_unsaved_changes is True
 
     store.save_all([p])
 
@@ -85,7 +85,7 @@ def test_incremental_update(store):
     patients_loaded = store.load_all()
     loaded_inst = patients_loaded[0].studies[0].series[0].instances[0]
     assert loaded_inst.attributes["0010,0010"] == "Changed Name"
-    assert inst._dirty is False
+    assert inst.has_unsaved_changes is False
 
 def test_incremental_delete(store):
     p = create_mock_patient("P_DEL", count=3)

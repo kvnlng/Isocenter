@@ -110,7 +110,7 @@ class TestPersistenceConcurrency:
             # Since persistence is decoupled from object identity in memory for this test
             # (we pass object to save_all)
             p_update = Patient("SHARED_P", f"Name_{name_suffix}")
-            p_update._dirty = True
+            p_update.mark_modified()
             store.save_all([p_update])
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
