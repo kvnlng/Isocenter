@@ -56,6 +56,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`redact()` reports what it did, and stops claiming success when it failed.** The whole body was wrapped in `except Exception`, which logged, printed `Execution interrupted`, and returned normally -- and the two lines above it printed `Remember to call .save() to persist.` immediately followed by `Execution Complete. Session saved.`, unconditionally and contradicting each other. Redaction is the step that removes burned-in PHI from pixels, so a run that removed nothing was indistinguishable from one that removed everything, to a caller and to a script. It now returns the number of instances it updated, and re-raises after logging. (#48)
+
+  A shortfall is now reported rather than absorbed: a worker that fails returns `None`, and the result loop skipped falsy mutations without counting them, so a run where two of three images failed to redact looked exactly like a clean one. A malformed `ISOCENTER_MAX_WORKERS` is no longer fatal either -- its `ValueError` was raised inside that same handler, so a typo in a shell profile turned redaction into a silent no-op that reported success; it now warns and uses the default.
+
+  The `DEBUG:` lines printed once or twice per instance are gone, along with a `try: ... finally: pass`.
+
+- **A threaded redaction would have discarded every result.** Redacting an image gives it a new SOP UID, and the map used to apply results back onto the in-memory instances was keyed on UIDs read after the workers were dispatched. Under process isolation the workers mutate copies, so this happened to work by accident. In threads they share those very objects, so the map would have been keyed on the post-redaction UIDs and every result logged as unmatched and dropped -- a redaction that ran, reported no error, and changed nothing in the session. That is not a hypothetical configuration: `run_parallel` chooses threads on a free-threaded build, and on any build when `ISOCENTER_FORCE_THREADS=1` is set. The map is now taken before any worker starts.
+
+
 - **`isocenter.__version__` could report a version the source tree was not.** It came from `importlib.metadata.version("isocenter")`, which answers "what is installed under this name" -- a different question, and in an editable checkout that had drifted from `setup.py`, a different answer. It also fell back to `0.0.0` when the package was not installed at all. That string is stamped into WFDB `annotations.json` as producer provenance, so a wrong version became a wrong claim inside a delivered dataset. (#17)
 - **v0.7.0 was released with no changelog section.** Everything it contained sat under `[Unreleased]`, so the published release had no record of what was in it. The 39 entries present at the `v0.7.0` tag now appear under `[0.7.0] - 2026-08-25`; the rest remain unreleased. The release runbook already listed moving `[Unreleased]` as step 1 -- `tests/test_version_contract.py` now checks it, rather than relying on the step being remembered.
 

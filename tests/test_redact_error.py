@@ -49,17 +49,24 @@ def test_execute_config_crash_repro(tmp_path):
     # Verify pixels changed (simple check)
     assert inst.get_pixel_data()[10,10] == 0
 
-def test_execute_config_session_level_interruption(capsys):
+def test_execute_config_session_level_interruption(caplog):
     """
-    Verifies that DicomSession.execute_config catches the error and reports it.
+    Verifies that a malformed rule stops the redaction rather than being
+    reported as a completed one.
+
+    This test previously asserted the opposite: that redact() printed
+    "Execution interrupted" and returned normally. That was the whole of
+    issue #48 -- redaction is the step that removes burned-in PHI, and a
+    caller could not tell a failed run from a clean one. The error now
+    reaches the caller, and the log still records it.
     """
     session = DicomSession(persistence_file=":memory:")
     session.configuration.rules = [["bad", "rule"]]
 
-    session.redact()
+    with pytest.raises(AttributeError, match="'list' object has no attribute 'get'"):
+        session.redact()
 
-    captured = capsys.readouterr()
-    assert "Execution interrupted: 'list' object has no attribute 'get'" in captured.out
+    assert any("Redaction failed" in record.message for record in caplog.records)
 
 def test_burned_in_safety_check(capsys):
     """
