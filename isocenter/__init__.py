@@ -49,15 +49,11 @@ try:
 except ImportError:
     pass
 
-try:
-    from importlib.metadata import version, PackageNotFoundError
-except ImportError:
-    # Backport for older Pythons if needed, though Isocenter requires 3.9+ where this is standard
-    from importlib_metadata import version, PackageNotFoundError
-
-try:
-    __version__ = version("isocenter")
-except PackageNotFoundError:
-    # Package is not installed
-    __version__ = "0.0.0"
+# Declared in _version.py, which setup.py also reads. Deriving it from
+# importlib.metadata instead asks "what is installed under this name",
+# which is a different question -- and in an editable checkout that has
+# drifted from setup.py, a different answer. The version is stamped into
+# WFDB annotations.json as producer provenance, so a wrong one becomes a
+# wrong claim inside a delivered dataset.
+from ._version import __version__
 __all__ = ["Session", "Builder", "Equipment"]
