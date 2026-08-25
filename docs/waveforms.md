@@ -166,19 +166,38 @@ above are in the Basic profile (`(0008,002A)` and `(0008,0030)`), so a
 configured, anonymized session has no real time-of-day left to write.
 Gantry does **not** substitute a fake `00:00:00` in that case: when
 `study.study_date` is real but no real time-of-day is available, the
-record's start time/date fields are omitted from the header entirely.
-This is a deliberate limitation, not an oversight -- `header(5)` does
-not support a date-only start time (PhysioNet's own spec, and
-`wfdb-python`'s reference reader/writer, both treat `base_date` as
-depending on `base_time` being present), so the choice is between
+record line's start time/date fields are omitted entirely. This is a
+deliberate limitation, not an oversight -- `header(5)` does not support
+a date-only start time (PhysioNet's own spec, and `wfdb-python`'s
+reference reader/writer, both treat `base_date` as depending on
+`base_time` being present), so the record line's choice is between
 omitting both fields and fabricating a time; Gantry omits both.
+
+That real, de-identified date is not simply lost, though: `SHIFT_DATE`
+produces genuinely useful information (e.g. for ordering records within
+a cohort), and dropping it outright would be a research-utility
+regression on top of the privacy fix. When this happens, the shifted
+date is written instead as a single `# de-identified start date:
+DD/MM/YYYY` comment line -- the one deliberate exception to "no comment
+lines" below -- using the same `DD/MM/YYYY` format the record line's
+own date field would have used, so the two can never disagree. A
+consumer reading the record line alone sees no timing at all, which is
+correct (there is none to report); a consumer that also reads comments
+gets the real de-identified date, clearly labeled and nowhere near a
+field a parser would mistake for a precise timestamp.
 
 Beyond content, the export path itself avoids two structural PHI
 paths a WFDB writer could otherwise open:
 
-- **No `#` comment lines are ever written.** WFDB readers render
-  header comments verbatim, and MIT-BIH convention places age, sex,
-  and diagnosis there -- Gantry never emits this line at all.
+- **No `#` comment lines are ever written, with one deliberate
+  exception.** WFDB readers render header comments verbatim, and
+  MIT-BIH convention places age, sex, and diagnosis there -- Gantry
+  never emits one for content. The sole exception is the de-identified
+  start date described above, which is not operator-typed or
+  attacker-controlled text: it is a computed `DD/MM/YYYY` string
+  written through the exact same sanitizer (`_sanitize_description`)
+  every other field on the line gets, not a second, separately
+  maintained comment-writing path.
 - **Record names derive from anonymized identifiers only** (the
   patient pseudonym, series number, instance number) -- never from
   raw patient identifiers, and lead identity in the header prefers the

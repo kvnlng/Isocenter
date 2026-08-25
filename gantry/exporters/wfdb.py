@@ -132,17 +132,25 @@ def format_header(record_name: str,
                   waveform: Waveform,
                   samples: np.ndarray,
                   dat_filename: str,
-                  start_datetime=None) -> str:
+                  start_datetime=None,
+                  deidentified_date: Optional[str] = None) -> str:
     """Render a WFDB `.hea` file.
 
-    Emits no `#` comment lines. MIT-BIH convention puts age, sex, and
-    diagnosis there, and readers render comments verbatim, so a comment
-    line is a PHI escape route. This holds even when the channel
+    Emits no `#` comment lines, with exactly one deliberate exception:
+    `deidentified_date`. MIT-BIH convention puts age, sex, and diagnosis
+    in comments, and readers render comments verbatim, so a comment line
+    is normally a PHI escape route -- this holds even when the channel
     description (Channel Label/Channel Source, raw DICOM SH text) itself
     contains an embedded CR/LF: `_sanitize_description` collapses any
     line-breaking character to a space before it reaches the signal
     line, so it cannot manufacture a second physical line that a
-    conformant reader would surface as a comment.
+    conformant reader would surface as a comment. `deidentified_date` is
+    different in kind: it is not operator-typed or attacker-controlled
+    text, it is a `DD/MM/YYYY` string the caller has already computed
+    (the same format used for the record line's own date field), and it
+    is written through this function's own comment-writing path -- not a
+    second, separately-sanitized one -- specifically so this narrow
+    exception cannot become a general-purpose injection route later.
 
     Args:
         record_name (str): Record name (must match the .hea basename).
@@ -151,6 +159,19 @@ def format_header(record_name: str,
         dat_filename (str): Signal file basename referenced by each line.
         start_datetime (datetime, optional): Already date-shifted start
             time. Omitted from the record line when None.
+        deidentified_date (str, optional): A real (possibly shifted)
+            `DD/MM/YYYY` start date to preserve as a `#` comment when
+            `start_datetime` is None because no real time-of-day survived
+            remediation -- e.g. Acquisition DateTime and Study Time both
+            removed by the Basic profile. Writing a fabricated
+            `00:00:00` into the record line to keep the date would be
+            worse than omitting it (see `WfdbExporter._start_datetime`);
+            losing the date outright would be a research-utility
+            regression, since `SHIFT_DATE` produces a genuine
+            de-identified date. This is the compromise: the date
+            survives, but only somewhere a consumer would not mistake it
+            for a precise timestamp. Omitted (no comment line at all)
+            when None or empty -- never an empty/placeholder comment.
 
     Returns:
         str: Complete header text, newline-terminated.
@@ -169,6 +190,16 @@ def format_header(record_name: str,
         record_fields.append(start_datetime.strftime("%d/%m/%Y"))
 
     lines = [" ".join(record_fields)]
+
+    if deidentified_date:
+        # Same sanitizer the signal-line description gets -- not a new,
+        # separately-maintained comment-writing path. `deidentified_date`
+        # is a computed DD/MM/YYYY string, not attacker input, but a
+        # second unsanitized comment path is exactly how injection bugs
+        # reappear.
+        comment_text = _sanitize_description(
+            f"de-identified start date: {deidentified_date}")
+        lines.append(f"# {comment_text}")
 
     for idx in range(n_channels):
         if waveform.channels:
@@ -329,9 +360,11 @@ class WfdbExporter(Exporter):
         with open(dat_path, "wb") as f:
             f.write(np.ascontiguousarray(samples, dtype="<i2").tobytes())
 
+        start_datetime, deidentified_date = self._start_datetime(instance, study)
         header = format_header(
             record_name, waveform, samples, dat_filename,
-            start_datetime=self._start_datetime(instance, study))
+            start_datetime=start_datetime,
+            deidentified_date=deidentified_date)
 
         hea_path = os.path.join(out_dir, f"{record_name}.hea")
         with open(hea_path, "w", encoding="utf-8") as f:
@@ -479,7 +512,30 @@ class WfdbExporter(Exporter):
         misparse are (a) omit both fields, or (b) leak the unshifted
         instance date via the fallback below. This picks (a).
 
-        Returns None when no usable value exists anywhere.
+        But (a) alone would silently drop a genuine de-identified date:
+        `study.study_date` after SHIFT_DATE is real, useful information
+        (e.g. for ordering records within a cohort), not PHI-adjacent
+        noise -- unlike the fabricated time it would otherwise have been
+        paired with. So this case is not "return nothing"; it is "return
+        no record-line datetime, but hand the caller the shifted date
+        separately" so `format_header` can preserve it as a `#` comment
+        instead of a precise (and precisely wrong) timestamp.
+
+        Returns:
+            tuple[Optional[datetime], Optional[str]]:
+            `(start_datetime, deidentified_date_comment)`.
+            `start_datetime` is exactly what this function used to
+            return alone: the record-line value, or None. When it is
+            None specifically because a real study date exists but no
+            real time-of-day does, `deidentified_date_comment` carries
+            that date as a `DD/MM/YYYY` string (the record line's own
+            date format) for the caller to write as a comment.
+            `deidentified_date_comment` is None in every other case --
+            including when `start_datetime` already carries the date (no
+            need to duplicate it), and when there is no shifted date to
+            report at all (the instance-only fallback below never
+            populates it: that path is real, un-shifted, pre-anonymize
+            timing, not a SHIFT_DATE result worth preserving specially).
         """
         from datetime import datetime
 
@@ -494,15 +550,18 @@ class WfdbExporter(Exporter):
                     shifted_date = None
                 if shifted_date is not None:
                     if time_of_day is not None:
-                        return datetime.combine(shifted_date, time_of_day)
+                        return datetime.combine(shifted_date, time_of_day), None
                     # Real date, no real time: do not fabricate one, and
                     # do not fall through to the instance-only fallback
                     # below -- that would read the instance's real,
                     # un-shifted date and reopen the Safe Harbor leak
                     # this function's docstring above exists to close.
-                    return None
+                    # The date is real de-identified information, so
+                    # hand it back for the caller to preserve as a
+                    # comment rather than dropping it outright.
+                    return None, shifted_date.strftime("%d/%m/%Y")
 
-        return WfdbExporter._instance_only_datetime(instance)
+        return WfdbExporter._instance_only_datetime(instance), None
 
 
 register("wfdb", WfdbExporter)
