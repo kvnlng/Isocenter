@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Trusted Publishing workflow**: `.github/workflows/publish.yml` publishes to PyPI on a GitHub Release via OIDC, so no API token exists in repository secrets or on any developer machine. It refuses to publish a release whose tag disagrees with `setup.py`'s version, and installs the built wheel into a clean environment outside the source tree to prove it carries its own `resources/*.json` before anything reaches an index.
 - **Developer Guide**: Added `docs/developer_guide.md` covering linting and testing standards.
 - **Advanced Discovery**: Added `DiscoveryResult.to_dataframe()` and `get_density_matrix()` for data science integration.
 - **Iterability**: Made `DiscoveryResult` iterable, yielding `(tag_string, count)` tuples.
