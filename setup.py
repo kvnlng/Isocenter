@@ -100,7 +100,18 @@ setup(
         "tests": [
             "pytest>=7.0.0",
             "wfdb>=4.1.0",
-            "jsonschema>=4.0.0"
+            "jsonschema>=4.0.0",
+            # tests/test_packaging_contract.py builds a real wheel and sdist
+            # and inspects them, which needs a build backend in the *test*
+            # environment -- not just in pip's isolated build env. Python
+            # 3.12 dropped setuptools from new venvs, so `pip install -e
+            # ".[tests]"` leaves none behind and those tests fail with
+            # ModuleNotFoundError. Invisible locally to anyone whose venv
+            # predates 3.12 or who installed setuptools by hand; CI, which
+            # builds its venv fresh every run, fails every time. 70.1 is the
+            # first release with bdist_wheel built in, so no separate
+            # `wheel` dependency is needed.
+            "setuptools>=70.1"
         ]
     }
 )

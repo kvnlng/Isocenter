@@ -11,6 +11,7 @@ unguarded, so CI passed (it installed both files) and a real install
 would have failed at import. There is now one dependency list.
 """
 import ast
+import importlib.util
 import pathlib
 import subprocess
 import sys
@@ -331,6 +332,13 @@ def built(tmp_path_factory):
     distutils applies an option to the command it follows, so a single
     trailing `--dist-dir` would send the sdist to the repo's own dist/.
     """
+    if importlib.util.find_spec("setuptools") is None:
+        pytest.fail(
+            "setuptools is not installed in this environment, so the "
+            "distributions cannot be built and this module's guarantees "
+            "cannot be checked. It is declared in the `tests` extra: "
+            'install with `pip install -e ".[tests]"`.')
+
     out = tmp_path_factory.mktemp("dist")
     result = subprocess.run(
         [sys.executable, "setup.py", "-q",
