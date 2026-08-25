@@ -1,0 +1,46 @@
+# Citation metadata for Isocenter.
+# GitHub renders a "Cite this repository" button from this file.
+# Schema reference: https://citation-file-format.github.io
+#
+# Isocenter is the upstream half of a pair: it builds and de-identifies
+# the corpus that Murmur Studio (10.5281/zenodo.21077528) reviews. Work
+# that used both should cite both -- the de-identification tooling is a
+# methods citation, not a courtesy.
+#
+# There is no `doi:` field yet. It gets added, carrying the CONCEPT DOI
+# (the parent record that always resolves to the latest version), after
+# the first Zenodo deposit. Per-version DOIs live alongside their release
+# on Zenodo. Do not guess it: a DOI in this file that does not resolve is
+# worse than none, because it is what tooling copies into bibliographies.
+
+cff-version: 1.2.0
+message: "If you use Isocenter in your research, please cite it as below."
+title: "Isocenter"
+abstract: >-
+  A Python library for indexing, de-identifying, and exporting DICOM
+  datasets at cohort scale. Builds a SQLite metadata index and a binary
+  pixel/waveform sidecar over a read-only source tree, applies DICOM
+  PS3.15 de-identification profiles and machine-specific pixel redaction
+  in memory, and writes clean copies to a new directory. Exports DICOM or
+  PhysioNet WFDB, including a waveform annotation bridge to Murmur
+  Studio. Source data is never modified.
+type: software
+license: AGPL-3.0-or-later
+repository-code: "https://github.com/kvnlng/Isocenter"
+url: "https://kvnlng.github.io/Isocenter/"
+keywords:
+  - DICOM
+  - de-identification
+  - anonymization
+  - PHI
+  - HIPAA
+  - WFDB
+  - ECG
+  - medical-imaging
+  - research-software
+authors:
+  - family-names: Long
+    given-names: Kevin
+    orcid: "https://orcid.org/0000-0001-8881-2481"
+version: 0.7.0
+date-released: 2026-08-25
