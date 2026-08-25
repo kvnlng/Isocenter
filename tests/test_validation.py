@@ -1,5 +1,5 @@
 from pydicom.dataset import Dataset
-from gantry.validation import IODValidator
+from isocenter.validation import IODValidator
 
 
 def test_validator_valid_ct():

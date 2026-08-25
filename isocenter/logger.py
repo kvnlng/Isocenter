@@ -1,5 +1,5 @@
 """
-Logging configuration and helpers for the Gantry application.
+Logging configuration and helpers for the Isocenter application.
 """
 import logging
 import sys
@@ -16,15 +16,15 @@ def configure_logger(log_file=None):
     2. Console Handler: Captures WARNING+ logs only (to keep CLI output/tqdm clean).
 
     Args:
-        log_file (str, optional): Path to the log file. Defaults to env `GANTRY_LOG_FILE` or `gantry.log`.
+        log_file (str, optional): Path to the log file. Defaults to env `ISOCENTER_LOG_FILE` or `isocenter.log`.
 
     Returns:
         logging.Logger: The configured logger instance.
     """
     if log_file is None:
-        log_file = os.getenv("GANTRY_LOG_FILE", "gantry.log")
+        log_file = os.getenv("ISOCENTER_LOG_FILE", "isocenter.log")
 
-    logger = logging.getLogger("gantry")
+    logger = logging.getLogger("isocenter")
 
     # helper for default level
     log_level_map = {
@@ -34,7 +34,7 @@ def configure_logger(log_file=None):
         "ERROR": logging.ERROR,
         "CRITICAL": logging.CRITICAL
     }
-    default_level = log_level_map.get(os.getenv("GANTRY_LOG_LEVEL", "DEBUG").upper(), logging.DEBUG)
+    default_level = log_level_map.get(os.getenv("ISOCENTER_LOG_LEVEL", "DEBUG").upper(), logging.DEBUG)
 
     logger.setLevel(default_level)
 
@@ -61,9 +61,9 @@ def configure_logger(log_file=None):
 
 def get_logger():
     """
-    Retrieves the configured 'gantry' logger.
+    Retrieves the configured 'isocenter' logger.
 
     Returns:
-        logging.Logger: The gantry logger.
+        logging.Logger: The isocenter logger.
     """
-    return logging.getLogger("gantry")
+    return logging.getLogger("isocenter")

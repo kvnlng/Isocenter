@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from gantry.waveform import (
+from isocenter.waveform import (
     Waveform,
     WaveformChannel,
     decode_samples,
@@ -74,8 +74,8 @@ def test_nonzero_baseline_maps_to_negated_adc_offset():
 
 
 def test_from_dicom_item_reads_the_generated_fixture():
-    from gantry.io_handlers import populate_attrs
-    from gantry.entities import DicomItem
+    from isocenter.io_handlers import populate_attrs
+    from isocenter.entities import DicomItem
     from scripts.generate_waveform_test_data import build_ecg_dataset, LEADS
 
     ds = build_ecg_dataset(num_samples=200, baseline_uv=0.0)

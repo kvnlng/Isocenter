@@ -4,9 +4,9 @@ Maps Waveform Annotation Sequence (0040,B020) into the
 `<record>.annotations.json` format documented at
 https://kvnlng.github.io/Murmur/annotation-schema
 
-Gantry transcribes; it does not interpret. Coded concepts are passed
+Isocenter transcribes; it does not interpret. Coded concepts are passed
 through scheme-qualified rather than normalized into a clinical
-vocabulary of Gantry's own, so a finding says exactly what the
+vocabulary of Isocenter's own, so a finding says exactly what the
 originating cart said.
 """
 import json
@@ -64,7 +64,7 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
     channel number.
 
     Sanitized with the same `_sanitize_description` the `.hea` signal
-    line gets (`gantry.exporters.wfdb`): `wfdb_description()` returns a
+    line gets (`isocenter.exporters.wfdb`): `wfdb_description()` returns a
     coded Channel Source value verbatim -- it is not filtered by the
     lead-name allowlist, which only guards the free-text Channel Label
     fallback -- so a non-conformant source can still carry an embedded

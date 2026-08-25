@@ -1,7 +1,7 @@
 import os
-from gantry.session import DicomSession
-from gantry.io_handlers import DicomStore
-from gantry.io_handlers import DicomExporter
+from isocenter.session import DicomSession
+from isocenter.io_handlers import DicomStore
+from isocenter.io_handlers import DicomExporter
 
 
 def test_session_persistence(tmp_path, dummy_patient):

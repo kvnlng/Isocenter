@@ -1,8 +1,8 @@
-# Gantry
+# Isocenter
 
 **A Python DICOM Object Model and Redaction Toolkit.**
 
-Gantry provides a high-performance, object-oriented interface for managing, analyzing, and de-identifying DICOM datasets. It is designed for large-scale ingestion, precise pixel redaction, and strict PHI compliance.
+Isocenter provides a high-performance, object-oriented interface for managing, analyzing, and de-identifying DICOM datasets. It is designed for large-scale ingestion, precise pixel redaction, and strict PHI compliance.
 
 ## Features
 
@@ -39,19 +39,19 @@ Test machine:
 
 ## Architecture
 
-Gantry acts as a smart indexing layer over your raw DICOM files. It does *not* modify your original data. Instead, it builds a lightweight metadata index (SQLite) and exposes a clean Python Object Model for manipulation.
+Isocenter acts as a smart indexing layer over your raw DICOM files. It does *not* modify your original data. Instead, it builds a lightweight metadata index (SQLite) and exposes a clean Python Object Model for manipulation.
 
 ### 1. The Session Facade
 
 The `Session` object is your single entry point. It manages:
 
-- **Persistence**: Auto-saving state to `gantry.db`.
+- **Persistence**: Auto-saving state to `isocenter.db`.
 - **Inventory**: Tracking Patients, Studies, and Series.
 - **Transactions**: Atomic persistence of changes.
 
 ### 2. Object Model
 
-Gantry abstracts DICOM into a semantic hierarchy, removing the pain of manual tag iteration.
+Isocenter abstracts DICOM into a semantic hierarchy, removing the pain of manual tag iteration.
 
 ```mermaid
 graph LR
@@ -68,7 +68,7 @@ graph LR
 
 ### 3. Safety Pipeline (The 10 Checkpoints)
 
-Gantry provides a system to ensure data safety:
+Isocenter provides a system to ensure data safety:
 
 1. **Ingest**: Load raw data into the managed session index.
 2. **Examine**: Inventory the cohort and equipment.
@@ -83,37 +83,37 @@ Gantry provides a system to ensure data safety:
 
 ## Installation
 
-Gantry requires **Python 3.12+**.
+Isocenter requires **Python 3.12+**.
 
 ```bash
 # Install directly from GitHub (Recommended for users)
-pip install "git+https://github.com/kvnlng/Gantry.git"
+pip install "git+https://github.com/kvnlng/Isocenter.git"
 
 # OR Clone and install from source
-git clone https://github.com/kvnlng/Gantry.git
-cd Gantry
+git clone https://github.com/kvnlng/Isocenter.git
+cd Isocenter
 pip install .
 ```
 
 ## System Requirements
 
-Gantry's parallel processing engine is designed to maximize CPU utilization. However, heavy operations like JPEG 2000 compression require significant memory per worker.
+Isocenter's parallel processing engine is designed to maximize CPU utilization. However, heavy operations like JPEG 2000 compression require significant memory per worker.
 
-- **Memory**: Gantry is memory-intensive during specific operations (e.g., Pixel Redaction, J2K Export).
+- **Memory**: Isocenter is memory-intensive during specific operations (e.g., Pixel Redaction, J2K Export).
   - **Minimum**: 2GB RAM per vCPU.
   - **Recommended (Heavy Workloads)**: 8GB RAM per vCPU (e.g., for massive multi-frame J2K compression).
-- **Concurrency**: By default, Gantry uses all available cores (`1:1` ratio). Use `GANTRY_MAX_WORKERS` env var to limit this if OOM occurs.
+- **Concurrency**: By default, Isocenter uses all available cores (`1:1` ratio). Use `ISOCENTER_MAX_WORKERS` env var to limit this if OOM occurs.
 
 ## Quick Start
 
 ### 1. Initialize a Session
 
-Gantry uses a **persistent session** to manage your workflow. Unlike scripts that run once and forget, a Session creates a local SQLite database (`gantry.db`) to index your data. This allows you to pause, resume, and audit your work without re-scanning thousands of files.
+Isocenter uses a **persistent session** to manage your workflow. Unlike scripts that run once and forget, a Session creates a local SQLite database (`isocenter.db`) to index your data. This allows you to pause, resume, and audit your work without re-scanning thousands of files.
 
 ```python
-from gantry import Session
+from isocenter import Session
 
-# Initialize a new session (creates 'gantry.db' by default)
+# Initialize a new session (creates 'isocenter.db' by default)
 session = Session("my_project.db")
 ```
 
@@ -121,7 +121,7 @@ session = Session("my_project.db")
 
 ### 2. Ingest & Examine
 
-Ingestion builds a lightweight **metadata index** of your DICOM files. Gantry scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.
+Ingestion builds a lightweight **metadata index** of your DICOM files. Isocenter scans your folders recursively, extracting patient/study/series information into the database *without moving or modifying your original files*. It is resilient to nested directories and non-DICOM clutter.
 
 ```python
 session.ingest("/path/to/dicom/data")
@@ -162,7 +162,7 @@ print(f"Found {len(report)} potential PHI issues.")
 To enable reversible anonymization, generate a cryptographic key and "lock" the original patient identities into a secure, encrypted DICOM tag. This must be done *before* anonymization. Our CryptoEngine handles encryption and decryption of bytes using Fernet symmetric key (AES-128-CBC w/ HMAC-SHA256)
 
 ```python
-# Enable encryption (generates 'gantry.key')
+# Enable encryption (generates 'isocenter.key')
 session.enable_reversible_anonymization()
 
 # cryptographically lock identities for all patients found in the audit
@@ -205,7 +205,7 @@ Exporting:  15%|██▌       | 15/100 [00:05<00:30,  2.80patient/s]
 
 ### 5a. Analytics & Export
 
-Gantry supports **Exploratory Data Analysis (EDA)**. You can interrogate your cohort using Pandas and perform targeted exports based on metadata criteria.
+Isocenter supports **Exploratory Data Analysis (EDA)**. You can interrogate your cohort using Pandas and perform targeted exports based on metadata criteria.
 
 ```python
 # 0. Ensure that data is persisted to disk
@@ -250,12 +250,12 @@ print(density)
 
 ### 6. Recover Identity (Optional)
 
-If you have a valid key (`gantry.key`) and need to retrieve the original identity of an anonymized patient:
+If you have a valid key (`isocenter.key`) and need to retrieve the original identity of an anonymized patient:
 
 ```python
 # Load the session containing anonymized data
 session = Session("my_project.db")
-session.enable_reversible_anonymization("gantry.key")
+session.enable_reversible_anonymization("isocenter.key")
 
 # Recover the original PatientName and PatientID
 # Recover the original identity and restore attributes in-memory
@@ -268,11 +268,11 @@ print(f"Restored: {session.store.patients[0].patient_name}")
 
 ## Configuration
 
-Gantry uses a **Unified YAML Configuration** to control all aspects of de-identification.
+Isocenter uses a **Unified YAML Configuration** to control all aspects of de-identification.
 
 ### Example `config.yaml`
 
-See the **[Complete Configuration Guide](https://kvnlng.github.io/Gantry/configuration/)** for a full reference.
+See the **[Complete Configuration Guide](https://kvnlng.github.io/Isocenter/configuration/)** for a full reference.
 
 ```yaml
 # 1. Privacy Profile (Optional)
@@ -300,14 +300,14 @@ machines:
 
 ### Pixel Redaction
 
-Gantry can scrub burned-in PHI from pixels based on matching the equipment's `DeviceSerialNumber`. Define `redaction_zones` in your config to automatically verify and scrub these regions during export/anonymization.
+Isocenter can scrub burned-in PHI from pixels based on matching the equipment's `DeviceSerialNumber`. Define `redaction_zones` in your config to automatically verify and scrub these regions during export/anonymization.
 
 ### Reversible Anonymization
 
 To maintain a secure link back to the original identity:
 
 ```python
-# Enable encryption (generates 'gantry.key')
+# Enable encryption (generates 'isocenter.key')
 session.enable_reversible_anonymization()
 
 # Lock identities BEFORE anonymization to store encrypted original data
@@ -323,7 +323,7 @@ session.recover_patient_identity("ANON_123")
 
 ### Strict Codec & Export Safety
 
-Gantry performs strict validation during export. If a compressed image cannot be decompressed (e.g., due to missing codecs or corruption), the export **will fail** rather than passing through unverified data. This ensures 100% PHI safety.
+Isocenter performs strict validation during export. If a compressed image cannot be decompressed (e.g., due to missing codecs or corruption), the export **will fail** rather than passing through unverified data. This ensures 100% PHI safety.
 
 Supported Transfer Syntaxes:
 
@@ -351,7 +351,7 @@ session.generate_report("compliance_report.md")
 
 ### 2. Safety Checks
 
-Gantry can screen for high-risk attributes:
+Isocenter can screen for high-risk attributes:
 
 - **Burned-In Annotation Check**: Flags images where `BurnedInAnnotation (0028,0301)` is "YES", enforcing manual review.
 - **Exception Tracking**: Captures all system errors during batch processing for the final report.
@@ -360,11 +360,11 @@ Gantry can screen for high-risk attributes:
 
 ### Clinical Trial Processor (CTP)
 
-Gantry includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into Gantry's YAML configuration format.
+Isocenter includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into Isocenter's YAML configuration format.
 
 ```bash
-# Convert CTP script to Gantry YAML
-python -m gantry.utils.ctp_parser /path/to/anonymizer.script output_rules.yaml
+# Convert CTP script to Isocenter YAML
+python -m isocenter.utils.ctp_parser /path/to/anonymizer.script output_rules.yaml
 ```
 
 This parser extracts:

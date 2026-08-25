@@ -2,21 +2,21 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make DICOM waveform IODs a first-class data type in Gantry — ingested, persisted, de-identified, and exported as PhysioNet WFDB records that Murmur Studio reads directly.
+**Goal:** Make DICOM waveform IODs a first-class data type in Isocenter — ingested, persisted, de-identified, and exported as PhysioNet WFDB records that Murmur Studio reads directly.
 
-**Architecture:** Waveforms become a peer of pixels rather than a special case. The sidecar generalizes from pixel-only to `(instance_uid, kind)` blob storage; a new `gantry/waveform.py` models the DICOM Waveform Module; a new `gantry/exporters/` package introduces an `Exporter` seam that both the existing `DicomExporter` and the new `WfdbExporter` implement, dispatched by `session.export(folder, format=...)`.
+**Architecture:** Waveforms become a peer of pixels rather than a special case. The sidecar generalizes from pixel-only to `(instance_uid, kind)` blob storage; a new `isocenter/waveform.py` models the DICOM Waveform Module; a new `isocenter/exporters/` package introduces an `Exporter` seam that both the existing `DicomExporter` and the new `WfdbExporter` implement, dispatched by `session.export(folder, format=...)`.
 
 **Tech Stack:** Python 3.14, pydicom 3.x, NumPy, SQLite. Test-only: `wfdb` (PhysioNet's own reader, used for conformance validation) and `jsonschema`.
 
 **Spec:** `docs/superpowers/specs/2026-08-23-wfdb-export-design.md`
-**Issues:** #9–#16 · [v0.7.0 milestone](https://github.com/kvnlng/Gantry/milestone/1)
+**Issues:** #9–#16 · [v0.7.0 milestone](https://github.com/kvnlng/Isocenter/milestone/1)
 
 ## Global Constraints
 
-- **Python floor:** `python_requires=">=3.9"`. Do not use syntax newer than 3.9 in `gantry/` (no `match`, no PEP 604 `X | Y` in annotations evaluated at runtime).
+- **Python floor:** `python_requires=">=3.9"`. Do not use syntax newer than 3.9 in `isocenter/` (no `match`, no PEP 604 `X | Y` in annotations evaluated at runtime).
 - **No new runtime dependencies.** `wfdb` and `jsonschema` are **test-only** — add them to a `tests` extra in `setup.py`, never to `install_requires`.
 - **Never break the pixel path.** Every existing test under `tests/` must pass unchanged after every task. This is the regression gate for the sidecar refactor.
-- **WFDB conformance over convenience.** Gantry writes `header(5)`-conformant output (`gain(baseline)/units`, e.g. `200(0)/mV`). Murmur's parser currently reads this swapped — that is tracked as [kvnlng/Murmur#360](https://github.com/kvnlng/Murmur/issues/360) and is **not** worked around here.
+- **WFDB conformance over convenience.** Isocenter writes `header(5)`-conformant output (`gain(baseline)/units`, e.g. `200(0)/mV`). Murmur's parser currently reads this swapped — that is tracked as [kvnlng/Murmur#360](https://github.com/kvnlng/Murmur/issues/360) and is **not** worked around here.
 - **Never emit `gain 0`** for a calibrated signal. WFDB reads 0 as *uncalibrated* and substitutes 200 adu/mV.
 - **No PHI in WFDB output.** No `#` comment lines, ever. Record names derive from anonymized identifiers only.
 - **Existing sidecar filename is frozen.** Blobs of all kinds live in the existing `*_pixels.bin`. Renaming it would break every existing session.
@@ -29,15 +29,15 @@
 
 | File | Responsibility | Task |
 |---|---|---|
-| `gantry/waveform.py` | *(new)* `Waveform` / `WaveformChannel` model, DICOM parsing, sample decoding | 4 |
-| `gantry/exporters/__init__.py` | *(new)* `Exporter` protocol, format registry | 6 |
-| `gantry/exporters/dicom.py` | *(new)* Thin adapter wrapping the existing `DicomExporter` | 6 |
-| `gantry/exporters/wfdb.py` | *(new)* `WfdbExporter` — `.hea` and `.dat` writer | 7 |
-| `gantry/murmur.py` | *(new)* DICOM annotations → Murmur `annotations.json` | 10 |
-| `gantry/persistence.py` | Blob-kind storage, migration, compaction | 3 |
-| `gantry/io_handlers.py` | Waveform extraction at ingest | 5 |
-| `gantry/entities.py` | `Instance` waveform accessor triad | 5 |
-| `gantry/session.py` | `export(format=...)` dispatch | 6 |
+| `isocenter/waveform.py` | *(new)* `Waveform` / `WaveformChannel` model, DICOM parsing, sample decoding | 4 |
+| `isocenter/exporters/__init__.py` | *(new)* `Exporter` protocol, format registry | 6 |
+| `isocenter/exporters/dicom.py` | *(new)* Thin adapter wrapping the existing `DicomExporter` | 6 |
+| `isocenter/exporters/wfdb.py` | *(new)* `WfdbExporter` — `.hea` and `.dat` writer | 7 |
+| `isocenter/murmur.py` | *(new)* DICOM annotations → Murmur `annotations.json` | 10 |
+| `isocenter/persistence.py` | Blob-kind storage, migration, compaction | 3 |
+| `isocenter/io_handlers.py` | Waveform extraction at ingest | 5 |
+| `isocenter/entities.py` | `Instance` waveform accessor triad | 5 |
+| `isocenter/session.py` | `export(format=...)` dispatch | 6 |
 | `scripts/generate_waveform_test_data.py` | *(new)* Synthetic 12-lead ECG DICOM generator | 2 |
 | `tests/fixtures/annotations.schema.json` | *(new)* Pinned copy of Murmur's schema | 10 |
 
@@ -116,7 +116,7 @@ In `.github/workflows/tests.yml`, replace the `paths:` block under `on: push:` w
 on:
   push:
     paths:
-      - 'gantry/**'
+      - 'isocenter/**'
       - 'tests/**'
       - 'scripts/**'
       - 'setup.py'
@@ -244,7 +244,7 @@ Expected: collection error — `ModuleNotFoundError: No module named 'scripts.ge
 Create `scripts/generate_waveform_test_data.py`:
 
 ```python
-"""Generate synthetic 12-lead ECG DICOM files for Gantry's waveform tests.
+"""Generate synthetic 12-lead ECG DICOM files for Isocenter's waveform tests.
 
 Signals are deterministic and analytically known, so a round-trip through
 WFDB export can be asserted against exact expected physical values.
@@ -340,7 +340,7 @@ def build_ecg_dataset(num_samples=5000,
     ds.StudyDate = "20260101"
     ds.StudyTime = "101530"
     ds.AcquisitionDateTime = "20260101101530.000000"
-    ds.Manufacturer = "GantryTest"
+    ds.Manufacturer = "IsocenterTest"
     ds.ManufacturerModelName = "SyntheticCart"
     ds.DeviceSerialNumber = "SN-ECG-001"
 
@@ -439,11 +439,11 @@ Generalize sidecar bookkeeping from pixel-only to `(instance_uid, kind)` so wave
 Closes #10.
 
 **Files:**
-- Modify: `gantry/persistence.py` — `SCHEMA` (~line 75), `_init_db` (~line 237), `persist_pixel_data` (~line 747), `compact_sidecar` (~line 1325)
+- Modify: `isocenter/persistence.py` — `SCHEMA` (~line 75), `_init_db` (~line 237), `persist_pixel_data` (~line 747), `compact_sidecar` (~line 1325)
 - Test: `tests/test_blob_storage.py`
 
 **Interfaces:**
-- Consumes: `SidecarManager.write_frame(data, compression) -> (offset, length)` from `gantry/sidecar.py`
+- Consumes: `SidecarManager.write_frame(data, compression) -> (offset, length)` from `isocenter/sidecar.py`
 - Produces:
   - `SqliteStore.record_blob_ref(instance_uid, kind, offset, length, hash, compress_alg) -> None` — DB-only write, no sidecar I/O. Used by the ingest path, which writes to the sidecar itself.
   - `SqliteStore.persist_blob(instance, kind, data) -> None` — `data` is `bytes` or `np.ndarray`; `kind` is `'pixels'` or `'waveform'`
@@ -461,8 +461,8 @@ Create `tests/test_blob_storage.py`:
 import numpy as np
 import pytest
 
-from gantry.persistence import SqliteStore
-from gantry.entities import Instance
+from isocenter.persistence import SqliteStore
+from isocenter.entities import Instance
 
 
 @pytest.fixture
@@ -611,7 +611,7 @@ Expected: FAIL — `AttributeError: 'SqliteStore' object has no attribute 'persi
 
 - [ ] **Step 3: Add the table to the schema**
 
-In `gantry/persistence.py`, inside the `SCHEMA` string, immediately after the `instance_attributes` table definition:
+In `isocenter/persistence.py`, inside the `SCHEMA` string, immediately after the `instance_attributes` table definition:
 
 ```sql
     CREATE TABLE IF NOT EXISTS instance_blobs (
@@ -635,7 +635,7 @@ And with the other index definitions at the bottom of `SCHEMA`:
 
 - [ ] **Step 4: Back-fill legacy pixel references on open**
 
-In `gantry/persistence.py`, replace the body of `_init_db` with:
+In `isocenter/persistence.py`, replace the body of `_init_db` with:
 
 ```python
     def _init_db(self):
@@ -665,7 +665,7 @@ In `gantry/persistence.py`, replace the body of `_init_db` with:
 
 - [ ] **Step 5: Add the blob accessors**
 
-In `gantry/persistence.py`, immediately above `persist_pixel_data` (~line 747):
+In `isocenter/persistence.py`, immediately above `persist_pixel_data` (~line 747):
 
 ```python
     def persist_blob(self, instance, kind: str, data) -> None:
@@ -745,7 +745,7 @@ In `gantry/persistence.py`, immediately above `persist_pixel_data` (~line 747):
 
 - [ ] **Step 6: Record the pixel blob reference from the existing pixel path**
 
-`persist_pixel_data` keeps its current behavior (it must — the pixel loader and `_pixel_hash` wiring depend on it). Add the blob-table write at the end. In `gantry/persistence.py`, in `persist_pixel_data`, immediately before the line `instance._mod_count += 1`:
+`persist_pixel_data` keeps its current behavior (it must — the pixel loader and `_pixel_hash` wiring depend on it). Add the blob-table write at the end. In `isocenter/persistence.py`, in `persist_pixel_data`, immediately before the line `instance._mod_count += 1`:
 
 ```python
             # Mirror the reference into the kind-keyed blob table so
@@ -756,7 +756,7 @@ In `gantry/persistence.py`, immediately above `persist_pixel_data` (~line 747):
 
 - [ ] **Step 7: Make compaction walk every kind**
 
-In `gantry/persistence.py`, in `compact_sidecar`, replace the `SELECT` query with one over the blob table so waveform blobs are not dropped as orphans. **Re-run the back-fill first** — the ingest path writes pixel frames through `SidecarManager` directly, so `instances.pixel_offset` can hold references that `instance_blobs` has never seen. Without this line, compaction silently discards every pixel blob ingested during the current session:
+In `isocenter/persistence.py`, in `compact_sidecar`, replace the `SELECT` query with one over the blob table so waveform blobs are not dropped as orphans. **Re-run the back-fill first** — the ingest path writes pixel frames through `SidecarManager` directly, so `instances.pixel_offset` can hold references that `instance_blobs` has never seen. Without this line, compaction silently discards every pixel blob ingested during the current session:
 
 ```python
                 self._backfill_legacy_blobs(conn)
@@ -809,7 +809,7 @@ Expected: identical pass/fail counts to the Task 1 baseline. **If any previously
 - [ ] **Step 10: Commit**
 
 ```bash
-git add gantry/persistence.py tests/test_blob_storage.py
+git add isocenter/persistence.py tests/test_blob_storage.py
 git commit -m "feat: generalize sidecar storage to blob-kind
 
 Adds instance_blobs keyed by (instance_uid, kind) with an idempotent
@@ -828,11 +828,11 @@ Model the DICOM Waveform Module and decode samples. Pure parsing — no I/O, no 
 Closes #11 (model half).
 
 **Files:**
-- Create: `gantry/waveform.py`
+- Create: `isocenter/waveform.py`
 - Test: `tests/test_waveform_model.py`
 
 **Interfaces:**
-- Consumes: `build_ecg_dataset()` from Task 2; `DicomItem` from `gantry/entities.py`
+- Consumes: `build_ecg_dataset()` from Task 2; `DicomItem` from `isocenter/entities.py`
 - Produces:
   - `WaveformChannel(label, source_code, source_scheme, sensitivity, correction_factor, units, baseline)` — all keyword-constructible
   - `Waveform(sampling_frequency, num_channels, num_samples, bits_allocated, sample_interpretation, channels, samples=None)`
@@ -850,7 +850,7 @@ Create `tests/test_waveform_model.py`:
 import numpy as np
 import pytest
 
-from gantry.waveform import (
+from isocenter.waveform import (
     Waveform,
     WaveformChannel,
     decode_samples,
@@ -923,8 +923,8 @@ def test_nonzero_baseline_maps_to_negated_adc_offset():
 
 
 def test_from_dicom_item_reads_the_generated_fixture():
-    from gantry.io_handlers import populate_attrs
-    from gantry.entities import DicomItem
+    from isocenter.io_handlers import populate_attrs
+    from isocenter.entities import DicomItem
     from scripts.generate_waveform_test_data import build_ecg_dataset, LEADS
 
     ds = build_ecg_dataset(num_samples=200, baseline_uv=0.0)
@@ -948,11 +948,11 @@ def test_from_dicom_item_reads_the_generated_fixture():
 .venv/bin/python -m pytest tests/test_waveform_model.py -q
 ```
 
-Expected: collection error — `ModuleNotFoundError: No module named 'gantry.waveform'`.
+Expected: collection error — `ModuleNotFoundError: No module named 'isocenter.waveform'`.
 
 - [ ] **Step 3: Write the model**
 
-Create `gantry/waveform.py`:
+Create `isocenter/waveform.py`:
 
 ```python
 """DICOM Waveform Module object model.
@@ -998,7 +998,7 @@ _COMPANDED = {"MB", "AB"}
 
 
 class UnsupportedInterpretation(ValueError):
-    """Raised for Waveform Sample Interpretations Gantry cannot decode."""
+    """Raised for Waveform Sample Interpretations Isocenter cannot decode."""
 
 
 def _as_float(value, default=0.0):
@@ -1043,7 +1043,7 @@ def decode_samples(data: bytes,
     if interp in _COMPANDED:
         raise UnsupportedInterpretation(
             f"Sample Interpretation {interp!r} is companded audio "
-            "(mu-law/A-law), which Gantry does not decode.")
+            "(mu-law/A-law), which Isocenter does not decode.")
 
     dtype = _DTYPES.get(interp)
     if dtype is None:
@@ -1186,7 +1186,7 @@ Expected: 10 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gantry/waveform.py tests/test_waveform_model.py
+git add isocenter/waveform.py tests/test_waveform_model.py
 git commit -m "feat: add DICOM waveform object model
 
 Refs #11"
@@ -1201,9 +1201,9 @@ Stop discarding waveform samples at ingest, offload them to the sidecar, and giv
 Closes #9, closes #11 (accessor half).
 
 **Files:**
-- Modify: `gantry/io_handlers.py:102-180` (`ingest_worker`), `gantry/io_handlers.py:229-270` (`DicomImporter.import_files` signature and result unpack)
-- Modify: `gantry/entities.py:131` (`Instance`)
-- Modify: `gantry/session.py:344-349` (`ingest` passes the store backend through)
+- Modify: `isocenter/io_handlers.py:102-180` (`ingest_worker`), `isocenter/io_handlers.py:229-270` (`DicomImporter.import_files` signature and result unpack)
+- Modify: `isocenter/entities.py:131` (`Instance`)
+- Modify: `isocenter/session.py:344-349` (`ingest` passes the store backend through)
 - Test: `tests/test_waveform_ingest.py`
 
 **Interfaces:**
@@ -1223,7 +1223,7 @@ Create `tests/test_waveform_ingest.py`:
 import numpy as np
 import pytest
 
-from gantry.io_handlers import ingest_worker
+from isocenter.io_handlers import ingest_worker
 from scripts.generate_waveform_test_data import write_fixture, LEADS
 
 
@@ -1248,7 +1248,7 @@ def test_waveform_hash_is_sha256_of_raw_bytes(ecg_file):
 
 def test_waveform_metadata_survives_ingest(ecg_file):
     _, inst, _, _, _, _, _, _ = ingest_worker(ecg_file)
-    from gantry.waveform import Waveform
+    from isocenter.waveform import Waveform
     seq = inst.sequences.get("5400,0100")
     assert seq is not None and seq.items
     wf = Waveform.from_dicom_item(seq.items[0])
@@ -1302,7 +1302,7 @@ def test_pixel_only_file_yields_no_waveform(tmp_path, dummy_patient):
 
 
 def test_instance_waveform_accessors_roundtrip():
-    from gantry.entities import Instance
+    from isocenter.entities import Instance
     inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.9.1.1", 1)
     arr = np.arange(12, dtype=np.int16).reshape(6, 2)
 
@@ -1321,7 +1321,7 @@ def test_instance_waveform_accessors_roundtrip():
 
 def test_ingest_registers_the_waveform_blob_reference(tmp_path):
     """Without a blob-table row, compaction reclaims the waveform."""
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
 
     src = tmp_path / "src"
     src.mkdir()
@@ -1339,8 +1339,8 @@ def test_ingest_registers_the_waveform_blob_reference(tmp_path):
 
 
 def test_waveform_survives_a_session_reload(tmp_path):
-    """Gantry's pause/resume promise must hold for waveforms, not just pixels."""
-    from gantry.session import DicomSession
+    """Isocenter's pause/resume promise must hold for waveforms, not just pixels."""
+    from isocenter.session import DicomSession
 
     src = tmp_path / "src"
     src.mkdir()
@@ -1374,7 +1374,7 @@ Expected: FAIL — `ValueError: not enough values to unpack (expected 8, got 6)`
 
 - [ ] **Step 3: Add the waveform fields and accessors to `Instance`**
 
-In `gantry/entities.py`, in the `Instance` class, immediately after the `_pixel_hash` field declaration:
+In `isocenter/entities.py`, in the `Instance` class, immediately after the `_pixel_hash` field declaration:
 
 ```python
     # Transient: Decoded waveform samples, shape (num_samples, num_channels)
@@ -1428,7 +1428,7 @@ Then, immediately after the `get_pixel_data` method, add:
 
 - [ ] **Step 4: Extract waveform data in `ingest_worker`**
 
-In `gantry/io_handlers.py`, in `ingest_worker`, immediately before the `return (meta, inst, p_bytes, p_hash, p_alg, None)` line:
+In `isocenter/io_handlers.py`, in `ingest_worker`, immediately before the `return (meta, inst, p_bytes, p_hash, p_alg, None)` line:
 
 ```python
         # Extract Waveform Data
@@ -1467,7 +1467,7 @@ def ingest_worker(fp: str) -> Tuple:
 
 - [ ] **Step 5: Update the result consumer and register the blob reference**
 
-In `gantry/io_handlers.py`, add a `store_backend` parameter to `DicomImporter.import_files`:
+In `isocenter/io_handlers.py`, add a `store_backend` parameter to `DicomImporter.import_files`:
 
 ```python
     @staticmethod
@@ -1508,7 +1508,7 @@ Then, immediately after the existing pixel sidecar block (the one that sets `ins
                                 w_off, w_len, w_hash, 'zlib')
 ```
 
-Finally, in `gantry/session.py`, in `ingest` (~line 344), pass the backend through:
+Finally, in `isocenter/session.py`, in `ingest` (~line 344), pass the backend through:
 
 ```python
         DicomImporter.import_files(
@@ -1521,7 +1521,7 @@ Finally, in `gantry/session.py`, in `ingest` (~line 344), pass the backend throu
 
 - [ ] **Step 6: Add the waveform loader**
 
-In `gantry/io_handlers.py`, immediately after the `SidecarPixelLoader` class definition, add:
+In `isocenter/io_handlers.py`, immediately after the `SidecarPixelLoader` class definition, add:
 
 ```python
 class SidecarWaveformLoader:
@@ -1580,7 +1580,7 @@ class SidecarWaveformLoader:
 
 Pixels are rewired from the `instances.pixel_offset` columns during hydration; waveforms have no such columns, so without this they vanish on reopen and `test_waveform_survives_a_session_reload` fails.
 
-In `gantry/persistence.py`, in `load_all`, immediately **before** the `for r in i_rows:` loop, fetch every waveform reference in one query rather than querying per instance:
+In `isocenter/persistence.py`, in `load_all`, immediately **before** the `for r in i_rows:` loop, fetch every waveform reference in one query rather than querying per instance:
 
 ```python
                 wave_refs = {
@@ -1628,13 +1628,13 @@ Expected: 8 passed.
 .venv/bin/python -m pytest -q 2>&1 | tail -20
 ```
 
-Expected: matches the Task 1 baseline. `ingest_worker`'s arity changed, so any other caller would surface here — check `gantry/session.py:27` (`scan_worker`) is genuinely independent and untouched.
+Expected: matches the Task 1 baseline. `ingest_worker`'s arity changed, so any other caller would surface here — check `isocenter/session.py:27` (`scan_worker`) is genuinely independent and untouched.
 
 - [ ] **Step 10: Commit**
 
 ```bash
-git add gantry/io_handlers.py gantry/entities.py gantry/persistence.py \
-        gantry/session.py tests/test_waveform_ingest.py
+git add isocenter/io_handlers.py isocenter/entities.py isocenter/persistence.py \
+        isocenter/session.py tests/test_waveform_ingest.py
 git commit -m "fix: stop discarding waveform data at ingest
 
 populate_attrs skips all OB/OW VRs, so Waveform Data (5400,1010) was
@@ -1655,19 +1655,19 @@ Introduce the seam before a second format lands on `session.export()`. Behavior 
 Closes #12.
 
 **Files:**
-- Create: `gantry/exporters/__init__.py`
-- Create: `gantry/exporters/dicom.py`
-- Modify: `gantry/session.py:1610` (`export` signature and dispatch)
+- Create: `isocenter/exporters/__init__.py`
+- Create: `isocenter/exporters/dicom.py`
+- Modify: `isocenter/session.py:1610` (`export` signature and dispatch)
 - Test: `tests/test_exporter_registry.py`
 
 **Interfaces:**
-- Consumes: `DicomExporter` from `gantry/io_handlers.py`
+- Consumes: `DicomExporter` from `isocenter/io_handlers.py`
 - Produces:
-  - `gantry.exporters.Exporter` — protocol with `export(session, folder, **options) -> List[str]`
-  - `gantry.exporters.register(name, exporter_cls) -> None`
-  - `gantry.exporters.get_exporter(name) -> Exporter`
-  - `gantry.exporters.available_formats() -> List[str]`
-  - `gantry.exporters.dicom.DicomFormatExporter`
+  - `isocenter.exporters.Exporter` — protocol with `export(session, folder, **options) -> List[str]`
+  - `isocenter.exporters.register(name, exporter_cls) -> None`
+  - `isocenter.exporters.get_exporter(name) -> Exporter`
+  - `isocenter.exporters.available_formats() -> List[str]`
+  - `isocenter.exporters.dicom.DicomFormatExporter`
   - `session.export(folder, ..., format="dicom")`
 
 - [ ] **Step 1: Write the failing test**
@@ -1677,7 +1677,7 @@ Create `tests/test_exporter_registry.py`:
 ```python
 import pytest
 
-from gantry import exporters
+from isocenter import exporters
 
 
 def test_dicom_is_registered_by_default():
@@ -1721,11 +1721,11 @@ def test_registering_a_class_without_export_is_rejected():
 .venv/bin/python -m pytest tests/test_exporter_registry.py -q
 ```
 
-Expected: collection error — `ImportError: cannot import name 'exporters' from 'gantry'`.
+Expected: collection error — `ImportError: cannot import name 'exporters' from 'isocenter'`.
 
 - [ ] **Step 3: Write the registry**
 
-Create `gantry/exporters/__init__.py`:
+Create `isocenter/exporters/__init__.py`:
 
 ```python
 """Export format registry.
@@ -1797,7 +1797,7 @@ from . import dicom  # noqa: E402,F401  (registers the built-in format)
 
 - [ ] **Step 4: Write the DICOM adapter**
 
-Create `gantry/exporters/dicom.py`:
+Create `isocenter/exporters/dicom.py`:
 
 ```python
 """Built-in DICOM export format.
@@ -1823,7 +1823,7 @@ register("dicom", DicomFormatExporter)
 
 - [ ] **Step 5: Split the session's export method**
 
-In `gantry/session.py`, rename the existing `def export(self, folder: str, version=None, ...)` at line 1610 to `_export_dicom`, leaving its entire body untouched. Then add a new dispatching `export` immediately above it:
+In `isocenter/session.py`, rename the existing `def export(self, folder: str, version=None, ...)` at line 1610 to `_export_dicom`, leaving its entire body untouched. Then add a new dispatching `export` immediately above it:
 
 ```python
     def export(self, folder: str, format: str = "dicom", **options):
@@ -1871,7 +1871,7 @@ Expected: 5 passed.
 Expected: both match the Task 1 baseline. One risk to watch: any existing caller passing the second positional argument (`version`) now binds it to `format`. Grep for it:
 
 ```bash
-grep -rn "\.export(" tests/ gantry/ scripts/ | grep -v "export_dataframe\|export_to_parquet\|export_batch"
+grep -rn "\.export(" tests/ isocenter/ scripts/ | grep -v "export_dataframe\|export_to_parquet\|export_batch"
 ```
 
 Fix any positional second argument by making it keyword.
@@ -1879,7 +1879,7 @@ Fix any positional second argument by making it keyword.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add gantry/exporters/ gantry/session.py tests/test_exporter_registry.py
+git add isocenter/exporters/ isocenter/session.py tests/test_exporter_registry.py
 git commit -m "refactor: extract Exporter seam with format dispatch
 
 session.export(folder, format=...) now dispatches through a registry.
@@ -1897,7 +1897,7 @@ Emit `.hea` and `.dat`. One record per waveform-bearing Instance, written into t
 Closes #13.
 
 **Files:**
-- Create: `gantry/exporters/wfdb.py`
+- Create: `isocenter/exporters/wfdb.py`
 - Test: `tests/test_wfdb_writer.py`
 
 **Interfaces:**
@@ -1916,8 +1916,8 @@ Create `tests/test_wfdb_writer.py`:
 import numpy as np
 import pytest
 
-from gantry.exporters.wfdb import format_header, signal_checksum
-from gantry.waveform import Waveform, WaveformChannel
+from isocenter.exporters.wfdb import format_header, signal_checksum
+from isocenter.waveform import Waveform, WaveformChannel
 
 
 def _waveform(n_samples=100, n_channels=2, baseline=0.0, units="mV"):
@@ -2023,11 +2023,11 @@ def test_gain_is_never_zero_for_a_calibrated_channel():
 .venv/bin/python -m pytest tests/test_wfdb_writer.py -q
 ```
 
-Expected: collection error — `ModuleNotFoundError: No module named 'gantry.exporters.wfdb'`.
+Expected: collection error — `ModuleNotFoundError: No module named 'isocenter.exporters.wfdb'`.
 
 - [ ] **Step 3: Write the writer**
 
-Create `gantry/exporters/wfdb.py`:
+Create `isocenter/exporters/wfdb.py`:
 
 ```python
 """PhysioNet WFDB export format.
@@ -2251,7 +2251,7 @@ register("wfdb", WfdbExporter)
 
 - [ ] **Step 4: Register the format on package import**
 
-In `gantry/exporters/__init__.py`, extend the trailing import line so the new format registers too:
+In `isocenter/exporters/__init__.py`, extend the trailing import line so the new format registers too:
 
 ```python
 from . import dicom, wfdb  # noqa: E402,F401  (registers the built-in formats)
@@ -2276,7 +2276,7 @@ Expected: matches the Task 1 baseline.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add gantry/exporters/wfdb.py gantry/exporters/__init__.py tests/test_wfdb_writer.py
+git add isocenter/exporters/wfdb.py isocenter/exporters/__init__.py tests/test_wfdb_writer.py
 git commit -m "feat: add WFDB format-16 exporter
 
 Writes header(5)-conformant .hea and channel-interleaved .dat, one
@@ -2289,7 +2289,7 @@ Closes #13"
 
 ## Task 8: Conformance round-trip against PhysioNet's reader
 
-This is the task that makes the writer trustworthy. Reading back with PhysioNet's own `wfdb` package validates *conformance* rather than testing Gantry against itself — a self-consistent writer/reader pair agrees happily on the wrong answer.
+This is the task that makes the writer trustworthy. Reading back with PhysioNet's own `wfdb` package validates *conformance* rather than testing Isocenter against itself — a self-consistent writer/reader pair agrees happily on the wrong answer.
 
 **If the baseline assertions here fail, the sign in `WaveformChannel.wfdb_baseline()` is the thing to flip.** That formula is derived, not verified; this test is what verifies it.
 
@@ -2307,9 +2307,9 @@ Closes #16.
 Create `tests/test_wfdb_conformance.py`:
 
 ```python
-"""Validate Gantry's WFDB output against PhysioNet's own reader.
+"""Validate Isocenter's WFDB output against PhysioNet's own reader.
 
-Deliberately does NOT use any Gantry code to read the output back.
+Deliberately does NOT use any Isocenter code to read the output back.
 """
 import os
 
@@ -2318,7 +2318,7 @@ import pytest
 
 wfdb = pytest.importorskip("wfdb", reason="conformance tests need the wfdb package")
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 from scripts.generate_waveform_test_data import write_fixture, LEADS
 
 
@@ -2442,7 +2442,7 @@ Expected: 9 passed.
 
 - [ ] **Step 3: If `test_nonzero_baseline_round_trips_to_the_correct_physical_zero` fails, correct the formula**
 
-This is the anticipated failure. If `record.baseline[0]` comes back `250` rather than `-250`, the derivation's sign is inverted. In `gantry/waveform.py`, change `WaveformChannel.wfdb_baseline` to:
+This is the anticipated failure. If `record.baseline[0]` comes back `250` rather than `-250`, the derivation's sign is inverted. In `isocenter/waveform.py`, change `WaveformChannel.wfdb_baseline` to:
 
 ```python
     def wfdb_baseline(self) -> int:
@@ -2463,7 +2463,7 @@ Expected: matches the Task 1 baseline plus the new tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/test_wfdb_conformance.py gantry/waveform.py tests/test_waveform_model.py tests/test_wfdb_writer.py
+git add tests/test_wfdb_conformance.py isocenter/waveform.py tests/test_waveform_model.py tests/test_wfdb_writer.py
 git commit -m "test: validate WFDB output against PhysioNet's reader
 
 Round-trips synthetic ECG through ingest and export, then reads it back
@@ -2481,7 +2481,7 @@ Wire date shifting into the record start time and prove the waveform text surfac
 Closes #14.
 
 **Files:**
-- Modify: `gantry/exporters/wfdb.py` (`_start_datetime`)
+- Modify: `isocenter/exporters/wfdb.py` (`_start_datetime`)
 - Test: `tests/test_wfdb_privacy.py`
 
 **Interfaces:**
@@ -2497,7 +2497,7 @@ import os
 
 import pytest
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 from scripts.generate_waveform_test_data import write_fixture
 
 
@@ -2600,7 +2600,7 @@ Expected: the two timing tests fail — `_start_datetime` returns `None` uncondi
 
 - [ ] **Step 3: Read the shifted acquisition time**
 
-In `gantry/exporters/wfdb.py`, replace the `_start_datetime` stub with:
+In `isocenter/exporters/wfdb.py`, replace the `_start_datetime` stub with:
 
 ```python
     @staticmethod
@@ -2657,7 +2657,7 @@ Expected: matches the Task 1 baseline plus the new tests.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add gantry/exporters/wfdb.py tests/test_wfdb_privacy.py
+git add isocenter/exporters/wfdb.py tests/test_wfdb_privacy.py
 git commit -m "feat: carry shifted timing into the WFDB header
 
 Reads Acquisition DateTime post-remediation so the record line carries
@@ -2676,9 +2676,9 @@ Map the DICOM Waveform Annotation Sequence into Murmur's external-producer JSON,
 Closes #15.
 
 **Files:**
-- Create: `gantry/murmur.py`
+- Create: `isocenter/murmur.py`
 - Create: `tests/fixtures/annotations.schema.json`
-- Modify: `gantry/exporters/wfdb.py` (`_write_instance`)
+- Modify: `isocenter/exporters/wfdb.py` (`_write_instance`)
 - Modify: `scripts/generate_waveform_test_data.py` (annotation fixture support)
 - Test: `tests/test_murmur_annotations.py`
 
@@ -2755,10 +2755,10 @@ import pytest
 
 jsonschema = pytest.importorskip("jsonschema")
 
-from gantry.entities import DicomItem
-from gantry.io_handlers import populate_attrs
-from gantry.murmur import build_annotations, SCHEMA_VERSION
-from gantry.waveform import Waveform
+from isocenter.entities import DicomItem
+from isocenter.io_handlers import populate_attrs
+from isocenter.murmur import build_annotations, SCHEMA_VERSION
+from isocenter.waveform import Waveform
 from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation
 
 
@@ -2767,8 +2767,8 @@ SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "fixtures",
 
 
 def _instance_from(ds):
-    """Build a Gantry Instance-like item carrying ds's sequences."""
-    from gantry.entities import Instance
+    """Build a Isocenter Instance-like item carrying ds's sequences."""
+    from isocenter.entities import Instance
     inst = Instance(str(ds.SOPInstanceUID), str(ds.SOPClassUID), 1)
     populate_attrs(ds, inst, inst.text_index)
     return inst
@@ -2783,7 +2783,7 @@ def _waveform_from(ds):
 def test_point_annotation_maps_to_a_point_finding():
     ds = build_ecg_dataset(num_samples=1000)
     add_annotation(ds, start_sample=101)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test")
 
     assert doc["schemaVersion"] == SCHEMA_VERSION
     assert len(doc["findings"]) == 1
@@ -2796,7 +2796,7 @@ def test_point_annotation_maps_to_a_point_finding():
 def test_segment_annotation_maps_to_a_range_finding():
     ds = build_ecg_dataset(num_samples=1000)
     add_annotation(ds, start_sample=101, end_sample=301)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test")
 
     finding = doc["findings"][0]
     assert finding["kind"] == "range"
@@ -2809,7 +2809,7 @@ def test_category_is_the_scheme_qualified_code_and_label_is_the_meaning():
     add_annotation(ds, code_value="164889003",
                    code_meaning="Atrial fibrillation", scheme="SCT")
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
 
     assert finding["category"] == "SCT:164889003"
     assert finding["label"] == "Atrial fibrillation"
@@ -2819,7 +2819,7 @@ def test_lead_comes_from_the_coded_channel_source():
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, channel=2)
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
     assert finding["lead"] == "MDC_ECG_LEAD_II"
 
 
@@ -2827,7 +2827,7 @@ def test_free_text_becomes_the_note():
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, text="Onset preceded by R-on-T")
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
     assert finding["note"] == "Onset preceded by R-on-T"
 
 
@@ -2835,14 +2835,14 @@ def test_absolute_time_is_never_emitted():
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, start_sample=10)
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
     assert "startUnixMS" not in finding
     assert "endUnixMS" not in finding
 
 
 def test_no_annotation_sequence_yields_no_findings():
     ds = build_ecg_dataset(num_samples=500)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test")
     assert doc["findings"] == []
 
 
@@ -2851,7 +2851,7 @@ def test_output_validates_against_murmurs_published_schema():
     add_annotation(ds, start_sample=101, end_sample=301,
                    text="Range finding")
     add_annotation(ds, start_sample=500, channel=3)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/1.0")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/1.0")
 
     with open(SCHEMA_PATH, encoding="utf-8") as f:
         schema = json.load(f)
@@ -2865,11 +2865,11 @@ def test_output_validates_against_murmurs_published_schema():
 .venv/bin/python -m pytest tests/test_murmur_annotations.py -q
 ```
 
-Expected: collection error — `ModuleNotFoundError: No module named 'gantry.murmur'`.
+Expected: collection error — `ModuleNotFoundError: No module named 'isocenter.murmur'`.
 
 - [ ] **Step 5: Write the bridge**
 
-Create `gantry/murmur.py`:
+Create `isocenter/murmur.py`:
 
 ```python
 """Bridge DICOM Waveform Annotations to Murmur Studio's producer JSON.
@@ -2878,9 +2878,9 @@ Maps Waveform Annotation Sequence (0040,B020) into the
 `<record>.annotations.json` format documented at
 https://kvnlng.github.io/Murmur/annotation-schema
 
-Gantry transcribes; it does not interpret. Coded concepts are passed
+Isocenter transcribes; it does not interpret. Coded concepts are passed
 through scheme-qualified rather than normalized into a clinical
-vocabulary of Gantry's own, so a finding says exactly what the
+vocabulary of Isocenter's own, so a finding says exactly what the
 originating cart said.
 """
 import json
@@ -3075,18 +3075,18 @@ Expected: 8 passed.
 
 - [ ] **Step 7: Emit the file during WFDB export**
 
-In `gantry/exporters/wfdb.py`, in `_write_instance`, immediately before `return hea_path`:
+In `isocenter/exporters/wfdb.py`, in `_write_instance`, immediately before `return hea_path`:
 
 ```python
         from ..murmur import build_annotations, write_annotations
 
         try:
-            from .. import __version__ as gantry_version
+            from .. import __version__ as isocenter_version
         except ImportError:
-            gantry_version = "0.0.0"
+            isocenter_version = "0.0.0"
 
         manufacturer = str(instance.attributes.get("0008,0070", "") or "").strip()
-        source = f"gantry/{gantry_version}"
+        source = f"isocenter/{isocenter_version}"
         if manufacturer:
             source = f"{source} ({manufacturer})"
 
@@ -3100,7 +3100,7 @@ Then add a test to `tests/test_murmur_annotations.py`:
 ```python
 def test_annotations_file_lands_beside_the_header(tmp_path):
     import pydicom
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
     from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation
 
     src = tmp_path / "src"
@@ -3123,7 +3123,7 @@ def test_annotations_file_lands_beside_the_header(tmp_path):
         doc = json.load(f)
     assert doc["schemaVersion"] == 1
     assert doc["findings"][0]["startSample"] == 100
-    assert doc["source"].startswith("gantry/")
+    assert doc["source"].startswith("isocenter/")
 ```
 
 - [ ] **Step 8: Add the non-blocking schema drift check**
@@ -3174,7 +3174,7 @@ Expected: matches the Task 1 baseline plus every test added across tasks 2–10.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add gantry/murmur.py gantry/exporters/wfdb.py scripts/generate_waveform_test_data.py \
+git add isocenter/murmur.py isocenter/exporters/wfdb.py scripts/generate_waveform_test_data.py \
         tests/test_murmur_annotations.py tests/fixtures/annotations.schema.json \
         .github/workflows/schema-drift.yml
 git commit -m "feat: bridge DICOM waveform annotations to Murmur JSON
@@ -3204,14 +3204,14 @@ Create `docs/waveforms.md`:
 ```markdown
 # Waveforms and WFDB Export
 
-Gantry ingests DICOM waveform IODs — 12-Lead ECG, General ECG,
+Isocenter ingests DICOM waveform IODs — 12-Lead ECG, General ECG,
 Hemodynamic, and related SOP classes — alongside image data, and exports
 them as PhysioNet WFDB records.
 
 ## Quick start
 
 ```python
-from gantry import Session
+from isocenter import Session
 
 session = Session("ecg_study.db")
 session.ingest("/data/ecg")
@@ -3274,7 +3274,7 @@ In `CHANGELOG.md`, under `## [Unreleased]` → `### Added`:
 - **DICOM Waveform Support**: Waveform IODs are now ingested, persisted, and de-identified as a first-class data type alongside pixel data.
 - **WFDB Export**: `session.export(folder, format="wfdb")` writes `header(5)`-conformant PhysioNet WFDB records (format 16).
 - **Murmur Annotation Bridge**: Waveform Annotation Sequence `(0040,B020)` is exported as `<record>.annotations.json` for [Murmur Studio](https://github.com/kvnlng/Murmur).
-- **Export Format Registry**: `gantry.exporters` provides a pluggable `Exporter` seam; `session.export()` dispatches on `format`.
+- **Export Format Registry**: `isocenter.exporters` provides a pluggable `Exporter` seam; `session.export()` dispatches on `format`.
 ```
 
 And under `### Fixed`, creating the section if absent:
@@ -3325,6 +3325,6 @@ git commit -m "docs: document waveform ingest and WFDB export"
 
 1. **Compaction would have destroyed ingested pixel data.** `DicomImporter.import_files` writes pixel frames through `SidecarManager` directly and never calls `persist_pixel_data()`, so `instance_blobs` stays empty for anything ingested in the current session. A `compact_sidecar()` reading only that table would have judged every ingested pixel blob orphaned and reclaimed its bytes. Fixed by re-running the back-fill inside compaction (Task 3 Step 7) and proven by `test_compaction_preserves_both_kinds`. Waveforms need the complementary fix — they have no legacy column to back-fill from — so ingest registers their reference explicitly via `record_blob_ref` (Task 5 Step 5).
 
-2. **Waveforms would not have survived a session reload.** Hydration rewires `_pixel_loader` from the `instances.pixel_offset` columns, but waveforms have no such columns and nothing read `instance_blobs` back. Ingest-then-export in one session would have passed every conformance test while pause/resume — Gantry's core promise for large jobs — silently lost the data. Fixed in Task 5 Step 7, covered by `test_waveform_survives_a_session_reload`.
+2. **Waveforms would not have survived a session reload.** Hydration rewires `_pixel_loader` from the `instances.pixel_offset` columns, but waveforms have no such columns and nothing read `instance_blobs` back. Ingest-then-export in one session would have passed every conformance test while pause/resume — Isocenter's core promise for large jobs — silently lost the data. Fixed in Task 5 Step 7, covered by `test_waveform_survives_a_session_reload`.
 
 Both were invisible from the spec and only surfaced from tracing the actual ingest call path. Worth re-checking in review that the back-fill call precedes the `SELECT` in `compact_sidecar`, since ordering is what makes the first fix work.

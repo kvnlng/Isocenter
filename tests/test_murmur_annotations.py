@@ -5,10 +5,10 @@ import pytest
 
 jsonschema = pytest.importorskip("jsonschema")
 
-from gantry.entities import DicomItem
-from gantry.io_handlers import populate_attrs
-from gantry.murmur import build_annotations, write_annotations, SCHEMA_VERSION
-from gantry.waveform import Waveform
+from isocenter.entities import DicomItem
+from isocenter.io_handlers import populate_attrs
+from isocenter.murmur import build_annotations, write_annotations, SCHEMA_VERSION
+from isocenter.waveform import Waveform
 from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation
 
 
@@ -17,8 +17,8 @@ SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "fixtures",
 
 
 def _instance_from(ds):
-    """Build a Gantry Instance-like item carrying ds's sequences."""
-    from gantry.entities import Instance
+    """Build a Isocenter Instance-like item carrying ds's sequences."""
+    from isocenter.entities import Instance
     inst = Instance(str(ds.SOPInstanceUID), str(ds.SOPClassUID), 1)
     populate_attrs(ds, inst, inst.text_index)
     return inst
@@ -33,7 +33,7 @@ def _waveform_from(ds):
 def test_point_annotation_maps_to_a_point_finding():
     ds = build_ecg_dataset(num_samples=1000)
     add_annotation(ds, start_sample=101)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test")
 
     assert doc["schemaVersion"] == SCHEMA_VERSION
     assert len(doc["findings"]) == 1
@@ -46,7 +46,7 @@ def test_point_annotation_maps_to_a_point_finding():
 def test_segment_annotation_maps_to_a_range_finding():
     ds = build_ecg_dataset(num_samples=1000)
     add_annotation(ds, start_sample=101, end_sample=301)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test")
 
     finding = doc["findings"][0]
     assert finding["kind"] == "range"
@@ -59,7 +59,7 @@ def test_category_is_the_scheme_qualified_code_and_label_is_the_meaning():
     add_annotation(ds, code_value="164889003",
                    code_meaning="Atrial fibrillation", scheme="SCT")
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
 
     assert finding["category"] == "SCT:164889003"
     assert finding["label"] == "Atrial fibrillation"
@@ -69,7 +69,7 @@ def test_lead_comes_from_the_coded_channel_source():
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, channel=2)
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
     assert finding["lead"] == "MDC_ECG_LEAD_II"
 
 
@@ -78,7 +78,7 @@ def test_lead_falls_back_to_a_positional_token_for_an_uncoded_channel():
     number through to `wfdb_description`, not rely on its no-argument
     default.
 
-    Mutating `gantry/murmur.py`'s `wfdb_description(index)` call to
+    Mutating `isocenter/murmur.py`'s `wfdb_description(index)` call to
     `wfdb_description()` survived the full suite: every uncoded,
     non-allowlisted channel then reported the same "signal" placeholder
     regardless of which channel it actually was -- leads silently
@@ -96,20 +96,20 @@ def test_lead_falls_back_to_a_positional_token_for_an_uncoded_channel():
     add_annotation(ds, channel=2)
 
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
     assert finding["lead"] == "ch1"
 
 
 def test_lead_from_coded_source_is_sanitized_against_hea_comment_injection():
     """`annotations.json`'s `lead` field must get the same line-break
     sanitization the `.hea` signal description gets
-    (`gantry.exporters.wfdb._sanitize_description`).
+    (`isocenter.exporters.wfdb._sanitize_description`).
 
     A coded Channel Source value is not filtered by the lead-name
     allowlist -- that only guards the free-text Channel Label fallback --
     so a non-conformant source can still carry an embedded newline.
-    `gantry/exporters/wfdb.py` already sanitizes this for the `.hea` file
-    (`_sanitize_description`); pre-fix, `gantry/murmur.py` did not apply
+    `isocenter/exporters/wfdb.py` already sanitizes this for the `.hea` file
+    (`_sanitize_description`); pre-fix, `isocenter/murmur.py` did not apply
     the same treatment, so `annotations.json` carried a rawer value than
     the `.hea` for the identical input.
     """
@@ -119,7 +119,7 @@ def test_lead_from_coded_source_is_sanitized_against_hea_comment_injection():
     add_annotation(ds, channel=2)
 
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
     assert "\n" not in finding["lead"]
     assert finding["lead"] == "MDC #patient ZQINJECT01"
 
@@ -133,7 +133,7 @@ def test_free_text_note_is_written_only_when_opted_in():
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, text="Onset preceded by R-on-T")
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test", include_text=True)["findings"][0]
+                                "isocenter/test", include_text=True)["findings"][0]
     assert finding["note"] == "Onset preceded by R-on-T"
 
 
@@ -146,7 +146,7 @@ def test_note_is_omitted_by_default():
     """
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, text="Reviewed by Dr Jane Doe, MRN-12345678")
-    document = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    document = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test")
     assert document["findings"], "fixture produced no findings"
     for finding in document["findings"]:
         assert "note" not in finding, (
@@ -158,7 +158,7 @@ def test_note_is_written_when_explicitly_requested():
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, text="sinus rhythm")
     document = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                 "gantry/test", include_text=True)
+                                 "isocenter/test", include_text=True)
     notes = [f.get("note") for f in document["findings"]]
     assert "sinus rhythm" in notes
 
@@ -167,14 +167,14 @@ def test_absolute_time_is_never_emitted():
     ds = build_ecg_dataset(num_samples=500)
     add_annotation(ds, start_sample=10)
     finding = build_annotations(_instance_from(ds), _waveform_from(ds),
-                                "gantry/test")["findings"][0]
+                                "isocenter/test")["findings"][0]
     assert "startUnixMS" not in finding
     assert "endUnixMS" not in finding
 
 
 def test_no_annotation_sequence_yields_no_findings():
     ds = build_ecg_dataset(num_samples=500)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/test")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test")
     assert doc["findings"] == []
 
 
@@ -188,7 +188,7 @@ def test_write_annotations_skips_when_there_are_no_findings(tmp_path):
     `annotations.json` with `"findings": []` and nothing would notice.
     """
     path = str(tmp_path / "rec.annotations.json")
-    document = {"schemaVersion": SCHEMA_VERSION, "source": "gantry/test", "findings": []}
+    document = {"schemaVersion": SCHEMA_VERSION, "source": "isocenter/test", "findings": []}
 
     result = write_annotations(path, document)
 
@@ -206,7 +206,7 @@ def test_write_annotations_writes_when_findings_are_present(tmp_path):
     path = str(tmp_path / "rec.annotations.json")
     document = {
         "schemaVersion": SCHEMA_VERSION,
-        "source": "gantry/test",
+        "source": "isocenter/test",
         "findings": [{"kind": "point", "startSample": 0, "category": "AFib"}],
     }
 
@@ -224,7 +224,7 @@ def test_output_validates_against_murmurs_published_schema():
     add_annotation(ds, start_sample=101, end_sample=301,
                    text="Range finding")
     add_annotation(ds, start_sample=500, channel=3)
-    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "gantry/1.0")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/1.0")
 
     # Guard against a trivially-passing validation: an empty findings list
     # validates fine against the schema, so a broken mapping that silently
@@ -283,7 +283,7 @@ def test_schema_rejects_an_unknown_top_level_key():
 
 def test_annotations_file_lands_beside_the_header(tmp_path):
     import pydicom
-    from gantry.session import DicomSession
+    from isocenter.session import DicomSession
     from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation
 
     src = tmp_path / "src"
@@ -306,4 +306,4 @@ def test_annotations_file_lands_beside_the_header(tmp_path):
         doc = json.load(f)
     assert doc["schemaVersion"] == 1
     assert doc["findings"][0]["startSample"] == 100
-    assert doc["source"].startswith("gantry/")
+    assert doc["source"].startswith("isocenter/")

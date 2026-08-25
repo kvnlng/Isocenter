@@ -10,15 +10,15 @@ import numpy as np
 import pytest
 import pydicom
 
-from gantry.session import DicomSession
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.crypto import KeyManager
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.crypto import KeyManager
 
 def test_reversible_anonymization_flow(tmp_path):
     """
     Test full flow: Anonymize -> Embed -> Export -> Read -> Recover.
     """
-    db_path = str(tmp_path / "gantry_rev.db")
+    db_path = str(tmp_path / "isocenter_rev.db")
     key_path = str(tmp_path / "test.key")
     export_dir = str(tmp_path / "export")
 
@@ -135,7 +135,7 @@ def test_expanded_restoration(tmp_path):
     """
     Verifies that we can lock arbitrary tags and restore them in-memory.
     """
-    db_path = str(tmp_path / "gantry_rev_expanded.db")
+    db_path = str(tmp_path / "isocenter_rev_expanded.db")
     key_path = str(tmp_path / "test_expanded.key")
 
     # Generate valid key

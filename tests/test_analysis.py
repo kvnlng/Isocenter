@@ -1,8 +1,8 @@
 import pytest
 import pandas as pd
-from gantry.session import DicomSession
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.privacy import PhiReport
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.privacy import PhiReport
 from datetime import date
 import os
 

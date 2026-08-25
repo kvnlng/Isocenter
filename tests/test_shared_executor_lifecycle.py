@@ -1,8 +1,8 @@
 import unittest
 import concurrent.futures
 from unittest.mock import MagicMock, patch
-from gantry.session import DicomSession
-from gantry.parallel import run_parallel
+from isocenter.session import DicomSession
+from isocenter.parallel import run_parallel
 import time
 import os
 
@@ -32,8 +32,8 @@ class TestSharedExecutorLifecycle(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             executor.submit(sum, [1, 2])
 
-    @patch('gantry.io_handlers.run_parallel')
-    @patch('gantry.session.DicomSession.save')
+    @patch('isocenter.io_handlers.run_parallel')
+    @patch('isocenter.session.DicomSession.save')
     def test_export_uses_fresh_recycled_pool_not_shared_executor(self, mock_save, mock_run_parallel):
         """Verify that export builds its own recycling pool instead of reusing the shared executor.
 
@@ -76,7 +76,7 @@ class TestSharedExecutorLifecycle(unittest.TestCase):
         passed_executor = kwargs.get('executor')
         self.assertNotEqual(passed_executor, self.session._executor)
 
-    @patch('gantry.io_handlers.run_parallel')
+    @patch('isocenter.io_handlers.run_parallel')
     @patch('os.path.isfile')
     @patch('os.path.isdir')
     def test_ingest_uses_executor(self, mock_isdir, mock_isfile, mock_run_parallel):
@@ -100,7 +100,7 @@ class TestSharedExecutorLifecycle(unittest.TestCase):
         self.assertIn('executor', kwargs)
         self.assertEqual(kwargs['executor'], self.session._executor)
 
-    @patch('gantry.io_handlers.run_parallel')
+    @patch('isocenter.io_handlers.run_parallel')
     @patch('os.path.isfile')
     def test_consistency_across_calls(self, mock_isfile, mock_run):
         """Verify that the same executor is reused across multiple calls."""

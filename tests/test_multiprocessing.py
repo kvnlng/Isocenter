@@ -1,10 +1,10 @@
 import pytest
 import os
-from gantry.session import DicomSession
-from gantry import Builder
+from isocenter.session import DicomSession
+from isocenter import Builder
 from datetime import date
-from gantry.privacy import PhiReport
-from gantry.io_handlers import DicomExporter
+from isocenter.privacy import PhiReport
+from isocenter.io_handlers import DicomExporter
 
 def test_parallel_import_and_scan(tmp_path):
     # 1. Generate Data

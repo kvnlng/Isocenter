@@ -1,6 +1,6 @@
 import pytest
-from gantry.session import DicomSession
-from gantry.io_handlers import DicomImporter
+from isocenter.session import DicomSession
+from isocenter.io_handlers import DicomImporter
 import os
 import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
@@ -38,8 +38,8 @@ def test_import_with_progress(tmp_path, monkeypatch):
         ds.save_as(str(fp))
 
     # 2. Mock Tqdm in parallel module
-    import gantry.parallel
-    monkeypatch.setattr(gantry.parallel, "tqdm", MockTqdm)
+    import isocenter.parallel
+    monkeypatch.setattr(isocenter.parallel, "tqdm", MockTqdm)
 
     # 3. Create Session (initializes logger)
     session = DicomSession(str(tmp_path / "session.db"))
@@ -48,7 +48,7 @@ def test_import_with_progress(tmp_path, monkeypatch):
     session.ingest(str(dcm_dir))
 
     # 5. Verify Logger created file
-    log_file = os.getenv("GANTRY_LOG_FILE", "gantry.log")
+    log_file = os.getenv("ISOCENTER_LOG_FILE", "isocenter.log")
     assert os.path.exists(log_file)
     with open(log_file, "r") as f:
         content = f.read()

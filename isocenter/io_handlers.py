@@ -1,5 +1,5 @@
 """
-IO Handlers for Gantry.
+IO Handlers for Isocenter.
 
 This module provides classes for:
 - DicomStore: The central catalog of DICOM objects.
@@ -53,12 +53,12 @@ def populate_attrs(ds: Any, item: "DicomItem", text_index: list = None):
     Standalone function to populate attributes for pickle-compatibility in workers.
 
     Extracts standard DICOM elements from a pydicom Dataset and populates the
-    Gantry DicomItem. Handles Sequences recursively. Skips large binary blobs
+    Isocenter DicomItem. Handles Sequences recursively. Skips large binary blobs
     (PixelData, Overlays) to keep the object graph lightweight.
 
     Args:
         ds: The pydicom Dataset or Sequence Item.
-        item (DicomItem): The Gantry item to populate.
+        item (DicomItem): The Isocenter item to populate.
         text_index (list, optional): A list to append (item, tag) tuples for text indexing.
     """
 
@@ -146,7 +146,7 @@ def ingest_worker(fp: str) -> Tuple:
         inst = Instance(meta['sop'], meta['sop_class'], 0, file_path=fp)
         populate_attrs(ds, inst, inst.text_index)
 
-        # Gantry internally manages pixels as standard contiguous arrays (Interleaved)
+        # Isocenter internally manages pixels as standard contiguous arrays (Interleaved)
         # So we MUST ensure PlanarConfiguration=0 in metadata to match our converted data
         if inst.attributes.get("0028,0006") == 1:
             inst.set_attr("0028,0006", 0)
@@ -482,8 +482,8 @@ def _export_instance_worker(ctx: ExportContext) -> Optional[bool]:
             ds.HighBit = inst.attributes.get("0028,0102", default_bits - 1)
             ds.PixelRepresentation = inst.attributes.get("0028,0103", 0)
 
-        if "_GANTRY_REDACTION_HASH" in ds:
-            del ds["_GANTRY_REDACTION_HASH"]
+        if "_ISOCENTER_REDACTION_HASH" in ds:
+            del ds["_ISOCENTER_REDACTION_HASH"]
 
         # Validate & Save
         ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
@@ -841,7 +841,7 @@ def export_folder_names(patient, study, series):
 
     Uses `ConfigLoader.clean_filename`, the single sanitizer for folder
     names -- NOT the even-stricter per-format record-*name* sanitizers
-    such as `gantry.exporters.wfdb._sanitize` (which forbids spaces,
+    such as `isocenter.exporters.wfdb._sanitize` (which forbids spaces,
     appropriate for a bare record-name token but not for a folder name
     that must match `_export_dicom`'s output character-for-character).
 
@@ -1169,7 +1169,7 @@ class DicomExporter:
     def _merge(ds, attrs):
         """Merges a dictionary of attributes into a pydicom Dataset."""
         for t, v in attrs.items():
-            # Explicit handling for Gantry Private Tags to ensure correct VR
+            # Explicit handling for Isocenter Private Tags to ensure correct VR
             if t == "0099,0010":
                 ds.add_new(0x00990010, 'LO', v)
                 continue

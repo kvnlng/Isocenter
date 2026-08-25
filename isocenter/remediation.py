@@ -337,7 +337,7 @@ class RemediationService:
         Stamps the entity with standard De-Identification Method tags.
 
         Adds:
-        - (0012,0063) De-identification Method (Gantry Signature)
+        - (0012,0063) De-identification Method (Isocenter Signature)
         - (0012,0064) De-identification Method Code Sequence (Basic Profile)
 
         Args:
@@ -353,7 +353,7 @@ class RemediationService:
         if isinstance(current_method, str):
             current_method = [current_method]
 
-        our_method = "Gantry Privacy Profile"
+        our_method = "Isocenter Privacy Profile"
         if our_method not in current_method:
             current_method.append(our_method)
             # Remove empty/None if any

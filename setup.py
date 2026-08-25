@@ -5,17 +5,17 @@ from setuptools import setup, find_packages
 README = (pathlib.Path(__file__).parent / "README.md").read_text(encoding="utf-8")
 
 setup(
-    name="gantry",
-    version="0.6.0",
+    name="isocenter",
+    version="0.7.0",
     description="A Python DICOM Object Model and Redaction Toolkit",
     long_description=README,
     long_description_content_type="text/markdown",
     author="Kevin Long",
-    url="https://github.com/kvnlng/Gantry",
+    url="https://github.com/kvnlng/Isocenter",
     project_urls={
-        "Documentation": "https://kvnlng.github.io/Gantry/",
-        "Issues": "https://github.com/kvnlng/Gantry/issues",
-        "Changelog": "https://github.com/kvnlng/Gantry/blob/main/CHANGELOG.md",
+        "Documentation": "https://kvnlng.github.io/Isocenter/",
+        "Issues": "https://github.com/kvnlng/Isocenter/issues",
+        "Changelog": "https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md",
     },
     license="AGPL-3.0-or-later",
     classifiers=[
@@ -36,13 +36,13 @@ setup(
               "ecg", "medical-imaging", "research"],
     packages=find_packages(),
     # Single source of truth for dependencies. There is deliberately no
-    # requirements.txt: two lists drift, and `pip install gantry` only ever
+    # requirements.txt: two lists drift, and `pip install isocenter` only ever
     # reads this one -- python-dotenv once lived only in requirements.txt
     # while being imported unguarded, so a real install failed at import
     # while CI (which installed both) stayed green.
     install_requires=[
         # 2.x's pixel_data_handlers API is deprecated in 3.x and removed in
-        # 4.0; gantry/__init__.py still assigns it, so cap until that is
+        # 4.0; isocenter/__init__.py still assigns it, so cap until that is
         # migrated.
         "pydicom>=3.0.0,<4.0",
         # Floors chosen as the first release of each that supports 3.12.
@@ -54,14 +54,14 @@ setup(
         "pyarrow>=14.0.0",
         "cryptography>=41.0.0",
         "tqdm>=4.65.0",
-        # Imported unguarded by gantry/config_manager.py.
+        # Imported unguarded by isocenter/config_manager.py.
         "python-dotenv>=1.0.0",
     ],
     # dataclass(slots=True) needs 3.10, and the dependency set above
     # resolves only on 3.12+. CI tests 3.12, 3.13, 3.14 and 3.14t.
     python_requires=">=3.12",
     extras_require={
-        # Optional: gantry/pixel_analysis.py guards the import and sets
+        # Optional: isocenter/pixel_analysis.py guards the import and sets
         # HAS_OCR=False when absent.
         "ocr": [
             "pytesseract>=0.3.10"

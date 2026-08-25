@@ -1,11 +1,11 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from gantry.discovery import ZoneDiscoverer
+from isocenter.discovery import ZoneDiscoverer
 
 class TestZoneDiscovererNLP(unittest.TestCase):
 
-    @patch('gantry.discovery.ZoneDiscoverer._nlp_model', None)
-    @patch('gantry.discovery.ZoneDiscoverer._nlp_model_failed', True)
+    @patch('isocenter.discovery.ZoneDiscoverer._nlp_model', None)
+    @patch('isocenter.discovery.ZoneDiscoverer._nlp_model_failed', True)
     def test_classify_text_regex(self):
         # 1. Name Pattern
         self.assertEqual(ZoneDiscoverer._classify_text("Smith^John"), "NAME_PATTERN")
@@ -20,8 +20,8 @@ class TestZoneDiscovererNLP(unittest.TestCase):
         self.assertEqual(ZoneDiscoverer._classify_text("kvp: 120"), "TEXT") # Lowercase
         self.assertEqual(ZoneDiscoverer._classify_text("12345"), "TEXT")
 
-    @patch('gantry.discovery.ZoneDiscoverer._nlp_model')
-    @patch('gantry.discovery.ZoneDiscoverer._nlp_model_failed', False)
+    @patch('isocenter.discovery.ZoneDiscoverer._nlp_model')
+    @patch('isocenter.discovery.ZoneDiscoverer._nlp_model_failed', False)
     def test_classify_text_nlp(self, mock_model):
         # Setup Mock NLP
         # doc.ents = [ent]

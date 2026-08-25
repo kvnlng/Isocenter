@@ -1,8 +1,8 @@
 
 import pytest
 import numpy as np
-from gantry.entities import Instance
-from gantry.services import RedactionService
+from isocenter.entities import Instance
+from isocenter.services import RedactionService
 
 class MockStore:
     def __init__(self):

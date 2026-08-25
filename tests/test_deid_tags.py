@@ -1,7 +1,7 @@
 
 import pytest
-from gantry.entities import Instance, DicomSequence, DicomItem
-from gantry.remediation import RemediationService
+from isocenter.entities import Instance, DicomSequence, DicomItem
+from isocenter.remediation import RemediationService
 
 def test_deid_tags_stamping():
     """
@@ -17,7 +17,7 @@ def test_deid_tags_stamping():
     # 3. Verify (0012,0063) De-identification Method
     method_val = inst.attributes.get("0012,0063")
     assert method_val is not None
-    assert "Gantry Privacy Profile" in method_val
+    assert "Isocenter Privacy Profile" in method_val
 
     # 4. Verify (0012,0064) Code Sequence
     seq = inst.sequences.get("0012,0064")
@@ -49,7 +49,7 @@ def test_deid_tags_idempotency():
     # Verify Method list length (should be 1 if starting empty)
     method_val = inst.attributes.get("0012,0063")
     assert len(method_val) == 1
-    assert method_val[0] == "Gantry Privacy Profile"
+    assert method_val[0] == "Isocenter Privacy Profile"
 
     # Verify Sequence length (should be 1)
     seq = inst.sequences.get("0012,0064")

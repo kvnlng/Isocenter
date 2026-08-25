@@ -1,6 +1,6 @@
 
 import pytest
-from gantry.config_manager import ConfigLoader
+from isocenter.config_manager import ConfigLoader
 
 def test_zone_validation_flexible_format(tmp_path):
     """
@@ -19,7 +19,7 @@ def test_zone_validation_flexible_format(tmp_path):
     # Should not crash
     ConfigLoader._validate_rule(list_zone_rule, 0)
 
-    # 2. Test Dict Format (Standard Gantry)
+    # 2. Test Dict Format (Standard Isocenter)
     dict_zone_rule = {
         "serial_number": "TEST_DICT_ZONE",
         "redaction_zones": [

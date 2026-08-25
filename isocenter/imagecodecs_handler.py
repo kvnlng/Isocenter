@@ -20,7 +20,7 @@ def is_available():
     if imagecodecs is None:
         # Log to stderr so it appears in logs even if pydicom swallows the handler check
         print(
-            f"[gantry_imagecodecs_handler] NOT AVAILABLE. Import Error: {IMPORT_ERROR}",
+            f"[isocenter_imagecodecs_handler] NOT AVAILABLE. Import Error: {IMPORT_ERROR}",
             file=sys.stderr)
         return False
     return True
@@ -37,7 +37,7 @@ JPEGLSLossless = UID("1.2.840.10008.1.2.4.80")
 JPEGLSLossy = UID("1.2.840.10008.1.2.4.81")
 RLELossless = UID("1.2.840.10008.1.2.5")
 
-HANDLER_NAME = "gantry_imagecodecs_handler"
+HANDLER_NAME = "isocenter_imagecodecs_handler"
 
 DEPENDENCIES = {
     "imagecodecs": ("http://www.lfd.uci.edu/~gohlke/pythonlibs/#imagecodecs", "imagecodecs"),
@@ -148,6 +148,6 @@ def get_pixel_data(ds):
 
     except Exception as e:
         print(
-            f"[gantry_imagecodecs_handler] Decode error for {transfer_syntax}: {e}",
+            f"[isocenter_imagecodecs_handler] Decode error for {transfer_syntax}: {e}",
             file=sys.stderr)
         raise RuntimeError(f"imagecodecs failed to decode {transfer_syntax}: {e}") from e

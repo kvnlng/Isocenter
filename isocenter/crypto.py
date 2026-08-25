@@ -13,7 +13,7 @@ class KeyManager:
     Persists the key to a file for consistent encryption/decryption across sessions.
     """
 
-    def __init__(self, key_path: str = "gantry.key"):
+    def __init__(self, key_path: str = "isocenter.key"):
         """
         Args:
             key_path (str): File path to store/load the key.

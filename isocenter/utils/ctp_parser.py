@@ -6,7 +6,7 @@ import yaml
 
 class CTPParser:
     """
-    Parses CTP DicomPixelAnonymizer.script files into Gantry-compatible rules.
+    Parses CTP DicomPixelAnonymizer.script files into Isocenter-compatible rules.
     """
 
     @staticmethod
@@ -74,9 +74,9 @@ class CTPParser:
 
         # 2. Parse Coordinates
         # (x,y,w,h)
-        # Gantry expects: [r1, r2, c1, c2] = [y, y+h, x, x+w]
+        # Isocenter expects: [r1, r2, c1, c2] = [y, y+h, x, x+w]
 
-        gantry_zones = []
+        isocenter_zones = []
 
         # Find all (x,y,w,h) tuples
         coord_matches = re.findall(
@@ -84,10 +84,10 @@ class CTPParser:
 
         for (x, y, w, h) in coord_matches:
             x, y, w, h = int(x), int(y), int(w), int(h)
-            gantry_zone = [y, y + h, x, x + w]
-            gantry_zones.append(gantry_zone)
+            isocenter_zone = [y, y + h, x, x + w]
+            isocenter_zones.append(isocenter_zone)
 
-        if not gantry_zones:
+        if not isocenter_zones:
             return None
 
         # Build Rule Object
@@ -99,7 +99,7 @@ class CTPParser:
                 "manufacturer": criteria.get("manufacturer", "Unknown"),
                 "model_name": criteria.get("model_name", "Unknown"),
                 "comment": f"Imported from CTP. Condition: {condition_str.strip()}",
-                "redaction_zones": gantry_zones
+                "redaction_zones": isocenter_zones
             }
 
         return None
@@ -108,7 +108,7 @@ class CTPParser:
 if __name__ == "__main__":
 
     if len(sys.argv) < 3:
-        print("Usage: python -m gantry.utils.ctp_parser <input_script_path> <output_yaml_path>")
+        print("Usage: python -m isocenter.utils.ctp_parser <input_script_path> <output_yaml_path>")
         sys.exit(1)
 
     input_path = sys.argv[1]

@@ -1,3 +1,3 @@
 # Entities API
 
-::: gantry.entities
+::: isocenter.entities

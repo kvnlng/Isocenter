@@ -1,8 +1,8 @@
 import pytest
 import os
 import json
-from gantry.manifest import Manifest, ManifestItem, generate_manifest_file, JSONManifestRenderer, HTMLManifestRenderer
-from gantry.session import DicomSession
+from isocenter.manifest import Manifest, ManifestItem, generate_manifest_file, JSONManifestRenderer, HTMLManifestRenderer
+from isocenter.session import DicomSession
 
 @pytest.fixture
 def mock_manifest():

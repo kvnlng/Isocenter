@@ -4,8 +4,8 @@ import os
 import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian, UID
-from gantry.session import DicomSession
-from gantry.entities import Instance
+from isocenter.session import DicomSession
+from isocenter.entities import Instance
 
 def create_dcm(path, patient_id, study_uid, series_uid, sop_uid, seri_num=0, inst_num=1):
     """Helper to create a valid minimal DICOM file"""

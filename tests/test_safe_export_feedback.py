@@ -1,8 +1,8 @@
 
 import pytest
 import os
-from gantry.session import DicomSession
-from gantry.builders import DicomBuilder
+from isocenter.session import DicomSession
+from isocenter.builders import DicomBuilder
 import datetime
 
 def test_safe_export_feedback(tmp_path, capsys):

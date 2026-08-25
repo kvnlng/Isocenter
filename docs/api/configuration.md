@@ -1,6 +1,6 @@
 # Configuration API
 
-::: gantry.configuration.GantryConfiguration
+::: isocenter.configuration.IsocenterConfiguration
     handler: python
     options:
       members:

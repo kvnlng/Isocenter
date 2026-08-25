@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
-from gantry.verification import RedactionVerifier
-from gantry.pixel_analysis import TextRegion
-from gantry.entities import Instance, Equipment
+from isocenter.verification import RedactionVerifier
+from isocenter.pixel_analysis import TextRegion
+from isocenter.entities import Instance, Equipment
 
 class TestRedactionVerifier(unittest.TestCase):
 
@@ -45,7 +45,7 @@ class TestRedactionVerifier(unittest.TestCase):
         zone = (105, 10, 10, 10)
         self.assertFalse(verifier.is_covered(text_box, zone))
 
-    @patch('gantry.verification.analyze_pixels')
+    @patch('isocenter.verification.analyze_pixels')
     def test_verify_instance_filtering(self, mock_analyze):
         # Setup Rules
         rules = [{

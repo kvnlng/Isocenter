@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pydicom
 from pydicom.uid import generate_uid
-import gantry.imagecodecs_handler as h
+import isocenter.imagecodecs_handler as h
 from .logger import get_logger
 
 
@@ -239,7 +239,7 @@ class Instance(DicomItem):
             1. Return already cached `pixel_array`.
             2. Use `_pixel_loader` (Sidecar) if available.
             3. Read from `file_path` using `pydicom`.
-            4. Fallback to `gantry.imagecodecs_handler` if pydicom fails.
+            4. Fallback to `isocenter.imagecodecs_handler` if pydicom fails.
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None if missing/load failed.
@@ -282,7 +282,7 @@ class Instance(DicomItem):
                     raise e
 
             except Exception as e:
-                # Try explicit fallback to gantry.imagecodecs_handler
+                # Try explicit fallback to isocenter.imagecodecs_handler
                 # Pydicom sometimes fails to iterate handlers correctly or swallows errors.
                 try:
                     if ds is not None and h.is_available() and h.supports_transfer_syntax(ds.file_meta.TransferSyntaxUID):

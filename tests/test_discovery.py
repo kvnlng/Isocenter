@@ -1,5 +1,5 @@
 import unittest
-from gantry.discovery import ZoneDiscoverer
+from isocenter.discovery import ZoneDiscoverer
 
 class TestZoneDiscoverer(unittest.TestCase):
 
@@ -77,7 +77,7 @@ class TestZoneDiscoverer(unittest.TestCase):
 
 class TestDiscoveryResult(unittest.TestCase):
     def test_iteration(self):
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate
 
         c1 = DiscoveryCandidate("A", 0.9, [0,0,10,10], 0, "TEXT")
         c2 = DiscoveryCandidate("B", 0.8, [20,20,10,10], 1, "TEXT")
@@ -98,7 +98,7 @@ class TestDiscoveryResult(unittest.TestCase):
             next(it)
 
     def test_filter_lambda(self):
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate
         c1 = DiscoveryCandidate("Keep", 0.9, [0,0,10,10], 0, "TEXT")
         c2 = DiscoveryCandidate("Drop", 0.5, [0,0,10,10], 0, "TEXT")
 
@@ -115,7 +115,7 @@ class TestDiscoveryResult(unittest.TestCase):
         self.assertEqual(filtered_conf.candidates[0].confidence, 0.9)
 
     def test_heatmap(self):
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate
         # A 100x100 grid concept.
         # Box at 10,10 (Top Left)
         c1 = DiscoveryCandidate("A", 1.0, [10,10,10,10], 0, "TEXT")
@@ -128,7 +128,7 @@ class TestDiscoveryResult(unittest.TestCase):
         self.assertTrue("." in heatmap or "o" in heatmap)
 
     def test_temporal_stability(self):
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate
         # 10 sources.
         # "Static" appears in all 10.
         candidates = []
@@ -154,7 +154,7 @@ class TestDiscoveryResult(unittest.TestCase):
         self.assertEqual(transient_zone['occurrence'], 0.1)
 
     def test_inspect_clusters(self):
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate
         c1 = DiscoveryCandidate("A", 1.0, [0,0,10,10], 0, "TEXT")
         c2 = DiscoveryCandidate("B", 1.0, [5,0,10,10], 0, "TEXT") # Overlaps A
         c3 = DiscoveryCandidate("C", 1.0, [100,0,10,10], 0, "TEXT") # Disjoint
@@ -168,7 +168,7 @@ class TestDiscoveryResult(unittest.TestCase):
         self.assertEqual(lens, [1, 2]) # One cluster of 2, one of 1
 
     def test_get_density_matrix(self):
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate
         c1 = DiscoveryCandidate("A", 1.0, [10,10,10,10], 0, "TEXT")
         # 10x10 bin. Box is at 10,10.
         # If max extent is small, it might map to specific bin.
@@ -187,7 +187,7 @@ class TestDiscoveryResult(unittest.TestCase):
         import sys
         from unittest.mock import patch
 
-        from gantry.discovery import DiscoveryResult
+        from isocenter.discovery import DiscoveryResult
 
         with patch.dict(sys.modules, {'pandas': None}):
             res = DiscoveryResult([], 1)
@@ -197,7 +197,7 @@ class TestDiscoveryResult(unittest.TestCase):
     def test_to_dataframe_mock_success(self):
         import sys
         from unittest.mock import MagicMock, patch
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate
 
         mock_pd = MagicMock()
         mock_df = MagicMock()

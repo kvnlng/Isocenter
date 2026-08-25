@@ -1,7 +1,7 @@
 import pytest
 import os
 import yaml
-from gantry.config_manager import load_unified_config
+from isocenter.config_manager import load_unified_config
 
 def test_load_custom_privacy_profile(tmp_path):
     """

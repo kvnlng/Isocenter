@@ -2,10 +2,10 @@ import sys
 import os
 import shutil
 
-# Ensure we can import gantry
+# Ensure we can import isocenter
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def verify_ocr():
     print("Initializing Verification Session...")

@@ -1,15 +1,15 @@
 # Developer Guide
 
-Welcome to the Gantry development documentation. This guide covers how to set up your environment, maintain code quality, and run tests.
+Welcome to the Isocenter development documentation. This guide covers how to set up your environment, maintain code quality, and run tests.
 
 ## 1. Environment Setup
 
-Gantry requires Python 3.9+.
+Isocenter requires Python 3.9+.
 
 ```bash
 # Clone the repository
-git clone https://github.com/kvnlng/Gantry.git
-cd Gantry
+git clone https://github.com/kvnlng/Isocenter.git
+cd Isocenter
 
 # Install dependencies (including dev tools)
 pip install -e ".[dev]"
@@ -27,7 +27,7 @@ We use `pylint` to lint our codebase. The configuration is strict (`pylintrc.tom
 
 ```bash
 # Lint the main package
-pylint gantry
+pylint isocenter
 
 # Lint tests (slightly more lenient)
 pylint tests

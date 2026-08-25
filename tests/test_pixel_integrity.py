@@ -5,7 +5,7 @@ import pydicom
 import numpy as np
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def create_dicom(path, rows=10, cols=10, samples=1, photometric="MONOCHROME2", bits=16, pixel_data=None, instance_num=1):
     file_meta = FileMetaDataset()

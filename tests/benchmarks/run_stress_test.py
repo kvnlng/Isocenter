@@ -1,6 +1,6 @@
 
 """
-Headless Stress Test Runner for Gantry.
+Headless Stress Test Runner for Isocenter.
 Executes Import -> Redact -> Export pipeline and reports metrics.
 """
 
@@ -10,8 +10,8 @@ import argparse
 import resource
 import shutil
 import logging
-from gantry.session import DicomSession
-from gantry.logger import get_logger
+from isocenter.session import DicomSession
+from isocenter.logger import get_logger
 
 def report_resource_usage(stage_name):
     usage = resource.getrusage(resource.RUSAGE_SELF)
@@ -57,11 +57,11 @@ def run_benchmark(input_dir, output_dir, db_path, return_stats=False, compress_e
     # [4] Configure (Create & Load)
     print("\n[Step 4] Configure")
     # Write a dynamic config compatible with generated data
-    # Machines: GantryGen, Siemens, GE, Philips, Canon, Toshiba, Hitachi, Fujifilm
+    # Machines: IsocenterGen, Siemens, GE, Philips, Canon, Toshiba, Hitachi, Fujifilm
     # Serial Format: GEN_{MFR}_001
 
     machines_list = [
-        "GantryGen", "Siemens", "GE", "Philips",
+        "IsocenterGen", "Siemens", "GE", "Philips",
         "Canon", "Toshiba", "Hitachi", "Fujifilm"
     ]
 

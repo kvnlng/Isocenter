@@ -211,7 +211,7 @@ class DiscoveryResult:
 
             # Filter tiny zones
             if merged_box[2] > 5 and merged_box[3] > 5:
-                # Convert to [y1, y2, x1, x2] for Gantry Config
+                # Convert to [y1, y2, x1, x2] for Isocenter Config
                 x, y, w, h = merged_box
                 final_zones.append({
                     "zone": [y, y + h, x, x + w],

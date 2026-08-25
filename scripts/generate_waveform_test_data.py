@@ -1,4 +1,4 @@
-"""Generate synthetic 12-lead ECG DICOM files for Gantry's waveform tests.
+"""Generate synthetic 12-lead ECG DICOM files for Isocenter's waveform tests.
 
 Signals are deterministic and analytically known, so a round-trip through
 WFDB export can be asserted against exact expected physical values.
@@ -94,7 +94,7 @@ def build_ecg_dataset(num_samples=5000,
     ds.StudyDate = "20260101"
     ds.StudyTime = "101530"
     ds.AcquisitionDateTime = "20260101101530.000000"
-    ds.Manufacturer = "GantryTest"
+    ds.Manufacturer = "IsocenterTest"
     ds.ManufacturerModelName = "SyntheticCart"
     ds.DeviceSerialNumber = "SN-ECG-001"
 

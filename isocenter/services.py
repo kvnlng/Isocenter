@@ -1,5 +1,5 @@
 """
-Services for Gantry.
+Services for Isocenter.
 
 This module contains the core service logic for:
 - MachinePixelIndex: Fast retrieval of instances by device serial number.
@@ -224,7 +224,7 @@ class RedactionService:
 
         try:
             # Optimized: Skip if already redacted with same config
-            current_hash = inst.attributes.get("_GANTRY_REDACTION_HASH")
+            current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
 
             if current_hash == config_hash:
                 return None
@@ -244,7 +244,7 @@ class RedactionService:
                 self._apply_redaction_flags(inst)
                 inst.regenerate_uid()
                 # Mark as redacted with this hash
-                inst.attributes["_GANTRY_REDACTION_HASH"] = config_hash
+                inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
                 inst._dirty = True
 
                 # CRITICAL: Persist modified pixel data to sidecar (generate new Loader)
@@ -266,7 +266,7 @@ class RedactionService:
                     "0008,0008": inst.attributes.get("0008,0008"),
                     "0028,0301": inst.attributes.get("0028,0301"),
                     "0008,2111": inst.attributes.get("0008,2111"),
-                    "_GANTRY_REDACTION_HASH": inst.attributes.get("_GANTRY_REDACTION_HASH"),
+                    "_ISOCENTER_REDACTION_HASH": inst.attributes.get("_ISOCENTER_REDACTION_HASH"),
                 },
                 "sequences": {
                     k: v for k, v in inst.sequences.items() if k == "0008,9215"
@@ -408,7 +408,7 @@ class RedactionService:
                 disable=not show_progress):
             try:
                 # Optimized: Skip if already redacted with same config
-                current_hash = inst.attributes.get("_GANTRY_REDACTION_HASH")
+                current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
 
                 # DEBUG: Log hashes
                 # if verbose and current_hash:
@@ -444,7 +444,7 @@ class RedactionService:
                     self._apply_redaction_flags(inst)
                     inst.regenerate_uid()
                     # Mark as redacted with this hash
-                    inst.attributes["_GANTRY_REDACTION_HASH"] = config_hash
+                    inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
                     # Force Dirty to persist metadata update
                     inst._dirty = True
                     self.logger.debug(f"  Modified {inst.sop_instance_uid}")
@@ -579,7 +579,7 @@ class RedactionService:
         inst.set_attr("0028,0301", "NO")
 
         # 3. Derivation Description (0008,2111)
-        inst.set_attr("0008,2111", "Gantry Pixel Redaction: Burned-in PHI removed")
+        inst.set_attr("0008,2111", "Isocenter Pixel Redaction: Burned-in PHI removed")
 
         # 4. Derivation Code Sequence (0008,9215)
         # Code 113062: Pixel Data modification

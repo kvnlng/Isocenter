@@ -1,7 +1,7 @@
 import pytest
 import os
 import json
-from gantry import Session
+from isocenter import Session
 
 @pytest.fixture
 def session_db(tmp_path):

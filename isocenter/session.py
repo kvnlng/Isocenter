@@ -21,7 +21,7 @@ from .crypto import KeyManager
 from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import run_parallel
-from .configuration import GantryConfiguration
+from .configuration import IsocenterConfiguration
 from . import pixel_analysis
 from .automation import ConfigAutomator
 
@@ -101,7 +101,7 @@ class LockingResult(list):
 
 class DicomSession:
     """
-    The Main Facade for the Gantry library.
+    The Main Facade for the Isocenter library.
 
     Manages the lifecycle of the DicomStore including:
     - Loading/Saving session state from SQLite.
@@ -122,10 +122,10 @@ class DicomSession:
 
         Args:
             persistence_file (str): Path to the SQLite database file for session persistence.
-                                    Defaults to "gantry.db".
+                                    Defaults to "isocenter.db".
         """
         configure_logger()
-        self.persistence_file = persistence_file or os.getenv("GANTRY_DB_PATH", "gantry.db")
+        self.persistence_file = persistence_file or os.getenv("ISOCENTER_DB_PATH", "isocenter.db")
 
         # Check existence before SqliteStore potentially creates it
         db_exists = os.path.exists(self.persistence_file)
@@ -144,14 +144,14 @@ class DicomSession:
         self.store.patients = self.store_backend.load_all()
 
         # Initialize Configuration Object
-        self.configuration = GantryConfiguration()
+        self.configuration = IsocenterConfiguration()
 
         # Reversibility
         self.key_manager = None
         self.reversibility_service = None
 
-        if os.path.exists("gantry.key"):
-            self.enable_reversible_anonymization("gantry.key")
+        if os.path.exists("isocenter.key"):
+            self.enable_reversible_anonymization("isocenter.key")
 
         # Shared Global Executor for Process Consistency
         self._executor = concurrent.futures.ProcessPoolExecutor(
@@ -446,7 +446,7 @@ class DicomSession:
             get_logger().info(f"Loading configuration from {config_file}...")
             print(f"Loading configuration from {config_file}...")
 
-            # UNIFIED LOAD (v2) - Now loading into GantryConfiguration object
+            # UNIFIED LOAD (v2) - Now loading into IsocenterConfiguration object
             tags, rules, jitter, remove_private = ConfigLoader.load_unified_config(config_file)
 
             # Update the configuration object
@@ -803,7 +803,7 @@ class DicomSession:
                     new_lines.append(line)
 
             # Prepend Header Comments
-            header = """# Gantry Privacy Configuration (v2.0)
+            header = """# Isocenter Privacy Configuration (v2.0)
 # ==========================================
 #
 #
@@ -819,7 +819,7 @@ class DicomSession:
 #   - Range of days to shift dates by (negative = into past).
 #
 # remove_private_tags:
-#   - If true, removes all odd-group tags except Gantry Metadata.
+#   - If true, removes all odd-group tags except Isocenter Metadata.
 #
 #
 """
@@ -867,7 +867,7 @@ class DicomSession:
                 # Fallback to simple tags load
                 tags_to_use = ConfigLoader.load_phi_config(config_path)
 
-        # Uses GantryConfiguration derived tags
+        # Uses IsocenterConfiguration derived tags
         inspector = PhiInspector(config_tags=tags_to_use,
                                  remove_private_tags=self.configuration.remove_private_tags)
         if not inspector.phi_tags:
@@ -1017,7 +1017,7 @@ class DicomSession:
             DiscoveryResult: Object containing all detected text candidates.
             Call .to_zones() on the result to get grouped redaction zones.
         """
-        from gantry.discovery import DiscoveryResult, DiscoveryCandidate, ZoneDiscoverer
+        from isocenter.discovery import DiscoveryResult, DiscoveryCandidate, ZoneDiscoverer
         
         get_logger().info(f"Discovering zones for {serial_number}...")
 
@@ -1149,13 +1149,13 @@ class DicomSession:
         privacy_profile = "See Config"
         try:
             from importlib.metadata import version
-            ver = version("gantry")
+            ver = version("isocenter")
         except BaseException:
             ver = "0.0.0"
 
         # 4. Build Report DTO
         report = ComplianceReport(
-            gantry_version=ver,
+            isocenter_version=ver,
             project_name=os.path.basename(self.persistence_file),
             privacy_profile=privacy_profile,
             total_patients=n_p,
@@ -1480,7 +1480,7 @@ class DicomSession:
         else:
             print("No encrypted identity token found or decryption failed.")
 
-    def enable_reversible_anonymization(self, key_path: str = "gantry.key"):
+    def enable_reversible_anonymization(self, key_path: str = "isocenter.key"):
         """
         Initializes the encryption subsystem for Reversible Anonymization.
 
@@ -1524,8 +1524,8 @@ class DicomSession:
             # Shared memory allows in-place modification of instances.
             # OPTIMIZATION: Limited to 0.5x CPU or Max 8 to prevent OOM with large datasets
             cpu_count = os.cpu_count() or 1
-            if os.environ.get("GANTRY_MAX_WORKERS"):
-                max_workers = int(os.environ["GANTRY_MAX_WORKERS"])
+            if os.environ.get("ISOCENTER_MAX_WORKERS"):
+                max_workers = int(os.environ["ISOCENTER_MAX_WORKERS"])
             else:
                 max_workers = max(1, min(int(cpu_count * 0.5), 8))
 
@@ -1713,7 +1713,7 @@ class DicomSession:
         # 1. Validation Checks
         if check_reversibility and self.reversibility_service:
             # warn if we are exporting encrypted data without warning?
-            # Actually Gantry exports exactly what is in store (which might be encrypted).
+            # Actually Isocenter exports exactly what is in store (which might be encrypted).
             pass
 
         target_ids = patient_ids

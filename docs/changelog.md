@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the "Gantry" project will be documented in this file.
+All notable changes to the "Isocenter" project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Hybrid Storage Model**: Major refactor of the persistence layer to split metadata into **Core Attributes** (JSON) and **Vertical Attributes** (EAV Table). This allows Gantry to handle sparse private tags elegantly without bloating the main index, enabling unlimited private tag support.
+- **Hybrid Storage Model**: Major refactor of the persistence layer to split metadata into **Core Attributes** (JSON) and **Vertical Attributes** (EAV Table). This allows Isocenter to handle sparse private tags elegantly without bloating the main index, enabling unlimited private tag support.
 - **Sidecar Binary Offloading**: Pixel data is now eagerly extracted to a parallel sidecar file (`_pixels.bin`) during ingestion. This drastically reduces the size of the SQLite index and ensures fast start-up times even for massive datasets.
 - **Configuration API 2.0**:
-  - Introduced `gantry.configure()` / `session.create_config()` workflow.
-  - New `GantryConfiguration` class providing programmatic access to Rules, Redaction Zones, and PHI Tags.
+  - Introduced `isocenter.configure()` / `session.create_config()` workflow.
+  - New `IsocenterConfiguration` class providing programmatic access to Rules, Redaction Zones, and PHI Tags.
   - Automatic `version: 2.0` schema migration.
 - **Bytes Persistence**: Full support for persisting raw `bytes` in metadata via the JSON Core layer, ensuring complex VRs (like `OB`/`OW`) survive round-trips correctly.
 - **Planar Configuration Support**: Added native handling for `PlanarConfiguration=1` (RRRGGGBBB layout) in `SidecarPixelLoader`, fixing RGB corruption in some Ultrasound/Secondary Capture images.
@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Database Schema**: `gantry.db` now contains `instances` (horizontal) and `instance_attributes` (vertical) tables.
+- **Database Schema**: `isocenter.db` now contains `instances` (horizontal) and `instance_attributes` (vertical) tables.
 - **API**: `DicomSession.active_rules` is deprecated; use `DicomSession.configuration.rules` instead.
 - **API**: `DicomSession.active_phi_tags` is deprecated; use `DicomSession.configuration.phi_tags` instead.
 
@@ -95,11 +95,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Python 3.13t+ Support**: Full compatibility with Free-threaded Python (no-GIL).
 - **Benchmarks**: Documented performance achieving ~770k instances/sec for metadata operations.
-- **Migration Tools**: Added `gantry.utils.ctp_parser` to convert legacy CTP scripts to Gantry YAML.
+- **Migration Tools**: Added `isocenter.utils.ctp_parser` to convert legacy CTP scripts to Isocenter YAML.
 
 ### Changed
 
-- **Dependencies**: Merged `[images]` extra into core install. Gantry now installs `pillow` and `imagecodecs` by default.
+- **Dependencies**: Merged `[images]` extra into core install. Isocenter now installs `pillow` and `imagecodecs` by default.
 - **Documentation**: Complete rewrite of `README.md` to reflect v2.0 Architecture.
 
 ### Fixed
@@ -150,7 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Features**:
   - **Safe Export**: New `export(safe=True)` mode ensuring no PHI leaves the system.
-  - **Reversible Anonymization**: Securely embed encrypted original identities (`gantry.key`).
+  - **Reversible Anonymization**: Securely embed encrypted original identities (`isocenter.key`).
   - **Manual Persistence**: Changed default behavior to manual `.save()` for better user control.
   - **Background Persistence**: Non-blocking saves via `PersistenceManager`.
   - **PHI Analysis Reports**: `scan_for_phi` now returns a rich `PhiReport` object with Pandas DataFrame support.
@@ -171,7 +171,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Robust Persistence (SQLite)**: Replaced `Pickle` with `SQLite` for session storage (`gantry.db`). Allows for scale and external querying.
+- **Robust Persistence (SQLite)**: Replaced `Pickle` with `SQLite` for session storage (`isocenter.db`). Allows for scale and external querying.
 - **Audit Trail**: Implemented a comprehensive audit system. Actions such as `Redaction` and `Remediation` are now logged to the `audit_log` table in the database.
 - **Automated PHI Remediation**:
   - **Metadata Anonymization**: Automatically detects and anonymizes Patient Names and IDs.
@@ -202,7 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Core Architecture**: Implemented the semantic object graph (`Patient` → `Study` → `Series` → `Instance`) to replace flat dictionary handling.
-- **Facade Interface**: Added `gantry.Session` class as the primary entry point for user interaction, managing imports, persistence, and inventory.
+- **Facade Interface**: Added `isocenter.Session` class as the primary entry point for user interaction, managing imports, persistence, and inventory.
 - **Lazy Loading**: Implemented a Proxy Pattern for `Instance` objects. Metadata is loaded into memory during import, while heavy pixel data is read from disk only upon request.
 - **De-Identification Service**: Added `RedactionService` to modify pixel data (burn-in removal) based on specific machine serial numbers.
 - **Configuration Management**: Added support for `redaction_rules.json` to define Redaction Regions of Interest (ROIs) externally.

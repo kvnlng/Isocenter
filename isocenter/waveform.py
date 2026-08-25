@@ -77,7 +77,7 @@ def _is_known_lead_name(label: str) -> bool:
 
 
 class UnsupportedInterpretation(ValueError):
-    """Raised for Waveform Sample Interpretations Gantry cannot decode."""
+    """Raised for Waveform Sample Interpretations Isocenter cannot decode."""
 
 
 def _as_float(value, default=0.0):
@@ -122,7 +122,7 @@ def decode_samples(data: bytes,
     if interp in _COMPANDED:
         raise UnsupportedInterpretation(
             f"Sample Interpretation {interp!r} is companded audio "
-            "(mu-law/A-law), which Gantry does not decode.")
+            "(mu-law/A-law), which Isocenter does not decode.")
 
     dtype = _DTYPES.get(interp)
     if dtype is None:

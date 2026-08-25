@@ -1,9 +1,9 @@
 import pytest
 import time
 import threading
-from gantry.session import DicomSession
-from gantry.entities import Patient
-from gantry.persistence import SqliteStore
+from isocenter.session import DicomSession
+from isocenter.entities import Patient
+from isocenter.persistence import SqliteStore
 
 def test_async_save_completes(tmp_path):
     db_path = str(tmp_path / "async.db")

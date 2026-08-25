@@ -1,7 +1,7 @@
 import pytest
 import json
 import os
-from gantry.config_manager import ConfigLoader
+from isocenter.config_manager import ConfigLoader
 
 def test_load_valid_config(tmp_path):
     data = {

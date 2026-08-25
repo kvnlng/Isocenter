@@ -1,9 +1,9 @@
 import pytest
 import os
 import sqlite3
-from gantry.persistence import SqliteStore
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.session import DicomSession
+from isocenter.persistence import SqliteStore
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.session import DicomSession
 
 @pytest.fixture
 def store(tmp_path):
@@ -91,8 +91,8 @@ def test_session_integration(tmp_path):
     # Cleanup auto by tmp_path
 
 def test_remediation_audit(store):
-    from gantry.remediation import RemediationService
-    from gantry.privacy import PhiFinding, PhiRemediation
+    from isocenter.remediation import RemediationService
+    from isocenter.privacy import PhiFinding, PhiRemediation
 
     # Create finding
     finding = PhiFinding("PID_123", "Patient", "patient_name", "John Doe", "Names",

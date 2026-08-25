@@ -6,12 +6,12 @@ import datetime
 import numpy as np
 from typing import List, Dict, Any
 
-# Ensure we can import gantry
+# Ensure we can import isocenter
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from gantry.builders import DicomBuilder
-from gantry.io_handlers import DicomExporter
-from gantry.entities import Patient, DicomItem
+from isocenter.builders import DicomBuilder
+from isocenter.io_handlers import DicomExporter
+from isocenter.entities import Patient, DicomItem
 
 def generate_random_date(start_year=1950, end_year=2000):
     start_date = datetime.date(start_year, 1, 1)
@@ -186,8 +186,8 @@ def main():
         "RF": [("GE", "Precision"), ("Siemens", "Luminos")],
         "MG": [("Hologic", "Selenia"), ("GE", "Senographe")],
         "MG": [("Hologic", "Selenia"), ("GE", "Senographe")],
-        "OT": [("Gantry", "Test")],
-        "SR": [("Gantry", "ReportSystem")]
+        "OT": [("Isocenter", "Test")],
+        "SR": [("Isocenter", "ReportSystem")]
     }
     
     patients = []

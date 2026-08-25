@@ -1,4 +1,4 @@
-name: Gantry Tests
+name: Isocenter Tests
 
 on:
   # Post-merge verification only. Without the branch filter this also fires

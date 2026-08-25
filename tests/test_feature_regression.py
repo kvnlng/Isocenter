@@ -7,8 +7,8 @@ import numpy as np
 import pydicom
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless, ExplicitVRLittleEndian
-from gantry.session import DicomSession
-from gantry.reversibility import ReversibilityService
+from isocenter.session import DicomSession
+from isocenter.reversibility import ReversibilityService
 from cryptography.fernet import Fernet
 
 class TestNewFeatures(unittest.TestCase):
@@ -30,8 +30,8 @@ class TestNewFeatures(unittest.TestCase):
         # Cleanup potential side-effects in CWD
         if os.path.exists("test_session.db"):
             os.remove("test_session.db")
-        if os.path.exists("gantry_test.key"):
-            os.remove("gantry_test.key")
+        if os.path.exists("isocenter_test.key"):
+            os.remove("isocenter_test.key")
 
     def _create_dummy_dicom(self, path):
         ds = Dataset()
@@ -100,10 +100,10 @@ class TestNewFeatures(unittest.TestCase):
 
 
     def test_session_auto_key_loading(self):
-        """Verify Gantry automatically loads 'gantry.key' if present"""
+        """Verify Isocenter automatically loads 'isocenter.key' if present"""
         # 1. Create a key file
-        key_path = "gantry.key"
-        # Note: DicomSession looks for 'gantry.key' in CWD.
+        key_path = "isocenter.key"
+        # Note: DicomSession looks for 'isocenter.key' in CWD.
         # We need to be careful not to overwrite user's actual key if running locally.
         # But we are in a test env. The user prompt says we can write to files in workspaces.
         # We should back up existing key if any.

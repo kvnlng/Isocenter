@@ -1,8 +1,8 @@
 
 import pytest
 import os
-from gantry.session import DicomSession
-from gantry.entities import Patient, Study, Series, Instance
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Study, Series, Instance
 from datetime import date
 import numpy as np
 

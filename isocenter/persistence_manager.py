@@ -127,7 +127,7 @@ class PersistenceManager:
             return
 
         get_logger().info("Shutting down PersistenceManager...")
-        print("\nShutting down Gantry Persistence Manager...")
+        print("\nShutting down Isocenter Persistence Manager...")
 
         # Determine if we have pending work
         pending = self.queue.qsize()

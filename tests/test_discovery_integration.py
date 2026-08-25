@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 import sys
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 # Ensure we can import the generator
 sys.path.insert(0, os.path.abspath('.'))
 import scripts.generate_redaction_example as gen

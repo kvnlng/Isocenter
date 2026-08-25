@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from unittest.mock import patch
-from gantry.entities import Instance, Equipment
+from isocenter.entities import Instance, Equipment
 
 
 def test_equipment_equality():

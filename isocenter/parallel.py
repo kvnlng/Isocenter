@@ -32,9 +32,9 @@ def run_parallel(
     """
     Executes `func(item)` in parallel using multiple processes or threads.
 
-    Adapts strategy based on environment variables (`GANTRY_MAX_WORKERS`,
-    `GANTRY_FORCE_THREADS`, `GANTRY_CHUNKSIZE`, `GANTRY_MAX_TASKS_PER_CHILD`,
-    `GANTRY_DISABLE_GC`) and presence of GIL. Defaults to `ProcessPoolExecutor`.
+    Adapts strategy based on environment variables (`ISOCENTER_MAX_WORKERS`,
+    `ISOCENTER_FORCE_THREADS`, `ISOCENTER_CHUNKSIZE`, `ISOCENTER_MAX_TASKS_PER_CHILD`,
+    `ISOCENTER_DISABLE_GC`) and presence of GIL. Defaults to `ProcessPoolExecutor`.
 
     Args:
         func (Callable[[T], R]): The worker function.
@@ -61,7 +61,7 @@ def run_parallel(
 
     # Global override (Disable only)
     if show_progress:
-        env_show = os.environ.get("GANTRY_SHOW_PROGRESS", "1").lower()
+        env_show = os.environ.get("ISOCENTER_SHOW_PROGRESS", "1").lower()
         if env_show in ("0", "false", "off", "no"):
             show_progress = False
 
@@ -71,9 +71,9 @@ def run_parallel(
         # This provides better throughput for I/O and compression heavy tasks
         nonlocal max_workers, chunksize, maxtasksperchild, disable_gc
         if max_workers is None:
-            if os.environ.get("GANTRY_MAX_WORKERS"):
+            if os.environ.get("ISOCENTER_MAX_WORKERS"):
                 try:
-                    max_workers = int(os.environ["GANTRY_MAX_WORKERS"])
+                    max_workers = int(os.environ["ISOCENTER_MAX_WORKERS"])
                 except ValueError:
                     pass
 
@@ -84,30 +84,30 @@ def run_parallel(
 
         # Determine Strategy
         if chunksize == 1:
-             if os.environ.get("GANTRY_CHUNKSIZE"):
+             if os.environ.get("ISOCENTER_CHUNKSIZE"):
                 try:
-                    chunksize = int(os.environ["GANTRY_CHUNKSIZE"])
+                    chunksize = int(os.environ["ISOCENTER_CHUNKSIZE"])
                 except ValueError:
                     pass
 
         if maxtasksperchild is None:
-             if os.environ.get("GANTRY_MAX_TASKS_PER_CHILD"):
+             if os.environ.get("ISOCENTER_MAX_TASKS_PER_CHILD"):
                 try:
-                    maxtasksperchild = int(os.environ["GANTRY_MAX_TASKS_PER_CHILD"])
+                    maxtasksperchild = int(os.environ["ISOCENTER_MAX_TASKS_PER_CHILD"])
                 except ValueError:
                     pass
 
         # Check for GC disable override
         if not disable_gc:
-             if os.environ.get("GANTRY_DISABLE_GC") == "1":
+             if os.environ.get("ISOCENTER_DISABLE_GC") == "1":
                  disable_gc = True
 
         # Determine Strategy
         use_threads = False
 
-        if force_threads or os.environ.get("GANTRY_FORCE_THREADS") == "1":
+        if force_threads or os.environ.get("ISOCENTER_FORCE_THREADS") == "1":
             use_threads = True
-        elif os.environ.get("GANTRY_FORCE_PROCESSES") == "1":
+        elif os.environ.get("ISOCENTER_FORCE_PROCESSES") == "1":
             use_threads = False
         else:
             if hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled():

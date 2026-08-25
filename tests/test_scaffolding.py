@@ -1,8 +1,8 @@
 import pytest
 import json
-from gantry.session import DicomSession
-from gantry.entities import Patient, Equipment
-from gantry.builders import DicomBuilder
+from isocenter.session import DicomSession
+from isocenter.entities import Patient, Equipment
+from isocenter.builders import DicomBuilder
 from datetime import date
 
 def test_scaffold_config_creates_new_entries(tmp_path):

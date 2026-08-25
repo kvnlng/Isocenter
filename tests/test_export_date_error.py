@@ -1,7 +1,7 @@
 
 import pytest
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.io_handlers import DicomExporter
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.io_handlers import DicomExporter
 
 def test_export_string_date_error(tmp_path):
     # Setup

@@ -3,8 +3,8 @@ import os
 import shutil
 import pytest
 import numpy as np
-from gantry.session import DicomSession
-from gantry.entities import Instance, Patient, Study, Series, Equipment
+from isocenter.session import DicomSession
+from isocenter.entities import Instance, Patient, Study, Series, Equipment
 
 TEST_DB = "test_memory_redaction.db"
 
@@ -30,7 +30,7 @@ def test_redaction_memory_swap(clean_env):
     # Each instance has 100x100 pixels
     p = Patient("P_MEM", "Memory Test")
     st = Study("S_MEM", "20230101")
-    se = Series("SE_MEM", "OT", 1, Equipment("Gantry", "MemTest", "SERIAL_123"))
+    se = Series("SE_MEM", "OT", 1, Equipment("Isocenter", "MemTest", "SERIAL_123"))
 
     instances = []
     for i in range(10):
@@ -65,7 +65,7 @@ def test_redaction_memory_swap(clean_env):
     # - Persist to sidecar
     # - Unload pixels (Set to None)
 
-    from gantry.services import RedactionService
+    from isocenter.services import RedactionService
     svc = RedactionService(sess.store, sess.store_backend)
     svc.redact_machine_instances("SERIAL_123", rois, verbose=True)
 

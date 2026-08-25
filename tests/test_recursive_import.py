@@ -1,8 +1,8 @@
 import pytest
 import os
-from gantry.io_handlers import DicomImporter, DicomStore, DicomExporter
-from gantry.entities import Patient
-from gantry.builders import DicomBuilder
+from isocenter.io_handlers import DicomImporter, DicomStore, DicomExporter
+from isocenter.entities import Patient
+from isocenter.builders import DicomBuilder
 from datetime import date
 
 def test_recursive_import(tmp_path):

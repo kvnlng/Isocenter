@@ -3,7 +3,7 @@ import json
 import base64
 from pydicom.multival import MultiValue
 from pydicom.valuerep import DSfloat
-from gantry.persistence import GantryJSONEncoder, gantry_json_object_hook
+from isocenter.persistence import IsocenterJSONEncoder, isocenter_json_object_hook
 
 class TestJsonSerialization:
 
@@ -15,7 +15,7 @@ class TestJsonSerialization:
         mv = MultiValue(DSfloat, ['0.5', '1.5', '2.5'])
         data = {"ImagePositionPatient": mv}
 
-        json_str = json.dumps(data, cls=GantryJSONEncoder)
+        json_str = json.dumps(data, cls=IsocenterJSONEncoder)
 
         # Verify result is a valid JSON string with a list
         decoded = json.loads(json_str)
@@ -29,7 +29,7 @@ class TestJsonSerialization:
         data = {"MyBytes": b"HiddenData"}
 
         # 1. Encode
-        json_str = json.dumps(data, cls=GantryJSONEncoder)
+        json_str = json.dumps(data, cls=IsocenterJSONEncoder)
         decoded_raw = json.loads(json_str)
 
         # Verify encoding format
@@ -37,7 +37,7 @@ class TestJsonSerialization:
         assert decoded_raw["MyBytes"]["data"] == base64.b64encode(b"HiddenData").decode('ascii')
 
         # 2. Decode via Hook
-        restored = json.loads(json_str, object_hook=gantry_json_object_hook)
+        restored = json.loads(json_str, object_hook=isocenter_json_object_hook)
         assert restored["MyBytes"] == b"HiddenData"
 
     def test_mixed_structure(self):
@@ -52,8 +52,8 @@ class TestJsonSerialization:
             ]
         }
 
-        json_str = json.dumps(data, cls=GantryJSONEncoder)
-        restored = json.loads(json_str, object_hook=gantry_json_object_hook)
+        json_str = json.dumps(data, cls=IsocenterJSONEncoder)
+        restored = json.loads(json_str, object_hook=isocenter_json_object_hook)
 
         assert restored["Complex"][0]["Pos"] == [1.0, 2.0]
         assert restored["Complex"][1]["Raw"] == b"123"

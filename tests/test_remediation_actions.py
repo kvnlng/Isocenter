@@ -1,8 +1,8 @@
 
 import pytest
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.session import DicomSession
-from gantry.privacy import PhiInspector, PhiFinding
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.session import DicomSession
+from isocenter.privacy import PhiInspector, PhiFinding
 import json
 import os
 

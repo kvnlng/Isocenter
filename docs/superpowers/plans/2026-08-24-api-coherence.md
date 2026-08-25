@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove the duplicate and contradicting public methods that make "where does Gantry put files?" and "how do I sanitize a name?" have more than one answer, before the API is frozen for 1.0.
+**Goal:** Remove the duplicate and contradicting public methods that make "where does Isocenter put files?" and "how do I sanitize a name?" have more than one answer, before the API is frozen for 1.0.
 
 **Architecture:** Three DICOM directory layouts collapse to one; two folder-name sanitizers collapse to one; the dead `version` parameter and the dead `generate_export_from_db` entry point are deleted; `DicomSession` gains the context manager its `close()` already implies.
 
@@ -15,7 +15,7 @@
 - **Every test must be able to fail.** Nine false-passing tests were found on the previous branch. For each test you write, state what it would look like if it silently passed against broken code. Guard negative assertions (`X not in Y`) with a positive precondition proving the thing exists at all.
 - **Use `.venv/bin/python` for every python and pytest invocation** (Python 3.14.7). A bare `python` is a pyenv 3.12.13 shim missing `wfdb` and `jsonschema`, under which whole test files silently skip and still report green. Always pass `-rs`; always report skip counts.
 - **Baseline: 373 passed, 1 skipped, 0 failed.** The single skip is `tests/test_discovery_integration.py:45` (undeclared `faker`, tracked as #44) — do not fix it here.
-- **Do not touch `gantry/exporters/wfdb.py`'s `_sanitize`, `_sanitize_description` or `_sanitize_units`.** They are purpose-specific WFDB header/record-name rules, not duplicates. See Task 4.
+- **Do not touch `isocenter/exporters/wfdb.py`'s `_sanitize`, `_sanitize_description` or `_sanitize_units`.** They are purpose-specific WFDB header/record-name rules, not duplicates. See Task 4.
 - **De-identification behaviour must not regress.** Several of these paths feed export directory names, which carry PHI. If a change alters what reaches a folder name, say so explicitly.
 
 ---
@@ -45,7 +45,7 @@ The first two are two answers to the same question (make a folder name) and diff
 `_export_dicom` accepts `version=None`, its own docstring calls it "Deprecated/Unused", and it is never read anywhere in the body or passed to any callee. No test passes it.
 
 **Files:**
-- Modify: `gantry/session.py` (`_export_dicom` signature ~1651, docstring ~1660)
+- Modify: `isocenter/session.py` (`_export_dicom` signature ~1651, docstring ~1660)
 - Test: `tests/test_api_coherence.py` (create)
 
 **Interfaces:**
@@ -64,7 +64,7 @@ parameters are removed rather than deprecated.
 """
 import inspect
 
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 
 def test_export_does_not_accept_a_dead_version_parameter():
@@ -98,7 +98,7 @@ Expected: 374 passed, 1 skipped.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gantry/session.py tests/test_api_coherence.py
+git add isocenter/session.py tests/test_api_coherence.py
 git commit -m "refactor: delete the dead version parameter from export
 
 Accepted, documented as Deprecated/Unused, never read, and passed by no
@@ -113,7 +113,7 @@ passes it."
 A public staticmethod with its own inline copy of the folder-format strings and no production caller — its only caller anywhere is `tests/test_export_sql.py:71`. It is a third answer to "where do files go", kept alive solely by the test that exercises it.
 
 **Files:**
-- Modify: `gantry/io_handlers.py` (delete `generate_export_from_db`, lines ~927-1053)
+- Modify: `isocenter/io_handlers.py` (delete `generate_export_from_db`, lines ~927-1053)
 - Delete: `tests/test_export_sql.py`
 - Modify: `tests/test_shared_executor_lifecycle.py` (a `patch()` of the removed name at line ~85)
 - Test: `tests/test_api_coherence.py`
@@ -133,7 +133,7 @@ def test_only_one_public_export_entry_point_builds_directory_trees():
     It duplicated the format strings inline rather than sharing a helper,
     and nothing but a test ever called it.
     """
-    from gantry.io_handlers import DicomExporter
+    from isocenter.io_handlers import DicomExporter
 
     assert not hasattr(DicomExporter, "generate_export_from_db"), (
         "generate_export_from_db still exists; it is a third, "
@@ -150,10 +150,10 @@ Expected: FAIL on `hasattr`. Quote the output.
 Run and paste the output into your report:
 
 ```bash
-grep -rn "generate_export_from_db" gantry/ scripts/ tests/ --include='*.py'
+grep -rn "generate_export_from_db" isocenter/ scripts/ tests/ --include='*.py'
 ```
 
-Expected: definitions in `gantry/io_handlers.py`, a call in `tests/test_export_sql.py`, a `patch()` in `tests/test_shared_executor_lifecycle.py`. **If you find any other caller — especially under `scripts/` — stop and report BLOCKED**: the reachability premise of this task is wrong.
+Expected: definitions in `isocenter/io_handlers.py`, a call in `tests/test_export_sql.py`, a `patch()` in `tests/test_shared_executor_lifecycle.py`. **If you find any other caller — especially under `scripts/` — stop and report BLOCKED**: the reachability premise of this task is wrong.
 
 - [ ] **Step 4: Delete**
 
@@ -182,7 +182,7 @@ exercised it. Removing it leaves two layouts, unified in the next commit."
 `DicomExporter.save_patient`/`save_studies` are public and used by three `scripts/` files, but produce a different tree than `session.export()`: no UID suffix, no modality, a different date format. This was attempted once during the WFDB work and reverted because `tests/test_structured_export.py` pins the legacy strings. Those assertions are the thing being changed, so update them deliberately.
 
 **Files:**
-- Modify: `gantry/io_handlers.py` — `_generate_export_contexts` (~1055) to call `export_folder_names` (807); delete `_legacy_generate_export_contexts_folder_names` (866-902)
+- Modify: `isocenter/io_handlers.py` — `_generate_export_contexts` (~1055) to call `export_folder_names` (807); delete `_legacy_generate_export_contexts_folder_names` (866-902)
 - Modify: `tests/test_structured_export.py` (hardcoded legacy assertions)
 - Test: `tests/test_api_coherence.py`
 
@@ -198,14 +198,14 @@ Append to `tests/test_api_coherence.py`:
 def test_both_public_export_paths_produce_the_same_tree(tmp_path):
     """`DicomExporter.save_patient` and `session.export()` must agree.
 
-    Both are public and shipped. Two layouts means "where does Gantry put
+    Both are public and shipped. Two layouts means "where does Isocenter put
     files" has no single answer for a library user.
 
     Derives both trees from real exports rather than hardcoding names, so
     it cannot drift out of step with the naming logic it guards.
     """
-    from gantry.io_handlers import DicomExporter
-    from gantry.session import DicomSession
+    from isocenter.io_handlers import DicomExporter
+    from isocenter.session import DicomSession
     from scripts.generate_waveform_test_data import write_fixture
 
     source = tmp_path / "src"
@@ -248,7 +248,7 @@ Expected: FAIL showing two different directory strings. **Paste both trees into 
 
 - [ ] **Step 3: Point `_generate_export_contexts` at the shared helper**
 
-In `gantry/io_handlers.py` at ~line 1118, replace the call to `_legacy_generate_export_contexts_folder_names` with `export_folder_names(patient, st, se)`. The enclosing loops (`for st in studies:` at 1076, `for se in st.series:` at 1077) already bind the study and series objects, so no plumbing is needed; `s_date_str` and `inst` become unused at this call site — check whether `s_date_str` is still needed elsewhere in the loop before removing it. Then delete `_legacy_generate_export_contexts_folder_names` entirely, along with the docstring paragraph explaining why it was kept unshared — that reason no longer applies.
+In `isocenter/io_handlers.py` at ~line 1118, replace the call to `_legacy_generate_export_contexts_folder_names` with `export_folder_names(patient, st, se)`. The enclosing loops (`for st in studies:` at 1076, `for se in st.series:` at 1077) already bind the study and series objects, so no plumbing is needed; `s_date_str` and `inst` become unused at this call site — check whether `s_date_str` is still needed elsewhere in the loop before removing it. Then delete `_legacy_generate_export_contexts_folder_names` entirely, along with the docstring paragraph explaining why it was kept unshared — that reason no longer applies.
 
 - [ ] **Step 4: Update the tests that pin the old strings**
 
@@ -279,14 +279,14 @@ BREAKING: save_patient/save_studies output paths change."
 
 `ConfigLoader.clean_filename` and `DicomExporter._sanitize` are two answers to the same question. After Task 3, `_sanitize` should have no folder-naming callers left. It differs from `clean_filename` only in substituting `"Unknown"` for falsy input — including the integer `0`, which is a meaningful series number.
 
-`gantry/exporters/wfdb.py`'s `_sanitize` is **not** in scope: WFDB record names must be bare ASCII tokens, so it replaces `^`/`/`/space with `_` instead of deleting them, and `wfdb.py`'s own docstring warns against using it for folder names. Leave it, and leave `_sanitize_description`/`_sanitize_units` (WFDB header field rules).
+`isocenter/exporters/wfdb.py`'s `_sanitize` is **not** in scope: WFDB record names must be bare ASCII tokens, so it replaces `^`/`/`/space with `_` instead of deleting them, and `wfdb.py`'s own docstring warns against using it for folder names. Leave it, and leave `_sanitize_description`/`_sanitize_units` (WFDB header field rules).
 
 **Files:**
-- Modify: `gantry/io_handlers.py` (delete `DicomExporter._sanitize`, ~1359; update remaining callers)
+- Modify: `isocenter/io_handlers.py` (delete `DicomExporter._sanitize`, ~1359; update remaining callers)
 - Test: `tests/test_api_coherence.py`
 
 **Interfaces:**
-- Consumes: `ConfigLoader.clean_filename` from `gantry/config_manager.py:212`
+- Consumes: `ConfigLoader.clean_filename` from `isocenter/config_manager.py:212`
 - Produces: `DicomExporter._sanitize` no longer exists
 
 - [ ] **Step 1: Find the remaining callers**
@@ -294,7 +294,7 @@ BREAKING: save_patient/save_studies output paths change."
 Run and paste into your report:
 
 ```bash
-grep -rn "_sanitize" gantry/ scripts/ tests/ --include='*.py' | grep -v "exporters/wfdb.py"
+grep -rn "_sanitize" isocenter/ scripts/ tests/ --include='*.py' | grep -v "exporters/wfdb.py"
 ```
 
 For each remaining call site, decide whether `clean_filename` is a behaviour-preserving substitute. **The falsy case is the real difference**: `_sanitize(0)` is `"Unknown"`, `clean_filename(0)` is `"0"`. If any call site passes a series number or similar, `"0"` is the correct output and `"Unknown"` was a latent bug — say so in your report rather than preserving it.
@@ -310,7 +310,7 @@ def test_one_sanitizer_for_folder_names():
     `wfdb._sanitize` is deliberately excluded -- WFDB record names are
     bare ASCII tokens with different rules, documented as such.
     """
-    from gantry.io_handlers import DicomExporter
+    from isocenter.io_handlers import DicomExporter
 
     assert not hasattr(DicomExporter, "_sanitize"), (
         "DicomExporter._sanitize still exists alongside "
@@ -322,7 +322,7 @@ def test_a_zero_series_number_is_not_renamed_to_unknown():
 
     A series number of 0 is a real value, not a missing one.
     """
-    from gantry.config_manager import ConfigLoader
+    from isocenter.config_manager import ConfigLoader
 
     assert ConfigLoader.clean_filename(0) == "0"
 ```
@@ -372,7 +372,7 @@ if safe:
 Two names for one behaviour each. Unlike `version` these are live and tested, so this is a rename with test updates, not a deletion. `subset` is **not** in scope — it is a real feature (query/DataFrame/UID-list resolution), not an alias.
 
 **Files:**
-- Modify: `gantry/session.py` (`_export_dicom` signature and the legacy-mapping block)
+- Modify: `isocenter/session.py` (`_export_dicom` signature and the legacy-mapping block)
 - Modify: the tests listed in Step 1
 - Test: `tests/test_api_coherence.py`
 
@@ -444,7 +444,7 @@ compression= is now use_compression=."
 `close()` shuts down a `ProcessPoolExecutor`, the persistence-manager thread, and the audit thread that owns the sqlite connection. There is no `__enter__`/`__exit__`, so a caller who forgets `close()` leaks worker subprocesses. Every test in the suite already wraps sessions in `try/finally` by hand.
 
 **Files:**
-- Modify: `gantry/session.py` (add `__enter__`/`__exit__` near `close()`, ~165)
+- Modify: `isocenter/session.py` (add `__enter__`/`__exit__` near `close()`, ~165)
 - Test: `tests/test_api_coherence.py`
 
 **Interfaces:**
@@ -510,7 +510,7 @@ Expected: FAIL with `AttributeError: __enter__` (or `TypeError` about the contex
 
 - [ ] **Step 3: Implement**
 
-In `gantry/session.py`, beside `close()`:
+In `isocenter/session.py`, beside `close()`:
 
 ```python
     def __enter__(self) -> "DicomSession":
@@ -564,7 +564,7 @@ subprocesses. __exit__ returns None so exceptions still propagate."
 `active_rules`/`active_phi_tags` do not exist — they were fully migrated to `configuration.rules`/`configuration.phi_tags`. Only misleading prose survives.
 
 **Files:**
-- Modify: `gantry/session.py:1581` (comment referencing `active_rules`)
+- Modify: `isocenter/session.py:1581` (comment referencing `active_rules`)
 - Modify: `tests/test_scaffold_features.py:112`, `tests/test_redact_error.py:9,102-103` (comments only)
 - Modify: `CHANGELOG.md`
 - Modify: `docs/` — any page documenting a removed parameter or the legacy export layout

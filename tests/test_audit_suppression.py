@@ -1,8 +1,8 @@
 
 import pytest
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.privacy import PhiInspector, PhiFinding, PhiReport
-from gantry.remediation import RemediationService
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.privacy import PhiInspector, PhiFinding, PhiReport
+from isocenter.remediation import RemediationService
 
 def test_audit_suppresses_shifted_dates():
     """
@@ -43,7 +43,7 @@ def test_remediation_service_sets_flag():
     inst.attributes["0008,0020"] = "20230101"
 
     # 2. Create Finding regarding this entity
-    from gantry.privacy import PhiRemediation
+    from isocenter.privacy import PhiRemediation
     proposal = PhiRemediation(
         action_type="SHIFT_DATE",
         target_attr="0008,0020",

@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Gantry uses a **Unified YAML Configuration** (v2.0) to control all aspects of de-identification, including PHI tag rules, date shifting, and pixel redaction.
+Isocenter uses a **Unified YAML Configuration** (v2.0) to control all aspects of de-identification, including PHI tag rules, date shifting, and pixel redaction.
 
 This file allows you to define a reproducible privacy policy that can be shared across your team or version controlled.
 
@@ -18,7 +18,7 @@ This file allows you to define a reproducible privacy policy that can be shared 
 
 ## Complete Example
 
-Save this as `gantry_config.yaml`:
+Save this as `isocenter_config.yaml`:
 
 ```yaml
 # 1. Privacy Profile (Base Rules)
@@ -80,7 +80,7 @@ privacy_profile: "comprehensive"
 
 Shifts all date attributes (`DA`, `DT`) by a random number of days.
 
-* **Logic**: Gantry generates a secret random offset for each `PatientID`. This offset is consistent for that patient across all their studies and series, preserving temporal relationships (intervals) while hiding the absolute dates.
+* **Logic**: Isocenter generates a secret random offset for each `PatientID`. This offset is consistent for that patient across all their studies and series, preserving temporal relationships (intervals) while hiding the absolute dates.
 * **Config**:
 
     ```yaml
@@ -124,7 +124,7 @@ phi_tags:
 
 ### Pixel Redaction (Machines)
 
-Automatically scrubs burned-in text (pixels) for specific devices. Gantry identifies the machine using the `DeviceSerialNumber` (0018,1000) tag.
+Automatically scrubs burned-in text (pixels) for specific devices. Isocenter identifies the machine using the `DeviceSerialNumber` (0018,1000) tag.
 
 ```yaml
 machines:
@@ -142,7 +142,7 @@ machines:
 
 ### Generating Configuration Templates
 
-You can generate a starter `gantry_config.yaml` based on your current session inventory. This is useful for bootstrapping a new configuration file that includes all detected machines.
+You can generate a starter `isocenter_config.yaml` based on your current session inventory. This is useful for bootstrapping a new configuration file that includes all detected machines.
 
 ```python
 # Inspects data, finds all unique machine serials, and writes a config file
@@ -158,11 +158,11 @@ In addition to YAML files, you can manage the configuration dynamically using Py
 ### Accessing Configuration
 
 ```python
-import gantry
+import isocenter
 
-session = gantry.Session(data_directory="./dicom_data")
+session = isocenter.Session(data_directory="./dicom_data")
 
-# improved: Access the GantryConfiguration object directly
+# improved: Access the IsocenterConfiguration object directly
 config = session.configuration
 
 print(config.rules)    # List active redaction rules
@@ -218,7 +218,7 @@ session.configuration.set_phi_tag("0008,1030", "REPLACE", replacement="RESEARCH 
 
 ## Auto-Discovery of Redaction Zones
 
-To help identify pixel redaction zones (e.g., for burned-in PHI), Gantry provides a discovery tool that analyzes a sample of images from a specific machine to find common text "hotspots".
+To help identify pixel redaction zones (e.g., for burned-in PHI), Isocenter provides a discovery tool that analyzes a sample of images from a specific machine to find common text "hotspots".
 
 ```python
 # Discover potential redaction zones for a machine

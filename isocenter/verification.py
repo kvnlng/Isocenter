@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Tuple
-from gantry.entities import Instance
-from gantry.privacy import PhiFinding
-from gantry.pixel_analysis import TextRegion, analyze_pixels
+from isocenter.entities import Instance
+from isocenter.privacy import PhiFinding
+from isocenter.pixel_analysis import TextRegion, analyze_pixels
 
 class RedactionVerifier:
     """

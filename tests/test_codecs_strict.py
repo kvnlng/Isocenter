@@ -5,11 +5,11 @@ from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless, JPEGLosslessSV1
 import numpy as np
 import os
-from gantry import Session as DicomSession
-from gantry.entities import Instance
+from isocenter import Session as DicomSession
+from isocenter.entities import Instance
 
-# Import gantry to trigger __init__ handler registration
-import gantry
+# Import isocenter to trigger __init__ handler registration
+import isocenter
 
 def test_handler_registration():
     """Verifies that the correct handlers are registered in pydicom."""
@@ -21,22 +21,22 @@ def test_handler_registration():
     # Check for Import Strings or Function Objects
     # pydicom stores them as objects once loaded, or strings if lazy?
     # Actually pydicom.config.pixel_data_handlers is a list of modules usually after config is applied?
-    # Gantry sets them as strings in __init__.py.
+    # Isocenter sets them as strings in __init__.py.
 
     print(f"Registered Handlers: {handlers}")
 
-    # We expect 'gantry.imagecodecs_handler'
+    # We expect 'isocenter.imagecodecs_handler'
     has_imagecodecs = any("imagecodecs_handler" in str(h) for h in handlers)
     has_pillow = any("pillow_handler" in str(h) for h in handlers)
 
-    assert has_imagecodecs, "gantry.imagecodecs_handler should be registered"
+    assert has_imagecodecs, "isocenter.imagecodecs_handler should be registered"
     assert has_pillow, "pillow_handler should be registered"
 
 def test_jpeg_lossless_handling_mock():
     """
     Verifies that the imagecodecs handler supports JPEG Lossless.
     """
-    from gantry import imagecodecs_handler
+    from isocenter import imagecodecs_handler
 
     assert imagecodecs_handler.is_available(), "imagecodecs should be installed and available"
 
@@ -72,9 +72,9 @@ def test_strict_export_failure():
     ds.save_as(filename, write_like_original=False)
 
     try:
-        # Create minimal Gantry session
-        import gantry.io_handlers
-        from gantry.entities import Instance, Patient, Study, Series
+        # Create minimal Isocenter session
+        import isocenter.io_handlers
+        from isocenter.entities import Instance, Patient, Study, Series
 
         # Manually create the graph to skip ingestion overhead
         inst = Instance("9.9.9.9", "1.2.840.10008.5.1.4.1.1.2", 1, file_path=os.path.abspath(filename))
@@ -86,7 +86,7 @@ def test_strict_export_failure():
         # Should raise RuntimeError because get_pixel_data will fail to decompress,
         # and we Removed Raw Export.
 
-        from gantry.io_handlers import DicomExporter
+        from isocenter.io_handlers import DicomExporter
 
         with pytest.raises(RuntimeError) as excinfo:
             DicomExporter.save_patient(p, "export_strict_test")

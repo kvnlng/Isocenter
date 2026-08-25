@@ -1,9 +1,9 @@
 
 import pytest
 from unittest.mock import MagicMock, call
-from gantry.services import RedactionService
-from gantry.entities import Instance, Series, Study, Patient, Equipment
-from gantry.io_handlers import DicomStore
+from isocenter.services import RedactionService
+from isocenter.entities import Instance, Series, Study, Patient, Equipment
+from isocenter.io_handlers import DicomStore
 
 @pytest.fixture
 def mock_store():

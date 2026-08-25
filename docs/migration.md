@@ -2,11 +2,11 @@
 
 ## Clinical Trial Processor (CTP)
 
-Gantry includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into Gantry's YAML configuration format.
+Isocenter includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into Isocenter's YAML configuration format.
 
 ```bash
-# Convert CTP script to Gantry YAML
-python -m gantry.utils.ctp_parser /path/to/anonymizer.script output_rules.yaml
+# Convert CTP script to Isocenter YAML
+python -m isocenter.utils.ctp_parser /path/to/anonymizer.script output_rules.yaml
 ```
 
 This parser extracts:

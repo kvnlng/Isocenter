@@ -2,12 +2,12 @@ import os
 import pytest
 import sqlite3
 import numpy as np
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.persistence import SqliteStore
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.persistence import SqliteStore
 
 @pytest.fixture
 def store(tmp_path):
-    db_file = tmp_path / "test_gantry.db"
+    db_file = tmp_path / "test_isocenter.db"
     s = SqliteStore(str(db_file))
     yield s
 

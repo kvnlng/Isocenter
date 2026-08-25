@@ -1,9 +1,9 @@
 
 """
-Standard Privacy Profiles for Gantry.
+Standard Privacy Profiles for Isocenter.
 
 This module defines built-in privacy profiles that can be referenced in the
-Gantry configuration file using the "privacy_profile" key. These profiles
+Isocenter configuration file using the "privacy_profile" key. These profiles
 provide a baseline set of PHI actions (e.g. REMOVE, EMPTY) which can be
 overridden by the user's specific "phi_tags" configuration.
 """
@@ -11,8 +11,8 @@ overridden by the user's specific "phi_tags" configuration.
 # Based on DICOM PS3.15 Annex E (Basic Profile) - Reduced for common usage
 #
 # NOTE: keys must be lowercase 'gggg,eeee'. Ingested attribute keys on the
-# object graph are always lowercased (gantry/io_handlers.py's populate_attrs),
-# and PhiInspector.__init__ (gantry/privacy.py) now normalizes any phi_tags
+# object graph are always lowercased (isocenter/io_handlers.py's populate_attrs),
+# and PhiInspector.__init__ (isocenter/privacy.py) now normalizes any phi_tags
 # dict to lowercase keys as a defensive backstop -- but do not rely on that
 # backstop when adding new entries here; write them lowercase directly so
 # a mismatch never has a chance to silently disable a tag. (0008,103E,

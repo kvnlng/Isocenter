@@ -1,9 +1,9 @@
 
 import os
 import pytest
-from gantry.session import DicomSession
-from gantry.services import RedactionService
-from gantry.entities import Instance, Patient, Study, Series
+from isocenter.session import DicomSession
+from isocenter.services import RedactionService
+from isocenter.entities import Instance, Patient, Study, Series
 
 def test_redaction_result_application_logic():
     """

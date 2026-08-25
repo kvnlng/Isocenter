@@ -1,6 +1,6 @@
 
 import pytest
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def test_import_validation_headerless(tmp_path):
     """

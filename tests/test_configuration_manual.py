@@ -1,8 +1,8 @@
 import os
 import shutil
 
-from gantry.session import DicomSession
-from gantry.configuration import GantryConfiguration
+from isocenter.session import DicomSession
+from isocenter.configuration import IsocenterConfiguration
 
 # Cleanup previous runs
 if os.path.exists("test_config_api.db"):
@@ -13,7 +13,7 @@ def test_configuration_api():
     s = DicomSession("test_config_api.db")
 
     # 1. Test Initial State
-    assert isinstance(s.configuration, GantryConfiguration)
+    assert isinstance(s.configuration, IsocenterConfiguration)
     assert s.configuration.rules == []
     assert s.configuration.phi_tags == {}
 

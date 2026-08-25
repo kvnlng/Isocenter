@@ -5,7 +5,7 @@ import pydicom
 import numpy as np
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ImplicitVRLittleEndian
-from gantry.session import DicomSession
+from isocenter.session import DicomSession
 
 def test_pixel_integrity(tmp_path):
     # CASE 3: RGB Image with Planar Configuration = 1 (R..G..B..)

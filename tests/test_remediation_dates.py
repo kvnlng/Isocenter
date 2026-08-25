@@ -1,6 +1,6 @@
 
 import pytest
-from gantry.remediation import RemediationService
+from isocenter.remediation import RemediationService
 
 @pytest.fixture
 def service():

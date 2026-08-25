@@ -1,7 +1,7 @@
 """
-Defines the runtime configuration structures for the Gantry application.
+Defines the runtime configuration structures for the Isocenter application.
 
-This module contains the `GantryConfiguration` dataclass which encapsulates everything
+This module contains the `IsocenterConfiguration` dataclass which encapsulates everything
 needed to drive a session's behavior, including redaction rules, PHI profiling,
 and date shifting parameters. It also handles the persistent state of these
 settings by syncing with a backing YAML file.
@@ -12,7 +12,7 @@ import yaml
 
 
 @dataclass
-class GantryConfiguration:
+class IsocenterConfiguration:
     """
     Encapsulates the runtime configuration for a DicomSession.
 

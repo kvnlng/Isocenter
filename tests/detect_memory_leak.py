@@ -8,7 +8,7 @@ import gc
 import threading
 import concurrent.futures
 from typing import List
-from gantry.io_handlers import ExportContext, _export_instance_worker, DicomExporter
+from isocenter.io_handlers import ExportContext, _export_instance_worker, DicomExporter
 
 # --- Configuration ---
 ITERATIONS = 50
@@ -44,7 +44,7 @@ class MockInstance:
         # Random data ensures compression actually works somewhat
         self.pixel_data = np.random.randint(0, 65535, (FRAMES, side, side), dtype=np.uint16)
         # Ensure we have NumberOfFrames frame attribute set on instance for logic checks?
-        # Actually gantry/io_handlers.py checks len(shape) mostly or NumberOfFrames attribute.
+        # Actually isocenter/io_handlers.py checks len(shape) mostly or NumberOfFrames attribute.
         # We set 0028,0008 above, but helper might check property.
 
     def get_pixel_data(self):
@@ -73,7 +73,7 @@ def worker_task(i, sidecar_path, offsets):
     offset, length = offsets[i]
 
     # Simulate SidecarPixelLoader logic manually or import it
-    from gantry.io_handlers import SidecarPixelLoader
+    from isocenter.io_handlers import SidecarPixelLoader
 
     # Mock instance just needs attributes for reconstruction
     inst = MockInstance(f"1.2.3.{i}", IMAGE_SIZE_MB)

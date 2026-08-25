@@ -3,10 +3,10 @@ import pytest
 import pydicom
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.sequence import Sequence
-from gantry import Session
-from gantry.entities import Instance
-from gantry.io_handlers import populate_attrs, process_sequence
-from gantry.privacy import PhiInspector, PhiFinding
+from isocenter import Session
+from isocenter.entities import Instance
+from isocenter.io_handlers import populate_attrs, process_sequence
+from isocenter.privacy import PhiInspector, PhiFinding
 
 def test_sr_recursive_indexing():
     """
@@ -44,7 +44,7 @@ def test_sr_recursive_indexing():
     # ds[0x0010, 0x0010].VR = 'PN' # Top PatientName
     # ds[0x0010, 0x0020].VR = 'LO' # Top PatientID
 
-    # 2. Create Gantry Instance
+    # 2. Create Isocenter Instance
     inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.88.33", 1)
 
     # 3. Populate
@@ -82,7 +82,7 @@ def test_phi_inspector_deep_scan():
     inst = Instance("1.2.3", "class", 1)
 
     # Mock deeply nested item
-    from gantry.entities import DicomItem
+    from isocenter.entities import DicomItem
     deep_item = DicomItem()
     deep_item.set_attr("0040,a160", "Patient has history of diabetes.")
 

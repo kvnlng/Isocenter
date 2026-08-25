@@ -1,16 +1,16 @@
 # Waveforms and WFDB Export
 
-Gantry ingests any DICOM instance carrying a Waveform Sequence
+Isocenter ingests any DICOM instance carrying a Waveform Sequence
 `(5400,0100)` — 12-Lead ECG, General ECG, Hemodynamic, and similar
 Waveform Storage IODs — alongside image data, and exports them as
 PhysioNet WFDB records. The bridge is one-way: DICOM waveforms go out
 as WFDB, for tools like [Murmur Studio](https://github.com/kvnlng/Murmur)
-to read. Gantry does not read WFDB back in.
+to read. Isocenter does not read WFDB back in.
 
 ## Quick start
 
 ```python
-from gantry import Session
+from isocenter import Session
 
 with Session("ecg_study.db") as session:
     session.ingest("/data/ecg")
@@ -51,7 +51,7 @@ channel-interleaved) -- the same layout DICOM already stores them in,
 so no sample transcoding happens. The gain field is written in
 spec-conformant `header(5)` form, `gain(baseline)/units`; if you see a
 downstream tool mis-parse that field, check the tool's parser first --
-this is a known issue already filed against Murmur, not a Gantry
+this is a known issue already filed against Murmur, not a Isocenter
 nonconformance.
 
 When present, Waveform Annotation Sequence `(0040,B020)` items --
@@ -61,7 +61,7 @@ cart-generated findings such as rhythm calls -- are exported as
 
 ## What is and isn't de-identified
 
-Gantry's PHI scan is **tag-gated, not content-based**: a tag gets
+Isocenter's PHI scan is **tag-gated, not content-based**: a tag gets
 flagged only if it's named by your loaded configuration -- explicit
 `phi_tags` entries, or a privacy profile expanded into them. A tag
 outside that set is never inspected for what it contains, no matter
@@ -78,7 +78,7 @@ There are three configurations a reader of this guide can be in:
   touched.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic`; `load_config()` expands that into
-  `PRIVACY_PROFILES["basic"]` (`gantry/profiles.py`) -- **34 tags, 33
+  `PRIVACY_PROFILES["basic"]` (`isocenter/profiles.py`) -- **34 tags, 33
   effective** -- covering patient identity, study/series dates and
   times, and institution/physician fields, based on DICOM PS3.15 Annex
   E's Basic Profile. This is what actually runs on the documented path.
@@ -86,7 +86,7 @@ There are three configurations a reader of this guide can be in:
   remediated by `session.audit()`/`session.anonymize()`; see the
   Unformatted Text Value entry below for why, and #57 for the tracked
   engine bug.
-  `gantry/resources/phi_tags.json`, a separate 6-tag file, is *not*
+  `isocenter/resources/phi_tags.json`, a separate 6-tag file, is *not*
   reached from this flow: `create_config()` deliberately drops its
   REMOVE-action tags from the scaffold, on the assumption the Basic
   profile already covers them.
@@ -98,7 +98,7 @@ alongside -- are both correctly emptied on the documented path. (A
 casing mismatch between the profile's key and the lowercased attribute
 keys the object graph actually uses briefly made Series Description
 the one exception during this branch's review; `PhiInspector` now
-normalizes PHI-tag key casing at load time, in `gantry/privacy.py`, so
+normalizes PHI-tag key casing at load time, in `isocenter/privacy.py`, so
 this class of bug can't recur regardless of how a tag is spelled in a
 profile or config file.) This matters for waveform export specifically
 because the series description becomes a **directory name** -- every
@@ -114,7 +114,7 @@ configurations above you're in:
 - **Channel Label `(003A,0203)`** -- reaches the `.hea` signal-line
   description and the `annotations.json` `lead` field **only** when it
   is a recognisable signal name, checked against the module-level
-  `KNOWN_LEAD_NAMES` set in `gantry/waveform.py`. Anything else --
+  `KNOWN_LEAD_NAMES` set in `isocenter/waveform.py`. Anything else --
   including genuinely operator-typed text -- is replaced with a
   positional `ch<N>` token instead of being written verbatim. `N` is
   the **zero-based** channel index, not DICOM's 1-based ChannelNumber
@@ -128,10 +128,10 @@ configurations above you're in:
   but that profile entry is currently **inert** for this tag: it lives
   inside each Waveform Annotation Sequence item, not at the top level of
   the instance, and `PhiInspector._scan_instance`
-  (`gantry/privacy.py`) only reaches nested-sequence content through the
+  (`isocenter/privacy.py`) only reaches nested-sequence content through the
   instance's `text_index` -- which the multiprocess worker clone
   `session.audit()`/`session.anonymize()` actually scan against
-  (`_make_lightweight_copy`, `gantry/session.py`) does not carry; only
+  (`_make_lightweight_copy`, `isocenter/session.py`) does not carry; only
   flat `attributes` survive that copy. So a configured session that
   passes `include_annotation_text=True` currently gets `(0070,0006)`'s
   **raw** value, not the profile's remediated (emptied) one. This is a
@@ -143,8 +143,8 @@ Both are safe by default: no PHI tag configuration is required to get
 this behaviour, and it applies even to a bare `Session()`.
 
 `annotations.json`'s `source` field is producer provenance only: the
-running gantry version plus Manufacturer `(0008,0070)`, e.g.
-`gantry/0.6.0 (AcmeCart)`. It does not read Device Serial Number
+running isocenter version plus Manufacturer `(0008,0070)`, e.g.
+`isocenter/0.6.0 (AcmeCart)`. It does not read Device Serial Number
 `(0018,1000)` or any other equipment identifier.
 
 **Record timing** in the `.hea` file combines two independently
@@ -159,19 +159,19 @@ is sourced from the instance, so it is genuinely not shifted by that
 mechanism. This is deliberate, not a gap: time-of-day alone is not a
 Safe Harbor identifier. If you export without running `anonymize()` at
 all, the date is real too -- exactly like every other un-remediated
-field in Gantry.
+field in Isocenter.
 
 On the documented Quick Start path, both instance-level timestamp tags
 above are in the Basic profile (`(0008,002A)` and `(0008,0030)`), so a
 configured, anonymized session has no real time-of-day left to write.
-Gantry does **not** substitute a fake `00:00:00` in that case: when
+Isocenter does **not** substitute a fake `00:00:00` in that case: when
 `study.study_date` is real but no real time-of-day is available, the
 record line's start time/date fields are omitted entirely. This is a
 deliberate limitation, not an oversight -- `header(5)` does not support
 a date-only start time (PhysioNet's own spec, and `wfdb-python`'s
 reference reader/writer, both treat `base_date` as depending on
 `base_time` being present), so the record line's choice is between
-omitting both fields and fabricating a time; Gantry omits both.
+omitting both fields and fabricating a time; Isocenter omits both.
 
 That real, de-identified date is not simply lost, though: `SHIFT_DATE`
 produces genuinely useful information (e.g. for ordering records within
@@ -191,7 +191,7 @@ paths a WFDB writer could otherwise open:
 
 - **No `#` comment lines are ever written, with one deliberate
   exception.** WFDB readers render header comments verbatim, and
-  MIT-BIH convention places age, sex, and diagnosis there -- Gantry
+  MIT-BIH convention places age, sex, and diagnosis there -- Isocenter
   never emits one for content. The sole exception is the de-identified
   start date described above, which is not operator-typed or
   attacker-controlled text: it is a computed `DD/MM/YYYY` string

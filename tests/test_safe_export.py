@@ -1,8 +1,8 @@
 
 import pytest
-from gantry.entities import Patient, Study, Series, Instance
-from gantry.session import DicomSession
-from gantry.io_handlers import DicomExporter
+from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.session import DicomSession
+from isocenter.io_handlers import DicomExporter
 import os
 
 def test_safe_export_skips_phi(tmp_path):

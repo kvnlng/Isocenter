@@ -4,11 +4,11 @@ import random
 import datetime
 import numpy as np
 
-# Ensure we can import gantry
+# Ensure we can import isocenter
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from gantry.builders import DicomBuilder
-from gantry.io_handlers import DicomExporter
+from isocenter.builders import DicomBuilder
+from isocenter.io_handlers import DicomExporter
 try:
     from PIL import Image, ImageDraw, ImageFont
     import faker

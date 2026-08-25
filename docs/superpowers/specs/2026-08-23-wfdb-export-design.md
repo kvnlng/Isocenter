@@ -2,28 +2,28 @@
 
 **Date:** 2026-08-23
 **Status:** Approved, not yet implemented
-**Tracking:** [v0.7.0 — The Connector](https://github.com/kvnlng/Gantry/milestone/1) · issues #9–#16
+**Tracking:** [v0.7.0 — The Connector](https://github.com/kvnlng/Isocenter/milestone/1) · issues #9–#16
 
 ---
 
 ## Context
 
-Gantry de-identifies DICOM. [Murmur Studio](https://github.com/kvnlng/Murmur)
+Isocenter de-identifies DICOM. [Murmur Studio](https://github.com/kvnlng/Murmur)
 reviews PhysioNet WFDB recordings. Nothing currently connects them: a
 clinical ECG that arrives as a DICOM waveform IOD cannot reach Murmur
 without a manual conversion step that no de-identification pipeline
 covers.
 
-This design adds waveforms as a first-class data type in Gantry and
+This design adds waveforms as a first-class data type in Isocenter and
 emits WFDB records — signal, header, and annotations — that Murmur reads
 directly.
 
 ### The blocking discovery
 
-Gantry does not merely lack a WFDB writer. It **discards waveform sample
+Isocenter does not merely lack a WFDB writer. It **discards waveform sample
 data at ingest**, silently.
 
-`populate_attrs` (`gantry/io_handlers.py:69`) skips all bulk binary VRs:
+`populate_attrs` (`isocenter/io_handlers.py:69`) skips all bulk binary VRs:
 
 ```python
 BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
@@ -63,12 +63,12 @@ users today regardless of whether this feature ships.
 
 | # | Decision | Rationale |
 |---|---|---|
-| 1 | **DICOM waveform IODs only** — one-way bridge | Keeps everything in Gantry's native object model; no second ingest concept. |
+| 1 | **DICOM waveform IODs only** — one-way bridge | Keeps everything in Isocenter's native object model; no second ingest concept. |
 | 2 | **Generic reader, validated on 12-lead** | The DICOM Waveform module is generic, so breadth is nearly free; scoping *verification* to 12-lead + General ECG avoids claiming support that has not been tested. |
 | 3 | **Pseudonymous record name, shifted timing** | Safe Harbor clean while preserving relative timing, which Murmur needs for absolute-time navigation and cross-record alignment. |
 | 4 | **Carry annotations across to `annotations.json`** | This is the substance of the bridge — a de-identified cart interpretation reaching Murmur's findings panel. |
 | 5 | **Exporter seam with format dispatch** | NIfTI/BIDS (#22) is also planned, and v1.0 commits to freezing the API (#26). Better to freeze a seam than a method with four formats in it. |
-| 6 | **`category` = code, `label` = Code Meaning** | Gantry transcribes; it does not author clinical meaning. A scheme-qualified code is also stable across vendors and sites. |
+| 6 | **`category` = code, `label` = Code Meaning** | Isocenter transcribes; it does not author clinical meaning. A scheme-qualified code is also stable across vendors and sites. |
 | 7 | **Generalize the sidecar to blob-kind** | One integrity/compaction/hashing implementation rather than two — and duplicating that subsystem would duplicate the bug surface that produced both 0.6.1 regressions. |
 
 ---
@@ -90,12 +90,12 @@ DICOM ECG ──ingest_worker──┬─→ waveform samples ──→ sidecar 
 
 | Component | Location | Issue |
 |---|---|---|
-| `Waveform` / `WaveformChannel` model | `gantry/waveform.py` (new) | #11 |
-| Waveform extraction at ingest | `gantry/io_handlers.py` | #9 |
-| Blob-kind sidecar storage | `gantry/persistence.py` | #10 |
-| `Instance` waveform accessors | `gantry/entities.py` | #11 |
-| `Exporter` protocol, `WfdbExporter` | `gantry/exporters/` (new) | #12, #13 |
-| Murmur annotation bridge | `gantry/murmur.py` (new) | #15 |
+| `Waveform` / `WaveformChannel` model | `isocenter/waveform.py` (new) | #11 |
+| Waveform extraction at ingest | `isocenter/io_handlers.py` | #9 |
+| Blob-kind sidecar storage | `isocenter/persistence.py` | #10 |
+| `Instance` waveform accessors | `isocenter/entities.py` | #11 |
+| `Exporter` protocol, `WfdbExporter` | `isocenter/exporters/` (new) | #12, #13 |
+| Murmur annotation bridge | `isocenter/murmur.py` (new) | #15 |
 
 **Record granularity:** one WFDB record per DICOM Instance. A waveform
 SOP instance *is* one acquisition, so the mapping is 1:1 with no
@@ -107,7 +107,7 @@ layout and Murmur's folder picker finds `.hea` alongside its siblings.
 
 ## Storage (#10)
 
-`SidecarManager` (`gantry/sidecar.py`) is **already kind-agnostic** —
+`SidecarManager` (`isocenter/sidecar.py`) is **already kind-agnostic** —
 `write_frame`/`read_frame` operate on raw offsets with no notion of
 pixels. The `fcntl` append path, which produced both 0.6.1 regressions,
 does not change. Pixel-specificity lives in exactly four places:
@@ -184,7 +184,7 @@ yields a trace that renders plausibly at the wrong level. This must be
 settled by a round-trip test against a real record (#16), not by
 derivation in this document.
 
-**Gain field convention.** Gantry writes spec-conformant
+**Gain field convention.** Isocenter writes spec-conformant
 `gain(baseline)/units` per `header(5)` — e.g. `200(0)/mV` — so output
 remains readable by `rdsamp` and the `wfdb` Python package. Murmur's
 current parser reads the parenthesised and slash-delimited parts
@@ -208,7 +208,7 @@ Never emit `gain 0` for a calibrated signal — WFDB reads 0 as
 
 MIT-BIH convention places age, sex, and diagnosis in `#` comments, and
 Murmur parses `#Age:` / `#Sex:` / `#Dx:` into structured metadata while
-rendering comments verbatim. Anything Gantry wrote there would surface as
+rendering comments verbatim. Anything Isocenter wrote there would surface as
 patient metadata in a viewer.
 
 Emitting *shifted* dates rather than omitting them is deliberate: a
@@ -225,7 +225,7 @@ gain the shift does not already provide.
 
 `populate_attrs` already indexes `UT` and `SH` into `text_index`, and
 `process_sequence` passes that index down recursively
-(`gantry/io_handlers.py:66-99`). These surfaces therefore flow through
+(`isocenter/io_handlers.py:66-99`). These surfaces therefore flow through
 the **existing** `PhiInspector` once the data is ingested — they were
 invisible only because the data never arrived. No new scanning machinery
 is required; #14 is about coverage tests and the header rules.
@@ -246,7 +246,7 @@ name.
 | `category` | Concept Name Code Sequence `(0040,A043)` — scheme-qualified code value |
 | `label` | Code Meaning `(0008,0104)`, verbatim |
 | `note` | Unformatted Text Value `(0070,0006)`, **after** PHI remediation |
-| `source` | `gantry/<version>` plus originating manufacturer |
+| `source` | `isocenter/<version>` plus originating manufacturer |
 
 Where DICOM supplies only Referenced Time Offsets `(0040,A138)`, convert
 to sample indices via the sampling frequency.
@@ -255,7 +255,7 @@ to sample indices via the sampling frequency.
 without precision loss and prefers them when both are present; it also
 keeps absolute time out of the annotation file entirely.
 
-**`category` is the code, `label` is the Code Meaning.** Gantry does not
+**`category` is the code, `label` is the Code Meaning.** Isocenter does not
 normalize coded concepts into a clinical vocabulary of its own. This
 applies Murmur's stated producer contract — *"Murmur transmits
 assertions. It does not author them."* — to the producer side.
@@ -293,7 +293,7 @@ annotation `note` scrubbed); `annotations.json` validated against a
 pinned copy of Murmur's Draft 2020-12 schema in `tests/fixtures/`, with a
 separate non-blocking job that fetches the live schema and warns on
 drift; every existing pixel test passing untouched as the regression gate
-for #10; and a 0.6.x-era `gantry.db` opening with a correct back-fill.
+for #10; and a 0.6.x-era `isocenter.db` opening with a correct back-fill.
 
 ### Prerequisites
 
@@ -301,7 +301,7 @@ Two environment problems block verification of any of this:
 
 1. `.venv/bin/python` points at a pyenv `3.14.0t` that no longer exists,
    so the suite cannot currently run locally.
-2. `tests.yml` triggers only on `gantry/**` and `tests/**` (#19), so
+2. `tests.yml` triggers only on `isocenter/**` and `tests/**` (#19), so
    adding `wfdb` and `jsonschema` to `setup.py` would not run CI.
 
 ---
