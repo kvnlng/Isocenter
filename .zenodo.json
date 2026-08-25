@@ -1,13 +1,12 @@
 {
   "title": "Isocenter",
   "description": "A Python library for indexing, de-identifying, and exporting DICOM datasets at cohort scale. Builds a SQLite metadata index and a binary pixel/waveform sidecar over a read-only source tree, applies DICOM PS3.15 de-identification profiles and machine-specific pixel redaction in memory, and writes clean copies to a new directory. Exports DICOM or PhysioNet WFDB, including a waveform annotation bridge to Murmur Studio. Source data is never modified.",
-  "license": "AGPL-3.0-or-later",
+  "license": "agpl-3.0-or-later",
   "upload_type": "software",
   "access_right": "open",
   "creators": [
     {
       "name": "Long, Kevin",
-      "affiliation": "",
       "orcid": "0000-0001-8881-2481"
     }
   ],
