@@ -304,8 +304,11 @@ class Instance(DicomItem):
                     try:
                         # pydicom is already imported globally
                         handlers = [str(h) for h in pydicom.config.pixel_data_handlers]
-                    except Exception:
-                        pass
+                    except AttributeError:
+                        # pydicom 4.0 removes pixel_data_handlers. This is
+                        # only decorating an error message, so an empty list
+                        # is fine -- but do not let it hide the real one.
+                        handlers = []
 
                     raise RuntimeError(
                         f"Failed to decompress pixel data for {os.path.basename(self.file_path)} "

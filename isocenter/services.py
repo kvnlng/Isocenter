@@ -480,61 +480,59 @@ class RedactionService:
             bool: True if any modification was applied.
         """
         modified = False
-        try:
-            ndim = len(arr.shape)
-            # Default to last two dimensions (standard Grayscale/Planar)
-            row_dim = ndim - 2
-            col_dim = ndim - 1
 
-            if ndim >= 3 and arr.shape[-1] in [3, 4]:
-                # RGB/RGBA Interleaved: (..., Rows, Cols, Channels)
-                row_dim = ndim - 3
-                col_dim = ndim - 2
+        ndim = len(arr.shape)
+        # Default to the last two dimensions (standard grayscale/planar).
+        row_dim = ndim - 2
+        col_dim = ndim - 1
 
-            rows = arr.shape[row_dim]
-            cols = arr.shape[col_dim]
+        if ndim >= 3 and arr.shape[-1] in [3, 4]:
+            # RGB/RGBA interleaved: (..., Rows, Cols, Channels)
+            row_dim = ndim - 3
+            col_dim = ndim - 2
 
-            # Ensure Writability
-            # Note: The caller is responsible for ensuring 'arr' can be modified
-            # or assigning the copy back if they passed a read-only view that needed copying?
-            # Actually, standard numpy semantics: if we modify in place, it works if writeable.
-            # If not writeable, we probably need to copy. But a static method receiving an array
-            # can't "replace" the array reference in the caller.
-            # So we assume caller handles copy if needed, or we raise/return?
-            # For this method, let's assume valid writeable array, or try to write.
-            if not arr.flags.writeable:
-                 # This method cannot easily "fix" non-writeable in-place without returning the new array
-                 # But our signature returns bool.
-                 # Let's assume the caller must ensure writeability for a "void" style modifier.
-                 # OR, we change signature to return the array?
-                 pass
+        rows = arr.shape[row_dim]
+        cols = arr.shape[col_dim]
 
-            for roi in rois:
-                try:
-                    r1, r2, c1, c2 = [int(v) for v in roi]
+        # Writeability is the caller's responsibility: this returns a bool,
+        # so it has no way to hand a copy back. Both callers
+        # (_apply_roi_to_instance and the export worker) copy first. A
+        # read-only array reaching here now raises below rather than being
+        # silently skipped.
 
-                    # Safety Checks
-                    if r1 >= rows or c1 >= cols:
-                        continue
+        for roi in rois:
+            try:
+                r1, r2, c1, c2 = [int(v) for v in roi]
 
-                    # Clipping
-                    r2_clamped = min(r2, rows)
-                    c2_clamped = min(c2, cols)
+                # A zone starting past the edge describes nothing to redact.
+                if r1 >= rows or c1 >= cols:
+                    continue
 
-                    # Construct Slices dynamically
-                    slices = [slice(None)] * ndim
-                    slices[row_dim] = slice(r1, r2_clamped)
-                    slices[col_dim] = slice(c1, c2_clamped)
+                # Clipping
+                r2_clamped = min(r2, rows)
+                c2_clamped = min(c2, cols)
 
-                    # Apply Redaction
-                    arr[tuple(slices)] = 0
-                    modified = True
-                except Exception:
-                    pass
+                # Construct slices dynamically
+                slices = [slice(None)] * ndim
+                slices[row_dim] = slice(r1, r2_clamped)
+                slices[col_dim] = slice(c1, c2_clamped)
 
-            return modified
-        except Exception:
-            return False
+                # Apply redaction
+                arr[tuple(slices)] = 0
+                modified = True
+            except (ValueError, IndexError, TypeError) as exc:
+                # Never swallow this. A zone that fails to apply means PHI
+                # is still in the pixel data, and the export worker writes
+                # arr.tobytes() immediately after calling us -- so a silent
+                # skip ships the unredacted image while reporting success.
+                # The bool return cannot express "tried and failed": False
+                # already means "no zones matched". (#66)
+                get_logger().error(
+                    "Redaction zone %s could not be applied to an array of "
+                    "shape %s: %s", tuple(roi), arr.shape, exc)
+                raise
+
+        return modified
 
     def _apply_roi_to_instance(self, inst: Instance, arr, roi: tuple) -> bool:
         """

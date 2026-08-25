@@ -4,7 +4,7 @@ Module for discovering common locations of burned-in text (hotspots) in DICOM in
 import logging
 import re
 from dataclasses import dataclass
-from typing import List, Tuple, Any, Dict, Union, Callable, Optional
+from typing import List, Tuple, Any, Dict, Union, Callable
 
 # Lazy imports for optional dependencies
 # import pandas as pd
@@ -112,10 +112,14 @@ class DiscoveryResult:
             for c in range(cols):
                 count = grid[r][c]
                 char = " "
-                if count > 0: char = "."
-                if count > 5: char = "o"
-                if count > 10: char = "O"
-                if count > 50: char = "#"
+                if count > 0:
+                    char = "."
+                if count > 5:
+                    char = "o"
+                if count > 10:
+                    char = "O"
+                if count > 50:
+                    char = "#"
                 line += char
             line += "|"
             output.append(line)

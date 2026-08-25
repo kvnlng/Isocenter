@@ -10,12 +10,10 @@ This module provides classes for:
 """
 
 import os
-import pickle
 import sys
-import shutil
 import hashlib
 import io
-from typing import List, Set, Dict, Any, Optional, Tuple, NamedTuple, Iterable
+from typing import List, Dict, Any, Optional, Tuple, Iterable
 from datetime import datetime, date
 from dataclasses import dataclass, field
 
@@ -25,9 +23,8 @@ try:
     from PIL import Image
 except ImportError:
     Image = None
-from tqdm import tqdm
 from pydicom.dataset import FileDataset, FileMetaDataset
-from pydicom.uid import ImplicitVRLittleEndian, UncompressedTransferSyntaxes, JPEG2000Lossless
+from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless
 from pydicom.tag import Tag
 from pydicom.datadict import dictionary_VR
 try:
@@ -37,7 +34,7 @@ except ImportError:
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
 
-from .entities import Patient, Study, Series, Instance, Equipment, DicomItem, DicomSequence
+from .entities import Patient, Study, Series, Instance, Equipment, DicomItem
 from .logger import get_logger
 from .parallel import run_parallel
 from .validation import IODValidator
@@ -322,7 +319,9 @@ class DicomImporter:
                         # Parse date carefully or use fallback
                         try:
                             sdate = datetime.strptime(meta['sdate'], "%Y%m%d").date()
-                        except BaseException:
+                        except (ValueError, TypeError):
+                            # See #60: this sentinel is then shifted and
+                            # exported as though it were a real date.
                             sdate = date(1900, 1, 1)
 
                         study = Study(sid, sdate)
@@ -864,7 +863,10 @@ def export_folder_names(patient, study, series):
         if study.series and study.series[0].instances:
             st_desc = _get_attr_case_insensitive(
                 study.series[0].instances[0].attributes, "0008,1030", "Study")
-    except BaseException:
+    except (AttributeError, IndexError, KeyError):
+        # No instances, or no description tag: the "Study" default above
+        # stands. Narrow on purpose -- BaseException here also swallowed
+        # Ctrl-C during a long export.
         pass
     st_date = str(study.study_date or "NoDate")
     st_uid_suffix = (study.study_instance_uid or "Unknown")[-5:]
@@ -875,7 +877,8 @@ def export_folder_names(patient, study, series):
         if series.instances:
             se_desc = _get_attr_case_insensitive(
                 series.instances[0].attributes, "0008,103e", "Series")
-    except BaseException:
+    except (AttributeError, IndexError, KeyError):
+        # As above: fall back to the "Series" default.
         pass
     se_num = str(series.series_number)
     se_mod = series.modality or "OT"
@@ -969,7 +972,9 @@ class DicomExporter:
                         try:
                             inum = int(inst.attributes["0020,0013"])
                             fname = f"{inum:04d}.dcm"
-                        except BaseException:
+                        except (ValueError, TypeError):
+                            # Non-numeric InstanceNumber: keep the SOP UID
+                            # filename assigned above.
                             pass
 
                     full_out_path = os.path.join(

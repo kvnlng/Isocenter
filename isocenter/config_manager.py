@@ -208,14 +208,9 @@ class ConfigLoader:
             base = os.path.dirname(os.path.abspath(__file__))
             filepath = os.path.join(base, "resources", "phi_tags.json")
             if os.path.exists(filepath):
-                # Resource is likely still JSON for internal defaults unless we change it too.
-                # But sticking to JSON for internal resources is fine, OR we change helper to handle both?
-                # User asked to drop JSON support for *config files*.
-                # Let's support JSON just for internal resources via simple json load if yaml fails or extension check?
-                # Actually, clearer to migrate the resource to YAML too?
-                # Or just use json.load here explicitly since it's internal.
-                # import json  <-- Removed
-
+                # Read with json, not the YAML helper: user-facing config
+                # files are YAML-only by design, but this is a shipped
+                # package resource and stays JSON.
                 with open(filepath, 'r', encoding="utf-8") as f:
                     return json.load(f).get("phi_tags", {})
             return {}

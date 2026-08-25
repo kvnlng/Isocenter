@@ -1,12 +1,12 @@
 import numpy as np
-from typing import List, Optional, Any, Tuple
+from typing import List, Tuple
 from dataclasses import dataclass
 import logging
 import pydicom
 from pydicom.dataset import Dataset
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 from isocenter.entities import Instance
-from isocenter.privacy import PhiFinding
+from isocenter.logger import get_logger
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ def _get_voi_lut_dataset(instance: Instance) -> Dataset:
     for tag in tags_to_copy:
         val = instance.attributes.get(tag)
         if val is not None:
-            # Pydicom expects specific keywords or tags. 
+            # Pydicom expects specific keywords or tags.
             # DicomItem stores tags as "GGGG,EEEE" strings.
             # We can map them to keywords or set by tag.
             # Setting by tag (int) is safer.
@@ -81,13 +81,21 @@ def _get_voi_lut_dataset(instance: Instance) -> Dataset:
                 # Naive assignment, pydicom might complain about VR
                 # For WindowCenter/Width (DS), Rescale (DS)
                 vr = "DS"
-                if tag == "0028,1054": vr = "LO" # RescaleType
-                if tag == "0028,1055": vr = "LO" # Explanation
-                if tag == "0028,3010": continue # Skip Sequence for now (too complex to map back from dict manually here)
+                if tag == "0028,1054":
+                    vr = "LO" # RescaleType
+                if tag == "0028,1055":
+                    vr = "LO" # Explanation
+                if tag == "0028,3010":
+                    continue # Skip Sequence for now (too complex to map back from dict manually here)
 
                 ds.add_new(pydicom.tag.Tag(group, elem), vr, val)
-            except Exception:
-                pass
+            except (ValueError, TypeError) as exc:
+                # A tag we cannot map back onto a Dataset is skipped, but
+                # silently dropping it meant OCR ran against a dataset
+                # quietly missing the windowing tags that decide contrast.
+                get_logger().debug(
+                    "Skipping attribute %s while rebuilding dataset: %s",
+                    tag, exc)
 
     return ds
 
@@ -108,7 +116,7 @@ def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[Text
 
     try:
         # Normalize pixel types for PIL if not already uint8
-        # Note: VOI LUT should have theoretically handled contrast, but we still need 
+        # Note: VOI LUT should have theoretically handled contrast, but we still need
         # to ensure it fits in 8-bit for OCR.
         if pixel_data.dtype != np.uint8:
             p_min = pixel_data.min()
@@ -173,29 +181,28 @@ def analyze_pixels(instance: Instance) -> List[TextRegion]:
         pixel_array = instance.get_pixel_data()
         if pixel_array is None:
             return all_regions
-            
+
         # Apply VOI LUT (Windowing) if metadata exists
         # This converts high-bit DICOM to human-viewable contrast
         try:
-           ds_voi = _get_voi_lut_dataset(instance)
-           # apply_voi_lut handles the math. It returns float64 or int usually.
-           # index=0 is default, but we might want to apply per frame if WindowWidth differs per frame 
-           # (though usually it's per series/image). 
-           # If pixel_array is 3D/4D, apply_voi_lut might work on the whole array if implemented, 
-           # but safer to do it. pydicom's apply_voi_lut expects array + ds.
-           pixel_array = apply_voi_lut(pixel_array, ds_voi)
-        except Exception as e:
-            # Fallback to raw data if VOI fails (e.g. missing tags)
-            # logger.debug(f"VOI LUT application failed: {e}")
+            ds_voi = _get_voi_lut_dataset(instance)
+            # apply_voi_lut applies the windowing maths for the whole
+            # array, including 3D/4D. It uses index=0, so a series whose
+            # WindowWidth varies per frame is windowed by its first frame.
+            pixel_array = apply_voi_lut(pixel_array, ds_voi)
+        except (ValueError, TypeError, AttributeError) as exc:
+            # Fall back to raw pixel data when VOI LUT cannot be applied
+            # (missing or malformed windowing tags).
+            get_logger().debug("VOI LUT application failed: %s", exc)
             pass
 
         frames = []
         shape = pixel_array.shape
 
         # Heuristic to detect frames vs RGB
-        # If RGB, shape is (H, W, 3). If MultiFrame, (N, H, W). 
+        # If RGB, shape is (H, W, 3). If MultiFrame, (N, H, W).
         # CAUTION: apply_voi_lut might change shape? No, usually preserves.
-        
+
         if pixel_array.ndim == 2:
             frames.append(pixel_array)
         elif pixel_array.ndim == 3:
@@ -205,9 +212,9 @@ def analyze_pixels(instance: Instance) -> List[TextRegion]:
                 for i in range(shape[0]):
                     frames.append(pixel_array[i])
         elif pixel_array.ndim == 4:
-             # (Frames, Rows, Cols, Samples)
-             for i in range(shape[0]):
-                    frames.append(pixel_array[i])
+            # (Frames, Rows, Cols, Samples)
+            for i in range(shape[0]):
+                frames.append(pixel_array[i])
 
         for i, frame in enumerate(frames):
             regions = detect_text_regions(frame, frame_idx=i)

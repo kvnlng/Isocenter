@@ -2,7 +2,7 @@ import concurrent.futures
 import os
 import sys
 import multiprocessing
-from typing import Callable, Iterable, List, Any, TypeVar
+from typing import Callable, Iterable, Any, TypeVar
 from tqdm import tqdm
 
 T = TypeVar('T')
@@ -84,14 +84,14 @@ def run_parallel(
 
         # Determine Strategy
         if chunksize == 1:
-             if os.environ.get("ISOCENTER_CHUNKSIZE"):
+            if os.environ.get("ISOCENTER_CHUNKSIZE"):
                 try:
                     chunksize = int(os.environ["ISOCENTER_CHUNKSIZE"])
                 except ValueError:
                     pass
 
         if maxtasksperchild is None:
-             if os.environ.get("ISOCENTER_MAX_TASKS_PER_CHILD"):
+            if os.environ.get("ISOCENTER_MAX_TASKS_PER_CHILD"):
                 try:
                     maxtasksperchild = int(os.environ["ISOCENTER_MAX_TASKS_PER_CHILD"])
                 except ValueError:
@@ -99,8 +99,8 @@ def run_parallel(
 
         # Check for GC disable override
         if not disable_gc:
-             if os.environ.get("ISOCENTER_DISABLE_GC") == "1":
-                 disable_gc = True
+            if os.environ.get("ISOCENTER_DISABLE_GC") == "1":
+                disable_gc = True
 
         # Determine Strategy
         use_threads = False

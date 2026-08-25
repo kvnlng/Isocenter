@@ -26,7 +26,8 @@ class DicomBuilder:
 class PatientBuilder:
     """Fluent Builder for Patient entities."""
 
-    def __init__(self, id, name): self.patient = Patient(id, name)
+    def __init__(self, id, name):
+        self.patient = Patient(id, name)
 
     def add_study(self, uid, date):
         """Adds a child Study to this Patient."""
@@ -42,7 +43,9 @@ class PatientBuilder:
 class StudyBuilder:
     """Fluent Builder for Study entities."""
 
-    def __init__(self, parent, study): self.parent, self.study = parent, study
+    def __init__(self, parent, study):
+        self.parent = parent
+        self.study = study
 
     def add_series(self, uid, mod, num):
         """Adds a child Series to this Study."""
@@ -58,7 +61,9 @@ class StudyBuilder:
 class SeriesBuilder:
     """Fluent Builder for Series entities."""
 
-    def __init__(self, parent, series): self.parent, self.series = parent, series
+    def __init__(self, parent, series):
+        self.parent = parent
+        self.series = series
 
     def set_equipment(self, man, mod, sn=""):
         """Sets the Equipment metadata for this Series."""
@@ -79,7 +84,9 @@ class SeriesBuilder:
 class InstanceContextBuilder:
     """Fluent context for configuring a single Instance."""
 
-    def __init__(self, parent, instance): self.parent, self.instance = parent, instance
+    def __init__(self, parent, instance):
+        self.parent = parent
+        self.instance = instance
 
     def set_attribute(self, tag, val):
         """Sets a generic DICOM attribute."""

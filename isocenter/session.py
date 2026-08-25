@@ -1,8 +1,9 @@
 import os
 import re
+import json
 import datetime
 import concurrent.futures
-from typing import List, Union, Dict, Any
+from typing import List, Union
 
 import yaml
 from tqdm import tqdm
@@ -243,8 +244,11 @@ class DicomSession:
             try:
                 # Force kill old processes if they are stuck/broken
                 self._executor.shutdown(wait=False, cancel_futures=True)
-            except BaseException:
-                pass
+            except (RuntimeError, OSError) as exc:
+                # The executor is being replaced regardless; a failure to
+                # shut the old one down is worth a line in the log, not a
+                # crash.
+                get_logger().debug("Could not shut down prior executor: %s", exc)
 
         # Re-init
         self._executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
@@ -371,7 +375,7 @@ class DicomSession:
         for p in self.store.patients:
             for st in p.studies:
                 for se in st.series:
-                    for inst in se.instances:
+                    for _ in se.instances:
                         if se.equipment:
                             key = (se.equipment.manufacturer, se.equipment.model_name)
                             eq_counts[key] = eq_counts.get(key, 0) + 1
@@ -568,8 +572,13 @@ class DicomSession:
                 with open(kb_path, 'r', encoding='utf-8') as f:
                     kb_data = json.load(f)
                     kb_machines = kb_data.get("machines", [])
-            except BaseException:
-                pass
+            except (OSError, json.JSONDecodeError) as exc:
+                # Scaffolding continues without the knowledge base, but
+                # silently producing a config with no pre-filled machines
+                # looked identical to "the KB had nothing for you".
+                get_logger().warning(
+                    "Could not read the redaction knowledge base at %s: %s",
+                    kb_path, exc)
 
         # 3. Find missing machines and try to pre-fill
         missing_configs = []
@@ -604,7 +613,6 @@ class DicomSession:
                             with open(ctp_path, 'r', encoding='utf-8') as f:
                                 ctp_data = yaml.safe_load(f)
                         else:
-                            import json
                             with open(ctp_path, 'r', encoding='utf-8') as f:
                                 ctp_data = json.load(f)
 
@@ -865,10 +873,13 @@ class DicomSession:
 
         if config_path:
             try:
-                t, r, dj, rpt, _ = ConfigLoader.load_unified_config(config_path)
+                t, _, _, _, _ = ConfigLoader.load_unified_config(config_path)
                 tags_to_use = t
-            except BaseException:
-                # Fallback to simple tags load
+            except (OSError, ValueError, yaml.YAMLError) as exc:
+                # Not a unified v2 config; try it as a plain PHI tag file.
+                get_logger().debug(
+                    "%s is not a unified config (%s); reading it as PHI tags",
+                    config_path, exc)
                 tags_to_use = ConfigLoader.load_phi_config(config_path)
 
         # Uses IsocenterConfiguration derived tags
@@ -922,9 +933,6 @@ class DicomSession:
         # Gather all instances with their equipment context
         current_rules = self.configuration.rules
 
-        # Build set of valid serials from config
-        configured_serials = {r.get("serial_number") for r in current_rules if r.get("serial_number")}
-
         worker_items = []
         skipped_count = 0
 
@@ -953,10 +961,10 @@ class DicomSession:
                     # Rule Refinement: Skip if NO ZONES defined (Scaffolded state)
                     # Unless user explicitly wants to scan? No, user req says skip.
                     if not matched_rule.get("redaction_zones"):
-                         # Log once per serial?
-                         # For now just skip
-                         skipped_count += len(se.instances)
-                         continue
+                        # Log once per serial?
+                        # For now just skip
+                        skipped_count += len(se.instances)
+                        continue
 
                     # Filter 2: Explicit User Filter
                     if serial_number and sn != serial_number:
@@ -1022,7 +1030,7 @@ class DicomSession:
             Call .to_zones() on the result to get grouped redaction zones.
         """
         from isocenter.discovery import DiscoveryResult, DiscoveryCandidate, ZoneDiscoverer
-        
+
         get_logger().info(f"Discovering zones for {serial_number}...")
 
         # 1. Gather instances
@@ -1056,14 +1064,14 @@ class DicomSession:
         )
 
         candidates = []
-        
+
         for i, regions in enumerate(raw_regions_lists):
             # i serves as the unique source index
             for r in regions:
                 if r.confidence >= min_confidence:
                     # Classify immediately (or could be lazy)
                     cls = ZoneDiscoverer._classify_text(r.text)
-                    
+
                     cand = DiscoveryCandidate(
                         text=r.text,
                         confidence=r.confidence,
@@ -1143,7 +1151,7 @@ class DicomSession:
         # Check for unsafe attributes (BurnedInAnnotation)
         unsafe_items = self.store_backend.check_unsafe_attributes()
         if unsafe_items:
-            for uid, fpath, msg in unsafe_items:
+            for uid, _path, msg in unsafe_items:
                 exceptions.append(
                     (datetime.datetime.now().isoformat(),
                      "COMPLIANCE_CHECK",
@@ -1183,9 +1191,10 @@ class DicomSession:
             f"{len(self.configuration.rules)} pixel redaction rules")
 
         try:
-            from importlib.metadata import version
+            from importlib.metadata import version, PackageNotFoundError
             ver = version("isocenter")
-        except BaseException:
+        except PackageNotFoundError:
+            # Running from a source tree that was never installed.
             ver = "0.0.0"
 
         # 4. Build Report DTO
@@ -1690,10 +1699,6 @@ class DicomSession:
             count = remediator.apply_remediation(findings)
         else:
             # Blind execution (apply all rules)
-            # We need to generate findings based on current config first?
-            # Or assume RemediationService can handle blind?
-            # Actually, standard flow assumes findings.
-            tqdm_desc = "Blind Anonymize"
             # Logic for blind anonymization: scan then remediate
             # Use audit() which uses self.configuration internally now
             current_findings = self.audit()
@@ -1991,9 +1996,6 @@ class DicomSession:
 
         # 4. Execute Export
         # We use global run_parallel logic or specialized internal batcher?
-        # session.py line 1107 used DicomExporter.export_batch with maxtasksperchild=25
-
-        chunk_size = 500  # Report progress every N
         show_progress = True
 
         if total_instances > 0:
@@ -2019,7 +2021,20 @@ class DicomSession:
                 import gc
                 gc.collect()
 
-            get_logger().info("Export complete.")
+            if success_count < total_instances:
+                # Partial failure used to be invisible here: the count came
+                # back and was dropped, and "Export complete." printed
+                # whether 1200 of 1200 instances survived or 3 did. Per-file
+                # errors are already in the audit log; this is the summary
+                # that says to go and read it.
+                get_logger().warning(
+                    "Export finished with failures: %d of %d instances exported. "
+                    "See the audit log for per-instance errors.",
+                    success_count, total_instances)
+                print(f"Export finished with failures: "
+                      f"{success_count}/{total_instances} instances exported.")
+            else:
+                get_logger().info("Export complete.")
         else:
             get_logger().warning("No instances queued for export.")
 
