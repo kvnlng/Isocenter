@@ -124,5 +124,31 @@ the deposit metadata and `CITATION.cff` is what GitHub's "Cite this
 repository" button reads.
 
 Zenodo only archives releases created *after* the integration is
-switched on; it does not backfill. After the first deposit, add the
-concept DOI to `CITATION.cff` and the badge to `README.md`.
+switched on; it does not backfill -- its own guide says "once connected,
+new releases from the repository will be automatically ingested and
+archived". So enabling it does nothing to the releases already published:
+the first deposit comes from the next release, or from deleting and
+re-creating an existing GitHub Release, which fires `release: published`
+again. Note that re-firing it also re-runs the PyPI publish, which will
+fail on a version the index already has; nothing is uploaded, but the run
+goes red.
+
+After the first deposit, add the concept DOI to `CITATION.cff` and the
+badge to `README.md`. Use the **concept** DOI, the one that always
+resolves to the latest version, not the version DOI minted alongside it.
+
+`.zenodo.json` supplies the metadata the record is minted from. Two
+things about it are easy to get wrong and are pinned by
+`tests/test_version_contract.py`:
+
+* **`license` is a Zenodo vocabulary id, not an SPDX id**, and those are
+  lowercase. `agpl-3.0-or-later` resolves at
+  `zenodo.org/api/vocabularies/licenses/`; the SPDX spelling
+  `AGPL-3.0-or-later` returns 404, and would have gone into the record as
+  a licence Zenodo could not match.
+* **No `version` field.** The GitHub integration fills it in from the
+  release tag. Pinning it here would add a third place for the number to
+  drift.
+
+Record metadata can be corrected on Zenodo after publication; the DOI
+itself cannot be reissued.

@@ -110,3 +110,39 @@ def test_the_release_runbook_points_at_the_file_that_declares_the_version():
     assert "Bump `version` in `setup.py`" not in runbook, (
         "the release runbook still tells you to bump the version in "
         "setup.py, which no longer declares it")
+
+
+def test_the_zenodo_license_is_an_id_zenodo_recognises():
+    """`.zenodo.json` mints the DOI record's metadata; a bad id is silent.
+
+    Zenodo resolves licences against its own vocabulary, not SPDX, and
+    those ids are lowercase: `agpl-3.0-or-later` returns 200 from
+    `/api/vocabularies/licenses/`, `AGPL-3.0-or-later` returns 404. The
+    file carried the SPDX spelling, which reads correctly to everyone
+    except the service that has to match it.
+
+    Checked as a literal rather than over the network: a test that calls
+    Zenodo fails when Zenodo is down, which says nothing about this repo.
+    If Zenodo changes its vocabulary, this line is what gets updated.
+    """
+    import json
+
+    deposit = json.loads((ROOT / ".zenodo.json").read_text(encoding="utf-8"))
+
+    assert deposit["license"] == "agpl-3.0-or-later", (
+        "the licence id in .zenodo.json is not the one Zenodo's vocabulary "
+        "uses; the deposit would not carry the licence it names")
+
+
+def test_the_zenodo_deposit_does_not_pin_a_version():
+    """The GitHub integration fills `version` in from the release tag.
+
+    Hardcoding it here would give a third place for the number to live and
+    a third place for it to drift -- the failure this module exists for.
+    """
+    import json
+
+    deposit = json.loads((ROOT / ".zenodo.json").read_text(encoding="utf-8"))
+
+    assert "version" not in deposit, (
+        "the deposit pins a version; let the release tag supply it")
