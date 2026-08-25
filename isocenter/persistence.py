@@ -24,7 +24,8 @@ from contextlib import nullcontext
 
 from pydicom.multival import MultiValue
 
-from .entities import Patient, Study, Series, Instance, Equipment
+from .entities import (Patient, Study, Series, Instance, Equipment,
+                       PhiStatus)
 from .sidecar import SidecarManager
 from .logger import get_logger
 from .privacy import PhiFinding, PhiRemediation
@@ -38,19 +39,34 @@ _PIXEL_COMPRESSION = 'zlib'
 
 _UPSERT_INSTANCE_SQL = """
     INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
-                           pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json,
+                           phi_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(sop_instance_uid) DO UPDATE SET
         series_id_fk=excluded.series_id_fk,
         sop_class_uid=excluded.sop_class_uid,
         instance_number=excluded.instance_number,
         file_path=excluded.file_path,
         attributes_json=excluded.attributes_json,
+        phi_status=excluded.phi_status,
         pixel_offset=COALESCE(excluded.pixel_offset, instances.pixel_offset),
         pixel_length=COALESCE(excluded.pixel_length, instances.pixel_length),
         pixel_hash=COALESCE(excluded.pixel_hash, instances.pixel_hash),
         compress_alg=COALESCE(excluded.compress_alg, instances.compress_alg)
 """
+
+
+def _phi_status_from_stored(value) -> PhiStatus:
+    """The status a stored row claims, defaulting to UNSCANNED.
+
+    Rows written before the column existed, and any value this version
+    does not recognise, read as UNSCANNED. An unrecognised claim must
+    never present as an assurance.
+    """
+    try:
+        return PhiStatus(value)
+    except ValueError:
+        return PhiStatus.UNSCANNED
 
 
 def _in_clause(values):
@@ -207,6 +223,7 @@ class SqliteStore:
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         patient_id TEXT NOT NULL,
         patient_name TEXT,
+        phi_status TEXT,
         UNIQUE(patient_id)
     );
 
@@ -215,6 +232,7 @@ class SqliteStore:
         patient_id_fk INTEGER,
         study_instance_uid TEXT NOT NULL,
         study_date TEXT,
+        phi_status TEXT,
         FOREIGN KEY(patient_id_fk) REFERENCES patients(id),
         UNIQUE(study_instance_uid)
     );
@@ -245,6 +263,7 @@ class SqliteStore:
         pixel_hash TEXT,
         compress_alg TEXT,
         attributes_json TEXT, -- Core attributes (Horizontal)
+        phi_status TEXT,      -- What the last scan concluded, if still valid
         FOREIGN KEY(series_id_fk) REFERENCES series(id),
         UNIQUE(sop_instance_uid)
     );
@@ -413,7 +432,29 @@ class SqliteStore:
             conn.execute("PRAGMA auto_vacuum = FULL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
             conn.executescript(self.SCHEMA)
+            self._add_missing_columns(conn)
             self._backfill_legacy_blobs(conn)
+
+    @staticmethod
+    def _add_missing_columns(conn):
+        """Adds columns introduced after a database was first created.
+
+        `CREATE TABLE IF NOT EXISTS` leaves an existing table exactly as it
+        was, so a column added to the schema never appears in a store an
+        earlier version created. Each ALTER is guarded by the table's own
+        column list rather than a version number, which keeps this
+        idempotent and independent of how the database got here.
+
+        Rows predating the column read as NULL, which `_phi_status_from_stored`
+        maps to UNSCANNED -- correct, since they were never scanned under
+        this scheme.
+        """
+        for table in ("patients", "studies", "instances"):
+            columns = {row[1] for row in conn.execute(
+                f"PRAGMA table_info({table})").fetchall()}
+            if "phi_status" not in columns:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN phi_status TEXT")
 
     def _backfill_legacy_blobs(self, conn):
         """Migrate 0.6.x pixel_* columns into instance_blobs.
@@ -659,16 +700,24 @@ class SqliteStore:
                 i_rows = cur.execute("SELECT * FROM instances").fetchall()
 
                 # 2. Build Maps
+                # Statuses are applied after hydration, not during it:
+                # setting attributes advances an entity's revision, and a
+                # status stamped at an earlier one would read as stale the
+                # moment anyone asked.
+                stored_statuses = []
+
                 p_map = {}
                 for r in p_rows:
                     p = Patient(r['patient_id'], r['patient_name'])
                     p_map[r['id']] = p
                     patients.append(p)
+                    stored_statuses.append((p, r['phi_status']))
 
                 st_map = {}
                 for r in st_rows:
                     st = Study(r['study_instance_uid'], r['study_date'])
                     st_map[r['id']] = st
+                    stored_statuses.append((st, r['phi_status']))
                     if r['patient_id_fk'] in p_map:
                         p_map[r['patient_id_fk']].studies.append(st)
 
@@ -728,7 +777,17 @@ class SqliteStore:
                     if r['series_id_fk'] in se_map:
                         se_map[r['series_id_fk']].instances.append(inst)
 
+                    stored_statuses.append((inst, r['phi_status']))
+
             self.logger.info(f"Loaded {len(patients)} patients from {self.db_path}")
+
+            # The row that was loaded is the row the status was written for,
+            # so the stored conclusion applies to this revision. Recorded
+            # before marking persisted, because recording advances the
+            # revision.
+            for entity, stored in stored_statuses:
+                entity.record_phi_status(_phi_status_from_stored(stored))
+
             # Mark all loaded data as clean so we don't save it back immediately
             for p in patients:
                 p.mark_subtree_persisted()
@@ -766,6 +825,7 @@ class SqliteStore:
 
                 p = Patient(p_row['patient_id'], p_row['patient_name'])
                 p_pk = p_row['id']
+                stored_statuses = [(p, p_row['phi_status'])]
 
                 # Same one-query pre-fetch as load_all; see the note there.
                 wave_refs = {
@@ -781,6 +841,7 @@ class SqliteStore:
                 for st_r in st_rows:
                     st = Study(st_r['study_instance_uid'], st_r['study_date'])
                     st_pk = st_r['id']
+                    stored_statuses.append((st, st_r['phi_status']))
 
                     # Fetch Series
                     se_rows = cur.execute(
@@ -831,9 +892,13 @@ class SqliteStore:
                                 inst, wave_refs.get(r['sop_instance_uid']))
 
                             se.instances.append(inst)
+                            stored_statuses.append((inst, r['phi_status']))
 
                         st.series.append(se)
                     p.studies.append(st)
+
+                for entity, stored in stored_statuses:
+                    entity.record_phi_status(_phi_status_from_stored(stored))
 
                 p.mark_subtree_persisted()
                 return p
@@ -1313,9 +1378,13 @@ class SqliteStore:
         """Writes the patient row if dirty; returns its primary key."""
         if patient.has_unsaved_changes:
             cur.execute("""
-                INSERT INTO patients (patient_id, patient_name) VALUES (?, ?)
-                ON CONFLICT(patient_id) DO UPDATE SET patient_name=excluded.patient_name
-            """, (patient.patient_id, patient.patient_name))
+                INSERT INTO patients (patient_id, patient_name, phi_status)
+                VALUES (?, ?, ?)
+                ON CONFLICT(patient_id) DO UPDATE SET
+                    patient_name=excluded.patient_name,
+                    phi_status=excluded.phi_status
+            """, (patient.patient_id, patient.patient_name,
+                  patient.phi_status.value))
             tally.patients += 1
 
         # Re-read rather than use lastrowid: the row may have existed
@@ -1330,12 +1399,15 @@ class SqliteStore:
         """Writes the study row if dirty; returns its primary key."""
         if study.has_unsaved_changes:
             cur.execute("""
-                INSERT INTO studies (patient_id_fk, study_instance_uid, study_date) VALUES (?, ?, ?)
+                INSERT INTO studies (patient_id_fk, study_instance_uid, study_date, phi_status)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(study_instance_uid) DO UPDATE SET
                     study_date=excluded.study_date,
-                    patient_id_fk=excluded.patient_id_fk
+                    patient_id_fk=excluded.patient_id_fk,
+                    phi_status=excluded.phi_status
             """, (patient_pk, study.study_instance_uid,
-                  _as_stored_date(study.study_date)))
+                  _as_stored_date(study.study_date),
+                  study.phi_status.value))
             tally.studies += 1
 
         row = cur.execute(
@@ -1485,7 +1557,11 @@ class SqliteStore:
                 series_pk, inst.sop_instance_uid, inst.sop_class_uid,
                 inst.instance_number, inst.file_path,
                 frame.offset, frame.length, frame.hash, frame.alg,
-                json.dumps(core, cls=IsocenterJSONEncoder)))
+                json.dumps(core, cls=IsocenterJSONEncoder),
+                # The property, not the stored field: an entity edited since
+                # the scan reports UNSCANNED, and that is what belongs in the
+                # row, whose attributes are the edited ones.
+                inst.phi_status.value))
 
             # instance_blobs is what compaction reads, so it must never lag
             # behind `instances`. If it did, compaction would copy the STALE

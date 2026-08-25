@@ -1,6 +1,7 @@
 import os
 from typing import List, Dict, Any, Optional, Callable, Tuple
 from dataclasses import dataclass, field
+from enum import Enum
 import numpy as np
 import pydicom
 from pydicom.uid import generate_uid
@@ -19,6 +20,34 @@ class DicomSequence:
     """
     tag: str
     items: List['DicomItem'] = field(default_factory=list)
+
+
+class PhiStatus(Enum):
+    """What the last scan concluded about an entity, and when.
+
+    This answers a different question from `has_unsaved_changes`, which is
+    persistence bookkeeping. Both used to be called "dirty".
+
+    A status is only ever valid for the revision it was computed at. Edit
+    the entity and it reverts to UNSCANNED, because a conclusion drawn
+    about earlier content says nothing about the current content -- and a
+    stale REMEDIATED reads as an assurance, which is worse than admitting
+    nothing is known.
+    """
+
+    #: Never inspected, or inspected before the entity's current revision.
+    UNSCANNED = "unscanned"
+
+    #: The scan found identifiers here, and nothing has acted on them.
+    IDENTIFIED = "identified"
+
+    #: Identifiers were found and remediation was applied.
+    REMEDIATED = "remediated"
+
+    #: The scan found no identifiers. This means the configured *tag* scan
+    #: found nothing -- not that burned-in pixel text was checked, which is
+    #: a separate scan, and not that the entity is approved for release.
+    CLEARED = "cleared"
 
 
 @dataclass(slots=True)
@@ -49,6 +78,11 @@ class TrackedEntity:
     _revision: int = field(init=False, default=1)
     _persisted_revision: int = field(init=False, default=0)
 
+    # -1 matches no revision, so an entity that has never been scanned
+    # reports UNSCANNED without needing a separate "was it scanned" flag.
+    _phi_status: 'PhiStatus' = field(init=False, default=None)
+    _phi_status_revision: int = field(init=False, default=-1)
+
     @property
     def has_unsaved_changes(self) -> bool:
         """Whether this entity holds changes the store does not have."""
@@ -73,6 +107,39 @@ class TrackedEntity:
         # Never move backwards: an out-of-order or retried save must not
         # un-persist a revision that already reached the store.
         self._persisted_revision = max(self._persisted_revision, revision)
+
+    @property
+    def phi_status(self) -> 'PhiStatus':
+        """What the last scan concluded, if it still applies.
+
+        Returns UNSCANNED when the entity has changed since the scan ran.
+        The check is structural rather than a convention someone has to
+        remember: there is no way to read a status that describes content
+        the entity no longer holds.
+        """
+        if self._phi_status is None or self._phi_status_revision != self._revision:
+            return PhiStatus.UNSCANNED
+        return self._phi_status
+
+    def record_phi_status(self, status: 'PhiStatus'):
+        """Records what a scan concluded about this entity's current state.
+
+        Call this *after* any change the status describes -- remediation
+        modifies the entity, so recording REMEDIATED first would stamp a
+        revision the entity immediately leaves behind.
+
+        A new status is a change to what the store should hold, so it
+        advances the revision and leaves the entity with unsaved changes.
+        Without that, a scan of an already-saved session would record
+        statuses that the next save had no reason to write. Recording the
+        status an entity already carries changes nothing and is ignored,
+        so repeated scans of unchanged data do not force a rewrite.
+        """
+        if self.phi_status is status:
+            return
+        self._revision += 1
+        self._phi_status = status
+        self._phi_status_revision = self._revision
 
     def mark_subtree_persisted(self):
         """Marks this entity and everything beneath it as stored.
