@@ -1,0 +1,47 @@
+# Isocenter Privacy Configuration (v2.0)
+# ==========================================
+#
+#
+# privacy_profile: "basic"
+#   - Standard profile handling common PHI (Name, ID, etc).
+#   - Set to "none" for manual control.
+#
+# phi_tags:
+#   - Define custom overrides here.
+#   - Actions: KEEP, REMOVE, EMPTY, REPLACE, JITTER (SHIFT)
+#
+# date_jitter:
+#   - Range of days to shift dates by (negative = into past).
+#
+# remove_private_tags:
+#   - If true, removes all odd-group tags except Isocenter Metadata.
+#
+#
+
+version: '2.0'
+privacy_profile: basic
+phi_tags:
+  0008,0020:
+    name: Study Date
+    action: JITTER
+  0010,0040:
+    name: Patient Sex
+    action: KEEP
+  0010,1010:
+    name: Patient Age
+    action: KEEP
+date_jitter:
+  min_days: -365
+  max_days: -1
+remove_private_tags: true
+machines:
+
+- manufacturer: Acme
+  model_name: Scanner 9000
+  serial_number: SN-UNKNOWN-42
+  redaction_zones: []
+
+- serial_number: SN-SCANNER-01
+  model_name: Revolution CT
+  # Redact burned-in Patient Name top-left WARNING: 1 images have 'Burned In Annotation' flag. Verify pixel redaction.
+  redaction_zones: [{roi: [50, 100, 50, 200], note: 'RowStart, RowEnd, ColStart, ColEnd'}]
