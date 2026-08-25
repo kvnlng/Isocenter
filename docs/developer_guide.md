@@ -4,16 +4,22 @@ Welcome to the Isocenter development documentation. This guide covers how to set
 
 ## 1. Environment Setup
 
-Isocenter requires Python 3.9+.
+Isocenter requires Python 3.12+. The floor is not arbitrary: `entities.py`
+and `privacy.py` use `@dataclass(slots=True)` (3.10+), and the declared
+dependency set resolves only on 3.12 and later.
 
 ```bash
 # Clone the repository
 git clone https://github.com/kvnlng/Isocenter.git
 cd Isocenter
 
-# Install dependencies (including dev tools)
+# Install the library, the test suite's dependencies, and pylint
 pip install -e ".[dev]"
 ```
+
+The `dev` extra is contributor tooling only -- it pulls in `tests` plus
+`pylint`. Somebody installing Isocenter to *use* it gets none of it;
+`pip install isocenter` never installs a linter or a test runner.
 
 ## 2. Code Quality
 

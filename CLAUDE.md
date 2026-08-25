@@ -9,8 +9,8 @@ Isocenter is a Python library (no CLI yet — that's the v1.1.0 milestone) for i
 ## Commands
 
 ```bash
-pip install -e ".[tests]"        # dev environment (there is deliberately no requirements.txt)
-pytest                           # full suite, ~404 tests
+pip install -e ".[dev]"          # contributor environment: tests + pylint (there is deliberately no requirements.txt)
+pytest                           # full suite, ~414 tests
 pytest tests/test_session.py     # one file
 pytest tests/test_session.py::test_name -x   # one test
 pylint isocenter                    # lint (target >8.5/10; NOT enforced by CI)
@@ -20,11 +20,13 @@ python -m tests.benchmarks.run_stress_test   # benchmark suite
 
 CI (`.github/workflows/tests.yml`) runs only `pytest -v`, on Python 3.12 / 3.13 / 3.14 / 3.14t (free-threaded, `PYTHON_GIL=0`). It is not path-filtered — every PR into `main` runs the whole suite.
 
+Three other workflows exist. `publish.yml` releases to PyPI by Trusted Publishing (OIDC, no token anywhere) when a GitHub Release is published; it refuses to publish if the tag disagrees with `setup.py`'s version, or if the built wheel does not carry its own `resources/*.json`. Its *filename and environment names are pinned by PyPI's publisher config* — renaming either breaks publishing until PyPI is updated to match. `docs.yml` runs `mkdocs gh-deploy` on pushes to `main` only; it deploys straight to the live site, so the branch filter is load-bearing. `schema-drift.yml` checks Murmur's published annotation schema weekly.
+
 `setup.py` is the single source of truth for dependencies; `tests/test_packaging_contract.py` fails if a module imported unguarded at module scope isn't in `install_requires`. Adding an import means adding a dependency there.
 
 Tests write `*.db`, `*_pixels.bin`, `isocenter.log`, and a few config/CSV artifacts into the repo root. All are gitignored; leave them alone rather than adding cleanup.
 
-Optional extras degrade gracefully and must keep doing so: `ocr` (pytesseract — `pixel_analysis.HAS_OCR`), `nlp` (spacy — `ZoneDiscoverer` falls back to regex), `docs`, `tests`.
+Optional extras degrade gracefully and must keep doing so: `ocr` (pytesseract — `pixel_analysis.HAS_OCR`), `nlp` (spacy — `ZoneDiscoverer` falls back to regex; the `en_core_web_sm` model is deliberately not declared, because PyPI refuses direct-URL requirements), `docs`, `tests` (includes `setuptools`, which the build-based contract tests need and 3.12+ venvs no longer ship), and `dev` (`tests` plus pylint — contributor tooling that `pip install isocenter` must never pull in).
 
 ## Architecture
 
@@ -84,6 +86,6 @@ Design specs and implementation plans live in `docs/superpowers/{specs,plans}/` 
 
 Planning lives in GitHub Issues/milestones, not `ROADMAP.md`.
 
-## Known doc drift
+## Documentation
 
-`docs/developer_guide.md` still claims Python 3.9+ and a `.[dev]` extra; neither is true (floor is 3.12, and the extras are `ocr`/`docs`/`nlp`/`tests`). `docs/architecture.md` says "8 Checkpoints" over a 9-item list while `README.md` says 10. Fix these in passing if you touch those files.
+`README.md` and `docs/` are kept true to the code; the drift that used to be listed here (a 3.9 floor, a non-existent `.[dev]` extra, three different checkpoint counts, a hand-copied changelog 97 lines behind) is fixed. `CHANGELOG.md` has exactly one home — the docs site links to it on GitHub rather than keeping a copy, because a changelog with two homes only ever has one that is current.

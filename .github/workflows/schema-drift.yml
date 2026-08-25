@@ -11,6 +11,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     # No continue-on-error: this job only runs on a weekly schedule (or
     # manual dispatch), never on pull_request, so a real failure here
     # cannot block anyone's PR -- it can only signal the thing it exists

@@ -1,7 +1,14 @@
 name: Documentation
 
 on:
+  # The branch filter is load-bearing, not tidiness: this job runs
+  # `mkdocs gh-deploy`, which publishes straight to the live site. Without
+  # it, any push to any branch touching docs/** deploys unreviewed
+  # documentation -- which is exactly what happened twice during the
+  # isocenter rename, from a feature branch, before the PR was merged.
   push:
+    branches:
+      - main
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
@@ -18,6 +25,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
     - name: Checkout Repository

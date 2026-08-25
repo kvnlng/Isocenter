@@ -3,7 +3,7 @@ site_description: A high-performance Python DICOM Object Model and Redaction Too
 site_url: https://kvnlng.github.io/Isocenter/
 repo_url: https://github.com/kvnlng/Isocenter
 repo_name: kvnlng/Isocenter
-edit_uri: edit/main/docs_site/
+edit_uri: edit/main/docs/
 
 theme:
   name: material
@@ -97,5 +97,8 @@ nav:
       - 'Persistence': api/persistence.md
       - 'Intelligent OCR': api/ocr.md
   - Project Info:
-      - 'Changelog': changelog.md
+      # Points at the real file rather than a copy inside docs/. The
+      # copy drifted 97 lines behind and stopped at 0.6.0 (#52); a
+      # changelog with two homes only ever has one that is current.
+      - 'Changelog': https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md
       - 'Roadmap': roadmap.md

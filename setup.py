@@ -112,6 +112,16 @@ setup(
             # first release with bdist_wheel built in, so no separate
             # `wheel` dependency is needed.
             "setuptools>=70.1"
+        ],
+        # Contributor tooling, deliberately kept out of `tests` and out of
+        # install_requires: pylint keeps this codebase readable, and none
+        # of that is any business of somebody who just wants to use the
+        # library. `pip install isocenter` must never drag a linter in.
+        # This is also the extra `docs/developer_guide.md` documents, so
+        # the command it gives contributors has to keep working.
+        "dev": [
+            "isocenter[tests]",
+            "pylint>=3.0"
         ]
     }
 )
