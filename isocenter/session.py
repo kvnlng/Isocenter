@@ -3,7 +3,7 @@ import re
 import json
 import datetime
 import concurrent.futures
-from typing import List, Union
+from typing import List, Union, Dict, Any
 
 import yaml
 from tqdm import tqdm
@@ -22,7 +22,7 @@ from .crypto import KeyManager
 from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import run_parallel
-from .configuration import IsocenterConfiguration
+from .configuration import IsocenterConfiguration, FlowList
 from .profiles import PRIVACY_PROFILES
 from . import pixel_analysis
 from .automation import ConfigAutomator
@@ -90,6 +90,181 @@ def _verify_worker(args):
 
     verifier = RedactionVerifier(rules)
     return verifier.verify_instance(instance, equipment)
+
+
+RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "resources")
+
+# The header written above every scaffolded config.
+_CONFIG_HEADER = """# Isocenter Privacy Configuration (v2.0)
+# ==========================================
+#
+#
+# privacy_profile: "basic"
+#   - Standard profile handling common PHI (Name, ID, etc).
+#   - Set to "none" for manual control.
+#
+# phi_tags:
+#   - Define custom overrides here.
+#   - Actions: KEEP, REMOVE, EMPTY, REPLACE, JITTER (SHIFT)
+#
+# date_jitter:
+#   - Range of days to shift dates by (negative = into past).
+#
+# remove_private_tags:
+#   - If true, removes all odd-group tags except Isocenter Metadata.
+#
+#
+"""
+
+
+def _load_redaction_knowledge_base() -> List[Dict[str, Any]]:
+    """Machine redaction rules shipped with the package, keyed by serial."""
+    path = os.path.join(RESOURCES_DIR, "redaction_rules.json")
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f).get("machines", [])
+    except (OSError, json.JSONDecodeError) as exc:
+        get_logger().warning(
+            "Could not read the redaction knowledge base at %s: %s", path, exc)
+        return []
+
+
+def _load_ctp_rules() -> List[Dict[str, Any]]:
+    """CTP-derived rules, matched by manufacturer and model rather than serial.
+
+    YAML is preferred when present; the shipped copy is JSON.
+    """
+    yaml_path = os.path.join(RESOURCES_DIR, "ctp_rules.yaml")
+    path = yaml_path if os.path.exists(yaml_path) else os.path.join(
+        RESOURCES_DIR, "ctp_rules.json")
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f) if path.endswith('.yaml') else json.load(f)
+        return (data or {}).get("rules", [])
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        get_logger().warning("Failed to load CTP rules: %s", exc)
+        return []
+
+
+def _match_machine_rule(equipment, kb_machines, ctp_rules):
+    """The first knowledge-base entry describing this machine, or None.
+
+    Priority is deliberate and behaviour-preserving: an exact serial
+    number beats a fuzzy manufacturer/model match from CTP, which in turn
+    beats a model-only match. A serial identifies one scanner; a model
+    match is an educated guess about a family of them.
+    """
+    for rule in kb_machines:
+        if rule.get("serial_number") == equipment.device_serial_number:
+            return rule
+
+    matched = _match_ctp_rule(equipment, ctp_rules)
+    if matched:
+        return matched
+
+    return _match_kb_by_model(equipment, kb_machines)
+
+
+def _match_ctp_rule(equipment, ctp_rules):
+    """CTP's containment match on manufacturer and model."""
+    eq_man = (equipment.manufacturer or "").lower()
+    eq_mod = (equipment.model_name or "").lower()
+
+    for rule in ctp_rules:
+        r_man = rule.get("manufacturer", "").lower()
+        r_mod = rule.get("model_name", "").lower()
+        if not (r_man and r_mod):
+            continue
+        if r_man in eq_man and r_mod in eq_mod:
+            matched = rule.copy()
+            matched["serial_number"] = equipment.device_serial_number
+            condition = matched.pop("_ctp_condition", None)
+            if condition:
+                matched["comment"] = f"Auto-matched from CTP. Condition: {condition}"
+            else:
+                matched["comment"] = (
+                    f"Auto-matched from CTP Knowledge Base "
+                    f"({rule.get('manufacturer')} {rule.get('model_name')})")
+            return matched
+    return None
+
+
+def _match_kb_by_model(equipment, kb_machines):
+    """Model-name match against the internal KB, ignoring serial."""
+    for rule in kb_machines:
+        if rule.get("model_name") != equipment.model_name:
+            continue
+        manufacturer = rule.get("manufacturer")
+        if manufacturer and manufacturer != equipment.manufacturer:
+            continue
+        matched = rule.copy()
+        matched["serial_number"] = equipment.device_serial_number
+        matched["comment"] = (
+            f"Auto-matched from Model Knowledge Base ({equipment.model_name})")
+        return matched
+    return None
+
+
+def _default_action_for_tag(tag: str) -> str:
+    """The research-friendly default action for a PHI tag.
+
+    Only three tags deviate from REMOVE. Earlier versions also branched on
+    "Date"/"Time"/"ID" appearing in the tag's name, but every one of those
+    branches also chose REMOVE, so they never changed an outcome.
+    """
+    if tag == "0008,0020":      # Study Date: keep intervals, lose the date
+        return "JITTER"
+    if tag in ("0010,0040", "0010,1010"):   # Sex, Age: research-relevant
+        return "KEEP"
+    return "REMOVE"
+
+
+def _render_config_yaml(data: Dict[str, Any]) -> str:
+    """Renders the config dict as the commented YAML users actually edit.
+
+    PyYAML cannot emit comments, so `comment:` keys are dumped as data and
+    rewritten into `#` lines afterwards. That is why comments are
+    flattened to one line first: a multi-line value would produce YAML
+    that this pass turns into a broken comment block.
+    """
+    for machine in data.get("machines", []):
+        comment = machine.get("comment")
+        if isinstance(comment, str):
+            machine["comment"] = re.sub(
+                r'\s+', ' ', comment.replace("\n", " ").replace("\r", "")).strip()
+
+        zones = machine.get("redaction_zones")
+        if isinstance(zones, list):
+            machine["redaction_zones"] = FlowList(
+                FlowList(z) if isinstance(z, list) else z for z in zones)
+
+    yaml_content = yaml.dump(
+        data, sort_keys=False, default_flow_style=False, width=float("inf"))
+
+    rendered = []
+    for line in yaml_content.splitlines():
+        match = re.search(r'^(\s*)comment:\s*(.*)$', line)
+        if match:
+            indent, content = match.group(1), match.group(2).strip()
+            if content.startswith("'") and content.endswith("'"):
+                content = content[1:-1].replace("''", "'")
+            elif content.startswith('"') and content.endswith('"'):
+                content = content[1:-1].replace('\\"', '"')
+            rendered.append(f"{indent}# {content}")
+            continue
+
+        # A blank line before each machine keeps the list readable.
+        if (line.strip().startswith("- ") and rendered
+                and rendered[-1].strip() != ""):
+            rendered.append("")
+        rendered.append(line)
+
+    return _CONFIG_HEADER + "\n" + "\n".join(rendered) + "\n"
 
 
 class LockingResult(list):
@@ -529,323 +704,143 @@ class DicomSession:
         """
         Generates a unified configuration file (scaffold) in YAML format.
 
-        This method analyzes the current session inventory (Equipment, Manufacturers)
-        and attempts to auto-generate redaction rules based on internal knowledge bases
-        (e.g., CTP rules). It also includes a default set of PHI tags.
+        Reads the session inventory, pre-fills redaction rules for any
+        machine the shipped knowledge bases recognise, adds default PHI
+        tag policy, and writes the result as commented YAML.
 
         Args:
-            output_path (str): The file path where the generated YAML configuration should be saved.
+            output_path (str): Where to write the generated YAML. A
+                `.yaml` suffix is appended if missing.
         """
-
-
-        # Helper for Flow-Style Lists (Bracketed)
-        class FlowList(list):
-            pass
-
-        def flow_list_representer(dumper, data):
-            return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
-
-        yaml.add_representer(FlowList, flow_list_representer)
-
         if not (output_path.endswith(".yaml") or output_path.endswith(".yml")):
             output_path += ".yaml"
             print(f"Note: Appending .yaml extension -> {output_path}")
 
-        # 1. Identify what we have
-        all_equipment = self.store.get_unique_equipment()
+        machine_rules = self._scaffold_machine_rules()
 
-        # Instantiate service to query pixel/tag data efficiently
-        service = RedactionService(self.store)
-
-        # 2. Identify what is already configured (Pixel Rules)
-        configured_serials = {rule.get("serial_number") for rule in self.configuration.rules}
-
-        # Load Knowledge Base for Machines
-        kb_path = os.path.join(
-            os.path.dirname(
-                os.path.abspath(__file__)),
-            "resources",
-            "redaction_rules.json")
-        kb_machines = []
-        if os.path.exists(kb_path):
-            try:
-                with open(kb_path, 'r', encoding='utf-8') as f:
-                    kb_data = json.load(f)
-                    kb_machines = kb_data.get("machines", [])
-            except (OSError, json.JSONDecodeError) as exc:
-                # Scaffolding continues without the knowledge base, but
-                # silently producing a config with no pre-filled machines
-                # looked identical to "the KB had nothing for you".
-                get_logger().warning(
-                    "Could not read the redaction knowledge base at %s: %s",
-                    kb_path, exc)
-
-        # 3. Find missing machines and try to pre-fill
-        missing_configs = []
-        for eq in all_equipment:
-            if eq.device_serial_number and eq.device_serial_number not in configured_serials:
-
-                # Check KB
-                matched_rule = None
-                # Primary: Serial Match
-                for rule in kb_machines:
-                    if rule.get("serial_number") == eq.device_serial_number:
-                        matched_rule = rule
-                        break
-
-                # Check CTP Rules (Knowledge Base 2)
-                ctp_path = os.path.join(
-                    os.path.dirname(
-                        os.path.abspath(__file__)),
-                    "resources",
-                    "ctp_rules.yaml")
-                if not os.path.exists(ctp_path):
-                    # Fallback to JSON if YAML doesn't exist
-                    ctp_path = os.path.join(
-                        os.path.dirname(
-                            os.path.abspath(__file__)),
-                        "resources",
-                        "ctp_rules.json")
-
-                if not matched_rule and os.path.exists(ctp_path):
-                    try:
-                        if ctp_path.endswith('.yaml'):
-                            with open(ctp_path, 'r', encoding='utf-8') as f:
-                                ctp_data = yaml.safe_load(f)
-                        else:
-                            with open(ctp_path, 'r', encoding='utf-8') as f:
-                                ctp_data = json.load(f)
-
-                        ctp_rules = ctp_data.get("rules", [])
-
-                        for rule in ctp_rules:
-                            # Fuzzy matching on Manufacturer and Model
-                            # CTP rules usually have "manufacturer" and "model_name"
-                            r_man = rule.get("manufacturer", "").lower()
-                            r_mod = rule.get("model_name", "").lower()
-
-                            eq_man = (eq.manufacturer or "").lower()
-                            eq_mod = (eq.model_name or "").lower()
-
-                            # Simple containment check as per CTP style
-                            if r_man and r_man in eq_man and r_mod and r_mod in eq_mod:
-                                matched_rule = rule.copy()
-                                matched_rule["serial_number"] = eq.device_serial_number
-
-                                # Move _ctp_condition to comment if present
-                                cond = matched_rule.pop("_ctp_condition", None)
-                                if cond:
-                                    matched_rule["comment"] = f"Auto-matched from CTP. Condition: {cond}"
-                                else:
-                                    matched_rule["comment"] = f"Auto-matched from CTP Knowledge Base ({
-                                        rule.get('manufacturer')} {
-                                        rule.get('model_name')})"
-
-                                break
-
-                    except Exception as e:
-                        get_logger().warning(f"Failed to load CTP rules: {e}")
-
-                # Secondary: Model Match (Internal KB)
-                if not matched_rule:
-                    for rule in kb_machines:
-                        if rule.get("model_name") == eq.model_name:
-                            # It's a model match, so we should probably copy the zones
-                            matches_man = not rule.get("manufacturer") or (
-                                rule.get("manufacturer") == eq.manufacturer)
-                            if matches_man:
-                                matched_rule = rule.copy()
-                                matched_rule["serial_number"] = eq.device_serial_number
-                                matched_rule["comment"] = f"Auto-matched from Model Knowledge Base ({
-                                    eq.model_name})"
-                                break
-
-                # 3.b Check for Burned In Annotations (Safety Check)
-                # query index for this machine
-                instances = service.index.get_by_machine(eq.device_serial_number)
-                burned_in_count = 0
-                for inst in instances:
-                    val = inst.attributes.get("0028,0301", "NO")
-                    if isinstance(val, str) and "YES" in val.upper():
-                        burned_in_count += 1
-
-                safety_comment = ""
-                if burned_in_count > 0:
-                    safety_comment = f"WARNING: {burned_in_count} images have 'Burned In Annotation' flag. Verify pixel redaction."
-
-                if matched_rule:
-                    # Use the template
-                    rule_copy = matched_rule.copy()  # Ensure we don't mutate KB
-                    if safety_comment:
-                        existing = rule_copy.get("comment", "")
-                        rule_copy["comment"] = f"{existing} {safety_comment}".strip()
-                    missing_configs.append(rule_copy)
-                else:
-                    # Create empty scaffold
-                    new_rule = {
-                        "manufacturer": eq.manufacturer or "Unknown",
-                        "model_name": eq.model_name or "Unknown",
-                        "serial_number": eq.device_serial_number,
-                        "redaction_zones": []
-                    }
-                    if safety_comment:
-                        new_rule["comment"] = safety_comment
-                    missing_configs.append(new_rule)
-
-        # 4. Load PHI Tags Default (if not loaded)
-        phi_tags = self.configuration.phi_tags
-        if not phi_tags:
-            # Load default config for scaffold
-            try:
-                phi_tags = ConfigLoader.load_phi_config()
-            except Exception as e:
-                get_logger().warning(f"Failed to load research tags: {e}")
-
-        # 4b. Enhance PHI Tags (Transform to structured defaults)
-        structured_tags = {}
-
-        # Ensure critical tags are present
-        if "0008,0020" not in phi_tags:
-            phi_tags["0008,0020"] = "Study Date"
-        if "0010,0040" not in phi_tags:
-            phi_tags["0010,0040"] = "Patient Sex"
-        if "0010,1010" not in phi_tags:
-            phi_tags["0010,1010"] = "Patient Age"  # Helper
-
-        for tag, val in phi_tags.items():
-            name = val if isinstance(val, str) else val.get("name", "Unknown")
-            action = "REMOVE"  # Default safety
-
-            # Apply Research-Friendly Smart Defaults
-            if tag == "0008,0020":  # Study Date
-                action = "JITTER"
-            elif tag == "0010,0040":  # Sex
-                action = "KEEP"
-            elif tag == "0010,1010":  # Age
-                action = "KEEP"
-            elif "Date" in name or "Time" in name:
-                action = "REMOVE"  # Times are sensitive
-            elif "ID" in name:
-                action = "REMOVE"  # IDs are sensitive
-
-            # Preserve existing structure if it was already structured
-            if isinstance(val, dict):
-                structured_tags[tag] = val
-            else:
-                # Minimal Scaffold: Skip tags that are simply REMOVED (covered by Basic profile)
-                # Unless explicitly requested to show all? For now, match tests.
-                if action == "REMOVE":
-                    continue
-
-                structured_tags[tag] = {
-                    "name": name,
-                    "action": action
-                }
-
-        # 5. Construct Unified Data
         data = {
             "version": "2.0",
             "privacy_profile": "basic",
-            # No _instructions dict anymore, we use comments!
-            "phi_tags": structured_tags,
+            "phi_tags": self._scaffold_phi_tags(),
             "date_jitter": self.configuration.date_jitter,
             "remove_private_tags": self.configuration.remove_private_tags,
-            "machines": missing_configs + self.configuration.rules
+            "machines": machine_rules + self.configuration.rules
         }
 
-        if not missing_configs and not self.configuration.rules:
+        if not machine_rules and not self.configuration.rules:
             print("No machines detected to scaffold.")
 
-        # Pre-process data to ensure comments are single-line strings
-        # And ensure redaction_zones use FlowList for bracketed style
-        for m in data.get("machines", []):
-            if "comment" in m and isinstance(m["comment"], str):
-                # Replace newlines with spaces/semicolons
-                m["comment"] = m["comment"].replace("\n", " ").replace("\r", "")
-                # collapse multiple spaces
-                m["comment"] = re.sub(r'\s+', ' ', m["comment"]).strip()
-
-            if "redaction_zones" in m and isinstance(m["redaction_zones"], list):
-                # Wrap inner lists (zones) in FlowList
-                # And assume user wants [[...], [...]] so wrap outer too?
-
-                zones = m["redaction_zones"]
-                new_zones = FlowList()
-                for z in zones:
-                    if isinstance(z, list):
-                        new_zones.append(FlowList(z))
-                    else:
-                        new_zones.append(z)
-                m["redaction_zones"] = new_zones  # Assign flow list wrapper
-
         try:
-            # Generate YAML string
-            # sort_keys=False ensures order is preserved (machines list)
-            # width=float("inf") prevents line wrapping for long strings
-            yaml_content = yaml.dump(
-                data,
-                sort_keys=False,
-                default_flow_style=False,
-                width=float("inf"))
-
-            # Post-process: Convert "comment: ..." into "# ..."
-            lines = yaml_content.splitlines()
-            new_lines = []
-            for line in lines:
-                # Simple match for key-value pair
-                match = re.search(r'^(\s*)comment:\s*(.*)$', line)
-                if match:
-                    indent = match.group(1)
-                    content = match.group(2).strip()
-
-                    # Check for surrounding quotes and strip them
-                    if content.startswith("'") and content.endswith("'"):
-                        content = content[1:-1]
-                        content = content.replace("''", "'")
-                    elif content.startswith('"') and content.endswith('"'):
-                        content = content[1:-1]
-                        content = content.replace('\\"', '"')
-
-                    new_lines.append(f"{indent}# {content}")
-                else:
-                    if line.strip().startswith(
-                            "- ") and len(new_lines) > 0 and new_lines[-1].strip() != "":
-                        new_lines.append("")
-
-                    new_lines.append(line)
-
-            # Prepend Header Comments
-            header = """# Isocenter Privacy Configuration (v2.0)
-# ==========================================
-#
-#
-# privacy_profile: "basic"
-#   - Standard profile handling common PHI (Name, ID, etc).
-#   - Set to "none" for manual control.
-#
-# phi_tags:
-#   - Define custom overrides here.
-#   - Actions: KEEP, REMOVE, EMPTY, REPLACE, JITTER (SHIFT)
-#
-# date_jitter:
-#   - Range of days to shift dates by (negative = into past).
-#
-# remove_private_tags:
-#   - If true, removes all odd-group tags except Isocenter Metadata.
-#
-#
-"""
-            final_content = header + "\n" + "\n".join(new_lines) + "\n"
-
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(final_content)
+                f.write(_render_config_yaml(data))
 
             get_logger().info(
-                f"Scaffolded Unified Config to {output_path} ({
-                    len(missing_configs)} new machines)")
+                "Scaffolded Unified Config to %s (%d new machines)",
+                output_path, len(machine_rules))
             print(f"Scaffolded Unified Config to {output_path}")
-        except Exception as e:
-            get_logger().error(f"Failed to write scaffold: {e}")
+        except OSError as exc:
+            get_logger().error("Failed to write scaffold: %s", exc)
+
+    def _scaffold_machine_rules(self) -> List[Dict[str, Any]]:
+        """Builds a redaction rule for every machine not already configured.
+
+        Each machine is matched against the knowledge bases in priority
+        order, then annotated with a burned-in-annotation warning if its
+        images claim to carry one. Machines that match nothing still get
+        an entry, with empty zones for the user to fill in.
+        """
+        configured_serials = {
+            rule.get("serial_number") for rule in self.configuration.rules}
+
+        # Both knowledge bases are read once here. The CTP file was
+        # previously opened and parsed inside the per-machine loop, so a
+        # cohort with 40 scanners re-read the same 27KB of rules 40 times.
+        kb_machines = _load_redaction_knowledge_base()
+        ctp_rules = _load_ctp_rules()
+
+        service = RedactionService(self.store)
+        scaffolded = []
+
+        for equipment in self.store.get_unique_equipment():
+            serial = equipment.device_serial_number
+            if not serial or serial in configured_serials:
+                continue
+
+            matched = _match_machine_rule(equipment, kb_machines, ctp_rules)
+            warning = self._burned_in_warning(service, serial)
+
+            if matched:
+                rule = dict(matched)      # never mutate the knowledge base
+                if warning:
+                    # Append: the KB comment says what to redact, the
+                    # warning says the pixels need checking. Both matter.
+                    rule["comment"] = f"{rule.get('comment', '')} {warning}".strip()
+            else:
+                rule = {
+                    "manufacturer": equipment.manufacturer or "Unknown",
+                    "model_name": equipment.model_name or "Unknown",
+                    "serial_number": serial,
+                    "redaction_zones": []
+                }
+                if warning:
+                    rule["comment"] = warning
+
+            scaffolded.append(rule)
+
+        return scaffolded
+
+    @staticmethod
+    def _burned_in_warning(service, serial_number: str) -> str:
+        """Warns when a machine's images declare burned-in annotations.
+
+        (0028,0301) is the scanner's own claim that PHI is drawn into the
+        pixels. It is advisory -- absence proves nothing -- but its
+        presence means the zones below need checking rather than trusting.
+        """
+        flagged = sum(
+            1 for inst in service.index.get_by_machine(serial_number)
+            if isinstance(inst.attributes.get("0028,0301", "NO"), str)
+            and "YES" in inst.attributes.get("0028,0301", "NO").upper())
+
+        if not flagged:
+            return ""
+        return (f"WARNING: {flagged} images have 'Burned In Annotation' "
+                f"flag. Verify pixel redaction.")
+
+    def _scaffold_phi_tags(self) -> Dict[str, Any]:
+        """The PHI tag section of a scaffolded config.
+
+        Only tags that *deviate* from the basic profile are written. The
+        scaffold sets `privacy_profile: basic`, which already removes
+        everything listed there, so re-listing a REMOVE tag would add a
+        line that changes nothing. What survives is the research-friendly
+        defaults: a jittered study date, and age and sex kept.
+        """
+        phi_tags = dict(self.configuration.phi_tags)
+        if not phi_tags:
+            try:
+                phi_tags = dict(ConfigLoader.load_phi_config())
+            except (OSError, ValueError) as exc:
+                get_logger().warning("Failed to load default PHI tags: %s", exc)
+
+        for tag, name in (("0008,0020", "Study Date"),
+                          ("0010,0040", "Patient Sex"),
+                          ("0010,1010", "Patient Age")):
+            phi_tags.setdefault(tag, name)
+
+        structured = {}
+        for tag, val in phi_tags.items():
+            if isinstance(val, dict):
+                # Already structured by a loaded config; pass it through.
+                structured[tag] = val
+                continue
+
+            action = _default_action_for_tag(tag)
+            if action == "REMOVE":
+                continue
+            structured[tag] = {"name": val, "action": action}
+
+        return structured
 
     # =========================================================================
     # AUDIT & ANALYSIS

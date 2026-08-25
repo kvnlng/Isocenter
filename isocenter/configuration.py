@@ -11,6 +11,25 @@ from typing import List, Dict, Any, Optional
 import yaml
 
 
+class FlowList(list):
+    """A list YAML should render inline, as [a, b, c].
+
+    Redaction zones read as coordinates, not as a bulleted list four
+    lines tall. Defined once here and registered once at import: this
+    class and its representer previously existed twice, and
+    `create_config` re-registered the representer -- mutating global PyYAML
+    state -- on every call.
+    """
+
+
+def _flow_list_representer(dumper, data):
+    return dumper.represent_sequence(
+        'tag:yaml.org,2002:seq', data, flow_style=True)
+
+
+yaml.add_representer(FlowList, _flow_list_representer)
+
+
 @dataclass
 class IsocenterConfiguration:
     """
@@ -43,18 +62,6 @@ class IsocenterConfiguration:
         """
         if not self.config_path:
             return
-
-        class FlowList(list):
-            """Marks lists for flow-style (bracketed) YAML formatting."""
-
-        def flow_list_representer(dumper, data):
-            return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
-
-        try:
-            yaml.add_representer(FlowList, flow_list_representer)
-        except ValueError:
-            # Already registered
-            pass
 
         # Construct Unified Data
         # Re-using logic similar to session.create_config but simplified for direct object dump

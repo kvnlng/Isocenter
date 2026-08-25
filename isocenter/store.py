@@ -22,10 +22,18 @@ class DicomStore:
 
     def get_unique_equipment(self) -> List[Equipment]:
         """
-        Returns a list of all unique Equipment (Manufacturer/Model/Serial) found in the store.
+        Returns all unique Equipment (Manufacturer/Model/Serial) in the store.
+
+        The result is sorted. `list(set(...))` iterates in hash order, which
+        varies between processes because string hashing is randomised, so
+        `session.create_config()` emitted the same machines in a different
+        order on each run -- a generated file people keep in version control
+        and diff. Sorting costs nothing at these sizes and makes the output
+        reproducible.
 
         Returns:
-            List[Equipment]: A list of unique Equipment objects.
+            List[Equipment]: Unique equipment, ordered by manufacturer,
+            then model, then serial number.
         """
         unique = set()
         for p in self.patients:
@@ -33,7 +41,10 @@ class DicomStore:
                 for se in st.series:
                     if se.equipment:
                         unique.add(se.equipment)
-        return list(unique)
+        return sorted(
+            unique,
+            key=lambda e: (e.manufacturer or "", e.model_name or "",
+                           e.device_serial_number or ""))
 
     def get_known_files(self) -> Set[str]:
         """
