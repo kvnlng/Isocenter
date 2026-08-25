@@ -73,6 +73,57 @@ def test_lead_comes_from_the_coded_channel_source():
     assert finding["lead"] == "MDC_ECG_LEAD_II"
 
 
+def test_lead_falls_back_to_a_positional_token_for_an_uncoded_channel():
+    """`_lead_for` must pass the annotation's own referenced channel
+    number through to `wfdb_description`, not rely on its no-argument
+    default.
+
+    Mutating `gantry/murmur.py`'s `wfdb_description(index)` call to
+    `wfdb_description()` survived the full suite: every uncoded,
+    non-allowlisted channel then reported the same "signal" placeholder
+    regardless of which channel it actually was -- leads silently
+    indistinguishable in Murmur, even though `CHANGELOG.md` (#39) claims
+    the positional-token fix covers the `annotations.json` `lead` field.
+    Channel 2 (DICOM ChannelNumber, 1-based) is 0-based index 1, so a
+    correct pass-through produces "ch1", not "signal".
+    """
+    ds = build_ecg_dataset(num_samples=500,
+                           channels=[("MDC_ECG_LEAD_I", "Lead I"),
+                                     ("MDC_ECG_LEAD_II", "Lead II")])
+    chdef = ds.WaveformSequence[0].ChannelDefinitionSequence[1]
+    del chdef.ChannelSourceSequence
+    chdef.ChannelLabel = "Operator Free Text Not A Lead Name"
+    add_annotation(ds, channel=2)
+
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "gantry/test")["findings"][0]
+    assert finding["lead"] == "ch1"
+
+
+def test_lead_from_coded_source_is_sanitized_against_hea_comment_injection():
+    """`annotations.json`'s `lead` field must get the same line-break
+    sanitization the `.hea` signal description gets
+    (`gantry.exporters.wfdb._sanitize_description`).
+
+    A coded Channel Source value is not filtered by the lead-name
+    allowlist -- that only guards the free-text Channel Label fallback --
+    so a non-conformant source can still carry an embedded newline.
+    `gantry/exporters/wfdb.py` already sanitizes this for the `.hea` file
+    (`_sanitize_description`); pre-fix, `gantry/murmur.py` did not apply
+    the same treatment, so `annotations.json` carried a rawer value than
+    the `.hea` for the identical input.
+    """
+    ds = build_ecg_dataset(num_samples=500)
+    chdef = ds.WaveformSequence[0].ChannelDefinitionSequence[1]
+    chdef.ChannelSourceSequence[0].CodeValue = "MDC\n#patient ZQINJECT01"
+    add_annotation(ds, channel=2)
+
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "gantry/test")["findings"][0]
+    assert "\n" not in finding["lead"]
+    assert finding["lead"] == "MDC #patient ZQINJECT01"
+
+
 def test_free_text_note_is_written_only_when_opted_in():
     """Covers the note mapping itself (not the default): with
     include_text=True, Unformatted Text Value must still land in `note`.

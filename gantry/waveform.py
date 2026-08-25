@@ -209,12 +209,24 @@ class WaveformChannel:
     def wfdb_description(self, index: Optional[int] = None) -> str:
         """Signal description for the .hea signal line and annotations `lead`.
 
-        Prefers the coded channel source, which cannot contain
-        operator-typed text. Falls back to the free-text Channel Label
-        ONLY when that label is a recognisable lead name; anything else is
-        replaced with a positional token, because (003A,0203) is
-        operator-typed SH and has been observed carrying names, MRNs and
-        clinical commentary.
+        Prefers the coded channel source: a conformant CodeValue (SH, per
+        the DICOM standard) is far less likely to carry operator-typed
+        text than a free-text label. That is a likelihood argument, not a
+        guarantee -- this method does NOT run the coded value through the
+        lead-name allowlist below or `_sanitize_description`, and pydicom
+        does not enforce SH's content restrictions on read or write, so a
+        non-conformant (or malicious) source can still put anything here,
+        including an embedded newline (see
+        `test_coded_channel_source_newline_cannot_manufacture_a_hea_comment`
+        in `tests/test_wfdb_conformance.py`, which proves exactly that).
+        The `.hea` writer and the Murmur bridge both sanitize line-break
+        characters out of whatever this returns as their own last line of
+        defense.
+
+        Falls back to the free-text Channel Label ONLY when that label is
+        a recognisable lead name; anything else is replaced with a
+        positional token, because (003A,0203) is operator-typed SH and has
+        been observed carrying names, MRNs and clinical commentary.
 
         The check lives here rather than in the privacy profile on purpose:
         the PHI scan is tag-gated, so a profile entry protects only sessions

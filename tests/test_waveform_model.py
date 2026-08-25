@@ -94,7 +94,14 @@ def test_from_dicom_item_reads_the_generated_fixture():
 
 
 def test_coded_source_still_wins():
-    """A coded value cannot contain operator text, so it is always preferred."""
+    """A coded value is preferred over free text whenever one is present.
+
+    Not because it cannot contain operator text -- it demonstrably can
+    (see `test_coded_channel_source_newline_cannot_manufacture_a_hea_comment`
+    in `tests/test_wfdb_conformance.py`, which injects one) -- but because
+    a conformant coding scheme value is far less likely to carry it than
+    an unconstrained free-text label.
+    """
     channel = WaveformChannel(label="anything at all", source_code="MDC_ECG_LEAD_II")
     assert channel.wfdb_description(0) == "MDC_ECG_LEAD_II"
 

@@ -14,6 +14,8 @@ import os
 from collections.abc import Sequence as _SequenceABC
 from typing import Any, Dict, List, Optional
 
+from .exporters.wfdb import _sanitize_description
+
 SCHEMA_VERSION = 1
 
 TAG_ANNOTATION_SEQ = "0040,b020"
@@ -60,6 +62,14 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
 
     The attribute is a (multiplex group, channel) pair with a 1-based
     channel number.
+
+    Sanitized with the same `_sanitize_description` the `.hea` signal
+    line gets (`gantry.exporters.wfdb`): `wfdb_description()` returns a
+    coded Channel Source value verbatim -- it is not filtered by the
+    lead-name allowlist, which only guards the free-text Channel Label
+    fallback -- so a non-conformant source can still carry an embedded
+    newline. Without this, `annotations.json` could carry a rawer value
+    than the `.hea` file for the identical input.
     """
     values = _as_list(referenced_channels)
     if len(values) < 2:
@@ -71,7 +81,7 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
 
     index = channel_number - 1
     if 0 <= index < len(waveform.channels):
-        return waveform.channels[index].wfdb_description(index)
+        return _sanitize_description(waveform.channels[index].wfdb_description(index))
     return None
 
 
