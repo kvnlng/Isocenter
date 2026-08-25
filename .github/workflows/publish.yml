@@ -53,6 +53,35 @@ jobs:
           python -m pip install --upgrade pip build twine
           python -m build
 
+      # Read on every run, not just releases. The comparison below can
+      # only happen on a release -- a workflow_dispatch has no tag -- but
+      # reading the version is the part that can break, so it must run on
+      # the TestPyPI rehearsals too. It did not, and the consequence was
+      # that this gate failed the first time it was ever executed, on a
+      # real release: it called `python setup.py --version`, and the
+      # runner's Python has no setuptools.
+      - name: Read the packaged version
+        id: packaged
+        run: |
+          # From the built wheel, which is the artifact that gets
+          # uploaded. Anything else -- setup.py, a regex over a source
+          # file -- re-derives the number and can agree with itself while
+          # disagreeing with what was built.
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ ${#wheels[@]} -ne 1 ]; then
+            echo "::error::expected exactly one wheel in dist/, found ${#wheels[@]}"
+            exit 1
+          fi
+          # isocenter-0.8.0-py3-none-any.whl -> 0.8.0
+          version=$(basename "${wheels[0]}" | cut -d- -f2)
+          if [ -z "$version" ]; then
+            echo "::error::could not read a version from ${wheels[0]}"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "packaged version: $version"
+
       - name: Release tag must match the packaged version
         if: github.event_name == 'release'
         run: |
@@ -60,14 +89,8 @@ jobs:
           # release nobody can install by the name they were given, and the
           # version it *did* claim is then permanently spent. Fail here
           # instead.
-          #
-          # Asks setuptools for the value it will build with, rather than
-          # parsing the file. The version now lives in isocenter/_version.py
-          # and setup.py derives it, so a regex over setup.py matches
-          # nothing -- and a gate that cannot find a version to compare is
-          # worse than no gate.
           tag="${GITHUB_REF_NAME#v}"
-          version=$(python setup.py --version)
+          version="${{ steps.packaged.outputs.version }}"
           if [ "$tag" != "$version" ]; then
             echo "::error::release tag ${GITHUB_REF_NAME} does not match packaged version ${version}"
             exit 1
