@@ -458,6 +458,27 @@ class WfdbExporter(Exporter):
         function does not suppress timing on an un-anonymized session --
         that would be a design change, not a bug fix.
 
+        Never fabricates a time-of-day. When `study.study_date` is a real
+        (shifted or unshifted) date but no real time-of-day is available --
+        which is now the normal case on a fully configured, anonymized
+        session, since the Basic profile (#38) removes both Acquisition
+        DateTime (0008,002A) and Study Time (0008,0030) -- the record's
+        start time/date fields are omitted entirely rather than
+        substituting a fake "00:00:00". header(5) does not support a
+        date-only start time: PhysioNet's own spec documents base_date as
+        depending on base_time being present, `wfdb-python`'s RECORD_SPECS
+        encodes that same dependency (`Record.wrheader()` raises "Missing
+        field required: base_time" if only a date is set), and empirically
+        `wfdb.rdheader`'s own field regex cannot disambiguate a bare date
+        from a bare time -- both are just digit runs, so a hand-written
+        date-only record line gets its day silently swallowed into
+        base_time and its base_date left dangling (verified: it either
+        raises inside `datetime.strptime` or misparses). So "write the
+        date without a time" is not achievable against the reference
+        reader; the only options that neither fabricate a fake time nor
+        misparse are (a) omit both fields, or (b) leak the unshifted
+        instance date via the fallback below. This picks (a).
+
         Returns None when no usable value exists anywhere.
         """
         from datetime import datetime
@@ -469,10 +490,17 @@ class WfdbExporter(Exporter):
             if normalized:
                 try:
                     shifted_date = datetime.strptime(normalized, "%Y%m%d").date()
-                    return datetime.combine(
-                        shifted_date, time_of_day or datetime.min.time())
                 except ValueError:
-                    pass
+                    shifted_date = None
+                if shifted_date is not None:
+                    if time_of_day is not None:
+                        return datetime.combine(shifted_date, time_of_day)
+                    # Real date, no real time: do not fabricate one, and
+                    # do not fall through to the instance-only fallback
+                    # below -- that would read the instance's real,
+                    # un-shifted date and reopen the Safe Harbor leak
+                    # this function's docstring above exists to close.
+                    return None
 
         return WfdbExporter._instance_only_datetime(instance)
 

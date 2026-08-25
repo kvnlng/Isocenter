@@ -422,25 +422,41 @@ def test_two_instances_missing_instance_number_get_distinct_records(tmp_path):
         f"expected one 40-sample and one 60-sample record; got {sample_counts!r}")
 
 
-def test_acquisition_datetime_is_remediated_end_to_end(tmp_path):
-    """The profile entry must actually fire on a real ingest->anonymize pass.
+def test_acquisition_and_procedure_step_timing_is_remediated_end_to_end(tmp_path):
+    """All five date/time tags Task 1 (#38) added to BASIC_PROFILE must
+    actually fire on a real ingest->anonymize pass, not just Acquisition
+    DateTime.
 
     A tag can sit in BASIC_PROFILE and still never be remediated if the key
-    casing does not match the lowercased ingested keys (#41). This asserts
-    the value is gone from the object graph, not merely that the profile
-    mentions it. Runs the real, documented Quick Start flow end-to-end:
+    casing does not match the lowercased ingested keys (#41), or if its
+    action is silently wrong (mutating "0040,0251" from REMOVE to KEEP
+    survived the full suite -- see test_profiles.py's
+    test_basic_profile_datetime_twins_are_actually_set_to_remove). This
+    asserts every one of the five values is gone from the object graph
+    after a real remediation pass, not merely that the profile mentions
+    the tags. Runs the documented Quick Start flow end-to-end:
     create_config() -> load_config() -> audit() -> anonymize().
     """
     import pydicom
 
-    raw_datetime = "20260101101530.000000"
+    raw_values = {
+        "0008,002a": "20260101101530.000000",
+        "0040,0244": "20260101",
+        "0040,0245": "101530",
+        "0040,0250": "20260101",
+        "0040,0251": "101545",
+    }
     path = tmp_path / "wf.dcm"
     ds = build_ecg_dataset(
         channels=[("MDC_ECG_LEAD_I", "Lead I")],
         patient_id="DTTEST001",
         patient_name="Waveform^Test",
     )
-    ds.AcquisitionDateTime = raw_datetime
+    ds.AcquisitionDateTime = raw_values["0008,002a"]
+    ds.PerformedProcedureStepStartDate = raw_values["0040,0244"]
+    ds.PerformedProcedureStepStartTime = raw_values["0040,0245"]
+    ds.PerformedProcedureStepEndDate = raw_values["0040,0250"]
+    ds.PerformedProcedureStepEndTime = raw_values["0040,0251"]
     pydicom.dcmwrite(str(path), ds, write_like_original=False)
 
     session = DicomSession(":memory:")
@@ -454,20 +470,93 @@ def test_acquisition_datetime_is_remediated_end_to_end(tmp_path):
         findings = session.audit()
         session.anonymize(findings)
 
-        remaining = []
+        remaining = {}
         for patient in session.store.patients:
             for study in patient.studies:
                 for series in study.series:
                     for instance in series.instances:
-                        value = instance.attributes.get("0008,002a")
-                        if value:
-                            remaining.append(str(value))
+                        for tag, raw in raw_values.items():
+                            value = instance.attributes.get(tag)
+                            if value:
+                                remaining.setdefault(tag, []).append(str(value))
     finally:
         session.close()
 
-    assert raw_datetime not in remaining, (
-        "Acquisition DateTime survived anonymize(); the BASIC_PROFILE entry "
-        f"is present but not firing. Remaining values: {remaining!r}")
+    assert not remaining, (
+        "one or more of the five date/time tags Task 1 (#38) added to "
+        "BASIC_PROFILE survived anonymize(); the profile entry is present "
+        f"but not firing. Remaining values: {remaining!r}")
+
+
+# --- WFDB header must not fabricate a time-of-day (round-2 review) ---
+
+
+def test_anonymized_export_does_not_fabricate_a_midnight_timestamp(tmp_path):
+    """Once Acquisition DateTime (0008,002A) and Study Time (0008,0030)
+    are both remediated by the Basic profile (#38), `_instance_time_of_day`
+    returns None on every fully configured + anonymized session --
+    `time_of_day` is never real again. Pre-fix, `_start_datetime` combined
+    the (real) shifted study date with `time_of_day or datetime.min.time()`,
+    so every such record's header carried a fabricated "00:00:00" presented
+    as real acquisition timing. Runs the documented Quick Start flow
+    end-to-end: create_config() -> load_config() -> audit() -> anonymize()
+    -> export(format="wfdb").
+    """
+    path = tmp_path / "wf.dcm"
+    write_fixture(str(path), channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                 patient_id="MIDNIGHT001", patient_name="Waveform^Test")
+
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path))
+
+        config_path = tmp_path / "config.yaml"
+        session.create_config(str(config_path))
+        session.load_config(str(config_path))
+
+        findings = session.audit()
+        session.anonymize(findings)
+
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    with open(paths[0], encoding="utf-8") as f:
+        header = f.read()
+    assert "00:00:00" not in header, (
+        "the header carries a fabricated midnight timestamp; "
+        f"record line: {header.splitlines()[0]!r}")
+
+
+def test_non_anonymized_export_still_carries_the_real_acquisition_time(tmp_path):
+    """Companion to the fabricated-timestamp fix above: a session that
+    never remediates Acquisition DateTime still carries its real,
+    un-shifted time-of-day in the header -- exactly like every other
+    un-remediated field in Gantry. This is not a case where timing
+    should be suppressed; only a genuinely absent time-of-day must not
+    be replaced with a fake one.
+    """
+    path = tmp_path / "wf.dcm"
+    write_fixture(str(path), channels=[("MDC_ECG_LEAD_I", "Lead I")])
+    # scripts.generate_waveform_test_data.build_ecg_dataset default:
+    # AcquisitionDateTime = "20260101101530.000000" -> 10:15:30.
+
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    with open(paths[0], encoding="utf-8") as f:
+        record_line = f.readline().split()
+    assert len(record_line) == 6, (
+        f"expected record line with timing fields, got: {record_line!r}")
+    assert record_line[4] == "10:15:30", (
+        f"expected the real Acquisition DateTime to survive; got "
+        f"time field {record_line[4]!r}")
 
 
 # --- Annotation free text omitted from annotations.json by default (#39) ---
