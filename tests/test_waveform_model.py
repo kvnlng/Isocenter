@@ -91,3 +91,46 @@ def test_from_dicom_item_reads_the_generated_fixture():
     assert len(wf.channels) == len(LEADS)
     assert wf.channels[0].source_code == "MDC_ECG_LEAD_I"
     assert wf.channels[0].units == "uV"
+
+
+def test_coded_source_still_wins():
+    """A coded value is preferred over free text whenever one is present.
+
+    Not because it cannot contain operator text -- it demonstrably can
+    (see `test_coded_channel_source_newline_cannot_manufacture_a_hea_comment`
+    in `tests/test_wfdb_conformance.py`, which injects one) -- but because
+    a conformant coding scheme value is far less likely to carry it than
+    an unconstrained free-text label.
+    """
+    channel = WaveformChannel(label="anything at all", source_code="MDC_ECG_LEAD_II")
+    assert channel.wfdb_description(0) == "MDC_ECG_LEAD_II"
+
+
+def test_recognisable_lead_names_survive():
+    """Real lead names stay in the header -- a positional token for every
+    uncoded channel would make records much harder to interpret."""
+    for label in ["II", "v5", "aVR", "Lead I", " III "]:
+        channel = WaveformChannel(label=label)
+        assert channel.wfdb_description(3) == label.strip(), (
+            f"{label!r} is a valid lead name and should survive verbatim")
+
+
+def test_free_text_label_is_replaced_with_a_positional_token():
+    """Operator free text must never reach the header, coded or not."""
+    for label in [
+        "OPERATOR NOTE Smith^John DOB19800101",
+        "Lead I taken by Jane Doe",
+        "II - patient moved",
+        "MRN-12345678",
+    ]:
+        channel = WaveformChannel(label=label)
+        assert channel.wfdb_description(3) == "ch3", (
+            f"{label!r} is not a lead name and must be replaced")
+
+
+def test_absent_label_is_positional():
+    assert WaveformChannel(label="").wfdb_description(2) == "ch2"
+
+
+def test_index_is_optional_for_callers_that_lack_one():
+    assert WaveformChannel(label="").wfdb_description() == "signal"

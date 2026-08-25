@@ -36,10 +36,20 @@ BASIC_PROFILE = {
     "0008,0021": {"action": "REMOVE", "name": "Series Date"},
     "0008,0022": {"action": "REMOVE", "name": "Acquisition Date"},
     "0008,0023": {"action": "REMOVE", "name": "Content Date"},
+    # DT-valued twins of the dates above. (0008,002A) carries the same
+    # information as (0008,0022) Acquisition Date; omitting it meant raw
+    # acquisition timing survived a full anonymize() pass while the plain
+    # date was stripped.
+    "0008,002a": {"action": "REMOVE", "name": "Acquisition DateTime"},
     "0008,0030": {"action": "REMOVE", "name": "Study Time"},
     "0008,0031": {"action": "REMOVE", "name": "Series Time"},
     "0008,0032": {"action": "REMOVE", "name": "Acquisition Time"},
     "0008,0033": {"action": "REMOVE", "name": "Content Time"},
+    # Procedure step timing: same shape of leak as the acquisition dates.
+    "0040,0244": {"action": "REMOVE", "name": "Performed Procedure Step Start Date"},
+    "0040,0245": {"action": "REMOVE", "name": "Performed Procedure Step Start Time"},
+    "0040,0250": {"action": "REMOVE", "name": "Performed Procedure Step End Date"},
+    "0040,0251": {"action": "REMOVE", "name": "Performed Procedure Step End Time"},
     "0008,0050": {"action": "REMOVE", "name": "Accession Number"},
     "0008,0090": {"action": "REMOVE", "name": "Referring Physician's Name"},
     # Often contains PHI, but structural
@@ -51,6 +61,10 @@ BASIC_PROFILE = {
     "0008,1040": {"action": "REMOVE", "name": "Institutional Department Name"},
     "0008,1050": {"action": "REMOVE", "name": "Performing Physician's Name"},
     "0008,1070": {"action": "REMOVE", "name": "Operators' Name"},
+    # Free-text annotation commentary. Reaches annotations.json `note` when
+    # a caller opts in via include_annotation_text; remediated here so that
+    # opting in on a configured session still does not surface raw text.
+    "0070,0006": {"action": "EMPTY", "name": "Unformatted Text Value"},
 }
 
 PRIVACY_PROFILES = {

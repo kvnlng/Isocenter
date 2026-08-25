@@ -3,7 +3,7 @@ import os
 import pytest
 
 from gantry.session import DicomSession
-from scripts.generate_waveform_test_data import build_ecg_dataset, write_fixture
+from scripts.generate_waveform_test_data import build_ecg_dataset, add_annotation, write_fixture
 
 
 @pytest.fixture
@@ -231,21 +231,25 @@ def test_missing_acquisition_datetime_omits_timing_fields(tmp_path):
     assert len(record_line) == 4
 
 
-# --- Characterization: ChannelLabel free-text fallback (Task 4 carry-forward) ---
+# --- Safety assertion: ChannelLabel free-text fallback (fixed under #39) ---
 #
 # WaveformChannel.wfdb_description() (gantry/waveform.py) prefers the coded
-# Channel Source Sequence value, but falls back to the free-text ChannelLabel
-# when no source code is present. ChannelLabel is operator-typed SH text, so
-# this fallback is a plausible PHI carrier. The brief's fixture always
-# populates ChannelSourceSequence, so that fallback path is never exercised
-# by the tests above. This test builds a dataset with an EMPTY/ABSENT Channel
-# Source Sequence and a recognisable free-text marker in ChannelLabel, then
-# asserts what actually reaches the .hea signal line.
+# Channel Source Sequence value, but previously fell back to the raw,
+# free-text ChannelLabel verbatim whenever no source code was present.
+# ChannelLabel is operator-typed SH text and was observed carrying names,
+# MRNs and clinical commentary, so that unconditional fallback was a PHI
+# leak -- including for a bare Session() that loads no PHI configuration,
+# since this check lives in the exporter rather than the (tag-gated)
+# privacy profile.
 #
-# This test does NOT assert the fallback is safe or unsafe -- it documents
-# current behaviour so a reviewer can see it directly. Do not change
-# wfdb_description() to make this test "pass differently" without sign-off;
-# see the Task 9 report for the CONCERN this raises.
+# Fixed by a lead-name allowlist: the label reaches the header only when it
+# is a recognisable signal name (e.g. "II", "V5", "aVR"); anything else is
+# replaced with a positional token ch<N>. This test used to be a
+# characterization of the unsafe behaviour ("this is what happens, not
+# whether it's OK"); it is now a safety assertion that the free-text marker
+# below never reaches the .hea description field. If it goes red, the
+# allowlist in gantry/waveform.py has stopped firing and operator text is
+# reaching the header again.
 FREE_TEXT_MARKER = "OPERATOR NOTE Smith^John DOB19800101"
 
 
@@ -271,11 +275,9 @@ def _write_fixture_with_uncoded_channel(path, patient_id="WFTEST001",
     return path
 
 
-def test_uncoded_channel_label_fallback_characterization(tmp_path):
-    """Characterize: with no coded channel source, does free-text
-    ChannelLabel reach the .hea signal line?
-
-    This is evidence, not a safety guarantee -- see module docstring above.
+def test_uncoded_channel_label_free_text_never_reaches_the_header(tmp_path):
+    """With no coded channel source, free-text ChannelLabel must NOT reach
+    the .hea signal line -- see module comment above.
     """
     src = tmp_path / "src"
     src.mkdir()
@@ -314,19 +316,16 @@ def test_uncoded_channel_label_fallback_characterization(tmp_path):
     finally:
         session.close()
 
-    # CHARACTERIZATION (evidence, not a safety guarantee -- see module
-    # docstring above; report, do not silently "fix"): wfdb_description()
-    # falls back to the raw ChannelLabel when source_code is empty, so
-    # the free-text marker DOES reach the .hea signal line's description
-    # field verbatim. Embedded whitespace in that field is spec-conformant
-    # header(5) (see reference-reader evidence above), not a format
-    # defect -- only the PHI question is live here.
-    assert description_field == FREE_TEXT_MARKER, (
-        "characterization assumption changed: expected the free-text "
-        "ChannelLabel fallback to reach the .hea description field "
-        f"verbatim; got {description_field!r} instead. If this fallback "
-        "was fixed, update this test to match the new (safer) behaviour "
-        "instead of deleting the assertion.")
+    # SAFETY ASSERTION (converted from characterization once the lead-name
+    # allowlist landed): FREE_TEXT_MARKER is not a recognisable lead name,
+    # so wfdb_description() replaces it with a positional token and the
+    # operator text never reaches the .hea description field.
+    assert description_field == "ch0", (
+        "expected the free-text ChannelLabel to be replaced with a "
+        f"positional token; got {description_field!r}. If this reverted to "
+        "the raw label, the allowlist in gantry/waveform.py stopped firing "
+        "and operator text is reaching the header again.")
+    assert FREE_TEXT_MARKER not in description_field
 
 
 # --- Record-name collision: instances missing InstanceNumber (Task 9 round 2, IMPORTANT 6) ---
@@ -421,3 +420,307 @@ def test_two_instances_missing_instance_number_get_distinct_records(tmp_path):
     # must survive independently, proving no overwrite occurred.
     assert sorted(sample_counts) == [40, 60], (
         f"expected one 40-sample and one 60-sample record; got {sample_counts!r}")
+
+
+def test_acquisition_and_procedure_step_timing_is_remediated_end_to_end(tmp_path):
+    """All five date/time tags Task 1 (#38) added to BASIC_PROFILE must
+    actually fire on a real ingest->anonymize pass, not just Acquisition
+    DateTime.
+
+    A tag can sit in BASIC_PROFILE and still never be remediated if the key
+    casing does not match the lowercased ingested keys (#41), or if its
+    action is silently wrong (mutating "0040,0251" from REMOVE to KEEP
+    survived the full suite -- see test_profiles.py's
+    test_basic_profile_datetime_twins_are_actually_set_to_remove). This
+    asserts every one of the five values is gone from the object graph
+    after a real remediation pass, not merely that the profile mentions
+    the tags. Runs the documented Quick Start flow end-to-end:
+    create_config() -> load_config() -> audit() -> anonymize().
+    """
+    import pydicom
+
+    raw_values = {
+        "0008,002a": "20260101101530.000000",
+        "0040,0244": "20260101",
+        "0040,0245": "101530",
+        "0040,0250": "20260101",
+        "0040,0251": "101545",
+    }
+    path = tmp_path / "wf.dcm"
+    ds = build_ecg_dataset(
+        channels=[("MDC_ECG_LEAD_I", "Lead I")],
+        patient_id="DTTEST001",
+        patient_name="Waveform^Test",
+    )
+    ds.AcquisitionDateTime = raw_values["0008,002a"]
+    ds.PerformedProcedureStepStartDate = raw_values["0040,0244"]
+    ds.PerformedProcedureStepStartTime = raw_values["0040,0245"]
+    ds.PerformedProcedureStepEndDate = raw_values["0040,0250"]
+    ds.PerformedProcedureStepEndTime = raw_values["0040,0251"]
+    pydicom.dcmwrite(str(path), ds, write_like_original=False)
+
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path))
+
+        config_path = tmp_path / "config.yaml"
+        session.create_config(str(config_path))
+        session.load_config(str(config_path))
+
+        findings = session.audit()
+        session.anonymize(findings)
+
+        remaining = {}
+        for patient in session.store.patients:
+            for study in patient.studies:
+                for series in study.series:
+                    for instance in series.instances:
+                        for tag, raw in raw_values.items():
+                            value = instance.attributes.get(tag)
+                            if value:
+                                remaining.setdefault(tag, []).append(str(value))
+    finally:
+        session.close()
+
+    assert not remaining, (
+        "one or more of the five date/time tags Task 1 (#38) added to "
+        "BASIC_PROFILE survived anonymize(); the profile entry is present "
+        f"but not firing. Remaining values: {remaining!r}")
+
+
+# --- WFDB header must not fabricate a time-of-day (round-2 review) ---
+
+
+def test_anonymized_export_does_not_fabricate_a_midnight_timestamp(tmp_path):
+    """Once Acquisition DateTime (0008,002A) and Study Time (0008,0030)
+    are both remediated by the Basic profile (#38), `_instance_time_of_day`
+    returns None on every fully configured + anonymized session --
+    `time_of_day` is never real again. Pre-fix, `_start_datetime` combined
+    the (real) shifted study date with `time_of_day or datetime.min.time()`,
+    so every such record's header carried a fabricated "00:00:00" presented
+    as real acquisition timing. Runs the documented Quick Start flow
+    end-to-end: create_config() -> load_config() -> audit() -> anonymize()
+    -> export(format="wfdb").
+    """
+    path = tmp_path / "wf.dcm"
+    write_fixture(str(path), channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                 patient_id="MIDNIGHT001", patient_name="Waveform^Test")
+
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path))
+
+        config_path = tmp_path / "config.yaml"
+        session.create_config(str(config_path))
+        session.load_config(str(config_path))
+
+        findings = session.audit()
+        session.anonymize(findings)
+
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    with open(paths[0], encoding="utf-8") as f:
+        header = f.read()
+    assert "00:00:00" not in header, (
+        "the header carries a fabricated midnight timestamp; "
+        f"record line: {header.splitlines()[0]!r}")
+
+
+def test_non_anonymized_export_still_carries_the_real_acquisition_time(tmp_path):
+    """Companion to the fabricated-timestamp fix above: a session that
+    never remediates Acquisition DateTime still carries its real,
+    un-shifted time-of-day in the header -- exactly like every other
+    un-remediated field in Gantry. This is not a case where timing
+    should be suppressed; only a genuinely absent time-of-day must not
+    be replaced with a fake one.
+    """
+    path = tmp_path / "wf.dcm"
+    write_fixture(str(path), channels=[("MDC_ECG_LEAD_I", "Lead I")])
+    # scripts.generate_waveform_test_data.build_ecg_dataset default:
+    # AcquisitionDateTime = "20260101101530.000000" -> 10:15:30.
+
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    with open(paths[0], encoding="utf-8") as f:
+        record_line = f.readline().split()
+    assert len(record_line) == 6, (
+        f"expected record line with timing fields, got: {record_line!r}")
+    assert record_line[4] == "10:15:30", (
+        f"expected the real Acquisition DateTime to survive; got "
+        f"time field {record_line[4]!r}")
+
+
+# --- Annotation free text omitted from annotations.json by default (#39) ---
+
+
+def _write_annotated_fixture(directory, note, patient_id="WFTEST001",
+                             patient_name="Waveform^Test",
+                             manufacturer=None, device_serial_number=None):
+    """Build+write an ECG dataset carrying one point annotation whose
+    Unformatted Text Value (0070,0006) is `note`.
+
+    `manufacturer` and `device_serial_number` are optional and, when given,
+    are set directly on the dataset before it is written -- used by the
+    `source` provenance tests, which need both Manufacturer (0008,0070) and
+    Device Serial Number (0018,1000) present.
+    """
+    import pydicom
+
+    ds = build_ecg_dataset(num_samples=500, patient_id=patient_id,
+                           patient_name=patient_name)
+    add_annotation(ds, start_sample=101, text=note)
+    if manufacturer is not None:
+        ds.Manufacturer = manufacturer
+    if device_serial_number is not None:
+        ds.DeviceSerialNumber = device_serial_number
+
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, "ecg.dcm")
+    pydicom.dcmwrite(path, ds, enforce_file_format=True)
+    return path
+
+
+def test_annotation_text_is_absent_from_exported_json_by_default(tmp_path):
+    """The default must hold through the real export path, not just the
+    helper -- an option that is never threaded through is the same bug as
+    a profile entry that never fires (#41).
+    """
+    import json
+    import glob
+    from gantry.session import DicomSession
+
+    secret = "Reviewed by Dr Jane Doe, MRN-12345678"
+    _write_annotated_fixture(tmp_path / "in", note=secret)
+
+    out = tmp_path / "out"
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path / "in"))
+
+        # Positive precondition: prove the secret genuinely reached the
+        # ingested object graph before asserting it is absent from the
+        # export. Without this, a fixture that never carried the secret in
+        # the first place (e.g. build_ecg_dataset's own default field
+        # values, see scripts/generate_waveform_test_data.py:96) would make
+        # the negative assertion below pass vacuously.
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        ann_seq = instance.sequences.get("0040,b020")  # Waveform Annotation Sequence
+        assert ann_seq is not None and ann_seq.items, (
+            "fixture produced no Waveform Annotation Sequence; the ingested "
+            "object graph never carried the secret in the first place")
+        notes = [str(item.attributes.get("0070,0006", "")) for item in ann_seq.items]
+        assert secret in notes, (
+            f"fixture's Unformatted Text Value {notes!r} does not contain the "
+            "secret; the absence assertion below would be vacuous")
+
+        session.export(str(out), format="wfdb")
+    finally:
+        session.close()
+
+    payloads = []
+    for path in glob.glob(str(out / "**" / "*.annotations.json"), recursive=True):
+        with open(path, encoding="utf-8") as handle:
+            payloads.append(handle.read())
+
+    assert payloads, "no annotations.json was written; fixture is not exercising the path"
+    for payload in payloads:
+        assert secret not in payload, "annotation free text reached annotations.json by default"
+        for finding in json.loads(payload)["findings"]:
+            assert "note" not in finding
+
+
+def test_annotation_text_is_present_when_opted_in_end_to_end(tmp_path):
+    """The opt-in must ALSO hold through the real export path.
+
+    The default-omission test above cannot, by itself, prove
+    include_annotation_text is threaded from session.export() through to
+    build_annotations(): build_annotations's own default is False, so a
+    call site that silently drops the option (never forwards it) falls
+    back to that same safe default and the default-path test above would
+    still pass -- the bug would be invisible. Only exercising the opt-in
+    path distinguishes "wired correctly" from "never wired at all".
+    """
+    import json
+    import glob
+    from gantry.session import DicomSession
+
+    secret = "sinus rhythm"
+    _write_annotated_fixture(tmp_path / "in", note=secret)
+
+    out = tmp_path / "out"
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path / "in"))
+        session.export(str(out), format="wfdb", include_annotation_text=True)
+    finally:
+        session.close()
+
+    payloads = []
+    for path in glob.glob(str(out / "**" / "*.annotations.json"), recursive=True):
+        with open(path, encoding="utf-8") as handle:
+            payloads.append(json.loads(handle.read()))
+
+    assert payloads, "no annotations.json was written; fixture is not exercising the path"
+    notes = [f.get("note") for payload in payloads for f in payload["findings"]]
+    assert secret in notes, (
+        "opting in via include_annotation_text=True did not reach "
+        "annotations.json -- the option is not threaded through "
+        "export() -> _write_instance() -> build_annotations()")
+
+
+# --- annotations.json `source` carries no device serial (#39) ---
+
+
+def test_annotations_source_carries_no_device_serial(tmp_path):
+    """`source` is producer provenance: gantry version plus Manufacturer.
+
+    Device Serial Number (0018,1000) is a stable identifier that can link
+    records across exports back to one machine and site. It is not read
+    today; this pins that so it cannot be added casually.
+    """
+    import json
+    import glob
+    from gantry.session import DicomSession
+
+    serial = "SN-DEADBEEF-12345"
+    _write_annotated_fixture(tmp_path / "in", note="sinus rhythm",
+                             manufacturer="AcmeCart",
+                             device_serial_number=serial)
+
+    out = tmp_path / "out"
+    session = DicomSession(":memory:")
+    try:
+        session.ingest(str(tmp_path / "in"))
+
+        # Positive precondition: prove the serial genuinely reached the
+        # ingested object graph before asserting it is absent from the
+        # export, so the negative assertion below cannot pass vacuously.
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        assert str(instance.attributes.get("0018,1000", "")) == serial, (
+            "fixture did not carry the device serial into the ingested "
+            "object graph; the absence assertion below would be vacuous")
+
+        session.export(str(out), format="wfdb")
+    finally:
+        session.close()
+
+    documents = []
+    for path in glob.glob(str(out / "**" / "*.annotations.json"), recursive=True):
+        with open(path, encoding="utf-8") as handle:
+            documents.append(json.load(handle))
+
+    assert documents, "no annotations.json written; fixture is not exercising the path"
+    for document in documents:
+        source = document["source"]
+        assert serial not in source, f"device serial leaked into source: {source!r}"
+        assert "AcmeCart" in source, (
+            f"manufacturer provenance was lost from source: {source!r}")

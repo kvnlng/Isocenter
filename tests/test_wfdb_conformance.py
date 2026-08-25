@@ -153,6 +153,12 @@ def test_channel_label_newline_cannot_manufacture_a_hea_comment(tmp_path):
     `comments=['Patient Jane Doe MRN9988776']` for exactly this input --
     a PHI escape route, since this module's own docstring and
     docs/waveforms.md both assert no comment lines are ever written.
+
+    Also exercises the lead-name allowlist (#39): "Lead I\\n# Patient Jane
+    Doe MRN9988776" is not a recognisable lead name, so besides not
+    manufacturing a fake comment line, none of this operator text -- name,
+    MRN, or the embedded newline -- should reach the header at all; it is
+    replaced with a positional token.
     """
     import pydicom
 
@@ -183,9 +189,71 @@ def test_channel_label_newline_cannot_manufacture_a_hea_comment(tmp_path):
     with open(paths[0], encoding="utf-8") as f:
         raw_lines = f.readlines()
     assert not any(line.startswith("#") for line in raw_lines)
-    assert "Patient Jane Doe MRN9988776" in "".join(raw_lines), (
-        "the description text should still be readable -- just not on "
-        "its own comment line")
+    assert record.sig_name == ["ch0"], (
+        "expected the free-text Channel Label to be replaced with a "
+        f"positional token; got sig_name={record.sig_name!r}")
+    assert "Patient Jane Doe MRN9988776" not in "".join(raw_lines), (
+        "operator text embedded in Channel Label reached the header; "
+        "expected the lead-name allowlist to replace it with a positional "
+        "token instead")
+
+
+def test_coded_channel_source_newline_cannot_manufacture_a_hea_comment(tmp_path):
+    """A coded Channel Source Sequence value containing a newline must not
+    be surfaced by the reference reader as a real header comment.
+
+    The lead-name allowlist (#39) only filters the free-text Channel
+    Label fallback: `wfdb_description()` returns a coded `source_code`
+    verbatim and unconditionally, on the assumption that "a coded value
+    cannot contain an operator-typed patient name." That assumption holds
+    for the DICOM standard's own SH VR, which forbids embedded control
+    characters -- but pydicom does not enforce that on read or write.
+    Verified directly: `pydicom.dcmwrite`/`dcmread` round-trip a CodeValue
+    containing an embedded newline and a leading "#" completely unchanged,
+    with no error and no warning. So a non-conformant (or malicious)
+    source can still put a newline into `source_code`, and this test
+    exercises the one remaining production path where
+    `_sanitize_description` -- not the allowlist -- is what stops that
+    from forging a `.hea` comment line.
+    """
+    import pydicom
+
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")], num_samples=50)
+    chdef = ds.WaveformSequence[0].ChannelDefinitionSequence[0]
+    chdef.ChannelSourceSequence[0].CodeValue = "MDC\n# Patient Jane Doe MRN9988776"
+
+    src = tmp_path / "src"
+    src.mkdir()
+    pydicom.dcmwrite(str(src / "ecg.dcm"), ds, enforce_file_format=True)
+
+    session = DicomSession(persistence_file=str(tmp_path / "inject_source.db"))
+    try:
+        session.ingest(str(src))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    record = _read(paths[0])
+    assert record.comments == [], (
+        "a newline embedded in a coded Channel Source value reached the "
+        f"reference reader as a real header comment: {record.comments!r}")
+
+    with open(paths[0], encoding="utf-8") as f:
+        raw_lines = f.readlines()
+    assert len(raw_lines) == 2, (
+        "the embedded newline manufactured an extra physical line in the "
+        f".hea file: {raw_lines!r}")
+    assert not any(line.startswith("#") for line in raw_lines)
+    # Unlike the free-text Channel Label case, a coded source value is
+    # trusted content -- not run through the lead-name allowlist -- so
+    # the text itself is expected to survive; only the line-breaking
+    # character that could forge a comment line is replaced.
+    assert "MDC # Patient Jane Doe MRN9988776" in "".join(raw_lines), (
+        f"expected the newline to be replaced with a space, not stripped "
+        f"or otherwise mangled: {raw_lines!r}")
 
 
 def test_units_with_embedded_whitespace_does_not_shift_fields_via_reference_reader(tmp_path):
@@ -272,3 +340,71 @@ def test_missing_channel_definitions_do_not_abort_the_export(tmp_path):
         "written with fallback calibration")
     record = _read(paths[0])
     assert record.n_sig == 1
+
+
+# --- De-identified date preserved as a comment when no time survives ---
+
+
+def test_deidentified_date_survives_as_a_comment_when_no_time_of_day_remains(tmp_path):
+    """Round-3 review follow-up: dropping the fabricated `00:00:00`
+    timestamp (see gantry/exporters/wfdb.py::WfdbExporter._start_datetime)
+    must not also drop the genuine de-identified study date. `SHIFT_DATE`
+    produces a real, useful date -- losing it entirely would be a
+    research-utility regression, not just a privacy fix.
+
+    Runs the documented Quick Start flow end-to-end (create_config() ->
+    load_config() -> audit() -> anonymize()), which remediates both
+    Acquisition DateTime (0008,002A) and Study Time (0008,0030) via the
+    Basic profile, so no real time-of-day survives. Verifies against the
+    PhysioNet reference reader (not just Gantry's own parsing) that:
+
+    - `record.base_time` and `record.base_date` are both None (no
+      fabricated timestamp reintroduced, and no record-line date either
+      -- header(5) cannot carry a date without a time, see
+      _start_datetime's docstring).
+    - The shifted study date appears in `record.comments`, in the same
+      DD/MM/YYYY format the record line's own date field would have
+      used, so it can never disagree with that format if a real time
+      ever is present.
+    """
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+    import pydicom
+
+    path = tmp_path / "wf.dcm"
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                           patient_id="COMMENTDATE001",
+                           patient_name="Waveform^Test")
+    pydicom.dcmwrite(str(path), ds, write_like_original=False)
+
+    session = DicomSession(persistence_file=str(tmp_path / "commentdate.db"))
+    try:
+        session.ingest(str(tmp_path))
+
+        config_path = tmp_path / "config.yaml"
+        session.create_config(str(config_path))
+        session.load_config(str(config_path))
+
+        findings = session.audit()
+        session.anonymize(findings)
+
+        study = session.store.patients[0].studies[0]
+        assert study.date_shifted is True, (
+            "study was not marked date_shifted; anonymize() did not run "
+            "the SHIFT_DATE remediation this test depends on")
+        expected_date_token = study.study_date.strftime("%d/%m/%Y")
+
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    assert paths, "export produced no .hea files"
+    record = _read(paths[0])
+
+    assert record.base_time is None, (
+        f"expected no fabricated/real base_time; got {record.base_time!r}")
+    assert record.base_date is None, (
+        "expected no record-line base_date (header(5) cannot carry a "
+        f"date without a time); got {record.base_date!r}")
+    assert record.comments == [f"de-identified start date: {expected_date_token}"], (
+        f"expected the shifted study date preserved as a comment; got "
+        f"comments={record.comments!r}")

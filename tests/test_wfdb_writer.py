@@ -231,6 +231,11 @@ def test_description_with_embedded_newline_cannot_inject_a_comment_line():
     `wfdb.rdheader` treats that line as a real header comment (verified
     directly: `comments=['Patient Jane Doe MRN9988776']`) -- see
     tests/test_wfdb_conformance.py for the reference-reader-level proof.
+
+    Since the lead-name allowlist (#39) landed, "Lead I\\n# Patient Jane
+    Doe MRN9988776" is not a recognisable lead name at all, so besides not
+    injecting a fake comment line, none of this operator text should reach
+    the header -- it is replaced outright with a positional token.
     """
     wf = _waveform(n_channels=1)
     wf.channels[0].source_code = ""
@@ -242,8 +247,10 @@ def test_description_with_embedded_newline_cannot_inject_a_comment_line():
     assert not any(line.startswith("#") for line in lines), (
         f"a newline embedded in the channel description injected a "
         f"'#' comment line; header was:\n{header}")
-    # The description must still be readable text, not silently dropped.
-    assert "Patient Jane Doe MRN9988776" in lines[1]
+    # The free-text label is not a recognisable lead name, so it must be
+    # replaced with a positional token rather than reach the header at all.
+    assert lines[1].split()[-1] == "ch0"
+    assert "Patient Jane Doe MRN9988776" not in lines[1]
 
 
 def test_units_with_embedded_whitespace_does_not_shift_signal_line_fields():
@@ -342,11 +349,11 @@ def test_one_failing_instance_does_not_abort_the_whole_export(tmp_path, monkeypa
     original_write_instance = WfdbExporter._write_instance
 
     def _write_instance_maybe_boom(self, folder, patient, study, series, instance,
-                                   logger, used_names):
+                                   logger, used_names, include_annotation_text=False):
         if patient.patient_id == "BAD01":
             raise RuntimeError("simulated malformed instance from a non-conformant cart")
         return original_write_instance(self, folder, patient, study, series,
-                                       instance, logger, used_names)
+                                       instance, logger, used_names, include_annotation_text)
 
     monkeypatch.setattr(WfdbExporter, "_write_instance", _write_instance_maybe_boom)
 
@@ -372,6 +379,48 @@ def test_sanitize_preserves_falsy_zero():
     assert _sanitize(0) == "0"
     assert _sanitize(None) == "record"
     assert _sanitize("") == "record"
+
+
+def test_sanitize_description_strips_line_breaking_control_characters():
+    """`_sanitize_description` must remove every character class its own
+    docstring promises to strip -- CR, LF, vertical tab, form feed, the
+    C1 file/group/record/unit separators (\\x1c-\\x1f), NEL (\\x85), and
+    the Unicode LINE/PARAGRAPH SEPARATORS (U+2028/U+2029) -- replacing
+    each with a space (not deleting it, which would silently glue
+    adjacent words together) and trimming the ends.
+
+    Pinned directly against the function, not only through a channel
+    label/source fixture: mutating `_sanitize_description` to a no-op
+    (`return str(value)`) left the full suite green before this test
+    existed, because every fixture that reached it via the lead-name
+    allowlist either failed the allowlist first (label replaced with a
+    positional token before the sanitizer ever saw the injected
+    character) or never carried a control character at all. See
+    test_wfdb_conformance.py::test_coded_channel_source_newline_cannot_manufacture_a_hea_comment
+    for the one production path (a coded Channel Source value) that
+    still reaches this function with attacker-controlled text.
+    """
+    from gantry.exporters.wfdb import _sanitize_description
+
+    assert _sanitize_description("Lead I\nJane Doe") == "Lead I Jane Doe"
+    assert _sanitize_description("Lead I\rJane Doe") == "Lead I Jane Doe"
+    assert _sanitize_description("Lead I\x0bJane Doe") == "Lead I Jane Doe"  # vertical tab
+    assert _sanitize_description("Lead I\x0cJane Doe") == "Lead I Jane Doe"  # form feed
+    assert _sanitize_description("Lead I\x1cJane Doe") == "Lead I Jane Doe"  # file separator
+    assert _sanitize_description("Lead I\x1dJane Doe") == "Lead I Jane Doe"  # group separator
+    assert _sanitize_description("Lead I\x1eJane Doe") == "Lead I Jane Doe"  # record separator
+    assert _sanitize_description("Lead I\x1fJane Doe") == "Lead I Jane Doe"  # unit separator
+    assert _sanitize_description("Lead I\x85Jane Doe") == "Lead I Jane Doe"  # NEL
+    assert _sanitize_description("Lead I\u2028Jane Doe") == "Lead I Jane Doe"  # LINE SEPARATOR
+    assert _sanitize_description("Lead I\u2029Jane Doe") == "Lead I Jane Doe"  # PARAGRAPH SEPARATOR
+
+    # Leading/trailing control characters are stripped away entirely.
+    assert _sanitize_description("\nLead I\n") == "Lead I"
+
+    # Ordinary spaces are NOT stripped: the description is the last (9th)
+    # field on a header(5) signal line and legally runs to end of line,
+    # embedded spaces and all.
+    assert _sanitize_description("Lead I taken by Jane Doe") == "Lead I taken by Jane Doe"
 
 
 def test_write_instance_with_no_sample_data_is_skipped_not_crashed(tmp_path, caplog):
