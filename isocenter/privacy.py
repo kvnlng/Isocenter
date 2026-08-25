@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from typing import List, Any, Optional, Union, Dict
+from typing import List, Any, Optional, Dict
 import hashlib
-from .entities import Patient, Study, Series, Instance
+from .entities import Patient, Study, Instance
 from .logger import get_logger
 
 
@@ -273,17 +273,16 @@ class PhiInspector:
 
         # 1. Private Tag Removal Logic
         if self.remove_private_tags:
-            # Isocenter Whitelist for Reversibility
-            # Usually checking value, but here we check tag if possible?
-            WHITELIST_CREATORS = ["ISOCENTER_SECURE"]
-            # Actually, per DICOM, Private Tags are odd groups.
-            # We want to remove ALL private tags except our own reversibility ones.
-            # Our Reversibility Service uses "0099,0010" (Creator) and "0099,1001" (Data)
+            # Private tags live in odd groups. Remove all of them except
+            # the two the reversibility service owns -- (0099,0010) is its
+            # Private Creator and (0099,1001) holds the encrypted
+            # identities, so stripping them would destroy the ability to
+            # de-anonymize with the key.
             WHITELIST_TAGS = {"0099,0010", "0099,1001"}
 
             for tag, val in instance.attributes.items():
                 try:
-                    group_str, element_str = tag.split(',')
+                    group_str, _ = tag.split(',')
                     group = int(group_str, 16)
                     if group % 2 != 0:  # Odd group = Private
                         if tag not in WHITELIST_TAGS:

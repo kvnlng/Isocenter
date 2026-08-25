@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
 from unittest.mock import MagicMock, patch
-from isocenter.verification import RedactionVerifier, TextRegion
+from isocenter.verification import RedactionVerifier
+from isocenter.pixel_analysis import TextRegion
 from isocenter.entities import Instance, Equipment
 from isocenter.privacy import PhiFinding
 

@@ -1,7 +1,6 @@
 import os
 import zlib
-import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 from threading import Lock
 
 
@@ -22,7 +21,7 @@ class SidecarManager:
     def _ensure_file(self):
         if not os.path.exists(self.filepath):
             # Create empty file
-            with open(self.filepath, 'wb') as f:
+            with open(self.filepath, 'wb'):
                 pass
 
     def write_frame(self, data: bytes, compression: str = 'zlib') -> Tuple[int, int]:

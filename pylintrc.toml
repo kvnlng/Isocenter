@@ -73,6 +73,22 @@ disable = [
     # "missing-module-docstring", # C0114 - ENABLED
     # "missing-class-docstring",  # C0115 - ENABLED
     # "missing-function-docstring", # C0116 - ENABLED
+
+    # Disabled because obeying them would make this codebase worse, not
+    # because the count was inconvenient. Anything else stays on.
+
+    # W1203, 104 hits. The rule exists so that `logging.debug(f"...")`
+    # does not pay for string formatting when the record is filtered out.
+    # Our log calls are overwhelmingly INFO/ERROR on paths that do emit,
+    # so the saving is imaginary, while `%s`-style lazy interpolation
+    # separates the message from its values and is materially harder to
+    # read. Readability wins.
+    "logging-fstring-interpolation",
+
+    # R0903, 16 hits. Fires on dataclasses, DTOs and Protocols --
+    # ComplianceReport, IsocenterConfiguration, ManifestItem. "Too few
+    # public methods" is the correct design for a value object.
+    "too-few-public-methods",
 ]
 
 # Enable the message, report, category or checker with the given id(s). You can

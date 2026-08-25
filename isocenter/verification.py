@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Tuple
 from isocenter.entities import Instance
 from isocenter.privacy import PhiFinding
-from isocenter.pixel_analysis import TextRegion, analyze_pixels
+from isocenter.pixel_analysis import analyze_pixels
 
 class RedactionVerifier:
     """

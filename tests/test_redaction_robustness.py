@@ -74,3 +74,58 @@ def test_log_throttling(mock_store):
     service.logger.error.assert_has_calls([
         call("... (Suppressing further individual errors for Burned In Annotations) ...")
     ], any_order=True)
+
+
+# --- A zone that cannot be applied is a failure, not a no-op (#66) ----
+#
+# apply_redaction_to_array used to wrap the pixel-zeroing itself in
+# `except Exception: pass` and the enclosing loop in a second handler
+# that returned False. A zone that failed to apply was skipped, PHI
+# stayed burned into the image, nothing was logged at any level, and the
+# return value was indistinguishable from "there were no zones". The
+# export worker (io_handlers._export_instance_worker) ignores the return
+# value entirely and writes arr.tobytes() straight afterwards, so a
+# silent failure meant exporting unredacted pixels as though clean.
+
+import logging
+import numpy as np
+
+
+def test_a_zone_that_cannot_be_applied_raises_instead_of_reporting_nothing():
+    """Silence here means PHI ships. The caller has to be told."""
+    arr = np.ones((64, 64), dtype=np.uint16)
+    arr.flags.writeable = False
+
+    with pytest.raises(ValueError):
+        RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)])
+
+
+def test_a_failed_zone_is_logged_with_enough_detail_to_find_it(caplog):
+    """An exception alone does not say which zone, on what array."""
+    arr = np.ones((64, 64), dtype=np.uint16)
+    arr.flags.writeable = False
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(ValueError):
+            RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)])
+
+    assert caplog.records, "a failed redaction produced no log record at all"
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "(0, 10, 0, 10)" in logged or "0, 10, 0, 10" in logged
+    assert "(64, 64)" in logged
+
+
+def test_having_no_zones_to_apply_is_not_a_failure():
+    """The legitimate no-op must stay distinguishable from a failure."""
+    arr = np.ones((64, 64), dtype=np.uint16)
+
+    assert RedactionService.apply_redaction_to_array(arr, []) is False
+    assert arr.sum() == 64 * 64, "an empty zone list must not modify the array"
+
+
+def test_a_zone_that_applies_cleanly_still_reports_success():
+    arr = np.ones((64, 64), dtype=np.uint16)
+
+    assert RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)]) is True
+    assert arr[0:10, 0:10].sum() == 0
+    assert arr[10:, 10:].sum() == 54 * 54

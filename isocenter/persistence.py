@@ -15,7 +15,6 @@ import queue
 import threading
 import time
 import hashlib
-import shutil
 import base64
 import traceback
 from typing import List, Optional, Dict, Any, Tuple
@@ -24,7 +23,7 @@ from contextlib import nullcontext
 
 from pydicom.multival import MultiValue
 
-from .entities import Patient, Study, Series, Instance, Equipment, DicomItem
+from .entities import Patient, Study, Series, Instance, Equipment
 from .sidecar import SidecarManager
 from .logger import get_logger
 from .privacy import PhiFinding, PhiRemediation
@@ -241,7 +240,7 @@ class SqliteStore:
             try:
                 yield conn
                 conn.commit()
-            except Exception as e:
+            except Exception:
                 conn.rollback()
                 raise
             finally:
@@ -346,7 +345,7 @@ class SqliteStore:
         while not self.audit_queue.empty():
             try:
                 batch.append(self.audit_queue.get_nowait())
-            except BaseException:
+            except queue.Empty:
                 break
         if batch:
             self.log_audit_batch(batch)
@@ -546,15 +545,13 @@ class SqliteStore:
                             attrs = json.loads(
                                 r['attributes_json'], object_hook=isocenter_json_object_hook)
                             self._deserialize_into(inst, attrs)
-                        except BaseException:
-                            pass  # JSON error
+                        except (json.JSONDecodeError, TypeError) as exc:
+                            self.logger.error(
+                                "Could not decode stored attributes for "
+                                "instance %s: %s", r['sop_instance_uid'], exc)
 
                     # Wire up Sidecar Loader if present
                     if r['pixel_offset'] is not None and r['pixel_length'] is not None:
-                        # Capture closure vars
-                        offset = r['pixel_offset']
-                        length = r['pixel_length']
-                        alg = r['compress_alg']
 
                         # We need to reshape after loading. The dimensions are in attributes.
                         # We can do this inside the lambda wrapper or a helper method.
@@ -653,12 +650,19 @@ class SqliteStore:
                                     attrs = json.loads(
                                         r['attributes_json'], object_hook=isocenter_json_object_hook)
                                     self._deserialize_into(inst, attrs)
-                                except BaseException:
-                                    pass
+                                except (json.JSONDecodeError, TypeError) as exc:
+                                    # Silence here meant an instance loaded
+                                    # with no attributes at all and nothing
+                                    # anywhere said so.
+                                    self.logger.error(
+                                        "Could not decode stored attributes "
+                                        "for instance %s: %s",
+                                        r['sop_instance_uid'], exc)
 
-                            # Wire up Sidecar (Copy-Paste logic from load_all, keep generic?)
+                            # Wire up Sidecar. Duplicates load_all's loader
+                            # construction below; the two have drifted apart
+                            # before, so change them together.
                             if r['pixel_offset'] is not None and r['pixel_length'] is not None:
-                                offset, length, alg = r['pixel_offset'], r['pixel_length'], r['compress_alg']
                                 inst._pixel_loader = self._create_pixel_loader(
                                     r['pixel_offset'], r['pixel_length'], r['compress_alg'], inst)
 
@@ -1072,13 +1076,8 @@ class SqliteStore:
             with self._get_connection() as conn:
                 cur = conn.cursor()
 
-                # Check for schema compatibility (simple check)
-                try:
-                    # We rely on UNIQUE constraints for UPSERT.
-                    # If older DB without constraints, we might fail or duplicate.
-                    pass
-                except BaseException:
-                    pass
+                # UPSERT relies on the UNIQUE constraints being present.
+                # A database old enough to lack them can duplicate rows.
 
                 # Counts for reporting
                 saved_p, saved_st, saved_se, saved_i = 0, 0, 0, 0
@@ -1213,7 +1212,10 @@ class SqliteStore:
                                                 vert_data[k_tuple] = val
                                             else:
                                                 core_data[key] = val
-                                        except BaseException:
+                                        except (ValueError, AttributeError):
+                                            # Key is not a well-formed
+                                            # "gggg,eeee" pair; store it as a
+                                            # standard attribute.
                                             core_data[key] = val
 
                                     # Queue Vertical (Saved after Instance Insert)
@@ -1376,7 +1378,6 @@ class SqliteStore:
                 # If transaction failed, those items are marked clean in memory but not in DB -> Inconsistency.
                 # However, re-implementing rollback for memory objects is out of scope.
                 # The versioning fixes the "Overwrite valid change" race, which is the user's issue.
-                pass
 
                 # Restore Logging Logic
                 if saved_p + saved_i > 0:
@@ -1728,6 +1729,9 @@ class SqliteStore:
             os.replace(self.sidecar_path, backup_path)
             try:
                 os.replace(temp_path, self.sidecar_path)
+            # BaseException deliberately: a KeyboardInterrupt landing
+            # between these two renames would otherwise leave the sidecar
+            # missing entirely. Restore first, then let it propagate.
             except BaseException:
                 os.replace(backup_path, self.sidecar_path)
                 raise
@@ -1756,6 +1760,9 @@ class SqliteStore:
                             WHERE id = ? AND kind = 'pixels'
                         )
                     """, updates)
+            # BaseException deliberately, as above: the offsets in the DB
+            # and the bytes in the sidecar must not be left disagreeing,
+            # whatever interrupted us.
             except BaseException:
                 # Put the original file back so the DB is never left
                 # describing a generation the sidecar does not hold.
@@ -1792,16 +1799,20 @@ class SqliteStore:
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except BaseException:
-                    pass
+                except OSError as exc:
+                    self.logger.warning(
+                        "Could not remove temporary sidecar %s: %s",
+                        temp_path, exc)
             # Only ever discard the backup once the real sidecar is back in
             # place -- otherwise it is the last copy of the data.
             stale_backup = self.sidecar_path + ".compact.bak"
             if os.path.exists(stale_backup) and os.path.exists(self.sidecar_path):
                 try:
                     os.remove(stale_backup)
-                except BaseException:
-                    pass
+                except OSError as exc:
+                    self.logger.warning(
+                        "Could not remove stale sidecar backup %s: %s",
+                        stale_backup, exc)
             raise e
 
 

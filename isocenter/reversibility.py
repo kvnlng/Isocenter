@@ -1,5 +1,4 @@
 import json
-import base64
 from typing import Dict, Any, Optional
 from .entities import Instance
 from .crypto import CryptoEngine, KeyManager
