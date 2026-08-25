@@ -17,7 +17,8 @@ import time
 import hashlib
 import base64
 import traceback
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, NamedTuple
+from dataclasses import dataclass
 from datetime import datetime
 from contextlib import nullcontext
 
@@ -28,6 +29,104 @@ from .sidecar import SidecarManager
 from .logger import get_logger
 from .privacy import PhiFinding, PhiRemediation
 from .io_handlers import SidecarPixelLoader
+
+
+
+# zlib is the only algorithm `save_all` writes. Named so the value and the
+# column it lands in cannot drift apart.
+_PIXEL_COMPRESSION = 'zlib'
+
+_UPSERT_INSTANCE_SQL = """
+    INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
+                           pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(sop_instance_uid) DO UPDATE SET
+        series_id_fk=excluded.series_id_fk,
+        sop_class_uid=excluded.sop_class_uid,
+        instance_number=excluded.instance_number,
+        file_path=excluded.file_path,
+        attributes_json=excluded.attributes_json,
+        pixel_offset=COALESCE(excluded.pixel_offset, instances.pixel_offset),
+        pixel_length=COALESCE(excluded.pixel_length, instances.pixel_length),
+        pixel_hash=COALESCE(excluded.pixel_hash, instances.pixel_hash),
+        compress_alg=COALESCE(excluded.compress_alg, instances.compress_alg)
+"""
+
+
+@dataclass
+class _SaveTally:
+    """What one `save_all` call wrote, for the summary log line."""
+    patients: int = 0
+    studies: int = 0
+    series: int = 0
+    instances: int = 0
+    pixel_frames: int = 0
+    pixel_bytes: int = 0
+
+
+class _StoredFrame(NamedTuple):
+    """Where an instance's pixels live in the sidecar, if anywhere.
+
+    All four fields are None for an instance carrying no pixel data. The
+    upsert COALESCEs them, so None means "leave whatever is stored alone"
+    rather than "clear it".
+    """
+    offset: Optional[int]
+    length: Optional[int]
+    alg: Optional[str]
+    hash: Optional[str]
+
+
+def _as_stored_date(value) -> Optional[str]:
+    """Renders a study date as text for SQLite.
+
+    Python 3.12 deprecated the default date adapter, so dates are
+    converted here rather than left for sqlite3 to guess at.
+    """
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
+                                                                 Dict[Tuple[str, str], Any]]:
+    """Separates private tags from the ones stored inline as JSON.
+
+    Odd DICOM groups are private (PS3.5 §7.8) and go to the vertical
+    `instance_attributes` table, where they can be queried per tag rather
+    than by parsing every instance's JSON blob.
+
+    Two things stay inline regardless: `__sequences__`, which is nested
+    structure the vertical table has no shape for, and any `bytes` value,
+    which that table's TEXT column cannot hold.
+
+    Returns:
+        Tuple of (core attributes keyed by "gggg,eeee", private attributes
+        keyed by a ("gggg", "eeee") tuple).
+    """
+    core, private = {}, {}
+
+    for key, value in attributes.items():
+        if key == "__sequences__":
+            core[key] = value
+            continue
+
+        try:
+            group = int(key.split(',')[0], 16)
+        except (ValueError, AttributeError):
+            # Not a well-formed "gggg,eeee" pair; keep it as a standard
+            # attribute rather than guessing at what it is.
+            core[key] = value
+            continue
+
+        if group % 2 != 0 and not isinstance(value, bytes):
+            private[tuple(key.split(','))] = value
+        else:
+            core[key] = value
+
+    return core, private
 
 
 
@@ -1058,340 +1157,274 @@ class SqliteStore:
 
     def save_all(self, patients: List[Patient]):
         """
-        Incrementally persists the provided patients and their graph to the database.
+        Incrementally persists the provided patients and their graph.
 
-        Uses UPSERT logic to update existing records and Insert new ones.
-        Only processes entities marked as `_dirty`.
+        Walks Patient -> Study -> Series -> Instance, upserting anything
+        marked `_dirty` and deleting instances that are in the database but
+        no longer in memory. The whole walk runs in one transaction, so a
+        failure anywhere leaves the database exactly as it was found.
 
         Args:
-            patients (List[Patient]): The list of patient objects to save.
+            patients (List[Patient]): The patient objects to save.
         """
-        self.logger.info(f"Saving {len(patients)} patients to {self.db_path} (Incremental)...")
+        self.logger.info(
+            "Saving %d patients to %s (Incremental)...", len(patients), self.db_path)
 
-        pixel_bytes_written = 0
-        pixel_frames_written = 0
-        sidecar_manager = self.sidecar
+        tally = _SaveTally()
+        # Instances are marked clean only after the commit returns. Doing it
+        # inside the walk -- as this method used to -- means a rolled-back
+        # save leaves memory believing it was written, so the retry skips
+        # exactly the rows that failed. These are references to objects that
+        # are already resident, so holding them costs a pointer each.
+        saved_instances = []
 
         try:
             with self._get_connection() as conn:
                 cur = conn.cursor()
-
-                # UPSERT relies on the UNIQUE constraints being present.
-                # A database old enough to lack them can duplicate rows.
-
-                # Counts for reporting
-                saved_p, saved_st, saved_se, saved_i = 0, 0, 0, 0
-
-                for p in patients:
-                    # Patient Level (Always Check Dirty)
-                    if getattr(p, '_dirty', True):
-                        cur.execute("""
-                            INSERT INTO patients (patient_id, patient_name) VALUES (?, ?)
-                            ON CONFLICT(patient_id) DO UPDATE SET patient_name=excluded.patient_name
-                        """, (p.patient_id, p.patient_name))
-                        saved_p += 1
-
-                    # We need the PK for children
-                    # Since we might have just updated or it might exist, we select it.
-                    # Optimization: Cache PKs? For now, fetch is safe.
-                    p_pk_row = cur.execute(
-                        "SELECT id FROM patients WHERE patient_id=?", (p.patient_id,)).fetchone()
-                    if not p_pk_row:
-                        continue  # Should not happen after Insert
-                    p_pk = p_pk_row[0]
-
-                    for st in p.studies:
-                        if getattr(st, '_dirty', True):
-                            # FIX: Convert date objects to string to avoid Python 3.12+
-                            # DeprecationWarning for default adapter
-                            s_date = st.study_date
-                            if hasattr(s_date, "isoformat"):
-                                s_date = s_date.isoformat()
-                            elif s_date is not None:
-                                s_date = str(s_date)
-
-                            cur.execute("""
-                                INSERT INTO studies (patient_id_fk, study_instance_uid, study_date) VALUES (?, ?, ?)
-                                ON CONFLICT(study_instance_uid) DO UPDATE SET
-                                    study_date=excluded.study_date,
-                                    patient_id_fk=excluded.patient_id_fk
-                            """, (p_pk, st.study_instance_uid, s_date))
-                            saved_st += 1
-
-                        st_pk_row = cur.execute(
-                            "SELECT id FROM studies WHERE study_instance_uid=?", (st.study_instance_uid,)).fetchone()
-                        if not st_pk_row:
-                            continue
-                        st_pk = st_pk_row[0]
-
-                        for se in st.series:
-                            if getattr(se, '_dirty', True):
-                                man = se.equipment.manufacturer if se.equipment else ""
-                                mod = se.equipment.model_name if se.equipment else ""
-                                sn = se.equipment.device_serial_number if se.equipment else ""
-
-                                cur.execute("""
-                                    INSERT INTO series (study_id_fk, series_instance_uid, modality, series_number, manufacturer, model_name, device_serial_number)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                                    ON CONFLICT(series_instance_uid) DO UPDATE SET
-                                        modality=excluded.modality,
-                                        series_number=excluded.series_number,
-                                        manufacturer=excluded.manufacturer,
-                                        model_name=excluded.model_name,
-                                        device_serial_number=excluded.device_serial_number,
-                                        study_id_fk=excluded.study_id_fk
-                                """, (st_pk, se.series_instance_uid, se.modality, se.series_number, man, mod, sn))
-                                saved_se += 1
-
-                            se_pk_row = cur.execute(
-                                "SELECT id FROM series WHERE series_instance_uid=?", (se.series_instance_uid,)).fetchone()
-                            if not se_pk_row:
-                                continue
-                            se_pk = se_pk_row[0]
-
-                            # --- Deletion Handling (Diff DB vs Memory) ---
-                            # Only perform if we suspect deletions or periodically?
-                            # Plan says: Implement Diff Logic.
-                            # Optimization: If series is NOT dirty, can we assume no deletions?
-                            # Not necessarily. Removing an item doesn't always mark Series dirty unless we hook "remove".
-                            # But DicomItem doesn't track removals from list automatically.
-                            # So we must check.
-
-                            db_uids_rows = cur.execute(
-                                "SELECT sop_instance_uid FROM instances WHERE series_id_fk=?", (se_pk,)).fetchall()
-                            db_uids = {r[0] for r in db_uids_rows}
-                            mem_uids = {i.sop_instance_uid for i in se.instances}
-
-                            to_delete = db_uids - mem_uids
-                            if to_delete:
-                                cur.executemany(
-                                    "DELETE FROM instances WHERE sop_instance_uid=?", [
-                                        (u,) for u in to_delete])
-                                saved_i += 0  # Or count negative?
-                                # self.logger.debug(f"Deleted {len(to_delete)} instances from Series {se.series_instance_uid}")
-
-                            # --- Upsert Dirty ---
-                            dirty_items = []
-                            for i in se.instances:
-                                if getattr(i, '_dirty', True):
-                                    # Capture version if available (robustness against race)
-                                    ver = getattr(i, '_mod_count', 0)
-                                    dirty_items.append((i, ver))
-
-                            if dirty_items:
-                                i_batch = []
-                                blob_batch = []  # Mirrored into instance_blobs
-                                vert_updates = []  # Defer vertical updates to satisfy foreign key
-                                for inst, ver in dirty_items:
-                                    full_data = self._serialize_item(inst)
-
-                                    # Split Core vs Vertical (Private Tags -> Vertical Table)
-                                    core_data = {}
-                                    vert_data = {}
-
-                                    for key, val in full_data.items():
-                                        if key == "__sequences__":
-                                            # Keep sequences in Core JSON for now
-                                            core_data[key] = val
-                                            continue
-
-                                        # key is "GGGG,EEEE" hex string
-                                        try:
-                                            group = int(key.split(',')[0], 16)
-                                            # Odd Group = Private Tag (usually)
-                                            # Skip Vertical for BYTES (cant be stored as TEXT
-                                            # easily, keep in JSON)
-                                            is_private = (
-                                                group %
-                                                2 != 0) and not isinstance(
-                                                val, bytes)
-
-                                            if is_private:
-                                                # Tuple key for vertical method: (grp, elem)
-                                                k_tuple = tuple(key.split(','))
-                                                vert_data[k_tuple] = val
-                                            else:
-                                                core_data[key] = val
-                                        except (ValueError, AttributeError):
-                                            # Key is not a well-formed
-                                            # "gggg,eeee" pair; store it as a
-                                            # standard attribute.
-                                            core_data[key] = val
-
-                                    # Queue Vertical (Saved after Instance Insert)
-                                    if vert_data:
-                                        vert_updates.append((inst.sop_instance_uid, vert_data))
-
-                                    # Serialize Core
-                                    attrs_json = json.dumps(core_data, cls=IsocenterJSONEncoder)
-
-                                    p_offset, p_length, p_alg, p_hash = None, None, None, None
-
-                                    if inst.pixel_array is not None:
-                                        b_data = inst.pixel_array.tobytes()
-                                        c_alg = 'zlib'
-                                        # Compute Hash
-                                        # Compute Hash
-                                        # Compute Hash
-                                        p_hash = hashlib.sha256(b_data).hexdigest()
-
-                                        # Deduplication: If already persisted with same hash, skip
-                                        # write
-                                        if getattr(
-                                                inst, '_pixel_hash', None) == p_hash and isinstance(
-                                                inst._pixel_loader, SidecarPixelLoader):
-                                            p_offset = inst._pixel_loader.offset
-                                            p_length = inst._pixel_loader.length
-                                            p_alg = inst._pixel_loader.alg
-                                        else:
-                                            off, leng = sidecar_manager.write_frame(b_data, c_alg)
-                                            p_offset, p_length, p_alg = off, leng, c_alg
-                                            pixel_bytes_written += leng
-                                            pixel_frames_written += 1
-
-                                            # Update loader so we can unload safely later
-                                            inst._pixel_loader = self._create_pixel_loader(
-                                                off, leng, c_alg, inst)
-
-                                        inst._pixel_hash = p_hash  # Cache on instance
-
-                                    elif isinstance(inst._pixel_loader, SidecarPixelLoader):
-                                        # Already persisted (swapped), preserve metadata
-                                        p_offset = inst._pixel_loader.offset
-                                        p_length = inst._pixel_loader.length
-                                        p_alg = inst._pixel_loader.alg
-                                        p_hash = getattr(inst, '_pixel_hash', None)
-                                    else:
-                                        pass
-
-                                    i_batch.append((
-                                        se_pk,
-                                        inst.sop_instance_uid,
-                                        inst.sop_class_uid,
-                                        inst.instance_number,
-                                        inst.file_path,
-                                        p_offset,
-                                        p_length,
-                                        p_hash,
-                                        p_alg,
-                                        attrs_json
-                                    ))
-
-                                    # instance_blobs is what compaction reads,
-                                    # so it must never lag behind `instances`.
-                                    # If it did, compaction would copy the
-                                    # STALE frame forward and discard the
-                                    # current one -- silently resurrecting
-                                    # pre-redaction pixels. Mirrored inside the
-                                    # same transaction as the upsert below,
-                                    # from the same values.
-                                    #
-                                    # Skipping NULL offsets mirrors the
-                                    # COALESCE(...) semantics of that upsert:
-                                    # "no new frame" must leave the stored
-                                    # reference alone, not clear it.
-                                    if p_offset is not None and p_length is not None:
-                                        blob_batch.append((
-                                            inst.sop_instance_uid,
-                                            'pixels',
-                                            p_offset,
-                                            p_length,
-                                            p_hash,
-                                            p_alg
-                                        ))
-
-                                cur.executemany("""
-                                    INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
-                                                           pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    ON CONFLICT(sop_instance_uid) DO UPDATE SET
-                                        series_id_fk=excluded.series_id_fk,
-                                        sop_class_uid=excluded.sop_class_uid,
-                                        instance_number=excluded.instance_number,
-                                        file_path=excluded.file_path,
-                                        attributes_json=excluded.attributes_json,
-                                        pixel_offset=COALESCE(excluded.pixel_offset, instances.pixel_offset),
-                                        pixel_length=COALESCE(excluded.pixel_length, instances.pixel_length),
-                                        pixel_hash=COALESCE(excluded.pixel_hash, instances.pixel_hash),
-                                        compress_alg=COALESCE(excluded.compress_alg, instances.compress_alg)
-                                """, i_batch)
-
-                                # Routed through record_blob_ref rather than
-                                # inlined, so that exactly one place knows how
-                                # an instance_blobs row is written. Duplicating
-                                # the SQL here is what let this mirror's
-                                # conflict clause drift away from its sibling.
-                                # `conn=conn` keeps it in this transaction.
-                                for b_row in blob_batch:
-                                    self.record_blob_ref(*b_row, conn=conn)
-
-                                # Process Deferred Vertical Updates (Now that Instances exist)
-                                if vert_updates:
-                                    # self.logger.debug(f"Saving vertical attributes for {len(vert_updates)} instances")
-                                    for uid, v_data in vert_updates:
-                                        self.save_vertical_attributes(uid, v_data, conn=conn)
-
-                                saved_i += len(dirty_items)
-
-                                # Mark saved with version (deferred until commit success?
-                                # No, we can attach to list and do it post-commit)
-                                # But we're inside loops.
-                                # Creating a cleanup list:
-                                # (We can store dirty_items in a larger list to clean up post-commit)
-                                # For now, let's mark clean *assuming* commit will succeed.
-                                # If commit fails, we rollback, but objects remain "clean" in memory?
-                                # That is a risk. We should do it post-commit.
-                                # But scope is tricky.
-                                # Let's mark clean here but using version.
-                                # If transaction rolls back, DB is old, but memory has _saved_mod_count advanced?
-                                # That means next save won't save it. BAD.
-                                # We must hold off.
-
-                                # Since we commit once at the end:
-                                # We need to collect ALL dirty items and their versions.
-                                # That is expensive memory-wise for massive sets.
-                                # But necessary for correctness.
-                                # Compromise: we iterate again.
-                                # Wait, "Iterate again" in 'mark clean' loop below.
-                                # We can't know "ver" then.
-
-                                # Let's just update them here. If commit fails, the Exception propagates.
-                                # Use a try/except block around the whole `save_all`? Yes.
-                                # But `_saved_mod_count` is in memory.
-                                # If we update it, and `save_all` crashes, we can't easily undo it.
-                                # BUT `save_all` crashing usually kills the process or stops persistence.
-                                # So `eventual consistency` implies retrying.
-                                # If we marked it saved but it didn't save, we have data loss.
-
-                                # Correct way: List of callbacks?
-                                # Or just:
-                                for inst, ver in dirty_items:
-                                    if hasattr(inst, 'mark_saved'):
-                                        inst.mark_saved(ver)
-                                    else:
-                                        inst._dirty = False
-
+                for patient in patients:
+                    saved_instances.extend(
+                        self._save_patient(conn, cur, patient, tally))
                 conn.commit()
-
-                # Post-Commit:
-                # We already marked items as saved/clean incrementally using naive-commit assumption.
-                # If transaction failed, those items are marked clean in memory but not in DB -> Inconsistency.
-                # However, re-implementing rollback for memory objects is out of scope.
-                # The versioning fixes the "Overwrite valid change" race, which is the user's issue.
-
-                # Restore Logging Logic
-                if saved_p + saved_i > 0:
-                    msg = f"Save (Inc) complete. P:{saved_p} St:{saved_st} Se:{saved_se} I:{saved_i}."
-                    if pixel_frames_written > 0:
-                        mb = pixel_bytes_written / (1024 * 1024)
-                        msg += f" Sidecar: {pixel_frames_written} frames ({mb:.2f} MB)."
-                    self.logger.info(msg)
-
-        except Exception as e:
-            self.logger.error(f"Save failed: {e}")
-            if hasattr(conn, "rollback"):
-                conn.rollback()
+        except Exception:
+            # No rollback here: `_get_connection` owns the transaction and
+            # has already rolled it back and closed the connection by the
+            # time this runs. Calling `conn.rollback()` on the closed
+            # handle raised `ProgrammingError: Cannot operate on a closed
+            # database`, which then replaced the real exception -- every
+            # distinct save failure surfaced under one misleading name.
+            self.logger.error(
+                "Save failed; the transaction was rolled back and nothing was "
+                "marked clean", exc_info=True)
             raise
+
+        for instance, version in saved_instances:
+            if hasattr(instance, 'mark_saved'):
+                instance.mark_saved(version)
+            else:
+                instance._dirty = False
+
+        self._log_save_summary(tally)
+
+    def _save_patient(self, conn, cur, patient, tally) -> List[Tuple[Instance, int]]:
+        """Persists one patient's subtree. Returns the instances written."""
+        patient_pk = self._upsert_patient(cur, patient, tally)
+        if patient_pk is None:
+            return []
+
+        saved = []
+        for study in patient.studies:
+            study_pk = self._upsert_study(cur, study, patient_pk, tally)
+            if study_pk is None:
+                continue
+
+            for series in study.series:
+                series_pk = self._upsert_series(cur, series, study_pk, tally)
+                if series_pk is None:
+                    continue
+                self._delete_removed_instances(cur, series, series_pk)
+                saved.extend(
+                    self._save_dirty_instances(conn, cur, series, series_pk, tally))
+        return saved
+
+    def _upsert_patient(self, cur, patient, tally) -> Optional[int]:
+        """Writes the patient row if dirty; returns its primary key."""
+        if getattr(patient, '_dirty', True):
+            cur.execute("""
+                INSERT INTO patients (patient_id, patient_name) VALUES (?, ?)
+                ON CONFLICT(patient_id) DO UPDATE SET patient_name=excluded.patient_name
+            """, (patient.patient_id, patient.patient_name))
+            tally.patients += 1
+
+        # Re-read rather than use lastrowid: the row may have existed
+        # already, in which case the UPSERT updated it and no id was
+        # allocated. Children need the real key either way.
+        row = cur.execute(
+            "SELECT id FROM patients WHERE patient_id=?",
+            (patient.patient_id,)).fetchone()
+        return row[0] if row else None
+
+    def _upsert_study(self, cur, study, patient_pk, tally) -> Optional[int]:
+        """Writes the study row if dirty; returns its primary key."""
+        if getattr(study, '_dirty', True):
+            cur.execute("""
+                INSERT INTO studies (patient_id_fk, study_instance_uid, study_date) VALUES (?, ?, ?)
+                ON CONFLICT(study_instance_uid) DO UPDATE SET
+                    study_date=excluded.study_date,
+                    patient_id_fk=excluded.patient_id_fk
+            """, (patient_pk, study.study_instance_uid,
+                  _as_stored_date(study.study_date)))
+            tally.studies += 1
+
+        row = cur.execute(
+            "SELECT id FROM studies WHERE study_instance_uid=?",
+            (study.study_instance_uid,)).fetchone()
+        return row[0] if row else None
+
+    def _upsert_series(self, cur, series, study_pk, tally) -> Optional[int]:
+        """Writes the series row if dirty; returns its primary key."""
+        if getattr(series, '_dirty', True):
+            equipment = series.equipment
+            cur.execute("""
+                INSERT INTO series (study_id_fk, series_instance_uid, modality, series_number, manufacturer, model_name, device_serial_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(series_instance_uid) DO UPDATE SET
+                    modality=excluded.modality,
+                    series_number=excluded.series_number,
+                    manufacturer=excluded.manufacturer,
+                    model_name=excluded.model_name,
+                    device_serial_number=excluded.device_serial_number,
+                    study_id_fk=excluded.study_id_fk
+            """, (study_pk, series.series_instance_uid, series.modality,
+                  series.series_number,
+                  equipment.manufacturer if equipment else "",
+                  equipment.model_name if equipment else "",
+                  equipment.device_serial_number if equipment else ""))
+            tally.series += 1
+
+        row = cur.execute(
+            "SELECT id FROM series WHERE series_instance_uid=?",
+            (series.series_instance_uid,)).fetchone()
+        return row[0] if row else None
+
+    @staticmethod
+    def _delete_removed_instances(cur, series, series_pk) -> int:
+        """Deletes rows for instances no longer present in memory.
+
+        Run for every series, dirty or not. Removing an instance from a
+        series' list mutates a plain Python list, which marks nothing --
+        so the only way to notice a deletion is to compare the two sets.
+        """
+        stored = {row[0] for row in cur.execute(
+            "SELECT sop_instance_uid FROM instances WHERE series_id_fk=?",
+            (series_pk,)).fetchall()}
+        in_memory = {i.sop_instance_uid for i in series.instances}
+
+        removed = stored - in_memory
+        if removed:
+            cur.executemany(
+                "DELETE FROM instances WHERE sop_instance_uid=?",
+                [(uid,) for uid in removed])
+        return len(removed)
+
+    def _save_dirty_instances(self, conn, cur, series, series_pk,
+                              tally) -> List[Tuple[Instance, int]]:
+        """Upserts the dirty instances of one series.
+
+        Returns the (instance, version) pairs written, for the caller to
+        mark clean once the transaction has actually committed. The
+        version is captured *before* the write so that a concurrent edit
+        arriving mid-save is not mistaken for the state that was stored.
+        """
+        dirty = [(inst, getattr(inst, '_mod_count', 0))
+                 for inst in series.instances if getattr(inst, '_dirty', True)]
+        if not dirty:
+            return []
+
+        rows, blob_rows, vertical_rows = self._build_instance_writes(
+            [inst for inst, _version in dirty], series_pk, tally)
+
+        cur.executemany(_UPSERT_INSTANCE_SQL, rows)
+
+        # Routed through record_blob_ref rather than inlined, so that exactly
+        # one place knows how an instance_blobs row is written. Duplicating
+        # the SQL here is what let this mirror's conflict clause drift away
+        # from its sibling. `conn=conn` keeps it in this transaction.
+        for blob_row in blob_rows:
+            self.record_blob_ref(*blob_row, conn=conn)
+
+        # Deferred until the instances exist: instance_attributes has a
+        # foreign key onto instances(sop_instance_uid).
+        for uid, attributes in vertical_rows:
+            self.save_vertical_attributes(uid, attributes, conn=conn)
+
+        tally.instances += len(dirty)
+        return dirty
+
+    def _build_instance_writes(self, instances, series_pk, tally):
+        """Turns instances into the rows three tables need.
+
+        Pixel data is written to the sidecar here, because the offset it
+        lands at is part of the row. Nothing else touches the database:
+        the caller decides when, and in what order, these go in.
+
+        Returns:
+            Tuple of (instance rows, instance_blobs rows, (uid, private
+            attributes) pairs for the vertical table).
+        """
+        rows, blob_rows, vertical_rows = [], [], []
+
+        for inst in instances:
+            core, private = _split_core_and_private(self._serialize_item(inst))
+            if private:
+                vertical_rows.append((inst.sop_instance_uid, private))
+
+            frame = self._persist_pixels(inst, tally)
+            rows.append((
+                series_pk, inst.sop_instance_uid, inst.sop_class_uid,
+                inst.instance_number, inst.file_path,
+                frame.offset, frame.length, frame.hash, frame.alg,
+                json.dumps(core, cls=IsocenterJSONEncoder)))
+
+            # instance_blobs is what compaction reads, so it must never lag
+            # behind `instances`. If it did, compaction would copy the STALE
+            # frame forward and discard the current one -- silently
+            # resurrecting pre-redaction pixels. Skipping NULL offsets
+            # mirrors the COALESCE(...) in the upsert: "no new frame" must
+            # leave the stored reference alone, not clear it.
+            if frame.offset is not None and frame.length is not None:
+                blob_rows.append((
+                    inst.sop_instance_uid, 'pixels', frame.offset,
+                    frame.length, frame.hash, frame.alg))
+
+        return rows, blob_rows, vertical_rows
+
+    def _persist_pixels(self, inst, tally) -> '_StoredFrame':
+        """Writes this instance's pixels to the sidecar if they are new.
+
+        Three cases: pixels resident in memory (hash them, and write only
+        if the bytes actually changed), pixels already swapped out to the
+        sidecar (keep the reference the loader holds), or no pixels at all.
+        """
+        if inst.pixel_array is None:
+            loader = inst._pixel_loader
+            if isinstance(loader, SidecarPixelLoader):
+                return _StoredFrame(loader.offset, loader.length, loader.alg,
+                                    getattr(inst, '_pixel_hash', None))
+            return _StoredFrame(None, None, None, None)
+
+        raw = inst.pixel_array.tobytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        loader = inst._pixel_loader
+
+        # Deduplication: identical bytes already in the sidecar. Appending
+        # them again would grow the file by a full frame per save.
+        if (getattr(inst, '_pixel_hash', None) == digest
+                and isinstance(loader, SidecarPixelLoader)):
+            inst._pixel_hash = digest
+            return _StoredFrame(loader.offset, loader.length, loader.alg, digest)
+
+        offset, length = self.sidecar.write_frame(raw, _PIXEL_COMPRESSION)
+        tally.pixel_bytes += length
+        tally.pixel_frames += 1
+
+        # Re-point the loader so the array can be unloaded safely later.
+        inst._pixel_loader = self._create_pixel_loader(
+            offset, length, _PIXEL_COMPRESSION, inst)
+        inst._pixel_hash = digest
+        return _StoredFrame(offset, length, _PIXEL_COMPRESSION, digest)
+
+    def _log_save_summary(self, tally) -> None:
+        """One line describing what the save actually wrote."""
+        if tally.patients + tally.instances <= 0:
+            return
+
+        message = (f"Save (Inc) complete. P:{tally.patients} St:{tally.studies} "
+                   f"Se:{tally.series} I:{tally.instances}.")
+        if tally.pixel_frames > 0:
+            megabytes = tally.pixel_bytes / (1024 * 1024)
+            message += (f" Sidecar: {tally.pixel_frames} frames "
+                        f"({megabytes:.2f} MB).")
+        self.logger.info(message)
 
     def get_total_instances(self) -> int:
         """
