@@ -27,6 +27,7 @@ from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import run_parallel
 from .configuration import IsocenterConfiguration, FlowList
+from .entities import PhiStatus
 from .profiles import PRIVACY_PROFILES
 from . import pixel_analysis
 from .automation import ConfigAutomator
@@ -1057,10 +1058,69 @@ class DicomSession:
 
         # Rehydrate Entities!
         self._rehydrate_findings(all_findings)
+        self._record_scan_results(all_findings)
 
         get_logger().info(f"PHI Scan Complete. Found {len(all_findings)} issues.")
 
         return PhiReport(all_findings)
+
+    def phi_status_summary(self) -> Dict[str, Counter]:
+        """What the session currently knows about the PHI in each entity.
+
+        Counts are of `PhiStatus`, per level, and reflect the *current*
+        state of each entity rather than the last scan's output -- an item
+        edited since it was scanned counts as UNSCANNED, because that is
+        what it is.
+
+        Series are absent by design: the inspector reports on patients,
+        studies and instances only, so a series has never been examined
+        and would report UNSCANNED for every session, which reads as a
+        gap rather than as "not applicable".
+
+        Returns:
+            Dict[str, Counter]: Keyed "patients", "studies", "instances";
+            each a Counter of PhiStatus to how many carry it.
+        """
+        summary = {"patients": Counter(), "studies": Counter(),
+                   "instances": Counter()}
+
+        for patient in self.store.patients:
+            summary["patients"][patient.phi_status] += 1
+            for study in patient.studies:
+                summary["studies"][study.phi_status] += 1
+                for series in study.series:
+                    for instance in series.instances:
+                        summary["instances"][instance.phi_status] += 1
+
+        return summary
+
+    def _record_scan_results(self, findings):
+        """Writes what the scan concluded onto the entities it scanned.
+
+        Every entity the inspector reports on gets a status: IDENTIFIED
+        where a finding names it, CLEARED where the scan looked and found
+        nothing. Series are deliberately left alone -- the inspector emits
+        findings for patients, studies and instances only, so a series has
+        not been examined and must not claim it has.
+
+        The status is stamped at each entity's current revision, so a
+        later edit invalidates it. That is why this runs after
+        rehydration: it needs the live objects, not the worker copies.
+        """
+        identified = {f.entity_uid for f in findings if f.entity_uid}
+
+        def record(entity, uid):
+            entity.record_phi_status(
+                PhiStatus.IDENTIFIED if uid in identified
+                else PhiStatus.CLEARED)
+
+        for patient in self.store.patients:
+            record(patient, patient.patient_id)
+            for study in patient.studies:
+                record(study, study.study_instance_uid)
+                for series in study.series:
+                    for instance in series.instances:
+                        record(instance, instance.sop_instance_uid)
 
     def scan_pixel_content(self, serial_number: str = None) -> "PhiReport":
         """

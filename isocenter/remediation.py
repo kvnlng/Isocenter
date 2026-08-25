@@ -2,6 +2,7 @@ import hashlib
 from typing import List, Optional
 from datetime import datetime, timedelta
 from tqdm import tqdm
+from .entities import PhiStatus
 from .privacy import PhiFinding, PhiRemediation
 from .logger import get_logger
 
@@ -187,6 +188,11 @@ class RemediationService:
 
         # Logging & Auditing
         if action_type:
+            # Recorded after the change, never before: remediation modifies
+            # the entity, so a status stamped first would name a revision
+            # the entity immediately leaves behind and would read as
+            # UNSCANNED the moment anyone asked.
+            entity.record_phi_status(PhiStatus.REMEDIATED)
             self.logger.info(details)
             if self.store_backend:
                 if audit_buffer is not None:
