@@ -12,6 +12,11 @@ would have failed at import. There is now one dependency list.
 """
 import ast
 import pathlib
+import subprocess
+import sys
+import tarfile
+import tomllib
+import zipfile
 
 import pytest
 
@@ -113,7 +118,6 @@ def _unguarded_third_party_imports():
 
 
 def _is_stdlib(module_name):
-    import sys
     return module_name in sys.stdlib_module_names
 
 
@@ -289,3 +293,190 @@ def test_classifiers_do_not_advertise_unsupported_python_versions():
     assert not below_floor, (
         f"classifiers advertise {below_floor} but python_requires is "
         f"{declared!r}; pip would refuse to install there")
+
+
+# --- What the built distributions actually contain -------------------
+#
+# Everything above reads setup.py. That is not the same contract: the
+# defect these next tests exist for was invisible to a source-tree read.
+# `isocenter/resources/*.json` shipped in neither the wheel nor the sdist,
+# because nothing declared package_data -- and the loaders guard on
+# os.path.exists, so a pip-installed Isocenter did not crash. It audited
+# against an empty PHI tag list (`ConfigLoader.load_phi_config` returns
+# {}, `PhiInspector` at isocenter/privacy.py:140 takes it) and reported
+# clean. A de-identification tool that silently stops looking for PHI is
+# the worst failure this project can ship, and every test in the suite
+# passed while it was true, because tests import from the source tree
+# where the files are present.
+#
+# So these build the real artefacts and read what is inside them.
+
+def _data_files_in_package():
+    """Non-Python files under isocenter/ that the code reads at runtime."""
+    return {
+        path.relative_to(PACKAGE).as_posix()
+        for path in PACKAGE.rglob("*")
+        if path.is_file()
+        and path.suffix != ".py"
+        and "__pycache__" not in path.parts
+    }
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory):
+    """The wheel and sdist setup.py actually produces.
+
+    Built once per module: this shells out to a real build, which costs a
+    couple of seconds. `--dist-dir` is repeated per command on purpose --
+    distutils applies an option to the command it follows, so a single
+    trailing `--dist-dir` would send the sdist to the repo's own dist/.
+    """
+    out = tmp_path_factory.mktemp("dist")
+    result = subprocess.run(
+        [sys.executable, "setup.py", "-q",
+         "sdist", "--dist-dir", str(out),
+         "bdist_wheel", "--dist-dir", str(out)],
+        cwd=REPO, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        pytest.fail(f"building the distributions failed:\n{result.stderr}")
+
+    wheels = list(out.glob("*.whl"))
+    sdists = list(out.glob("*.tar.gz"))
+    assert wheels, f"no wheel was built: {result.stderr}"
+    assert sdists, f"no sdist was built: {result.stderr}"
+
+    with zipfile.ZipFile(wheels[0]) as archive:
+        wheel_names = archive.namelist()
+        metadata = next(
+            archive.read(name).decode("utf-8")
+            for name in wheel_names if name.endswith("dist-info/METADATA"))
+        top_level = next(
+            (archive.read(name).decode("utf-8").split()
+             for name in wheel_names if name.endswith("top_level.txt")), [])
+
+    with tarfile.open(sdists[0]) as archive:
+        # Strip the leading `isocenter-<version>/` component.
+        sdist_names = [
+            name.split("/", 1)[1]
+            for name in archive.getnames() if "/" in name]
+
+    return {
+        "wheel": wheel_names,
+        "sdist": sdist_names,
+        "metadata": metadata,
+        "top_level": top_level,
+    }
+
+
+def test_the_wheel_ships_every_resource_the_package_reads(built):
+    """A data file left out of the wheel silently disables a feature.
+
+    isocenter/resources/phi_tags.json is the whole default PHI policy. When
+    it is absent, load_phi_config() returns {} rather than raising, so
+    audit() finds nothing and reports success on data full of PHI.
+    """
+    shipped = {
+        name[len("isocenter/"):]
+        for name in built["wheel"] if name.startswith("isocenter/")}
+
+    missing = sorted(_data_files_in_package() - shipped)
+    assert not missing, (
+        "read from isocenter/ at runtime but absent from the wheel, so a "
+        "pip-installed Isocenter degrades silently instead of failing: "
+        f"{missing}. Declare them in setup.py's package_data.")
+
+
+def test_the_sdist_ships_every_resource_the_package_reads(built):
+    """The sdist is what pip builds from when no wheel matches."""
+    shipped = {
+        name[len("isocenter/"):]
+        for name in built["sdist"] if name.startswith("isocenter/")}
+
+    missing = sorted(_data_files_in_package() - shipped)
+    assert not missing, (
+        f"absent from the sdist: {missing}. A wheel built from this sdist "
+        "would inherit the omission.")
+
+
+def test_the_wheel_installs_nothing_but_the_library(built):
+    """Installing must not claim a top-level name we do not own.
+
+    `scripts/` carries an __init__.py for the benchmark imports, so a
+    bare find_packages() swept it into the distribution and installing
+    Isocenter dropped a module called `scripts` into site-packages --
+    a name any number of other projects also use.
+    """
+    assert built["top_level"] == ["isocenter"], (
+        f"the wheel installs top-level packages {built['top_level']}; only "
+        "'isocenter' belongs to us. Exclude the rest in find_packages().")
+
+
+def test_no_requirement_is_a_direct_url(built):
+    """PyPI rejects any distribution whose metadata carries a URL.
+
+    The nlp extra pinned spaCy's en_core_web_sm to a GitHub release URL.
+    That is legal for `pip install -e .` and fatal for `twine upload`,
+    which fails with "Can't have direct dependency" -- the upload is
+    refused outright, so this is not a defect a user ever sees. We do.
+    """
+    direct = [
+        line for line in built["metadata"].splitlines()
+        if line.startswith("Requires-Dist:") and " @ " in line]
+    assert not direct, (
+        "PyPI refuses metadata containing direct URL requirements, so "
+        f"`twine upload` would reject this build: {direct}")
+
+
+def test_the_sdist_ships_a_test_suite_that_can_run(built):
+    """Half a test suite is worse than none.
+
+    The sdist shipped 105 test modules without conftest.py, without
+    tests/fixtures/, and without pytest.ini, so `pytest` inside an
+    unpacked sdist failed at collection. Ship the suite whole or not at
+    all; this test only demands consistency.
+    """
+    test_modules = [
+        name for name in built["sdist"]
+        if name.startswith("tests/") and name.endswith(".py")]
+    if not test_modules:
+        pytest.skip("the sdist deliberately ships no tests")
+
+    required = ["tests/conftest.py", "tests/fixtures/annotations.schema.json",
+                "pytest.ini"]
+    missing = [name for name in required if name not in built["sdist"]]
+    assert not missing, (
+        f"the sdist ships {len(test_modules)} test modules but omits "
+        f"{missing}, so pytest cannot collect them. Add them to MANIFEST.in "
+        "or stop shipping tests.")
+
+
+def test_the_build_backend_is_declared_exactly_once():
+    """pip needs a PEP 517 backend, and setup.py stays the metadata.
+
+    With no pyproject.toml at all, pip falls back to setuptools'
+    `__legacy__` backend -- it works today and is not promised to keep
+    working. Declaring the backend fixes that.
+
+    The second half matters more: every test above parses setup.py with
+    `ast` to learn what Isocenter depends on. A `[project]` table in
+    pyproject.toml would be a second, higher-precedence dependency list
+    that those tests cannot see, recreating the exact requirements.txt
+    drift that this module exists to prevent.
+    """
+    pyproject = REPO / "pyproject.toml"
+    assert pyproject.exists(), (
+        "no pyproject.toml, so builds depend on setuptools' legacy "
+        "fallback backend")
+
+    config = tomllib.loads(pyproject.read_text())
+    backend = config.get("build-system", {})
+    assert backend.get("build-backend"), (
+        "pyproject.toml declares no build-backend")
+    assert backend.get("requires"), (
+        "pyproject.toml declares no build requirements")
+
+    assert "project" not in config, (
+        "pyproject.toml declares a [project] table, which overrides "
+        "setup.py and silently becomes a second source of dependency "
+        "truth. Keep the metadata in setup.py or move all of it here and "
+        "rewrite this module's parsers.")
