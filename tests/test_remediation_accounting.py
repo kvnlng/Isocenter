@@ -129,3 +129,32 @@ def test_a_remediation_that_fails_is_not_counted_as_applied(
 
     assert applied == 0
     assert any("failed" in record.message.lower() for record in caplog.records)
+
+
+def test_two_tags_sharing_a_display_name_are_both_remediated(make_session):
+    """The dedupe key must identify the attribute, not its label.
+
+    `field_name` is a display string taken from the config's `name`, and
+    it falls back to the literal "Unknown Tag" when a config entry omits
+    one. Two such entries on the same instance produced the same key, so
+    the second tag was skipped and its value survived -- reachable in
+    every released version with a hand-written config, since
+    `create_config()` and the shipped profiles always write names.
+    """
+    instance = _instance_with("A note")
+    instance.attributes["0008,0080"] = "St Elsewhere"
+    instance.attributes["0008,1010"] = "SCANNER-1"
+
+    session = make_session(instance)
+    session.configuration.phi_tags = {
+        "0008,0080": {"action": "REMOVE"},   # no "name" -> "Unknown Tag"
+        "0008,1010": {"action": "REMOVE"},   # no "name" -> "Unknown Tag"
+    }
+
+    session.audit()
+    session.anonymize()
+
+    assert "0008,0080" not in instance.attributes
+    assert "0008,1010" not in instance.attributes, (
+        "the second tag deduped against the first because they share a "
+        "display name")
