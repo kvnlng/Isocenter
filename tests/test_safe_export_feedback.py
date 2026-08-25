@@ -35,7 +35,10 @@ def test_safe_export_feedback(tmp_path, capsys):
 
     # 4. Assert Detailed Feedback
     assert "Safety Scan Found Issues" in stdout
-    assert "The following tags were flagged as dirty:" in stdout
+    # "dirty" means "has unsaved changes" everywhere else in the
+    # codebase; the PHI report no longer borrows the word.
+    assert "The following tags still carry identifiers:" in stdout
+    assert "dirty" not in stdout.lower()
 
     # Check table headers
     assert "Tag" in stdout

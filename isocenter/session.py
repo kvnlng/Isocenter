@@ -1,15 +1,19 @@
+import gc
 import os
 import re
 import json
 import datetime
 import concurrent.futures
-from typing import List, Union, Dict, Any
+from collections import Counter
+from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
+                    NamedTuple)
 
 import yaml
 from tqdm import tqdm
 
-from .io_handlers import (DicomImporter, DicomExporter, SidecarPixelLoader,
-                          SidecarWaveformLoader)
+from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
+                          SidecarPixelLoader, SidecarWaveformLoader,
+                          export_folder_names)
 from .store import DicomStore
 from .services import RedactionService
 from .config_manager import ConfigLoader
@@ -265,6 +269,152 @@ def _render_config_yaml(data: Dict[str, Any]) -> str:
         rendered.append(line)
 
     return _CONFIG_HEADER + "\n" + "\n".join(rendered) + "\n"
+
+
+class _ExportOptions(NamedTuple):
+    """Everything the export plan needs beyond the store itself.
+
+    Bundled because all four travel together down three levels of the
+    walk, and a parameter list that long stops being read.
+    """
+    folder: str
+    identifying_uids: Optional[Set[str]]
+    allowed_uids: Optional[Set[str]]
+    use_compression: bool
+
+
+def _excluded(options, patient, study, series, instance) -> bool:
+    """Whether an instance is filtered out of the export, and why in the log.
+
+    Two independent filters, both matching at every level of the
+    hierarchy: the safety scan excludes anything still carrying an
+    identifier, and a subset includes only what the caller selected.
+    `None` means the filter is not in use, which is not the same as an
+    empty set -- that means it is in use and matched nothing.
+    """
+    uids = _uid_path(patient, study, series, instance)
+
+    if options.identifying_uids is not None and any(
+            uid in options.identifying_uids for uid in uids):
+        get_logger().warning(
+            "Skipping %s: it or one of its parents still carries identifiers.",
+            instance.sop_instance_uid)
+        return True
+
+    if options.allowed_uids is not None and not any(
+            uid in options.allowed_uids for uid in uids):
+        return True
+
+    return False
+
+
+def _uid_path(patient, study, series, instance) -> Tuple[str, str, str, str]:
+    """The four UIDs locating one instance in the hierarchy.
+
+    Both export filters -- the safety scan and the subset -- match against
+    every level, so a rule written for a study applies to its images
+    without having to be restated for each one.
+    """
+    return (patient.patient_id, study.study_instance_uid,
+            series.series_instance_uid, instance.sop_instance_uid)
+
+
+def _patient_attributes(patient) -> Dict[str, Any]:
+    """Patient-level tags stamped onto every exported instance."""
+    attributes = {
+        "0010,0010": patient.patient_name,
+        "0010,0020": patient.patient_id,
+    }
+    if getattr(patient, 'birth_date', None):
+        attributes["0010,0030"] = patient.birth_date
+    if getattr(patient, 'sex', None):
+        attributes["0010,0040"] = patient.sex
+    return attributes
+
+
+def _study_attributes(study) -> Dict[str, Any]:
+    """Study-level tags stamped onto every exported instance."""
+    attributes = {
+        "0020,000D": study.study_instance_uid,
+        "0008,0020": study.study_date,
+    }
+    if getattr(study, 'study_time', None):
+        attributes["0008,0030"] = study.study_time
+    if getattr(study, 'accession_number', None):
+        attributes["0008,0050"] = study.accession_number
+    return attributes
+
+
+def _series_attributes(series) -> Dict[str, Any]:
+    """Series-level tags stamped onto every exported instance."""
+    attributes = {
+        "0020,000E": series.series_instance_uid,
+        "0008,0060": series.modality,
+        "0020,0011": str(series.series_number),
+    }
+    if getattr(series, 'series_description', None):
+        attributes["0008,103E"] = series.series_description
+    return attributes
+
+
+def _uids_from_frame(frame) -> Set[str]:
+    """The UIDs a subset DataFrame selects, at the most precise level present.
+
+    Only one column is read, deliberately. A frame filtered down to the CT
+    series of a patient still carries that patient's ID in every row, so
+    adding PatientID to the set would pull the MR series back in and undo
+    the filter the caller asked for.
+    """
+    for column in ("SOPInstanceUID", "SeriesInstanceUID",
+                   "StudyInstanceUID", "PatientID"):
+        if column in frame.columns:
+            return set(frame[column].tolist())
+    return set()
+
+
+def _report_phi_findings(findings) -> None:
+    """Prints what the pre-export scan found, and how to configure it away."""
+    counts, examples, descriptions = Counter(), {}, {}
+    for finding in findings:
+        tag = finding.tag or finding.field_name
+        counts[tag] += 1
+        examples.setdefault(tag, str(finding.value))
+        descriptions[tag] = finding.reason
+
+    print("\nSafety Scan Found Issues")
+    print("The following tags still carry identifiers:")
+    print(f"{'Tag':<15} {'Description':<30} {'Count':<10} {'Examples'}")
+    print("-" * 80)
+    for tag, count in counts.items():
+        print(f"{tag:<15} {descriptions[tag][:28]:<30} {count:<10} "
+              f"{examples[tag][:30]}")
+
+    _print_suggested_config(counts)
+
+
+def _print_suggested_config(counts) -> None:
+    """Prints a config fragment removing every tag the scan flagged."""
+    print("\nSuggested Config Update:")
+    print("Add the following rules to your config to resolve these:")
+    print("{")
+    print('    "phi_tags": {')
+    print(",\n".join(
+        f'        "{tag}": {{ "name": "{_suggested_tag_name(tag)}", '
+        f'"action": "REMOVE" }} , // Found {count} times'
+        for tag, count in counts.items()))
+    print('    }')
+    print("}")
+
+
+def _suggested_tag_name(tag: str) -> str:
+    """A readable name for the handful of tags the report can recognise."""
+    if "0010,0020" in tag:
+        return "patient_id"
+    if "0008,0020" in tag:
+        return "study_date"
+    if "0010,0010" in tag:
+        return "patient_name"
+    return "unknown_tag"
 
 
 class LockingResult(list):
@@ -1728,312 +1878,219 @@ class DicomSession:
         exporter = exporters.get_exporter(format)
         return exporter.export(self, folder, **options)
 
+    # pylint: disable=unused-argument
     def _export_dicom(self, folder: str, use_compression=True,
-               check_burned_in=False, check_reversibility=True, patient_ids: List[str] = None, show_progress=True,
-               subset=None):
+                      check_burned_in=False, check_reversibility=True,
+                      patient_ids: List[str] = None, show_progress=True,
+                      subset=None):
         """
         Exports the current session to a directory, structured by Patient/Study/Series.
 
         Args:
             folder (str): The output directory path.
             use_compression (bool): If True, compresses output images using JPEG2000 (Lossless).
-            check_burned_in (bool): If True, performs a safety scan for 'Burned In Annotation' flags before export.
-            check_reversibility (bool): If True, checks if reversibility is enabled (informational).
+            check_burned_in (bool): If True, scans for PHI before exporting and
+                skips every instance that still carries an identifier.
+            check_reversibility (bool): Accepted and currently inert. The export
+                writes exactly what the store holds, encrypted or not; there is
+                nothing for this flag to check. Kept because removing a public
+                parameter is a breaking change.
             patient_ids (List[str], optional): Limit export to specific Patient IDs.
             show_progress (bool): If True, shows progress bar.
-            subset (Union[str, list, pd.DataFrame]): Filter export using a query string, list of UIDs, or DataFrame.
+            subset (Union[str, list, pd.DataFrame]): Filter the export
+                using a query string, a list of UIDs, or a DataFrame.
         """
-        import os
-        from .io_handlers import DicomExporter
+        target_ids = (patient_ids if patient_ids is not None
+                      else [p.patient_id for p in self.store.patients])
 
-        # 1. Validation Checks
-        if check_reversibility and self.reversibility_service:
-            # warn if we are exporting encrypted data without warning?
-            # Actually Isocenter exports exactly what is in store (which might be encrypted).
-            pass
+        # None means "no safety filter"; an empty set means "the scan ran and
+        # found nothing". The two are not the same and the walk treats them
+        # differently, so they must not collapse into one falsy value.
+        identifying_uids = (self._scan_before_export()
+                            if check_burned_in else None)
+        allowed_uids = self._resolve_subset(subset)
 
-        target_ids = patient_ids
-        if target_ids is None:
-            target_ids = [p.patient_id for p in self.store.patients]
-
-        # SAFETY CHECK & FEEDBACK LOOP
-        # If running in safe mode, run a full scan first to give aggregated feedback
-        if check_burned_in:
-            get_logger().info("Performing pre-export safety scan...")
-            findings = self.scan_for_phi()
-            if findings:
-                print("\nSafety Scan Found Issues")
-                print("The following tags were flagged as dirty:")
-                print(f"{'Tag':<15} {'Description':<30} {'Count':<10} {'Examples'}")
-                print("-" * 80)
-
-                from collections import Counter
-                counts = Counter()
-                examples = {}
-                descriptions = {}
-
-                for f in findings:
-                    tag = f.tag or f.field_name
-                    counts[tag] += 1
-                    if tag not in examples:
-                        examples[tag] = str(f.value)
-                    descriptions[tag] = f.reason
-
-                for tag, count in counts.items():
-                    ex = examples[tag][:30]
-                    desc = descriptions[tag][:28]
-                    print(f"{tag:<15} {desc:<30} {count:<10} {ex}")
-
-                print("\nSuggested Config Update:")
-                print("Add the following rules to your config to resolve these:")
-                print("{")
-                print('    "phi_tags": {')
-                rows = []
-                for tag in counts:
-                    # Attempt to infer name
-                    name = "patient_name" if "0010,0010" in tag else "unknown_tag"
-                    if "0010,0020" in tag:
-                        name = "patient_id"
-                    if "0008,0020" in tag:
-                        name = "study_date"
-
-                    rows.append(
-                        f'        "{tag}": {{ "name": "{name}", "action": "REMOVE" }} , // Found {counts[tag]} times')
-                print(",\n".join(rows))
-                print('    }')
-                print("}")
-
-                print('    }')
-                print("}")
-
-                get_logger().warning("Safe Export: PHI findings detected. Proceeding to export ONLY safe instances (Skipping dirty).")
-                # Build Dirty Filter
-                dirty_uids = set()
-                for f in findings:
-                    if f.entity_uid:
-                        dirty_uids.add(f.entity_uid)
-
-            else:
-                dirty_uids = set()
-
-        # Subset resolution
-        allowed_uids = None
-        if subset is not None:
-            import pandas as pd
-            df = None
-            if isinstance(subset, str):
-                # Query string
-                full_df = self.get_cohort_report(expand_metadata=True)
-                try:
-                    df = full_df.query(subset)
-                except Exception as e:
-                    get_logger().error(f"Failed to query subset '{subset}': {e}")
-                    return
-            elif isinstance(subset, pd.DataFrame):
-                df = subset
-            elif isinstance(subset, list):
-                # Assume list of UIDs (Patient, Series, or Instance)
-                # We need to match against any level. simpler to scan.
-                # For now, let's assume if it matches PatientID, SeriesUID, or SOPUID we keep it.
-                subset_set = set(subset)
-                allowed_uids = subset_set  # We will pass this to filter
-
-            if df is not None:
-                # Extract all UIDs relevant
-                allowed_uids = set()
-                # PRECISION EXPORT:
-                # If we have SOPInstanceUID, we ONLY use that to ensure we match the exact rows returned by the query.
-                # Adding PatientID would re-include ALL instances for that patient
-                # (defeating granular filters like Modality='CT').
-                if "SOPInstanceUID" in df.columns:
-                    allowed_uids.update(df["SOPInstanceUID"].tolist())
-                # Fallbacks if SOPInstanceUID is missing (e.g. custom dataframe)
-                elif "SeriesInstanceUID" in df.columns:
-                    allowed_uids.update(df["SeriesInstanceUID"].tolist())
-                elif "StudyInstanceUID" in df.columns:
-                    allowed_uids.update(df["StudyInstanceUID"].tolist())
-                elif "PatientID" in df.columns:
-                    allowed_uids.update(df["PatientID"].tolist())
-
-        get_logger().info(f"Exporting session to: {folder}")
+        get_logger().info("Exporting session to: %s", folder)
         print("Preparing export plan...")
 
-        # 2. Memory Management Check
-        # Before starting a massive export (which might load pixels), ensure we save pending changes
-        # and flush memory to avoid OOM if user did a lot of redaction.
+        # Flush before the walk: a large export loads pixels back in, and
+        # holding both the pending edits and the frames being written has
+        # been enough to run a redaction session out of memory.
         print("Saving pending changes to free memory...")
         self.save()
         self.release_memory()
 
-        # 3. Create Export Plan (Lightweight objects)
-        export_tasks = []
-        total_instances = 0
+        tasks, patient_count = self._build_export_plan(
+            _ExportOptions(folder, identifying_uids, allowed_uids,
+                           use_compression),
+            target_ids)
 
-        count_p = 0
-        count_i = 0
-
-        # We iterate our store to build tasks.
-        # But for parallelism, we want to pass file paths or DB IDs, not full objects.
-        # DicomExporter needs (Instance -> OutputPath) mapping.
-
-        # Pre-calculate paths
-        # Structure: Folder / Patient / Study / Series / Instance
-
-        # Optimization: We can generate the plan using minimal metadata
-        from .io_handlers import ExportContext, export_folder_names
-
-        for p in self.store.patients:
-            if p.patient_id not in target_ids:
-                continue
-
-            count_p += 1
-
-            pat_attrs = {
-                "0010,0010": p.patient_name,
-                "0010,0020": p.patient_id
-            }
-            if hasattr(p, 'birth_date') and p.birth_date:
-                pat_attrs["0010,0030"] = p.birth_date
-            if hasattr(p, 'sex') and p.sex:
-                pat_attrs["0010,0040"] = p.sex
-
-            for st in p.studies:
-                study_attrs = {
-                    "0020,000D": st.study_instance_uid,
-                    "0008,0020": st.study_date,
-                }
-                if hasattr(st, 'study_time') and st.study_time:
-                    study_attrs["0008,0030"] = st.study_time
-                if hasattr(st, 'accession_number'):
-                    study_attrs["0008,0050"] = st.accession_number
-
-                for se in st.series:
-                    # Hybrid Naming: shared with every other export format
-                    # (see `export_folder_names` in io_handlers.py) so
-                    # trees stay co-located.
-                    subj_name, study_folder, series_folder = export_folder_names(p, st, se)
-                    se_path = os.path.join(folder, subj_name, study_folder, series_folder)
-
-                    series_attrs = {
-                        "0020,000E": se.series_instance_uid,
-                        "0008,0060": se.modality,
-                        "0020,0011": str(se.series_number)
-                    }
-                    if hasattr(se, 'series_description'):
-                        series_attrs["0008,103E"] = se.series_description
-
-                    for inst in se.instances:
-                        # Debug
-                        # print(f"Checking instance {inst.sop_instance_uid}...")
-
-                        if check_burned_in:
-                            # HIERARCHICAL SAFETY CHECK
-                            # If parent (Patient, Study, Series) is dirty, skip instance.
-                            # Also check instance itself.
-                            is_dirty = False
-                            if p.patient_id in dirty_uids:
-                                is_dirty = True
-                            elif st.study_instance_uid in dirty_uids:
-                                is_dirty = True
-                            elif se.series_instance_uid in dirty_uids:
-                                is_dirty = True
-                            elif inst.sop_instance_uid in dirty_uids:
-                                is_dirty = True
-
-                            # Fallback: Per-instance check if not already flagged dirty but inspector failed?
-                            # No, Pre-Check covered everything.
-
-                            if is_dirty:
-                                get_logger().warning(
-                                    f"Skipping unsafe instance {
-                                        inst.sop_instance_uid} (Entity or Parent is Dirty).")
-                                continue
-
-                        # Legacy Subset Filtering
-                        if allowed_uids is not None:
-                            if (inst.sop_instance_uid not in allowed_uids and
-                                se.series_instance_uid not in allowed_uids and
-                                st.study_instance_uid not in allowed_uids and
-                                    p.patient_id not in allowed_uids):
-                                continue
-                        count_i += 1
-                        # Use SOP Instance UID for filename to ensure uniqueness and match tests
-                        inst_clean = f"{inst.sop_instance_uid}.dcm"
-                        out_path = os.path.join(se_path, inst_clean)
-
-                        # Determine if this instance needs redaction
-                        redaction_zones = []
-                        if se.equipment and se.equipment.device_serial_number:
-                            sn = se.equipment.device_serial_number
-                            rule = self.configuration.get_rule(sn)
-                            if rule:
-                                redaction_zones = rule.get("redaction_zones", [])
-
-                        # Build Context
-                        # Compression handled by worker finalizing dataset
-                        ctx = ExportContext(
-                            instance=inst,
-                            output_path=out_path,
-                            patient_attributes=pat_attrs,
-                            study_attributes=study_attrs,
-                            series_attributes=series_attrs,
-                            compression='j2k' if use_compression else None,
-                            redaction_zones=redaction_zones
-                        )
-                        export_tasks.append(ctx)
-                        total_instances += 1
-
-        if not export_tasks:
+        if not tasks:
             get_logger().warning("No instances found to export.")
             return
 
-        print(f"Exporting {total_instances} images from {count_p} patients...")
-
-        # 4. Execute Export
-        # We use global run_parallel logic or specialized internal batcher?
-        show_progress = True
-
-        if total_instances > 0:
-            # MEMORY LEAK MITIGATION:
-            # We use worker recycling (maxtasksperchild=100) via multiprocessing.Pool
-            # This forces workers to restart periodically, clearing any leaked memory (e.g. from C-libs).
-            # We do NOT use the shared self._executor for this, as ProcessPoolExecutor
-            # doesn't support recycling.
-            try:
-                # Optimized for stability: maxtasksperchild=25 clears memory frequently
-                # GC Optimization: Disable GC in workers
-                success_count = DicomExporter.export_batch(
-                    export_tasks,
-                    show_progress=show_progress,
-                    total=total_instances,
-                    maxtasksperchild=25,
-                    disable_gc=True)
-            except Exception as e:
-                get_logger().error(f"Export Failed! Error: {e}")
-                raise e
-            finally:
-                # Main process GC trigger
-                import gc
-                gc.collect()
-
-            if success_count < total_instances:
-                # Partial failure used to be invisible here: the count came
-                # back and was dropped, and "Export complete." printed
-                # whether 1200 of 1200 instances survived or 3 did. Per-file
-                # errors are already in the audit log; this is the summary
-                # that says to go and read it.
-                get_logger().warning(
-                    "Export finished with failures: %d of %d instances exported. "
-                    "See the audit log for per-instance errors.",
-                    success_count, total_instances)
-                print(f"Export finished with failures: "
-                      f"{success_count}/{total_instances} instances exported.")
-            else:
-                get_logger().info("Export complete.")
-        else:
-            get_logger().warning("No instances queued for export.")
-
+        print(f"Exporting {len(tasks)} images from {patient_count} patients...")
+        self._run_export_batch(tasks, show_progress)
         print("Done.")
+
+    def _scan_before_export(self) -> Set[str]:
+        """Scans for PHI and reports what it found, before anything is written.
+
+        Returns:
+            Set[str]: The UID of every entity carrying an identifier, at any
+            level of the hierarchy. An instance is skipped if its own UID or
+            any of its parents' appears here, so a patient whose name is
+            still present excludes every image beneath them.
+        """
+        get_logger().info("Performing pre-export safety scan...")
+        findings = self.scan_for_phi()
+        if not findings:
+            return set()
+
+        _report_phi_findings(findings)
+        get_logger().warning(
+            "Safe export: identifiers detected. Exporting only the instances "
+            "that carry none, and skipping the rest.")
+        return {f.entity_uid for f in findings if f.entity_uid}
+
+    def _resolve_subset(self, subset) -> Optional[Set[str]]:
+        """Turns a subset argument into the UIDs allowed through the walk.
+
+        Accepts a pandas query string, a DataFrame, or a list of UIDs at any
+        level. Returns None when no subset was given, which means "export
+        everything" -- distinct from an empty set, which means "the filter
+        matched nothing".
+
+        Raises:
+            TypeError: If `subset` is not one of the three accepted forms.
+                It used to be ignored, so a caller who asked for a filter
+                and mistyped it got a full unfiltered export instead.
+            ValueError: If a query string does not run against the cohort
+                report. That also used to abort the export silently, which
+                is indistinguishable from a query that matched nothing.
+        """
+        if subset is None:
+            return None
+
+        if isinstance(subset, list):
+            # A bare list of UIDs at any level: patient, study, series or
+            # instance. All four are matched during the walk.
+            return set(subset)
+
+        # pandas is an optional dependency, imported only on the paths that
+        # need it so `import isocenter` does not require it.
+        import pandas as pd
+
+        if isinstance(subset, str):
+            report = self.get_cohort_report(expand_metadata=True)
+            try:
+                frame = report.query(subset)
+            except Exception as exc:
+                raise ValueError(
+                    f"subset query {subset!r} could not be run against the "
+                    f"cohort report: {exc}") from exc
+        elif isinstance(subset, pd.DataFrame):
+            frame = subset
+        else:
+            raise TypeError(
+                f"subset must be a query string, a DataFrame, or a list of "
+                f"UIDs; got {type(subset).__name__}")
+
+        return _uids_from_frame(frame)
+
+    def _build_export_plan(self, options: '_ExportOptions', target_ids):
+        """Walks the store and builds one ExportContext per instance to write.
+
+        Nothing is written here. The plan is built first so the count is
+        known before the parallel batch starts, and so the filters are
+        applied in one place rather than inside the workers.
+
+        Returns:
+            Tuple of (contexts, number of patients visited).
+        """
+        tasks = []
+        patient_count = 0
+
+        for patient in self.store.patients:
+            if patient.patient_id not in target_ids:
+                continue
+            patient_count += 1
+            patient_attrs = _patient_attributes(patient)
+
+            for study in patient.studies:
+                study_attrs = _study_attributes(study)
+
+                for series in study.series:
+                    # Hybrid naming: shared with every other export format
+                    # (see `export_folder_names` in io_handlers.py) so trees
+                    # stay co-located.
+                    series_path = os.path.join(
+                        options.folder,
+                        *export_folder_names(patient, study, series))
+                    series_attrs = _series_attributes(series)
+                    zones = self._redaction_zones_for(series)
+
+                    for instance in series.instances:
+                        if _excluded(options, patient, study, series, instance):
+                            continue
+
+                        tasks.append(ExportContext(
+                            instance=instance,
+                            # The SOP Instance UID names the file: it is
+                            # unique where InstanceNumber is not.
+                            output_path=os.path.join(
+                                series_path, f"{instance.sop_instance_uid}.dcm"),
+                            patient_attributes=patient_attrs,
+                            study_attributes=study_attrs,
+                            series_attributes=series_attrs,
+                            compression=('j2k' if options.use_compression
+                                         else None),
+                            redaction_zones=zones))
+
+        return tasks, patient_count
+
+    def _redaction_zones_for(self, series) -> list:
+        """The configured pixel-redaction zones for this series' scanner."""
+        if not (series.equipment and series.equipment.device_serial_number):
+            return []
+        rule = self.configuration.get_rule(
+            series.equipment.device_serial_number)
+        return rule.get("redaction_zones", []) if rule else []
+
+    @staticmethod
+    def _run_export_batch(tasks, show_progress) -> None:
+        """Runs the export in worker processes and reports the outcome.
+
+        Uses `export_batch`'s own pool rather than `self._executor`: workers
+        are recycled every 25 tasks so memory leaked by the imaging C
+        libraries is reclaimed, which `ProcessPoolExecutor` cannot do.
+        """
+        try:
+            success_count = DicomExporter.export_batch(
+                tasks,
+                show_progress=show_progress,
+                total=len(tasks),
+                maxtasksperchild=25,
+                disable_gc=True)
+        except Exception as exc:
+            get_logger().error("Export Failed! Error: %s", exc)
+            raise
+        finally:
+            gc.collect()
+
+        if success_count < len(tasks):
+            # Partial failure used to be invisible here: the count came back
+            # and was dropped, and "Export complete." printed whether 1200 of
+            # 1200 instances survived or 3 did. Per-file errors are already in
+            # the audit log; this is the summary that says to go and read it.
+            get_logger().warning(
+                "Export finished with failures: %d of %d instances exported. "
+                "See the audit log for per-instance errors.",
+                success_count, len(tasks))
+            print(f"Export finished with failures: "
+                  f"{success_count}/{len(tasks)} instances exported.")
+        else:
+            get_logger().info("Export complete.")
 
     def export_dataframe(
             self,
