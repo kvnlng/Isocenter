@@ -22,6 +22,7 @@ from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import run_parallel
 from .configuration import IsocenterConfiguration
+from .profiles import PRIVACY_PROFILES
 from . import pixel_analysis
 from .automation import ConfigAutomator
 
@@ -447,7 +448,8 @@ class DicomSession:
             print(f"Loading configuration from {config_file}...")
 
             # UNIFIED LOAD (v2) - Now loading into IsocenterConfiguration object
-            tags, rules, jitter, remove_private = ConfigLoader.load_unified_config(config_file)
+            (tags, rules, jitter, remove_private,
+             profile) = ConfigLoader.load_unified_config(config_file)
 
             # Update the configuration object
             self.configuration.phi_tags = tags
@@ -455,6 +457,7 @@ class DicomSession:
             self.configuration.date_jitter = jitter
             self.configuration.remove_private_tags = remove_private
             self.configuration.config_path = config_file
+            self.configuration.privacy_profile = profile
 
             get_logger().info(
                 f"Loaded {len(self.configuration.rules)} machine rules and {len(self.configuration.phi_tags)} PHI tags.")
@@ -475,6 +478,7 @@ class DicomSession:
             # Original behavior was reset.
             self.configuration.rules = []
             self.configuration.phi_tags = {}
+            self.configuration.privacy_profile = None
 
     def preview_config(self):
         """
@@ -861,7 +865,7 @@ class DicomSession:
 
         if config_path:
             try:
-                t, r, dj, rpt = ConfigLoader.load_unified_config(config_path)
+                t, r, dj, rpt, _ = ConfigLoader.load_unified_config(config_path)
                 tags_to_use = t
             except BaseException:
                 # Fallback to simple tags load
@@ -1146,7 +1150,38 @@ class DicomSession:
                      f"{msg} - {uid}"))
 
         # 3. Determine Context
-        privacy_profile = "See Config"
+        #
+        # Describe what was configured, never what standard it might
+        # satisfy. `deid_method` used to be a dataclass default reading
+        # "Safe Harbor (Basic Profile)" that nothing assigned, so every
+        # report -- including a bare session's, scanning six tags --
+        # asserted HIPAA Safe Harbor above a DPO signature line.
+        # The tag count mirrors what PhiInspector actually scans with:
+        # the configured policy, or the shipped defaults when there is
+        # none (see PhiInspector.__init__).
+        effective_tags = self.configuration.phi_tags
+        if not effective_tags:
+            try:
+                effective_tags = ConfigLoader.load_phi_config()
+            except (OSError, ValueError):
+                effective_tags = {}
+
+        profile_name = self.configuration.privacy_profile
+        if not profile_name:
+            privacy_profile = "None (session defaults)"
+            method = "Session defaults"
+        elif profile_name in PRIVACY_PROFILES:
+            privacy_profile = profile_name
+            method = f"DICOM PS3.15 '{profile_name}' profile"
+        else:
+            # Resolved, but from a file rather than a built-in name.
+            privacy_profile = profile_name
+            method = f"Custom profile '{profile_name}'"
+
+        deid_method = (
+            f"{method}: {len(effective_tags)} tag rules, "
+            f"{len(self.configuration.rules)} pixel redaction rules")
+
         try:
             from importlib.metadata import version
             ver = version("isocenter")
@@ -1158,6 +1193,7 @@ class DicomSession:
             isocenter_version=ver,
             project_name=os.path.basename(self.persistence_file),
             privacy_profile=privacy_profile,
+            deid_method=deid_method,
             total_patients=n_p,
             total_studies=n_st,
             total_series=n_se,
