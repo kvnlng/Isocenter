@@ -304,7 +304,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../changelog/" class="md-tabs__link">
+        <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-tabs__link">
           
   
   
@@ -568,10 +568,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-safety-pipeline-the-8-checkpoints" class="md-nav__link">
+  <a href="#3-safety-pipeline-the-10-checkpoints" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Safety Pipeline (The 8 Checkpoints)
+        3. Safety Pipeline (The 10 Checkpoints)
       
     </span>
   </a>
@@ -1202,7 +1202,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
         
   
   
@@ -1307,10 +1307,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-safety-pipeline-the-8-checkpoints" class="md-nav__link">
+  <a href="#3-safety-pipeline-the-10-checkpoints" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Safety Pipeline (The 8 Checkpoints)
+        3. Safety Pipeline (The 10 Checkpoints)
       
     </span>
   </a>
@@ -1468,7 +1468,7 @@
 <li><strong>Series</strong>: A scan or reconstruction (e.g., "ct_soft_kernel").</li>
 <li><strong>Instance</strong>: A single DICOM slice. <strong>Pixel data is extracted upfront</strong>; the heavyweight pixel array is sequestered in a binary sidecar immediately upon ingestion and loaded into memory only when needed.</li>
 </ul>
-<h2 id="3-safety-pipeline-the-8-checkpoints">3. Safety Pipeline (The 8 Checkpoints)</h2>
+<h2 id="3-safety-pipeline-the-10-checkpoints">3. Safety Pipeline (The 10 Checkpoints)</h2>
 <p>Isocenter enforces a strict checkpoint system to ensure data safety:</p>
 <ol>
 <li><strong>Ingest</strong>: Load raw data into the managed session index.</li>
@@ -1479,6 +1479,7 @@
 <li><strong>Anonymize</strong>: Apply remediation to metadata (in-memory).</li>
 <li><strong>Redact</strong>: Scrub pixel data for specific machines (in-memory).</li>
 <li><strong>Verify</strong>: Re-audit the session to ensure a clean state.</li>
+<li><strong>Report</strong>: Generate a signed Compliance Report (Manifest, Exceptions, Audit Trail).</li>
 <li><strong>Export</strong>: Write clean DICOM files to disk.</li>
 </ol>
 <h2 id="4-persistence-architecture-hybrid-storage">4. Persistence Architecture (Hybrid Storage)</h2>

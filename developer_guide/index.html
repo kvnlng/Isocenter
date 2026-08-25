@@ -298,7 +298,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../changelog/" class="md-tabs__link">
+        <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-tabs__link">
           
   
   
@@ -1052,7 +1052,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
         
   
   
@@ -1254,14 +1254,19 @@
 <h1 id="developer-guide">Developer Guide</h1>
 <p>Welcome to the Isocenter development documentation. This guide covers how to set up your environment, maintain code quality, and run tests.</p>
 <h2 id="1-environment-setup">1. Environment Setup</h2>
-<p>Isocenter requires Python 3.9+.</p>
+<p>Isocenter requires Python 3.12+. The floor is not arbitrary: <code>entities.py</code>
+and <code>privacy.py</code> use <code>@dataclass(slots=True)</code> (3.10+), and the declared
+dependency set resolves only on 3.12 and later.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Clone the repository</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/kvnlng/Isocenter.git
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>Isocenter
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Install dependencies (including dev tools)</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Install the library, the test suite's dependencies, and pylint</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[dev]"</span>
 </code></pre></div>
+<p>The <code>dev</code> extra is contributor tooling only -- it pulls in <code>tests</code> plus
+<code>pylint</code>. Somebody installing Isocenter to <em>use</em> it gets none of it;
+<code>pip install isocenter</code> never installs a linter or a test runner.</p>
 <h2 id="2-code-quality">2. Code Quality</h2>
 <p>We enforce strict code quality standards to insure reliability and maintainability.</p>
 <h3 id="pylint">Pylint</h3>

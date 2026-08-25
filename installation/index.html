@@ -304,7 +304,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../changelog/" class="md-tabs__link">
+        <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-tabs__link">
           
   
   
@@ -1169,7 +1169,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md" class="md-nav__link">
         
   
   
@@ -1382,13 +1382,17 @@
 
 <h1 id="installation">Installation</h1>
 <p>Isocenter requires <strong>Python 3.12+</strong>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/kvnlng/Isocenter.git"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>isocenter
+</code></pre></div>
+<p>Releases are published to PyPI from a tagged GitHub Release, via Trusted
+Publishing. To install unreleased work from <code>main</code> instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/kvnlng/Isocenter.git"</span>
 </code></pre></div>
 <h2 id="optional-features">Optional Features</h2>
 <h3 id="natural-language-processing-nlp">Natural Language Processing (NLP)</h3>
 <p>To enable advanced entity detection (e.g., precise Patient Name recognition) for Redaction Zone Discovery:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/kvnlng/Isocenter.git#egg=isocenter[nlp]"</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>spacy<span class="w"> </span>download<span class="w"> </span>en_core_web_sm
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"isocenter[nlp]"</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>-m<span class="w"> </span>spacy<span class="w"> </span>download<span class="w"> </span>en_core_web_sm
 </code></pre></div>
 <p>The model download is a separate step, like Tesseract below: spaCy's
 <code>en_core_web_sm</code> has no PyPI release, and pinning it in the extra would
@@ -1396,12 +1400,12 @@ need a direct URL, which PyPI refuses in published metadata. Without the
 model, <code>ZoneDiscoverer</code> falls back to its regex heuristics.</p>
 <h3 id="optical-character-recognition-ocr">Optical Character Recognition (OCR)</h3>
 <p>To detect burned-in text in pixel data, install the <code>ocr</code> extra:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"git+https://github.com/kvnlng/Isocenter.git#egg=isocenter[ocr]"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"isocenter[ocr]"</span>
 </code></pre></div>
 <p>This also needs the Tesseract binary itself, which is not a Python
 package:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>brew<span class="w"> </span>install<span class="w"> </span>tesseract<span class="w">        </span><span class="c1"># macOS</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>apt-get<span class="w"> </span>install<span class="w"> </span>tesseract-ocr<span class="w"> </span><span class="c1"># Debian/Ubuntu</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>brew<span class="w"> </span>install<span class="w"> </span>tesseract<span class="w">        </span><span class="c1"># macOS</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>apt-get<span class="w"> </span>install<span class="w"> </span>tesseract-ocr<span class="w"> </span><span class="c1"># Debian/Ubuntu</span>
 </code></pre></div>
 <p>Without it, <code>isocenter.pixel_analysis</code> sets <code>HAS_OCR = False</code> and the rest
 of Isocenter works normally — OCR-dependent features are simply skipped.</p>
@@ -1415,7 +1419,7 @@ no <code>requirements.txt</code>: two lists drift apart, and only <code>install_
 is consulted when you <code>pip install</code>.</p>
 <p>To set up a development environment, install the package with its test
 extra:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[tests]"</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[tests]"</span>
 </code></pre></div>
 <h2 id="system-requirements">System Requirements</h2>
 <p>Isocenter's parallel processing engine is designed to maximize CPU utilization. However, heavy operations like JPEG 2000 compression require significant memory per worker.</p>
