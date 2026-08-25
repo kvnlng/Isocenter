@@ -1361,8 +1361,32 @@ concept DOI that always resolves to the latest. <code>.zenodo.json</code> suppli
 the deposit metadata and <code>CITATION.cff</code> is what GitHub's "Cite this
 repository" button reads.</p>
 <p>Zenodo only archives releases created <em>after</em> the integration is
-switched on; it does not backfill. After the first deposit, add the
-concept DOI to <code>CITATION.cff</code> and the badge to <code>README.md</code>.</p>
+switched on; it does not backfill -- its own guide says "once connected,
+new releases from the repository will be automatically ingested and
+archived". So enabling it does nothing to the releases already published:
+the first deposit comes from the next release, or from deleting and
+re-creating an existing GitHub Release, which fires <code>release: published</code>
+again. Note that re-firing it also re-runs the PyPI publish, which will
+fail on a version the index already has; nothing is uploaded, but the run
+goes red.</p>
+<p>After the first deposit, add the concept DOI to <code>CITATION.cff</code> and the
+badge to <code>README.md</code>. Use the <strong>concept</strong> DOI, the one that always
+resolves to the latest version, not the version DOI minted alongside it.</p>
+<p><code>.zenodo.json</code> supplies the metadata the record is minted from. Two
+things about it are easy to get wrong and are pinned by
+<code>tests/test_version_contract.py</code>:</p>
+<ul>
+<li><strong><code>license</code> is a Zenodo vocabulary id, not an SPDX id</strong>, and those are
+  lowercase. <code>agpl-3.0-or-later</code> resolves at
+  <code>zenodo.org/api/vocabularies/licenses/</code>; the SPDX spelling
+  <code>AGPL-3.0-or-later</code> returns 404, and would have gone into the record as
+  a licence Zenodo could not match.</li>
+<li><strong>No <code>version</code> field.</strong> The GitHub integration fills it in from the
+  release tag. Pinning it here would add a third place for the number to
+  drift.</li>
+</ul>
+<p>Record metadata can be corrected on Zenodo after publication; the DOI
+itself cannot be reissued.</p>
 
 
 
