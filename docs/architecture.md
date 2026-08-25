@@ -27,7 +27,7 @@ graph LR
 - **Series**: A scan or reconstruction (e.g., "ct_soft_kernel").
 - **Instance**: A single DICOM slice. **Pixel data is extracted upfront**; the heavyweight pixel array is sequestered in a binary sidecar immediately upon ingestion and loaded into memory only when needed.
 
-## 3. Safety Pipeline (The 8 Checkpoints)
+## 3. Safety Pipeline (The 10 Checkpoints)
 
 Isocenter enforces a strict checkpoint system to ensure data safety:
 
@@ -39,7 +39,8 @@ Isocenter enforces a strict checkpoint system to ensure data safety:
 6. **Anonymize**: Apply remediation to metadata (in-memory).
 7. **Redact**: Scrub pixel data for specific machines (in-memory).
 8. **Verify**: Re-audit the session to ensure a clean state.
-9. **Export**: Write clean DICOM files to disk.
+9. **Report**: Generate a signed Compliance Report (Manifest, Exceptions, Audit Trail).
+10. **Export**: Write clean DICOM files to disk.
 
 ## 4. Persistence Architecture (Hybrid Storage)
 

@@ -86,13 +86,18 @@ Isocenter provides a system to ensure data safety:
 Isocenter requires **Python 3.12+**.
 
 ```bash
-# Install directly from GitHub (Recommended for users)
+pip install isocenter
+```
+
+To install unreleased work from `main`, or to work on Isocenter itself:
+
+```bash
 pip install "git+https://github.com/kvnlng/Isocenter.git"
 
-# OR Clone and install from source
+# or, for development
 git clone https://github.com/kvnlng/Isocenter.git
 cd Isocenter
-pip install .
+pip install -e ".[dev]"
 ```
 
 ## System Requirements

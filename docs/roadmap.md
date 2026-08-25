@@ -28,5 +28,5 @@ We welcome contributions. Good places to start:
 
 ## Completed work
 
-Shipped features are recorded in [the changelog](changelog.md), which
+Shipped features are recorded in [the changelog](https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md), which
 remains the canonical history.

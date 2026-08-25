@@ -3,6 +3,13 @@
 Isocenter requires **Python 3.12+**.
 
 ```bash
+pip install isocenter
+```
+
+Releases are published to PyPI from a tagged GitHub Release, via Trusted
+Publishing. To install unreleased work from `main` instead:
+
+```bash
 pip install "git+https://github.com/kvnlng/Isocenter.git"
 ```
 
@@ -13,7 +20,7 @@ pip install "git+https://github.com/kvnlng/Isocenter.git"
 To enable advanced entity detection (e.g., precise Patient Name recognition) for Redaction Zone Discovery:
 
 ```bash
-pip install "git+https://github.com/kvnlng/Isocenter.git#egg=isocenter[nlp]"
+pip install "isocenter[nlp]"
 python -m spacy download en_core_web_sm
 ```
 
@@ -27,7 +34,7 @@ model, `ZoneDiscoverer` falls back to its regex heuristics.
 To detect burned-in text in pixel data, install the `ocr` extra:
 
 ```bash
-pip install "git+https://github.com/kvnlng/Isocenter.git#egg=isocenter[ocr]"
+pip install "isocenter[ocr]"
 ```
 
 This also needs the Tesseract binary itself, which is not a Python
