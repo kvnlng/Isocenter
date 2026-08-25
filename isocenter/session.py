@@ -555,9 +555,14 @@ class DicomSession:
         """
         if sync and hasattr(self, 'store_backend'):
             get_logger().info("Saving session (Synchronous)...")
-            self.store_backend.save_all(self.store.patients)
+            self.store_backend.save_all(
+                self.store.patients, prune_absent_patients=True)
         elif hasattr(self, 'persistence_manager'):
-            self.persistence_manager.save_async(self.store.patients)
+            # The session owns the whole store, so rows for patients it no
+            # longer holds are stale -- including the pre-anonymisation row
+            # of a patient whose identifier has since changed.
+            self.persistence_manager.save_async(
+                self.store.patients, prune_absent_patients=True)
 
     def _restart_executor(self, max_workers=None):
         """

@@ -53,6 +53,68 @@ _UPSERT_INSTANCE_SQL = """
 """
 
 
+def _in_clause(values):
+    """A parameter placeholder list for an IN clause of this length."""
+    return ",".join("?" * len(values))
+
+
+def _delete_instances(cur, uids) -> None:
+    """Deletes instances and everything keyed to them.
+
+    `instance_attributes` and `instance_blobs` are keyed by instance UID.
+    The first declares `ON DELETE CASCADE`, but SQLite enforces foreign
+    keys only under `PRAGMA foreign_keys=ON`, which this store never sets
+    -- so nothing cascades and the rows have to be removed explicitly.
+
+    That matters more than tidiness: `instance_attributes` holds private
+    tag *values* as text. Leaving them behind after deleting the instance
+    leaves identifiable content in the database, still attributable by
+    UID.
+    """
+    if not uids:
+        return
+    rows = [(uid,) for uid in uids]
+    cur.executemany("DELETE FROM instance_attributes WHERE instance_uid=?", rows)
+    cur.executemany("DELETE FROM instance_blobs WHERE instance_uid=?", rows)
+    cur.executemany("DELETE FROM instances WHERE sop_instance_uid=?", rows)
+
+
+def _delete_series_subtrees(cur, series_pks) -> None:
+    """Deletes series rows and every instance beneath them."""
+    if not series_pks:
+        return
+    clause = _in_clause(series_pks)
+    uids = [row[0] for row in cur.execute(
+        f"SELECT sop_instance_uid FROM instances WHERE series_id_fk IN ({clause})",
+        series_pks).fetchall()]
+    _delete_instances(cur, uids)
+    cur.execute(f"DELETE FROM series WHERE id IN ({clause})", series_pks)
+
+
+def _delete_study_subtrees(cur, study_pks) -> None:
+    """Deletes study rows and every series and instance beneath them."""
+    if not study_pks:
+        return
+    clause = _in_clause(study_pks)
+    series_pks = [row[0] for row in cur.execute(
+        f"SELECT id FROM series WHERE study_id_fk IN ({clause})",
+        study_pks).fetchall()]
+    _delete_series_subtrees(cur, series_pks)
+    cur.execute(f"DELETE FROM studies WHERE id IN ({clause})", study_pks)
+
+
+def _delete_patient_subtrees(cur, patient_pks) -> None:
+    """Deletes patient rows and everything beneath them."""
+    if not patient_pks:
+        return
+    clause = _in_clause(patient_pks)
+    study_pks = [row[0] for row in cur.execute(
+        f"SELECT id FROM studies WHERE patient_id_fk IN ({clause})",
+        patient_pks).fetchall()]
+    _delete_study_subtrees(cur, study_pks)
+    cur.execute(f"DELETE FROM patients WHERE id IN ({clause})", patient_pks)
+
+
 @dataclass
 class _SaveTally:
     """What one `save_all` call wrote, for the summary log line."""
@@ -1156,7 +1218,8 @@ class SqliteStore:
             self.logger.error(f"Failed to persist pixel swap for {instance.sop_instance_uid}: {e}")
             raise e
 
-    def save_all(self, patients: List[Patient]):
+    def save_all(self, patients: List[Patient],
+                 prune_absent_patients: bool = False):
         """
         Incrementally persists the provided patients and their graph.
 
@@ -1168,6 +1231,13 @@ class SqliteStore:
 
         Args:
             patients (List[Patient]): The patient objects to save.
+            prune_absent_patients (bool): Delete patient rows that `patients`
+                does not contain. Only correct when the list is the entire
+                contents of the session, so it defaults to off: a partial
+                save that pruned would turn "store this one patient" into
+                "delete everyone else". `DicomSession.save()` owns the whole
+                store and passes True, which is what stops an anonymised
+                patient's original row surviving under its old identifier.
         """
         self.logger.info(
             "Saving %d patients to %s (Incremental)...", len(patients), self.db_path)
@@ -1186,6 +1256,10 @@ class SqliteStore:
                 for patient in patients:
                     saved_instances.extend(
                         self._save_patient(conn, cur, patient, tally))
+
+                if prune_absent_patients:
+                    self._delete_absent_patients(cur, patients)
+
                 conn.commit()
         except Exception:
             # No rollback here: `_get_connection` owns the transaction and
@@ -1224,6 +1298,15 @@ class SqliteStore:
                 saved.extend(
                     self._save_unsaved_instances(
                         conn, cur, series, series_pk, tally))
+
+            # After the upserts, so a series re-parented within this same
+            # save has already moved and is not mistaken for a deletion.
+            # Moving a child between *different* parents in one save is
+            # still unsupported -- the same limitation instances have
+            # always had.
+            self._delete_removed_series(cur, study, study_pk)
+
+        self._delete_removed_studies(cur, patient, patient_pk)
         return saved
 
     def _upsert_patient(self, cur, patient, tally) -> Optional[int]:
@@ -1290,20 +1373,59 @@ class SqliteStore:
     def _delete_removed_instances(cur, series, series_pk) -> int:
         """Deletes rows for instances no longer present in memory.
 
-        Run for every series, dirty or not. Removing an instance from a
+        Run for every series, changed or not. Removing an instance from a
         series' list mutates a plain Python list, which marks nothing --
         so the only way to notice a deletion is to compare the two sets.
         """
         stored = {row[0] for row in cur.execute(
             "SELECT sop_instance_uid FROM instances WHERE series_id_fk=?",
             (series_pk,)).fetchall()}
-        in_memory = {i.sop_instance_uid for i in series.instances}
+        removed = stored - {i.sop_instance_uid for i in series.instances}
+        _delete_instances(cur, removed)
+        return len(removed)
 
-        removed = stored - in_memory
-        if removed:
-            cur.executemany(
-                "DELETE FROM instances WHERE sop_instance_uid=?",
-                [(uid,) for uid in removed])
+    @staticmethod
+    def _delete_removed_series(cur, study, study_pk) -> int:
+        """Deletes series no longer present in memory, and their instances."""
+        stored = {row[1]: row[0] for row in cur.execute(
+            "SELECT id, series_instance_uid FROM series WHERE study_id_fk=?",
+            (study_pk,)).fetchall()}
+        in_memory = {s.series_instance_uid for s in study.series}
+        removed = [pk for uid, pk in stored.items() if uid not in in_memory]
+        _delete_series_subtrees(cur, removed)
+        return len(removed)
+
+    @staticmethod
+    def _delete_removed_studies(cur, patient, patient_pk) -> int:
+        """Deletes studies no longer present in memory, and their subtrees."""
+        stored = {row[1]: row[0] for row in cur.execute(
+            "SELECT id, study_instance_uid FROM studies WHERE patient_id_fk=?",
+            (patient_pk,)).fetchall()}
+        in_memory = {s.study_instance_uid for s in patient.studies}
+        removed = [pk for uid, pk in stored.items() if uid not in in_memory]
+        _delete_study_subtrees(cur, removed)
+        return len(removed)
+
+    @staticmethod
+    def _delete_absent_patients(cur, patients) -> int:
+        """Deletes patient rows the in-memory store no longer contains.
+
+        This is what closes the gap anonymisation opens. Patients are
+        upserted on `patient_id`, so changing that value -- exactly what
+        de-identification does -- writes a *new* row and orphans the old
+        one, with the original name and identifier still in it. The
+        studies are re-parented to the new row, so nothing ever visits the
+        old one again and no scoped deletion reaches it.
+
+        Runs after every patient has been written, never before: the
+        re-parenting has to have happened already, or this would delete
+        the subtree the new row is about to adopt.
+        """
+        stored = {row[1]: row[0] for row in cur.execute(
+            "SELECT id, patient_id FROM patients").fetchall()}
+        in_memory = {p.patient_id for p in patients}
+        removed = [pk for pid, pk in stored.items() if pid not in in_memory]
+        _delete_patient_subtrees(cur, removed)
         return len(removed)
 
     def _save_unsaved_instances(self, conn, cur, series, series_pk,

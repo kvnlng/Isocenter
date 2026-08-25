@@ -58,7 +58,8 @@ class PersistenceManager:
 
         self.queue.join()
 
-    def save_async(self, patients: List[Patient]):
+    def save_async(self, patients: List[Patient],
+                   prune_absent_patients: bool = False):
         """
         Queues an asynchronous save operation for a list of patients.
 
@@ -67,6 +68,12 @@ class PersistenceManager:
 
         Args:
             patients (List[Patient]): The list of patients to persist.
+            prune_absent_patients (bool): Whether this list is the entire
+                contents of the session, so patient rows it does not contain
+                may be deleted. Travels with the queued item rather than
+                being assumed here: callers queue single patients as well as
+                whole stores, and pruning on a single-patient save would
+                delete every other patient in the database.
         """
         # Auto-restart if we were shut down
         if not self.running or not self.thread or not self.thread.is_alive():
@@ -76,17 +83,16 @@ class PersistenceManager:
         # Shallow copy the list itself so if the session adds/removes patients, we have the old list.
         # But if attributes of patients change, we see the change. This is usually
         # acceptable "eventual consistency" for this UX.
-        snapshot = list(patients)
-        self.queue.put(snapshot)
+        self.queue.put((list(patients), prune_absent_patients))
 
     def _worker(self):
         while True:
             try:
                 # Wait for work
-                patients = self.queue.get(timeout=1.0)
+                item = self.queue.get(timeout=1.0)
 
                 # If we get a sentinel (None), we exit
-                if patients is None:
+                if item is None:
                     if self.running:
                         # Stale sentinel from previous shutdown - ignore it
                         self.queue.task_done()
@@ -95,9 +101,16 @@ class PersistenceManager:
                     break
 
                 # Perform the save
-                # We catch exceptions to prevent thread death
+                # Everything from unpacking onwards runs under the same
+                # try/finally, so `task_done()` is reached no matter what
+                # fails. A malformed item that escaped this block would
+                # leave the queue's unfinished count permanently above
+                # zero, and `flush()` waits on it: one bad item and every
+                # later save hangs forever.
                 try:
-                    self.store_backend.save_all(patients)
+                    patients, prune_absent_patients = item
+                    self.store_backend.save_all(
+                        patients, prune_absent_patients=prune_absent_patients)
                 except Exception as e:
                     get_logger().error(f"Background save failed: {e}")
                 finally:

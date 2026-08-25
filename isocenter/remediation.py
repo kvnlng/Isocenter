@@ -169,6 +169,12 @@ class RemediationService:
             if hasattr(entity, "attributes") and isinstance(entity.attributes, dict):
                 if proposal.target_attr in entity.attributes:
                     del entity.attributes[proposal.target_attr]
+                    # `attributes` is a plain dict, so deleting from it bumps
+                    # no revision -- unlike `set_attr`, which does. Without
+                    # this an already-saved instance reported no unsaved
+                    # changes after its PHI was stripped, the next save
+                    # skipped it, and the identifier stayed in the database.
+                    entity.mark_modified()
                     details = f"Removed Tag {proposal.target_attr} from {finding.entity_uid}"
                     action_type = "REMEDIATION_REMOVE"
             # 2. Python Object Attribute
