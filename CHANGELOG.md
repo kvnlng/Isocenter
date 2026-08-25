@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-25
+
+**If you de-identified data with 0.7.x or earlier, re-audit it.** Two
+defects in this release meant the session could retain or export
+identifiers it reported as handled: the PHI scan never opened DICOM
+sequences (#57), and the session database kept rows the session had
+removed. Neither announced itself -- both reported success. The
+individual entries below say what was affected.
+
 ### Added
 
 - **The version is declared once, in `isocenter/_version.py`.** `setup.py` parses that file (without importing the package, which would require pydicom and numpy in the build environment) and `isocenter.__version__` re-exports it, so the distribution, the runtime value and the source tree cannot disagree. `tests/test_version_contract.py` holds the files that restate it to the same number -- `CITATION.cff`, `CHANGELOG.md` -- and rejects the old `0.0.0` placeholder.

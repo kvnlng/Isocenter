@@ -86,11 +86,14 @@ publisher configuration is updated to match.
 
 1. Move `[Unreleased]` in `CHANGELOG.md` to a new `[x.y.z] - YYYY-MM-DD`
    section.
-2. Bump `version` in `setup.py`.
+2. Bump `__version__` in `isocenter/_version.py`. That is the only
+   place the number is declared; `setup.py` parses it and
+   `isocenter.__version__` re-exports it.
 3. Update `version` and `date-released` in `CITATION.cff`.
 4. Merge to `main` with CI green.
-5. Tag `vx.y.z`. **The tag must match `setup.py` exactly** -- the build
-   job compares them and refuses to publish a mismatch. Publishing
+5. Tag `vx.y.z`. **The tag must match the declared version exactly** --
+   the build job runs `setup.py --version` and refuses to publish a
+   mismatch. Publishing
    `v0.7.1` from a tree that still says `0.7.0` would produce a release
    nobody can install under the name they were given, and permanently
    spend the version it did claim, since PyPI never allows reuse.
