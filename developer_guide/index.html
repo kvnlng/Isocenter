@@ -1327,11 +1327,14 @@ publisher configuration is updated to match.</p>
 <ol>
 <li>Move <code>[Unreleased]</code> in <code>CHANGELOG.md</code> to a new <code>[x.y.z] - YYYY-MM-DD</code>
    section.</li>
-<li>Bump <code>version</code> in <code>setup.py</code>.</li>
+<li>Bump <code>__version__</code> in <code>isocenter/_version.py</code>. That is the only
+   place the number is declared; <code>setup.py</code> parses it and
+   <code>isocenter.__version__</code> re-exports it.</li>
 <li>Update <code>version</code> and <code>date-released</code> in <code>CITATION.cff</code>.</li>
 <li>Merge to <code>main</code> with CI green.</li>
-<li>Tag <code>vx.y.z</code>. <strong>The tag must match <code>setup.py</code> exactly</strong> -- the build
-   job compares them and refuses to publish a mismatch. Publishing
+<li>Tag <code>vx.y.z</code>. <strong>The tag must match the declared version exactly</strong> --
+   the build job runs <code>setup.py --version</code> and refuses to publish a
+   mismatch. Publishing
    <code>v0.7.1</code> from a tree that still says <code>0.7.0</code> would produce a release
    nobody can install under the name they were given, and permanently
    spend the version it did claim, since PyPI never allows reuse.</li>
