@@ -182,9 +182,13 @@ def test_documented_basic_profile_tag_count_matches_the_code():
         f"isocenter/profiles.py defines {actual}. Update the sentence in "
         "docs/waveforms.md.")
     # Known-inert tags: present in BASIC_PROFILE but not reachable by the
-    # worker clone's shallow scan (#57). Update this set, not the
-    # assertion below, if #57 is fixed or another tag is found inert.
-    known_inert = {"0070,0006"}
+    # scan. Empty since 0.8.0 -- `(0070,0006)` was the only entry, inert
+    # because the scan never opened sequences (#57).
+    # `test_the_basic_profile_reaches_unformatted_text_value` in
+    # tests/test_nested_phi_audit.py proves it fires; this only keeps the
+    # doc sentence honest. Add to this set, do not weaken the assertion,
+    # if another tag is ever found inert.
+    known_inert = set()
     assert known_inert <= set(BASIC_PROFILE), (
         "a tag documented as known-inert is no longer in BASIC_PROFILE; "
         "update `known_inert` and the doc sentence together")
@@ -192,4 +196,4 @@ def test_documented_basic_profile_tag_count_matches_the_code():
     assert claimed_effective == expected_effective, (
         f"docs/waveforms.md claims {claimed_effective} effective tags but "
         f"the profile defines {actual} tags with {len(known_inert)} known "
-        f"inert (#57), i.e. {expected_effective} effective.")
+        f"inert, i.e. {expected_effective} effective.")

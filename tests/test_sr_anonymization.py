@@ -76,18 +76,23 @@ def test_sr_recursive_indexing():
 
 def test_phi_inspector_deep_scan():
     """
-    Verifies that PhiInspector uses the index to find deep PHI.
+    Verifies that PhiInspector finds PHI nested in a sequence.
+
+    This used to attach `deep_item` to nothing and hand-append it to
+    `inst.text_index`, so it pinned the index as the mechanism. The index
+    is built once at ingest and is neither rebuilt when a session loads
+    from the store nor carried into the worker copies `session.audit()`
+    scans -- so it was empty on every real path, and the deep scan this
+    test proved was working never once ran in production (#57). The scan
+    now walks the item graph, so the item has to actually be in one.
     """
-    # 1. Setup Instance with Index
+    # 1. Setup Instance with a nested sequence item
     inst = Instance("1.2.3", "class", 1)
 
-    # Mock deeply nested item
     from isocenter.entities import DicomItem
     deep_item = DicomItem()
     deep_item.set_attr("0040,a160", "Patient has history of diabetes.")
-
-    # Add to index manually
-    inst.text_index.append((deep_item, "0040,a160"))
+    inst.add_sequence_item("0040,a730", deep_item)
 
     # 2. Setup Inspector with rule for TextValue (0040,A160)
     # We pretend 0040,A160 is flagged as PHI (it usually is or should be cleaned)
@@ -106,4 +111,7 @@ def test_phi_inspector_deep_scan():
     assert f.tag == "0040,a160"
     assert f.value == "Patient has history of diabetes."
     assert f.remediation_proposal.new_value == "ANONYMIZED"
-    assert f.entity == deep_item # Crucial: Point to deep item, not root instance
+    assert f.entity is deep_item  # Crucial: Point to deep item, not root instance
+    assert f.entity_path == (("0040,a730", 0),), (
+        "the finding must record where the item sits, or it cannot be "
+        "found again after crossing a process boundary")
