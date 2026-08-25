@@ -56,17 +56,23 @@ jobs:
       - name: Release tag must match the packaged version
         if: github.event_name == 'release'
         run: |
-          # Publishing v0.7.1 from a tree that still says version="0.7.0"
-          # produces a release nobody can install by the name they were
-          # given, and the version it *did* claim is then permanently
-          # spent. Fail here instead.
+          # Publishing v0.7.1 from a tree that still says 0.7.0 produces a
+          # release nobody can install by the name they were given, and the
+          # version it *did* claim is then permanently spent. Fail here
+          # instead.
+          #
+          # Asks setuptools for the value it will build with, rather than
+          # parsing the file. The version now lives in isocenter/_version.py
+          # and setup.py derives it, so a regex over setup.py matches
+          # nothing -- and a gate that cannot find a version to compare is
+          # worse than no gate.
           tag="${GITHUB_REF_NAME#v}"
-          version=$(python -c "import re, pathlib; print(re.search(r'version=\"([^\"]+)\"', pathlib.Path('setup.py').read_text()).group(1))")
+          version=$(python setup.py --version)
           if [ "$tag" != "$version" ]; then
-            echo "::error::release tag ${GITHUB_REF_NAME} does not match setup.py version ${version}"
+            echo "::error::release tag ${GITHUB_REF_NAME} does not match packaged version ${version}"
             exit 1
           fi
-          echo "tag ${GITHUB_REF_NAME} matches setup.py version ${version}"
+          echo "tag ${GITHUB_REF_NAME} matches packaged version ${version}"
 
       - name: Metadata must be acceptable to the index
         run: twine check dist/*

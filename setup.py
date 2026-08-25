@@ -1,12 +1,30 @@
 import pathlib
+import re
 
 from setuptools import setup, find_packages
 
-README = (pathlib.Path(__file__).parent / "README.md").read_text(encoding="utf-8")
+HERE = pathlib.Path(__file__).parent
+README = (HERE / "README.md").read_text(encoding="utf-8")
+
+
+def read_version():
+    """The version from isocenter/_version.py, without importing it.
+
+    Parsed rather than imported because importing the package pulls in
+    pydicom and numpy, and a build environment is not required to have
+    them installed. This is what makes _version.py the single source:
+    setup.py restating the number is how the two came to disagree.
+    """
+    source = (HERE / "isocenter" / "_version.py").read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']',
+                      source, re.MULTILINE)
+    if not match:
+        raise RuntimeError("No __version__ found in isocenter/_version.py")
+    return match.group(1)
 
 setup(
     name="isocenter",
-    version="0.7.0",
+    version=read_version(),
     description="A Python DICOM Object Model and Redaction Toolkit",
     long_description=README,
     long_description_content_type="text/markdown",
