@@ -92,8 +92,8 @@ publisher configuration is updated to match.
 3. Update `version` and `date-released` in `CITATION.cff`.
 4. Merge to `main` with CI green.
 5. Tag `vx.y.z`. **The tag must match the declared version exactly** --
-   the build job runs `setup.py --version` and refuses to publish a
-   mismatch. Publishing
+   the build job reads the version out of the built wheel and refuses to
+   publish a mismatch. Publishing
    `v0.7.1` from a tree that still says `0.7.0` would produce a release
    nobody can install under the name they were given, and permanently
    spend the version it did claim, since PyPI never allows reuse.
