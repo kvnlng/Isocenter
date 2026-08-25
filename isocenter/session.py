@@ -25,7 +25,7 @@ from .persistence import SqliteStore
 from .crypto import KeyManager
 from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
-from .parallel import run_parallel
+from .parallel import run_parallel, _env_int
 from .configuration import IsocenterConfiguration, FlowList
 from .entities import PhiStatus
 from .profiles import PRIVACY_PROFILES
@@ -425,6 +425,25 @@ class LockingResult(list):
 
     def __repr__(self):
         return f"<LockingResult: {len(self)} instances secured>"
+
+
+def _redaction_worker_count() -> int:
+    """How many workers to redact pixels with.
+
+    Half the CPUs, capped at eight. Each worker holds a decoded image, so
+    this cap is a memory ceiling rather than a throughput choice --
+    `run_parallel`'s own default of one worker per CPU has exhausted
+    memory on large studies.
+
+    `ISOCENTER_MAX_WORKERS` overrides it. A malformed value used to raise
+    inside the handler that swallowed everything, so a typo in a shell
+    profile turned redaction into a no-op that reported success; now it
+    warns and falls back to the default.
+    """
+    override = _env_int("ISOCENTER_MAX_WORKERS")
+    if override is not None:
+        return max(1, override)
+    return max(1, min((os.cpu_count() or 1) // 2, 8))
 
 
 class DicomSession:
@@ -1757,114 +1776,142 @@ class DicomSession:
         """
         Applies pixel redaction rules to the current session.
 
-        Uses the currently loaded configuration (`self.configuration.rules`) to find and
-        redact sensitive regions in the pixel data. This operation modifies the
-        pixel data in-memory (and via Sidecar for persistence).
+        Uses the currently loaded configuration (`self.configuration.rules`) to
+        find and redact sensitive regions in the pixel data. This operation
+        modifies the pixel data in memory (and via Sidecar for persistence);
+        call `.save()` afterwards to persist it.
 
         Args:
             show_progress (bool): If True, displays a progress bar.
+
+        Returns:
+            int: How many instances were updated in memory. Zero means nothing
+                was redacted -- no rules loaded, or no image matched one.
+
+        Raises:
+            Exception: Whatever the redaction backend raised, after logging it.
+                Redaction is the step that removes burned-in PHI, so a failure
+                here must reach the caller. This used to be caught, printed as
+                `Execution interrupted`, and followed by `Execution Complete`,
+                which left a half-redacted session looking like a finished one.
         """
         if not self.configuration.rules:
             get_logger().warning("No configuration loaded. Use .load_config() first.")
             print("No configuration loaded. Use .load_config() first.")
-            return
+            return 0
 
         service = RedactionService(self.store, self.store_backend)
-
         try:
+            return self._apply_redaction_rules(service, show_progress)
+        except Exception:
+            get_logger().exception(
+                "Redaction failed. Images already processed are still redacted "
+                "in memory; the rest are untouched.")
+            raise
 
+    def _apply_redaction_rules(self, service, show_progress):
+        """Runs every loaded rule and applies the results to the store.
 
-            # Parallel Execution for Speed
-            # Threading works well here because pixel I/O and NumPy ops release GIL.
-            # Shared memory allows in-place modification of instances.
-            # OPTIMIZATION: Limited to 0.5x CPU or Max 8 to prevent OOM with large datasets
-            cpu_count = os.cpu_count() or 1
-            if os.environ.get("ISOCENTER_MAX_WORKERS"):
-                max_workers = int(os.environ["ISOCENTER_MAX_WORKERS"])
-            else:
-                max_workers = max(1, min(int(cpu_count * 0.5), 8))
+        Returns the number of instances updated. Raises on failure; the
+        caller logs and re-raises.
+        """
+        tasks = []
+        get_logger().info("Analyzing workload...")
+        for rule in self.configuration.rules:
+            tasks.extend(service.prepare_redaction_tasks(rule))
 
-            # Generate granular tasks for better load balancing
-            all_tasks = []
-            get_logger().info("Analyzing workload...")
-            for rule in self.configuration.rules:
-                tasks = service.prepare_redaction_tasks(rule)
-                all_tasks.extend(tasks)
+        if not tasks:
+            get_logger().warning("No matching images found for any loaded rules.")
+            print("No matching images found for any loaded rules.")
+            return 0
 
-            if not all_tasks:
-                get_logger().warning("No matching images found for any loaded rules.")
-                print("No matching images found for any loaded rules.")
-                return
+        max_workers = _redaction_worker_count()
+        print(f"Queued {len(tasks)} redaction tasks across "
+              f"{len(self.configuration.rules)} rules.")
+        print(f"Executing using {max_workers} workers (Process Isolation)...")
+        get_logger().info(
+            f"Starting granular redaction ({len(tasks)} tasks, "
+            f"workers={max_workers})...")
 
-            print(
-                f"Queued {len(all_tasks)} redaction tasks across {len(self.configuration.rules)} rules.")
-            print(f"Executing using {max_workers} workers (Process Isolation)...")
-            # 2. Parallel Redaction (Granular)
-            get_logger().info(
-                f"Starting granular redaction ({
-                    len(all_tasks)} tasks, workers={max_workers})...")
+        # Keyed before any worker starts. A redacted image gets a new SOP
+        # UID, and `run_parallel` uses threads on a free-threaded build --
+        # where the workers share these very objects, not copies of them.
+        # A map built after dispatch would be keyed on the post-redaction
+        # UIDs and match none of the results coming back, so every image
+        # would be dropped by a run that reported no error.
+        instances = {t['instance'].sop_instance_uid: t['instance'] for t in tasks}
 
-            # Map for quick Result application (SOP -> Instance)
-            instance_map = {t['instance'].sop_instance_uid: t['instance'] for t in all_tasks}
+        # Pixel I/O and NumPy ops release the GIL. The generator is consumed
+        # incrementally so each worker's image is applied and released rather
+        # than held until the end.
+        mutations = run_parallel(
+            service.execute_redaction_task,
+            tasks,
+            desc="Redacting Pixels",
+            max_workers=max_workers,
+            return_generator=True,
+            chunksize=1,
+            progress=show_progress)
 
-            try:
-                # Use Process Isolation (Standard Pool) - Workers clean up via GC/Exit
-                # We consume generator to apply updates incrementally
-                results_gen = run_parallel(
-                    service.execute_redaction_task,
-                    all_tasks,
-                    desc="Redacting Pixels",
-                    max_workers=max_workers,
-                    return_generator=True,
-                    chunksize=1,
-                    progress=show_progress)
+        applied = self._apply_redaction_mutations(mutations, instances)
 
-                for mutation in results_gen:
-                    if mutation:
-                        sop = mutation.get('original_sop_uid') or mutation.get('sop_uid')
-                        if sop in instance_map:
-                            inst = instance_map[sop]
+        if applied < len(tasks):
+            get_logger().warning(
+                f"Redaction updated {applied} of {len(tasks)} targeted images. "
+                "The remainder returned no change: already redacted under this "
+                "configuration, pixel data that would not load, or a worker "
+                "that failed -- see the entries above for which.")
 
-                            # 1. Apply Attributes & Sequences
-                            if mutation.get('attributes'):
-                                inst.attributes.update(mutation['attributes'])
-                            if mutation.get('sequences'):
-                                inst.sequences.update(mutation['sequences'])
+        service.scan_burned_in_annotations()
 
-                            # 2. Apply Pixel Loader (Critical)
-                            # The loader acts as our handle to the sidecar data
-                            loader = mutation.get('pixel_loader')
-                            if loader:
-                                # Fix Reference: Loader points to Worker's Instance copy.
-                                # Re-point it to the Main Process Instance.
-                                loader.instance = inst
-                                inst._pixel_loader = loader
-                                print(f"DEBUG: Updated loader for {sop} -> {loader.offset}")
+        print(f"Redaction complete: {applied} of {len(tasks)} images updated. "
+              "Remember to call .save() to persist.")
+        return applied
 
-                            if mutation.get('pixel_hash'):
-                                inst._pixel_hash = mutation['pixel_hash']
+    @staticmethod
+    def _apply_redaction_mutations(mutations, instances):
+        """Copies each worker's result back onto the in-memory instance.
 
-                            inst.mark_modified()
-                            print(f"DEBUG: Instance {sop} updated in memory.")
-                        else:
-                            print(
-                                f"DEBUG: MISS! {sop} not in instance_map {
-                                    list(
-                                        instance_map.keys())[
-                                        :3]}...")
+        `instances` maps pre-redaction SOP UID to the instance in this
+        process. Workers operate on copies, so a mutation that is never
+        applied here is a redaction that did not happen. Returns how many
+        landed.
+        """
+        applied = 0
 
-            finally:
-                pass
+        for mutation in mutations:
+            if not mutation:
+                # The worker reported no change. It logs its own reason;
+                # the shortfall is summarised by the caller.
+                continue
 
-            # Run Safety Checks
-            service.scan_burned_in_annotations()
+            sop = mutation.get('original_sop_uid') or mutation.get('sop_uid')
+            instance = instances.get(sop)
+            if instance is None:
+                get_logger().error(
+                    f"Redacted image {sop} does not match any targeted "
+                    "instance, so its redaction was discarded.")
+                continue
 
-            print("Execution Complete. Remember to call .save() to persist.")
-            print("Execution Complete. Session saved.")
+            if mutation.get('attributes'):
+                instance.attributes.update(mutation['attributes'])
+            if mutation.get('sequences'):
+                instance.sequences.update(mutation['sequences'])
 
-        except Exception as e:
-            get_logger().error(f"Execution interrupted: {e}")
-            print(f"Execution interrupted: {e}")
+            loader = mutation.get('pixel_loader')
+            if loader:
+                # The loader is our handle on the sidecar copy, but it points
+                # at the worker's instance. Re-point it at this process's.
+                loader.instance = instance
+                instance._pixel_loader = loader
+
+            if mutation.get('pixel_hash'):
+                instance._pixel_hash = mutation['pixel_hash']
+
+            instance.mark_modified()
+            applied += 1
+
+        return applied
 
     def redact_by_machine(self, serial_number: str, roi: List[int]):
         """
