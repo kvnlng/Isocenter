@@ -36,16 +36,27 @@ class RemediationService:
 
         Args:
             findings (List[PhiFinding]): The list of findings with proposals to execute.
+
+        Returns:
+            int: How many remediations were applied. Failures are logged and
+                excluded, so this is a count of what actually changed.
         """
         processed_entities = set()  # To avoid double-processing if multiple findings point to same entity/attr
         audit_buffer = []
+        failures = 0
 
         for finding in tqdm(findings, desc="Anonymizing Metadata", unit="finding"):
             if not finding.remediation_proposal:
                 continue
 
-            # Simple deduping key
-            key = (finding.entity_uid, finding.field_name)
+            # Deduping key. The path is part of it because a finding
+            # raised inside a sequence carries the *instance's* UID --
+            # nested items have none of their own -- so two annotation
+            # items on one instance holding the same tag produced one key
+            # between them and the second was dropped, leaving its text in
+            # place. Unreachable until the scan started opening sequences
+            # (#57), and the same failure that fix was about.
+            key = (finding.entity_uid, finding.entity_path, finding.field_name)
             if key in processed_entities:
                 continue
 
@@ -53,6 +64,7 @@ class RemediationService:
                 self._apply_single_remediation(finding, audit_buffer)
                 processed_entities.add(key)
             except Exception as e:
+                failures += 1
                 self.logger.error(
                     f"Failed to apply remediation for {
                         finding.entity_uid} ({
@@ -62,6 +74,14 @@ class RemediationService:
         if self.store_backend and audit_buffer:
             self.logger.info(f"Flushing {len(audit_buffer)} audit logs...")
             self.store_backend.log_audit_batch(audit_buffer)
+
+        if failures:
+            self.logger.warning(
+                f"{failures} of {failures + len(processed_entities)} "
+                "remediations failed and were not applied. The values they "
+                "targeted are still present.")
+
+        return len(processed_entities)
 
     def _apply_single_remediation(self, finding: PhiFinding, audit_buffer: list = None):
         """

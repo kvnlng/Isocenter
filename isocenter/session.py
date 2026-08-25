@@ -1942,6 +1942,12 @@ class DicomSession:
 
         Args:
             findings (List[PhiFinding], optional): Specific findings to clean.
+
+        Returns:
+            int: How many remediations were applied. Failures are logged and
+                excluded, so a caller can tell a clean run from a partial
+                one -- this used to be unreported, and the console line
+                below printed the literal "None".
         """
         from .remediation import RemediationService
         # Pass date jitter config to constructor
@@ -1963,6 +1969,7 @@ class DicomSession:
 
         get_logger().info(f"Anonymized {count} entities.")
         print(f"Anonymized/Remediated {count} tags according to policy.")
+        return count
 
     # =========================================================================
     # EXPORT
