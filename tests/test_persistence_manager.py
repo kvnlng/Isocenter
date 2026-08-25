@@ -15,8 +15,10 @@ class MockStore(SqliteStore):
         self.db_path = db_path
         self.saved_patients = []
 
-    def save_all(self, patients):
-        # Flatten list for simplicity or just store the batch
+    def save_all(self, patients, prune_absent_patients=False):
+        # Signature mirrors SqliteStore.save_all: the manager passes
+        # prune_absent_patients, and a double that cannot accept it fails
+        # inside the worker thread, where the error becomes a log line.
         self.saved_patients.extend(patients)
 
 @pytest.fixture
@@ -105,7 +107,10 @@ def test_flush_recover_from_crash(pm):
 
     # 2. Inject work directly into queue (simulating work queued just before/during crash)
     p = Patient("P_CRASH", "Crash Test")
-    pm.queue.put([p])
+    # Queue items are (patients, prune_absent_patients), as save_async
+    # builds them; this test injects one directly to simulate a crash
+    # that left work outstanding.
+    pm.queue.put(([p], False))
 
     # 3. Call flush()
     # WITHOUT FIX: This should just return immediately because !is_alive(), leaving item in queue.
