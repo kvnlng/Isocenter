@@ -605,13 +605,22 @@ class DicomSession:
 
     def release_memory(self):
         """
-        Attempts to release memory by unloading pixel data from all instances.
-        Safe to call: only unloads data that is safely persisted (on disk or sidecar).
+        Attempts to release memory by unloading cached pixel and waveform
+        data from all instances.
+
+        Safe to call: each unload happens only when the data can be
+        restored (from disk or the sidecar), so nothing is discarded.
         Useful after running extensive redaction or export operations.
+
+        Waveforms matter here as much as pixels: samples are cached as
+        int16 of shape (num_samples, num_channels), which is ~80 KB for a
+        10-second 12-lead but ~104 MB for a 24-hour 3-channel Holter.
         """
         get_logger().info("Releasing memory (RAM cleanup)...")
         count = 0
-        freed = 0
+        pixels_freed = 0
+        waveforms_freed = 0
+        instances_freed = 0
 
         # Count total instances first for progress bar
         total_instances = sum(len(se.instances)
@@ -620,20 +629,39 @@ class DicomSession:
         if total_instances == 0:
             return
 
-        with tqdm(total=total_instances, desc="Releasing Memory", unit="img") as pbar:
+        with tqdm(total=total_instances, desc="Releasing Memory", unit="inst") as pbar:
             for p in self.store.patients:
                 for st in p.studies:
                     for se in st.series:
                         for inst in se.instances:
                             count += 1
-                            if inst.unload_pixel_data():
-                                freed += 1
+                            # Both unloads report True when there was
+                            # nothing cached, so the return value alone
+                            # cannot tell "released" from "there was
+                            # none". Counting it as freed is how this
+                            # used to report every instance in a session
+                            # holding nothing as reclaimed -- the same
+                            # false assurance as not freeing at all.
+                            had_pixels = inst.pixel_array is not None
+                            had_waveform = inst.waveform_array is not None
+
+                            gave_pixels = inst.unload_pixel_data() and had_pixels
+                            gave_waveform = (inst.unload_waveform_data()
+                                             and had_waveform)
+
+                            pixels_freed += 1 if gave_pixels else 0
+                            waveforms_freed += 1 if gave_waveform else 0
+                            if gave_pixels or gave_waveform:
+                                instances_freed += 1
                             pbar.update(1)
 
         get_logger().info(
-            f"Memory release complete. Unloaded pixels for {freed}/{count} instances.")
-        if freed > 0:
-            print(f"Memory Cleanup: Released {freed} images from RAM.")
+            f"Memory release complete. Freed {instances_freed}/{count} "
+            f"instances (pixels: {pixels_freed}, waveform samples: "
+            f"{waveforms_freed}).")
+        if instances_freed > 0:
+            print(f"Memory Cleanup: Released {pixels_freed} pixel arrays and "
+                  f"{waveforms_freed} waveform arrays from RAM.")
 
     def compact(self):
         """
