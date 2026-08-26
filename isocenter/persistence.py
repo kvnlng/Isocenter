@@ -1318,9 +1318,17 @@ class SqliteStore:
         try:
             with self._get_connection() as conn:
                 cur = conn.cursor()
+                pending_deletions = []
                 for patient in patients:
                     saved_instances.extend(
-                        self._save_patient(conn, cur, patient, tally))
+                        self._save_patient(conn, cur, patient, tally,
+                                           pending_deletions))
+
+                # Every upsert in the whole save has now run, so a child
+                # that moved to a different parent already points at it and
+                # a scoped delete will not mistake it for a removal (#77).
+                for delete, parent, parent_pk in pending_deletions:
+                    delete(cur, parent, parent_pk)
 
                 if prune_absent_patients:
                     self._delete_absent_patients(cur, patients)
@@ -1343,8 +1351,16 @@ class SqliteStore:
 
         self._log_save_summary(tally)
 
-    def _save_patient(self, conn, cur, patient, tally) -> List[Tuple[Instance, int]]:
-        """Persists one patient's subtree. Returns the instances written."""
+    def _save_patient(self, conn, cur, patient, tally,
+                      pending_deletions) -> List[Tuple[Instance, int]]:
+        """Persists one patient's subtree. Returns the instances written.
+
+        Deletions are appended to `pending_deletions` rather than run
+        here. They must not execute until every parent in the save has
+        been walked: a scoped `WHERE parent_id_fk = ?` delete is only
+        correct once the row it might delete has had the chance to be
+        claimed by its new parent (#77).
+        """
         patient_pk = self._upsert_patient(cur, patient, tally)
         if patient_pk is None:
             return []
@@ -1355,23 +1371,29 @@ class SqliteStore:
             if study_pk is None:
                 continue
 
+            # A child moved between parents mutates the *parent's* list,
+            # which marks nothing dirty -- so the child's own upsert never
+            # runs and its foreign key would still name the old parent.
+            # Correcting it here, from the parent that now holds it, is
+            # what makes the deferred deletion below see the truth (#77).
+            self._reparent_series(cur, study, study_pk)
+
             for series in study.series:
                 series_pk = self._upsert_series(cur, series, study_pk, tally)
                 if series_pk is None:
                     continue
-                self._delete_removed_instances(cur, series, series_pk)
+                self._reparent_instances(cur, series, series_pk)
+                pending_deletions.append(
+                    (self._delete_removed_instances, series, series_pk))
                 saved.extend(
                     self._save_unsaved_instances(
                         conn, cur, series, series_pk, tally))
 
-            # After the upserts, so a series re-parented within this same
-            # save has already moved and is not mistaken for a deletion.
-            # Moving a child between *different* parents in one save is
-            # still unsupported -- the same limitation instances have
-            # always had.
-            self._delete_removed_series(cur, study, study_pk)
+            pending_deletions.append(
+                (self._delete_removed_series, study, study_pk))
 
-        self._delete_removed_studies(cur, patient, patient_pk)
+        pending_deletions.append(
+            (self._delete_removed_studies, patient, patient_pk))
         return saved
 
     def _upsert_patient(self, cur, patient, tally) -> Optional[int]:
@@ -1440,6 +1462,38 @@ class SqliteStore:
             "SELECT id FROM series WHERE series_instance_uid=?",
             (series.series_instance_uid,)).fetchone()
         return row[0] if row else None
+
+    @staticmethod
+    def _reparent_series(cur, study, study_pk) -> None:
+        """Point this study's series rows at it, wherever they were before.
+
+        `_upsert_series` writes only when the series has unsaved changes,
+        and moving a series between studies mutates the old study's list
+        rather than the series -- so nothing marks it dirty and its
+        `study_id_fk` would go on naming the study that no longer holds
+        it. Restricted to rows whose key actually differs, so the ordinary
+        case costs one statement and updates nothing.
+        """
+        uids = [s.series_instance_uid for s in study.series]
+        if not uids:
+            return
+        placeholders = ",".join("?" * len(uids))
+        cur.execute(
+            f"UPDATE series SET study_id_fk=? "
+            f"WHERE series_instance_uid IN ({placeholders}) AND study_id_fk!=?",
+            (study_pk, *uids, study_pk))
+
+    @staticmethod
+    def _reparent_instances(cur, series, series_pk) -> None:
+        """Point this series' instance rows at it. See `_reparent_series`."""
+        uids = [i.sop_instance_uid for i in series.instances]
+        if not uids:
+            return
+        placeholders = ",".join("?" * len(uids))
+        cur.execute(
+            f"UPDATE instances SET series_id_fk=? "
+            f"WHERE sop_instance_uid IN ({placeholders}) AND series_id_fk!=?",
+            (series_pk, *uids, series_pk))
 
     @staticmethod
     def _delete_removed_instances(cur, series, series_pk) -> int:
