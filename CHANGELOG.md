@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A test that had never once run now runs.** `tests/test_discovery_integration.py` skipped unconditionally because `faker` was undeclared, making it the single skip in an otherwise green suite -- dead coverage reporting as a skip rather than as a gap, over redaction-zone logic on a de-identification product. The skip message compounded it by naming `pillow`, which is in `install_requires` and always present, sending anyone who investigated to the wrong place.
+
+  `faker` is now in the `tests` extra, so its absence is an error rather than a silent loss of coverage. The remaining skip is narrow and accurate: this test discovers zones from *burned-in pixel text*, so it needs the `ocr` extra **and** a `tesseract` binary on PATH -- something pip cannot install, which is why it stays a skip rather than becoming a failure. That dependency was not identified in the issue; without OCR every machine yields zero zones and the assertions are vacuous rather than merely unrun.
+
+  CI now installs `tesseract-ocr` and the `ocr` extra, so the test executes there rather than skipping. The graceful-degradation path is unaffected: it is covered by patching `HAS_OCR` (`tests/test_pixel_analysis.py`), not by leaving OCR uninstalled. The suite now reports **545 passed, 0 skipped**.
+
+  The test needed no repair once it could run -- it passes as written, without spacy, because the regex fallback's `PROPER_NOUN_CANDIDATE` classification satisfies it. Leftover exploratory comments referencing a `reproduce_issue_v2.py` scratch script, and debug `print()` calls in the assertion loop, are gone. (#44)
+
 - **`release_memory()` never freed waveform samples, and overcounted what it did free.** The traversal called `unload_pixel_data()` and nothing else, so the one operation Isocenter offers for reclaiming RAM did nothing for waveform-bearing instances. `Instance.unload_waveform_data()` has existed since #11 as the exact counterpart, with the same safety guard; nothing called it. Samples cache as int16 of shape (num_samples, num_channels) -- ~80 KB for a 10-second 12-lead, but ~104 MB for a 24-hour 3-channel Holter, so a cohort of Holter studies pinned hundreds of megabytes per record with no way to release it.
 
   The count was wrong in the same direction. Both `unload_pixel_data()` and `unload_waveform_data()` return `True` when there was nothing cached -- "already absent" is a successful unload -- so `freed` counted every instance it visited. A session holding nothing in RAM reported every instance as reclaimed. That is the same false assurance as not freeing at all: the user is told memory was returned when none was.
