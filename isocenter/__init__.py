@@ -29,25 +29,30 @@ except ImportError as e:
         ) from e
     raise
 
-# Configure pydicom handlers
-# We prioritize pylibjpeg (if installed) and pillow.
-# GDCM is often problematic to install via pip, so pylibjpeg is preferred for JPEG/JPEG-LS/RLE.
-try:
-    from pydicom import config as pydicom_config
-    import pydicom.pixel_data_handlers.gdcm_handler as gdcm_handler
-    import pydicom.pixel_data_handlers.pillow_handler as pillow_handler
-    import pydicom.pixel_data_handlers.numpy_handler as numpy_handler
-    from . import imagecodecs_handler
-
-    # We explicitly define the priority list using module objects
-    pydicom_config.pixel_data_handlers = [
-        gdcm_handler,
-        imagecodecs_handler,
-        pillow_handler,
-        numpy_handler
-    ]
-except ImportError:
-    pass
+# Codec preference is deliberately NOT expressed here.
+#
+# Isocenter used to assign a four-entry priority list to
+# `pydicom.config.pixel_data_handlers`. On pydicom 3.x nothing reads it:
+# decoding picks its backend from `Dataset._pixel_array_opts`, which
+# defaults to `{"use_pdh": False}`, and the handler list is consulted
+# only on the `use_pdh` branch. The assignment succeeded and the
+# attribute held the list, so it looked configured to anyone reading
+# this file -- silent precisely because the attribute is writable.
+#
+# It was also net-negative if it had ever been read: the list *replaced*
+# pydicom's defaults, dropping the jpeg_ls, pylibjpeg and rle handlers
+# that ship with it. setup.py requires pydicom>=3.0.0, so there is no
+# supported version on which this did anything but narrow support.
+#
+# pydicom 3.x has no notion of a priority list to migrate it to --
+# `pixel_array(..., decoding_plugin=...)` names a single plugin, and the
+# `pydicom.pixels` backend orders its own fallbacks per transfer syntax.
+# Expressing a preference is therefore a feature, not a repair, and is
+# left to #33.
+#
+# `imagecodecs` support is unaffected, because it never came from this
+# list: `Instance.get_pixel_data` calls `isocenter.imagecodecs_handler`
+# directly when pydicom fails to decode (see entities.py).
 
 # Declared in _version.py, which setup.py also reads. Deriving it from
 # importlib.metadata instead asks "what is installed under this name",

@@ -11,26 +11,33 @@ from isocenter.entities import Instance
 # Import isocenter to trigger __init__ handler registration
 import isocenter
 
-def test_handler_registration():
-    """Verifies that the correct handlers are registered in pydicom."""
-    handlers = pydicom.config.pixel_data_handlers
+def test_importing_isocenter_does_not_claim_a_codec_priority_it_cannot_honour():
+    """`config.pixel_data_handlers` is unread on pydicom 3.x (#46).
 
-    # We expect pylibjpeg to be present now
-    handler_names = [h.__name__ if hasattr(h, '__name__') else str(h) for h in handlers]
+    Isocenter used to assign a four-entry priority list to it. The
+    assignment succeeded, the attribute held the list, and decoding
+    ignored it entirely: `Dataset._pixel_array_opts` defaults to
+    `{"use_pdh": False}`, and the handler list is consulted only on the
+    `use_pdh` branch. Silent precisely because the attribute is writable.
 
-    # Check for Import Strings or Function Objects
-    # pydicom stores them as objects once loaded, or strings if lazy?
-    # Actually pydicom.config.pixel_data_handlers is a list of modules usually after config is applied?
-    # Isocenter sets them as strings in __init__.py.
+    Run in a subprocess because import order cannot be controlled inside
+    a pytest process that has already imported isocenter.
+    """
+    import subprocess
+    import sys
 
-    print(f"Registered Handlers: {handlers}")
+    probe = (
+        "from pydicom import config;"
+        "before = list(config.pixel_data_handlers);"
+        "import isocenter;"
+        "after = list(config.pixel_data_handlers);"
+        "print('SAME' if before == after else 'MUTATED: %r -> %r' % (before, after))"
+    )
+    result = subprocess.run([sys.executable, "-c", probe],
+                            capture_output=True, text=True, check=True)
 
-    # We expect 'isocenter.imagecodecs_handler'
-    has_imagecodecs = any("imagecodecs_handler" in str(h) for h in handlers)
-    has_pillow = any("pillow_handler" in str(h) for h in handlers)
+    assert "SAME" in result.stdout, result.stdout.strip()
 
-    assert has_imagecodecs, "isocenter.imagecodecs_handler should be registered"
-    assert has_pillow, "pillow_handler should be registered"
 
 def test_jpeg_lossless_handling_mock():
     """
