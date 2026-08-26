@@ -119,6 +119,13 @@ setup(
             "pytest>=7.0.0",
             "wfdb>=4.1.0",
             "jsonschema>=4.0.0",
+            # tests/test_discovery_integration.py builds its fixtures with
+            # scripts/generate_redaction_example.py, which fakes patient and
+            # institution names. Undeclared until 0.8.2, which meant that
+            # test skipped unconditionally and had never once run -- dead
+            # coverage reporting as a skip. It is a declared test dependency
+            # now, so its absence is an error rather than a quiet gap.
+            "faker>=19.0.0",
             # tests/test_packaging_contract.py builds a real wheel and sdist
             # and inspects them, which needs a build backend in the *test*
             # environment -- not just in pip's isolated build env. Python
