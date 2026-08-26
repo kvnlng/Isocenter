@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Python matrix moved from every PR to the release that actually needs it.** Four versions ran on every pull request, and again on every push to `main`. In 30 runs the four-way matrix produced **zero** divergences that were not step timeouts -- it was answering a release question four times a day.
+
+  PRs are now gated on **3.12 and 3.14t**. Those are two independent promises on orthogonal axes, and neither backs the other:
+
+  - `python_requires=">=3.12"` is broken by 3.13+ syntax or a stdlib API absent a version earlier, and only 3.12 can show that. A newer version passing proves nothing about the floor.
+  - Free-threading is broken by a data race or by code assuming GIL atomicity, and only a `t` build with `PYTHON_GIL=0` can show that. This is not a formality: `run_parallel()` chooses threads over processes when there is no GIL to escape, and everything heavy funnels through it, so a GIL-enabled interpreter never executes that path.
+
+  3.13 and 3.14 with the GIL are interpolation between a passing floor and a passing ceiling. All four now run in `publish.yml` at release time, split by authority over the upload: `test-floor` (3.12, 3.14t) blocks it, `test-supported` (3.13, 3.14) only reports -- a red job turns the run red and the release still ships. Failing at that point is cheap, because nothing has been uploaded and the version number is not spent.
+
+  `tests.yml` gained a `workflow_call` trigger with a `python-versions` input so `publish.yml` reuses it rather than duplicating the setup. The publishing step stays inline in `publish.yml`, because PyPI matches the *workflow filename* that carries it.
+
+  `PYTHON_GIL` is now derived from the version (`endsWith(..., 't')`) instead of a parallel `include:` block, so adding a version cannot silently run a free-threaded build with the GIL back on -- which would pass while testing none of what it was added for.
+
+### Added
+
+- **`setup.py` states its free-threading support, and something checks it.** `Programming Language :: Python :: Free Threading :: 3 - Stable`. This claim could not be made anywhere else: 3.14t *is* 3.14 -- the `t` is the build variant, not the version -- and the wheel is `py3-none-any`, so neither `python_requires` nor the ABI tag carries it. Until now the promise existed only as a line in CI and a sentence in CLAUDE.md.
+
+  `tests/test_packaging_contract.py` now asserts the PR gate still runs the floor `python_requires` declares, and still runs a free-threaded build whenever that classifier is present. The existing classifier test only caught advertising *below* the floor; neither caught the other direction, a claim nothing runs -- which matters more now that the gate is two versions rather than four, because narrowing it is a one-character change.
+
 ### Fixed
 
 - **A de-identification exemption justified by a mechanism that moved four releases ago.** `privacy.py`'s private-tag sweep exempts `(0099,0010)` and `(0099,1001)`, and the comment said they were the reversibility service's Private Creator and encrypted identities. They are not, and have not been since v0.5.0 (`47278f8`) migrated reversibility to the Encrypted Attributes Sequence `(0400,0500)` -- an *even* group, which this sweep never touches, so reversibility was never at risk from it in the first place.

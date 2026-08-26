@@ -131,8 +131,46 @@ jobs:
           path: dist/
           if-no-files-found: error
 
+  # The version matrix lives here rather than on every PR. "Which Pythons
+  # does this release support" is a release question, and the four-way PR
+  # matrix produced zero divergences in 30 runs that were not step
+  # timeouts -- it was answering a release question four times a day.
+  #
+  # Split in two on purpose, because the two halves have different
+  # authority over the upload. `continue-on-error` is not an allowed key
+  # on a job that calls a reusable workflow, so the distinction is drawn
+  # by what `publish` lists in `needs:` instead.
+  #
+  # Both test the source tree, exactly as the PR gate does. Testing the
+  # built wheel would be stronger and is a separate change.
+  test-floor:
+    # Blocks the upload. These are the two promises the package actually
+    # makes -- the `python_requires` floor and free-threaded support (see
+    # the matrix comment in tests.yml) -- and shipping a release that
+    # fails one of them is the unbacked promise the classifier comment in
+    # setup.py exists to prevent.
+    #
+    # Failing here is cheap: nothing has been uploaded, so the version
+    # number is not spent. Fix and re-tag.
+    uses: ./.github/workflows/tests.yml
+    with:
+      python-versions: '["3.12", "3.14t"]'
+
+  test-supported:
+    # Reports, does not block. A red job here turns the whole run red --
+    # which is the annotation: the release went out with a known failing
+    # version. `publish` does not list this in `needs:`, so it proceeds
+    # regardless.
+    #
+    # Publishing anyway is a decision, not an accident. If one of these
+    # stays red, drop its classifier from setup.py in the same release
+    # rather than advertising a version the release matrix says is broken.
+    uses: ./.github/workflows/tests.yml
+    with:
+      python-versions: '["3.13", "3.14"]'
+
   publish:
-    needs: build
+    needs: [build, test-floor]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The environment name is half of what PyPI matches against. `release`
@@ -143,7 +181,10 @@ jobs:
       name: ${{ github.event_name == 'release' && 'pypi' || inputs.target }}
       url: ${{ github.event_name == 'release' && 'https://pypi.org/p/isocenter' || 'https://test.pypi.org/p/isocenter' }}
     permissions:
-      # The OIDC token. Without this the action has no identity to present
+      # The OIDC token. Kept inline in this file rather than moved into a
+      # reusable workflow: PyPI matches the *workflow filename* that holds
+      # the publishing step, so this job cannot move. The test jobs above
+      # call out to tests.yml freely, because they carry no identity. Without this the action has no identity to present
       # and the upload is rejected; it also signs PEP 740 attestations,
       # which the action emits by default.
       id-token: write

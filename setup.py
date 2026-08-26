@@ -44,9 +44,23 @@ setup(
         "Operating System :: OS Independent",
         # Only versions CI actually runs. Advertising more is the same
         # unbacked promise the old python_requires=">=3.9" was.
+        #
+        # All four are run by the release matrix in publish.yml. 3.12 and
+        # 3.14t additionally block the upload; 3.13 and 3.14 only report.
+        # So if a release goes out with one of those red, delete its line
+        # here in the same release -- these are checked at release time,
+        # which is the last moment they can still be made true.
         "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: 3.14",
+        # `python_requires` cannot express this: 3.14t *is* 3.14, the `t`
+        # is the build variant, and the wheel is py3-none-any so the ABI
+        # tag does not carry it either. This classifier is the only place
+        # the promise can be stated -- and `run_parallel()` does take a
+        # different path when there is no GIL (isocenter/parallel.py), so
+        # it is a real promise, not an absence of one. Backed by 3.14t
+        # being both a required PR check and a publish blocker.
+        "Programming Language :: Python :: Free Threading :: 3 - Stable",
         "Topic :: Scientific/Engineering :: Medical Science Apps.",
         "Topic :: Security",
     ],
@@ -88,7 +102,8 @@ setup(
         "python-dotenv>=1.0.0",
     ],
     # dataclass(slots=True) needs 3.10, and the dependency set above
-    # resolves only on 3.12+. CI tests 3.12, 3.13, 3.14 and 3.14t.
+    # resolves only on 3.12+. Every PR is gated on this floor and on
+    # 3.14t; publish.yml runs all four at release time.
     python_requires=">=3.12",
     extras_require={
         # Optional: isocenter/pixel_analysis.py guards the import and sets

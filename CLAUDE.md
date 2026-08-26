@@ -19,7 +19,21 @@ python -m tests.benchmarks.run_stress_test   # benchmark suite
 python -m scripts.mutation_probe            # do the tests notice when behaviour changes?
 ```
 
-CI (`.github/workflows/tests.yml`) runs only `pytest -v`, on Python 3.12 / 3.13 / 3.14 / 3.14t (free-threaded, `PYTHON_GIL=0`). It is not path-filtered — every PR into `main` runs the whole suite.
+Testing is tiered, and the tier decides the breadth, never the depth — every tier runs the whole suite:
+
+- **Local**: run the tests for what you touched (see the mapping below), then the full suite before pushing.
+- **PR gate** (`.github/workflows/tests.yml`): `pytest -v` on **3.12 and 3.14t** only. Those are the two promises the package makes and neither backs the other — 3.12 is the `python_requires` floor, and 3.14t is the free-threaded build where `run_parallel()` takes its threads-not-processes path. 3.13 and 3.14 are interpolation between them; the four-way matrix produced zero divergences in 30 runs that were not step timeouts. Not path-filtered: `main` requires these checks, and a required check that never runs blocks a PR forever rather than failing it.
+- **Release** (`publish.yml`): all four versions. `test-floor` (3.12, 3.14t) blocks the upload; `test-supported` (3.13, 3.14) only reports — a red job turns the run red and the release still ships, which is the annotation. Shipping with one red means deleting that classifier from `setup.py` in the same release.
+
+`tests.yml` is `workflow_call`-able with a `python-versions` input, which is how `publish.yml` reuses it. `tests/test_packaging_contract.py` asserts the gate still runs the floor and a free-threaded build, so narrowing the matrix cannot silently unback a classifier.
+
+Which tests cover which module, for the local tier — `scripts/mutation_probe.py`'s `TARGETS` is the maintained version of this list:
+
+| Module | Tests |
+| --- | --- |
+| `crypto.py` | `test_crypto.py`, `test_reversibility.py` |
+| `privacy.py` | `test_privacy.py`, `test_remediation.py`, `test_mutation_gaps.py`, `test_profile_end_to_end.py`, `test_audit_suppression.py`, `test_sr_anonymization.py` |
+| `remediation.py` | `test_remediation.py`, `test_remediation_actions.py`, `test_mutation_gaps.py`, `test_remediation_dates.py`, `test_deid_tags.py`, `test_remediation_accounting.py` |
 
 Three other workflows exist. `publish.yml` releases to PyPI by Trusted Publishing (OIDC, no token anywhere) when a GitHub Release is published; it refuses to publish if the tag disagrees with `setup.py`'s version, or if the built wheel does not carry its own `resources/*.json`. Its *filename and environment names are pinned by PyPI's publisher config* — renaming either breaks publishing until PyPI is updated to match. `docs.yml` runs `mkdocs gh-deploy` on pushes to `main` only, filtered to `docs/**`, `mkdocs.yml`, its own file, and `isocenter/**.py` (the API reference is generated from docstrings, so a code-only push still changes the site); it deploys straight to the live site, so the branch filter is load-bearing. `schema-drift.yml` checks Murmur's published annotation schema weekly.
 

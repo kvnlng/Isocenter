@@ -12,7 +12,9 @@ would have failed at import. There is now one dependency list.
 """
 import ast
 import importlib.util
+import json
 import pathlib
+import re
 import subprocess
 import sys
 import tarfile
@@ -488,3 +490,76 @@ def test_the_build_backend_is_declared_exactly_once():
         "setup.py and silently becomes a second source of dependency "
         "truth. Keep the metadata in setup.py or move all of it here and "
         "rewrite this module's parsers.")
+
+
+# --- Support claims must be backed by the gate that runs on every PR ---
+#
+# The version classifiers above are checked against `python_requires`,
+# which catches advertising *below* the floor. Neither catches the other
+# direction: a claim nothing runs. The PR gate is deliberately narrow
+# (two versions, not four), so which two it runs is now load-bearing --
+# drop one and a promise silently stops being tested, which is the exact
+# defect `test_classifiers_do_not_advertise_unsupported_python_versions`
+# was written for, one level up.
+
+GATE_WORKFLOW = REPO / ".github" / "workflows" / "tests.yml"
+
+
+def _gate_versions():
+    """Python versions the PR gate runs by default.
+
+    The matrix is `fromJSON(inputs.python-versions || '[...]')` -- a
+    template string, because publish.yml overrides it to run the wider
+    release matrix. The default inside that expression is what runs on a
+    pull request, so that is what these assertions are about.
+    """
+    text = GATE_WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(r"inputs\.python-versions\s*\|\|\s*'(\[[^']*\])'", text)
+    assert match, (
+        f"no default version list found in {GATE_WORKFLOW.name}; if the "
+        "matrix was rewritten, this helper needs to be too -- it is the "
+        "only thing checking the gate still covers what setup.py claims")
+    return json.loads(match.group(1))
+
+
+def test_the_gate_runs_the_floor_python_requires_declares():
+    """A floor is the one claim a single-version gate can prove.
+
+    `python_requires=">=3.12"` says a 3.12 user can install and run this.
+    Only 3.12 can show that: 3.13 passing says nothing about syntax or a
+    stdlib API that does not exist a version earlier.
+    """
+    declared = _setup_keyword("python_requires") or ""
+    floor = declared.replace(">=", "").strip()
+
+    assert floor in _gate_versions(), (
+        f"python_requires={declared!r} but the PR gate does not run "
+        f"{floor}; the floor is advertised and untested")
+
+
+def test_a_free_threading_claim_is_backed_by_a_free_threaded_job():
+    """`Free Threading :: 3 - Stable` is a promise `python_requires` cannot make.
+
+    3.14t *is* 3.14 -- the `t` is the build variant, not the version --
+    and the wheel is py3-none-any, so neither the version specifier nor
+    the ABI tag carries this claim. The classifier is the whole promise.
+
+    It is not a formality: `run_parallel()` chooses threads over
+    processes when there is no GIL to escape (`isocenter/parallel.py`),
+    and everything heavy funnels through it. A GIL-enabled interpreter
+    never executes that path, so a matrix without a `t` build tests none
+    of what is being claimed.
+    """
+    classifiers = _setup_keyword("classifiers") or []
+    claims_free_threading = any(
+        item.startswith("Programming Language :: Python :: Free Threading")
+        for item in classifiers)
+
+    if not claims_free_threading:
+        pytest.skip("no free-threading claim to back")
+
+    versions = _gate_versions()
+    assert any(v.endswith("t") for v in versions), (
+        "setup.py advertises free-threading support but the PR gate runs "
+        f"{versions} -- no free-threaded build, so run_parallel()'s "
+        "no-GIL path is never executed")
