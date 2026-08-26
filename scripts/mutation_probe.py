@@ -40,9 +40,11 @@ PYTEST = [str(REPO / ".venv/bin/python"), "-m", "pytest", "-x", "-q", "--no-head
 TARGETS = {
     "isocenter/crypto.py": ["tests/test_crypto.py", "tests/test_reversibility.py"],
     "isocenter/privacy.py": ["tests/test_privacy.py", "tests/test_remediation.py",
+                             "tests/test_mutation_gaps.py",
                              "tests/test_profile_end_to_end.py", "tests/test_audit_suppression.py",
                              "tests/test_sr_anonymization.py"],
     "isocenter/remediation.py": ["tests/test_remediation.py", "tests/test_remediation_actions.py",
+                                 "tests/test_mutation_gaps.py",
                                  "tests/test_remediation_dates.py", "tests/test_deid_tags.py",
                                  "tests/test_remediation_accounting.py"],
 }
