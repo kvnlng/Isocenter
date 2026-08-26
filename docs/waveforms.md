@@ -239,7 +239,18 @@ paths a WFDB writer could otherwise open:
 
 ## Limitations
 
-Format 16 only. The exporter also does not support: multi-rate
-records (only the first Waveform Sequence item of an instance is
-exported), WFDB ingest, `.atr` annotation output, or mu-law/A-law
-companded audio sample interpretations.
+Format 16 only. The exporter also does not support: WFDB ingest,
+`.atr` annotation output, or mu-law/A-law companded audio sample
+interpretations.
+
+**Multi-rate records are truncated at ingest, not at export.** Each
+Waveform Sequence `(5400,0100)` item is a multiplex group with its own
+sampling frequency and channel set -- how DICOM carries ECG at 500 Hz
+alongside respiration at 25 Hz. Isocenter reads group 0 and discards the
+rest, so groups 1..n never enter the object graph: they are not in the
+session, not in the sidecar, and not reachable by any other export
+format or API. Since 0.8.2 this is announced rather than silent -- a
+warning naming the number of groups dropped, plus a `DATA_LOSS` entry in
+the audit log so it appears in the compliance trail and not only in a
+log file. Multi-group support is deferred, but a truncated record should
+never look like a complete one.
