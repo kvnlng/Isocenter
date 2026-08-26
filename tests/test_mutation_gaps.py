@@ -93,14 +93,21 @@ def test_a_non_whitelisted_private_tag_is_reported():
     assert [f.tag for f in findings] == ["0009,1001"]
 
 
-def test_the_reversibility_tags_are_not_reported_as_private_phi():
+def test_the_legacy_identity_tags_are_not_reported_as_private_phi():
     """Kills `not in WHITELIST_TAGS` -> `in WHITELIST_TAGS`.
 
-    (0099,0010) is the reversibility service's Private Creator and
-    (0099,1001) holds the encrypted identities. Flagging them for removal
-    destroys the ability to de-anonymize with the key -- and the inverted
-    test does exactly that while *also* letting every real vendor private
-    tag through untouched.
+    (0099,0010) and (0099,1001) held the encrypted identities in `gantry`
+    v0.4.1 only; v0.5.0 moved them to the Encrypted Attributes Sequence
+    (0400,0500). They are exempt so `remove_private_tags` cannot strip
+    the identities out of a store written by that release and leave it
+    unrecoverable with its own key.
+
+    An earlier version of this docstring called them the *reversibility
+    service's* tags, which has been false since v0.5.0 -- see #113.
+    Reversibility's tags are in an even group and never reach this sweep.
+
+    Inverting the check destroys those identities while *also* letting
+    every real vendor private tag through untouched.
     """
     inst = _instance_with({
         "0099,0010": "ISOCENTER",

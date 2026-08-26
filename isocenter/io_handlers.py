@@ -1262,7 +1262,15 @@ class DicomExporter:
     def _merge(ds, attrs):
         """Merges a dictionary of attributes into a pydicom Dataset."""
         for t, v in attrs.items():
-            # Explicit handling for Isocenter Private Tags to ensure correct VR
+            # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
+            # tags. They are private, so `dictionary_VR` below raises for
+            # them and the fallback would only log a warning -- the tags
+            # would silently not be written. Nothing has *written* these
+            # since v0.5.0 (47278f8) migrated to (0400,0500); this is the
+            # read-back path for stores from that one release, and pairs
+            # with the WHITELIST_TAGS exemption in `privacy.py`. Remove
+            # one without the other and the sweep strips what this
+            # preserves.
             if t == "0099,0010":
                 ds.add_new(0x00990010, 'LO', v)
                 continue

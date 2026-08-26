@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A de-identification exemption justified by a mechanism that moved four releases ago.** `privacy.py`'s private-tag sweep exempts `(0099,0010)` and `(0099,1001)`, and the comment said they were the reversibility service's Private Creator and encrypted identities. They are not, and have not been since v0.5.0 (`47278f8`) migrated reversibility to the Encrypted Attributes Sequence `(0400,0500)` -- an *even* group, which this sweep never touches, so reversibility was never at risk from it in the first place.
+
+  This matters more than a wrong comment usually would, because the justification is the only thing standing between a de-identification exemption and a future reader deleting it -- or extending it on the same false reasoning to tags that are not exempt.
+
+  The entries are not vestigial. `(0099,0010)`/`(0099,1001)` were the encrypted-identity payload in exactly one release, `gantry` v0.4.1, before both that migration and the rename to Isocenter, and the exemption keeps `remove_private_tags` from stripping the identities out of a store written by that version and leaving it unrecoverable with its own key. `DicomExporter._merge` is the other half of the same affordance: it hands those two tags explicit VRs on the way out, because `pydicom.datadict.dictionary_VR` raises for private tags and the fallback only logs. Each half now names the other, so removing one does not leave the exporter preserving a tag the sweep strips.
+
+  Nothing changed but the comments, and the docstring of the test that pinned the exemption -- which had copied the false justification, putting it in the place most likely to be believed. (#113)
+
 - **`config_tags={"0008,0020": "SHIFT"}` replaced the date instead of shifting it, and said nothing.** A tag's value has two shapes: a dict is a rule (`{"name": ..., "action": ...}`), and anything else is the tag's *display name*, leaving the action at `REPLACE`. That is coherent, and nothing stated it -- the docstring typed the parameter `Dict[str, str]`, which makes the string form look like the primary shape and the string itself look like the choice. A caller asking for a shift got `ANONYMIZED`, destroying the interval information shifting exists to preserve, with nothing raised and nothing logged.
 
   Constructing a `PhiInspector` now warns once per offending tag when a string value reads as an action name (`REMOVE`, `EMPTY`, `SHIFT`, `JITTER`), naming the tag and the rule form that would do what was asked. The docstring documents both shapes and says outright that the string names the tag rather than choosing what happens to it.
