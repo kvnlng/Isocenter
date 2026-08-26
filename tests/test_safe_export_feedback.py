@@ -53,5 +53,8 @@ def test_safe_export_feedback(tmp_path, capsys):
 
     # Check Config Suggestion
     assert "Suggested Config Update:" in stdout
-    assert '"action": "REMOVE"' in stdout
-    assert '"name": "patient_name"' in stdout
+    # The fragment is YAML since #20, and whether it *parses* is pinned
+    # by tests/test_suggested_config.py. Here we only check the report
+    # reaches the point of offering one.
+    assert "phi_tags:" in stdout
+    assert "action: REMOVE" in stdout
