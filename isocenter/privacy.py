@@ -338,10 +338,25 @@ class PhiInspector:
         # 1. Private Tag Removal Logic
         if self.remove_private_tags:
             # Private tags live in odd groups. Remove all of them except
-            # the two the reversibility service owns -- (0099,0010) is its
-            # Private Creator and (0099,1001) holds the encrypted
-            # identities, so stripping them would destroy the ability to
-            # de-anonymize with the key.
+            # two, which are NOT the reversibility service's tags -- a
+            # previous version of this comment said they were, and that
+            # has been false since v0.5.0 (47278f8). Reversibility uses
+            # the Encrypted Attributes Sequence (0400,0510), an *even*
+            # group, so it never reaches this sweep and was never at risk
+            # from it. See `reversibility.py`.
+            #
+            # (0099,0010) and (0099,1001) were the encrypted-identity
+            # payload in exactly one release -- `gantry` v0.4.1, before
+            # both the migration to (0400,0500) and the rename to
+            # Isocenter. The exemption exists so `remove_private_tags`
+            # does not strip the identities out of a store written by
+            # that version, leaving it unrecoverable with its own key.
+            #
+            # This is one of two halves. `DicomExporter._merge`
+            # (io_handlers.py) gives the same two tags explicit VRs on
+            # the way out, because they are private and `dictionary_VR`
+            # raises for them. Removing either half alone leaves the
+            # exporter carefully preserving a tag the sweep now strips.
             WHITELIST_TAGS = {"0099,0010", "0099,1001"}
 
             for item, tag, path in scan_targets:
