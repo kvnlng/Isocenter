@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Isocenter is a Python library (no CLI yet — that's the v1.1.0 milestone) for indexing, de-identifying, and exporting DICOM datasets. It never modifies source files: it builds a SQLite metadata index plus a binary pixel/waveform sidecar, mutates an in-memory object graph, and writes clean copies to a new directory.
+Isocenter is a Python library for indexing, de-identifying, and exporting DICOM datasets. It never modifies source files: it builds a SQLite metadata index plus a binary pixel/waveform sidecar, mutates an in-memory object graph, and writes clean copies to a new directory. There is no CLI and none is planned — #29 proposed one and was closed as not planned, so the Python API is the whole interface.
 
 ## Commands
 
@@ -20,7 +20,7 @@ python -m tests.benchmarks.run_stress_test   # benchmark suite
 
 CI (`.github/workflows/tests.yml`) runs only `pytest -v`, on Python 3.12 / 3.13 / 3.14 / 3.14t (free-threaded, `PYTHON_GIL=0`). It is not path-filtered — every PR into `main` runs the whole suite.
 
-Three other workflows exist. `publish.yml` releases to PyPI by Trusted Publishing (OIDC, no token anywhere) when a GitHub Release is published; it refuses to publish if the tag disagrees with `setup.py`'s version, or if the built wheel does not carry its own `resources/*.json`. Its *filename and environment names are pinned by PyPI's publisher config* — renaming either breaks publishing until PyPI is updated to match. `docs.yml` runs `mkdocs gh-deploy` on pushes to `main` only; it deploys straight to the live site, so the branch filter is load-bearing. `schema-drift.yml` checks Murmur's published annotation schema weekly.
+Three other workflows exist. `publish.yml` releases to PyPI by Trusted Publishing (OIDC, no token anywhere) when a GitHub Release is published; it refuses to publish if the tag disagrees with `setup.py`'s version, or if the built wheel does not carry its own `resources/*.json`. Its *filename and environment names are pinned by PyPI's publisher config* — renaming either breaks publishing until PyPI is updated to match. `docs.yml` runs `mkdocs gh-deploy` on pushes to `main` only, filtered to `docs/**`, `mkdocs.yml`, its own file, and `isocenter/**.py` (the API reference is generated from docstrings, so a code-only push still changes the site); it deploys straight to the live site, so the branch filter is load-bearing. `schema-drift.yml` checks Murmur's published annotation schema weekly.
 
 `setup.py` is the single source of truth for dependencies; `tests/test_packaging_contract.py` fails if a module imported unguarded at module scope isn't in `install_requires`. Adding an import means adding a dependency there.
 

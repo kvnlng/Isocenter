@@ -10,14 +10,14 @@ file can do.
 
 ## Where the plan lives now
 
-| Milestone | Focus |
-|---|---|
-| [v0.7.0 — The Connector](https://github.com/kvnlng/Isocenter/milestone/1) | PACS networking, the DICOM waveform → WFDB bridge, audit reporting, research export formats |
-| [v0.8.0 — Cloud Scale](https://github.com/kvnlng/Isocenter/milestone/2) | Persistence abstraction and cloud storage adapters |
-| [v1.0.0 — Production Release](https://github.com/kvnlng/Isocenter/milestone/3) | API freeze, documentation, PyPI release |
-| [v1.1.0 — Zero Code](https://github.com/kvnlng/Isocenter/milestone/4) | Command-line interface |
+Active work is tracked in
+[milestones](https://github.com/kvnlng/Isocenter/milestones). Longer-term
+ideas live as [unmilestoned issues](https://github.com/kvnlng/Isocenter/issues?q=is%3Aissue+is%3Aopen+no%3Amilestone).
 
-Longer-term ideas live as [unmilestoned issues](https://github.com/kvnlng/Isocenter/issues?q=is%3Aissue+is%3Aopen+no%3Amilestone).
+This page links to the milestone list rather than reproducing it. A table
+here would be a second copy of something that changes every release, and a
+plan with two homes only ever has one that is current — the same reason
+the changelog is linked rather than duplicated.
 
 ## Contributing
 
