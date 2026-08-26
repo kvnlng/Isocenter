@@ -2025,7 +2025,6 @@ class DicomSession:
         exporter = exporters.get_exporter(format)
         return exporter.export(self, folder, **options)
 
-    # pylint: disable=unused-argument
     def _export_dicom(self, folder: str, use_compression=True,
                       check_burned_in=False, check_reversibility=True,
                       patient_ids: List[str] = None, show_progress=True,
@@ -2038,10 +2037,15 @@ class DicomSession:
             use_compression (bool): If True, compresses output images using JPEG2000 (Lossless).
             check_burned_in (bool): If True, scans for PHI before exporting and
                 skips every instance that still carries an identifier.
-            check_reversibility (bool): Accepted and currently inert. The export
-                writes exactly what the store holds, encrypted or not; there is
-                nothing for this flag to check. Kept because removing a public
-                parameter is a breaking change.
+            check_reversibility (bool): If True (the default), warn when the
+                files about to be written still carry the encrypted originals
+                that `lock_identities()` embeds, and record the disclosure in
+                the audit log. Those identities are recoverable by anyone
+                holding `isocenter.key`, which a recipient of the cohort has
+                no way to see for themselves. Passing False is the caller
+                stating they already know; it silences the warning and skips
+                the audit entry. The export itself is unchanged either way --
+                this reports, it does not withhold.
             patient_ids (List[str], optional): Limit export to specific Patient IDs.
             show_progress (bool): If True, shows progress bar.
             subset (Union[str, list, pd.DataFrame]): Filter the export
@@ -2076,9 +2080,63 @@ class DicomSession:
             get_logger().warning("No instances found to export.")
             return
 
+        if check_reversibility:
+            self._report_recoverable_identities(tasks)
+
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
         self._run_export_batch(tasks, show_progress)
         print("Done.")
+
+    def _report_recoverable_identities(self, tasks) -> int:
+        """Report instances whose exported copy still carries its originals.
+
+        `lock_identities()` embeds the original identifiers, encrypted,
+        in an Encrypted Attributes Sequence (0400,0500). That is the
+        point of reversible anonymisation and is not a defect -- but the
+        exported file then looks de-identified while carrying everything
+        needed to undo it, and nothing in the file says so to the person
+        who receives it.
+
+        Keyed on the data rather than on `self.reversibility_service`: a
+        store can hold tokens embedded by an earlier session that never
+        enabled the service in this one, and it is the bytes about to be
+        written that matter, not what this session happens to have
+        configured.
+
+        Runs against the export plan, so it counts what will actually be
+        written -- after the subset filter and the burned-in scan have
+        removed whatever they remove.
+
+        Returns:
+            int: How many instances carry recoverable identities.
+        """
+        affected = [
+            task.instance.sop_instance_uid
+            for task in tasks
+            if (task.instance.sequences.get(
+                ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ) is not None
+                and task.instance.sequences[
+                    ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ].items)
+        ]
+        if not affected:
+            return 0
+
+        detail = (
+            f"{len(affected)} of {len(tasks)} exported instances carry "
+            f"encrypted original identities (0400,0500). They are "
+            f"recoverable with the session key; treat the export as "
+            f"re-identifiable by any holder of it.")
+        get_logger().warning(detail)
+
+        # The warning goes to a log the recipient of the cohort never
+        # reads. The audit entry is what puts the disclosure somewhere it
+        # survives the session.
+        if getattr(self, "store_backend", None) is not None:
+            self.store_backend.log_audit(
+                action_type="REVERSIBLE_EXPORT",
+                entity_uid=affected[0] if len(affected) == 1 else "MULTIPLE",
+                details=detail)
+        return len(affected)
 
     def _scan_before_export(self) -> Set[str]:
         """Scans for PHI and reports what it found, before anything is written.

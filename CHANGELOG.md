@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`export(check_reversibility=...)` was accepted, documented and inert; it now checks something.** It defaulted to `True`, so every caller believed a safety check was running, and anyone passing it explicitly was asking for a behaviour and being told nothing. The implementation was a comment and a `pass`. #70 stopped the docstring promising a check and said the flag was inert, which was honest but left the parameter doing nothing.
+
+  What it checks is real. `lock_identities()` embeds the original identifiers, encrypted, in an Encrypted Attributes Sequence (0400,0500) -- that is the point of reversible anonymisation, not a defect. But the exported file then looks de-identified while carrying everything needed to undo it, and nothing in the file says so to whoever receives the cohort. The export now warns when the files it is about to write carry those tokens, naming how many of how many, and records a `REVERSIBLE_EXPORT` entry in the audit log so the disclosure outlives the session rather than scrolling past in a terminal.
+
+  Keyed on the data, not on whether `reversibility_service` is enabled in this session: a store can hold tokens embedded by an earlier one, and it is the bytes about to be written that matter. It runs against the export plan, so it counts what will actually be written -- after the subset filter and the burned-in scan have removed whatever they remove.
+
+  **Nothing is withheld.** This reports; it does not block, and the exported files are byte-for-byte what they were before. `check_reversibility=False` is the caller stating they already know, and silences both the warning and the audit entry. (#76)
+
 - **A child moved between two parents in a single save lost its own children.** `save_all` deletes rows the in-memory graph no longer holds, scoped one parent at a time and run inside that parent's pass. Move series `SE1` from study `A` to study `B` and save once: the walk reaches `A` first, finds `SE1` absent from its list, and deletes the series *and its instances*. `B` then re-inserts `SE1` -- but its instances are written only when they report unsaved changes, and untouched ones do not. The instances stayed intact in the session while their rows were gone, with nothing reporting it; it surfaced on the next reload.
 
   Two things had to change, because deferring the deletions alone was not enough. Re-parenting mutates the *parent's* list, which marks nothing dirty, so the child's own upsert never runs and its foreign key goes on naming the parent that no longer holds it. Each parent now re-points the rows it holds -- one statement, restricted to keys that actually differ, so the ordinary case updates nothing -- and every deletion pass is deferred until the whole save has been walked, so a scoped delete only runs once the row it might remove has had its chance to be claimed.
