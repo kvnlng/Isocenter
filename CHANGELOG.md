@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The safe-export report suggested a config nothing could read.** When `export(check_burned_in=True)` found identifiers it printed the one actionable instruction in the whole report -- a config fragment resolving the findings -- as JSON with `//` comments and a trailing comma. That is not valid JSON, and user-facing configs are YAML only, so even valid JSON would have been the wrong format. Both defects had the same cause: JSON has no comments, so the per-tag counts had to be smuggled in as `//`.
+
+  The fragment is now YAML in the shape `create_config()` writes, so it can be pasted into the file the user already has, and the counts sit above their entries as ordinary comments. Quoting is left to the YAML dumper -- a tag key contains a comma, and hand-rolling that is how the previous version produced a document nothing could load.
+
+  `_suggested_tag_name()` recognised three tags by hand and labelled everything else `unknown_tag`, while `resources/phi_tags.json` already named more -- two spellings of one mapping, with the smaller facing the user at the moment it needed to be right. It now reads the shipped defaults, and the three names only `_scaffold_phi_tags` knew (Study Date, Patient Sex, Patient Age) moved to one constant both use. An unrecognised tag falls back to the tag itself rather than `unknown_tag`: the name is a comment to the reader, and a tag repeated is at least true, where three rules all called `unknown_tag` are indistinguishable.
+
+  The tests that pinned the old output asserted its punctuation -- `'"action": "REMOVE"'`, and a closing-brace count. They now assert the fragment parses as YAML and round-trips through `ConfigLoader`, which is the property that was actually missing: the previous strings were exactly as intended and the document was still unusable. (#20)
+
 - **`export(check_reversibility=...)` was accepted, documented and inert; it now checks something.** It defaulted to `True`, so every caller believed a safety check was running, and anyone passing it explicitly was asking for a behaviour and being told nothing. The implementation was a comment and a `pass`. #70 stopped the docstring promising a check and said the flag was inert, which was honest but left the parameter doing nothing.
 
   What it checks is real. `lock_identities()` embeds the original identifiers, encrypted, in an Encrypted Attributes Sequence (0400,0500) -- that is the point of reversible anonymisation, not a defect. But the exported file then looks de-identified while carrying everything needed to undo it, and nothing in the file says so to whoever receives the cohort. The export now warns when the files it is about to write carry those tokens, naming how many of how many, and records a `REVERSIBLE_EXPORT` entry in the audit log so the disclosure outlives the session rather than scrolling past in a terminal.

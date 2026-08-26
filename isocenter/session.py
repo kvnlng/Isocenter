@@ -393,29 +393,71 @@ def _report_phi_findings(findings) -> None:
     _print_suggested_config(counts)
 
 
+# Names for tags the shipped `resources/phi_tags.json` does not list.
+# `_scaffold_phi_tags` needs them because they are the research-friendly
+# defaults a scaffold should mention, and `_suggested_tag_name` needs them
+# because Study Date is one of the tags a safety scan flags most often.
+# Kept in one place so the two cannot drift into disagreeing about what a
+# tag is called.
+_SUPPLEMENTAL_TAG_NAMES = {
+    "0008,0020": "Study Date",
+    "0010,0040": "Patient Sex",
+    "0010,1010": "Patient Age",
+}
+
+
 def _print_suggested_config(counts) -> None:
-    """Prints a config fragment removing every tag the scan flagged."""
+    """Prints a config fragment removing every tag the scan flagged.
+
+    YAML, and specifically the shape `create_config()` writes, so the
+    output can be pasted into the file the user already has. This is the
+    only actionable instruction in the safety report, and it used to be
+    JSON with `//` comments and a trailing comma -- neither valid JSON nor
+    the format `ConfigLoader` reads, since user-facing configs are YAML
+    only. Both defects came from the same place: JSON has no comments, so
+    the counts had to be smuggled in as `//`.
+    """
     print("\nSuggested Config Update:")
     print("Add the following rules to your config to resolve these:")
-    print("{")
-    print('    "phi_tags": {')
-    print(",\n".join(
-        f'        "{tag}": {{ "name": "{_suggested_tag_name(tag)}", '
-        f'"action": "REMOVE" }} , // Found {count} times'
-        for tag, count in counts.items()))
-    print('    }')
-    print("}")
+    print()
+    print("phi_tags:")
+    for tag, count in counts.items():
+        rule = {tag: {"name": _suggested_tag_name(tag), "action": "REMOVE"}}
+        # Dumped per tag rather than as one mapping so the count can sit
+        # above its own entry. yaml.dump owns the quoting -- a tag key
+        # contains a comma, and hand-rolling that is how the previous
+        # version produced a document nothing could read.
+        block = yaml.dump(rule, sort_keys=False, default_flow_style=False)
+        print(f"  # Found {count} times")
+        for line in block.splitlines():
+            print(f"  {line}")
 
 
 def _suggested_tag_name(tag: str) -> str:
-    """A readable name for the handful of tags the report can recognise."""
-    if "0010,0020" in tag:
-        return "patient_id"
-    if "0008,0020" in tag:
-        return "study_date"
-    if "0010,0010" in tag:
-        return "patient_name"
-    return "unknown_tag"
+    """A readable name for a flagged tag, from the shipped PHI defaults.
+
+    This recognised three tags by hand and called everything else
+    `unknown_tag`, while `resources/phi_tags.json` already named more --
+    two spellings of the same mapping, with the smaller one facing the
+    user at the exact moment they need it to be right.
+
+    Falls back to the tag itself rather than to `unknown_tag`: the name is
+    a comment to the reader, and a tag repeated is at least true, where
+    three rules all called `unknown_tag` are indistinguishable.
+    """
+    try:
+        names = dict(ConfigLoader.load_phi_config())
+    except (OSError, ValueError):
+        names = {}
+    for extra_tag, extra_name in _SUPPLEMENTAL_TAG_NAMES.items():
+        names.setdefault(extra_tag, extra_name)
+
+    entry = names.get(tag)
+    if isinstance(entry, dict):
+        return str(entry.get("name") or tag)
+    if isinstance(entry, str) and entry:
+        return entry
+    return tag
 
 
 class LockingResult(list):
@@ -1026,9 +1068,7 @@ class DicomSession:
             except (OSError, ValueError) as exc:
                 get_logger().warning("Failed to load default PHI tags: %s", exc)
 
-        for tag, name in (("0008,0020", "Study Date"),
-                          ("0010,0040", "Patient Sex"),
-                          ("0010,1010", "Patient Age")):
+        for tag, name in _SUPPLEMENTAL_TAG_NAMES.items():
             phi_tags.setdefault(tag, name)
 
         structured = {}

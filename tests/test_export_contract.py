@@ -64,19 +64,21 @@ def test_show_progress_false_is_honoured(session_with_phi, captured_batch,
 
 def test_the_suggested_config_block_is_printed_once(session_with_phi,
                                                     tmp_path, capsys):
-    """The scan's config suggestion closes its braces once, not twice.
+    """The scan's config suggestion is emitted once, not twice.
 
-    A duplicated pair of `print` calls emitted the closing `}` lines
-    again, so the snippet the report tells the user to copy was not
-    well-formed even on its own terms.
+    A duplicated pair of `print` calls used to emit the block's closing
+    lines again, so the snippet the report tells the user to copy was not
+    well-formed even on its own terms. Asserted through the section key
+    rather than a closing brace: the fragment is YAML since #20, and a
+    test that pins the punctuation of one format cannot outlive it.
     """
     session_with_phi.export(str(tmp_path / "out"), check_burned_in=True)
 
     stdout = capsys.readouterr().out
-    suggestion = stdout.split("Suggested Config Update:")[-1]
 
-    assert suggestion.count('    }') == 1, (
-        "the suggested-config block closes itself more than once")
+    assert stdout.count("Suggested Config Update:") == 1
+    assert stdout.count("phi_tags:") == 1, (
+        "the suggested-config block was emitted more than once")
 
 
 def test_the_safety_scan_names_what_it_found_without_borrowing_the_word_dirty(
