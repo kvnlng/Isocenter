@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A study with no Study Date was given one, near 1900, and it was exported as real.** Ingest filled a missing or unreadable date with the sentinel `19000101`, and nothing downstream could tell that apart from a recorded date. `SHIFT_DATE` jittered it like any other, so an instance that never had a date acquired a confidently de-identified one: in the exported folder tree (`Study_1900-01-01_...`), in the WFDB header comment (`# de-identified start date: 04/11/1899`), and in any date-based cohort filter. This is invention rather than leakage, and the more insidious of the two -- a consumer cannot distinguish "acquired in 1899, de-identified" from "we never knew". Absent now stays absent: the study carries no date, no shift is proposed for it, and the `NoDate` branch in `export_folder_names` -- which existed but was unreachable, because every study arrived carrying a parsed sentinel -- is now the one that runs. An unreadable date is logged rather than guessed at. (#60)
+
+
 ## [0.8.0] - 2026-08-25
 
 **If you de-identified data with 0.7.x or earlier, re-audit it.** Two
