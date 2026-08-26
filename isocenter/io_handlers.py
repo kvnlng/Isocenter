@@ -125,7 +125,12 @@ def ingest_worker(fp: str) -> Tuple:
             'pid': ds.get("PatientID", "UnknownPatient"),
             'pname': str(ds.get("PatientName", "Unknown")),
             'sid': ds.get("StudyInstanceUID", "UnknownStudy"),
-            'sdate': str(ds.get("StudyDate", "19000101")),
+            # Absent stays absent. This used to default to "19000101",
+            # and nothing downstream could tell that from a real date --
+            # SHIFT_DATE jittered it and the result was exported as
+            # genuine study timing, so a study that never had a date
+            # acquired one near 1900 (#60).
+            'sdate': str(ds.StudyDate) if "StudyDate" in ds else None,
             'ser_id': ds.get("SeriesInstanceUID", "UnknownSeries"),
             'modality': ds.get("Modality", "OT"),
             'sop': ds.get("SOPInstanceUID", None),
@@ -316,13 +321,19 @@ class DicomImporter:
                     # Study
                     study = study_map.get(sid)
                     if not study:
-                        # Parse date carefully or use fallback
-                        try:
-                            sdate = datetime.strptime(meta['sdate'], "%Y%m%d").date()
-                        except (ValueError, TypeError):
-                            # See #60: this sentinel is then shifted and
-                            # exported as though it were a real date.
-                            sdate = date(1900, 1, 1)
+                        # A date we cannot read is a date we do not have.
+                        # Substituting one here is indistinguishable
+                        # downstream from a date that was recorded (#60).
+                        sdate = None
+                        if meta['sdate']:
+                            try:
+                                sdate = datetime.strptime(
+                                    meta['sdate'], "%Y%m%d").date()
+                            except (ValueError, TypeError):
+                                logger.warning(
+                                    f"Study {sid} has an unreadable Study "
+                                    f"Date ({meta['sdate']!r}); it will be "
+                                    "treated as absent rather than guessed.")
 
                         study = Study(sid, sdate)
                         pat.studies.append(study)
