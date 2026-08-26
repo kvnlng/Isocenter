@@ -307,3 +307,81 @@ def test_annotations_file_lands_beside_the_header(tmp_path):
     assert doc["schemaVersion"] == 1
     assert doc["findings"][0]["startSample"] == 100
     assert doc["source"].startswith("isocenter/")
+
+
+# --- Concept Name free text (#58) -------------------------------------
+#
+# CodeMeaning sits one line above `note` in the same loop and has the same
+# property: for a site-defined coding scheme the cart populates it with
+# operator-typed text rather than a term from a published vocabulary.
+
+
+def test_a_site_defined_scheme_does_not_leak_the_code_meaning_into_label():
+    """The reproduction from #58, verbatim.
+
+    A CodeMeaning of "ZQANNMEAN01 Jane Doe" survived a full
+    create_config/audit/anonymize pass into annotations.json as
+    `"label": "ZQANNMEAN01 Jane Doe"`.
+    """
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, code_value="ZQ01",
+                   code_meaning="ZQANNMEAN01 Jane Doe", scheme="99LOCAL")
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "isocenter/test")["findings"][0]
+
+    assert "label" not in finding
+
+
+def test_a_site_defined_scheme_collapses_the_category_to_uncoded():
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, code_value="ZQ01", code_meaning="Local marking",
+                   scheme="99LOCAL")
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "isocenter/test")["findings"][0]
+
+    assert finding["category"] == "uncoded"
+
+
+def test_a_concept_with_no_scheme_is_treated_as_site_defined():
+    """An absent designator is not evidence of a published vocabulary."""
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, code_value="ZQ01", code_meaning="Local marking",
+                   scheme="")
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "isocenter/test")["findings"][0]
+
+    assert finding["category"] == "uncoded"
+    assert "label" not in finding
+
+
+def test_a_site_defined_concept_still_produces_a_finding():
+    """Suppressing the text must not delete the mark.
+
+    A reviewer seeing fewer marks than the DICOM carried, with nothing
+    saying any were withheld, is silent under-reporting on a review tool.
+    """
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, start_sample=101, code_value="ZQ01",
+                   code_meaning="ZQANNMEAN01 Jane Doe", scheme="99LOCAL")
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds),
+                            "isocenter/test")
+
+    assert len(doc["findings"]) == 1
+    assert doc["findings"][0]["startSample"] == 100
+    assert doc["findings"][0]["lead"] == "MDC_ECG_LEAD_I"
+
+
+def test_site_defined_concept_text_is_restored_when_opted_in():
+    """include_annotation_text is the auditor's override.
+
+    It already means "I accept free text in this output"; a protocol that
+    permits site-defined annotation labels says so through that flag.
+    """
+    ds = build_ecg_dataset(num_samples=500)
+    add_annotation(ds, code_value="ZQ01", code_meaning="Local marking",
+                   scheme="99LOCAL")
+    finding = build_annotations(_instance_from(ds), _waveform_from(ds),
+                                "isocenter/test", True)["findings"][0]
+
+    assert finding["category"] == "99LOCAL:ZQ01"
+    assert finding["label"] == "Local marking"

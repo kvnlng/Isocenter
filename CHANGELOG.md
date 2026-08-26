@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An annotation's Concept Name carried operator free text into `annotations.json`.** `CodeMeaning` (0008,0104) was copied into each finding's `label` and the scheme-qualified `CodeValue` into `category`, both verbatim. Neither tag is in any privacy profile, so `anonymize()` never touched them: a `CodeMeaning` of `"ZQANNMEAN01 Jane Doe"` survived a full `create_config()` / `audit()` / `anonymize()` pass into the exported file as `"label": "ZQANNMEAN01 Jane Doe"`.
+
+  This is the surface #39 missed. `CodeMeaning` sits one line above `note` in the same loop and has the same property -- for a **site-defined** coding scheme the cart populates it with typed text rather than a term from a vocabulary -- but #39 was scoped to Channel Label and Unformatted Text Value, so `docs/waveforms.md` was left describing two free-text surfaces when there were three.
+
+  Both fields are now emitted only when the Coding Scheme Designator (0008,0102) names a published vocabulary, checked against `KNOWN_CODING_SCHEMES` in `isocenter.waveform`. **Coded findings are unchanged**: `SCT:164889003` still arrives with `"Atrial fibrillation"`, because SNOMED defined that term and an operator did not. For a site-defined scheme, `label` is omitted and `category` becomes `"uncoded"`.
+
+  **The finding itself is still emitted** -- kind, sample positions and lead are untouched. Dropping it would have been safer in the narrow sense, but a reviewer seeing fewer marks on the strip than the record carried, with nothing indicating any were withheld, is silent under-reporting on a review tool, and the channel-label path already set the opposite precedent by substituting a positional token rather than deleting the channel. What is given up is the name, and the ability to tell two site-defined annotation types apart from each other -- which a local code never conveyed to Murmur anyway, since Murmur has no dictionary to resolve `99LOCAL:ZQ01` against.
+
+  `include_annotation_text=True` restores both fields, exactly as it does for `note`. De-identification here is protocol-conformant rather than maximal, and that flag is where the protocol speaks: a study whose auditor has determined site-defined annotation labels may be released says so by passing it. The allowlist is not a second policy layer competing with the profile -- it answers a question a `{tag: action}` profile is structurally unable to express, namely "empty this *only when* the scheme is site-defined".
+
+  Designators beginning `99` are reserved by DICOM for locally defined schemes and can never be recognised, and adding one to `KNOWN_CODING_SCHEMES` will not work: the prefix is checked independently of the set, because the tempting fix for "our site's codes are being suppressed" is to edit that list. (#58)
+
 ## [0.8.1] - 2026-08-25
 
 Three defects of one shape: the exported artefact asserting something
