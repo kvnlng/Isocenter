@@ -16,6 +16,7 @@ pytest tests/test_session.py::test_name -x   # one test
 pylint isocenter                    # lint (target >8.5/10; NOT enforced by CI)
 mkdocs serve                     # docs preview (needs the `docs` extra)
 python -m tests.benchmarks.run_stress_test   # benchmark suite
+python -m scripts.mutation_probe            # do the tests notice when behaviour changes?
 ```
 
 CI (`.github/workflows/tests.yml`) runs only `pytest -v`, on Python 3.12 / 3.13 / 3.14 / 3.14t (free-threaded, `PYTHON_GIL=0`). It is not path-filtered — every PR into `main` runs the whole suite.
