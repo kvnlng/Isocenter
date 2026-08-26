@@ -10,4 +10,4 @@ from it. `tests/test_version_contract.py` checks that the files which
 restate it -- CITATION.cff, CHANGELOG.md -- still agree.
 """
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
