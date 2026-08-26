@@ -73,7 +73,16 @@ jobs:
         pip install -e ".[tests,ocr]"
 
     - name: Run Tests
-      timeout-minutes: 5
+      # The suite takes ~4m15s locally and 5m30s-6m on a runner, so the
+      # old 5-minute budget had no margin left: on 2026-08-26 every job
+      # finished between 5m30s and 6m06s and `test (3.14)` was killed
+      # mid-run, reported as a test failure with no failing test in the
+      # log -- only "Terminate orphan process: pytest". Raised to leave
+      # real headroom while still catching a genuine hang rather than
+      # letting one burn a runner for six hours.
+      #
+      # Raise this rather than trimming coverage if it tightens again.
+      timeout-minutes: 20
       run: |
         pytest -v
       env:
