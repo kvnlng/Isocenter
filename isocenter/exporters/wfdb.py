@@ -305,17 +305,24 @@ class WfdbExporter(Exporter):
             session (DicomSession): Active session.
             folder (str): Output root.
             **options: `patient_ids` (list, optional) limits the export.
-                `include_annotation_text` (bool, default False) writes
-                Unformatted Text Value (0070,0006) into annotations.json
-                `note` fields; off by default because it is free-text
-                clinical commentary.
+                `include_annotation_text` (bool, default False) releases
+                the operator-typed text in annotations.json: Unformatted
+                Text Value (0070,0006) into `note`, and a site-defined
+                Concept Name's Code Meaning into `label` with its Code
+                Value as `category`. Off by default because both are free
+                text; pass it when the study protocol permits their
+                release. Concepts from a published coding scheme are
+                unaffected either way.
 
         Returns:
             List[str]: Paths of the `.hea` files written.
         """
         logger = get_logger()
         patient_ids = options.get("patient_ids")
-        # Off by default: (0070,0006) is free-text clinical commentary.
+        # Off by default: (0070,0006) is free-text clinical commentary, and
+        # a site-defined Concept Name's Code Meaning is operator-typed too.
+        # This is the auditor's override, not a debug switch -- it says the
+        # protocol permits releasing that text.
         include_annotation_text = bool(options.get("include_annotation_text", False))
         written = []
         used_names = {}  # out_dir -> set of record names already claimed

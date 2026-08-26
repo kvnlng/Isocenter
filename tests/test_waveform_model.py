@@ -134,3 +134,21 @@ def test_absent_label_is_positional():
 
 def test_index_is_optional_for_callers_that_lack_one():
     assert WaveformChannel(label="").wfdb_description() == "signal"
+
+
+def test_a_locally_defined_99_designator_is_never_treated_as_published(monkeypatch):
+    """The "99" prefix is checked, not merely absent from the allowlist.
+
+    DICOM PS3.3 reserves designators beginning "99" for locally defined
+    schemes. The tempting fix for "our site's codes are being suppressed"
+    is to add the designator to KNOWN_CODING_SCHEMES, which would reopen
+    exactly the free-text passthrough the allowlist exists to close -- so
+    the prefix rule holds independently of the set's contents.
+    """
+    from isocenter import waveform
+
+    monkeypatch.setattr(waveform, "KNOWN_CODING_SCHEMES",
+                        frozenset({"SCT", "99ACME"}))
+
+    assert waveform._is_known_coding_scheme("SCT")
+    assert not waveform._is_known_coding_scheme("99ACME")

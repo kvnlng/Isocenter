@@ -63,6 +63,45 @@ KNOWN_LEAD_NAMES = frozenset({
 })
 
 
+# Coding scheme designators naming a published vocabulary. A Concept Name
+# drawn from one of these carries a term somebody else defined and
+# maintains; anything else -- including an absent designator -- is
+# site-defined, which in practice means an operator typed it.
+#
+# DICOM PS3.3 reserves designators beginning "99" for locally defined
+# schemes, so no "99..." value can ever belong here however conformant it
+# looks: a site's own "99ACME" is precisely the case this guards against.
+# `_is_known_coding_scheme` re-checks that prefix rather than trusting the
+# set to stay clean, because the tempting fix for "our codes are being
+# suppressed" is to add the site's designator to this list.
+KNOWN_CODING_SCHEMES = frozenset({
+    "DCM",      # DICOM Controlled Terminology
+    "SCT",      # SNOMED CT
+    "SRT",      # SNOMED RT (retired, still emitted by older carts)
+    "SNM3",     # SNOMED v3 (ditto)
+    "LN",       # LOINC
+    "MDC",      # IEEE 11073-10101 nomenclature -- the ECG lead codes
+    "UCUM",     # Unified Code for Units of Measure
+    "NCIT",     # NCI Thesaurus
+    "RADLEX",
+    "ACR",
+})
+
+
+def _is_known_coding_scheme(designator: str) -> bool:
+    """True if `designator` names a published vocabulary.
+
+    Compared case-insensitively. Designators are case-sensitive by
+    specification, but real datasets write "sct" and "Sct", and treating
+    those as site-defined would suppress genuinely coded concepts -- the
+    same tolerance `_is_known_lead_name` applies for the same reason.
+    """
+    normalized = str(designator or "").strip().upper()
+    if normalized.startswith("99"):
+        return False
+    return normalized in KNOWN_CODING_SCHEMES
+
+
 def _is_known_lead_name(label: str) -> bool:
     """True if `label` is a recognisable signal name rather than free text.
 

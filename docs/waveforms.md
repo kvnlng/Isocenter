@@ -103,7 +103,7 @@ profile or config file.) This matters for waveform export specifically
 because the series description becomes a **directory name** -- every
 `.hea`/`.dat`/`.annotations.json` this exporter writes lives inside it.
 
-**The two free-text fields specific to waveform export are now
+**The three free-text surfaces specific to waveform export are now
 remediated in the exporter itself, not by profile membership** -- the
 PHI scan is tag-gated (see above), so a profile entry alone would not
 protect a bare `Session()` that never called `load_config()`. Both are
@@ -137,8 +137,36 @@ configurations above you're in:
   not just this one. If you de-identified waveforms with 0.7.x or
   earlier, re-audit them.
 
-Both are safe by default: no PHI tag configuration is required to get
-this behaviour, and it applies even to a bare `Session()`.
+- **Concept Name `(0040,A043)`** -- the annotation's Code Meaning
+  reaches `annotations.json` as `label`, and its scheme-qualified Code
+  Value as `category`, **only when the Coding Scheme Designator
+  `(0008,0102)` names a published vocabulary**, checked against
+  `KNOWN_CODING_SCHEMES` in `isocenter/waveform.py`. A coded finding is
+  unaffected: `SCT:164889003` still arrives with its label
+  `"Atrial fibrillation"`, because SNOMED defined that term, not an
+  operator.
+
+  For a site-defined scheme the cart populates Code Meaning with typed
+  text instead, so `label` is omitted and `category` collapses to
+  `uncoded`. The finding itself survives -- kind, sample positions and
+  lead are untouched -- because a reviewer seeing fewer marks than the
+  record carried, with nothing saying any were withheld, is a worse
+  failure than seeing them unnamed. What is lost is the name and the
+  ability to group two site-defined annotation types apart from each
+  other.
+
+  DICOM reserves designators beginning `99` for locally defined schemes,
+  so no `99...` value can be recognised however conformant it looks --
+  and adding one to `KNOWN_CODING_SCHEMES` will not work, because the
+  prefix is checked independently of the set.
+
+  `include_annotation_text=True` restores both fields, exactly as it
+  does for `note`. That flag is the protocol's voice here: a study whose
+  auditor has determined that site-defined annotation labels may be
+  released says so by passing it.
+
+All three are safe by default: no PHI tag configuration is required to
+get this behaviour, and it applies even to a bare `Session()`.
 
 `annotations.json`'s `source` field is producer provenance only: the
 running isocenter version plus Manufacturer `(0008,0070)`, e.g.

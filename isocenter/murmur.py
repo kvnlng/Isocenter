@@ -15,6 +15,7 @@ from collections.abc import Sequence as _SequenceABC
 from typing import Any, Dict, List, Optional
 
 from .exporters.wfdb import _sanitize_description
+from .waveform import _is_known_coding_scheme
 
 SCHEMA_VERSION = 1
 
@@ -31,6 +32,11 @@ TAG_CODING_SCHEME = "0008,0102"
 TAG_CODE_MEANING = "0008,0104"
 
 _RANGE_TYPES = {"SEGMENT", "MULTISEGMENT"}
+
+# Category stamped on a finding whose Concept Name came from a
+# site-defined scheme. The mark keeps its position and lead; only the
+# name and the grouping are given up.
+UNCODED_CATEGORY = "uncoded"
 
 
 def _as_list(value):
@@ -113,8 +119,19 @@ def _sample_positions(item, waveform) -> List[int]:
     return resolved
 
 
-def _concept(item):
-    """Return (category, label) from the Concept Name Code Sequence."""
+def _concept(item, include_text: bool = False):
+    """Return (category, label) from the Concept Name Code Sequence.
+
+    A Concept Name whose Coding Scheme Designator does not name a
+    published vocabulary is site-defined, and its Code Meaning is then
+    operator-typed free text rather than a term from a scheme -- the same
+    property that makes Unformatted Text Value opt-in. Such a concept
+    yields `UNCODED_CATEGORY` and no label.
+
+    `include_text` is the auditor's override, not a debug switch: it is
+    the same flag that releases `note`, and it already means "this
+    protocol permits free text in this output".
+    """
     seq = item.sequences.get(TAG_CONCEPT_NAME_CODE_SEQ)
     if seq is None or not seq.items:
         return None, None
@@ -126,6 +143,9 @@ def _concept(item):
 
     if not code:
         return None, meaning or None
+
+    if not include_text and not _is_known_coding_scheme(scheme):
+        return UNCODED_CATEGORY, None
 
     category = f"{scheme}:{code}" if scheme else code
     return category, (meaning or None)
@@ -154,7 +174,7 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
     items = seq.items if seq is not None else []
 
     for item in items:
-        category, label = _concept(item)
+        category, label = _concept(item, include_text)
         if not category:
             # Without a category there is nothing for Murmur to colour or
             # group by, and the schema requires it.
