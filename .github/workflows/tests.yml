@@ -5,6 +5,11 @@ on:
   # on every push to a PR branch, producing a second, duplicate run whose
   # check contexts share the names `main` requires -- ambiguous for branch
   # protection and twice the CI cost.
+  #
+  # This is not redundant with the pull_request run even though `strict`
+  # branch protection means they test the same tree: `--admin` merges
+  # bypass `strict`, and then this is the only thing that tests what
+  # actually landed.
   push:
     branches:
       - main
@@ -16,6 +21,14 @@ on:
     branches:
       - main
   workflow_dispatch:
+  # Called by publish.yml, which runs the full version matrix at release
+  # time. The gate below is deliberately narrow; the breadth lives there.
+  workflow_call:
+    inputs:
+      python-versions:
+        description: JSON array of Python versions to run.
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -28,17 +41,31 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # Never stop the other versions because one went red. The point of a
+      # matrix is the whole table; a truncated one cannot tell you whether
+      # a failure is version-specific.
+      fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14", "3.14t"]
-        include:
-          - python-version: "3.12"
-            PYTHON_GIL: "1" 
-          - python-version: "3.13"
-            PYTHON_GIL: "1" 
-          - python-version: "3.14"
-            PYTHON_GIL: "1" 
-          - python-version: "3.14t"
-            PYTHON_GIL: "0" 
+        # Two versions, because "supported" is two independent promises on
+        # orthogonal axes and neither backs the other:
+        #
+        #   3.12  -- the floor `python_requires=">=3.12"` asserts. Broken
+        #            by 3.13+ syntax or a stdlib API that did not exist in
+        #            3.12. A newer version passing proves nothing here.
+        #   3.14t -- the free-threaded build. `run_parallel()` chooses
+        #            threads over processes when there is no GIL to escape
+        #            (`parallel.py`), and everything heavy funnels through
+        #            it, so a GIL-enabled interpreter never executes that
+        #            path at all. `python_requires` cannot express this
+        #            promise: 3.14t *is* 3.14, `t` is the build, not the
+        #            version, and the wheel is py3-none-any so the ABI tag
+        #            does not carry it either.
+        #
+        # 3.13 and 3.14 with the GIL are interpolation between a passing
+        # floor and a passing ceiling. They moved to the release matrix in
+        # publish.yml after 30 runs of the four-way matrix produced zero
+        # divergences that were not step timeouts.
+        python-version: ${{ fromJSON(inputs.python-versions || '["3.12", "3.14t"]') }}
     timeout-minutes: 15
 
     steps:
@@ -73,6 +100,7 @@ jobs:
         pip install -e ".[tests,ocr]"
 
     - name: Run Tests
+      id: suite
       # The suite takes ~4m15s locally and 5m30s-6m on a runner, so the
       # old 5-minute budget had no margin left: on 2026-08-26 every job
       # finished between 5m30s and 6m06s and `test (3.14)` was killed
@@ -86,5 +114,20 @@ jobs:
       run: |
         pytest -v
       env:
-        PYTHON_GIL: ${{ matrix.PYTHON_GIL }}
+        # Derived from the version rather than carried in a parallel
+        # `include:` block, so adding a version to the matrix cannot
+        # silently run a free-threaded build with the GIL back on -- which
+        # would pass while testing none of what it was added for.
+        PYTHON_GIL: ${{ endsWith(matrix.python-version, 't') && '0' || '1' }}
+
+    - name: Record the result for the release matrix
+      # `if: always()` so a red version still reports. This is what makes
+      # the publish run's summary a compatibility table rather than a list
+      # of whatever happened to pass.
+      if: always()
+      run: |
+        outcome="${{ steps.suite.outcome }}"
+        [ "$outcome" = "success" ] && mark="pass" || mark="**$outcome**"
+        echo "- Python ${{ matrix.python-version }} (GIL=${{ endsWith(matrix.python-version, 't') && '0' || '1' }}): $mark" \
+          >> "$GITHUB_STEP_SUMMARY"
 
