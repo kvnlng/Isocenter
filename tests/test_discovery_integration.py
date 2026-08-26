@@ -12,31 +12,42 @@ import scripts.generate_redaction_example as gen
 class TestDiscoveryIntegration(unittest.TestCase):
 
     def setUp(self):
-        # Seed for determinism
+        # Seed for determinism. The generator picks manufacturers, serials
+        # and names at random, and the assertions below depend on at least
+        # one machine producing an adjacent hospital/name pair.
         import random
+        from faker import Faker
+
         random.seed(42)
-        try:
-            from faker import Faker
-            Faker.seed(42)
-        except ImportError:
-            pass
+        Faker.seed(42)
 
-        if not gen.HAS_DEPS:
-            self.skipTest("Requires 'pillow' and 'faker' which are not installed")
+        # `faker` is a declared `tests` dependency and `pillow` is a hard
+        # install_requires, so a false HAS_DEPS means a broken environment,
+        # not an optional feature. Skipping here is what let this test go
+        # unrun for months: the old skip named 'pillow' -- which is always
+        # present -- and sent readers looking in the wrong place (#44).
+        self.assertTrue(
+            gen.HAS_DEPS,
+            "generate_redaction_example reports missing dependencies, but "
+            "pillow is in install_requires and faker is in the `tests` "
+            "extra. Install with `pip install -e \'.[tests]\'`.")
 
-        # Create temp environment
+        # OCR is the one genuinely optional piece. This test discovers
+        # redaction zones from burned-in pixel text, so without it every
+        # machine yields zero zones and the assertions below are vacuous.
+        # pytesseract also needs the `tesseract` system binary, which pip
+        # cannot supply -- hence a real skip rather than a failure.
+        from isocenter.pixel_analysis import HAS_OCR
+        if not HAS_OCR:
+            self.skipTest(
+                "Requires the 'ocr' extra (pytesseract) and a `tesseract` "
+                "binary on PATH: this test reads burned-in pixel text.")
+
         self.test_dir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.test_dir, "test.db")
         self.session = DicomSession(self.db_path)
 
-        # Override generator path to output to temp dir
-        # The generator script is hardcoded to "test_data/redaction_examples"
-        # We'll just patch where we ingest from, but we have to let it write where it wants
-        # or monkeypatch it.
-        # Easier: Just run it, move files, or just ingest from the hardcoded path (if safe).
-        # Actually, let's just use the logic from reproduce_issue_v2.py
-
-        gen.main(output_dir=os.path.join(self.test_dir, "data")) # Generates data in the temp dir/data
+        gen.main(output_dir=os.path.join(self.test_dir, "data"))
 
     def tearDown(self):
         self.session.close()
@@ -47,15 +58,11 @@ class TestDiscoveryIntegration(unittest.TestCase):
         Integration test verifying that 'Hospital' + Gap + 'PatientName'
         are merged into a single PROPER_NOUN zone using asymmetric clustering.
         """
-        # 1. Ingest
         self.session.ingest(os.path.join(self.test_dir, "data"))
 
-        # 2. Identify Serial
-        # We know the generator makes specific sets.
-        # "SN-5506" was the problematic one (GE Revolution CT).
-        # But generator is random seeded in main().
-        # We should find ANY serial that has data.
-
+        # The generator seeds its manufacturers and serials randomly, so no
+        # particular serial can be named here; any machine that produced an
+        # adjacent hospital/name pair satisfies the assertions.
         eqs = self.session.store.get_unique_equipment()
 
         found_merged_zone = False
@@ -63,10 +70,7 @@ class TestDiscoveryIntegration(unittest.TestCase):
 
         for eq in eqs:
             serial = eq.device_serial_number
-            print(f"Scanning {serial} ({eq.manufacturer})...")
 
-            # Result is now a DiscoveryResult object
-            # We must group it to get zones
             result = self.session.discover_redaction_zones(
                 serial,
                 sample_size=10,
@@ -78,7 +82,6 @@ class TestDiscoveryIntegration(unittest.TestCase):
                 z_type = z.get('type')
                 z_rect = z.get('zone')
                 width = z_rect[3] - z_rect[2]
-                print(f"  Zone: {z_rect} Type: {z_type} Width: {width} Examples: {z.get('examples')}")
 
                 if z_type == "PROPER_NOUN":
                     found_proper_noun = True # At least one machine found a name
