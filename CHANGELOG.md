@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-08-25
+
+Three defects of one shape: the exported artefact asserting something
+that is not true, where a consumer has no way to tell. A study date that
+was invented, an acquisition time that was misread, and a provenance
+claim that was unearned. If you have exported WFDB records or used
+study-date filtering with 0.8.0 or earlier, re-export them.
+
 ### Fixed
 
 - **A four-digit Study Time was read as the wrong time.** `strptime` accepts one- and two-digit fields, and the formats were tried longest-first, so `%H%M%S` *matched* `"1430"` -- as 14:03:00, not 14:30. `"14"` matched `%H%M` as 01:04:00, and `"202304171430"` matched `%Y%m%d%H%M%S` the same way. Nothing raised, so nothing fell through to the correct format. `HH`, `HHMM` and `HHMMSS` are all legal for a TM, so this is ordinary data: an ECG recorded at half past two was exported claiming three minutes past, on the ordinary anonymized path. Parsing is now keyed by the stamp's length, in one place, for both TM and DT.
