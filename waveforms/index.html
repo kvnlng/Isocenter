@@ -1456,7 +1456,7 @@ this class of bug can't recur regardless of how a tag is spelled in a
 profile or config file.) This matters for waveform export specifically
 because the series description becomes a <strong>directory name</strong> -- every
 <code>.hea</code>/<code>.dat</code>/<code>.annotations.json</code> this exporter writes lives inside it.</p>
-<p><strong>The two free-text fields specific to waveform export are now
+<p><strong>The three free-text surfaces specific to waveform export are now
 remediated in the exporter itself, not by profile membership</strong> -- the
 PHI scan is tag-gated (see above), so a profile entry alone would not
 protect a bare <code>Session()</code> that never called <code>load_config()</code>. Both are
@@ -1489,8 +1489,34 @@ configurations above you're in:</p>
   <strong>raw</strong> value. That was #57, and it affected every sequence-nested tag,
   not just this one. If you de-identified waveforms with 0.7.x or
   earlier, re-audit them.</p>
-<p>Both are safe by default: no PHI tag configuration is required to get
-this behaviour, and it applies even to a bare <code>Session()</code>.</p>
+<ul>
+<li><strong>Concept Name <code>(0040,A043)</code></strong> -- the annotation's Code Meaning
+  reaches <code>annotations.json</code> as <code>label</code>, and its scheme-qualified Code
+  Value as <code>category</code>, <strong>only when the Coding Scheme Designator
+  <code>(0008,0102)</code> names a published vocabulary</strong>, checked against
+  <code>KNOWN_CODING_SCHEMES</code> in <code>isocenter/waveform.py</code>. A coded finding is
+  unaffected: <code>SCT:164889003</code> still arrives with its label
+  <code>"Atrial fibrillation"</code>, because SNOMED defined that term, not an
+  operator.</li>
+</ul>
+<p>For a site-defined scheme the cart populates Code Meaning with typed
+  text instead, so <code>label</code> is omitted and <code>category</code> collapses to
+  <code>uncoded</code>. The finding itself survives -- kind, sample positions and
+  lead are untouched -- because a reviewer seeing fewer marks than the
+  record carried, with nothing saying any were withheld, is a worse
+  failure than seeing them unnamed. What is lost is the name and the
+  ability to group two site-defined annotation types apart from each
+  other.</p>
+<p>DICOM reserves designators beginning <code>99</code> for locally defined schemes,
+  so no <code>99...</code> value can be recognised however conformant it looks --
+  and adding one to <code>KNOWN_CODING_SCHEMES</code> will not work, because the
+  prefix is checked independently of the set.</p>
+<p><code>include_annotation_text=True</code> restores both fields, exactly as it
+  does for <code>note</code>. That flag is the protocol's voice here: a study whose
+  auditor has determined that site-defined annotation labels may be
+  released says so by passing it.</p>
+<p>All three are safe by default: no PHI tag configuration is required to
+get this behaviour, and it applies even to a bare <code>Session()</code>.</p>
 <p><code>annotations.json</code>'s <code>source</code> field is producer provenance only: the
 running isocenter version plus Manufacturer <code>(0008,0070)</code>, e.g.
 <code>isocenter/0.6.0 (AcmeCart)</code>. It does not read Device Serial Number
