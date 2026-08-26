@@ -237,6 +237,37 @@ paths a WFDB writer could otherwise open:
   line-break characters out of it regardless, so it can't forge a
   `.hea` comment line, but the text itself is trusted, not filtered.
 
+## DICOM to DICOM round trips
+
+Exporting with `format="dicom"` writes the waveform samples back. The
+bytes are copied from the sidecar **verbatim** rather than re-encoded
+from the decoded array, so a round trip is byte-exact and the exported
+`Waveform Sample Interpretation (5400,1006)` cannot disagree with the
+samples it labels.
+
+That verbatim copy is deliberate. Isocenter decodes `US`/`SB`/`UB` to
+int16 internally, rebasing `US` by 32768; re-encoding from that array
+while leaving `(5400,1006)` saying `US` would shift every value by 32768
+without anything raising. Nothing in the pipeline mutates waveform
+samples -- unlike pixels, which redaction burns into -- so there is
+nothing a re-encode could add, and the mismatch is made structurally
+impossible instead of merely tested against. De-identification is
+unaffected: waveform PHI lives in tags (channel labels, annotation
+concepts), which are remediated in the object graph and rebuilt into the
+exported dataset as usual.
+
+Because no decode happens on this path, companded audio (`MB`/`AB`)
+round-trips through DICOM export even though WFDB export refuses it.
+
+**Sources must be little-endian.** Ingest does not record the source
+transfer syntax and `decode_samples` reads `<i2`/`<u2`, so the pipeline
+has always assumed this; the DICOM writeback inherits the assumption
+rather than adding one.
+
+If an instance carries a Waveform Sequence but no samples reached the
+sidecar, the export logs a warning rather than writing a
+structurally-plausible empty record in silence.
+
 ## Limitations
 
 Format 16 only. The exporter also does not support: multi-rate

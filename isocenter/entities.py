@@ -499,6 +499,24 @@ class Instance(DicomItem):
             return True
         return False
 
+    def get_waveform_bytes(self) -> Optional[bytes]:
+        """Return the original Waveform Data (5400,1010) bytes, undecoded.
+
+        DICOM export writes these back verbatim, so a DICOM -> DICOM round
+        trip is byte-exact rather than re-encoded (#34). Deliberately not
+        cached: the decoded array is what callers normally hold, and
+        keeping both resident would double the cost of the largest thing
+        an instance owns.
+
+        Returns:
+            Optional[bytes]: Raw sample bytes, or None when this instance
+            has no waveform or its samples are not backed by the sidecar.
+        """
+        loader = self._waveform_loader
+        if loader is None or not hasattr(loader, "read_raw"):
+            return None
+        return loader.read_raw()
+
     def get_waveform_data(self) -> Optional[np.ndarray]:
         """Return decoded waveform samples, loading from the sidecar if needed.
 

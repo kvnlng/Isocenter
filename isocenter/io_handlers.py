@@ -492,6 +492,43 @@ def _export_instance_worker(ctx: ExportContext) -> Optional[bool]:
             ds.HighBit = inst.attributes.get("0028,0102", default_bits - 1)
             ds.PixelRepresentation = inst.attributes.get("0028,0103", 0)
 
+        # Waveform samples never reach `attributes` -- populate_attrs skips
+        # OB/OW -- so the rebuilt dataset carries a complete Waveform
+        # Sequence (channel definitions, sampling frequency, sample count)
+        # with no signal in it unless they are put back here (#34).
+        #
+        # The sidecar's bytes are written back verbatim rather than
+        # re-encoded from the decoded array, because nothing in this
+        # pipeline mutates waveform samples -- unlike pixels, which
+        # redaction burns into a few lines above. A re-encode could
+        # therefore only lose: it would have to undo the int16 rebasing
+        # `decode_samples` applies to US, and any slip there shifts every
+        # value by 32768 while (5400,1006) still says "US". Copying the
+        # original bytes makes that mismatch structurally impossible
+        # rather than merely tested against.
+        #
+        # Endianness is inherited, not assumed here: ingest never records
+        # the source transfer syntax and `decode_samples` hardcodes
+        # little-endian, so the whole pipeline already requires a
+        # little-endian source. This adds no new assumption.
+        if "WaveformSequence" in ds and len(ds.WaveformSequence) > 0:
+            w_raw = inst.get_waveform_bytes()
+            if w_raw:
+                # Only group 0 is ingested (#36), so only group 0 can be
+                # written. Items 1..n keep their metadata and carry no
+                # samples -- the same state every item is in today, and
+                # the ingest-time warning is where that loss is reported.
+                ds.WaveformSequence[0].WaveformData = w_raw
+            else:
+                # Structurally plausible and empty is the failure mode this
+                # whole fix exists to end; if it is still reachable -- a
+                # source that never carried samples -- say so rather than
+                # writing the file in silence.
+                get_logger().warning(
+                    f"{inst.sop_instance_uid}: Waveform Sequence present but "
+                    "no samples are available to export; the written file "
+                    "will describe a waveform it does not contain.")
+
         if "_ISOCENTER_REDACTION_HASH" in ds:
             del ds["_ISOCENTER_REDACTION_HASH"]
 
@@ -769,9 +806,14 @@ class SidecarWaveformLoader:
             raise ValueError(
                 "SidecarWaveformLoader requires either 'instance' or 'metadata'")
 
-    def __call__(self):
-        from .waveform import decode_samples
+    def read_raw(self) -> bytes:
+        """Return the original Waveform Data bytes, integrity-checked.
 
+        Split out from `__call__` so DICOM export can write the source
+        bytes back without a decode/re-encode round trip (#34). Callers
+        get the sha256 verification for free, which is the reason to come
+        through here rather than reading the frame directly.
+        """
         mgr = SidecarManager(self.sidecar_path)
         raw = mgr.read_frame(self.offset, self.length, self.alg)
 
@@ -782,7 +824,12 @@ class SidecarWaveformLoader:
                     f"Waveform integrity check failed: expected "
                     f"{self.waveform_hash}, got {actual}")
 
-        return decode_samples(raw, self.interpretation,
+        return raw
+
+    def __call__(self):
+        from .waveform import decode_samples
+
+        return decode_samples(self.read_raw(), self.interpretation,
                               self.num_samples, self.num_channels)
 
 
