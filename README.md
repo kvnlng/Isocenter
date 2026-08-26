@@ -17,7 +17,7 @@ Isocenter provides a high-performance, object-oriented interface for managing, a
   - **Reversibility**: Optional cryptographic identity preservation.
 - **Codecs**: Robust support for JPEG Lossless, JPEG 2000, and other compressed formats via `imagecodecs`.
 - **Waveforms**: Ingest DICOM waveform IODs (ECG, hemodynamic) and export PhysioNet WFDB records, bridging to [Murmur Studio](https://github.com/kvnlng/Murmur).
-- **Free-threaded Python Ready**: Fully compatible with Python 3.13t+ (no-GIL) for true parallelism.
+- **Free-threaded Python Ready**: `run_parallel()` uses threads rather than processes when there is no GIL to escape, for true parallelism. Tested on **3.14t** (`PYTHON_GIL=0`) on every pull request and again at release.
 - **Enterprise-Grade Scalability**:
   - **Process-Isolated Redaction**: Guarantees zero memory leaks by isolating heavy pixel operations.
   - **Deep Memory Management**: Validated sub-linear memory scaling on 100GB+ datasets.
