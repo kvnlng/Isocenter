@@ -133,9 +133,13 @@ again. Note that re-firing it also re-runs the PyPI publish, which will
 fail on a version the index already has; nothing is uploaded, but the run
 goes red.
 
-After the first deposit, add the concept DOI to `CITATION.cff` and the
-badge to `README.md`. Use the **concept** DOI, the one that always
-resolves to the latest version, not the version DOI minted alongside it.
+The integration is enabled and the first deposit exists, from v0.8.1.
+The **concept** DOI is `10.5281/zenodo.22104298` -- that is what
+`CITATION.cff` and the README badge carry, and it always resolves to the
+latest version. Zenodo also mints a per-version DOI for each release, one
+digit away; do not substitute it, or the citation stops following the
+work. `tests/test_version_contract.py` pins both the value and the
+agreement between the two files.
 
 `.zenodo.json` supplies the metadata the record is minted from. Two
 things about it are easy to get wrong and are pinned by

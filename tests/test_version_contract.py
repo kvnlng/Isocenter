@@ -146,3 +146,44 @@ def test_the_zenodo_deposit_does_not_pin_a_version():
 
     assert "version" not in deposit, (
         "the deposit pins a version; let the release tag supply it")
+
+
+def test_the_readme_badge_shows_the_doi_the_citation_file_declares():
+    """Two copies of one DOI, in the two places people read.
+
+    `CITATION.cff` is what GitHub's "Cite this repository" button and
+    reference managers read; the README badge is what a human sees first.
+    A DOI is exactly the kind of value that gets updated in one place --
+    a version DOI pasted into the badge after a release, say -- and the
+    disagreement is invisible until someone cites the wrong record.
+    """
+    import re
+
+    declared = declared_in(ROOT / "CITATION.cff", r'^doi:\s*"?([^"\s]+)"?')
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    in_readme = set(re.findall(r'10\.5281/zenodo\.\d+', readme))
+    ours = {d for d in in_readme if d != "10.5281/zenodo.21077528"}  # Murmur's
+
+    assert ours, "the README names no Isocenter DOI"
+    assert ours == {declared}, (
+        f"CITATION.cff declares {declared} but the README carries {ours}")
+
+
+def test_the_declared_doi_is_the_concept_doi():
+    """The concept DOI resolves to the latest version; a version DOI freezes.
+
+    Zenodo mints both for every release, one digit apart, so pasting the
+    wrong one is a plausible slip rather than a far-fetched one. A
+    citation carrying a version DOI silently stops tracking the software
+    the moment the next release lands.
+
+    Pinned as a literal because it must not change: a new value here
+    means someone replaced the concept record, which is exactly the
+    change that should require reading this comment first.
+    """
+    declared = declared_in(ROOT / "CITATION.cff", r'^doi:\s*"?([^"\s]+)"?')
+
+    assert declared == "10.5281/zenodo.22104298", (
+        "the DOI in CITATION.cff is not Isocenter's concept DOI; a version "
+        "DOI here would stop the citation following the work")

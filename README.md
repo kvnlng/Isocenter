@@ -1,5 +1,7 @@
 # Isocenter
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22104298.svg)](https://doi.org/10.5281/zenodo.22104298)
+
 **A Python DICOM Object Model and Redaction Toolkit.**
 
 Isocenter provides a high-performance, object-oriented interface for managing, analyzing, and de-identifying DICOM datasets. It is designed for large-scale ingestion, precise pixel redaction, and strict PHI compliance.
@@ -105,6 +107,14 @@ pip install -e ".[dev]"
 If Isocenter's de-identification is part of how a dataset was prepared,
 it belongs in the methods section rather than the acknowledgements. Use
 GitHub's **Cite this repository** button, which reads `CITATION.cff`.
+
+Each release is archived on Zenodo. Cite the concept DOI,
+[10.5281/zenodo.22104298](https://doi.org/10.5281/zenodo.22104298), which
+always resolves to the latest version -- not the per-version DOI, so the
+citation follows the work rather than freezing on whichever version was
+current when you wrote it. If you need to record the exact version used,
+name it in the text (`Isocenter v0.8.1`) and leave the DOI pointing at
+the concept record.
 
 Isocenter is the upstream half of a pair: it builds and de-identifies the
 corpus that [Murmur Studio](https://github.com/kvnlng/Murmur)

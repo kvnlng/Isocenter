@@ -7,11 +7,16 @@
 # that used both should cite both -- the de-identification tooling is a
 # methods citation, not a courtesy.
 #
-# There is no `doi:` field yet. It gets added, carrying the CONCEPT DOI
-# (the parent record that always resolves to the latest version), after
-# the first Zenodo deposit. Per-version DOIs live alongside their release
-# on Zenodo. Do not guess it: a DOI in this file that does not resolve is
-# worse than none, because it is what tooling copies into bibliographies.
+# `doi:` carries the CONCEPT DOI -- the parent record that always
+# resolves to the latest version -- not the per-version DOI minted
+# alongside each release. A citation should follow the work, not freeze
+# on whichever version happened to be current when it was written;
+# readers who need the exact version can reach it from the concept
+# record. Per-version DOIs live alongside their release on Zenodo.
+#
+# Do not change this to a version DOI, and do not guess one: a DOI here
+# that does not resolve is worse than none, because this file is what
+# tooling copies into bibliographies.
 
 cff-version: 1.2.0
 message: "If you use Isocenter in your research, please cite it as below."
@@ -27,6 +32,7 @@ abstract: >-
 type: software
 license: AGPL-3.0-or-later
 repository-code: "https://github.com/kvnlng/Isocenter"
+doi: "10.5281/zenodo.22104298"
 url: "https://kvnlng.github.io/Isocenter/"
 keywords:
   - DICOM
