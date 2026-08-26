@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`config_tags={"0008,0020": "SHIFT"}` replaced the date instead of shifting it, and said nothing.** A tag's value has two shapes: a dict is a rule (`{"name": ..., "action": ...}`), and anything else is the tag's *display name*, leaving the action at `REPLACE`. That is coherent, and nothing stated it -- the docstring typed the parameter `Dict[str, str]`, which makes the string form look like the primary shape and the string itself look like the choice. A caller asking for a shift got `ANONYMIZED`, destroying the interval information shifting exists to preserve, with nothing raised and nothing logged.
 
-  Constructing a `PhiInspector` now warns once per offending tag when a string value reads as an action name (`REMOVE`, `EMPTY`, `SHIFT`, `JITTER`, `REPLACE`), naming the tag and the rule form that would do what was asked. The docstring documents both shapes and says outright that the string names the tag rather than choosing what happens to it.
+  Constructing a `PhiInspector` now warns once per offending tag when a string value reads as an action name (`REMOVE`, `EMPTY`, `SHIFT`, `JITTER`), naming the tag and the rule form that would do what was asked. The docstring documents both shapes and says outright that the string names the tag rather than choosing what happens to it.
 
   **The behaviour is unchanged**: the string form still means `REPLACE`. Rejecting it would break calls that work today, and a caller may legitimately have a tag *described* as "Shift" -- so this reports rather than raises. The warning is emitted at construction rather than during the scan, where it would fire once per tag per instance. (#111)
 

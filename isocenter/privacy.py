@@ -180,8 +180,11 @@ class PhiInspector:
 
     # Action names a caller is most likely to write where a description
     # belongs, having read `Dict[str, str]` and reasonably concluded the
-    # string chooses the behaviour.
-    _ACTION_WORDS = frozenset({"REMOVE", "EMPTY", "SHIFT", "JITTER", "REPLACE"})
+    # string chooses the behaviour. `REPLACE` is deliberately absent: it
+    # is what the string form already does, so there is no gap between
+    # what was asked and what happens, and the warning would only advise
+    # writing a rule to obtain the behaviour already in effect.
+    _ACTION_WORDS = frozenset({"REMOVE", "EMPTY", "SHIFT", "JITTER"})
 
     def _warn_on_bare_action_values(self) -> None:
         """Report tags whose value names an action rather than the tag.

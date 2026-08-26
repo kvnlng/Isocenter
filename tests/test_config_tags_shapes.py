@@ -77,3 +77,17 @@ def test_the_rule_form_still_shifts():
 
     assert dated
     assert dated[0].remediation_proposal.action_type == "SHIFT_DATE"
+
+
+def test_a_tag_described_as_replace_is_not_reported(caplog):
+    """`REPLACE` is what the string form already does.
+
+    Warning here would advise the caller to write `{"action": "REPLACE"}`
+    to obtain the behaviour they are already getting -- true, and no help
+    to anyone. The warning exists for the gap between what was asked and
+    what happens; for `REPLACE` there is no gap.
+    """
+    with caplog.at_level(logging.WARNING):
+        PhiInspector(config_tags={"0008,0020": "Replace"})
+
+    assert not _warnings(caplog)
