@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A correct refusal announced itself as a fault on stdout.** `Instance.unload_pixel_data()` printed `DEBUG: FAILED TO UNLOAD <uid> - No file path or loader!` whenever it declined to clear pixel data. Declining is the guard working: data held only in memory -- edited but not yet saved -- cannot be re-loaded, so clearing it would be a silent discard rather than a free. `release_memory()` over a store with unsaved edits printed one of these per instance, straight to the terminal, with no way to quiet it. It is now a `debug` log line, matching `unload_waveform_data`, which has always declined silently. (#108)
+
 - **The safe-export report suggested a config nothing could read.** When `export(check_burned_in=True)` found identifiers it printed the one actionable instruction in the whole report -- a config fragment resolving the findings -- as JSON with `//` comments and a trailing comma. That is not valid JSON, and user-facing configs are YAML only, so even valid JSON would have been the wrong format. Both defects had the same cause: JSON has no comments, so the per-tag counts had to be smuggled in as `//`.
 
   The fragment is now YAML in the shape `create_config()` writes, so it can be pasted into the file the user already has, and the counts sit above their entries as ordinary comments. Quoting is left to the YAML dumper -- a tag key contains a comma, and hand-rolling that is how the previous version produced a document nothing could load.

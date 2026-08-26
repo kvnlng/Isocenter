@@ -367,20 +367,28 @@ class Instance(DicomItem):
         or `_pixel_loader` is present).
 
         Returns:
-            bool: True if unloaded successfully,
-                 False if it was unsafe to unload (data would be lost).
+            bool: True if unloaded (or already absent), False if it was
+                unsafe to unload -- the data is in memory only and
+                nothing could bring it back.
         """
         if self.pixel_array is None:
             return True
 
         if self.file_path or self._pixel_loader:
             self.pixel_array = None
-            # print(f"DEBUG: Unloaded pixels for {self.sop_instance_uid}")
             return True
-        else:
-            # Data is in memory only (e.g. modified but not saved)
-            print(f"DEBUG: FAILED TO UNLOAD {self.sop_instance_uid} - No file path or loader!")
-            return False
+
+        # Refusing here is the guard working: pixel data held only in
+        # memory (edited but not yet saved) cannot be re-loaded, so
+        # clearing it would be a silent discard rather than a free. This
+        # announced itself on stdout prefixed "DEBUG:", once per instance,
+        # so a correct refusal read as a fault and `release_memory()` over
+        # a store with unsaved edits printed a wall of them with no way to
+        # quiet it. `unload_waveform_data` declines silently; match it.
+        get_logger().debug(
+            "Not unloading pixels for %s: held in memory only, with no "
+            "file path or loader to restore them.", self.sop_instance_uid)
+        return False
 
     def get_pixel_data(self) -> Optional[np.ndarray]:
         """
