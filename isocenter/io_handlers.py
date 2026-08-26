@@ -181,8 +181,16 @@ def ingest_worker(fp: str) -> Tuple:
         # is handled above, and offload the bytes to the sidecar.
         # Only the first Waveform Sequence item is handled; multi-item
         # sequences (e.g. multiplexed rhythm + median) keep item 0 only.
+        #
+        # The count is reported back in `meta` rather than kept here,
+        # because this function runs in a worker process and cannot reach
+        # the audit log. `import_files` warns and records the loss on the
+        # far side. It rides in `meta` rather than as a tenth tuple
+        # element so the return arity -- unpacked at every call site --
+        # does not change.
         w_bytes = None
         w_hash = None
+        meta['waveform_groups'] = len(ds.WaveformSequence) if "WaveformSequence" in ds else 0
 
         if "WaveformSequence" in ds and len(ds.WaveformSequence) > 0:
             wf_item = ds.WaveformSequence[0]
@@ -285,6 +293,28 @@ class DicomImporter:
                         inst._pixel_loader = SidecarPixelLoader(
                             sidecar_manager.filepath, off, leng, p_alg, instance=inst)
                         inst._pixel_hash = p_hash
+
+                    # Silent truncation is the defect here, not the
+                    # missing multi-rate support -- that is deferred on
+                    # purpose. A record whose groups were dropped without
+                    # a word is indistinguishable from one that only ever
+                    # had a single group (#36).
+                    groups = meta.get('waveform_groups', 0)
+                    if groups > 1:
+                        dropped = groups - 1
+                        detail = (f"WaveformSequence carried {groups} multiplex "
+                                  f"groups; kept group 0 and discarded "
+                                  f"{dropped}. Multi-rate records are not yet "
+                                  f"supported.")
+                        logger.warning(f"{inst.sop_instance_uid}: {detail}")
+                        # The log line alone is not a compliance trail: it
+                        # goes to a file the user may never open. The audit
+                        # entry is what puts this in the record.
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="DATA_LOSS",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail)
 
                     # Persist Waveform Samples to Sidecar
                     if w_bytes and sidecar_manager:
