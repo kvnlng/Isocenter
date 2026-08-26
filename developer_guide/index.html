@@ -1369,9 +1369,13 @@ re-creating an existing GitHub Release, which fires <code>release: published</co
 again. Note that re-firing it also re-runs the PyPI publish, which will
 fail on a version the index already has; nothing is uploaded, but the run
 goes red.</p>
-<p>After the first deposit, add the concept DOI to <code>CITATION.cff</code> and the
-badge to <code>README.md</code>. Use the <strong>concept</strong> DOI, the one that always
-resolves to the latest version, not the version DOI minted alongside it.</p>
+<p>The integration is enabled and the first deposit exists, from v0.8.1.
+The <strong>concept</strong> DOI is <code>10.5281/zenodo.22104298</code> -- that is what
+<code>CITATION.cff</code> and the README badge carry, and it always resolves to the
+latest version. Zenodo also mints a per-version DOI for each release, one
+digit away; do not substitute it, or the citation stops following the
+work. <code>tests/test_version_contract.py</code> pins both the value and the
+agreement between the two files.</p>
 <p><code>.zenodo.json</code> supplies the metadata the record is minted from. Two
 things about it are easy to get wrong and are pinned by
 <code>tests/test_version_contract.py</code>:</p>
