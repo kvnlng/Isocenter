@@ -137,7 +137,16 @@ class PhiInspector:
 
         Args:
             config_path (str, optional): Path to a JSON/YAML config file.
-            config_tags (Dict, optional): Direct config dictionary (takes precedence).
+            config_tags (Dict[str, Union[str, Dict]], optional): Direct
+                config dictionary, taking precedence over `config_path`.
+                A tag's value is either a **rule** --
+                `{"name": ..., "action": "REMOVE"|"EMPTY"|"SHIFT"|"JITTER"}`
+                -- or a plain string, which is the tag's **display name**
+                and leaves the action as `REPLACE`. The string form names
+                the tag; it does not choose what happens to it. Passing a
+                bare action name (`{"0008,0020": "SHIFT"}`) therefore
+                replaces the value instead of shifting it, and is warned
+                about at construction (#111).
             remove_private_tags (bool): If True, scans all attributes for non-whitelisted private tags.
         """
         from .config_manager import ConfigLoader
@@ -167,6 +176,39 @@ class PhiInspector:
         # one known offending key, means this class of bug cannot recur
         # regardless of which future profile or config file introduces it.
         self.phi_tags = self._normalize_tag_keys(self.phi_tags)
+        self._warn_on_bare_action_values()
+
+    # Action names a caller is most likely to write where a description
+    # belongs, having read `Dict[str, str]` and reasonably concluded the
+    # string chooses the behaviour.
+    _ACTION_WORDS = frozenset({"REMOVE", "EMPTY", "SHIFT", "JITTER", "REPLACE"})
+
+    def _warn_on_bare_action_values(self) -> None:
+        """Report tags whose value names an action rather than the tag.
+
+        A string value is the tag's display name and always leaves the
+        action as `REPLACE`, so `{"0008,0020": "SHIFT"}` replaces the date
+        with `ANONYMIZED` instead of shifting it -- destroying the
+        interval information shifting exists to preserve, with nothing
+        raised and nothing logged.
+
+        Warned rather than raised: the string form works as designed, and
+        rejecting a call that succeeds today would be a breaking change.
+        A caller may also legitimately have a tag *described* as "Shift".
+        """
+        offenders = sorted(
+            tag for tag, val in self.phi_tags.items()
+            if isinstance(val, str) and val.strip().upper() in self._ACTION_WORDS)
+        if not offenders:
+            return
+
+        for tag in offenders:
+            get_logger().warning(
+                "config_tags[%r] is %r, which is read as the tag's display "
+                "name, not its action -- the action stays REPLACE. To %s "
+                "this tag, write {'action': %r, 'name': ...}.",
+                tag, self.phi_tags[tag], self.phi_tags[tag].strip().lower(),
+                self.phi_tags[tag].strip().upper())
 
     @staticmethod
     def _normalize_tag_keys(phi_tags: Dict[str, Any]) -> Dict[str, Any]:
