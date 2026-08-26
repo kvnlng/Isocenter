@@ -133,24 +133,25 @@ def format_header(record_name: str,
                   samples: np.ndarray,
                   dat_filename: str,
                   start_datetime=None,
-                  deidentified_date: Optional[str] = None) -> str:
+                  start_date_note: Optional[str] = None) -> str:
     """Render a WFDB `.hea` file.
 
     Emits no `#` comment lines, with exactly one deliberate exception:
-    `deidentified_date`. MIT-BIH convention puts age, sex, and diagnosis
+    `start_date_note`. MIT-BIH convention puts age, sex, and diagnosis
     in comments, and readers render comments verbatim, so a comment line
     is normally a PHI escape route -- this holds even when the channel
     description (Channel Label/Channel Source, raw DICOM SH text) itself
     contains an embedded CR/LF: `_sanitize_description` collapses any
     line-breaking character to a space before it reaches the signal
     line, so it cannot manufacture a second physical line that a
-    conformant reader would surface as a comment. `deidentified_date` is
+    conformant reader would surface as a comment. `start_date_note` is
     different in kind: it is not operator-typed or attacker-controlled
-    text, it is a `DD/MM/YYYY` string the caller has already computed
-    (the same format used for the record line's own date field), and it
-    is written through this function's own comment-writing path -- not a
-    second, separately-sanitized one -- specifically so this narrow
-    exception cannot become a general-purpose injection route later.
+    text, it is a string the caller has already computed around a
+    `DD/MM/YYYY` date (the same format used for the record line's own
+    date field), and it is written through this function's own
+    comment-writing path -- not a second, separately-sanitized one --
+    specifically so this narrow exception cannot become a
+    general-purpose injection route later.
 
     Args:
         record_name (str): Record name (must match the .hea basename).
@@ -159,19 +160,27 @@ def format_header(record_name: str,
         dat_filename (str): Signal file basename referenced by each line.
         start_datetime (datetime, optional): Already date-shifted start
             time. Omitted from the record line when None.
-        deidentified_date (str, optional): A real (possibly shifted)
-            `DD/MM/YYYY` start date to preserve as a `#` comment when
-            `start_datetime` is None because no real time-of-day survived
-            remediation -- e.g. Acquisition DateTime and Study Time both
-            removed by the Basic profile. Writing a fabricated
-            `00:00:00` into the record line to keep the date would be
-            worse than omitting it (see `WfdbExporter._start_datetime`);
-            losing the date outright would be a research-utility
-            regression, since `SHIFT_DATE` produces a genuine
-            de-identified date. This is the compromise: the date
-            survives, but only somewhere a consumer would not mistake it
-            for a precise timestamp. Omitted (no comment line at all)
-            when None or empty -- never an empty/placeholder comment.
+        start_date_note (str, optional): The complete comment text
+            preserving a start date when `start_datetime` is None because
+            no real time-of-day is available -- e.g. Acquisition DateTime
+            and Study Time both removed by the Basic profile. Writing a
+            fabricated `00:00:00` into the record line to keep the date
+            would be worse than omitting it (see
+            `WfdbExporter._start_datetime`); losing the date outright
+            would be a research-utility regression, since `SHIFT_DATE`
+            produces a genuine de-identified date. This is the
+            compromise: the date survives, but only somewhere a consumer
+            would not mistake it for a precise timestamp.
+
+            The caller supplies the whole string, not just the date,
+            because the wording is a claim about provenance:
+            `de-identified start date: ...` only when the date really was
+            shifted, `start date: ...` when it is the real one and
+            nothing has de-identified it. This function used to prepend
+            "de-identified" unconditionally, which labelled real study
+            dates as de-identified on any export where `anonymize()` had
+            not run. Omitted (no comment line at all) when None or empty
+            -- never an empty/placeholder comment.
 
     Returns:
         str: Complete header text, newline-terminated.
@@ -191,14 +200,13 @@ def format_header(record_name: str,
 
     lines = [" ".join(record_fields)]
 
-    if deidentified_date:
+    if start_date_note:
         # Same sanitizer the signal-line description gets -- not a new,
-        # separately-maintained comment-writing path. `deidentified_date`
-        # is a computed DD/MM/YYYY string, not attacker input, but a
-        # second unsanitized comment path is exactly how injection bugs
-        # reappear.
-        comment_text = _sanitize_description(
-            f"de-identified start date: {deidentified_date}")
+        # separately-maintained comment-writing path. `start_date_note`
+        # is a caller-computed string around a DD/MM/YYYY date, not
+        # attacker input, but a second unsanitized comment path is
+        # exactly how injection bugs reappear.
+        comment_text = _sanitize_description(start_date_note)
         lines.append(f"# {comment_text}")
 
     for idx in range(n_channels):
@@ -239,6 +247,52 @@ def format_header(record_name: str,
         ]))
 
     return "\n".join(lines) + "\n"
+
+
+def _parse_dicom_tm(value: str):
+    """Parse a DICOM TM (`HH`, `HHMM`, `HHMMSS[.FFFFFF]`) to a `time`.
+
+    Keyed by length rather than tried longest-format-first, because
+    `strptime` accepts one- or two-digit fields and therefore *succeeds*
+    on the wrong format instead of raising and falling through:
+    `"1430"` matches `%H%M%S` as 14:03:00, and `"14"` matches `%H%M` as
+    01:04:00. Nothing raised, so nothing corrected it -- an ECG recorded
+    at half past two exported claiming three minutes past.
+
+    Returns None for anything not a legal TM length.
+    """
+    from datetime import datetime
+
+    stamp = (value or "").split(".")[0].strip()
+    fmt = {2: "%H", 4: "%H%M", 6: "%H%M%S"}.get(len(stamp))
+    if not fmt:
+        return None
+    try:
+        return datetime.strptime(stamp, fmt).time()
+    except ValueError:
+        return None
+
+
+def _parse_dicom_dt(value: str):
+    """Parse a DICOM DT to a `datetime`, at the precision it carries.
+
+    Same length-keyed reasoning as `_parse_dicom_tm`. The offset suffix
+    (`&ZZXX`) is dropped: this tool reports the timestamp as recorded and
+    does not convert time zones.
+
+    Returns None for anything not a legal DT length.
+    """
+    from datetime import datetime
+
+    stamp = (value or "").split("+")[0].split("-")[0].split(".")[0].strip()
+    fmt = {4: "%Y", 6: "%Y%m", 8: "%Y%m%d", 10: "%Y%m%d%H",
+           12: "%Y%m%d%H%M", 14: "%Y%m%d%H%M%S"}.get(len(stamp))
+    if not fmt:
+        return None
+    try:
+        return datetime.strptime(stamp, fmt)
+    except ValueError:
+        return None
 
 
 class WfdbExporter(Exporter):
@@ -360,11 +414,11 @@ class WfdbExporter(Exporter):
         with open(dat_path, "wb") as f:
             f.write(np.ascontiguousarray(samples, dtype="<i2").tobytes())
 
-        start_datetime, deidentified_date = self._start_datetime(instance, study)
+        start_datetime, start_date_note = self._start_datetime(instance, study)
         header = format_header(
             record_name, waveform, samples, dat_filename,
             start_datetime=start_datetime,
-            deidentified_date=deidentified_date)
+            start_date_note=start_date_note)
 
         hea_path = os.path.join(out_dir, f"{record_name}.hea")
         with open(hea_path, "w", encoding="utf-8") as f:
@@ -398,31 +452,17 @@ class WfdbExporter(Exporter):
 
         Returns a `datetime.time`, or None if no usable value exists.
         """
-        from datetime import datetime
+        acquired = _parse_dicom_dt(
+            str(instance.attributes.get("0008,002a", "") or ""))
+        if acquired is not None:
+            return acquired.time()
 
-        raw = str(instance.attributes.get("0008,002a", "") or "").strip()
-        if raw:
-            stamp = raw.split("+")[0].split("-")[0].strip()
-            for fmt in ("%Y%m%d%H%M%S.%f", "%Y%m%d%H%M%S", "%Y%m%d%H%M"):
-                try:
-                    return datetime.strptime(stamp, fmt).time()
-                except ValueError:
-                    continue
-
-        time_part = str(instance.attributes.get("0008,0030", "") or "").strip()
-        if time_part:
-            stamp = time_part.split(".")[0]
-            for fmt in ("%H%M%S", "%H%M"):
-                try:
-                    return datetime.strptime(stamp, fmt).time()
-                except ValueError:
-                    continue
-
-        return None
+        return _parse_dicom_tm(
+            str(instance.attributes.get("0008,0030", "") or ""))
 
     @staticmethod
     def _instance_only_datetime(instance):
-        """Fallback datetime built purely from instance tags.
+        """Fallback timing built purely from instance tags.
 
         Used when no `Study` is available, or the Study has no usable
         date. This is real (possibly un-shifted) timing, and that is
@@ -430,28 +470,43 @@ class WfdbExporter(Exporter):
         tool does not touch behaves before `session.anonymize()` runs.
         Suppressing timing on an un-anonymized session would be a design
         change, not a bug fix.
+
+        Returns:
+            tuple[Optional[datetime], Optional[str]]: the record-line
+                value, or None with a note for the caller to write as a
+                comment when a date is known but no time of day is.
         """
         from datetime import datetime
 
-        raw = str(instance.attributes.get("0008,002a", "") or "").strip()
-        if raw:
-            stamp = raw.split("+")[0].split("-")[0].strip()
-            for fmt in ("%Y%m%d%H%M%S.%f", "%Y%m%d%H%M%S", "%Y%m%d%H%M"):
-                try:
-                    return datetime.strptime(stamp, fmt)
-                except ValueError:
-                    continue
+        acquired = _parse_dicom_dt(
+            str(instance.attributes.get("0008,002a", "") or ""))
+        if acquired is not None:
+            return acquired, None
 
         date_part = str(instance.attributes.get("0008,0020", "") or "").strip()
-        time_part = str(instance.attributes.get("0008,0030", "") or "").strip()
-        if date_part:
-            combined = date_part + (time_part.split(".")[0] or "000000")
-            try:
-                return datetime.strptime(combined, "%Y%m%d%H%M%S")
-            except ValueError:
-                return None
+        if not date_part:
+            return None, None
 
-        return None
+        try:
+            only_date = datetime.strptime(date_part, "%Y%m%d").date()
+        except ValueError:
+            return None, None
+
+        # Parsed on its own, not concatenated onto the date. The combined
+        # stamp was only ever tried as `%Y%m%d%H%M%S`, so a four-digit
+        # Study Time failed and took the date down with it -- real
+        # recorded timing discarded, while an instance with no time at
+        # all kept its date.
+        time_of_day = _parse_dicom_tm(
+            str(instance.attributes.get("0008,0030", "") or ""))
+        if time_of_day is not None:
+            return datetime.combine(only_date, time_of_day), None
+
+        # A date, and no time of day we can read. `000000` used to be
+        # appended here, so the record line carried `00:00:00` -- timing
+        # this tool invented, indistinguishable to a reader from an
+        # acquisition that really happened at midnight (#59).
+        return None, f"start date: {only_date.strftime('%d/%m/%Y')}"
 
     @staticmethod
     def _start_datetime(instance, study):
@@ -556,12 +611,22 @@ class WfdbExporter(Exporter):
                     # below -- that would read the instance's real,
                     # un-shifted date and reopen the Safe Harbor leak
                     # this function's docstring above exists to close.
-                    # The date is real de-identified information, so
-                    # hand it back for the caller to preserve as a
-                    # comment rather than dropping it outright.
-                    return None, shifted_date.strftime("%d/%m/%Y")
+                    # The date is real information, so hand it back for
+                    # the caller to preserve as a comment rather than
+                    # dropping it outright.
+                    #
+                    # Labelled by whether a shift actually happened. This
+                    # said "de-identified" unconditionally, so exporting
+                    # without ever calling anonymize() wrote the
+                    # patient's real study date under a comment asserting
+                    # it had been de-identified -- a false provenance
+                    # claim in the one place a consumer would check.
+                    token = shifted_date.strftime("%d/%m/%Y")
+                    if getattr(study, "date_shifted", False):
+                        return None, f"de-identified start date: {token}"
+                    return None, f"start date: {token}"
 
-        return WfdbExporter._instance_only_datetime(instance), None
+        return WfdbExporter._instance_only_datetime(instance)
 
 
 register("wfdb", WfdbExporter)
