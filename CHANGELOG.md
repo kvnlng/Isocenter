@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The codec priority list never did anything, and would have narrowed codec support if it had.** `isocenter/__init__.py` assigned a four-entry list to `pydicom.config.pixel_data_handlers`. On pydicom 3.x nothing reads it: decoding takes its backend from `Dataset._pixel_array_opts`, which defaults to `{"use_pdh": False}`, and the handler list is consulted only on the `use_pdh` branch. The assignment succeeded and the attribute held the list, so the file read as correctly configured -- silent precisely because the attribute is writable. `setup.py` requires `pydicom>=3.0.0`, so there was no supported version on which it had any effect.
+
+  Worse than inert if it had ever been read: the assignment *replaced* pydicom's defaults rather than reordering them, dropping the `jpeg_ls`, `pylibjpeg` and `rle` handlers that ship with pydicom. The stated intent -- "GDCM first, then imagecodecs, then Pillow/numpy" -- would have removed RLE and JPEG-LS support to express it.
+
+  The assignment is removed. Nothing replaces it: pydicom 3.x has no priority list to migrate to, since `pixel_array(..., decoding_plugin=...)` names a single plugin and the `pydicom.pixels` backend orders its own fallbacks per transfer syntax. Expressing a codec preference is a feature rather than a repair, and belongs with #33.
+
+  **`imagecodecs` support is unchanged**, because it never came from this list: `Instance.get_pixel_data()` calls `isocenter.imagecodecs_handler` directly when pydicom fails to decode. The README and docs claims about JPEG Lossless and JPEG 2000 support remain accurate.
+
+  `tests/test_codecs_strict.py::test_handler_registration` asserted that the dead assignment had happened -- a test pinning a no-op, whose own comments record the author's uncertainty about what it checked. It is replaced by one asserting the opposite contract: importing `isocenter` must leave `pydicom.config.pixel_data_handlers` untouched, because mutating it silently promises control Isocenter does not have. (#46)
+
 - **`release_memory()` never freed waveform samples, and overcounted what it did free.** The traversal called `unload_pixel_data()` and nothing else, so the one operation Isocenter offers for reclaiming RAM did nothing for waveform-bearing instances. `Instance.unload_waveform_data()` has existed since #11 as the exact counterpart, with the same safety guard; nothing called it. Samples cache as int16 of shape (num_samples, num_channels) -- ~80 KB for a 10-second 12-lead, but ~104 MB for a 24-hour 3-channel Holter, so a cohort of Holter studies pinned hundreds of megabytes per record with no way to release it.
 
   The count was wrong in the same direction. Both `unload_pixel_data()` and `unload_waveform_data()` return `True` when there was nothing cached -- "already absent" is a successful unload -- so `freed` counted every instance it visited. A session holding nothing in RAM reported every instance as reclaimed. That is the same false assurance as not freeing at all: the user is told memory was returned when none was.
