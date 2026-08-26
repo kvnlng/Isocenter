@@ -90,3 +90,28 @@ def test_a_waveform_with_no_loader_is_left_resident(ecg_session, caplog):
     ecg_session.release_memory()
 
     assert inst.waveform_array is not None
+
+
+def test_refusing_to_unload_pixels_prints_nothing_to_stdout(capsys):
+    """`unload_pixel_data()` refusing is the guard working, not a fault (#108).
+
+    Pixel data held only in memory cannot be re-loaded, so declining to
+    clear it is what stops `release_memory()` discarding unrecoverable
+    edits. It used to announce that on stdout, prefixed `DEBUG:`, once per
+    instance -- so a correct refusal read like a failure and there was no
+    way to silence it.
+    """
+    import numpy as np
+
+    from isocenter.entities import Instance
+
+    inst = Instance("I1", "1.2.3", 1)
+    inst.set_pixel_data(np.zeros((4, 4), dtype=np.uint16))
+    assert inst.file_path is None and inst._pixel_loader is None
+
+    capsys.readouterr()
+    refused = inst.unload_pixel_data()
+
+    assert refused is False, "unloading unrecoverable data must be refused"
+    assert inst.pixel_array is not None, "the data must still be there"
+    assert capsys.readouterr().out == ""
