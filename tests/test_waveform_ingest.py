@@ -1,3 +1,5 @@
+import sqlite3
+
 import numpy as np
 import pytest
 
@@ -231,3 +233,104 @@ def test_waveform_loader_is_repointed_by_compaction(tmp_path):
         np.testing.assert_array_equal(inst.get_waveform_data(), expected)
     finally:
         session.close()
+
+
+# --- Multiplex group truncation (#36) ---------------------------------
+#
+# Each Waveform Sequence item is a multiplex group with its own sampling
+# frequency and channel set -- how DICOM carries ECG at 500 Hz alongside
+# respiration at 25 Hz. Isocenter keeps group 0 only. The defect being
+# fixed here is not the missing multi-rate support, which is deliberately
+# deferred; it is that the limitation used to be silent.
+
+
+def _two_group_file(path, num_samples=200):
+    """An ECG fixture carrying a second, slower multiplex group."""
+    import copy
+    import pydicom
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(num_samples=num_samples)
+    second = copy.deepcopy(ds.WaveformSequence[0])
+    second.SamplingFrequency = 25.0
+    ds.WaveformSequence.append(second)
+    pydicom.dcmwrite(str(path), ds, enforce_file_format=True)
+    return str(path)
+
+
+def test_ingest_worker_reports_the_multiplex_group_count(tmp_path):
+    meta, *_ = ingest_worker(_two_group_file(tmp_path / "multi.dcm"))
+    assert meta["waveform_groups"] == 2
+
+
+def test_a_single_group_record_reports_one_group(ecg_file):
+    meta, *_ = ingest_worker(ecg_file)
+    assert meta["waveform_groups"] == 1
+
+
+def test_a_multi_group_record_warns_that_groups_were_discarded(tmp_path, caplog):
+    import logging
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _two_group_file(src / "multi.dcm")
+
+    session = DicomSession(persistence_file=str(tmp_path / "multi.db"))
+    try:
+        with caplog.at_level(logging.WARNING):
+            session.ingest(str(src))
+    finally:
+        session.close()
+
+    warnings = [r.getMessage() for r in caplog.records
+                if r.levelno >= logging.WARNING]
+    assert any("multiplex" in m.lower() for m in warnings), warnings
+
+
+def test_a_multi_group_record_records_an_audit_entry(tmp_path):
+    """A log line the user may never read is not a compliance trail."""
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _two_group_file(src / "multi.dcm")
+
+    session = DicomSession(persistence_file=str(tmp_path / "audit.db"))
+    try:
+        session.ingest(str(src))
+        db_path = session.store_backend.db_path
+        # The audit writer batches on a background thread; close() drains it.
+    finally:
+        session.close()
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT details FROM audit_log WHERE action_type='DATA_LOSS'"
+        ).fetchall()
+
+    assert len(rows) == 1
+    assert "2" in rows[0][0]
+
+
+def test_a_single_group_record_records_no_data_loss(tmp_path):
+    """The warning must not fire for the ordinary single-group ECG."""
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    write_fixture(str(src / "ecg.dcm"), num_samples=200)
+
+    session = DicomSession(persistence_file=str(tmp_path / "single.db"))
+    try:
+        session.ingest(str(src))
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT 1 FROM audit_log WHERE action_type='DATA_LOSS'"
+        ).fetchall()
+
+    assert rows == []
