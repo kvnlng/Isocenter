@@ -157,3 +157,26 @@ def test_an_unwritable_element_is_named_as_data_loss(caplog):
     msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert any("0009,1004" in m for m in msgs), msgs
     assert any("not exported" in m.lower() for m in msgs), msgs
+
+
+def test_merging_the_same_attributes_twice_is_idempotent():
+    """`_export_instance_worker` merges `inst.attributes` twice.
+
+    `_merge` rebinds `v` when it encodes a fallback value, so the second
+    pass must not be handed what the first pass produced. It is not --
+    the rebind is local and the source dict is untouched -- and that is
+    worth pinning, because every exported instance takes this path and
+    none of the round-trip tests above would notice if it stopped being
+    true.
+    """
+    attrs = {"0009,1003": b"\x01\x02", "0009,1004": "x" * 80, "0009,1005": 5}
+    before = dict(attrs)
+
+    ds = pydicom.Dataset()
+    DicomExporter._merge(ds, attrs)
+    DicomExporter._merge(ds, attrs)
+
+    assert attrs == before, "_merge mutated the attributes it was given"
+    assert (ds[0x00091003].VR, ds[0x00091003].value) == ("UN", b"\x01\x02")
+    assert (ds[0x00091004].VR, ds[0x00091004].value) == ("UT", "x" * 80)
+    assert (ds[0x00091005].VR, ds[0x00091005].value) == ("LO", "5")

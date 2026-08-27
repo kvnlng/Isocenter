@@ -1378,6 +1378,14 @@ class DicomExporter:
         them anyway -- without it, whether a private tag exported would
         depend on whether a save had happened yet.
 
+        The `UT` branch narrows one thing: `UT` has a value multiplicity
+        of 1, where `LO` is 1-n. A backslash-delimited value past 64
+        characters therefore round-trips as one string containing literal
+        backslashes rather than a list. Widening `LO` to cover it would
+        be worse -- an over-long `LO` is non-conformant -- and nothing
+        downstream reads these as lists anyway, because they arrive from
+        `value_text` already flattened to a single string.
+
         Returns None when nothing fits, which the caller reports as data
         loss rather than encoding something it would have to guess at.
         """
