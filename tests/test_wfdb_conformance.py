@@ -6,8 +6,7 @@ import os
 
 import numpy as np
 import pytest
-
-wfdb = pytest.importorskip("wfdb", reason="conformance tests need the wfdb package")
+import wfdb
 
 from isocenter.session import DicomSession
 from scripts.generate_waveform_test_data import write_fixture, LEADS
