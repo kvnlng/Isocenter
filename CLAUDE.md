@@ -85,7 +85,9 @@ A known live gap: `_make_lightweight_copy` (`session.py`) copies flat `attribute
 
 `exporters/__init__.py` imports its submodules at the *bottom* of the file on purpose — `dicom.py` and `wfdb.py` re-enter the partially-initialized package. Moving that import up breaks every export path, and no isort/pre-commit config will stop you.
 
-`io_handlers.export_folder_names()` is the single source of the output directory layout. `session.export()`, `DicomExporter.save_patient`, and `save_studies` all route through it; `tests/test_api_coherence.py` asserts they agree.
+There are two public ways to write DICOM, and the split is deliberate. `session.export()` is the **pipeline**: burned-in identifier scan, subset filter, recoverable-identity disclosure, redaction rules, then the write. `DicomExporter.write_tree()` is the **serializer alone** — it applies none of that and writes the graph as it stands, which is what the fixture generators in `scripts/` need since they build a graph by hand with no session behind it. It was called `save_patient`/`save_studies` until #78, a name that read as though it were the export path rather than half of one; don't reintroduce a spelling that hides the missing gates.
+
+`io_handlers.export_folder_names()` is the single source of the output *directory* layout and both paths route through it. Filenames are the SOP Instance UID in both — InstanceNumber is not unique and collides silently within a series. `tests/test_api_coherence.py` asserts the two paths produce identical trees, comparing full relative paths rather than just directories, which is how the filename divergence went unnoticed.
 
 ## Conventions
 

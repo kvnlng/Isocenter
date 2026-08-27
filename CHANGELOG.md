@@ -5,6 +5,26 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking
+
+- **`DicomExporter.save_patient` and `save_studies` are now one method, `write_tree`, and it says what it does.** Calls to either raise `AttributeError: type object 'DicomExporter' has no attribute 'save_patient'`. Replace `DicomExporter.save_patient(patient, out_dir)` with `DicomExporter.write_tree(patient, out_dir)`; `save_studies(patient, studies, out_dir, ...)` becomes `write_tree(patient, out_dir, studies=studies, ...)`. `session.export()` is unaffected.
+
+  `save_patient` was a one-line wrapper around `save_studies`, and `save_studies` had no caller outside `io_handlers.py` itself -- two public names for one behaviour, which the pre-1.0 convention deletes rather than keeps.
+
+  The rename is the point, not the collapse. This method applies **no de-identification**: no burned-in identifier scan, no subset filter, no redaction zones, no recoverable-identity disclosure. That is legitimate -- it is the serializer, and `session.export()` is the pipeline that runs the gates and then calls the same write -- but `save_patient` named it as though it were the export path rather than half of one. On a de-identification tool, a public method whose name invites you to use it for export and which silently skips every safety gate is the most consequential kind of misnomer. The new name and its docstring both say what is missing.
+
+  It stays public because the need is real: building an object graph by hand and writing it out has no session behind it, which is how `scripts/generate_test_dataset.py` and the other fixture generators work.
+
+- **The two export paths wrote the same instance under two different filenames.** `DicomExporter` named files by InstanceNumber `(0020,0013)` when it parsed as an integer -- `0001.dcm` -- while `session.export()` used the SOP Instance UID. A tree built by one could not be diffed against a tree built by the other, and InstanceNumber is not unique: two instances claiming the same number silently overwrote each other. Both paths now use the SOP Instance UID.
+
+  `tests/test_api_coherence.py` already asserted the two paths agree, and passed throughout: it compared `path.parent`, so it saw matching directories and never looked at the filename inside them. It now compares full relative paths. (#50)
+
+### Fixed
+
+- **Export folder names invented a word when a UID was missing.** `export_folder_names` built its disambiguating suffix as `(uid or "Unknown")[-5:]`, which is `"nknow"` -- a token that looks like real data, sorts among real UID suffixes, and tells a reader nothing. The suffix exists to separate two studies sharing a date and description; with no UID there is nothing to separate them *with*, so it now says `NoUID`. `series_number` had the same defect one line down: `str(None)` is `"None"`, reading as a series numbered "None" rather than one whose number was never recorded, now `NoNumber`. This is the shared helper, so it was wrong for `session.export()` too. (#53)
+
 ## [0.8.2] - 2026-08-27
 
 ### Changed

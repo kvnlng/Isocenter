@@ -39,7 +39,7 @@ def test_parallel_import_and_scan(tmp_path):
                 for inst in se.instances:
                     inst.set_pixel_data(np.zeros((10,10), dtype=np.uint8))
 
-        DicomExporter.save_patient(p, str(raw_dir))
+        DicomExporter.write_tree(p, str(raw_dir))
 
     # 2. Parallel Import
     session = DicomSession(db_path)

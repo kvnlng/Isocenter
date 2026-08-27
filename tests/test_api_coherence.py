@@ -37,7 +37,7 @@ def test_only_one_public_export_entry_point_builds_directory_trees():
 
 
 def test_both_public_export_paths_produce_the_same_tree(tmp_path):
-    """`DicomExporter.save_patient` and `session.export()` must agree.
+    """`DicomExporter.write_tree` and `session.export()` must agree.
 
     Both are public and shipped. Two layouts means "where does Isocenter put
     files" has no single answer for a library user.
@@ -62,24 +62,29 @@ def test_both_public_export_paths_produce_the_same_tree(tmp_path):
         session.export(str(via_session), format="dicom")
 
         via_exporter = tmp_path / "via_exporter"
-        DicomExporter.save_patient(patient, str(via_exporter))
+        DicomExporter.write_tree(patient, str(via_exporter))
     finally:
         session.close()
 
     def tree(root):
+        # Full relative paths, not just `.parent`. Comparing folders only
+        # is how #50 survived this test: the two paths agreed on every
+        # directory and disagreed on the filename inside it, so a tree
+        # built by one could not be diffed against a tree built by the
+        # other while this assertion stayed green.
         return sorted(
-            str(p.relative_to(root).parent)
+            str(p.relative_to(root))
             for p in root.rglob("*.dcm"))
 
     session_tree = tree(via_session)
     exporter_tree = tree(via_exporter)
 
     assert session_tree, "session.export() produced no .dcm files"
-    assert exporter_tree, "save_patient produced no .dcm files"
+    assert exporter_tree, "write_tree produced no .dcm files"
     assert session_tree == exporter_tree, (
         f"the two public export paths disagree:\n"
         f"  session.export(): {session_tree}\n"
-        f"  save_patient():   {exporter_tree}")
+        f"  write_tree():   {exporter_tree}")
 
 
 def test_export_folder_naming_is_case_insensitive_to_description_tag_keys():
@@ -91,7 +96,7 @@ def test_export_folder_naming_is_case_insensitive_to_description_tag_keys():
     `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), but object graphs
     built directly by callers -- e.g. `scripts/generate_test_dataset.py`,
     which sets Series Description via `inst_builder.set_attribute(
-    "0008,103E", ...)` and then calls `DicomExporter.save_patient` -- are
+    "0008,103E", ...)` and then calls `DicomExporter.write_tree` -- are
     free to spell the tag with uppercase hex letters. `export_folder_names`
     must find the description either way: a mismatch here is the same trap
     `privacy.py`'s `PHIRedactor._normalize_tag_keys` guards against for
@@ -346,3 +351,68 @@ def test_close_still_shuts_down_the_executor_if_an_earlier_step_raises(tmp_path)
     assert raised is not None, (
         "the process pool survived close() after an earlier shutdown "
         "step raised -- close() is not exception-safe")
+
+
+# --- export_folder_names' fallbacks must not invent words (#53) -------
+
+def _bare_graph(study_uid="1.2.3.4.5.9999", series_uid="1.2.3.4.5.8888",
+                series_number=7):
+    from isocenter.entities import Patient, Series, Study
+    series = Series(series_instance_uid=series_uid, modality="CT",
+                    series_number=series_number)
+    study = Study(study_instance_uid=study_uid, study_date="20230101",
+                  series=[series])
+    patient = Patient(patient_id="PAT1", patient_name="DOE^JOHN",
+                      studies=[study])
+    return patient, study, series
+
+
+def test_a_study_with_no_uid_is_not_labelled_with_a_sliced_placeholder():
+    """`(uid or "Unknown")[-5:]` is `"nknow"`.
+
+    The suffix exists to disambiguate two studies that share a date and
+    a description. With no UID there is nothing to disambiguate *with*,
+    so the honest token says the UID is missing. `"nknow"` is a word
+    from nowhere: it looks like real data, sorts among real suffixes,
+    and tells a reader nothing.
+    """
+    from isocenter.io_handlers import export_folder_names
+
+    _, study_folder, _ = export_folder_names(*_bare_graph(study_uid=None))
+
+    assert "nknow" not in study_folder, study_folder
+    assert "NoUID" in study_folder, study_folder
+
+
+def test_a_series_with_no_uid_is_not_labelled_with_a_sliced_placeholder():
+    from isocenter.io_handlers import export_folder_names
+
+    _, _, series_folder = export_folder_names(*_bare_graph(series_uid=None))
+
+    assert "nknow" not in series_folder, series_folder
+    assert "NoUID" in series_folder, series_folder
+
+
+def test_a_series_with_no_number_is_not_labelled_None():
+    """`str(series.series_number)` is `"None"` when it is absent.
+
+    Same defect as the sliced placeholder, one line down: a folder named
+    `Series_None_CT_...` reads as a series numbered "None" rather than a
+    series whose number was never recorded.
+    """
+    from isocenter.io_handlers import export_folder_names
+
+    _, _, series_folder = export_folder_names(*_bare_graph(series_number=None))
+
+    assert "_None_" not in series_folder, series_folder
+    assert "NoNumber" in series_folder, series_folder
+
+
+def test_a_uid_that_exists_still_contributes_its_suffix():
+    """The fallbacks must not cost the disambiguation they exist beside."""
+    from isocenter.io_handlers import export_folder_names
+
+    _, study_folder, series_folder = export_folder_names(*_bare_graph())
+
+    assert study_folder.endswith("9999"), study_folder
+    assert series_folder.endswith("8888"), series_folder

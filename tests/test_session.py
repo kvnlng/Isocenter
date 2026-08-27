@@ -51,7 +51,7 @@ def test_execute_config_integration(tmp_path, dummy_patient, config_file):
     # 1. SETUP: We must EXPORT the dummy patient so valid files exist on disk
     #    This allows the Lazy Loader to find them later.
     dicom_dir = tmp_path / "raw_dicoms"
-    DicomExporter.save_patient(dummy_patient, str(dicom_dir))
+    DicomExporter.write_tree(dummy_patient, str(dicom_dir))
 
     # 2. Update dummy_patient instances to point to these new files
     #    (In a real app, Import would do this, but here we manually link for the test)

@@ -60,12 +60,12 @@ def test_structured_export(mock_patient, mock_validator, tmp_path):
     # Mock run_parallel to run synchronously so the IODValidator patch applies!
     from unittest.mock import patch
     with patch('isocenter.io_handlers.run_parallel', side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
-        DicomExporter.save_patient(mock_patient, str(out_dir))
+        DicomExporter.write_tree(mock_patient, str(out_dir))
 
     # Expected Structure (the shared `export_folder_names` scheme -- same
     # as `session.export()` -- date as-rendered plus a UID suffix on the
     # Study folder, modality plus a UID suffix on the Series folder):
-    # out_dir / Subject_PID_001 / Study_2025-01-01_Chest_CT_UID_1 / Series_1_CT_Axial_3mm_UID_1 / 0010.dcm
+    # out_dir / Subject_PID_001 / Study_2025-01-01_Chest_CT_UID_1 / Series_1_CT_Axial_3mm_UID_1 / SOP_UID_1.dcm
 
     subject_dir = out_dir / "Subject_PID_001"
     assert subject_dir.exists(), "Subject directory missing"
@@ -80,7 +80,13 @@ def test_structured_export(mock_patient, mock_validator, tmp_path):
 
     files = list(series_dirs[0].glob("*.dcm"))
     assert len(files) == 1
-    assert files[0].name == "0010.dcm"
+    # The SOP Instance UID, not InstanceNumber. This assertion used to
+    # read "0010.dcm" -- it was pinning #50, where this path named files
+    # by InstanceNumber (0020,0013) while `session.export()` named the
+    # same instance by its SOP UID. InstanceNumber is not unique and
+    # collides silently within a series, so the old name could be
+    # overwritten by a second instance claiming the same number.
+    assert files[0].name == f"{mock_patient.studies[0].series[0].instances[0].sop_instance_uid}.dcm"
 
 def test_sanitization():
     unsafe = "Bad/Name: With * Characters?"
