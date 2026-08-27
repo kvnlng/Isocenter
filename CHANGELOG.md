@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Three behaviours in `remediation.py` that nothing was holding in place.** The module that *applies* de-identification had 14 of 35 sampled mutations survive once #106 gave the probe operators that reach straight-line code. The code was right in each case below; no test would have noticed it changing. Now 11 of 35, and the three closed are the ones with consequences.
+
+  `add_global_deid_tags` writes the De-identification Method Code Sequence `(0012,0064)` as a triple: Code Value `113100`, Coding Scheme Designator `DCM`, Code Meaning. Deleting the designator left `113100` naming nothing -- code values are unique only within a scheme, so a reader cannot tell the Basic Application Confidentiality Profile from any other registry's 113100. That is the 0.8.1 family exactly, and here the false assertion is the de-identification conformance claim itself.
+
+  `_resolve_patient_id` had no caller in any test. It is the input to deterministic date jitter, which is per-patient so that intervals survive; returning None where an ID exists is how the jitter collapses to a single shift for everybody. That is #104's failure reached from upstream.
+
+  And `Patient`, `Study` and `Series` are `TrackedEntity` but not `DicomItem`, so they have no `set_attr` and remediation reaches them through a different branch that writes the Python attribute directly. Every test that drove remediation through an `Instance` stopped at the first branch, so that path was never exercised -- a mutation there survived the entire 608-test suite.
+
+  **Not fixed, deliberately.** Three surviving `entity.mark_modified()` mutants are equivalent mutants individually: `record_phi_status()` advances `_revision` too, so deleting either mechanism alone changes nothing observable and no test can kill it. The exposure is a refactor removing *both*, which reproduces the bug the line-206 comment records -- PHI stripped in memory, instance reports no unsaved changes, next save skips it, identifier stays in the database. `test_remediating_an_instance_leaves_it_needing_a_save` and its `Patient` counterpart pin the invariant the two jointly provide, so losing both fails rather than shipping. The remaining survivors are `logger` calls and comparison flips on logging severity; they are listed in #132 rather than papered over with assertions on log text. (#132)
+
+- **`TARGETS` was still missing coverage an import scan cannot see.** `tests/test_phi_retention.py` is the regression test for the PHI-stays-in-the-database bug, and it reaches `remediation.py` through `session.anonymize()` rather than by importing it -- so #106's contract test, which follows imports, could not find it either. Added as a curated extra alongside `test_remediation_actions.py`, with the limitation named where the list is defined.
+
 ### Changed
 
 - **`mutation_probe` can now see modules that do not branch, and says so when it cannot.** It reported `isocenter/crypto.py` as **0 mutation sites, 0 survived** -- which, in a table next to `privacy.py 11/36`, reads as the healthiest row and actually meant the module was never measured. `crypto.py` is the reversible-anonymisation core: 73 lines of key derivation, encrypt and decrypt with almost no branching, so the three operators the probe had -- comparison flips, `and`/`or`, boolean constants -- had nothing to find.

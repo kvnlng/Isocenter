@@ -1,0 +1,195 @@
+"""Behaviour in `remediation.py` that nothing was holding in place (#132).
+
+Found by `scripts/mutation_probe.py` once #106 gave it operators that
+reach straight-line code: 14 of 35 sampled mutations to the module that
+*applies* de-identification survived. The code was right in every case
+below; no test would have noticed it changing.
+
+Each test here corresponds to a specific surviving mutant, named in its
+docstring, so a future reader can tell what it is defending against
+rather than guessing from the assertion.
+"""
+import pytest
+
+from isocenter.entities import DicomItem, Instance, Patient
+from isocenter.privacy import PhiFinding, PhiRemediation
+from isocenter.remediation import RemediationService
+
+
+def _finding(entity, action, tag, new_value=None, original=None, metadata=None):
+    return PhiFinding(
+        entity_uid=getattr(entity, "sop_instance_uid", "E1"),
+        entity_type="Instance", field_name=tag, value=original,
+        reason="test", tag=tag, entity=entity,
+        remediation_proposal=PhiRemediation(
+            action_type=action, target_attr=tag, new_value=new_value,
+            original_value=original, metadata=metadata or {}))
+
+
+def _saved_instance():
+    inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.set_attr("0010,0010", "DOE^JOHN")
+    inst.mark_persisted()
+    assert not inst.has_unsaved_changes, "setup: starts saved"
+    return inst
+
+
+# --------------------------------------------------------------------
+# The de-identification method code sequence (0012,0064)
+# --------------------------------------------------------------------
+
+def test_the_deid_method_code_carries_its_coding_scheme():
+    """Mutant: `item.set_attr("0008,0102", "DCM")` deleted, and survived.
+
+    A Code Sequence item is a triple: Code Value, Coding Scheme
+    Designator, Code Meaning. Drop the designator and `113100` names
+    nothing -- code values are only unique within a scheme, so a reader
+    cannot tell "Basic Application Confidentiality Profile" from any
+    other registry's 113100.
+
+    This is the 0.8.1 family exactly: the exported artefact asserting
+    something a consumer has no way to check. Here the assertion is the
+    de-identification conformance claim itself.
+    """
+    inst = _saved_instance()
+    RemediationService().add_global_deid_tags(inst)
+
+    item = inst.sequences["0012,0064"].items[0]
+    assert item.attributes.get("0008,0100") == "113100"
+    assert item.attributes.get("0008,0102") == "DCM", \
+        "the code value has no scheme, so it identifies nothing"
+    assert item.attributes.get("0008,0104") == \
+        "Basic Application Confidentiality Profile"
+
+
+def test_stamping_twice_does_not_duplicate_the_code_item():
+    """The dedup check reads `0008,0100`; nothing pinned that it works."""
+    inst = _saved_instance()
+    service = RemediationService()
+    service.add_global_deid_tags(inst)
+    service.add_global_deid_tags(inst)
+
+    codes = [i.attributes.get("0008,0100")
+             for i in inst.sequences["0012,0064"].items]
+    assert codes == ["113100"], codes
+
+
+def test_the_deid_method_string_is_not_repeated():
+    inst = _saved_instance()
+    service = RemediationService()
+    service.add_global_deid_tags(inst)
+    service.add_global_deid_tags(inst)
+
+    assert inst.attributes["0012,0063"] == ["Isocenter Privacy Profile"]
+
+
+# --------------------------------------------------------------------
+# PatientID resolution -- the input to deterministic date shifting
+# --------------------------------------------------------------------
+
+def test_patient_id_comes_from_the_proposal_metadata_first():
+    """Mutant: `return entity.patient_id` -> `return None`, survived.
+
+    Date jitter is deterministic *per patient* so intervals survive. The
+    per-patient part is this ID. Returning None where an ID exists is how
+    the jitter collapses to one shift for everybody -- the failure #104
+    describes, reached from upstream. Nothing called this method.
+    """
+    inst = _saved_instance()
+    resolved = RemediationService()._resolve_patient_id(
+        inst, PhiRemediation(action_type="SHIFT_DATE", target_attr="0008,0020",
+                             metadata={"patient_id": "PAT-42"}))
+
+    assert resolved == "PAT-42"
+
+
+def test_patient_id_falls_back_to_the_entity():
+    patient = Patient(patient_name="DOE^JOHN", patient_id="PAT-7")
+    resolved = RemediationService()._resolve_patient_id(
+        patient, PhiRemediation(action_type="SHIFT_DATE",
+                                target_attr="0008,0020"))
+
+    assert resolved == "PAT-7"
+
+
+def test_an_unresolvable_patient_id_is_none_rather_than_a_guess():
+    """A wrong ID is worse than none: it would shift two patients as one."""
+    resolved = RemediationService()._resolve_patient_id(
+        DicomItem(), PhiRemediation(action_type="SHIFT_DATE",
+                                    target_attr="0008,0020"))
+
+    assert resolved is None
+
+
+# --------------------------------------------------------------------
+# "Remediated" must imply "needs saving"
+# --------------------------------------------------------------------
+
+@pytest.mark.parametrize("action,new_value", [
+    ("REMOVE_TAG", None),
+    ("REPLACE_TAG", "ANONYMIZED"),
+])
+def test_remediating_an_instance_leaves_it_needing_a_save(action, new_value):
+    """The invariant behind the bug the line-206 comment records.
+
+    `attributes` is a plain dict, so deleting from it bumps no revision.
+    Without an explicit bump an already-saved instance reported no
+    unsaved changes after its PHI was stripped, the next save skipped it,
+    and the identifier stayed in the database.
+
+    Two mechanisms now bump it -- `mark_modified()` and
+    `record_phi_status()` -- so deleting either alone is invisible, which
+    is why three such mutants survive (#132). This pins the invariant
+    they jointly provide, so removing *both* fails here rather than
+    shipping.
+    """
+    inst = _saved_instance()
+    RemediationService().apply_remediation(
+        [_finding(inst, action, "0010,0010",
+                  new_value=new_value, original="DOE^JOHN")])
+
+    assert inst.has_unsaved_changes, (
+        f"{action} changed the instance but left it looking saved; the "
+        "next save skips it and the identifier survives on disk")
+
+
+def _saved_patient():
+    """`Patient`/`Study`/`Series` are `TrackedEntity` but not `DicomItem`.
+
+    They have no `set_attr`, so remediation reaches them through the
+    `elif hasattr(entity, target_attr)` branch that writes the Python
+    attribute directly -- a separate code path from the tag-dict one an
+    `Instance` takes, with its own revision bookkeeping.
+    """
+    patient = Patient(patient_name="DOE^JOHN", patient_id="PAT-7")
+    patient.mark_persisted()
+    assert not patient.has_unsaved_changes, "setup: starts saved"
+    return patient
+
+
+def test_replacing_a_patient_attribute_leaves_it_needing_a_save():
+    """Same invariant as the instance case, on the branch `Patient` takes.
+
+    An `Instance` never reaches this code -- it has `set_attr`, so it
+    stops at the first branch. Every test that drove remediation through
+    an instance therefore left this path unexercised, which is why a
+    mutation here survived the whole 608-test suite (#132).
+    """
+    patient = _saved_patient()
+    RemediationService().apply_remediation(
+        [_finding(patient, "REPLACE_TAG", "patient_name",
+                  new_value="ANONYMIZED", original="DOE^JOHN")])
+
+    assert patient.patient_name == "ANONYMIZED"
+    assert patient.has_unsaved_changes, (
+        "the patient name was replaced in memory but the patient still "
+        "looks saved, so the next save skips it and the name survives")
+
+
+def test_clearing_a_patient_attribute_leaves_it_needing_a_save():
+    patient = _saved_patient()
+    RemediationService().apply_remediation(
+        [_finding(patient, "REMOVE_TAG", "patient_name", original="DOE^JOHN")])
+
+    assert patient.patient_name is None
+    assert patient.has_unsaved_changes
