@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Isocenter no longer calls pydicom APIs that 4.0 removes, and `setup.py`'s cap comment no longer names a blocker that does not exist.** Four changes, none of which alter a single output byte:
+
+  - `pixel_analysis.py` imports `apply_voi_lut` from `pydicom.pixels` rather than `pydicom.pixel_data_handlers.util`. This was the only *unguarded module-scope* import of a package 4.0 deletes, and so the only one that would have failed at import time, before any caller could degrade gracefully.
+  - `save_as(..., write_like_original=False)` is now `save_as(..., enforce_file_format=True)`. Verified as a pure rename rather than a behaviour change: byte-identical output on a valid dataset, and identical failure (`AttributeError`) on datasets missing the SOP Class UID, the SOP Instance UID, or the transfer syntax. The distinction matters because the export path catches broadly and turns a raise into `ExportOutcome(ok=False)`, so a newly-raising write would have converted silent success into reported failure.
+  - Six `is_little_endian`/`is_implicit_VR` assignments are deleted. All six were no-ops. pydicom resolves encoding from the transfer syntax first and only falls back to these attributes when there is no valid one; every site had already set a transfer syntax on the line above. The two on sequence items were doubly dead -- a sequence item is never encoded independently, so pydicom writes it with the enclosing file's encoding and never consults the item's own flags.
+
+  The cap itself stays at `<4.0`. 4.0 does not exist to test against, and `setup.py` is the project's shipping promise: a bound that no passing matrix backs is not a bound to widen. What changed is that the comment now says that, instead of pointing a reader at `isocenter/__init__.py` for a migration that had already happened.
+
+  `tests/test_pydicom_deprecations.py` keeps the claim true. It has to work around two things that each silently destroy the signal, and either alone would have made it pass for the wrong reason: `export()` fans out through `ProcessPoolExecutor`, so a warning raised in a worker reaches neither the parent nor the caller (the #126 loss channel again) -- hence it drives `_export_instance_worker` directly; and `isocenter/__init__.py` sets a process-wide pydicom warning filter at import, which is why the suite never showed any of this. That filter is a separate defect, filed as #144 and deliberately untouched here. A companion test asserts the fixture still produces compressed output and a nested sequence, because if it stopped, the deprecation test would keep passing while covering one site instead of four. (#141)
+
 ### Removed
 
 - **BREAKING: `Session.export_to_parquet()` is gone; call `export_dataframe()` with a `.parquet` path -- and update the column names you read.** `session.export_to_parquet(path)` now raises `AttributeError: 'DicomSession' object has no attribute 'export_to_parquet'`. The replacement is `session.export_dataframe(path, patient_ids=...)`, which sniffs the extension exactly as it always has.

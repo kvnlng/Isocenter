@@ -85,9 +85,22 @@ setup(
     # while being imported unguarded, so a real install failed at import
     # while CI (which installed both) stayed green.
     install_requires=[
-        # 2.x's pixel_data_handlers API is deprecated in 3.x and removed in
-        # 4.0; isocenter/__init__.py still assigns it, so cap until that is
-        # migrated.
+        # The `<4.0` cap is precautionary, not a pending migration. As
+        # of #141 nothing here calls an API 4.0 removes: the
+        # `pixel_data_handlers` import moved to `pydicom.pixels`, the
+        # `is_little_endian`/`is_implicit_VR` assignments are gone (the
+        # transfer syntax already determined both), and `save_as` takes
+        # `enforce_file_format`. The one remaining reference,
+        # `entities.py`'s read of `pydicom.config.pixel_data_handlers`,
+        # is inside `except AttributeError` and only decorates an error
+        # message.
+        #
+        # It stays capped because 4.0 does not exist to test against, and
+        # this file is the project's shipping promise -- a bound we
+        # cannot back with a passing matrix is a bound we should not
+        # widen. Lift it when 4.0 ships and the suite is green on it,
+        # not before. `tests/test_pydicom_deprecations.py` is what keeps
+        # the first half of this comment true.
         "pydicom>=3.0.0,<4.0",
         # Floors chosen as the first release of each that supports 3.12.
         "numpy>=1.26.0",

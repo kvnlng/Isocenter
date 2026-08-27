@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import logging
 import pydicom
 from pydicom.dataset import Dataset
-from pydicom.pixel_data_handlers.util import apply_voi_lut
+from pydicom.pixels import apply_voi_lut
 from isocenter.entities import Instance
 from isocenter.logger import get_logger
 

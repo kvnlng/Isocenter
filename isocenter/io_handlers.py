@@ -638,7 +638,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
 
-        ds.save_as(ctx.output_path, write_like_original=False)
+        ds.save_as(ctx.output_path, enforce_file_format=True)
         return ExportOutcome(ok=True, output_path=ctx.output_path,
                              sop_instance_uid=uid, losses=losses)
     except Exception as e:
@@ -754,10 +754,10 @@ def _compress_j2k(ds, pixel_array=None):
 
         ds.PixelData = encapsulate(frames_data)
         # ds.TransferSyntaxUID = JPEG2000Lossless # REMOVE: Group 2 tags must be in file_meta only
+        # The transfer syntax is the encoding. `is_implicit_VR` and
+        # `is_little_endian` are not set alongside it: pydicom derives
+        # both from the UID and removes the attributes in 4.0 (#141).
         ds.file_meta.TransferSyntaxUID = JPEG2000Lossless
-        ds.is_implicit_VR = False  # Compressed transfer syntaxes are always Explicit VR
-        # JPEG 2000 is always Little Endian (in DICOM encapsulation typically)
-        ds.is_little_endian = True
 
     except ImportError:
         # Fallback or Log?
@@ -1416,9 +1416,9 @@ class DicomExporter:
         meta.MediaStorageSOPClassUID = sop_class
         meta.MediaStorageSOPInstanceUID = inst.sop_instance_uid
         meta.TransferSyntaxUID = ImplicitVRLittleEndian
+        # Encoding comes from meta.TransferSyntaxUID above; see the
+        # note on the JPEG 2000 branch in `_compress_j2k` (#141).
         ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
-        ds.is_little_endian = True
-        ds.is_implicit_VR = True
         return ds
 
     @staticmethod
@@ -1564,9 +1564,10 @@ class DicomExporter:
 
             pydicom_seq = Sequence()
             for item in dicom_seq.items:
+                # A sequence item is never encoded on its own: pydicom
+                # writes it with the enclosing file's encoding, so these
+                # flags were read by nothing even before 4.0 drops them.
                 ds_item = Dataset()
-                ds_item.is_little_endian = True
-                ds_item.is_implicit_VR = True
 
                 # Recursively merge item attributes and sub-sequences
                 DicomExporter._merge(ds_item, item.attributes, losses)
