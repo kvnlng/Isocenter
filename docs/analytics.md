@@ -36,17 +36,33 @@ df = session.export_dataframe(expand_metadata=True)
 
 # Inspect the data
 print(df.head())
-print(df.groupby('Modality')['InstanceCount'].sum())
+print(df.groupby('Modality').size())
 ```
 
 ### 2. Parquet Export
 
 For massive datasets (100k+ images), exporting to Parquet is recommended for performance and compatibility with external BI tools (PowerBI, Tableau, Apache Spark).
 
+The format follows the extension -- `export_dataframe` writes Parquet for
+`.parquet` and CSV for anything else. It is the same method, and the same
+columns, either way.
+
 ```python
 # Export full cohort to Parquet
-session.export_to_parquet("cohort_inventory.parquet")
+session.export_dataframe("cohort_inventory.parquet")
+
+# Or just part of it
+session.export_dataframe("arm_a.parquet", patient_ids=["P001", "P002"])
 ```
+
+!!! warning "`export_to_parquet` was removed in #55"
+    A second Parquet writer, `session.export_to_parquet(...)`, existed
+    until 0.9. It read from the **database** rather than the in-memory
+    graph, so the two methods could disagree about the cohort, and it
+    emitted SQL column names (`patient_id`, `sop_instance_uid`) where
+    `export_dataframe` emits DICOM keywords (`PatientID`,
+    `SOPInstanceUID`). Calling it now raises `AttributeError`. Code
+    reading its output needs the column names updated, not just the call.
 
 ---
 
