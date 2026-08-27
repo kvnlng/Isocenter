@@ -34,7 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Two behaviours were worth keeping and moved across: `export_dataframe` now takes `patient_ids` (`None` means everyone; `[]` means nobody -- a filter that matched nothing is not an absent filter, or a caller computing an empty cohort would export the entire dataset), and it creates a missing output directory instead of letting pandas raise `Cannot save file into a non-existent directory`. `get_cohort_report()` takes the same `patient_ids` argument, since that is where the filtering belongs.
 
-  One behaviour deliberately did not move: `export_to_parquet` returned early without writing anything when the cohort was empty, logging a warning. `export_dataframe` writes the empty frame. A downstream job that reads its input on a schedule should find an empty file, not last week's file. (#55)
+  One behaviour deliberately did not move: `export_to_parquet` returned early without writing anything when the cohort was empty, logging a warning. `export_dataframe` writes the empty frame. A downstream job that reads its input on a schedule should find an empty file, not last week's file.
+
+  That is only useful if the empty file has a schema, so `get_cohort_report` now names its columns (`COHORT_REPORT_COLUMNS`) instead of letting `pd.DataFrame` infer them from the rows. A bare `pd.DataFrame([])` has no columns at all, which means the obvious `df[df.Modality == "CT"]` raises on an empty export and works on every other one -- a break that surfaces only when the filter happened to match nothing. The names are applied only when there are no rows; with rows, pandas takes the union of the dicts' keys, and forcing the list there would clip `expand_metadata`'s attributes back out. (#55)
 
 - **BREAKING: `Session.scan_for_phi()` is gone; call `audit()`.** `session.scan_for_phi()` now raises `AttributeError: 'DicomSession' object has no attribute 'scan_for_phi'`. The replacement is a rename at the call site and nothing else: same argument, same `PhiReport` back.
 

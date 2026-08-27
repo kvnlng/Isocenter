@@ -182,3 +182,43 @@ def test_an_empty_cohort_still_writes_a_file(session_with_two_patients, tmp_path
 
     assert df.empty
     assert os.path.exists(output_path)
+
+
+def test_an_empty_cohort_keeps_its_columns(session_with_two_patients, tmp_path):
+    """An empty result must still have a schema.
+
+    Writing the empty frame is only useful if a reader can treat it as
+    "no rows". A bare `pd.DataFrame([])` has no columns at all, so the
+    obvious downstream `df[df.Modality == "CT"]` raises `AttributeError`
+    on an empty export while working on every non-empty one -- a failure
+    that shows up only when the filter matched nothing.
+    """
+    output_path = tmp_path / "empty.parquet"
+    df = session_with_two_patients.export_dataframe(
+        str(output_path), patient_ids=["NO-SUCH-PATIENT"])
+
+    assert df.empty
+    assert list(df["PatientID"]) == []
+    assert list(pd.read_parquet(output_path).columns) == list(df.columns)
+
+
+def test_expand_metadata_still_adds_columns_beyond_the_fixed_set(session_with_data):
+    """The fixed column list must not become a whitelist that clips
+    expanded attributes back out."""
+    df = session_with_data.export_dataframe(expand_metadata=True)
+
+    assert "SliceThickness" in df.columns
+    assert "PatientID" in df.columns
+
+
+def test_the_declared_columns_match_the_rows_actually_built(session_with_data):
+    """`COHORT_REPORT_COLUMNS` is only used when there are no rows, so
+    nothing else would notice it drifting from the row dict. A column
+    added to one and not the other would appear on every populated
+    export and vanish on every empty one."""
+    from isocenter.session import COHORT_REPORT_COLUMNS
+
+    df = session_with_data.get_cohort_report()
+
+    assert not df.empty, "fixture must produce rows or this pins nothing"
+    assert list(df.columns) == COHORT_REPORT_COLUMNS

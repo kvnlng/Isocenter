@@ -100,6 +100,23 @@ def _verify_worker(args):
 RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "resources")
 
+# The fixed columns of `get_cohort_report`, in order. Named here rather
+# than left implicit in the row dict so that an empty cohort still
+# produces a frame with a schema -- see the comment at the return.
+# `expand_metadata` adds to these; it does not replace them.
+COHORT_REPORT_COLUMNS = [
+    "PatientID",
+    "PatientName",
+    "StudyInstanceUID",
+    "StudyDate",
+    "SeriesInstanceUID",
+    "Modality",
+    "SOPInstanceUID",
+    "Manufacturer",
+    "Model",
+    "DeviceSerial",
+]
+
 # The header written above every scaffolded config.
 _CONFIG_HEADER = """# Isocenter Privacy Configuration (v2.0)
 # ==========================================
@@ -1430,6 +1447,18 @@ class DicomSession:
 
                         rows.append(row)
 
+        # Name the columns explicitly so an empty cohort still has a
+        # schema. `pd.DataFrame([])` has no columns at all, so the
+        # obvious downstream `df[df.Modality == "CT"]` breaks only when
+        # the filter happened to match nothing -- the case least likely
+        # to be exercised before it reaches production.
+        #
+        # Only when there are no rows: with rows, pandas takes the union
+        # of the dicts' keys, and passing `columns` here would clip the
+        # `expand_metadata` attributes back out.
+        if not rows:
+            return pd.DataFrame(rows, columns=COHORT_REPORT_COLUMNS)
+
         return pd.DataFrame(rows)
 
     def generate_report(self, output_path: str, format: str = "markdown") -> None:
@@ -2388,7 +2417,12 @@ class DicomSession:
                 not installed.
         """
         try:
-            import pandas as pd  # noqa: F401  (imported for the error, used via the frame)
+            # Guarded here purely for the message. `get_cohort_report`
+            # imports pandas unguarded a moment later, so without this
+            # the caller gets a bare ModuleNotFoundError naming neither
+            # the extra to install nor the Parquet engine they will need
+            # next.
+            import pandas  # noqa: F401  pylint: disable=unused-import
         except ImportError as e:
             get_logger().error("export_dataframe requires 'pandas' installed.")
             raise ImportError(
