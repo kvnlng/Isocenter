@@ -42,10 +42,14 @@ def test_export_command_set_error(tmp_path):
     # (default on macOS/Py3.14) do NOT see the mocked IODValidator.
     with patch("isocenter.validation.IODValidator.validate", return_value=[]), \
          patch("concurrent.futures.ProcessPoolExecutor", side_effect=concurrent.futures.ThreadPoolExecutor):
-        DicomExporter.save_patient(p, str(out_dir))
+        DicomExporter.write_tree(p, str(out_dir))
 
     # Verify file exists (recursive search)
     files = list(out_dir.rglob("*.dcm"))
     assert len(files) == 1
-    # Instance Number is 1 -> 0001.dcm
-    assert files[0].name == "0001.dcm"
+    # The SOP Instance UID, not InstanceNumber. This asserted
+    # "0001.dcm" until #50: this path named files by InstanceNumber
+    # (0020,0013) while session.export() used the SOP UID, so the
+    # same instance landed under two names. InstanceNumber also is
+    # not unique and collides silently within a series.
+    assert files[0].name == f"{p.studies[0].series[0].instances[0].sop_instance_uid}.dcm"

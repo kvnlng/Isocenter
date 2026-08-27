@@ -165,7 +165,7 @@ def test_wfdb_records_are_colocated_with_the_dicom_export_tree(tmp_path):
     # noise unrelated to folder placement. `session.export(folder)` (the
     # "dicom" format, default) is the actual production path: it goes
     # through `DicomSession._export_dicom`, not the legacy
-    # `DicomExporter.save_patient` API.
+    # `DicomExporter.write_tree` API.
     with patch('isocenter.io_handlers.run_parallel',
               side_effect=lambda func, items, *a, **k: [func(i) for i in items]), \
          patch.object(IODValidator, "validate", lambda ds: []):

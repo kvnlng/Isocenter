@@ -96,7 +96,7 @@ def test_strict_export_failure():
         from isocenter.io_handlers import DicomExporter
 
         with pytest.raises(RuntimeError) as excinfo:
-            DicomExporter.save_patient(p, "export_strict_test")
+            DicomExporter.write_tree(p, "export_strict_test")
 
         # Verify it wasn't the "Raw read failed" log but a hard error
         # "Export failed for ... Failed to decompress" or "Export incomplete..."

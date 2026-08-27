@@ -957,7 +957,14 @@ def export_folder_names(patient, study, series):
         # Ctrl-C during a long export.
         pass
     st_date = str(study.study_date or "NoDate")
-    st_uid_suffix = (study.study_instance_uid or "Unknown")[-5:]
+    # The suffix disambiguates two studies sharing a date and description.
+    # With no UID there is nothing to disambiguate *with*, so say so --
+    # slicing a placeholder produced `"Unknown"[-5:]` == "nknow", a word
+    # from nowhere that looks like real data and sorts among real
+    # suffixes. Take the last 5 only when there is a UID to take them
+    # from. (#53, #78)
+    st_uid_suffix = (study.study_instance_uid[-5:]
+                     if study.study_instance_uid else "NoUID")
     study_folder = ConfigLoader.clean_filename(f"Study_{st_date}_{st_desc}_{st_uid_suffix}")
 
     se_desc = "Series"
@@ -968,9 +975,14 @@ def export_folder_names(patient, study, series):
     except (AttributeError, IndexError, KeyError):
         # As above: fall back to the "Series" default.
         pass
-    se_num = str(series.series_number)
+    # `str(None)` is "None", which reads as a series *numbered* None
+    # rather than one whose number was never recorded -- the same defect
+    # as the sliced placeholder, one line up.
+    se_num = ("NoNumber" if series.series_number is None
+              else str(series.series_number))
     se_mod = series.modality or "OT"
-    se_uid_suffix = (series.series_instance_uid or "Unknown")[-5:]
+    se_uid_suffix = (series.series_instance_uid[-5:]
+                     if series.series_instance_uid else "NoUID")
     series_folder = ConfigLoader.clean_filename(
         f"Series_{se_num}_{se_mod}_{se_desc}_{se_uid_suffix}")
 
@@ -983,17 +995,6 @@ class DicomExporter:
 
     Provides static methods for saving Patients, Studies, or creating export batches from Validated/Curated data.
     """
-    @staticmethod
-    def save_patient(patient: Patient, out_dir: str):
-        """
-        Iterates over a Patient's hierarchy and saves valid .dcm files to `out_dir`.
-
-        Args:
-            patient (Patient): The patient root object.
-            out_dir (str): The destination directory.
-        """
-        DicomExporter.save_studies(patient, patient.studies, out_dir)
-
     @staticmethod
     def _generate_export_contexts(
             patient: Patient,
@@ -1054,16 +1055,21 @@ class DicomExporter:
                     subj_name, study_folder, series_folder = export_folder_names(
                         patient, st, se)
 
-                    # 4. Filename
+                    # 4. Filename -- the SOP Instance UID, matching
+                    # `DicomSession._export_dicom`. InstanceNumber
+                    # (0020,0013) used to win here when it parsed as an
+                    # integer, which meant the same instance landed under
+                    # two different names depending on which export path
+                    # wrote it, and a tree built by one could not be
+                    # diffed against a tree built by the other.
+                    #
+                    # The UID is also the only correct choice on its own
+                    # terms: InstanceNumber is not unique and collides
+                    # silently within a series, so `0001.dcm` could be
+                    # overwritten by a second instance claiming the same
+                    # number. Do not reintroduce a "friendlier" name
+                    # here without making it unique. (#50, #78)
                     fname = f"{inst.sop_instance_uid}.dcm"
-                    if "0020,0013" in inst.attributes:
-                        try:
-                            inum = int(inst.attributes["0020,0013"])
-                            fname = f"{inum:04d}.dcm"
-                        except (ValueError, TypeError):
-                            # Non-numeric InstanceNumber: keep the SOP UID
-                            # filename assigned above.
-                            pass
 
                     full_out_path = os.path.join(
                         out_dir, subj_name, study_folder, series_folder, fname)
@@ -1104,24 +1110,49 @@ class DicomExporter:
         return contexts
 
     @staticmethod
-    def save_studies(
+    def write_tree(
             patient: Patient,
-            studies: List[Study],
             out_dir: str,
+            studies: List[Study] = None,
             compression: str = None,
             show_progress: bool = True,
             executor=None):
-        """
-        Exports a specific list of studies for a patient using parallel workers.
+        """Write an object graph to disk as DICOM, exactly as it stands.
+
+        **This applies no de-identification.** It is the serializer, not
+        the pipeline: it runs no PHI scan, honours no subset filter,
+        applies no redaction zones, and reports no partial failure beyond
+        raising on the first one. Whatever is in `patient` is what lands
+        on disk.
+
+        `DicomSession.export()` is the pipeline, and is what a caller
+        de-identifying a cohort wants. It performs the same write, after
+        the burned-in identifier scan (`check_burned_in`), the subset
+        filter, the recoverable-identity disclosure (`check_reversibility`)
+        and the configured redaction rules.
+
+        This exists as a public API because building an object graph by
+        hand and writing it out is a real need with no session behind it
+        -- it is how `scripts/generate_test_dataset.py` and the other
+        fixture generators work, and how the test suite produces DICOM
+        without standing up a database. It was previously called
+        `save_patient`/`save_studies`, which named it as though it were
+        the export path rather than half of one (#54, #78).
 
         Args:
             patient (Patient): The patient root object.
-            studies (List[Study]): The list of studies to export.
             out_dir (str): Destination directory.
+            studies (List[Study], optional): Write only these studies.
+                Defaults to every study under `patient`.
             compression (str, optional): Compression format ('j2k' or None).
             show_progress (bool): If True, shows a progress bar.
             executor (ProcessPoolExecutor, optional): Shared executor for parallelism.
+
+        Raises:
+            RuntimeError: If any instance failed to write.
         """
+        if studies is None:
+            studies = patient.studies
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
         logger = get_logger()

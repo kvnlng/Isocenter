@@ -10,9 +10,9 @@ from isocenter.io_handlers import DicomExporter, DicomImporter, DicomStore
 def test_export_import_roundtrip(tmp_path, dummy_patient):
     # 1. Export
     export_dir = tmp_path / "export_test"
-    DicomExporter.save_patient(dummy_patient, str(export_dir))
+    DicomExporter.write_tree(dummy_patient, str(export_dir))
 
-    DicomExporter.save_patient(dummy_patient, str(export_dir))
+    DicomExporter.write_tree(dummy_patient, str(export_dir))
 
     files = list(export_dir.rglob("*.dcm"))
     assert len(files) == 1
@@ -54,7 +54,7 @@ def test_persistence_priority(tmp_path):
     # AND Mock run_parallel to run synchronously so the patch applies!
     with patch('isocenter.validation.IODValidator.validate', return_value=[]), \
          patch('isocenter.io_handlers.run_parallel', side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
-        DicomExporter.save_patient(pat, str(out_dir))
+        DicomExporter.write_tree(pat, str(out_dir))
 
     # 3. Read back
     exported_files = list(out_dir.rglob("*.dcm"))

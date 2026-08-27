@@ -292,7 +292,7 @@ def main():
     # Export
     print(f"Exporting {len(patients)} patients...")
     for p in patients:
-        DicomExporter.save_patient(p, output_dir)
+        DicomExporter.write_tree(p, output_dir)
     
     print("Done!")
 

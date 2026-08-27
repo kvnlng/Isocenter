@@ -444,7 +444,7 @@ def main():
             patient_obj = study_builder.end_study().build()
             
             # Save
-            DicomExporter.save_patient(patient_obj, output_base_dir)
+            DicomExporter.write_tree(patient_obj, output_base_dir)
 
     print("Generation Logic Complete.")
 

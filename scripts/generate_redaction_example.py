@@ -153,7 +153,7 @@ def main(output_dir="test_data/redaction_examples"):
             p = builder.build()
             
             # Export
-            DicomExporter.save_patient(p, output_dir)
+            DicomExporter.write_tree(p, output_dir)
 
     print("Done.")
 

@@ -54,7 +54,7 @@ def test_export_silent_pixel_failure(tmp_path):
     # New behavior: Should raise FileNotFoundError / RuntimeError because pixels are missing
     # and we removed the silent swallow.
     with pytest.raises((FileNotFoundError, RuntimeError), match="Pixels missing"):
-         DicomExporter.save_patient(p, str(out_dir))
+         DicomExporter.write_tree(p, str(out_dir))
 
     # If we get here (and exception caught), success.
     # Validating file existence is no longer relevant as export typically stops or fails on that item.
