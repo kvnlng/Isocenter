@@ -3731,17 +3731,7 @@
 <span class="normal"><a href="#__codelineno-0-2539">2539</a></span>
 <span class="normal"><a href="#__codelineno-0-2540">2540</a></span>
 <span class="normal"><a href="#__codelineno-0-2541">2541</a></span>
-<span class="normal"><a href="#__codelineno-0-2542">2542</a></span>
-<span class="normal"><a href="#__codelineno-0-2543">2543</a></span>
-<span class="normal"><a href="#__codelineno-0-2544">2544</a></span>
-<span class="normal"><a href="#__codelineno-0-2545">2545</a></span>
-<span class="normal"><a href="#__codelineno-0-2546">2546</a></span>
-<span class="normal"><a href="#__codelineno-0-2547">2547</a></span>
-<span class="normal"><a href="#__codelineno-0-2548">2548</a></span>
-<span class="normal"><a href="#__codelineno-0-2549">2549</a></span>
-<span class="normal"><a href="#__codelineno-0-2550">2550</a></span>
-<span class="normal"><a href="#__codelineno-0-2551">2551</a></span>
-<span class="normal"><a href="#__codelineno-0-2552">2552</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-491" name="__codelineno-0-491"></a><span class="k">class</span><span class="w"> </span><span class="nc">DicomSession</span><span class="p">:</span>
+<span class="normal"><a href="#__codelineno-0-2542">2542</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-491" name="__codelineno-0-491"></a><span class="k">class</span><span class="w"> </span><span class="nc">DicomSession</span><span class="p">:</span>
 <a id="__codelineno-0-492" name="__codelineno-0-492"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">    The Main Facade for the Isocenter library.</span>
 <a id="__codelineno-0-494" name="__codelineno-0-494"></a>
@@ -5441,7 +5431,7 @@
 <a id="__codelineno-0-2188" name="__codelineno-0-2188"></a><span class="sd">            still present excludes every image beneath them.</span>
 <a id="__codelineno-0-2189" name="__codelineno-0-2189"></a><span class="sd">        """</span>
 <a id="__codelineno-0-2190" name="__codelineno-0-2190"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Performing pre-export safety scan..."</span><span class="p">)</span>
-<a id="__codelineno-0-2191" name="__codelineno-0-2191"></a>        <span class="n">findings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">scan_for_phi</span><span class="p">()</span>
+<a id="__codelineno-0-2191" name="__codelineno-0-2191"></a>        <span class="n">findings</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">audit</span><span class="p">()</span>
 <a id="__codelineno-0-2192" name="__codelineno-0-2192"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">findings</span><span class="p">:</span>
 <a id="__codelineno-0-2193" name="__codelineno-0-2193"></a>            <span class="k">return</span> <span class="nb">set</span><span class="p">()</span>
 <a id="__codelineno-0-2194" name="__codelineno-0-2194"></a>
@@ -5793,16 +5783,6 @@
 <a id="__codelineno-0-2540" name="__codelineno-0-2540"></a>                    <span class="n">se_new</span><span class="o">.</span><span class="n">instances</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i_new</span><span class="p">)</span>
 <a id="__codelineno-0-2541" name="__codelineno-0-2541"></a>
 <a id="__codelineno-0-2542" name="__codelineno-0-2542"></a>        <span class="k">return</span> <span class="n">p_new</span>
-<a id="__codelineno-0-2543" name="__codelineno-0-2543"></a>
-<a id="__codelineno-0-2544" name="__codelineno-0-2544"></a>    <span class="c1"># =========================================================================</span>
-<a id="__codelineno-0-2545" name="__codelineno-0-2545"></a>    <span class="c1"># DEPRECATED</span>
-<a id="__codelineno-0-2546" name="__codelineno-0-2546"></a>    <span class="c1"># =========================================================================</span>
-<a id="__codelineno-0-2547" name="__codelineno-0-2547"></a>
-<a id="__codelineno-0-2548" name="__codelineno-0-2548"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">scan_for_phi</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">"PhiReport"</span><span class="p">:</span>
-<a id="__codelineno-0-2549" name="__codelineno-0-2549"></a><span class="w">        </span><span class="sd">"""</span>
-<a id="__codelineno-0-2550" name="__codelineno-0-2550"></a><span class="sd">        Legacy alias for audit().</span>
-<a id="__codelineno-0-2551" name="__codelineno-0-2551"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2552" name="__codelineno-0-2552"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">audit</span><span class="p">(</span><span class="n">config_path</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
