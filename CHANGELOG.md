@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A test that can never run is now a test failure.** `tests/test_discovery_integration.py` skipped unconditionally for months because `faker` was undeclared -- the single skip in an otherwise green suite, dead coverage over redaction-zone logic, reporting as "not applicable here" rather than "nobody has run this since it was written". `tests/test_skip_contract.py` pins the rule that would have caught it: a skip's condition must be capable of being both true and false in a documented environment.
+
+  For a skip gated on importing a module, that means the module has to sit in exactly the optional extras. In `install_requires`, its absence is a broken installation and `import isocenter` would already have failed. In the `tests` extra, `pytest` itself ships there, so anything that can run the suite at all already has it. Declared in no extra at all, nothing can install it, so the skip can never be false -- the `faker` case. What remains is `ocr`/`nlp`/`docs`, which a user may legitimately lack, and `ocr` additionally needs a `tesseract` binary pip cannot supply. The rule reads the extras rather than a hand-kept allowlist, so declaring a new one is enough.
+
+  Applying it found three live instances, together guarding 40 tests. `test_query_export.py` skipped on **pydicom**, a hard dependency -- a skip that could only ever fire in an installation too broken to import the package, hiding that behind a green run. `test_wfdb_conformance.py` (14 tests) and `test_murmur_annotations.py` (23 tests) skipped on `wfdb` and `jsonschema`, both declared test dependencies: a contributor who forgot `pip install -e ".[tests]"` lost 37 tests and still saw green. All three now import directly, so a missing package is an error naming itself.
+
+  Two things keep the guard from going quietly vacuous, which is the failure mode it exists to prevent. A dumb text scan cross-checks the AST walk: if the scan finds a skip on a line the walk never accounted for, an unrecognised form has appeared and the guard has a blind spot. And a separate check rejects skips that do not depend on the environment at all -- `@pytest.mark.skip`, `@unittest.skip`, `skipIf(True, ...)`, `skipUnless(False, ...)` -- which is #107's opening line and the one shape the extras check structurally cannot see.
+
+  Verified by mutation: each of the five failure modes was introduced in turn and the guard caught all five. (#107)
+
 ## [0.9.0] - 2026-08-27
 
 Five defects of one shape, which is why they ship together: a gap

@@ -1,5 +1,8 @@
+import pydicom
 import pytest
 import pandas as pd
+from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.uid import ImplicitVRLittleEndian, generate_uid
 import os
 import shutil
 from isocenter.session import DicomSession
@@ -10,14 +13,6 @@ import time
 def session_for_query(tmp_path, monkeypatch):
     db_path = tmp_path / "isocenter_query.db"
     session = DicomSession(str(db_path))
-
-    # Check dependencies
-    try:
-        import pydicom
-        from pydicom.dataset import FileDataset, FileMetaDataset
-        from pydicom.uid import ImplicitVRLittleEndian, generate_uid
-    except ImportError:
-        pytest.skip("pydicom not installed")
 
     # Keep track of UIDs
     uids = {}

@@ -1,9 +1,8 @@
 import json
 import os
 
+import jsonschema
 import pytest
-
-jsonschema = pytest.importorskip("jsonschema")
 
 from isocenter.entities import DicomItem
 from isocenter.io_handlers import populate_attrs
