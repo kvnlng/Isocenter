@@ -5,7 +5,7 @@ All notable changes to the "Isocenter" project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.2] - 2026-08-26
 
 ### Changed
 
@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3.13 and 3.14 with the GIL are interpolation between a passing floor and a passing ceiling. All four now run in `publish.yml` at release time, split by authority over the upload: `test-floor` (3.12, 3.14t) blocks it, `test-supported` (3.13, 3.14) only reports -- a red job turns the run red and the release still ships. Failing at that point is cheap, because nothing has been uploaded and the version number is not spent.
 
   `tests.yml` gained a `workflow_call` trigger with a `python-versions` input so `publish.yml` reuses it rather than duplicating the setup. The publishing step stays inline in `publish.yml`, because PyPI matches the *workflow filename* that carries it.
+
+  `tests.yml`'s concurrency group now varies with the requested version list, and it does not cancel in progress when it was called rather than triggered. A reusable workflow's `github.workflow` is the *caller's* name, so both of `publish.yml`'s calls evaluated to `Publish-refs/heads/main` -- one group, `cancel-in-progress: true`, and the second call killed the first. The TestPyPI rehearsal caught it: `test-floor` was cancelled, `publish` was correctly skipped by its `needs`, and nothing was uploaded. The half worth fixing for is the other side of that race -- `test-supported` loses instead, `test-floor` passes, and a release ships having run half the matrix behind a green check. `publish.yml` sets `cancel-in-progress: false` precisely so an upload cannot be interrupted; a called workflow that cancelled anyway defeated that from one level down.
 
   `PYTHON_GIL` is now derived from the version (`endsWith(..., 't')`) instead of a parallel `include:` block, so adding a version cannot silently run a free-threaded build with the GIL back on -- which would pass while testing none of what it was added for.
 

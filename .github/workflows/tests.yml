@@ -34,8 +34,24 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # `github.workflow` is the *caller's* name when this runs as a reusable
+  # workflow, so publish.yml's two calls both evaluate to
+  # `Publish-refs/heads/main` -- one group, and with cancel-in-progress
+  # they killed each other. Observed on run 33032212241: `test-floor` was
+  # cancelled, `publish` was correctly skipped by its `needs`, and nothing
+  # shipped. The dangerous half of that coin flip is the other one --
+  # `test-supported` loses, `test-floor` passes, and a release goes out
+  # having run half the matrix behind a green check.
+  #
+  # The version list discriminates the two calls. It is empty on push and
+  # pull_request, where `inputs` does not exist, so the PR gate keeps its
+  # own single group.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.python-versions || 'gate' }}
+  # Superseding a stale PR push is worth cancelling for. A release's
+  # matrix is not: publish.yml sets cancel-in-progress: false so an
+  # upload cannot be interrupted, and a called workflow that cancels
+  # anyway would defeat that from one level down.
+  cancel-in-progress: ${{ !inputs.python-versions }}
 
 jobs:
   test:
