@@ -114,7 +114,7 @@ def test_a_multi_group_record_exports_samples_on_the_group_it_kept(tmp_path):
     assert getattr(out.WaveformSequence[0], "WaveformData", None)
 
 
-def test_a_waveform_sequence_with_no_samples_warns_on_export(tmp_path, caplog):
+def test_a_waveform_sequence_with_no_samples_is_reported_on_export(tmp_path):
     """A file describing a waveform it does not contain must say so.
 
     This is the state #34 left every exported record in. It should now be
@@ -123,14 +123,15 @@ def test_a_waveform_sequence_with_no_samples_warns_on_export(tmp_path, caplog):
     resulting file is structurally plausible and empty, which is exactly
     the failure mode this fix exists to end.
 
-    Driven through `_export_instance_worker` directly rather than
-    `session.export()`: the session hands `run_parallel` its own
-    ProcessPoolExecutor, so the worker's logger lives in a child process
-    where caplog cannot reach it (and ISOCENTER_FORCE_THREADS does not
-    apply to a caller-supplied executor).
+    Asserts on the worker's return value rather than on caplog. The
+    warning used to be emitted here, inside the worker, which is why this
+    test had to drive `_export_instance_worker` directly: through
+    `session.export()` the worker's logger lives in a child process where
+    caplog cannot reach it. That is the bug #126 fixed -- the loss now
+    comes back to the parent, which logs it and writes the audit entry --
+    so the honest assertion is that the worker reported it, not that a
+    log line appeared in whichever process happened to run.
     """
-    import logging
-
     from isocenter.io_handlers import ExportContext, _export_instance_worker
     from isocenter.entities import Instance
     from isocenter.io_handlers import populate_attrs
@@ -146,9 +147,7 @@ def test_a_waveform_sequence_with_no_samples_warns_on_export(tmp_path, caplog):
         output_path=str(tmp_path / "out" / "empty.dcm"),
         patient_attributes={}, study_attributes={}, series_attributes={})
 
-    with caplog.at_level(logging.WARNING):
-        _export_instance_worker(ctx)
+    outcome = _export_instance_worker(ctx)
 
-    messages = [r.getMessage() for r in caplog.records
-                if r.levelno >= logging.WARNING]
-    assert any("does not contain" in m for m in messages), messages
+    assert outcome.ok
+    assert any("does not contain" in loss for loss in outcome.losses), outcome

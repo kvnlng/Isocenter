@@ -404,7 +404,30 @@ class ExportContext:
     redaction_zones: List[Tuple] = field(default_factory=list)
 
 
-def _export_instance_worker(ctx: ExportContext) -> Optional[bool]:
+@dataclass
+class ExportOutcome:
+    """What one worker has to tell the parent about one instance (#126).
+
+    The worker used to answer `True` or the exception, which is enough to
+    count successes and no help at all for a *partial* success: a file
+    that was written and is missing something the caller asked for. Data
+    loss is neither an error nor nothing, so it needs its own field.
+
+    `error` lives here rather than being returned bare so the worker has
+    one return shape. Call sites still have to filter for `Exception`,
+    because `run_parallel` can return one of its own when a worker dies
+    -- but a site that forgets no longer gets an `AttributeError` on the
+    failure path, which is the path that only runs when something has
+    already gone wrong.
+    """
+    ok: bool
+    output_path: str
+    sop_instance_uid: Optional[str] = None
+    losses: List[str] = field(default_factory=list)
+    error: Optional[BaseException] = None
+
+
+def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
 
@@ -415,31 +438,34 @@ def _export_instance_worker(ctx: ExportContext) -> Optional[bool]:
         ctx (ExportContext): The context/request for export.
 
     Returns:
-        Optional[bool]: True on success, None (and prints error) on failure.
+        ExportOutcome: the write's result, plus any elements lost on the
+            way out for the parent to log and audit (#126).
     """
+    losses: List[str] = []
+    uid = getattr(ctx.instance, "sop_instance_uid", None)
 
     try:
         inst = ctx.instance
         ds = DicomExporter._create_ds(inst)
 
         # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes)
-        DicomExporter._merge_sequences(ds, inst.sequences)
+        DicomExporter._merge(ds, inst.attributes, losses)
+        DicomExporter._merge_sequences(ds, inst.sequences, losses)
 
         # 1. Patient Level
-        DicomExporter._merge(ds, ctx.patient_attributes)
+        DicomExporter._merge(ds, ctx.patient_attributes, losses)
         # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes)
-        DicomExporter._merge_sequences(ds, inst.sequences)
+        DicomExporter._merge(ds, inst.attributes, losses)
+        DicomExporter._merge_sequences(ds, inst.sequences, losses)
 
         # 1. Patient Level
-        DicomExporter._merge(ds, ctx.patient_attributes)
+        DicomExporter._merge(ds, ctx.patient_attributes, losses)
 
         # 2. Study Level
-        DicomExporter._merge(ds, ctx.study_attributes)
+        DicomExporter._merge(ds, ctx.study_attributes, losses)
 
         # 3. Series Level
-        DicomExporter._merge(ds, ctx.series_attributes)
+        DicomExporter._merge(ds, ctx.series_attributes, losses)
 
         # 4. Instance defaults helper
         populate_attrs(ds, inst)
@@ -554,10 +580,15 @@ def _export_instance_worker(ctx: ExportContext) -> Optional[bool]:
                 # whole fix exists to end; if it is still reachable -- a
                 # source that never carried samples -- say so rather than
                 # writing the file in silence.
-                get_logger().warning(
-                    f"{inst.sop_instance_uid}: Waveform Sequence present but "
-                    "no samples are available to export; the written file "
-                    "will describe a waveform it does not contain.")
+                #
+                # This is the export side of the same loss #36 records at
+                # ingest, so it rides the same channel (#126). Only the
+                # empty-samples case: the multiplex-group loss above is
+                # reported at ingest and is not re-reported here.
+                losses.append(
+                    "Waveform Sequence present but no samples are available "
+                    "to export; the written file will describe a waveform it "
+                    "does not contain.")
 
         if "_ISOCENTER_REDACTION_HASH" in ds:
             del ds["_ISOCENTER_REDACTION_HASH"]
@@ -569,12 +600,14 @@ def _export_instance_worker(ctx: ExportContext) -> Optional[bool]:
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
 
         ds.save_as(ctx.output_path, write_like_original=False)
-        return True
+        return ExportOutcome(ok=True, output_path=ctx.output_path,
+                             sop_instance_uid=uid, losses=losses)
     except Exception as e:
         # Do not raise, as it aborts the entire parallel batch.
-        # Log error and return None (Failure)
+        # Report the failure back for the parent to count and raise on.
         print(f"ERROR: Export failed for {ctx.output_path}: {e}", file=sys.stderr)
-        return e
+        return ExportOutcome(ok=False, output_path=ctx.output_path,
+                             sop_instance_uid=uid, losses=losses, error=e)
 
 
 def _compress_j2k(ds, pixel_array=None):
@@ -1110,13 +1143,46 @@ class DicomExporter:
         return contexts
 
     @staticmethod
+    def _report_export_losses(results, store_backend=None) -> int:
+        """Log every loss the workers reported, and audit it if we can.
+
+        Warning and auditing are deliberately not the same condition. The
+        warning is unconditional because `write_tree` can never supply a
+        backend -- it is the serializer path, with no session behind it --
+        and gating the report on one would make the fixture generators in
+        `scripts/` lose elements in total silence. The audit entry is what
+        turns a log line into a compliance record (#36), and needs a store.
+
+        Returns the number of losses reported.
+        """
+        logger = get_logger()
+        count = 0
+        for r in results:
+            for loss in getattr(r, "losses", ()):  # Exceptions have none
+                uid = r.sop_instance_uid or r.output_path
+                logger.warning(f"{uid}: {loss}")
+                count += 1
+                if store_backend is not None:
+                    # `log_audit`, not `log_audit_batch`: the batch method
+                    # writes straight to the database while the audit
+                    # writer thread is live, and swallows `sqlite3.Error`
+                    # into a log line -- so contention would lose the very
+                    # entry that exists because a log line was not enough.
+                    # The queue is the path #36 uses, and `close()` drains
+                    # it.
+                    store_backend.log_audit(
+                        action_type="DATA_LOSS", entity_uid=uid, details=loss)
+        return count
+
+    @staticmethod
     def write_tree(
             patient: Patient,
             out_dir: str,
             studies: List[Study] = None,
             compression: str = None,
             show_progress: bool = True,
-            executor=None):
+            executor=None,
+            store_backend=None):
         """Write an object graph to disk as DICOM, exactly as it stands.
 
         **This applies no de-identification.** It is the serializer, not
@@ -1147,6 +1213,10 @@ class DicomExporter:
             compression (str, optional): Compression format ('j2k' or None).
             show_progress (bool): If True, shows a progress bar.
             executor (ProcessPoolExecutor, optional): Shared executor for parallelism.
+            store_backend (SqliteStore, optional): Where to write a
+                `DATA_LOSS` audit entry for each element that could not be
+                written. Callers of this path usually have no session and
+                so pass nothing; the losses are logged either way (#126).
 
         Raises:
             RuntimeError: If any instance failed to write.
@@ -1179,9 +1249,20 @@ class DicomExporter:
             show_progress=show_progress,
             executor=executor)
 
-        # results contains True (success) or Exception (failure)
-        success_count = sum(1 for r in results if r is True)
-        failures = [r for r in results if isinstance(r, Exception)]
+        # An ExportOutcome per task -- or an Exception, if `run_parallel`
+        # itself lost a worker. Both shapes have to survive this.
+        #
+        # Materialized because what follows walks it twice, and
+        # `run_parallel` returns a generator when asked to. Neither export
+        # site asks today; if one ever does, the loss report would consume
+        # the results and every success count would silently read zero.
+        results = list(results)
+        DicomExporter._report_export_losses(results, store_backend)
+        success_count = sum(1 for r in results if getattr(r, "ok", False))
+        failures = [r.error if isinstance(r, ExportOutcome) else r
+                    for r in results
+                    if isinstance(r, Exception) or (
+                        isinstance(r, ExportOutcome) and not r.ok)]
 
         logger.info(f"Export Complete. Success: {success_count}/{len(export_tasks)}")
 
@@ -1199,7 +1280,8 @@ class DicomExporter:
             total: int = None,
             executor=None,
             maxtasksperchild: int = None,
-            disable_gc: bool = False):
+            disable_gc: bool = False,
+            store_backend=None):
         """
         Exports a flat list of ExportContexts using parallel workers.
 
@@ -1210,9 +1292,15 @@ class DicomExporter:
             executor (optional): Shared executor.
             maxtasksperchild (int, optional): Worker recycle rate (for memory management).
             disable_gc (bool): If True, disables GC in workers for throughput.
+            store_backend (SqliteStore, optional): Where to write a
+                `DATA_LOSS` audit entry for each element the workers could
+                not write. Without it the losses are still logged, but
+                only logged (#126).
 
         Returns:
-            int: Number of successfully exported instances.
+            int: Number of successfully exported instances. An instance
+                that was written but lost an element counts as a success;
+                the loss is reported separately.
         """
         logger = get_logger()
         # if not export_tasks: return # Cannot easily check empty iterator without consuming
@@ -1233,9 +1321,14 @@ class DicomExporter:
             maxtasksperchild=maxtasksperchild,
             disable_gc=disable_gc)
 
-        success_count = sum(1 for r in results if r is True)
-        # failures = [r for r in results if isinstance(r, Exception)]
-        # We don't raise here by default (batch mode), but success_count reflects only True results.
+        # Two passes -- see the note in `write_tree`.
+        results = list(results)
+        DicomExporter._report_export_losses(results, store_backend)
+        success_count = sum(1 for r in results if getattr(r, "ok", False))
+        # We don't raise here by default (batch mode); `success_count`
+        # counts only instances that were actually written. An instance
+        # that was written *and* lost an element counts as a success and
+        # is reported through the loss channel above, not this number.
 
         logger.info(f"Export Complete. Success: {success_count}/{total or '?'}")
         return success_count
@@ -1290,8 +1383,14 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs):
-        """Merges a dictionary of attributes into a pydicom Dataset."""
+    def _merge(ds, attrs, losses=None):
+        """Merges a dictionary of attributes into a pydicom Dataset.
+
+        `losses` is an optional list that collects a description of every
+        element that could not be written. It is an accumulator rather
+        than a return value because `_merge` is called six times per
+        instance and the loss belongs to the instance, not the call.
+        """
         for t, v in attrs.items():
             # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
             # tags. They are private, so `dictionary_VR` below raises for
@@ -1348,12 +1447,19 @@ class DicomExporter:
             except Exception as exc:
                 # Say "not exported". "Failed to merge" reads like an
                 # internal hiccup; this is an element the caller asked
-                # for that will not be in the output. There is no audit
-                # entry to pair it with because `_merge` runs inside
-                # `_export_instance_worker`, potentially in a subprocess
-                # with no store handle -- tracked as #126.
-                get_logger().warning(
-                    f"Tag {t} not exported (data loss): {exc}")
+                # for that will not be in the output.
+                #
+                # Reported by handing it back rather than logging it
+                # here: `_merge` runs inside `_export_instance_worker`,
+                # which may be in a subprocess with no store handle and
+                # -- as the #126 tests show -- no logger the caller can
+                # see either. The parent logs it and writes the audit
+                # entry (#126).
+                loss = f"Tag {t} not exported (data loss): {exc}"
+                if losses is None:
+                    get_logger().warning(loss)
+                elif loss not in losses:
+                    losses.append(loss)
 
     # PS3.5 6.2: `LO` is a Long String, 64 characters maximum.
     _LO_MAX = 64
@@ -1405,7 +1511,7 @@ class DicomExporter:
         return None
 
     @staticmethod
-    def _merge_sequences(ds, sequences: Dict[str, Any]):
+    def _merge_sequences(ds, sequences: Dict[str, Any], losses=None):
         """
         Recursively populates sequences into the dataset.
 
@@ -1424,8 +1530,8 @@ class DicomExporter:
                 ds_item.is_implicit_VR = True
 
                 # Recursively merge item attributes and sub-sequences
-                DicomExporter._merge(ds_item, item.attributes)
-                DicomExporter._merge_sequences(ds_item, item.sequences)
+                DicomExporter._merge(ds_item, item.attributes, losses)
+                DicomExporter._merge_sequences(ds_item, item.sequences, losses)
 
                 pydicom_seq.append(ds_item)
 
