@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Data lost on the way out of an export reached nobody.** `_merge` drops an element it cannot encode and warned; the export worker writes a Waveform Sequence with no samples in it and warned. Both are real losses in the artefact the caller keeps, and both were reported only to a logger -- from inside `_export_instance_worker`, which `session.export()` runs in a subprocess.
+
+  A subprocess is not a quieter channel, it is a different one. The existing test for the empty-waveform warning had to drive the worker directly and says why in its own docstring: through `session.export()` the worker's logger lives in a child process where `caplog` cannot reach it. That is not a testing inconvenience -- it is the finding. Through the only path a user takes, the warning reached neither the audit log nor the caller's log handlers. The element vanished and nothing anywhere recorded that it had.
+
+  #36 settled what to do at ingest: warn *and* write a `DATA_LOSS` audit entry, because "the log line alone is not a compliance trail". The export side now uses the same channel. Since the code that notices the loss cannot hold a store handle, the loss travels instead: `_export_instance_worker` returns an `ExportOutcome` -- written or not, plus what was lost -- and the parent, which has the backend, logs it and writes the audit entry.
+
+  The worker's return contract changed from `Optional[bool]` to that dataclass, which is why this is not a one-line fix; it is private, and both `run_parallel` consumers in `io_handlers.py` were updated with it. `error` is a field on the outcome rather than a bare exception returned in its place, so the worker has one return shape and a call site that forgets to check cannot raise `AttributeError` on the failure path -- the path that only runs when something has already gone wrong. Sites still filter for `Exception`, because `run_parallel` can return one of its own when a worker dies.
+
+  Warning and auditing are deliberately not the same condition. `DicomExporter.write_tree()` is the serializer, with no session behind it, and can never supply a backend; gating the report on one would make every fixture generator in `scripts/` lose elements in silence. The warning is unconditional, the audit entry is what a store adds. (#126)
+
 - **Three behaviours in `remediation.py` that nothing was holding in place.** The module that *applies* de-identification had 14 of 35 sampled mutations survive once #106 gave the probe operators that reach straight-line code. The code was right in each case below; no test would have noticed it changing. Now 11 of 35, and the three closed are the ones with consequences.
 
   `add_global_deid_tags` writes the De-identification Method Code Sequence `(0012,0064)` as a triple: Code Value `113100`, Coding Scheme Designator `DCM`, Code Meaning. Deleting the designator left `113100` naming nothing -- code values are unique only within a scheme, so a reader cannot tell the Basic Application Confidentiality Profile from any other registry's 113100. That is the 0.8.1 family exactly, and here the false assertion is the de-identification conformance claim itself.

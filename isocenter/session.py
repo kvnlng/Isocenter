@@ -2124,7 +2124,7 @@ class DicomSession:
             self._report_recoverable_identities(tasks)
 
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
-        self._run_export_batch(tasks, show_progress)
+        self._run_export_batch(tasks, show_progress, self.store_backend)
         print("Done.")
 
     def _report_recoverable_identities(self, tasks) -> int:
@@ -2303,12 +2303,17 @@ class DicomSession:
         return rule.get("redaction_zones", []) if rule else []
 
     @staticmethod
-    def _run_export_batch(tasks, show_progress) -> None:
+    def _run_export_batch(tasks, show_progress, store_backend=None) -> None:
         """Runs the export in worker processes and reports the outcome.
 
         Uses `export_batch`'s own pool rather than `self._executor`: workers
         are recycled every 25 tasks so memory leaked by the imaging C
         libraries is reclaimed, which `ProcessPoolExecutor` cannot do.
+
+        `store_backend` is passed explicitly because this is a static
+        method and the workers may be in subprocesses: the handle cannot
+        cross that boundary, so the losses come back instead and are
+        audited here, in the parent (#126).
         """
         try:
             success_count = DicomExporter.export_batch(
@@ -2316,7 +2321,8 @@ class DicomSession:
                 show_progress=show_progress,
                 total=len(tasks),
                 maxtasksperchild=25,
-                disable_gc=True)
+                disable_gc=True,
+                store_backend=store_backend)
         except Exception as exc:
             get_logger().error("Export Failed! Error: %s", exc)
             raise
