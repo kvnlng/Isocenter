@@ -102,7 +102,24 @@ jobs:
       # test went unrun for months while the suite looked healthy (#44).
       # A skip caused by a missing system package is indistinguishable
       # from a test that has nothing to say.
-      run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+      #
+      # `update` is deliberately allowed to fail. It exits non-zero if
+      # *any* configured source fails, and the runner image ships
+      # third-party repositories we neither use nor control: on
+      # 2026-08-27 packages.microsoft.com returned 403 for two of them
+      # and killed a release rehearsal, because `update && install` under
+      # `bash -e` meant `install` never ran. Tesseract comes from
+      # azure.archive.ubuntu.com, which was fine throughout.
+      #
+      # The install is what must succeed, and the version check is what
+      # proves it: pip cannot supply this binary, so an install that
+      # half-worked would resurface as #44 -- a silent skip that looks
+      # like a passing suite.
+      run: |
+        sudo apt-get update \
+          || echo "::warning::apt-get update had failing sources; continuing"
+        sudo apt-get install -y tesseract-ocr
+        tesseract --version
 
     - name: Install Dependencies
       timeout-minutes: 3
