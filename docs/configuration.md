@@ -100,9 +100,23 @@ remove_private_tags: true
 * `true`: Removes **ALL** private tags. (Recommended for safety).
 * `false`: Retains them (Use only if you are sure they are safe or strictly needed for analysis).
 
+!!! warning "`false` cannot retain private tags with a binary VR"
+
+    Elements with a binary VR (`OB`, `OW`, `OF`, `OD`, `OL`) are skipped
+    at ingest and never enter the object graph, so there is nothing left
+    for this flag to keep by the time it is read. A vendor block
+    routinely carries one. The rule exists to keep pixel and waveform
+    blobs out of resident memory -- an arbitrary private `OB` can be
+    megabytes -- and private tags are collateral.
+
+    Each one is logged and written to the audit log as a `DATA_LOSS`
+    entry naming the tag and its VR, so the loss is visible rather than
+    silent. Whether these bytes should be retained at all is still open
+    ([#125](https://github.com/kvnlng/Isocenter/issues/125)).
+
 ### PHI Tags
 
-Define specific rules for individual DICOM tags. Keys must be uppercase hex strings (e.g. `"0010,0010"`).
+Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex strings (e.g. `"0010,0010"`); case is normalised on load, so either case works.
 
 **Supported Actions:**
 

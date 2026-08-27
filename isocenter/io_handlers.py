@@ -45,7 +45,7 @@ from .store import DicomStore
 from .config_manager import ConfigLoader
 
 
-def populate_attrs(ds: Any, item: "DicomItem"):
+def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
     """
     Standalone function to populate attributes for pickle-compatibility in workers.
 
@@ -62,6 +62,10 @@ def populate_attrs(ds: Any, item: "DicomItem"):
     Args:
         ds: The pydicom Dataset or Sequence Item.
         item (DicomItem): The Isocenter item to populate.
+        dropped (list, optional): Collects `(tag, vr)` for private
+            elements skipped for their VR, so the caller can report them
+            (#125). See `_PRIVATE_BINARY_DROP` below for why only
+            private ones.
     """
 
     # Binary VRs to explicitly skip (Metadata Refactor)
@@ -72,12 +76,26 @@ def populate_attrs(ds: Any, item: "DicomItem"):
         if elem.tag.group == 0x7fe0:
             continue  # Skip pixels
         if elem.VR in BINARY_VRS:
+            # These bytes do not reach the object graph at all, so
+            # `remove_private_tags=False` cannot keep them -- there is
+            # nothing left to keep by the time the flag is consulted.
+            #
+            # Reported for odd groups only. The standard binary elements
+            # this skips are not lost: (7fe0,0010) is excluded above and
+            # (5400,1010) is written to the sidecar by the caller, so
+            # reporting them would put a DATA_LOSS entry in the record of
+            # every image ever ingested. Whether private binary should be
+            # *kept* is the open half of #125; that it vanished in
+            # silence is the half this closes.
+            if dropped is not None and elem.tag.group % 2 == 1:
+                dropped.append(
+                    (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
             continue  # Skip binary blobs
 
         tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
 
         if elem.VR == 'SQ':
-            process_sequence(tag, elem, item)
+            process_sequence(tag, elem, item, dropped)
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
             item.set_attr(tag, str(elem.value))
@@ -85,11 +103,11 @@ def populate_attrs(ds: Any, item: "DicomItem"):
             item.set_attr(tag, elem.value)
 
 
-def process_sequence(tag, elem, parent_item):
+def process_sequence(tag, elem, parent_item, dropped: list = None):
     """Recursively parses Sequence (SQ) items."""
     for ds_item in elem:
         seq_item = DicomItem()
-        populate_attrs(ds_item, seq_item)
+        populate_attrs(ds_item, seq_item, dropped)
         parent_item.add_sequence_item(tag, seq_item)
 
 
@@ -143,7 +161,14 @@ def ingest_worker(fp: str) -> Tuple:
 
         # Construct Instance (Metadata Only)
         inst = Instance(meta['sop'], meta['sop_class'], 0, file_path=fp)
-        populate_attrs(ds, inst)
+        # Rides `meta` rather than a ninth tuple slot, which is the
+        # channel #36's multiplex-group loss already uses. This worker
+        # may be in a subprocess with no store handle, so the loss
+        # travels and the parent records it (#125, and #126 for the
+        # export side of the same constraint).
+        dropped = []
+        populate_attrs(ds, inst, dropped)
+        meta['dropped_private_binary'] = dropped
 
         # Isocenter internally manages pixels as standard contiguous arrays (Interleaved)
         # So we MUST ensure PlanarConfiguration=0 in metadata to match our converted data
@@ -307,6 +332,23 @@ class DicomImporter:
                         # The log line alone is not a compliance trail: it
                         # goes to a file the user may never open. The audit
                         # entry is what puts this in the record.
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="DATA_LOSS",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail)
+
+                    # Private binary elements never reached the graph, so
+                    # `remove_private_tags=False` could not have kept
+                    # them. Same reasoning as the block above: a loss the
+                    # caller cannot see is indistinguishable from a file
+                    # that never carried the tag (#125).
+                    for tag, vr in meta.get('dropped_private_binary', ()):
+                        detail = (f"Private tag {tag} ({vr}) was not ingested; "
+                                  f"binary-VR elements are not held in the "
+                                  f"object graph, so it cannot be exported "
+                                  f"even with remove_private_tags=False.")
+                        logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
                             store_backend.log_audit(
                                 action_type="DATA_LOSS",
