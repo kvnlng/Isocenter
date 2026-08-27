@@ -3738,7 +3738,13 @@
 <span class="normal"><a href="#__codelineno-0-2546">2546</a></span>
 <span class="normal"><a href="#__codelineno-0-2547">2547</a></span>
 <span class="normal"><a href="#__codelineno-0-2548">2548</a></span>
-<span class="normal"><a href="#__codelineno-0-2549">2549</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-491" name="__codelineno-0-491"></a><span class="k">class</span><span class="w"> </span><span class="nc">DicomSession</span><span class="p">:</span>
+<span class="normal"><a href="#__codelineno-0-2549">2549</a></span>
+<span class="normal"><a href="#__codelineno-0-2550">2550</a></span>
+<span class="normal"><a href="#__codelineno-0-2551">2551</a></span>
+<span class="normal"><a href="#__codelineno-0-2552">2552</a></span>
+<span class="normal"><a href="#__codelineno-0-2553">2553</a></span>
+<span class="normal"><a href="#__codelineno-0-2554">2554</a></span>
+<span class="normal"><a href="#__codelineno-0-2555">2555</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-491" name="__codelineno-0-491"></a><span class="k">class</span><span class="w"> </span><span class="nc">DicomSession</span><span class="p">:</span>
 <a id="__codelineno-0-492" name="__codelineno-0-492"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">    The Main Facade for the Isocenter library.</span>
 <a id="__codelineno-0-494" name="__codelineno-0-494"></a>
@@ -5374,7 +5380,7 @@
 <a id="__codelineno-0-2124" name="__codelineno-0-2124"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_report_recoverable_identities</span><span class="p">(</span><span class="n">tasks</span><span class="p">)</span>
 <a id="__codelineno-0-2125" name="__codelineno-0-2125"></a>
 <a id="__codelineno-0-2126" name="__codelineno-0-2126"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Exporting </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">)</span><span class="si">}</span><span class="s2"> images from </span><span class="si">{</span><span class="n">patient_count</span><span class="si">}</span><span class="s2"> patients..."</span><span class="p">)</span>
-<a id="__codelineno-0-2127" name="__codelineno-0-2127"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_run_export_batch</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">show_progress</span><span class="p">)</span>
+<a id="__codelineno-0-2127" name="__codelineno-0-2127"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_run_export_batch</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">show_progress</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">store_backend</span><span class="p">)</span>
 <a id="__codelineno-0-2128" name="__codelineno-0-2128"></a>        <span class="nb">print</span><span class="p">(</span><span class="s2">"Done."</span><span class="p">)</span>
 <a id="__codelineno-0-2129" name="__codelineno-0-2129"></a>
 <a id="__codelineno-0-2130" name="__codelineno-0-2130"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_report_recoverable_identities</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tasks</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
@@ -5553,250 +5559,256 @@
 <a id="__codelineno-0-2303" name="__codelineno-0-2303"></a>        <span class="k">return</span> <span class="n">rule</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"redaction_zones"</span><span class="p">,</span> <span class="p">[])</span> <span class="k">if</span> <span class="n">rule</span> <span class="k">else</span> <span class="p">[]</span>
 <a id="__codelineno-0-2304" name="__codelineno-0-2304"></a>
 <a id="__codelineno-0-2305" name="__codelineno-0-2305"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-0-2306" name="__codelineno-0-2306"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_run_export_batch</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">show_progress</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2306" name="__codelineno-0-2306"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_run_export_batch</span><span class="p">(</span><span class="n">tasks</span><span class="p">,</span> <span class="n">show_progress</span><span class="p">,</span> <span class="n">store_backend</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-2307" name="__codelineno-0-2307"></a><span class="w">        </span><span class="sd">"""Runs the export in worker processes and reports the outcome.</span>
 <a id="__codelineno-0-2308" name="__codelineno-0-2308"></a>
 <a id="__codelineno-0-2309" name="__codelineno-0-2309"></a><span class="sd">        Uses `export_batch`'s own pool rather than `self._executor`: workers</span>
 <a id="__codelineno-0-2310" name="__codelineno-0-2310"></a><span class="sd">        are recycled every 25 tasks so memory leaked by the imaging C</span>
 <a id="__codelineno-0-2311" name="__codelineno-0-2311"></a><span class="sd">        libraries is reclaimed, which `ProcessPoolExecutor` cannot do.</span>
-<a id="__codelineno-0-2312" name="__codelineno-0-2312"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2313" name="__codelineno-0-2313"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2314" name="__codelineno-0-2314"></a>            <span class="n">success_count</span> <span class="o">=</span> <span class="n">DicomExporter</span><span class="o">.</span><span class="n">export_batch</span><span class="p">(</span>
-<a id="__codelineno-0-2315" name="__codelineno-0-2315"></a>                <span class="n">tasks</span><span class="p">,</span>
-<a id="__codelineno-0-2316" name="__codelineno-0-2316"></a>                <span class="n">show_progress</span><span class="o">=</span><span class="n">show_progress</span><span class="p">,</span>
-<a id="__codelineno-0-2317" name="__codelineno-0-2317"></a>                <span class="n">total</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">),</span>
-<a id="__codelineno-0-2318" name="__codelineno-0-2318"></a>                <span class="n">maxtasksperchild</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span>
-<a id="__codelineno-0-2319" name="__codelineno-0-2319"></a>                <span class="n">disable_gc</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-0-2320" name="__codelineno-0-2320"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-<a id="__codelineno-0-2321" name="__codelineno-0-2321"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"Export Failed! Error: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
-<a id="__codelineno-0-2322" name="__codelineno-0-2322"></a>            <span class="k">raise</span>
-<a id="__codelineno-0-2323" name="__codelineno-0-2323"></a>        <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-2324" name="__codelineno-0-2324"></a>            <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
-<a id="__codelineno-0-2325" name="__codelineno-0-2325"></a>
-<a id="__codelineno-0-2326" name="__codelineno-0-2326"></a>        <span class="k">if</span> <span class="n">success_count</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">):</span>
-<a id="__codelineno-0-2327" name="__codelineno-0-2327"></a>            <span class="c1"># Partial failure used to be invisible here: the count came back</span>
-<a id="__codelineno-0-2328" name="__codelineno-0-2328"></a>            <span class="c1"># and was dropped, and "Export complete." printed whether 1200 of</span>
-<a id="__codelineno-0-2329" name="__codelineno-0-2329"></a>            <span class="c1"># 1200 instances survived or 3 did. Per-file errors are already in</span>
-<a id="__codelineno-0-2330" name="__codelineno-0-2330"></a>            <span class="c1"># the audit log; this is the summary that says to go and read it.</span>
-<a id="__codelineno-0-2331" name="__codelineno-0-2331"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
-<a id="__codelineno-0-2332" name="__codelineno-0-2332"></a>                <span class="s2">"Export finished with failures: </span><span class="si">%d</span><span class="s2"> of </span><span class="si">%d</span><span class="s2"> instances exported. "</span>
-<a id="__codelineno-0-2333" name="__codelineno-0-2333"></a>                <span class="s2">"See the audit log for per-instance errors."</span><span class="p">,</span>
-<a id="__codelineno-0-2334" name="__codelineno-0-2334"></a>                <span class="n">success_count</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">))</span>
-<a id="__codelineno-0-2335" name="__codelineno-0-2335"></a>            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Export finished with failures: "</span>
-<a id="__codelineno-0-2336" name="__codelineno-0-2336"></a>                  <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">success_count</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">)</span><span class="si">}</span><span class="s2"> instances exported."</span><span class="p">)</span>
-<a id="__codelineno-0-2337" name="__codelineno-0-2337"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-2338" name="__codelineno-0-2338"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Export complete."</span><span class="p">)</span>
-<a id="__codelineno-0-2339" name="__codelineno-0-2339"></a>
-<a id="__codelineno-0-2340" name="__codelineno-0-2340"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">export_dataframe</span><span class="p">(</span>
-<a id="__codelineno-0-2341" name="__codelineno-0-2341"></a>            <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-0-2342" name="__codelineno-0-2342"></a>            <span class="n">output_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"export_metadata.csv"</span><span class="p">,</span>
-<a id="__codelineno-0-2343" name="__codelineno-0-2343"></a>            <span class="n">expand_metadata</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
-<a id="__codelineno-0-2344" name="__codelineno-0-2344"></a><span class="w">        </span><span class="sd">"""</span>
-<a id="__codelineno-0-2345" name="__codelineno-0-2345"></a><span class="sd">        Exports flat validation metadata to CSV or Parquet.</span>
-<a id="__codelineno-0-2346" name="__codelineno-0-2346"></a>
-<a id="__codelineno-0-2347" name="__codelineno-0-2347"></a><span class="sd">        Args:</span>
-<a id="__codelineno-0-2348" name="__codelineno-0-2348"></a><span class="sd">            output_path (str): The output file path (ends with .csv or .parquet).</span>
-<a id="__codelineno-0-2349" name="__codelineno-0-2349"></a><span class="sd">            expand_metadata (bool): If True, includes all DICOM attributes as columns.</span>
-<a id="__codelineno-0-2350" name="__codelineno-0-2350"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2351" name="__codelineno-0-2351"></a>        <span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-0-2352" name="__codelineno-0-2352"></a>        <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_cohort_report</span><span class="p">(</span><span class="n">expand_metadata</span><span class="o">=</span><span class="n">expand_metadata</span><span class="p">)</span>
-<a id="__codelineno-0-2353" name="__codelineno-0-2353"></a>
-<a id="__codelineno-0-2354" name="__codelineno-0-2354"></a>        <span class="k">if</span> <span class="n">output_path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".parquet"</span><span class="p">):</span>
-<a id="__codelineno-0-2355" name="__codelineno-0-2355"></a>            <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2356" name="__codelineno-0-2356"></a>                <span class="c1"># Requires pyarrow and pandas</span>
-<a id="__codelineno-0-2357" name="__codelineno-0-2357"></a>                <span class="n">df</span><span class="o">.</span><span class="n">to_parquet</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-0-2358" name="__codelineno-0-2358"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-2359" name="__codelineno-0-2359"></a>                <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Failed to export parquet: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-0-2360" name="__codelineno-0-2360"></a>                <span class="k">raise</span> <span class="n">e</span>
-<a id="__codelineno-0-2361" name="__codelineno-0-2361"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-2362" name="__codelineno-0-2362"></a>            <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-0-2363" name="__codelineno-0-2363"></a>
-<a id="__codelineno-0-2364" name="__codelineno-0-2364"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Exported metadata to </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-0-2365" name="__codelineno-0-2365"></a>        <span class="k">return</span> <span class="n">df</span>
-<a id="__codelineno-0-2366" name="__codelineno-0-2366"></a>
-<a id="__codelineno-0-2367" name="__codelineno-0-2367"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">export_to_parquet</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">patient_ids</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
-<a id="__codelineno-0-2368" name="__codelineno-0-2368"></a><span class="w">        </span><span class="sd">"""</span>
-<a id="__codelineno-0-2369" name="__codelineno-0-2369"></a><span class="sd">        [EXPERIMENTAL] Exports flattened metadata to a Parquet file.</span>
-<a id="__codelineno-0-2370" name="__codelineno-0-2370"></a><span class="sd">        Requires 'pandas' and 'pyarrow' or 'fastparquet'.</span>
-<a id="__codelineno-0-2371" name="__codelineno-0-2371"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2372" name="__codelineno-0-2372"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2373" name="__codelineno-0-2373"></a>            <span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-0-2374" name="__codelineno-0-2374"></a>        <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
-<a id="__codelineno-0-2375" name="__codelineno-0-2375"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"export_to_parquet requires 'pandas' installed."</span><span class="p">)</span>
-<a id="__codelineno-0-2376" name="__codelineno-0-2376"></a>            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span>
-<a id="__codelineno-0-2377" name="__codelineno-0-2377"></a>                <span class="s2">"Please install pandas to use this feature: pip install pandas pyarrow"</span><span class="p">)</span>
-<a id="__codelineno-0-2378" name="__codelineno-0-2378"></a>
-<a id="__codelineno-0-2379" name="__codelineno-0-2379"></a>        <span class="c1"># 1. Sync DB state</span>
-<a id="__codelineno-0-2380" name="__codelineno-0-2380"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Saving state before Parquet export..."</span><span class="p">)</span>
-<a id="__codelineno-0-2381" name="__codelineno-0-2381"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
-<a id="__codelineno-0-2382" name="__codelineno-0-2382"></a>
-<a id="__codelineno-0-2383" name="__codelineno-0-2383"></a>        <span class="c1"># 2. Stream Data</span>
-<a id="__codelineno-0-2384" name="__codelineno-0-2384"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Streaming data from database..."</span><span class="p">)</span>
-<a id="__codelineno-0-2385" name="__codelineno-0-2385"></a>
-<a id="__codelineno-0-2386" name="__codelineno-0-2386"></a>        <span class="n">target_ids</span> <span class="o">=</span> <span class="n">patient_ids</span>
-<a id="__codelineno-0-2387" name="__codelineno-0-2387"></a>        <span class="k">if</span> <span class="n">target_ids</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2388" name="__codelineno-0-2388"></a>            <span class="n">target_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">patient_id</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">patients</span><span class="p">]</span>
-<a id="__codelineno-0-2389" name="__codelineno-0-2389"></a>
-<a id="__codelineno-0-2390" name="__codelineno-0-2390"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">target_ids</span><span class="p">:</span>
-<a id="__codelineno-0-2391" name="__codelineno-0-2391"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"No patients to export."</span><span class="p">)</span>
-<a id="__codelineno-0-2392" name="__codelineno-0-2392"></a>            <span class="k">return</span>
-<a id="__codelineno-0-2393" name="__codelineno-0-2393"></a>
-<a id="__codelineno-0-2394" name="__codelineno-0-2394"></a>        <span class="n">generator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">persistence_manager</span><span class="o">.</span><span class="n">store_backend</span><span class="o">.</span><span class="n">get_flattened_instances</span><span class="p">(</span><span class="n">target_ids</span><span class="p">)</span>
+<a id="__codelineno-0-2312" name="__codelineno-0-2312"></a>
+<a id="__codelineno-0-2313" name="__codelineno-0-2313"></a><span class="sd">        `store_backend` is passed explicitly because this is a static</span>
+<a id="__codelineno-0-2314" name="__codelineno-0-2314"></a><span class="sd">        method and the workers may be in subprocesses: the handle cannot</span>
+<a id="__codelineno-0-2315" name="__codelineno-0-2315"></a><span class="sd">        cross that boundary, so the losses come back instead and are</span>
+<a id="__codelineno-0-2316" name="__codelineno-0-2316"></a><span class="sd">        audited here, in the parent (#126).</span>
+<a id="__codelineno-0-2317" name="__codelineno-0-2317"></a><span class="sd">        """</span>
+<a id="__codelineno-0-2318" name="__codelineno-0-2318"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2319" name="__codelineno-0-2319"></a>            <span class="n">success_count</span> <span class="o">=</span> <span class="n">DicomExporter</span><span class="o">.</span><span class="n">export_batch</span><span class="p">(</span>
+<a id="__codelineno-0-2320" name="__codelineno-0-2320"></a>                <span class="n">tasks</span><span class="p">,</span>
+<a id="__codelineno-0-2321" name="__codelineno-0-2321"></a>                <span class="n">show_progress</span><span class="o">=</span><span class="n">show_progress</span><span class="p">,</span>
+<a id="__codelineno-0-2322" name="__codelineno-0-2322"></a>                <span class="n">total</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">),</span>
+<a id="__codelineno-0-2323" name="__codelineno-0-2323"></a>                <span class="n">maxtasksperchild</span><span class="o">=</span><span class="mi">25</span><span class="p">,</span>
+<a id="__codelineno-0-2324" name="__codelineno-0-2324"></a>                <span class="n">disable_gc</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-2325" name="__codelineno-0-2325"></a>                <span class="n">store_backend</span><span class="o">=</span><span class="n">store_backend</span><span class="p">)</span>
+<a id="__codelineno-0-2326" name="__codelineno-0-2326"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+<a id="__codelineno-0-2327" name="__codelineno-0-2327"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"Export Failed! Error: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">exc</span><span class="p">)</span>
+<a id="__codelineno-0-2328" name="__codelineno-0-2328"></a>            <span class="k">raise</span>
+<a id="__codelineno-0-2329" name="__codelineno-0-2329"></a>        <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-2330" name="__codelineno-0-2330"></a>            <span class="n">gc</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
+<a id="__codelineno-0-2331" name="__codelineno-0-2331"></a>
+<a id="__codelineno-0-2332" name="__codelineno-0-2332"></a>        <span class="k">if</span> <span class="n">success_count</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">):</span>
+<a id="__codelineno-0-2333" name="__codelineno-0-2333"></a>            <span class="c1"># Partial failure used to be invisible here: the count came back</span>
+<a id="__codelineno-0-2334" name="__codelineno-0-2334"></a>            <span class="c1"># and was dropped, and "Export complete." printed whether 1200 of</span>
+<a id="__codelineno-0-2335" name="__codelineno-0-2335"></a>            <span class="c1"># 1200 instances survived or 3 did. Per-file errors are already in</span>
+<a id="__codelineno-0-2336" name="__codelineno-0-2336"></a>            <span class="c1"># the audit log; this is the summary that says to go and read it.</span>
+<a id="__codelineno-0-2337" name="__codelineno-0-2337"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+<a id="__codelineno-0-2338" name="__codelineno-0-2338"></a>                <span class="s2">"Export finished with failures: </span><span class="si">%d</span><span class="s2"> of </span><span class="si">%d</span><span class="s2"> instances exported. "</span>
+<a id="__codelineno-0-2339" name="__codelineno-0-2339"></a>                <span class="s2">"See the audit log for per-instance errors."</span><span class="p">,</span>
+<a id="__codelineno-0-2340" name="__codelineno-0-2340"></a>                <span class="n">success_count</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">))</span>
+<a id="__codelineno-0-2341" name="__codelineno-0-2341"></a>            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Export finished with failures: "</span>
+<a id="__codelineno-0-2342" name="__codelineno-0-2342"></a>                  <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">success_count</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">tasks</span><span class="p">)</span><span class="si">}</span><span class="s2"> instances exported."</span><span class="p">)</span>
+<a id="__codelineno-0-2343" name="__codelineno-0-2343"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-2344" name="__codelineno-0-2344"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Export complete."</span><span class="p">)</span>
+<a id="__codelineno-0-2345" name="__codelineno-0-2345"></a>
+<a id="__codelineno-0-2346" name="__codelineno-0-2346"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">export_dataframe</span><span class="p">(</span>
+<a id="__codelineno-0-2347" name="__codelineno-0-2347"></a>            <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-0-2348" name="__codelineno-0-2348"></a>            <span class="n">output_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"export_metadata.csv"</span><span class="p">,</span>
+<a id="__codelineno-0-2349" name="__codelineno-0-2349"></a>            <span class="n">expand_metadata</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+<a id="__codelineno-0-2350" name="__codelineno-0-2350"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-2351" name="__codelineno-0-2351"></a><span class="sd">        Exports flat validation metadata to CSV or Parquet.</span>
+<a id="__codelineno-0-2352" name="__codelineno-0-2352"></a>
+<a id="__codelineno-0-2353" name="__codelineno-0-2353"></a><span class="sd">        Args:</span>
+<a id="__codelineno-0-2354" name="__codelineno-0-2354"></a><span class="sd">            output_path (str): The output file path (ends with .csv or .parquet).</span>
+<a id="__codelineno-0-2355" name="__codelineno-0-2355"></a><span class="sd">            expand_metadata (bool): If True, includes all DICOM attributes as columns.</span>
+<a id="__codelineno-0-2356" name="__codelineno-0-2356"></a><span class="sd">        """</span>
+<a id="__codelineno-0-2357" name="__codelineno-0-2357"></a>        <span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-0-2358" name="__codelineno-0-2358"></a>        <span class="n">df</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_cohort_report</span><span class="p">(</span><span class="n">expand_metadata</span><span class="o">=</span><span class="n">expand_metadata</span><span class="p">)</span>
+<a id="__codelineno-0-2359" name="__codelineno-0-2359"></a>
+<a id="__codelineno-0-2360" name="__codelineno-0-2360"></a>        <span class="k">if</span> <span class="n">output_path</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">".parquet"</span><span class="p">):</span>
+<a id="__codelineno-0-2361" name="__codelineno-0-2361"></a>            <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2362" name="__codelineno-0-2362"></a>                <span class="c1"># Requires pyarrow and pandas</span>
+<a id="__codelineno-0-2363" name="__codelineno-0-2363"></a>                <span class="n">df</span><span class="o">.</span><span class="n">to_parquet</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-0-2364" name="__codelineno-0-2364"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-0-2365" name="__codelineno-0-2365"></a>                <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Failed to export parquet: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-0-2366" name="__codelineno-0-2366"></a>                <span class="k">raise</span> <span class="n">e</span>
+<a id="__codelineno-0-2367" name="__codelineno-0-2367"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-2368" name="__codelineno-0-2368"></a>            <span class="n">df</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-0-2369" name="__codelineno-0-2369"></a>
+<a id="__codelineno-0-2370" name="__codelineno-0-2370"></a>        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Exported metadata to </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-0-2371" name="__codelineno-0-2371"></a>        <span class="k">return</span> <span class="n">df</span>
+<a id="__codelineno-0-2372" name="__codelineno-0-2372"></a>
+<a id="__codelineno-0-2373" name="__codelineno-0-2373"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">export_to_parquet</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">output_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">patient_ids</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-0-2374" name="__codelineno-0-2374"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-2375" name="__codelineno-0-2375"></a><span class="sd">        [EXPERIMENTAL] Exports flattened metadata to a Parquet file.</span>
+<a id="__codelineno-0-2376" name="__codelineno-0-2376"></a><span class="sd">        Requires 'pandas' and 'pyarrow' or 'fastparquet'.</span>
+<a id="__codelineno-0-2377" name="__codelineno-0-2377"></a><span class="sd">        """</span>
+<a id="__codelineno-0-2378" name="__codelineno-0-2378"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2379" name="__codelineno-0-2379"></a>            <span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-0-2380" name="__codelineno-0-2380"></a>        <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+<a id="__codelineno-0-2381" name="__codelineno-0-2381"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"export_to_parquet requires 'pandas' installed."</span><span class="p">)</span>
+<a id="__codelineno-0-2382" name="__codelineno-0-2382"></a>            <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span>
+<a id="__codelineno-0-2383" name="__codelineno-0-2383"></a>                <span class="s2">"Please install pandas to use this feature: pip install pandas pyarrow"</span><span class="p">)</span>
+<a id="__codelineno-0-2384" name="__codelineno-0-2384"></a>
+<a id="__codelineno-0-2385" name="__codelineno-0-2385"></a>        <span class="c1"># 1. Sync DB state</span>
+<a id="__codelineno-0-2386" name="__codelineno-0-2386"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Saving state before Parquet export..."</span><span class="p">)</span>
+<a id="__codelineno-0-2387" name="__codelineno-0-2387"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
+<a id="__codelineno-0-2388" name="__codelineno-0-2388"></a>
+<a id="__codelineno-0-2389" name="__codelineno-0-2389"></a>        <span class="c1"># 2. Stream Data</span>
+<a id="__codelineno-0-2390" name="__codelineno-0-2390"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Streaming data from database..."</span><span class="p">)</span>
+<a id="__codelineno-0-2391" name="__codelineno-0-2391"></a>
+<a id="__codelineno-0-2392" name="__codelineno-0-2392"></a>        <span class="n">target_ids</span> <span class="o">=</span> <span class="n">patient_ids</span>
+<a id="__codelineno-0-2393" name="__codelineno-0-2393"></a>        <span class="k">if</span> <span class="n">target_ids</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2394" name="__codelineno-0-2394"></a>            <span class="n">target_ids</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="o">.</span><span class="n">patient_id</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">patients</span><span class="p">]</span>
 <a id="__codelineno-0-2395" name="__codelineno-0-2395"></a>
-<a id="__codelineno-0-2396" name="__codelineno-0-2396"></a>        <span class="n">rows</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
-<a id="__codelineno-0-2397" name="__codelineno-0-2397"></a>
-<a id="__codelineno-0-2398" name="__codelineno-0-2398"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
-<a id="__codelineno-0-2399" name="__codelineno-0-2399"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"No instances found for these patients."</span><span class="p">)</span>
-<a id="__codelineno-0-2400" name="__codelineno-0-2400"></a>            <span class="k">return</span>
+<a id="__codelineno-0-2396" name="__codelineno-0-2396"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">target_ids</span><span class="p">:</span>
+<a id="__codelineno-0-2397" name="__codelineno-0-2397"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"No patients to export."</span><span class="p">)</span>
+<a id="__codelineno-0-2398" name="__codelineno-0-2398"></a>            <span class="k">return</span>
+<a id="__codelineno-0-2399" name="__codelineno-0-2399"></a>
+<a id="__codelineno-0-2400" name="__codelineno-0-2400"></a>        <span class="n">generator</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">persistence_manager</span><span class="o">.</span><span class="n">store_backend</span><span class="o">.</span><span class="n">get_flattened_instances</span><span class="p">(</span><span class="n">target_ids</span><span class="p">)</span>
 <a id="__codelineno-0-2401" name="__codelineno-0-2401"></a>
-<a id="__codelineno-0-2402" name="__codelineno-0-2402"></a>        <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
+<a id="__codelineno-0-2402" name="__codelineno-0-2402"></a>        <span class="n">rows</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">generator</span><span class="p">)</span>
 <a id="__codelineno-0-2403" name="__codelineno-0-2403"></a>
-<a id="__codelineno-0-2404" name="__codelineno-0-2404"></a>        <span class="c1"># 3. Save</span>
-<a id="__codelineno-0-2405" name="__codelineno-0-2405"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Writing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows to </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">..."</span><span class="p">)</span>
-<a id="__codelineno-0-2406" name="__codelineno-0-2406"></a>
-<a id="__codelineno-0-2407" name="__codelineno-0-2407"></a>        <span class="c1"># Ensure directory exists</span>
-<a id="__codelineno-0-2408" name="__codelineno-0-2408"></a>        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">output_path</span><span class="p">)),</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-2404" name="__codelineno-0-2404"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="n">rows</span><span class="p">:</span>
+<a id="__codelineno-0-2405" name="__codelineno-0-2405"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"No instances found for these patients."</span><span class="p">)</span>
+<a id="__codelineno-0-2406" name="__codelineno-0-2406"></a>            <span class="k">return</span>
+<a id="__codelineno-0-2407" name="__codelineno-0-2407"></a>
+<a id="__codelineno-0-2408" name="__codelineno-0-2408"></a>        <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span>
 <a id="__codelineno-0-2409" name="__codelineno-0-2409"></a>
-<a id="__codelineno-0-2410" name="__codelineno-0-2410"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2411" name="__codelineno-0-2411"></a>            <span class="n">df</span><span class="o">.</span><span class="n">to_parquet</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-0-2412" name="__codelineno-0-2412"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Parquet export successful."</span><span class="p">)</span>
-<a id="__codelineno-0-2413" name="__codelineno-0-2413"></a>        <span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-2414" name="__codelineno-0-2414"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"Parquet engine (pyarrow or fastparquet) missing."</span><span class="p">)</span>
-<a id="__codelineno-0-2415" name="__codelineno-0-2415"></a>            <span class="k">raise</span> <span class="n">e</span>
-<a id="__codelineno-0-2416" name="__codelineno-0-2416"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-2417" name="__codelineno-0-2417"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Failed to write parquet: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-0-2418" name="__codelineno-0-2418"></a>            <span class="k">raise</span>
-<a id="__codelineno-0-2419" name="__codelineno-0-2419"></a>
-<a id="__codelineno-0-2420" name="__codelineno-0-2420"></a>    <span class="c1"># =========================================================================</span>
-<a id="__codelineno-0-2421" name="__codelineno-0-2421"></a>    <span class="c1"># INTERNAL HELPERS</span>
-<a id="__codelineno-0-2422" name="__codelineno-0-2422"></a>    <span class="c1"># =========================================================================</span>
-<a id="__codelineno-0-2423" name="__codelineno-0-2423"></a>
-<a id="__codelineno-0-2424" name="__codelineno-0-2424"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_rehydrate_findings</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">findings</span><span class="p">):</span>
-<a id="__codelineno-0-2425" name="__codelineno-0-2425"></a><span class="w">        </span><span class="sd">"""</span>
-<a id="__codelineno-0-2426" name="__codelineno-0-2426"></a><span class="sd">        Updates findings in-place to point to live objects in self.store</span>
-<a id="__codelineno-0-2427" name="__codelineno-0-2427"></a><span class="sd">        instead of the unpickled copies from workers.</span>
-<a id="__codelineno-0-2428" name="__codelineno-0-2428"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2429" name="__codelineno-0-2429"></a>        <span class="n">patient_map</span> <span class="o">=</span> <span class="p">{</span><span class="n">p</span><span class="o">.</span><span class="n">patient_id</span><span class="p">:</span> <span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">patients</span><span class="p">}</span>
-<a id="__codelineno-0-2430" name="__codelineno-0-2430"></a>        <span class="n">study_map</span> <span class="o">=</span> <span class="p">{}</span>
-<a id="__codelineno-0-2431" name="__codelineno-0-2431"></a>        <span class="n">instance_map</span> <span class="o">=</span> <span class="p">{}</span>
-<a id="__codelineno-0-2432" name="__codelineno-0-2432"></a>
-<a id="__codelineno-0-2433" name="__codelineno-0-2433"></a>        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">patients</span><span class="p">:</span>
-<a id="__codelineno-0-2434" name="__codelineno-0-2434"></a>            <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">studies</span><span class="p">:</span>
-<a id="__codelineno-0-2435" name="__codelineno-0-2435"></a>                <span class="n">study_map</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">study_instance_uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">s</span>
-<a id="__codelineno-0-2436" name="__codelineno-0-2436"></a>                <span class="k">for</span> <span class="n">se</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">series</span><span class="p">:</span>
-<a id="__codelineno-0-2437" name="__codelineno-0-2437"></a>                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">se</span><span class="o">.</span><span class="n">instances</span><span class="p">:</span>
-<a id="__codelineno-0-2438" name="__codelineno-0-2438"></a>                        <span class="n">instance_map</span><span class="p">[</span><span class="n">i</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span>
-<a id="__codelineno-0-2439" name="__codelineno-0-2439"></a>
-<a id="__codelineno-0-2440" name="__codelineno-0-2440"></a>        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">findings</span><span class="p">:</span>
-<a id="__codelineno-0-2441" name="__codelineno-0-2441"></a>            <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_type</span> <span class="o">==</span> <span class="s2">"Patient"</span><span class="p">:</span>
-<a id="__codelineno-0-2442" name="__codelineno-0-2442"></a>                <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span> <span class="ow">in</span> <span class="n">patient_map</span><span class="p">:</span>
-<a id="__codelineno-0-2443" name="__codelineno-0-2443"></a>                    <span class="n">f</span><span class="o">.</span><span class="n">entity</span> <span class="o">=</span> <span class="n">patient_map</span><span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span><span class="p">]</span>
-<a id="__codelineno-0-2444" name="__codelineno-0-2444"></a>            <span class="k">elif</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_type</span> <span class="o">==</span> <span class="s2">"Study"</span><span class="p">:</span>
-<a id="__codelineno-0-2445" name="__codelineno-0-2445"></a>                <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span> <span class="ow">in</span> <span class="n">study_map</span><span class="p">:</span>
-<a id="__codelineno-0-2446" name="__codelineno-0-2446"></a>                    <span class="n">f</span><span class="o">.</span><span class="n">entity</span> <span class="o">=</span> <span class="n">study_map</span><span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span><span class="p">]</span>
-<a id="__codelineno-0-2447" name="__codelineno-0-2447"></a>            <span class="k">elif</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_type</span> <span class="o">==</span> <span class="s2">"Instance"</span><span class="p">:</span>
-<a id="__codelineno-0-2448" name="__codelineno-0-2448"></a>                <span class="n">f</span><span class="o">.</span><span class="n">entity</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_live_target</span><span class="p">(</span><span class="n">instance_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span><span class="p">),</span> <span class="n">f</span><span class="p">)</span>
-<a id="__codelineno-0-2449" name="__codelineno-0-2449"></a>
-<a id="__codelineno-0-2450" name="__codelineno-0-2450"></a>    <span class="nd">@staticmethod</span>
-<a id="__codelineno-0-2451" name="__codelineno-0-2451"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_live_target</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="n">finding</span><span class="p">):</span>
-<a id="__codelineno-0-2452" name="__codelineno-0-2452"></a><span class="w">        </span><span class="sd">"""The live object a finding should be remediated against.</span>
-<a id="__codelineno-0-2453" name="__codelineno-0-2453"></a>
-<a id="__codelineno-0-2454" name="__codelineno-0-2454"></a><span class="sd">        A finding raised inside a sequence carries the path down to its</span>
-<a id="__codelineno-0-2455" name="__codelineno-0-2455"></a><span class="sd">        item; a sequence item has no UID, so the path is the only way to</span>
-<a id="__codelineno-0-2456" name="__codelineno-0-2456"></a><span class="sd">        find the same item again in this process. Returns None when it</span>
-<a id="__codelineno-0-2457" name="__codelineno-0-2457"></a><span class="sd">        cannot be resolved.</span>
-<a id="__codelineno-0-2458" name="__codelineno-0-2458"></a>
-<a id="__codelineno-0-2459" name="__codelineno-0-2459"></a><span class="sd">        None is the right answer rather than the enclosing instance.</span>
-<a id="__codelineno-0-2460" name="__codelineno-0-2460"></a><span class="sd">        Remediation skips a finding with no entity, whereas writing a</span>
-<a id="__codelineno-0-2461" name="__codelineno-0-2461"></a><span class="sd">        nested tag onto the instance fabricates a top-level element that</span>
-<a id="__codelineno-0-2462" name="__codelineno-0-2462"></a><span class="sd">        was never in the file and leaves the real value untouched inside</span>
-<a id="__codelineno-0-2463" name="__codelineno-0-2463"></a><span class="sd">        the sequence -- an export carrying the PHI plus a decoy.</span>
-<a id="__codelineno-0-2464" name="__codelineno-0-2464"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2465" name="__codelineno-0-2465"></a>        <span class="k">if</span> <span class="n">instance</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2466" name="__codelineno-0-2466"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
-<a id="__codelineno-0-2467" name="__codelineno-0-2467"></a>                <span class="sa">f</span><span class="s2">"Finding for </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2"> has no matching instance "</span>
-<a id="__codelineno-0-2468" name="__codelineno-0-2468"></a>                <span class="s2">"in the session; it will not be remediated."</span><span class="p">)</span>
-<a id="__codelineno-0-2469" name="__codelineno-0-2469"></a>            <span class="k">return</span> <span class="kc">None</span>
-<a id="__codelineno-0-2470" name="__codelineno-0-2470"></a>
-<a id="__codelineno-0-2471" name="__codelineno-0-2471"></a>        <span class="n">target</span> <span class="o">=</span> <span class="n">resolve_item_path</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="n">finding</span><span class="o">.</span><span class="n">entity_path</span><span class="p">)</span>
-<a id="__codelineno-0-2472" name="__codelineno-0-2472"></a>        <span class="k">if</span> <span class="n">target</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2473" name="__codelineno-0-2473"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
-<a id="__codelineno-0-2474" name="__codelineno-0-2474"></a>                <span class="sa">f</span><span class="s2">"The sequence item behind </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">field_name</span><span class="si">}</span><span class="s2"> on "</span>
-<a id="__codelineno-0-2475" name="__codelineno-0-2475"></a>                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2"> is gone (path </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_path</span><span class="si">}</span><span class="s2">); "</span>
-<a id="__codelineno-0-2476" name="__codelineno-0-2476"></a>                <span class="s2">"it will not be remediated."</span><span class="p">)</span>
-<a id="__codelineno-0-2477" name="__codelineno-0-2477"></a>        <span class="k">return</span> <span class="n">target</span>
-<a id="__codelineno-0-2478" name="__codelineno-0-2478"></a>
-<a id="__codelineno-0-2479" name="__codelineno-0-2479"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_make_lightweight_copy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patient</span><span class="p">:</span> <span class="s2">"Patient"</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">"Patient"</span><span class="p">:</span>
-<a id="__codelineno-0-2480" name="__codelineno-0-2480"></a><span class="w">        </span><span class="sd">"""</span>
-<a id="__codelineno-0-2481" name="__codelineno-0-2481"></a><span class="sd">        Creates a lightweight clone of the Patient object (and children)</span>
-<a id="__codelineno-0-2482" name="__codelineno-0-2482"></a><span class="sd">        stripped of heavy pixel data, for efficient IPC transfer.</span>
-<a id="__codelineno-0-2483" name="__codelineno-0-2483"></a><span class="sd">        Also attaches 'file_path' to instances to ensure workers can reload pixels if needed.</span>
-<a id="__codelineno-0-2484" name="__codelineno-0-2484"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2485" name="__codelineno-0-2485"></a>        <span class="kn">from</span><span class="w"> </span><span class="nn">.entities</span><span class="w"> </span><span class="kn">import</span> <span class="n">Patient</span><span class="p">,</span> <span class="n">Study</span><span class="p">,</span> <span class="n">Series</span><span class="p">,</span> <span class="n">Instance</span>
-<a id="__codelineno-0-2486" name="__codelineno-0-2486"></a>
-<a id="__codelineno-0-2487" name="__codelineno-0-2487"></a>        <span class="c1"># Clone Patient</span>
-<a id="__codelineno-0-2488" name="__codelineno-0-2488"></a>        <span class="n">p_new</span> <span class="o">=</span> <span class="n">Patient</span><span class="p">(</span>
-<a id="__codelineno-0-2489" name="__codelineno-0-2489"></a>            <span class="n">patient_name</span><span class="o">=</span><span class="n">patient</span><span class="o">.</span><span class="n">patient_name</span><span class="p">,</span>
-<a id="__codelineno-0-2490" name="__codelineno-0-2490"></a>            <span class="n">patient_id</span><span class="o">=</span><span class="n">patient</span><span class="o">.</span><span class="n">patient_id</span>
-<a id="__codelineno-0-2491" name="__codelineno-0-2491"></a>        <span class="p">)</span>
+<a id="__codelineno-0-2410" name="__codelineno-0-2410"></a>        <span class="c1"># 3. Save</span>
+<a id="__codelineno-0-2411" name="__codelineno-0-2411"></a>        <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Writing </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows to </span><span class="si">{</span><span class="n">output_path</span><span class="si">}</span><span class="s2">..."</span><span class="p">)</span>
+<a id="__codelineno-0-2412" name="__codelineno-0-2412"></a>
+<a id="__codelineno-0-2413" name="__codelineno-0-2413"></a>        <span class="c1"># Ensure directory exists</span>
+<a id="__codelineno-0-2414" name="__codelineno-0-2414"></a>        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">dirname</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">abspath</span><span class="p">(</span><span class="n">output_path</span><span class="p">)),</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-2415" name="__codelineno-0-2415"></a>
+<a id="__codelineno-0-2416" name="__codelineno-0-2416"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2417" name="__codelineno-0-2417"></a>            <span class="n">df</span><span class="o">.</span><span class="n">to_parquet</span><span class="p">(</span><span class="n">output_path</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-0-2418" name="__codelineno-0-2418"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">"Parquet export successful."</span><span class="p">)</span>
+<a id="__codelineno-0-2419" name="__codelineno-0-2419"></a>        <span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-0-2420" name="__codelineno-0-2420"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">"Parquet engine (pyarrow or fastparquet) missing."</span><span class="p">)</span>
+<a id="__codelineno-0-2421" name="__codelineno-0-2421"></a>            <span class="k">raise</span> <span class="n">e</span>
+<a id="__codelineno-0-2422" name="__codelineno-0-2422"></a>        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-0-2423" name="__codelineno-0-2423"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Failed to write parquet: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-0-2424" name="__codelineno-0-2424"></a>            <span class="k">raise</span>
+<a id="__codelineno-0-2425" name="__codelineno-0-2425"></a>
+<a id="__codelineno-0-2426" name="__codelineno-0-2426"></a>    <span class="c1"># =========================================================================</span>
+<a id="__codelineno-0-2427" name="__codelineno-0-2427"></a>    <span class="c1"># INTERNAL HELPERS</span>
+<a id="__codelineno-0-2428" name="__codelineno-0-2428"></a>    <span class="c1"># =========================================================================</span>
+<a id="__codelineno-0-2429" name="__codelineno-0-2429"></a>
+<a id="__codelineno-0-2430" name="__codelineno-0-2430"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_rehydrate_findings</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">findings</span><span class="p">):</span>
+<a id="__codelineno-0-2431" name="__codelineno-0-2431"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-2432" name="__codelineno-0-2432"></a><span class="sd">        Updates findings in-place to point to live objects in self.store</span>
+<a id="__codelineno-0-2433" name="__codelineno-0-2433"></a><span class="sd">        instead of the unpickled copies from workers.</span>
+<a id="__codelineno-0-2434" name="__codelineno-0-2434"></a><span class="sd">        """</span>
+<a id="__codelineno-0-2435" name="__codelineno-0-2435"></a>        <span class="n">patient_map</span> <span class="o">=</span> <span class="p">{</span><span class="n">p</span><span class="o">.</span><span class="n">patient_id</span><span class="p">:</span> <span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">patients</span><span class="p">}</span>
+<a id="__codelineno-0-2436" name="__codelineno-0-2436"></a>        <span class="n">study_map</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-2437" name="__codelineno-0-2437"></a>        <span class="n">instance_map</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-0-2438" name="__codelineno-0-2438"></a>
+<a id="__codelineno-0-2439" name="__codelineno-0-2439"></a>        <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">store</span><span class="o">.</span><span class="n">patients</span><span class="p">:</span>
+<a id="__codelineno-0-2440" name="__codelineno-0-2440"></a>            <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">p</span><span class="o">.</span><span class="n">studies</span><span class="p">:</span>
+<a id="__codelineno-0-2441" name="__codelineno-0-2441"></a>                <span class="n">study_map</span><span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">study_instance_uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">s</span>
+<a id="__codelineno-0-2442" name="__codelineno-0-2442"></a>                <span class="k">for</span> <span class="n">se</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">series</span><span class="p">:</span>
+<a id="__codelineno-0-2443" name="__codelineno-0-2443"></a>                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">se</span><span class="o">.</span><span class="n">instances</span><span class="p">:</span>
+<a id="__codelineno-0-2444" name="__codelineno-0-2444"></a>                        <span class="n">instance_map</span><span class="p">[</span><span class="n">i</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span>
+<a id="__codelineno-0-2445" name="__codelineno-0-2445"></a>
+<a id="__codelineno-0-2446" name="__codelineno-0-2446"></a>        <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">findings</span><span class="p">:</span>
+<a id="__codelineno-0-2447" name="__codelineno-0-2447"></a>            <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_type</span> <span class="o">==</span> <span class="s2">"Patient"</span><span class="p">:</span>
+<a id="__codelineno-0-2448" name="__codelineno-0-2448"></a>                <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span> <span class="ow">in</span> <span class="n">patient_map</span><span class="p">:</span>
+<a id="__codelineno-0-2449" name="__codelineno-0-2449"></a>                    <span class="n">f</span><span class="o">.</span><span class="n">entity</span> <span class="o">=</span> <span class="n">patient_map</span><span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span><span class="p">]</span>
+<a id="__codelineno-0-2450" name="__codelineno-0-2450"></a>            <span class="k">elif</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_type</span> <span class="o">==</span> <span class="s2">"Study"</span><span class="p">:</span>
+<a id="__codelineno-0-2451" name="__codelineno-0-2451"></a>                <span class="k">if</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span> <span class="ow">in</span> <span class="n">study_map</span><span class="p">:</span>
+<a id="__codelineno-0-2452" name="__codelineno-0-2452"></a>                    <span class="n">f</span><span class="o">.</span><span class="n">entity</span> <span class="o">=</span> <span class="n">study_map</span><span class="p">[</span><span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span><span class="p">]</span>
+<a id="__codelineno-0-2453" name="__codelineno-0-2453"></a>            <span class="k">elif</span> <span class="n">f</span><span class="o">.</span><span class="n">entity_type</span> <span class="o">==</span> <span class="s2">"Instance"</span><span class="p">:</span>
+<a id="__codelineno-0-2454" name="__codelineno-0-2454"></a>                <span class="n">f</span><span class="o">.</span><span class="n">entity</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_live_target</span><span class="p">(</span><span class="n">instance_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">f</span><span class="o">.</span><span class="n">entity_uid</span><span class="p">),</span> <span class="n">f</span><span class="p">)</span>
+<a id="__codelineno-0-2455" name="__codelineno-0-2455"></a>
+<a id="__codelineno-0-2456" name="__codelineno-0-2456"></a>    <span class="nd">@staticmethod</span>
+<a id="__codelineno-0-2457" name="__codelineno-0-2457"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_live_target</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="n">finding</span><span class="p">):</span>
+<a id="__codelineno-0-2458" name="__codelineno-0-2458"></a><span class="w">        </span><span class="sd">"""The live object a finding should be remediated against.</span>
+<a id="__codelineno-0-2459" name="__codelineno-0-2459"></a>
+<a id="__codelineno-0-2460" name="__codelineno-0-2460"></a><span class="sd">        A finding raised inside a sequence carries the path down to its</span>
+<a id="__codelineno-0-2461" name="__codelineno-0-2461"></a><span class="sd">        item; a sequence item has no UID, so the path is the only way to</span>
+<a id="__codelineno-0-2462" name="__codelineno-0-2462"></a><span class="sd">        find the same item again in this process. Returns None when it</span>
+<a id="__codelineno-0-2463" name="__codelineno-0-2463"></a><span class="sd">        cannot be resolved.</span>
+<a id="__codelineno-0-2464" name="__codelineno-0-2464"></a>
+<a id="__codelineno-0-2465" name="__codelineno-0-2465"></a><span class="sd">        None is the right answer rather than the enclosing instance.</span>
+<a id="__codelineno-0-2466" name="__codelineno-0-2466"></a><span class="sd">        Remediation skips a finding with no entity, whereas writing a</span>
+<a id="__codelineno-0-2467" name="__codelineno-0-2467"></a><span class="sd">        nested tag onto the instance fabricates a top-level element that</span>
+<a id="__codelineno-0-2468" name="__codelineno-0-2468"></a><span class="sd">        was never in the file and leaves the real value untouched inside</span>
+<a id="__codelineno-0-2469" name="__codelineno-0-2469"></a><span class="sd">        the sequence -- an export carrying the PHI plus a decoy.</span>
+<a id="__codelineno-0-2470" name="__codelineno-0-2470"></a><span class="sd">        """</span>
+<a id="__codelineno-0-2471" name="__codelineno-0-2471"></a>        <span class="k">if</span> <span class="n">instance</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2472" name="__codelineno-0-2472"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+<a id="__codelineno-0-2473" name="__codelineno-0-2473"></a>                <span class="sa">f</span><span class="s2">"Finding for </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2"> has no matching instance "</span>
+<a id="__codelineno-0-2474" name="__codelineno-0-2474"></a>                <span class="s2">"in the session; it will not be remediated."</span><span class="p">)</span>
+<a id="__codelineno-0-2475" name="__codelineno-0-2475"></a>            <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-2476" name="__codelineno-0-2476"></a>
+<a id="__codelineno-0-2477" name="__codelineno-0-2477"></a>        <span class="n">target</span> <span class="o">=</span> <span class="n">resolve_item_path</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="n">finding</span><span class="o">.</span><span class="n">entity_path</span><span class="p">)</span>
+<a id="__codelineno-0-2478" name="__codelineno-0-2478"></a>        <span class="k">if</span> <span class="n">target</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2479" name="__codelineno-0-2479"></a>            <span class="n">get_logger</span><span class="p">()</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+<a id="__codelineno-0-2480" name="__codelineno-0-2480"></a>                <span class="sa">f</span><span class="s2">"The sequence item behind </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">field_name</span><span class="si">}</span><span class="s2"> on "</span>
+<a id="__codelineno-0-2481" name="__codelineno-0-2481"></a>                <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_uid</span><span class="si">}</span><span class="s2"> is gone (path </span><span class="si">{</span><span class="n">finding</span><span class="o">.</span><span class="n">entity_path</span><span class="si">}</span><span class="s2">); "</span>
+<a id="__codelineno-0-2482" name="__codelineno-0-2482"></a>                <span class="s2">"it will not be remediated."</span><span class="p">)</span>
+<a id="__codelineno-0-2483" name="__codelineno-0-2483"></a>        <span class="k">return</span> <span class="n">target</span>
+<a id="__codelineno-0-2484" name="__codelineno-0-2484"></a>
+<a id="__codelineno-0-2485" name="__codelineno-0-2485"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_make_lightweight_copy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">patient</span><span class="p">:</span> <span class="s2">"Patient"</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">"Patient"</span><span class="p">:</span>
+<a id="__codelineno-0-2486" name="__codelineno-0-2486"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-2487" name="__codelineno-0-2487"></a><span class="sd">        Creates a lightweight clone of the Patient object (and children)</span>
+<a id="__codelineno-0-2488" name="__codelineno-0-2488"></a><span class="sd">        stripped of heavy pixel data, for efficient IPC transfer.</span>
+<a id="__codelineno-0-2489" name="__codelineno-0-2489"></a><span class="sd">        Also attaches 'file_path' to instances to ensure workers can reload pixels if needed.</span>
+<a id="__codelineno-0-2490" name="__codelineno-0-2490"></a><span class="sd">        """</span>
+<a id="__codelineno-0-2491" name="__codelineno-0-2491"></a>        <span class="kn">from</span><span class="w"> </span><span class="nn">.entities</span><span class="w"> </span><span class="kn">import</span> <span class="n">Patient</span><span class="p">,</span> <span class="n">Study</span><span class="p">,</span> <span class="n">Series</span><span class="p">,</span> <span class="n">Instance</span>
 <a id="__codelineno-0-2492" name="__codelineno-0-2492"></a>
-<a id="__codelineno-0-2493" name="__codelineno-0-2493"></a>        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">patient</span><span class="o">.</span><span class="n">studies</span><span class="p">:</span>
-<a id="__codelineno-0-2494" name="__codelineno-0-2494"></a>            <span class="n">s_new</span> <span class="o">=</span> <span class="n">Study</span><span class="p">(</span>
-<a id="__codelineno-0-2495" name="__codelineno-0-2495"></a>                <span class="n">study_instance_uid</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">study_instance_uid</span><span class="p">,</span>
-<a id="__codelineno-0-2496" name="__codelineno-0-2496"></a>                <span class="n">study_date</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">study_date</span>
-<a id="__codelineno-0-2497" name="__codelineno-0-2497"></a>            <span class="p">)</span>
-<a id="__codelineno-0-2498" name="__codelineno-0-2498"></a>            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="s2">"date_shifted"</span><span class="p">):</span>
-<a id="__codelineno-0-2499" name="__codelineno-0-2499"></a>                <span class="n">s_new</span><span class="o">.</span><span class="n">date_shifted</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">date_shifted</span>
-<a id="__codelineno-0-2500" name="__codelineno-0-2500"></a>
-<a id="__codelineno-0-2501" name="__codelineno-0-2501"></a>            <span class="n">p_new</span><span class="o">.</span><span class="n">studies</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">s_new</span><span class="p">)</span>
-<a id="__codelineno-0-2502" name="__codelineno-0-2502"></a>
-<a id="__codelineno-0-2503" name="__codelineno-0-2503"></a>            <span class="k">for</span> <span class="n">se</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">series</span><span class="p">:</span>
-<a id="__codelineno-0-2504" name="__codelineno-0-2504"></a>                <span class="n">se_new</span> <span class="o">=</span> <span class="n">Series</span><span class="p">(</span>
-<a id="__codelineno-0-2505" name="__codelineno-0-2505"></a>                    <span class="n">series_instance_uid</span><span class="o">=</span><span class="n">se</span><span class="o">.</span><span class="n">series_instance_uid</span><span class="p">,</span>
-<a id="__codelineno-0-2506" name="__codelineno-0-2506"></a>                    <span class="n">modality</span><span class="o">=</span><span class="n">se</span><span class="o">.</span><span class="n">modality</span><span class="p">,</span>
-<a id="__codelineno-0-2507" name="__codelineno-0-2507"></a>                    <span class="n">series_number</span><span class="o">=</span><span class="n">se</span><span class="o">.</span><span class="n">series_number</span>
-<a id="__codelineno-0-2508" name="__codelineno-0-2508"></a>                <span class="p">)</span>
-<a id="__codelineno-0-2509" name="__codelineno-0-2509"></a>                <span class="k">if</span> <span class="n">se</span><span class="o">.</span><span class="n">equipment</span><span class="p">:</span>
-<a id="__codelineno-0-2510" name="__codelineno-0-2510"></a>                    <span class="n">se_new</span><span class="o">.</span><span class="n">equipment</span> <span class="o">=</span> <span class="n">se</span><span class="o">.</span><span class="n">equipment</span>
-<a id="__codelineno-0-2511" name="__codelineno-0-2511"></a>                <span class="n">s_new</span><span class="o">.</span><span class="n">series</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">se_new</span><span class="p">)</span>
-<a id="__codelineno-0-2512" name="__codelineno-0-2512"></a>
-<a id="__codelineno-0-2513" name="__codelineno-0-2513"></a>                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">se</span><span class="o">.</span><span class="n">instances</span><span class="p">:</span>
-<a id="__codelineno-0-2514" name="__codelineno-0-2514"></a>                    <span class="c1"># Clone Instance</span>
-<a id="__codelineno-0-2515" name="__codelineno-0-2515"></a>                    <span class="n">i_new</span> <span class="o">=</span> <span class="n">Instance</span><span class="p">(</span>
-<a id="__codelineno-0-2516" name="__codelineno-0-2516"></a>                        <span class="n">sop_instance_uid</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">,</span>
-<a id="__codelineno-0-2517" name="__codelineno-0-2517"></a>                        <span class="n">instance_number</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">instance_number</span><span class="p">,</span>
-<a id="__codelineno-0-2518" name="__codelineno-0-2518"></a>                        <span class="n">sop_class_uid</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">sop_class_uid</span><span class="p">,</span>
-<a id="__codelineno-0-2519" name="__codelineno-0-2519"></a>                        <span class="n">file_path</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">file_path</span>
-<a id="__codelineno-0-2520" name="__codelineno-0-2520"></a>                    <span class="p">)</span>
-<a id="__codelineno-0-2521" name="__codelineno-0-2521"></a>                    <span class="c1"># Key: Ensure attributes are copied so workers can scan tags</span>
-<a id="__codelineno-0-2522" name="__codelineno-0-2522"></a>                    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="s1">'attributes'</span><span class="p">):</span>
-<a id="__codelineno-0-2523" name="__codelineno-0-2523"></a>                        <span class="n">i_new</span><span class="o">.</span><span class="n">attributes</span> <span class="o">=</span> <span class="n">i</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
-<a id="__codelineno-0-2524" name="__codelineno-0-2524"></a>
-<a id="__codelineno-0-2525" name="__codelineno-0-2525"></a>                    <span class="c1"># Sequences travel too. Dropping them was #57: the</span>
-<a id="__codelineno-0-2526" name="__codelineno-0-2526"></a>                    <span class="c1"># worker got a top-level-only instance, so the scan</span>
-<a id="__codelineno-0-2527" name="__codelineno-0-2527"></a>                    <span class="c1"># reported clean on every nested tag -- report text,</span>
-<a id="__codelineno-0-2528" name="__codelineno-0-2528"></a>                    <span class="c1"># annotations, anything below the first level.</span>
-<a id="__codelineno-0-2529" name="__codelineno-0-2529"></a>                    <span class="n">i_new</span><span class="o">.</span><span class="n">sequences</span><span class="p">,</span> <span class="n">item_map</span> <span class="o">=</span> <span class="n">clone_sequences</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
-<a id="__codelineno-0-2530" name="__codelineno-0-2530"></a>                    <span class="n">i_new</span><span class="o">.</span><span class="n">text_index</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-0-2531" name="__codelineno-0-2531"></a>                        <span class="p">(</span><span class="n">item_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">item</span><span class="p">),</span> <span class="n">i_new</span><span class="p">),</span> <span class="n">tag</span><span class="p">)</span>
-<a id="__codelineno-0-2532" name="__codelineno-0-2532"></a>                        <span class="k">for</span> <span class="n">item</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">i</span><span class="o">.</span><span class="n">text_index</span><span class="p">]</span>
-<a id="__codelineno-0-2533" name="__codelineno-0-2533"></a>
-<a id="__codelineno-0-2534" name="__codelineno-0-2534"></a>                    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="s2">"date_shifted"</span><span class="p">):</span>
-<a id="__codelineno-0-2535" name="__codelineno-0-2535"></a>                        <span class="n">i_new</span><span class="o">.</span><span class="n">date_shifted</span> <span class="o">=</span> <span class="n">i</span><span class="o">.</span><span class="n">date_shifted</span>
-<a id="__codelineno-0-2536" name="__codelineno-0-2536"></a>
-<a id="__codelineno-0-2537" name="__codelineno-0-2537"></a>                    <span class="n">se_new</span><span class="o">.</span><span class="n">instances</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i_new</span><span class="p">)</span>
-<a id="__codelineno-0-2538" name="__codelineno-0-2538"></a>
-<a id="__codelineno-0-2539" name="__codelineno-0-2539"></a>        <span class="k">return</span> <span class="n">p_new</span>
-<a id="__codelineno-0-2540" name="__codelineno-0-2540"></a>
-<a id="__codelineno-0-2541" name="__codelineno-0-2541"></a>    <span class="c1"># =========================================================================</span>
-<a id="__codelineno-0-2542" name="__codelineno-0-2542"></a>    <span class="c1"># DEPRECATED</span>
-<a id="__codelineno-0-2543" name="__codelineno-0-2543"></a>    <span class="c1"># =========================================================================</span>
+<a id="__codelineno-0-2493" name="__codelineno-0-2493"></a>        <span class="c1"># Clone Patient</span>
+<a id="__codelineno-0-2494" name="__codelineno-0-2494"></a>        <span class="n">p_new</span> <span class="o">=</span> <span class="n">Patient</span><span class="p">(</span>
+<a id="__codelineno-0-2495" name="__codelineno-0-2495"></a>            <span class="n">patient_name</span><span class="o">=</span><span class="n">patient</span><span class="o">.</span><span class="n">patient_name</span><span class="p">,</span>
+<a id="__codelineno-0-2496" name="__codelineno-0-2496"></a>            <span class="n">patient_id</span><span class="o">=</span><span class="n">patient</span><span class="o">.</span><span class="n">patient_id</span>
+<a id="__codelineno-0-2497" name="__codelineno-0-2497"></a>        <span class="p">)</span>
+<a id="__codelineno-0-2498" name="__codelineno-0-2498"></a>
+<a id="__codelineno-0-2499" name="__codelineno-0-2499"></a>        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">patient</span><span class="o">.</span><span class="n">studies</span><span class="p">:</span>
+<a id="__codelineno-0-2500" name="__codelineno-0-2500"></a>            <span class="n">s_new</span> <span class="o">=</span> <span class="n">Study</span><span class="p">(</span>
+<a id="__codelineno-0-2501" name="__codelineno-0-2501"></a>                <span class="n">study_instance_uid</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">study_instance_uid</span><span class="p">,</span>
+<a id="__codelineno-0-2502" name="__codelineno-0-2502"></a>                <span class="n">study_date</span><span class="o">=</span><span class="n">s</span><span class="o">.</span><span class="n">study_date</span>
+<a id="__codelineno-0-2503" name="__codelineno-0-2503"></a>            <span class="p">)</span>
+<a id="__codelineno-0-2504" name="__codelineno-0-2504"></a>            <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="s2">"date_shifted"</span><span class="p">):</span>
+<a id="__codelineno-0-2505" name="__codelineno-0-2505"></a>                <span class="n">s_new</span><span class="o">.</span><span class="n">date_shifted</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">date_shifted</span>
+<a id="__codelineno-0-2506" name="__codelineno-0-2506"></a>
+<a id="__codelineno-0-2507" name="__codelineno-0-2507"></a>            <span class="n">p_new</span><span class="o">.</span><span class="n">studies</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">s_new</span><span class="p">)</span>
+<a id="__codelineno-0-2508" name="__codelineno-0-2508"></a>
+<a id="__codelineno-0-2509" name="__codelineno-0-2509"></a>            <span class="k">for</span> <span class="n">se</span> <span class="ow">in</span> <span class="n">s</span><span class="o">.</span><span class="n">series</span><span class="p">:</span>
+<a id="__codelineno-0-2510" name="__codelineno-0-2510"></a>                <span class="n">se_new</span> <span class="o">=</span> <span class="n">Series</span><span class="p">(</span>
+<a id="__codelineno-0-2511" name="__codelineno-0-2511"></a>                    <span class="n">series_instance_uid</span><span class="o">=</span><span class="n">se</span><span class="o">.</span><span class="n">series_instance_uid</span><span class="p">,</span>
+<a id="__codelineno-0-2512" name="__codelineno-0-2512"></a>                    <span class="n">modality</span><span class="o">=</span><span class="n">se</span><span class="o">.</span><span class="n">modality</span><span class="p">,</span>
+<a id="__codelineno-0-2513" name="__codelineno-0-2513"></a>                    <span class="n">series_number</span><span class="o">=</span><span class="n">se</span><span class="o">.</span><span class="n">series_number</span>
+<a id="__codelineno-0-2514" name="__codelineno-0-2514"></a>                <span class="p">)</span>
+<a id="__codelineno-0-2515" name="__codelineno-0-2515"></a>                <span class="k">if</span> <span class="n">se</span><span class="o">.</span><span class="n">equipment</span><span class="p">:</span>
+<a id="__codelineno-0-2516" name="__codelineno-0-2516"></a>                    <span class="n">se_new</span><span class="o">.</span><span class="n">equipment</span> <span class="o">=</span> <span class="n">se</span><span class="o">.</span><span class="n">equipment</span>
+<a id="__codelineno-0-2517" name="__codelineno-0-2517"></a>                <span class="n">s_new</span><span class="o">.</span><span class="n">series</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">se_new</span><span class="p">)</span>
+<a id="__codelineno-0-2518" name="__codelineno-0-2518"></a>
+<a id="__codelineno-0-2519" name="__codelineno-0-2519"></a>                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">se</span><span class="o">.</span><span class="n">instances</span><span class="p">:</span>
+<a id="__codelineno-0-2520" name="__codelineno-0-2520"></a>                    <span class="c1"># Clone Instance</span>
+<a id="__codelineno-0-2521" name="__codelineno-0-2521"></a>                    <span class="n">i_new</span> <span class="o">=</span> <span class="n">Instance</span><span class="p">(</span>
+<a id="__codelineno-0-2522" name="__codelineno-0-2522"></a>                        <span class="n">sop_instance_uid</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">sop_instance_uid</span><span class="p">,</span>
+<a id="__codelineno-0-2523" name="__codelineno-0-2523"></a>                        <span class="n">instance_number</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">instance_number</span><span class="p">,</span>
+<a id="__codelineno-0-2524" name="__codelineno-0-2524"></a>                        <span class="n">sop_class_uid</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">sop_class_uid</span><span class="p">,</span>
+<a id="__codelineno-0-2525" name="__codelineno-0-2525"></a>                        <span class="n">file_path</span><span class="o">=</span><span class="n">i</span><span class="o">.</span><span class="n">file_path</span>
+<a id="__codelineno-0-2526" name="__codelineno-0-2526"></a>                    <span class="p">)</span>
+<a id="__codelineno-0-2527" name="__codelineno-0-2527"></a>                    <span class="c1"># Key: Ensure attributes are copied so workers can scan tags</span>
+<a id="__codelineno-0-2528" name="__codelineno-0-2528"></a>                    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="s1">'attributes'</span><span class="p">):</span>
+<a id="__codelineno-0-2529" name="__codelineno-0-2529"></a>                        <span class="n">i_new</span><span class="o">.</span><span class="n">attributes</span> <span class="o">=</span> <span class="n">i</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+<a id="__codelineno-0-2530" name="__codelineno-0-2530"></a>
+<a id="__codelineno-0-2531" name="__codelineno-0-2531"></a>                    <span class="c1"># Sequences travel too. Dropping them was #57: the</span>
+<a id="__codelineno-0-2532" name="__codelineno-0-2532"></a>                    <span class="c1"># worker got a top-level-only instance, so the scan</span>
+<a id="__codelineno-0-2533" name="__codelineno-0-2533"></a>                    <span class="c1"># reported clean on every nested tag -- report text,</span>
+<a id="__codelineno-0-2534" name="__codelineno-0-2534"></a>                    <span class="c1"># annotations, anything below the first level.</span>
+<a id="__codelineno-0-2535" name="__codelineno-0-2535"></a>                    <span class="n">i_new</span><span class="o">.</span><span class="n">sequences</span><span class="p">,</span> <span class="n">item_map</span> <span class="o">=</span> <span class="n">clone_sequences</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+<a id="__codelineno-0-2536" name="__codelineno-0-2536"></a>                    <span class="n">i_new</span><span class="o">.</span><span class="n">text_index</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-2537" name="__codelineno-0-2537"></a>                        <span class="p">(</span><span class="n">item_map</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">item</span><span class="p">),</span> <span class="n">i_new</span><span class="p">),</span> <span class="n">tag</span><span class="p">)</span>
+<a id="__codelineno-0-2538" name="__codelineno-0-2538"></a>                        <span class="k">for</span> <span class="n">item</span><span class="p">,</span> <span class="n">tag</span> <span class="ow">in</span> <span class="n">i</span><span class="o">.</span><span class="n">text_index</span><span class="p">]</span>
+<a id="__codelineno-0-2539" name="__codelineno-0-2539"></a>
+<a id="__codelineno-0-2540" name="__codelineno-0-2540"></a>                    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="s2">"date_shifted"</span><span class="p">):</span>
+<a id="__codelineno-0-2541" name="__codelineno-0-2541"></a>                        <span class="n">i_new</span><span class="o">.</span><span class="n">date_shifted</span> <span class="o">=</span> <span class="n">i</span><span class="o">.</span><span class="n">date_shifted</span>
+<a id="__codelineno-0-2542" name="__codelineno-0-2542"></a>
+<a id="__codelineno-0-2543" name="__codelineno-0-2543"></a>                    <span class="n">se_new</span><span class="o">.</span><span class="n">instances</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i_new</span><span class="p">)</span>
 <a id="__codelineno-0-2544" name="__codelineno-0-2544"></a>
-<a id="__codelineno-0-2545" name="__codelineno-0-2545"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">scan_for_phi</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">"PhiReport"</span><span class="p">:</span>
-<a id="__codelineno-0-2546" name="__codelineno-0-2546"></a><span class="w">        </span><span class="sd">"""</span>
-<a id="__codelineno-0-2547" name="__codelineno-0-2547"></a><span class="sd">        Legacy alias for audit().</span>
-<a id="__codelineno-0-2548" name="__codelineno-0-2548"></a><span class="sd">        """</span>
-<a id="__codelineno-0-2549" name="__codelineno-0-2549"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">audit</span><span class="p">(</span><span class="n">config_path</span><span class="p">)</span>
+<a id="__codelineno-0-2545" name="__codelineno-0-2545"></a>        <span class="k">return</span> <span class="n">p_new</span>
+<a id="__codelineno-0-2546" name="__codelineno-0-2546"></a>
+<a id="__codelineno-0-2547" name="__codelineno-0-2547"></a>    <span class="c1"># =========================================================================</span>
+<a id="__codelineno-0-2548" name="__codelineno-0-2548"></a>    <span class="c1"># DEPRECATED</span>
+<a id="__codelineno-0-2549" name="__codelineno-0-2549"></a>    <span class="c1"># =========================================================================</span>
+<a id="__codelineno-0-2550" name="__codelineno-0-2550"></a>
+<a id="__codelineno-0-2551" name="__codelineno-0-2551"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">scan_for_phi</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">"PhiReport"</span><span class="p">:</span>
+<a id="__codelineno-0-2552" name="__codelineno-0-2552"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-2553" name="__codelineno-0-2553"></a><span class="sd">        Legacy alias for audit().</span>
+<a id="__codelineno-0-2554" name="__codelineno-0-2554"></a><span class="sd">        """</span>
+<a id="__codelineno-0-2555" name="__codelineno-0-2555"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">audit</span><span class="p">(</span><span class="n">config_path</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
