@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-27
+
+Five defects of one shape, which is why they ship together: a gap
+between what the API said and what landed on disk. A public method named
+as though it were the export path when it is half of one; two export
+paths writing the same instance under two different filenames; two
+spellings of a tag key, so a profile rule declared for Series
+Description silently never fired; a flag that said *keep the private
+tags* and exported a file without them; and a folder name that invented
+the word `nknow` when it had no UID to work with.
+
+None of them raised. Each produced a plausible artefact that a consumer
+had no way to tell was wrong -- which is the failure mode a
+de-identification tool can least afford, and the reason three of these
+are breaking rather than deprecated.
+
 ### Breaking
 
 - **`DicomExporter.save_patient` and `save_studies` are now one method, `write_tree`, and it says what it does.** Calls to either raise `AttributeError: type object 'DicomExporter' has no attribute 'save_patient'`. Replace `DicomExporter.save_patient(patient, out_dir)` with `DicomExporter.write_tree(patient, out_dir)`; `save_studies(patient, studies, out_dir, ...)` becomes `write_tree(patient, out_dir, studies=studies, ...)`. `session.export()` is unaffected.
