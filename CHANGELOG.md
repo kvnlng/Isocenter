@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`mutation_probe` can now see modules that do not branch, and says so when it cannot.** It reported `isocenter/crypto.py` as **0 mutation sites, 0 survived** -- which, in a table next to `privacy.py 11/36`, reads as the healthiest row and actually meant the module was never measured. `crypto.py` is the reversible-anonymisation core: 73 lines of key derivation, encrypt and decrypt with almost no branching, so the three operators the probe had -- comparison flips, `and`/`or`, boolean constants -- had nothing to find.
+
+  Three operators now reach straight-line code: dropping a `not`, replacing a returned value with `None`, and deleting a bare expression statement (rewritten to `pass` rather than removed, because deleting the only statement in a body leaves an AST that will not unparse, and that would look like a skipped mutant instead of a bug in the probe). `crypto.py` goes from 0 sites to 6, and the suite kills all six -- a clean result that now means something. A module with 0 sites prints `NOT MEASURED` instead of a zero.
+
+  Still unreached, and named in the docstring so the next `0/0` is not mistaken for coverage: argument swaps between same-typed parameters, string and bytes constant mutation, and exception-handler removal.
+
+- **The probe was running a fraction of the tests that cover its targets, and reporting the difference as survivors.** `TARGETS` listed 6 test files for `privacy.py`; 15 exercise it. `tests/test_config_tags_shapes.py` was added for #111 and never added to the list, so two mutations of the warning it covers were reported as `SURVIVED` -- a phantom gap in the de-identification core, of exactly the kind that costs a reviewer a real investigation. With the complete list, `privacy.py` drops from 10 survivors to 5. Half were the tool's own bookkeeping.
+
+  `tests/test_mutation_probe_targets.py` now fails if a test file imports a target module and is not listed. Extra entries stay allowed and are used: `test_remediation_actions.py` exercises `remediation.py` without importing it, which no import scan can see. The same test pins CLAUDE.md's module-to-test table to `TARGETS`, since CLAUDE.md calls that dict "the maintained version of this list" and the two had drifted apart -- one copy of a mapping is a fact, two is a bet on whoever edits next. (#106)
+
 ### Added
 
 - **A test that can never run is now a test failure.** `tests/test_discovery_integration.py` skipped unconditionally for months because `faker` was undeclared -- the single skip in an otherwise green suite, dead coverage over redaction-zone logic, reporting as "not applicable here" rather than "nobody has run this since it was written". `tests/test_skip_contract.py` pins the rule that would have caught it: a skip's condition must be capable of being both true and false in a documented environment.

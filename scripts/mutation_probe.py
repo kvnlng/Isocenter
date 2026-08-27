@@ -16,6 +16,22 @@ is not an inconvenience but a leak nobody is watching for:
 **Sampled, not exhaustive.** It walks mutation sites at a fixed stride,
 so the output is "of N representative mutations, M survived" -- evidence
 about whether the suite bites, not a mutation score to track over time.
+Adding an operator renumbers the sites, so two runs across such a change
+are not comparable sample-for-sample.
+
+**The operator set decides what can be measured.** Three operators see
+decisions -- comparison flips, `and`/`or`, boolean constants -- and three
+see straight-line code: dropping a `not`, replacing a returned value with
+None, and deleting a bare expression statement. That second group exists
+because the first reported `crypto.py` as 0 sites and 0 survivors: 73
+lines of key derivation, encrypt and decrypt with almost no branching,
+so there was nothing for a comparison flip to find. A module with 0
+sites is unmeasured, not clean, and the run says so rather than printing
+a zero and letting it be read as a pass (#106).
+
+Still unreached: argument swaps between same-typed parameters, string and
+bytes constant mutation (salts, encodings, key-derivation parameters),
+and exception-handler removal.
 
 **A survivor is a question, not a verdict.** Some mutants are equivalent
 -- they change the code without changing behaviour, and no test could
@@ -37,16 +53,32 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PYTEST = [str(REPO / ".venv/bin/python"), "-m", "pytest", "-x", "-q", "--no-header", "-p", "no:randomly"]
 
+# The tests to run for each target. Complete-ness matters more than it
+# looks: a mutant that a test in this repo would kill, but which is not
+# in this list, is reported as SURVIVED -- a phantom gap in the
+# de-identification core that costs a human a real investigation.
+# `tests/test_mutation_probe_targets.py` fails if a test file imports a
+# target module and is not listed here. Extra entries are allowed and
+# deliberate: `test_remediation_actions.py` exercises `remediation.py`
+# without importing it, which no import scan can see.
 TARGETS = {
     "isocenter/crypto.py": ["tests/test_crypto.py", "tests/test_reversibility.py"],
-    "isocenter/privacy.py": ["tests/test_privacy.py", "tests/test_remediation.py",
-                             "tests/test_mutation_gaps.py",
-                             "tests/test_profile_end_to_end.py", "tests/test_audit_suppression.py",
+    "isocenter/privacy.py": ["tests/test_analysis.py", "tests/test_analysis_persistence.py",
+                             "tests/test_audit_suppression.py", "tests/test_automation.py",
+                             "tests/test_config_tags_shapes.py", "tests/test_multiprocessing.py",
+                             "tests/test_mutation_gaps.py", "tests/test_ocr_formal.py",
+                             "tests/test_persistence.py", "tests/test_privacy.py",
+                             "tests/test_profile_end_to_end.py", "tests/test_remediation.py",
+                             "tests/test_remediation_actions.py",
+                             "tests/test_scaffold_features.py",
                              "tests/test_sr_anonymization.py"],
-    "isocenter/remediation.py": ["tests/test_remediation.py", "tests/test_remediation_actions.py",
-                                 "tests/test_mutation_gaps.py",
-                                 "tests/test_remediation_dates.py", "tests/test_deid_tags.py",
-                                 "tests/test_remediation_accounting.py"],
+    "isocenter/remediation.py": ["tests/test_audit_suppression.py", "tests/test_deid_tags.py",
+                                 "tests/test_mutation_gaps.py", "tests/test_persistence.py",
+                                 "tests/test_remediation.py",
+                                 "tests/test_remediation_accounting.py",
+                                 "tests/test_remediation_actions.py",
+                                 "tests/test_remediation_dates.py",
+                                 "tests/test_scaffold_features.py"],
 }
 
 class Mut(ast.NodeTransformer):
@@ -80,6 +112,43 @@ class Mut(ast.NodeTransformer):
                 return ast.copy_location(ast.Constant(value=not node.value), node)
         return node
 
+    # The three operators above only see *decisions*. A module of
+    # straight-line calls has none, so it reported 0 sites and 0
+    # survivors -- which reads like a clean bill of health next to
+    # `privacy.py 11/36` and actually meant "not measured" (#106).
+    # crypto.py, the reversible-anonymisation core, was in that state.
+    # The three below reach code that decides nothing.
+    def visit_UnaryOp(self, node):
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Not) and self._hit():
+            self.desc = f"line {node.lineno}: dropped `not`"
+            return node.operand
+        return node
+
+    def visit_Return(self, node):
+        self.generic_visit(node)
+        already_none = (isinstance(node.value, ast.Constant)
+                        and node.value.value is None)
+        if node.value is not None and not already_none and self._hit():
+            self.desc = f"line {node.lineno}: return <value> -> return None"
+            return ast.copy_location(ast.Return(value=ast.Constant(value=None)), node)
+        return node
+
+    def visit_Expr(self, node):
+        # A bare expression statement is there for its side effect, so
+        # dropping it is the cheapest way to ask whether anything checks
+        # that the side effect happened. Becomes `pass` rather than being
+        # deleted: removing the only statement in a body leaves an AST
+        # that will not unparse, and the failure would look like a
+        # skipped mutant rather than a bug in this file.
+        if isinstance(node.value, ast.Constant):
+            return node  # a docstring; deleting it is an equivalent mutant
+        self.generic_visit(node)
+        if self._hit():
+            self.desc = f"line {node.lineno}: deleted statement"
+            return ast.copy_location(ast.Pass(), node)
+        return node
+
 def count_ops(src):
     n = 0
     while True:
@@ -110,6 +179,14 @@ def main():
         print(f"\n### {mod}  ({total} mutation sites, sampling {budget})")
         print(f"    control (unparsed, unmutated): {'PASS' if ok else 'FAIL -- results unusable'}")
         if not ok:
+            continue
+        # A module with no sites was NOT MEASURED. Left to speak for
+        # itself, "0 survived" sits in a table next to "11/36" and reads
+        # as the healthiest row (#106).
+        if total == 0:
+            print("    => NOT MEASURED: no operator in this probe can see "
+                  "this module. This is not a clean result -- it is the "
+                  "absence of one. Add an operator that reaches it.")
             continue
 
         step = max(1, total // budget)
