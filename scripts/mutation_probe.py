@@ -70,6 +70,7 @@ TARGETS = {
                              "tests/test_persistence.py", "tests/test_privacy.py",
                              "tests/test_profile_end_to_end.py", "tests/test_remediation.py",
                              "tests/test_remediation_actions.py",
+                             "tests/test_remediation_invariants.py",
                              "tests/test_scaffold_features.py",
                              "tests/test_sr_anonymization.py"],
     "isocenter/remediation.py": ["tests/test_audit_suppression.py", "tests/test_deid_tags.py",
@@ -78,6 +79,8 @@ TARGETS = {
                                  "tests/test_remediation_accounting.py",
                                  "tests/test_remediation_actions.py",
                                  "tests/test_remediation_dates.py",
+                                 "tests/test_remediation_invariants.py",
+                                 "tests/test_phi_retention.py",
                                  "tests/test_scaffold_features.py"],
 }
 
