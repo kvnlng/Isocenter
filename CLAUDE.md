@@ -10,7 +10,7 @@ Isocenter is a Python library for indexing, de-identifying, and exporting DICOM 
 
 ```bash
 pip install -e ".[dev]"          # contributor environment: tests + pylint (there is deliberately no requirements.txt)
-pytest                           # full suite, ~414 tests
+pytest                           # full suite, ~600 tests
 pytest tests/test_session.py     # one file
 pytest tests/test_session.py::test_name -x   # one test
 pylint isocenter                    # lint (target >8.5/10; NOT enforced by CI)
@@ -77,7 +77,7 @@ Everything heavy funnels through `run_parallel()`, which picks processes vs. thr
 
 `privacy.py` (`PhiInspector` → `PhiFinding` → `PhiReport`) detects; `remediation.py` (`RemediationService`) applies. Date jitter is deterministic per patient so intervals survive. `crypto.py`/`reversibility.py` implement optional reversible anonymization: Fernet-encrypted original identities stashed in a private tag, recoverable with `isocenter.key`.
 
-A known live gap: `_make_lightweight_copy` (`session.py`) copies flat `attributes` but not `sequences`/`text_index`, so profile rules targeting tags nested inside sequences never fire during audit/anonymize. Tracked as issue #57 — assume nested-sequence remediation does not work until that's fixed.
+Nested-sequence remediation works, and the way it works is worth knowing before you change either half. `PhiInspector._scan_instance` walks the instance structurally rather than reading `Instance.text_index`, because that index is built once at ingest and is not rebuilt on load from the store. `_make_lightweight_copy` (`session.py`) deep-copies `sequences` into the worker clone, and a finding raised inside a sequence carries an `entity_path` down to its item; `_rehydrate_findings` resolves that path against the live graph. When it cannot, `_live_target` returns **None** rather than the enclosing instance — deliberately, because remediation skips a finding with no entity, whereas writing a nested tag onto the instance fabricates a top-level element that was never in the file and leaves the real value inside the sequence: an export carrying the PHI plus a decoy. This was #57, fixed in 0.8.0 and covered by `tests/test_nested_phi_audit.py`.
 
 ### Export (`exporters/`)
 

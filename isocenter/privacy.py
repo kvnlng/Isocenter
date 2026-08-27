@@ -312,8 +312,9 @@ class PhiInspector:
         """
         Scans a single instance for PHI based on configured tags and private tag rules.
 
-        Uses cached `text_index` (if available) for O(1) access to all text nodes,
-        including nested sequence items.
+        Walks the instance structurally to reach every text node,
+        including nested sequence items. It does not read
+        `Instance.text_index`; see the comment below for why.
         """
         findings = []
 

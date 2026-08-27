@@ -145,19 +145,17 @@ def test_documented_basic_profile_tag_count_matches_the_code():
     `pip install isocenter`, and as docs/changelog.md (#52): the copy people
     read is not the copy people edit.
 
-    The "effective" half of this sentence is NOT `len(BASIC_PROFILE)`: one
-    entry, `(0070,0006)`, lives inside a Waveform Annotation Sequence item
-    rather than at the top level of the instance, and the worker clone
-    `session.audit()`/`session.anonymize()` actually scan against
-    (`_make_lightweight_copy`, `isocenter/session.py`) drops the `text_index`
-    nested-sequence content needs to be reached through -- so that entry's
-    REMOVE/EMPTY action never fires (tracked as #57, out of scope for this
-    test). A tag can sit in the profile, present in `BASIC_PROFILE`, and do
-    nothing; asserting effective-count == `len(BASIC_PROFILE)` would pin
-    that as true. Instead this pins the *documented* effective count to a
-    value one less than the tag count, so the doc has to be updated by hand
-    (not silently kept "true" by construction) if a newly added tag turns
-    out to be similarly inert.
+    The "effective" half of this sentence is deliberately not asserted as
+    `len(BASIC_PROFILE)`. A tag can sit in the profile and do nothing:
+    `(0070,0006)` lives inside a Waveform Annotation Sequence item, and
+    until #57 was fixed in 0.8.0 the scan never opened sequences, so its
+    REMOVE/EMPTY action never fired. `known_inert` is empty now and the
+    two counts are equal -- but asserting effective-count ==
+    `len(BASIC_PROFILE)` outright would pin "every profile tag fires" as
+    true by construction, which is exactly the claim that was false for
+    two releases. Keeping the subtraction means a newly inert tag is
+    recorded by hand in `known_inert` and in the doc sentence, rather
+    than silently absorbed.
     """
     import pathlib
     import re
