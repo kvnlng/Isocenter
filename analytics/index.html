@@ -1464,13 +1464,29 @@
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Inspect the data</span>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">())</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'Modality'</span><span class="p">)[</span><span class="s1">'InstanceCount'</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">'Modality'</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">())</span>
 </code></pre></div>
 <h3 id="2-parquet-export">2. Parquet Export</h3>
 <p>For massive datasets (100k+ images), exporting to Parquet is recommended for performance and compatibility with external BI tools (PowerBI, Tableau, Apache Spark).</p>
+<p>The format follows the extension -- <code>export_dataframe</code> writes Parquet for
+<code>.parquet</code> and CSV for anything else. It is the same method, and the same
+columns, either way.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Export full cohort to Parquet</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">session</span><span class="o">.</span><span class="n">export_to_parquet</span><span class="p">(</span><span class="s2">"cohort_inventory.parquet"</span><span class="p">)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"cohort_inventory.parquet"</span><span class="p">)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Or just part of it</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">session</span><span class="o">.</span><span class="n">export_dataframe</span><span class="p">(</span><span class="s2">"arm_a.parquet"</span><span class="p">,</span> <span class="n">patient_ids</span><span class="o">=</span><span class="p">[</span><span class="s2">"P001"</span><span class="p">,</span> <span class="s2">"P002"</span><span class="p">])</span>
 </code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title"><code>export_to_parquet</code> was removed in #55</p>
+<p>A second Parquet writer, <code>session.export_to_parquet(...)</code>, existed
+until 0.9. It read from the <strong>database</strong> rather than the in-memory
+graph, so the two methods could disagree about the cohort, and it
+emitted SQL column names (<code>patient_id</code>, <code>sop_instance_uid</code>) where
+<code>export_dataframe</code> emits DICOM keywords (<code>PatientID</code>,
+<code>SOPInstanceUID</code>). Calling it now raises <code>AttributeError</code>. Code
+reading its output needs the column names updated, not just the call.</p>
+</div>
 <hr />
 <h2 id="query-based-export">Query-Based Export</h2>
 <p>One of Isocenter's most powerful features is <strong>Query-Based Export</strong>. Instead of exporting the entire session, you can filter the export using Pandas-style queries or a subset DataFrame.</p>
