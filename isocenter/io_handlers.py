@@ -1326,11 +1326,83 @@ class DicomExporter:
             if g == 0x0000:
                 continue
 
+            vr, encoded = None, None
             try:
                 vr = dictionary_VR(Tag(g, e))
+            except Exception:
+                # Not a standard tag. Almost always a private (odd-group)
+                # one, which is the whole point of `remove_private_tags=
+                # False`: the caller asked to keep the vendor block, and
+                # until #118 this arm only logged, so the tags reached
+                # the object graph and the index and then never reached
+                # the file (#118).
+                encoded = DicomExporter._fallback_encoding(v)
+
+            try:
+                if vr is None:
+                    if encoded is None:
+                        raise ValueError(
+                            f"no VR fits a {type(v).__name__} value")
+                    vr, v = encoded
                 ds.add_new(Tag(g, e), vr, v)
-            except Exception as e:
-                get_logger().warning(f"Failed to merge tag {t} ({v}): {e}")
+            except Exception as exc:
+                # Say "not exported". "Failed to merge" reads like an
+                # internal hiccup; this is an element the caller asked
+                # for that will not be in the output. There is no audit
+                # entry to pair it with because `_merge` runs inside
+                # `_export_instance_worker`, potentially in a subprocess
+                # with no store handle -- tracked as #126.
+                get_logger().warning(
+                    f"Tag {t} not exported (data loss): {exc}")
+
+    # PS3.5 6.2: `LO` is a Long String, 64 characters maximum.
+    _LO_MAX = 64
+
+    @staticmethod
+    def _fallback_encoding(value) -> Optional[Tuple[str, Any]]:
+        """How to write a tag the standard dictionary does not know.
+
+        Returns `(vr, value)` -- picking the VR and encoding the value are
+        one decision, not two, because pydicom will accept almost anything
+        at `add_new` and only raise when the dataset is written. A wrong
+        pairing here does not fail on the offending element; it fails the
+        whole export, thousands of instances later, with a `TypeError`
+        from `filewriter`.
+
+        PS3.5 A.1 makes `UN` the VR for an unknown value, and for raw
+        bytes that is right. It is wrong for everything else: `UN` is an
+        OB-family VR and rejects `str` at write time. Text needs a text
+        VR, and `LO` caps at 64 characters, so longer values go to `UT`,
+        which is unbounded. Numbers are stringified, which is what the
+        EAV table (`instance_attributes.value_text`) would have done to
+        them anyway -- without it, whether a private tag exported would
+        depend on whether a save had happened yet.
+
+        The `UT` branch narrows one thing: `UT` has a value multiplicity
+        of 1, where `LO` is 1-n. A backslash-delimited value past 64
+        characters therefore round-trips as one string containing literal
+        backslashes rather than a list. Widening `LO` to cover it would
+        be worse -- an over-long `LO` is non-conformant -- and nothing
+        downstream reads these as lists anyway, because they arrive from
+        `value_text` already flattened to a single string.
+
+        Returns None when nothing fits, which the caller reports as data
+        loss rather than encoding something it would have to guess at.
+        """
+        if isinstance(value, (bytes, bytearray)):
+            return 'UN', bytes(value)
+        if isinstance(value, memoryview):
+            return 'UN', value.tobytes()
+        if isinstance(value, bool):
+            # Before `int`: `bool` is a subclass of it, and "True" is a
+            # better round-trip than "1" for a value that was set as one.
+            return 'LO', str(value)
+        if isinstance(value, (int, float)):
+            return 'LO', str(value)
+        if isinstance(value, str):
+            vr = 'LO' if len(value) <= DicomExporter._LO_MAX else 'UT'
+            return vr, value
+        return None
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any]):
