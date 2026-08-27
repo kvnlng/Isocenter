@@ -9,6 +9,17 @@ import isocenter.imagecodecs_handler as h
 from .logger import get_logger
 
 
+def _canonical_tag(tag: str) -> str:
+    """The one spelling of a `"gggg,eeee"` key: lowercase hex.
+
+    Non-strings pass through untouched -- this normalises casing and
+    nothing else, so a caller who has wandered off the string-tag
+    convention still gets whatever error their own key would have
+    caused, rather than an AttributeError from here.
+    """
+    return tag.lower() if isinstance(tag, str) else tag
+
+
 @dataclass(slots=True)
 class DicomSequence:
     """
@@ -178,11 +189,24 @@ class DicomItem(TrackedEntity):
         """
         Sets a generic attribute by its hex tag (e.g., '0010,0010').
 
+        The tag is lowercased first. Ingested keys are always lowercase
+        (`io_handlers.populate_attrs` builds
+        `f"{elem.tag.group:04x},{elem.tag.element:04x}"`), while
+        hand-authored ones are freely written `0008,103E`. Storing both
+        spellings made a lookup in one casing miss a value written in
+        the other, and a missed key reads as *absent* rather than
+        raising -- so the failure looked like ordinary missing data.
+        Two of the three recorded encounters were silent PHI defects:
+        a Basic-profile rule for Series Description that never matched
+        and so never remediated (#41), and a folder-naming helper that
+        dropped descriptions (#40). This is the choke point where
+        hand-authored keys enter the graph. (#51)
+
         Args:
-            tag (str): The DICOM tag string.
+            tag (str): The DICOM tag string. Case-insensitive.
             value (Any): The value to set.
         """
-        self.attributes[tag] = value
+        self.attributes[_canonical_tag(tag)] = value
         self.mark_modified()
 
     def add_sequence_item(self, tag: str, item: 'DicomItem'):
@@ -193,6 +217,7 @@ class DicomItem(TrackedEntity):
             tag (str): The DICOM tag for the sequence.
             item (DicomItem): The item to append.
         """
+        tag = _canonical_tag(tag)
         if tag not in self.sequences:
             self.sequences[tag] = DicomSequence(tag=tag)
         self.sequences[tag].items.append(item)

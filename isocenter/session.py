@@ -336,7 +336,7 @@ def _patient_attributes(patient) -> Dict[str, Any]:
 def _study_attributes(study) -> Dict[str, Any]:
     """Study-level tags stamped onto every exported instance."""
     attributes = {
-        "0020,000D": study.study_instance_uid,
+        "0020,000d": study.study_instance_uid,
         "0008,0020": study.study_date,
     }
     if getattr(study, 'study_time', None):
@@ -349,12 +349,12 @@ def _study_attributes(study) -> Dict[str, Any]:
 def _series_attributes(series) -> Dict[str, Any]:
     """Series-level tags stamped onto every exported instance."""
     attributes = {
-        "0020,000E": series.series_instance_uid,
+        "0020,000e": series.series_instance_uid,
         "0008,0060": series.modality,
         "0020,0011": str(series.series_number),
     }
     if getattr(series, 'series_description', None):
-        attributes["0008,103E"] = series.series_description
+        attributes["0008,103e"] = series.series_description
     return attributes
 
 
