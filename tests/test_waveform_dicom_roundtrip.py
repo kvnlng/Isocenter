@@ -140,7 +140,7 @@ def test_a_waveform_sequence_with_no_samples_is_reported_on_export(tmp_path):
     del ds.WaveformSequence[0].WaveformData
 
     inst = Instance(str(ds.SOPInstanceUID), str(ds.SOPClassUID), 1)
-    populate_attrs(ds, inst, inst.text_index)
+    populate_attrs(ds, inst)
 
     ctx = ExportContext(
         instance=inst,

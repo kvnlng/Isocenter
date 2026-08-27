@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING: `Instance.text_index` is gone, and `populate_attrs` no longer takes a third argument.** `inst.text_index` now raises `AttributeError: 'Instance' object has no attribute 'text_index'` -- on assignment too, since `Instance` is a slots dataclass, so no shim can quietly reintroduce it. `populate_attrs(ds, item, index)` raises `TypeError: populate_attrs() takes 2 positional arguments but 3 were given`; drop the argument. `entities.clone_sequences()` returns the clone dict alone rather than `(clones, mapping)`, so unpacking it into two names raises `ValueError`.
+
+  The index was described on the class as "Index of all text-based nodes for O(1) PHI scanning". It had not been that since 0.8.0. #57 moved `PhiInspector._scan_instance` to a structural walk precisely because the index was empty on every path that mattered -- built once at ingest, never rebuilt on load from the store, not carried into the worker copies `audit()` scans. After that fix nothing in `isocenter/` read it. Two functions still built it and four test files still asserted on it.
+
+  So this removes a stored second answer to "where does text live", which could disagree with the object graph. That disagreement was not hypothetical: it *was* #57. The structural walk is not a new risk being taken here -- it is what 0.8.0 and 0.9.0 have shipped. If an index is ever wanted for speed, it should be derived per scan rather than stored, and the comment in `privacy.py` now says so.
+
+  `populate_attrs`'s text-VR filter (`TEXT_VRS`) goes with it and is not replaced. It only ever decided what to index, never what to scan, and the top-level scan never applied it: a configured PHI tag is a configured PHI tag wherever it sits and whatever its VR.
+
+  Removed rather than deprecated per the project's pre-1.0 convention. The attribute was `init=False, repr=False` and commented "Transient", so it was never part of the constructor or the repr. (#84)
+
+- **A test asserting a claim the code contradicts.** `test_channel_label_is_indexed_for_phi_scanning` asserted that Channel Label `(003A,0203)` appeared in `text_index`, under the docstring "Free-text SH/UT inside the waveform sequence must reach the inspector". It does not, by design: `waveform.py` says so in as many words -- "The check lives here rather than in the privacy profile on purpose: the PHI scan is tag-gated, so a profile entry protects only sessions that loaded a configuration. A bare `Session()` would still leak." The label is protected by a recognisable-lead-name allowlist in the WFDB writer, not by the PHI scan, and `test_uncoded_channel_label_free_text_never_reaches_the_header` in the same file already covers that end to end.
+
+  The test therefore asserted a mechanism nothing consumed, in service of a claim the design rejects, while the real protection was tested elsewhere. That is the shape that let #57 ship for two releases: a green test pinning an index rather than an outcome. Deleted rather than rewritten, because its behaviour is not uncovered.
+
+  `test_sr_recursive_indexing` is replaced by `test_the_scan_finds_the_same_tag_at_every_level_it_appears`, which keeps the shape worth keeping -- PatientName at the top level *and* inside a nested Content Sequence item -- and asserts the scan raises a finding for each, on distinct entities. A scan that deduplicated by tag would have satisfied the old assertion and left the clinician's name in the report. (#84)
+
 ### Fixed
 
 - **Data lost on the way out of an export reached nobody.** `_merge` drops an element it cannot encode and warned; the export worker writes a Waveform Sequence with no samples in it and warned. Both are real losses in the artefact the caller keeps, and both were reported only to a logger -- from inside `_export_instance_worker`, which `session.export()` runs in a subprocess.

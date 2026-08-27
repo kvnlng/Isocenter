@@ -313,23 +313,28 @@ class PhiInspector:
         Scans a single instance for PHI based on configured tags and private tag rules.
 
         Walks the instance structurally to reach every text node,
-        including nested sequence items. It does not read
-        `Instance.text_index`; see the comment below for why.
+        including nested sequence items. See the comment below before
+        reintroducing an index.
         """
         findings = []
 
         # 0. Determine Scan Targets
-        # Walked from the instance itself rather than read off its
-        # `text_index`. That index is built once at ingest and is not
-        # rebuilt when a session is loaded from the store, nor carried
-        # into the worker copies `session.audit()` scans -- so every route
-        # into this method except a direct call arrived with it empty and
-        # took a top-level-only scan, reporting clean on sequence content
-        # it never opened (#57).
+        # Walked from the instance itself, not read off a prebuilt index.
+        # It was read off `Instance.text_index` until 0.8.0, and that
+        # index was built once at ingest: not rebuilt when a session was
+        # loaded from the store, and not carried into the worker copies
+        # `session.audit()` scans. So every route into this method except
+        # a direct call arrived with it empty and took a top-level-only
+        # scan, reporting clean on sequence content it never opened
+        # (#57). The index itself was retired in #84, once it was clear
+        # nothing had read it since.
         #
-        # Walking also drops the index's text-VR filter, which the
-        # top-level path never applied either. A configured PHI tag is a
-        # configured PHI tag wherever it sits and whatever its VR.
+        # An index would have to be derived here, per scan, to be worth
+        # having -- a stored one is a second answer to "where does text
+        # live" that can disagree with the graph, which is what #57 was.
+        # Note also that walking drops the index's text-VR filter, which
+        # the top-level path never applied either: a configured PHI tag
+        # is a configured PHI tag wherever it sits and whatever its VR.
         scan_targets = [
             (item, tag, path)
             for item, path in iter_item_tree(instance)

@@ -37,7 +37,7 @@ def _instance_with(*notes):
     ds.WaveformAnnotationSequence = DicomSequence(items)
 
     instance = Instance("1.2.9", "1.2.840.10008.5.1.4.1.1.9.1.1", 1)
-    populate_attrs(ds, instance, instance.text_index)
+    populate_attrs(ds, instance)
     return instance
 
 

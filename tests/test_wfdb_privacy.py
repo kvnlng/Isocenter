@@ -35,14 +35,6 @@ def _header_text(paths):
         return f.read()
 
 
-def test_channel_label_is_indexed_for_phi_scanning(session_with_ecg):
-    """Free-text SH/UT inside the waveform sequence must reach the inspector."""
-    session, _ = session_with_ecg
-    instance = session.store.patients[0].studies[0].series[0].instances[0]
-    indexed_tags = {tag for _, tag in instance.text_index}
-    assert "003a,0203" in indexed_tags
-
-
 def test_header_contains_no_comment_lines(session_with_ecg):
     session, tmp_path = session_with_ecg
     paths = session.export(str(tmp_path / "out"), format="wfdb")

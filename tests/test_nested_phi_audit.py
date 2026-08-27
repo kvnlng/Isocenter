@@ -42,7 +42,7 @@ def _instance_with_nested_text():
     ds.ContentSequence = DicomSequence([item])
 
     instance = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.88.33", 1)
-    populate_attrs(ds, instance, instance.text_index)
+    populate_attrs(ds, instance)
     return instance
 
 
@@ -169,7 +169,7 @@ def test_the_basic_profile_reaches_unformatted_text_value(tmp_path):
     ds.WaveformAnnotationSequence = DicomSequence([annotation])
 
     instance = Instance("1.2.9", "1.2.840.10008.5.1.4.1.1.9.1.1", 1)
-    populate_attrs(ds, instance, instance.text_index)
+    populate_attrs(ds, instance)
 
     sess = Session(str(tmp_path / "wf.db"))
     try:

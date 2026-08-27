@@ -8,71 +8,46 @@ from isocenter.entities import Instance
 from isocenter.io_handlers import populate_attrs, process_sequence
 from isocenter.privacy import PhiInspector, PhiFinding
 
-def test_sr_recursive_indexing():
+def test_the_scan_finds_the_same_tag_at_every_level_it_appears():
+    """A tag reused at two depths yields a finding per occurrence.
+
+    This replaces an assertion that the same tags were present in
+    `Instance.text_index` (#84). The index had no production consumer and
+    is gone; more to the point, asserting that something was *indexed*
+    was never evidence that anything *scanned* it -- that gap is #57 in
+    one sentence, and this file's other test carries the postmortem.
+
+    The shape worth keeping is specific to structured reports: PatientName
+    appears at the top level and again inside a nested Content Sequence
+    item, and the two are different values on different entities. A scan
+    that deduplicated by tag, or that stopped at the first hit, would
+    still satisfy "0010,0010 was found" and leave the clinician's name
+    inside the report.
     """
-    Verifies that nested text within a Sequence is correctly indexed during ingestion logic.
-    """
-    # 1. Manually simulate ingestion of a dataset with Sequence
     ds = Dataset()
     ds.PatientName = "Test^Patient"
     ds.PatientID = "123456"
 
-    # Create a Sequence
-    # (0040,A730) Content Sequence
     seq_item = Dataset()
     seq_item.ValueType = "TEXT"
-    seq_item.TextValue = "Patient states pain in leg." # Sensitive!
+    seq_item.TextValue = "Patient states pain in leg."
 
-    # Nested Sequence
     nested_item = Dataset()
-    nested_item.PersonName = "Dr. Smeagol" # Sensitive!
-
-    nested_seq = Sequence([nested_item])
-    seq_item.ContentSequence = nested_seq
-
+    nested_item.PatientName = "Dr. Smeagol"      # same tag, two levels down
+    seq_item.ContentSequence = Sequence([nested_item])
     ds.ContentSequence = Sequence([seq_item])
 
-    # Check VR manually for pseudo-dataset
-    # pydicom should handle VRs for standard tags automatically.
-    # We only ensure we aren't getting UN (Unknown) if implicit.
-    # But populate_attrs uses elem.VR.
-
-    # ds[0x0040, 0xa730].VR = 'SQ'
-    # ds[0x0040, 0xa730][0][0x0040, 0xa160].VR = 'UT' # TextValue
-    # ds[0x0040, 0xa730][0][0x0040, 0xa730].VR = 'SQ'
-    # ds[0x0040, 0xa730][0][0x0040, 0xa730][0][0x0010, 0x0010].VR = 'PN'
-    # ds[0x0010, 0x0010].VR = 'PN' # Top PatientName
-    # ds[0x0010, 0x0020].VR = 'LO' # Top PatientID
-
-    # 2. Create Isocenter Instance
     inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.88.33", 1)
+    populate_attrs(ds, inst)
 
-    # 3. Populate
-    populate_attrs(ds, inst, inst.text_index)
+    findings = PhiInspector()._scan_instance(inst, "P1", None)
+    names = [f for f in findings if f.tag == "0010,0010"]
 
-    # 4. Verify Index Size
-    # Expected:
-    # 1. PatientName (Top)
-    # 2. TextValue (Level 1)
-    # 3. PersonName (Level 2)
-    # 4. PatientID (Top)
+    assert len(names) == 2, [(f.tag, f.value) for f in findings]
+    assert {str(f.value) for f in names} == {"Test^Patient", "Dr. Smeagol"}
+    # Distinct entities, or remediation would write both to one item.
+    assert len({id(f.entity) for f in names}) == 2
 
-    print("Index Contents:")
-    for item, tag in inst.text_index:
-        val = item.attributes.get(tag)
-        print(f" - {tag}: {val}")
-
-    tags = [t for _, t in inst.text_index]
-
-    assert "0010,0010" in tags # PatientName
-    assert "0040,a160" in tags # TextValue
-    assert "0010,0010" in tags # Nested PersonName (Tag reuse)
-
-    # Let's check values to be sure where they came from
-    values = [str(i.attributes.get(t)) for i, t in inst.text_index]
-    assert "Test^Patient" in values
-    assert "Patient states pain in leg." in values
-    assert "Dr. Smeagol" in values
 
 def test_phi_inspector_deep_scan():
     """
