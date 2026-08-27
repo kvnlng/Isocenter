@@ -55,7 +55,15 @@ Optional extras degrade gracefully and must keep doing so: `ocr` (pytesseract �
 
 `DicomStore` (`store.py`) holds `List[Patient]`; `Patient → Study → Series → Instance` live in `entities.py`. `DicomItem` is the shared base carrying `attributes` (a `{"gggg,eeee": value}` dict — tags are lowercase-hex strings throughout, not pydicom keywords) and `sequences`.
 
-Persistence is driven by a monotonic counter, not a boolean: `_mod_count` increments on every `set_attr`/`add_sequence_item`, `_saved_mod_count` records what was written, and `_dirty` is the comparison. `mark_saved(version)` is the safe call — it tolerates edits that landed during a save. `mark_clean()` and the `_dirty` setter are legacy escape hatches that clobber that guarantee; prefer `mark_saved`.
+Persistence bookkeeping lives on `TrackedEntity` and is driven by a monotonic counter, not a boolean. `_revision` increments on every `set_attr`/`add_sequence_item`, `_persisted_revision` records what reached the store, and the `has_unsaved_changes` property is the comparison. Move the state with `mark_modified()` and `mark_persisted(revision=None)`; read it with `has_unsaved_changes`.
+
+**There is deliberately no setter.** An entity can be told what happened to it, never told what it is — "declare this saved" is precisely the operation that let a rolled-back save leave instances claiming they had been written. Three further traps, each of which exists because it was got wrong once:
+
+- `mark_persisted()` defaults to the *current* revision, which is only correct when nothing can have changed since the write. A save that takes time must capture the revision before it starts and pass that in; otherwise an edit that landed mid-save is written off by a commit that never contained it.
+- It never moves backwards (`max`), so a retried or out-of-order save cannot un-persist a revision that already reached the store.
+- `mark_subtree_persisted()` speaks for a whole graph and is for hydration only. `mark_persisted()` speaks for one entity — committing a single row must not vouch for its unsaved siblings.
+
+Persistence-dirty and PHI-dirty are separate questions with separate vocabularies; both were called "dirty" once, which made them indistinguishable in the code and in the output users read. The PHI half is `phi_status`/`record_phi_status()`, keyed on `_phi_status_revision`: a status recorded against a revision the entity has since left reads as `UNSCANNED`, structurally, rather than by convention. Note that `record_phi_status()` **also advances `_revision`** — a new status is a change the store should hold. That coupling is why three `mark_modified()` calls in `remediation.py` are individually redundant and survive deletion untested (#132); do not "simplify" one away without reading that issue.
 
 Instances hold pixel and waveform data lazily via `SidecarPixelLoader`/`SidecarWaveformLoader` callables. `get_pixel_data()` materializes, `unload_pixel_data()` releases. Heavy arrays are never kept resident by default — memory scaling on 100GB+ datasets depends on this.
 
