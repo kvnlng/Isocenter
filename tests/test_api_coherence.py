@@ -434,3 +434,23 @@ def test_a_uid_that_exists_still_contributes_its_suffix():
 
     assert study_folder.endswith("9999"), study_folder
     assert series_folder.endswith("8888"), series_folder
+
+
+def test_the_export_to_parquet_second_spelling_is_gone():
+    """Two methods wrote Parquet (#55). `export_dataframe(".parquet")`
+    and `export_to_parquet()` differed in source -- the in-memory graph
+    versus a re-read of the database -- so they could disagree about
+    what the cohort contained, and nothing said which was authoritative.
+
+    Pinned by name rather than by signature, for the reason given in
+    `test_the_scan_for_phi_alias_is_gone`: reintroducing the method with
+    a changed signature is worse than the state being removed, and a
+    signature check would not notice.
+    """
+    assert not hasattr(DicomSession, "export_to_parquet"), (
+        "`export_to_parquet` is back; Parquet has one writer, "
+        "`export_dataframe`, and pre-1.0 duplicate spellings are deleted "
+        "rather than deprecated")
+    assert callable(DicomSession.export_dataframe), (
+        "`export_dataframe` is missing -- the duplicate was removed but "
+        "the surviving writer did not")

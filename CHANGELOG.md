@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **BREAKING: `Session.export_to_parquet()` is gone; call `export_dataframe()` with a `.parquet` path -- and update the column names you read.** `session.export_to_parquet(path)` now raises `AttributeError: 'DicomSession' object has no attribute 'export_to_parquet'`. The replacement is `session.export_dataframe(path, patient_ids=...)`, which sniffs the extension exactly as it always has.
+
+  **The rename is the easy half.** The two methods did not produce the same frame, which is why keeping both was untenable rather than merely redundant. `export_to_parquet` read the *database* and emitted SQL column names; `export_dataframe` reads the *in-memory graph* and emits DICOM keywords. Downstream code that indexes the output by name breaks on a column lookup, not at the call site:
+
+  | `export_to_parquet` | `export_dataframe` |
+  | --- | --- |
+  | `patient_id` | `PatientID` |
+  | `patient_name` | `PatientName` |
+  | `study_instance_uid` | `StudyInstanceUID` |
+  | `study_date` | `StudyDate` |
+  | `series_instance_uid` | `SeriesInstanceUID` |
+  | `modality` | `Modality` |
+  | `sop_instance_uid` | `SOPInstanceUID` |
+  | `manufacturer` | `Manufacturer` |
+  | `model_name` | `Model` |
+  | `device_serial_number` | `DeviceSerial` |
+
+  Eight columns have no counterpart and are simply gone: `series_number`, `sop_class_uid`, `instance_number`, `file_path`, `pixel_offset`, `pixel_length`, `compress_alg`, and `attributes_json`. `attributes_json` is the closest to recoverable -- `expand_metadata=True` spreads the same attributes into real columns instead of one JSON blob. The storage-internal four (`pixel_offset`, `pixel_length`, `compress_alg`, `file_path`) were sidecar bookkeeping that a metadata inventory had no business publishing. If you need them, `store_backend.get_flattened_instances()` is still there and still returns exactly those rows.
+
+  **Why the in-memory graph won.** It is what every other stage of the pipeline reads, so it is the only source that agrees with what `anonymize()`, `redact()`, and `export()` just did. The database answers a different question -- what was last *saved* -- and `export_to_parquet` papered over the gap by calling `self.save()` first, silently committing pending edits as a side effect of what a caller had every reason to read as a read. An export must not decide to write.
+
+  The performance argument for the database path was not real either. Its docstring promised streaming, and it did open a generator over `get_flattened_instances`, but the very next statement was `rows = list(generator)` before handing the whole list to `pd.DataFrame`. It materialized the full cohort exactly like the method it was supposed to scale past.
+
+  Two behaviours were worth keeping and moved across: `export_dataframe` now takes `patient_ids` (`None` means everyone; `[]` means nobody -- a filter that matched nothing is not an absent filter, or a caller computing an empty cohort would export the entire dataset), and it creates a missing output directory instead of letting pandas raise `Cannot save file into a non-existent directory`. `get_cohort_report()` takes the same `patient_ids` argument, since that is where the filtering belongs.
+
+  One behaviour deliberately did not move: `export_to_parquet` returned early without writing anything when the cohort was empty, logging a warning. `export_dataframe` writes the empty frame. A downstream job that reads its input on a schedule should find an empty file, not last week's file. (#55)
+
 - **BREAKING: `Session.scan_for_phi()` is gone; call `audit()`.** `session.scan_for_phi()` now raises `AttributeError: 'DicomSession' object has no attribute 'scan_for_phi'`. The replacement is a rename at the call site and nothing else: same argument, same `PhiReport` back.
 
   It was a one-line body returning `self.audit(config_path)`, under a `# DEPRECATED` banner and a docstring reading "Legacy alias for audit()". That is the same shape as the `safe=`/`compression=` aliases #40 removed, and it was missed only because it is a method rather than a parameter.

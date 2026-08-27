@@ -1382,14 +1382,28 @@ class DicomSession:
         print(f"Discovery complete. Found {len(candidates)} raw candidates.")
         return result
 
-    def get_cohort_report(self, expand_metadata: bool = False) -> 'pd.DataFrame':
+    def get_cohort_report(self,
+                          expand_metadata: bool = False,
+                          patient_ids: Optional[List[str]] = None) -> 'pd.DataFrame':
         """
         Returns a Pandas DataFrame containing flattened metadata for the current cohort.
         Useful for analysis and QA.
+
+        Args:
+            expand_metadata (bool): If True, includes all DICOM attributes as columns.
+            patient_ids (List[str], optional): Restrict the report to these
+                Patient IDs. ``None`` means every patient in the session.
+                An empty list matches nobody -- it is a filter that
+                selected nothing, not an absent filter.
         """
         import pandas as pd
         rows = []
         for p in self.store.patients:
+            # `is not None` rather than a truth test: `[]` must exclude
+            # everyone. A caller computing a cohort that came back empty
+            # would otherwise export the whole dataset.
+            if patient_ids is not None and p.patient_id not in patient_ids:
+                continue
             for s in p.studies:
                 for se in s.series:
                     manufacturer = se.equipment.manufacturer if se.equipment else ""
@@ -2346,82 +2360,71 @@ class DicomSession:
     def export_dataframe(
             self,
             output_path: str = "export_metadata.csv",
-            expand_metadata: bool = False):
+            expand_metadata: bool = False,
+            patient_ids: Optional[List[str]] = None):
         """
         Exports flat validation metadata to CSV or Parquet.
+
+        The format is chosen from the extension: ``.parquet`` writes
+        Parquet, anything else writes CSV.
+
+        Reports the session's **in-memory graph**, which is what the rest
+        of the pipeline operates on. It deliberately does not `save()`
+        first: an export is a read, and a method whose name says
+        "dataframe" must not commit pending edits to the database as a
+        side effect.
 
         Args:
             output_path (str): The output file path (ends with .csv or .parquet).
             expand_metadata (bool): If True, includes all DICOM attributes as columns.
+            patient_ids (List[str], optional): Restrict the export to these
+                Patient IDs. ``None`` means every patient in the session.
+
+        Returns:
+            pd.DataFrame: The frame that was written.
+
+        Raises:
+            ImportError: If pandas (or, for Parquet, a Parquet engine) is
+                not installed.
         """
-        import pandas as pd
-        df = self.get_cohort_report(expand_metadata=expand_metadata)
+        try:
+            import pandas as pd  # noqa: F401  (imported for the error, used via the frame)
+        except ImportError as e:
+            get_logger().error("export_dataframe requires 'pandas' installed.")
+            raise ImportError(
+                "Please install pandas to use this feature: "
+                "pip install pandas pyarrow") from e
+
+        df = self.get_cohort_report(
+            expand_metadata=expand_metadata, patient_ids=patient_ids)
+
+        # Create the destination directory. pandas raises a bare
+        # "Cannot save file into a non-existent directory" otherwise,
+        # which names the wrong problem for a caller passing a nested
+        # report path.
+        parent = os.path.dirname(os.path.abspath(output_path))
+        os.makedirs(parent, exist_ok=True)
+
+        get_logger().info(f"Writing {len(df)} rows to {output_path}...")
 
         if output_path.endswith(".parquet"):
             try:
-                # Requires pyarrow and pandas
+                # Requires pandas plus pyarrow or fastparquet
                 df.to_parquet(output_path, index=False)
+            except ImportError as e:
+                get_logger().error(
+                    "Parquet engine (pyarrow or fastparquet) missing.")
+                raise ImportError(
+                    "Please install a Parquet engine to write .parquet: "
+                    "pip install pyarrow") from e
             except Exception as e:
                 get_logger().error(f"Failed to export parquet: {e}")
-                raise e
+                raise
         else:
             df.to_csv(output_path, index=False)
 
         print(f"Exported metadata to {output_path}")
         return df
-
-    def export_to_parquet(self, output_path: str, patient_ids: List[str] = None):
-        """
-        [EXPERIMENTAL] Exports flattened metadata to a Parquet file.
-        Requires 'pandas' and 'pyarrow' or 'fastparquet'.
-        """
-        try:
-            import pandas as pd
-        except ImportError:
-            get_logger().error("export_to_parquet requires 'pandas' installed.")
-            raise ImportError(
-                "Please install pandas to use this feature: pip install pandas pyarrow")
-
-        # 1. Sync DB state
-        get_logger().info("Saving state before Parquet export...")
-        self.save()
-
-        # 2. Stream Data
-        get_logger().info("Streaming data from database...")
-
-        target_ids = patient_ids
-        if target_ids is None:
-            target_ids = [p.patient_id for p in self.store.patients]
-
-        if not target_ids:
-            get_logger().warning("No patients to export.")
-            return
-
-        generator = self.persistence_manager.store_backend.get_flattened_instances(target_ids)
-
-        rows = list(generator)
-
-        if not rows:
-            get_logger().warning("No instances found for these patients.")
-            return
-
-        df = pd.DataFrame(rows)
-
-        # 3. Save
-        get_logger().info(f"Writing {len(df)} rows to {output_path}...")
-
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-        try:
-            df.to_parquet(output_path, index=False)
-            get_logger().info("Parquet export successful.")
-        except ImportError as e:
-            get_logger().error("Parquet engine (pyarrow or fastparquet) missing.")
-            raise e
-        except Exception as e:
-            get_logger().error(f"Failed to write parquet: {e}")
-            raise
 
     # =========================================================================
     # INTERNAL HELPERS
