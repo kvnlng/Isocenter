@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`remove_private_tags=False` could not keep a private tag with a binary VR, and did not say so.** `populate_attrs` skips every element whose VR is in `BINARY_VRS`, which is right for pixels and waveforms -- they belong in the sidecar, and holding them in `attributes` would undo the memory scaling the design depends on. A private `OB` is collateral: a vendor block routinely carries one, and it never reaches the object graph at all, so there is nothing left for the flag to keep by the time it is read.
+
+  The flag therefore reported success on a tag that had been gone since ingest. Each dropped element is now logged and written to the audit log as a `DATA_LOSS` entry naming the tag *and its VR* -- "a tag was dropped" is not actionable; the VR is what says whether it was a four-byte serial number or a megabyte of vendor telemetry. `docs/configuration.md` states the limitation where the flag is documented.
+
+  This reports the loss; it does not change it. Keeping the bytes is a real decision -- an arbitrary private `OB` can be megabytes, which is what `BINARY_VRS` exists to keep out of resident memory, and routing them to the sidecar means giving private tags an offset/length representation the EAV table does not have. That half of #125 stays open.
+
+  The report travels in `meta` rather than a ninth slot on `ingest_worker`'s return tuple, which is the channel #36's multiplex-group loss already uses: the worker may be in a subprocess with no store handle, so the parent records it. Same constraint as #126, on the other end of the pipeline. Nested vendor blocks are covered -- the accumulator recurses with `process_sequence`, or the report would cover the top level only and read as "nothing else was dropped". (#125)
+
+  Standard binary elements -- Overlay Data, palette LUTs -- are dropped by the same rule and are deliberately *not* reported here, because that is a documented design choice rather than a broken promise, and dropping them cannot leak. `test_a_standard_binary_element_is_not_reported` pins that boundary and says why. Filed as #137 rather than folded in.
+
 ### Removed
 
 - **BREAKING: `Instance.text_index` is gone, and `populate_attrs` no longer takes a third argument.** `inst.text_index` now raises `AttributeError: 'Instance' object has no attribute 'text_index'` -- on assignment too, since `Instance` is a slots dataclass, so no shim can quietly reintroduce it. `populate_attrs(ds, item, index)` raises `TypeError: populate_attrs() takes 2 positional arguments but 3 were given`; drop the argument. `entities.clone_sequences()` returns the clone dict alone rather than `(clones, mapping)`, so unpacking it into two names raises `ValueError`.
