@@ -48,7 +48,7 @@ def test_parallel_import_and_scan(tmp_path):
     assert len(session.store.patients) == 20
 
     # 3. Parallel Scan
-    report = session.scan_for_phi()
+    report = session.audit()
     assert isinstance(report, PhiReport)
     assert len(report) >= 20 # At least Names should be flagged
 

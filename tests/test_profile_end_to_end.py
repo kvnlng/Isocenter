@@ -79,7 +79,7 @@ def test_profile_remediation_end_to_end(tmp_path):
     # We'll use apply_remediation directly or just check if a burned-in-safe export flags it.
 
     # Method A: Check if scan finds it (Verification of config load + Privacy Inspector)
-    report = session.scan_for_phi()
+    report = session.audit()
     # Basic profile REMOVES PatientName. So scan should FLAG it.
 
     flagged_tags = {f.tag for f in report}
