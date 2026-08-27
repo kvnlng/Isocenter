@@ -1032,14 +1032,14 @@ class DicomExporter:
                     s_date_str = format_study_date(st.study_date)
 
                     study_attrs = {
-                        "0020,000D": st.study_instance_uid,
+                        "0020,000d": st.study_instance_uid,
                         "0008,0020": s_date_str,
                         "0008,0030": "120000"
                     }
 
                     # Series Attributes
                     series_attrs = {
-                        "0020,000E": se.series_instance_uid,
+                        "0020,000e": se.series_instance_uid,
                         "0008,0060": se.modality,
                         "0020,0011": se.series_number
                     }
