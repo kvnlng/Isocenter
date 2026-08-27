@@ -183,6 +183,24 @@ def test_export_offers_one_name_per_behaviour():
             "canonical parameter did not survive")
 
 
+def test_the_scan_for_phi_alias_is_gone():
+    """`scan_for_phi` was a pure alias for `audit()` -- its own docstring
+    said "Legacy alias for audit()", it took the same argument and
+    returned the same object, and it added nothing.
+
+    Pinned by name rather than by signature comparison: a signature check
+    would keep passing if someone reintroduced the alias with a *changed*
+    signature, which is a worse state than the one being removed. What
+    matters is that the second spelling does not exist.
+    """
+    assert not hasattr(DicomSession, "scan_for_phi"), (
+        "`scan_for_phi` is back; it is an alias for `audit()`, and pre-1.0 "
+        "duplicate spellings are deleted rather than deprecated")
+    assert callable(DicomSession.audit), (
+        "`audit` is missing -- the alias was removed but the canonical "
+        "method did not survive")
+
+
 def test_use_compression_none_means_no_compression(tmp_path):
     """`use_compression=None` must mean "do not compress", not "compress".
 

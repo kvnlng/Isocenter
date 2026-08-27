@@ -36,9 +36,9 @@ def test_safe_export_allows_jittered_dates(tmp_path):
     session.store.patients.append(p)
 
     # 3. Apply Jitter Remediation
-    # Using 'audit' effectively, but manually calling scan_for_phi/remediate
+    # Using 'audit' effectively, but manually calling audit/remediate
     # to simulate the exact workflow user described.
-    findings = session.scan_for_phi()
+    findings = session.audit()
     assert len(findings) > 0, "Setup failed: PHI finding should be detected."
 
     session.anonymize(findings)

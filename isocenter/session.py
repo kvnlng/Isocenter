@@ -2188,7 +2188,7 @@ class DicomSession:
             still present excludes every image beneath them.
         """
         get_logger().info("Performing pre-export safety scan...")
-        findings = self.scan_for_phi()
+        findings = self.audit()
         if not findings:
             return set()
 
@@ -2541,12 +2541,3 @@ class DicomSession:
 
         return p_new
 
-    # =========================================================================
-    # DEPRECATED
-    # =========================================================================
-
-    def scan_for_phi(self, config_path: str = None) -> "PhiReport":
-        """
-        Legacy alias for audit().
-        """
-        return self.audit(config_path)

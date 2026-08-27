@@ -16,7 +16,7 @@ def test_phi_report_analysis(tmp_path):
     session.save()
 
     # Scan
-    report = session.scan_for_phi()
+    report = session.audit()
     assert isinstance(report, PhiReport)
     assert len(report) > 0 # Should find Name and ID
 
@@ -55,7 +55,7 @@ def test_batch_preserve_from_report(tmp_path):
     session.save()
 
     # Scan
-    report = session.scan_for_phi()
+    report = session.audit()
 
     # Preserve using Report directly
     session.lock_identities_batch(report)

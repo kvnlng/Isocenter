@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING: `Session.scan_for_phi()` is gone; call `audit()`.** `session.scan_for_phi()` now raises `AttributeError: 'DicomSession' object has no attribute 'scan_for_phi'`. The replacement is a rename at the call site and nothing else: same argument, same `PhiReport` back.
+
+  It was a one-line body returning `self.audit(config_path)`, under a `# DEPRECATED` banner and a docstring reading "Legacy alias for audit()". That is the same shape as the `safe=`/`compression=` aliases #40 removed, and it was missed only because it is a method rather than a parameter.
+
+  The internal pre-export safety scan called it too, so `_report_recoverable_identities`'s sibling in `_export_dicom` now calls `audit()` directly -- one spelling in the code as well as in the API.
+
+  `test_api_coherence.py` pins the absence by name rather than by comparing signatures: a signature check would keep passing if the alias came back with a *changed* signature, which is a worse state than the one being removed. (#55)
+
 ### Fixed
 
 - **`remove_private_tags=False` could not keep a private tag with a binary VR, and did not say so.** `populate_attrs` skips every element whose VR is in `BINARY_VRS`, which is right for pixels and waveforms -- they belong in the sidecar, and holding them in `attributes` would undo the memory scaling the design depends on. A private `OB` is collateral: a vendor block routinely carries one, and it never reaches the object graph at all, so there is nothing left for the flag to keep by the time it is read.

@@ -95,7 +95,7 @@ def test_safe_export_skips_phi(tmp_path):
 
     # No config_path is loaded on `sess`, so this relies on the hardcoded
     # baseline PHI check in privacy.py. check_burned_in=True makes export()
-    # run scan_for_phi() first and skip any patient with a finding.
+    # run audit() first and skip any patient with a finding.
 
     sess.export(str(out_dir), check_burned_in=True)
 

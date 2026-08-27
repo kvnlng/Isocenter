@@ -34,7 +34,7 @@ def test_full_logging_coverage(tmp_path):
     session.examine()
 
     # PHI Scan (Empty config warning)
-    session.scan_for_phi()
+    session.audit()
 
     # Config Loading
     config_path = tmp_path / "logging_config.yaml"
