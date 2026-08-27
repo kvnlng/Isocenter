@@ -563,3 +563,35 @@ def test_a_free_threading_claim_is_backed_by_a_free_threaded_job():
         "setup.py advertises free-threading support but the PR gate runs "
         f"{versions} -- no free-threaded build, so run_parallel()'s "
         "no-GIL path is never executed")
+
+
+def test_the_gate_workflow_cannot_cancel_its_own_release_matrix():
+    """publish.yml calls tests.yml twice; both calls must survive.
+
+    A reusable workflow's `github.workflow` is the *caller's* name, so
+    `group: ${{ github.workflow }}-${{ github.ref }}` evaluates to the
+    same string -- `Publish-refs/heads/main` -- for both invocations.
+    With `cancel-in-progress: true`, whichever starts second cancels the
+    first.
+
+    Observed on run 33032212241: `test-floor` was cancelled, `publish`
+    was correctly skipped, and nothing shipped. The failure that matters
+    is the other side of the coin flip -- `test-supported` loses instead,
+    `test-floor` passes, and the release goes out having run half the
+    matrix behind a green check.
+
+    So the group must vary with what was asked for, and a release's tests
+    must not be cancellable at all.
+    """
+    text = GATE_WORKFLOW.read_text(encoding="utf-8")
+    block = re.search(r"^concurrency:\n(?:[ \t]+.*\n)+", text, re.M)
+    assert block, f"{GATE_WORKFLOW.name} declares no concurrency block"
+    block = block.group(0)
+
+    assert "inputs.python-versions" in block, (
+        "the concurrency group does not vary with the requested versions, "
+        "so publish.yml's two calls to this workflow share a group and "
+        "cancel each other")
+    assert re.search(r"cancel-in-progress:\s*\$\{\{", block), (
+        "cancel-in-progress is unconditional; a release's matrix must not "
+        "be cancellable, whatever the PR gate wants")
