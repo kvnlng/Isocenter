@@ -45,7 +45,7 @@ from .store import DicomStore
 from .config_manager import ConfigLoader
 
 
-def populate_attrs(ds: Any, item: "DicomItem", text_index: list = None):
+def populate_attrs(ds: Any, item: "DicomItem"):
     """
     Standalone function to populate attributes for pickle-compatibility in workers.
 
@@ -53,14 +53,17 @@ def populate_attrs(ds: Any, item: "DicomItem", text_index: list = None):
     Isocenter DicomItem. Handles Sequences recursively. Skips large binary blobs
     (PixelData, Overlays) to keep the object graph lightweight.
 
+    Took a third `text_index` argument until #84, which collected the
+    text-VR elements it saw into `Instance.text_index`. Nothing read that
+    index after the PHI scan became structural, and the VR filter it
+    applied was never a scan boundary -- a configured PHI tag is one
+    wherever it sits and whatever its VR.
+
     Args:
         ds: The pydicom Dataset or Sequence Item.
         item (DicomItem): The Isocenter item to populate.
-        text_index (list, optional): A list to append (item, tag) tuples for text indexing.
     """
 
-    # Text-like VRs that might contain PHI
-    TEXT_VRS = {'PN', 'LO', 'SH', 'ST', 'LT', 'UT', 'DA', 'DT', 'TM'}
     # Binary VRs to explicitly skip (Metadata Refactor)
     # UN left out for safety, usually small private tags
     BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
@@ -74,25 +77,19 @@ def populate_attrs(ds: Any, item: "DicomItem", text_index: list = None):
         tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
 
         if elem.VR == 'SQ':
-            process_sequence(tag, elem, item, text_index)
+            process_sequence(tag, elem, item)
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
-            val = str(elem.value)
-            item.set_attr(tag, val)
-            if text_index is not None:
-                text_index.append((item, tag))
+            item.set_attr(tag, str(elem.value))
         else:
             item.set_attr(tag, elem.value)
-            # Index if text
-            if text_index is not None and elem.VR in TEXT_VRS:
-                text_index.append((item, tag))
 
 
-def process_sequence(tag, elem, parent_item, text_index: list = None):
+def process_sequence(tag, elem, parent_item):
     """Recursively parses Sequence (SQ) items."""
     for ds_item in elem:
         seq_item = DicomItem()
-        populate_attrs(ds_item, seq_item, text_index)
+        populate_attrs(ds_item, seq_item)
         parent_item.add_sequence_item(tag, seq_item)
 
 
@@ -146,7 +143,7 @@ def ingest_worker(fp: str) -> Tuple:
 
         # Construct Instance (Metadata Only)
         inst = Instance(meta['sop'], meta['sop_class'], 0, file_path=fp)
-        populate_attrs(ds, inst, inst.text_index)
+        populate_attrs(ds, inst)
 
         # Isocenter internally manages pixels as standard contiguous arrays (Interleaved)
         # So we MUST ensure PlanarConfiguration=0 in metadata to match our converted data

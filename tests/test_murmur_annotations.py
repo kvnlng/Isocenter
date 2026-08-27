@@ -19,7 +19,7 @@ def _instance_from(ds):
     """Build a Isocenter Instance-like item carrying ds's sequences."""
     from isocenter.entities import Instance
     inst = Instance(str(ds.SOPInstanceUID), str(ds.SOPClassUID), 1)
-    populate_attrs(ds, inst, inst.text_index)
+    populate_attrs(ds, inst)
     return inst
 
 

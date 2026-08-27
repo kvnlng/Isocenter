@@ -2532,10 +2532,7 @@ class DicomSession:
                     # worker got a top-level-only instance, so the scan
                     # reported clean on every nested tag -- report text,
                     # annotations, anything below the first level.
-                    i_new.sequences, item_map = clone_sequences(i)
-                    i_new.text_index = [
-                        (item_map.get(id(item), i_new), tag)
-                        for item, tag in i.text_index]
+                    i_new.sequences = clone_sequences(i)
 
                     if hasattr(i, "date_shifted"):
                         i_new.date_shifted = i.date_shifted

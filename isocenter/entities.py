@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Any, Optional, Callable, Tuple
+from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
@@ -285,26 +285,29 @@ def resolve_item_path(root: 'DicomItem', path: tuple) -> Optional['DicomItem']:
     return item
 
 
-def clone_sequences(item: 'DicomItem'):
-    """Deep-copies an item's sequences; returns them with an id mapping.
+def clone_sequences(item: 'DicomItem') -> dict:
+    """Deep-copies an item's sequences.
 
-    Workers must not share sequence items with the session. The mapping is
-    keyed by `id()` of the original item, which is what `text_index`
-    holds, so a caller can rebuild that index against the copies.
+    Workers must not share sequence items with the session, or a finding
+    raised in a worker would carry a reference the parent also holds.
+
+    This used to return an `id()`-keyed mapping alongside the clones, for
+    rebuilding `Instance.text_index` against them. That index had no
+    production consumer and is gone (#84); nothing else ever read the
+    mapping. Nested items are matched between copies of a graph by the
+    `entity_path` from `iter_item_tree`, not by identity -- position is
+    the only identity a sequence item has.
     """
     clones = {}
-    mapping = {}
     for tag, sequence in item.sequences.items():
         clone = DicomSequence(tag=tag)
         for nested in sequence.items:
             nested_clone = DicomItem()
             nested_clone.attributes = dict(nested.attributes)
-            nested_clone.sequences, nested_map = clone_sequences(nested)
-            mapping[id(nested)] = nested_clone
-            mapping.update(nested_map)
+            nested_clone.sequences = clone_sequences(nested)
             clone.items.append(nested_clone)
         clones[tag] = clone
-    return clones, mapping
+    return clones
 
 
 @dataclass(slots=True)
@@ -341,10 +344,6 @@ class Instance(DicomItem):
 
     # Transient: Track if dates have been shifted in memory
     date_shifted: bool = field(default=False, init=False)
-
-    # Transient: Index of all text-based nodes for O(1) PHI scanning
-    # List of (DicomItem_Reference, Tag_String)
-    text_index: List[Tuple['DicomItem', str]] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self):
         # Inlined from DicomItem to avoid super() mismatch issues with slots/reloads
