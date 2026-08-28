@@ -15,6 +15,7 @@ import datetime
 import pytest
 
 from isocenter import io_handlers
+from isocenter.io_handlers import ExportSummary
 from isocenter.builders import DicomBuilder
 from isocenter.session import DicomSession
 
@@ -40,7 +41,13 @@ def captured_batch(monkeypatch):
 
     def record(tasks, **kwargs):
         calls.append({"tasks": list(tasks), **kwargs})
-        return len(calls[-1]["tasks"])
+        # The real `export_batch` returns an `ExportSummary`, and the
+        # caller reads `written` off it to report what was delivered
+        # (#181). A bare count here would pass this fixture and fail
+        # every caller.
+        return ExportSummary(
+            written_uids=[ctx.instance.sop_instance_uid
+                          for ctx in calls[-1]["tasks"]])
 
     monkeypatch.setattr(io_handlers.DicomExporter, "export_batch",
                         staticmethod(record))

@@ -246,10 +246,11 @@ def test_a_lost_element_does_not_make_the_export_report_zero_successes(
             {p.patient_id for p in session.store.patients})
         for task in tasks:
             task.instance.attributes[PRIVATE_TAG] = UNENCODABLE
-        written = DicomExporter.export_batch(
+        summary = DicomExporter.export_batch(
             tasks, show_progress=False, total=len(tasks),
             store_backend=session.store_backend)
     finally:
         session.close()
 
-    assert written == len(tasks), "a loss is not a failed write"
+    assert summary.written == len(tasks), "a loss is not a failed write"
+    assert summary.failures == [], "a loss is not a failed write"

@@ -12,8 +12,9 @@ import yaml
 from tqdm import tqdm
 
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
-                          SidecarPixelLoader, SidecarWaveformLoader,
-                          export_folder_names, LOSS_SCOPE_PRIVATE)
+                          ExportSummary, SidecarPixelLoader,
+                          SidecarWaveformLoader, export_folder_names,
+                          LOSS_SCOPE_PRIVATE)
 from .store import DicomStore
 from .services import RedactionService
 from .config_manager import ConfigLoader
@@ -555,6 +556,14 @@ class DicomSession:
         # Reversibility
         self.key_manager = None
         self.reversibility_service = None
+
+        # What the last DICOM export delivered, so the compliance report
+        # can say how many instances were written beside how many are
+        # indexed (#181). None means "no export has run in this
+        # session", which is not the same as "nothing was written" --
+        # the report omits the row rather than claiming a zero.
+        self._last_export_written = None
+        self._last_export_requested = None
 
         if os.path.exists("isocenter.key"):
             self.enable_reversible_anonymization("isocenter.key")
@@ -1566,6 +1575,8 @@ class DicomSession:
             total_studies=n_st,
             total_series=n_se,
             total_instances=n_i,
+            instances_written=self._last_export_written,
+            instances_requested=self._last_export_requested,
             audit_summary=audit_summary,
             exceptions=exceptions,
             data_losses=data_losses,
@@ -2190,7 +2201,14 @@ class DicomSession:
             self._report_recoverable_identities(tasks)
 
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
-        self._run_export_batch(tasks, show_progress, self.store_backend)
+        summary = self._run_export_batch(tasks, show_progress,
+                                         self.store_backend)
+
+        # Recorded for `generate_report`, which counted the object graph
+        # and nothing else: a run that wrote none of its three instances
+        # still reported "Total Instances | 3" under a PASS (#181).
+        self._last_export_written = summary.written
+        self._last_export_requested = len(tasks)
         print("Done.")
 
     def _report_recoverable_identities(self, tasks) -> int:
@@ -2369,7 +2387,8 @@ class DicomSession:
         return rule.get("redaction_zones", []) if rule else []
 
     @staticmethod
-    def _run_export_batch(tasks, show_progress, store_backend=None) -> None:
+    def _run_export_batch(tasks, show_progress,
+                          store_backend=None) -> ExportSummary:
         """Runs the export in worker processes and reports the outcome.
 
         Uses `export_batch`'s own pool rather than `self._executor`: workers
@@ -2379,10 +2398,16 @@ class DicomSession:
         `store_backend` is passed explicitly because this is a static
         method and the workers may be in subprocesses: the handle cannot
         cross that boundary, so the losses come back instead and are
-        audited here, in the parent (#126).
+        audited here, in the parent (#126). A failed *write* travels the
+        same way and is audited on the same trip (#181).
+
+        Returns:
+            ExportSummary: what reached disk and what did not. Returned
+                None until #181, which is why the caller had nothing to
+                report and the count was thrown away here.
         """
         try:
-            success_count = DicomExporter.export_batch(
+            summary = DicomExporter.export_batch(
                 tasks,
                 show_progress=show_progress,
                 total=len(tasks),
@@ -2395,19 +2420,23 @@ class DicomSession:
         finally:
             gc.collect()
 
-        if success_count < len(tasks):
+        if summary.written < len(tasks):
             # Partial failure used to be invisible here: the count came back
             # and was dropped, and "Export complete." printed whether 1200 of
-            # 1200 instances survived or 3 did. Per-file errors are already in
-            # the audit log; this is the summary that says to go and read it.
+            # 1200 instances survived or 3 did. Per-file errors are in the
+            # audit log as of #181 -- when this line was written they were
+            # not, so it told the reader to go and read rows that did not
+            # exist. This is the summary that says to go and read them.
             get_logger().warning(
                 "Export finished with failures: %d of %d instances exported. "
                 "See the audit log for per-instance errors.",
-                success_count, len(tasks))
+                summary.written, len(tasks))
             print(f"Export finished with failures: "
-                  f"{success_count}/{len(tasks)} instances exported.")
+                  f"{summary.written}/{len(tasks)} instances exported.")
         else:
             get_logger().info("Export complete.")
+
+        return summary
 
     def export_dataframe(
             self,
