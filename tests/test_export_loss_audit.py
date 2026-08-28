@@ -22,7 +22,8 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter import io_handlers
-from isocenter.io_handlers import DicomExporter
+from isocenter.io_handlers import (DicomExporter, LOSS_SCOPE_PRIVATE,
+                                   LOSS_SCOPE_STANDARD)
 from isocenter.session import DicomSession, _ExportOptions
 
 # `_fallback_encoding` returns None for this: not bytes, not a number, not
@@ -65,7 +66,7 @@ def _instances(session):
 def _data_loss_rows(db_path):
     with sqlite3.connect(db_path) as conn:
         return conn.execute(
-            "SELECT entity_uid, details FROM audit_log "
+            "SELECT entity_uid, details, loss_scope FROM audit_log "
             "WHERE action_type='DATA_LOSS'").fetchall()
 
 
@@ -97,9 +98,25 @@ def test_an_unencodable_tag_writes_a_data_loss_audit_entry(tmp_path):
         plant=lambda inst: inst.attributes.__setitem__(PRIVATE_TAG, UNENCODABLE))
 
     assert len(rows) == 1, rows
-    entity_uid, details = rows[0]
+    entity_uid, details, _scope = rows[0]
     assert entity_uid == uid
     assert PRIVATE_TAG in details
+
+
+def test_an_unencodable_private_tag_is_recorded_as_private_scope(tmp_path):
+    """An element the caller asked to keep and did not get is graded.
+
+    This is the export-side twin of the ingest loss: the vendor block
+    reached the graph, survived `remove_private_tags=False`, and then
+    did not reach the file. The worker classifies it, because
+    `_report_export_losses` in the parent has only the message by then
+    (#146).
+    """
+    _uid, rows = _export(
+        tmp_path,
+        plant=lambda inst: inst.attributes.__setitem__(PRIVATE_TAG, UNENCODABLE))
+
+    assert [scope for _u, _d, scope in rows] == [LOSS_SCOPE_PRIVATE], rows
 
 
 def test_a_clean_export_records_no_data_loss(tmp_path):
@@ -189,8 +206,12 @@ def test_a_waveform_with_no_samples_writes_a_data_loss_audit_entry(tmp_path):
     finally:
         session.close()
 
-    details = [d for _uid, d in _data_loss_rows(db_path)]
+    rows = _data_loss_rows(db_path)
+    details = [d for _uid, d, _s in rows]
     assert any("does not contain" in d for d in details), details
+    # Waveform Data is (5400,1010) -- an even group, so under the #146
+    # rule this loss is reported and not graded.
+    assert [s for _u, _d, s in rows] == [LOSS_SCOPE_STANDARD], rows
 
 
 def test_a_lost_element_does_not_make_the_export_report_zero_successes(

@@ -297,7 +297,12 @@ class SqliteStore:
         timestamp TEXT,
         action_type TEXT,
         entity_uid TEXT,
-        details TEXT
+        details TEXT,
+        -- Set only on DATA_LOSS rows, by the emitter, and read by
+        -- `generate_report` to grade the run (#146). NULL everywhere
+        -- else, and on DATA_LOSS rows written before this column
+        -- existed -- those cannot be graded and are not guessed at.
+        loss_scope TEXT
     );
     CREATE TABLE IF NOT EXISTS phi_findings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -456,6 +461,17 @@ class SqliteStore:
                 conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN phi_status TEXT")
 
+        # `loss_scope` on audit_log (#146). A DATA_LOSS row written
+        # before this column existed reads NULL, and NULL is ungraded:
+        # the scope says what kind of element was dropped, and the only
+        # place that ever knew is the emitter that has long since run.
+        # Back-filling it by parsing `details` is exactly the coupling
+        # the column exists to avoid.
+        audit_columns = {row[1] for row in conn.execute(
+            "PRAGMA table_info(audit_log)").fetchall()}
+        if "loss_scope" not in audit_columns:
+            conn.execute("ALTER TABLE audit_log ADD COLUMN loss_scope TEXT")
+
     def _backfill_legacy_blobs(self, conn):
         """Migrate 0.6.x pixel_* columns into instance_blobs.
 
@@ -571,10 +587,23 @@ class SqliteStore:
         if batch:
             self.log_audit_batch(batch)
 
-    def log_audit(self, action_type: str, entity_uid: str, details: str):
-        """Records an action in the audit log (Async)."""
+    def log_audit(self, action_type: str, entity_uid: str, details: str,
+                  loss_scope: Optional[str] = None):
+        """Records an action in the audit log (Async).
+
+        Args:
+            action_type (str): e.g. 'EXPORT', 'ERROR', 'DATA_LOSS'.
+            entity_uid (str): The instance (or path) the action concerns.
+            details (str): Prose for the human reading the report.
+            loss_scope (str, optional): For `DATA_LOSS` only:
+                `io_handlers.LOSS_SCOPE_PRIVATE` or
+                `LOSS_SCOPE_STANDARD`. This is what `generate_report`
+                grades on, and it is passed in rather than derived from
+                `details` because only the caller still holds the tag
+                (#146).
+        """
         # Push to queue instead of writing directly
-        self.audit_queue.put((action_type, entity_uid, details))
+        self.audit_queue.put((action_type, entity_uid, details, loss_scope))
 
     def get_audit_summary(self) -> Dict[str, int]:
         """
@@ -626,25 +655,29 @@ class SqliteStore:
 
     def get_audit_losses(self) -> List[tuple]:
         """
-        Retrieves every `DATA_LOSS` entry.
+        Retrieves every `DATA_LOSS` entry, with the scope it was
+        recorded under.
 
-        Separate from `get_audit_errors` on purpose (#146). Folding
-        `DATA_LOSS` into that query would surface the detail in one line
-        and also flip `validation_status` to `REVIEW_REQUIRED` for every
-        session that dropped anything -- including an ordinary ingest of
-        a file carrying an overlay. Whether a run that discarded data may
-        call itself PASS is a real decision; this getter reports the loss
-        without making it.
+        Still separate from `get_audit_errors`, and the reason is no
+        longer that the grade is untouched -- it is not. A loss scoped
+        `PRIVATE` now takes `validation_status` to `REVIEW_REQUIRED`;
+        one scoped `STANDARD` leaves it at `PASS` (CHANGELOG.md, #146).
+        Folding these rows into `get_audit_errors` would grade all of
+        them alike *and* file a routine drop under "Exceptions &
+        Errors", where nothing failed.
+
+        A row whose `loss_scope` is NULL predates the column and cannot
+        be graded; it is reported and left at `PASS`.
 
         Returns:
-            List[tuple]: (timestamp, entity_uid, details)
+            List[tuple]: (timestamp, entity_uid, details, loss_scope)
         """
         self.flush_audit_queue()
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT timestamp, entity_uid, details
+                    SELECT timestamp, entity_uid, details, loss_scope
                     FROM audit_log
                     WHERE action_type = 'DATA_LOSS'
                     ORDER BY timestamp ASC
@@ -682,19 +715,25 @@ class SqliteStore:
     def log_audit_batch(self, entries: List[tuple]):
         """
         Batch inserts audit logs.
-        entries: List of (action_type, entity_uid, details)
+
+        entries: List of (action_type, entity_uid, details, loss_scope).
+        `loss_scope` is None for everything that is not a `DATA_LOSS`
+        row; a caller with no loss to describe still writes the slot,
+        because one record with two accepted shapes is a fork the
+        reader has to hold in their head.
         """
         if not entries:
             return
 
         timestamp = datetime.now().isoformat()
-        # Prepare data with timestamp: (timestamp, action, uid, details)
-        data = [(timestamp, e[0], e[1], e[2]) for e in entries]
+        # (timestamp, action, uid, details, loss_scope)
+        data = [(timestamp, e[0], e[1], e[2], e[3]) for e in entries]
 
         try:
             with self._get_connection() as conn:
                 conn.executemany(
-                    "INSERT INTO audit_log (timestamp, action_type, entity_uid, details) VALUES (?, ?, ?, ?)", data)
+                    "INSERT INTO audit_log (timestamp, action_type, entity_uid, details, loss_scope) "
+                    "VALUES (?, ?, ?, ?, ?)", data)
                 conn.commit()
         except sqlite3.Error as e:
             self.logger.error(f"Failed to batch log audit: {e}")

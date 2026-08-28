@@ -290,6 +290,7 @@ def test_a_multi_group_record_warns_that_groups_were_discarded(tmp_path, caplog)
 
 def test_a_multi_group_record_records_an_audit_entry(tmp_path):
     """A log line the user may never read is not a compliance trail."""
+    from isocenter.io_handlers import LOSS_SCOPE_STANDARD
     from isocenter.session import DicomSession
 
     src = tmp_path / "src"
@@ -306,11 +307,17 @@ def test_a_multi_group_record_records_an_audit_entry(tmp_path):
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT details FROM audit_log WHERE action_type='DATA_LOSS'"
+            "SELECT details, loss_scope FROM audit_log "
+            "WHERE action_type='DATA_LOSS'"
         ).fetchall()
 
     assert len(rows) == 1
     assert "2" in rows[0][0]
+    # Multiplex groups live under Waveform Sequence (5400,0100), a
+    # standard element, so this loss is scoped STANDARD and does not
+    # move `validation_status` (#146). Whether it should is #150 --
+    # deliberately open, not an oversight in the classification.
+    assert rows[0][1] == LOSS_SCOPE_STANDARD, rows
 
 
 def test_a_single_group_record_records_no_data_loss(tmp_path):

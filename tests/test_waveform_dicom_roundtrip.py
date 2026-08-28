@@ -150,4 +150,5 @@ def test_a_waveform_sequence_with_no_samples_is_reported_on_export(tmp_path):
     outcome = _export_instance_worker(ctx)
 
     assert outcome.ok
-    assert any("does not contain" in loss for loss in outcome.losses), outcome
+    assert any("does not contain" in detail
+               for _scope, detail in outcome.losses), outcome

@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           SidecarPixelLoader, SidecarWaveformLoader,
-                          export_folder_names)
+                          export_folder_names, LOSS_SCOPE_PRIVATE)
 from .store import DicomStore
 from .services import RedactionService
 from .config_manager import ConfigLoader
@@ -1538,7 +1538,25 @@ class DicomSession:
             # Running from a source tree that was never installed.
             ver = "0.0.0"
 
-        # 4. Build Report DTO
+        # 4. Grade the run
+        #
+        # A dropped *private* element fails the grade; a dropped
+        # standard one does not. The asymmetry is deliberate rather than
+        # a rule half-applied, and is argued once -- CHANGELOG.md, #146.
+        #
+        # The one loss this rule sits badly on is the discarded waveform
+        # multiplex group: standard-group, so PASS, and not obviously
+        # routine. That is known and open on #150. Do not resolve it by
+        # widening this test -- the scope is set by the emitter, so
+        # widening here would take every overlay with it.
+        #
+        # `row[3]` is `loss_scope`. NULL for rows written before the
+        # column existed, which read as ungraded rather than as
+        # standard, because nothing here can know which they were.
+        graded_losses = [row for row in data_losses
+                         if row[3] == LOSS_SCOPE_PRIVATE]
+
+        # 5. Build Report DTO
         report = ComplianceReport(
             isocenter_version=ver,
             project_name=os.path.basename(self.persistence_file),
@@ -1551,7 +1569,10 @@ class DicomSession:
             audit_summary=audit_summary,
             exceptions=exceptions,
             data_losses=data_losses,
-            validation_status="PASS" if audit_summary and not exceptions else "REVIEW_REQUIRED"
+            validation_status=("PASS"
+                               if audit_summary and not exceptions
+                               and not graded_losses
+                               else "REVIEW_REQUIRED")
         )
 
         renderer = get_renderer(format)

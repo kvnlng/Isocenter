@@ -68,7 +68,11 @@ outside that set is never inspected for what it contains, no matter
 how identifying the text inside it is. Separately, odd-group private
 tags are removed whenever `remove_private_tags` is `True` (the
 default) -- that check is unconditional and is not gated by
-`phi_tags` at all.
+`phi_tags` at all. Setting it `False` does not retain everything,
+though: private tags with a binary VR never reach the graph -- see
+[Private Tags](configuration.md#private-tags). Cart vendors park
+`OB`/`OW` blobs there routinely, so this is a live case for waveform
+data rather than a footnote.
 
 There are three configurations a reader of this guide can be in:
 
@@ -285,3 +289,10 @@ warning naming the number of groups dropped, plus a `DATA_LOSS` entry in
 the audit log so it appears in the compliance trail and not only in a
 log file. Multi-group support is deferred, but a truncated record should
 never look like a complete one.
+
+That entry is scoped `STANDARD` -- a multiplex group lives under Waveform
+Sequence `(5400,0100)`, an even group -- so it is reported in the
+compliance report's Data Loss section but does **not** move Validation
+Status, which only a private-group loss does. Whether a discarded
+multiplex group should be an exception to that is open on
+[#150](https://github.com/kvnlng/Isocenter/issues/150).

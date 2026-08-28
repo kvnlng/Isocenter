@@ -55,6 +55,37 @@ _ROUTED_BINARY_TAGS = frozenset({
     Tag(0x5400, 0x1010),   # Waveform Data
 })
 
+#: How a `DATA_LOSS` audit entry is graded: PRIVATE takes
+#: `validation_status` to REVIEW_REQUIRED, STANDARD does not. Written by
+#: the emitter and stored on the audit row rather than re-derived, and
+#: why the two differ, are both argued once -- CHANGELOG.md, #146.
+LOSS_SCOPE_PRIVATE = "PRIVATE"
+LOSS_SCOPE_STANDARD = "STANDARD"
+
+
+def loss_scope_for_tag(tag: str) -> str:
+    """Classify a lost element for grading, by the parity of its group.
+
+    Odd group is private, even is standard -- the same split the store
+    already uses to decide where an attribute is written. What each
+    scope does to `validation_status`, and why they differ, is in
+    CHANGELOG.md under #146.
+
+    Args:
+        tag (str): A `"gggg,eeee"` lowercase-hex tag.
+
+    Returns:
+        str: `LOSS_SCOPE_PRIVATE` or `LOSS_SCOPE_STANDARD`.
+
+    Raises:
+        ValueError: If `tag` is not in `"gggg,eeee"` form. Deliberately
+            not caught: every caller holds a tag it has already parsed,
+            so an unparseable one is a bug, and defaulting it to
+            "standard" would silently downgrade a real loss.
+    """
+    group = int(tag.split(",")[0], 16)
+    return LOSS_SCOPE_PRIVATE if group % 2 else LOSS_SCOPE_STANDARD
+
 
 def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
     """
@@ -358,28 +389,56 @@ class DicomImporter:
                         # The log line alone is not a compliance trail: it
                         # goes to a file the user may never open. The audit
                         # entry is what puts this in the record.
+                        #
+                        # Scoped STANDARD, so it is reported and not
+                        # graded: what was discarded lives under Waveform
+                        # Sequence (5400,0100), an even group. This is
+                        # the one loss where that rule is uncomfortable
+                        # -- a discarded multiplex group is not routine
+                        # the way an overlay is -- and it is open on
+                        # #150, deliberately, rather than special-cased
+                        # here. Do not "fix" it to PRIVATE: the scope
+                        # states what the element was, not how bad the
+                        # loss felt.
                         if store_backend is not None:
                             store_backend.log_audit(
                                 action_type="DATA_LOSS",
                                 entity_uid=inst.sop_instance_uid,
-                                details=detail)
+                                details=detail,
+                                loss_scope=LOSS_SCOPE_STANDARD)
 
                     # Private binary elements never reached the graph, so
                     # `remove_private_tags=False` could not have kept
                     # them. Same reasoning as the block above: a loss the
                     # caller cannot see is indistinguishable from a file
                     # that never carried the tag (#125).
+                    #
+                    # The key still says `private` because #125 found it
+                    # there; since #137 the list also carries standard
+                    # elements, which is why the message is chosen per
+                    # tag. Saying "Private tag 6000,3000" on a row the
+                    # report scopes STANDARD invites the reader to
+                    # distrust whichever half they check second.
                     for tag, vr in meta.get('dropped_private_binary', ()):
-                        detail = (f"Private tag {tag} ({vr}) was not ingested; "
-                                  f"binary-VR elements are not held in the "
-                                  f"object graph, so it cannot be exported "
-                                  f"even with remove_private_tags=False.")
+                        scope = loss_scope_for_tag(tag)
+                        if scope == LOSS_SCOPE_PRIVATE:
+                            detail = (f"Private tag {tag} ({vr}) was not "
+                                      f"ingested; binary-VR elements are not "
+                                      f"held in the object graph, so it "
+                                      f"cannot be exported even with "
+                                      f"remove_private_tags=False.")
+                        else:
+                            detail = (f"Standard tag {tag} ({vr}) was not "
+                                      f"ingested; binary-VR elements are not "
+                                      f"held in the object graph, so it is "
+                                      f"not in the exported file.")
                         logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
                             store_backend.log_audit(
                                 action_type="DATA_LOSS",
                                 entity_uid=inst.sop_instance_uid,
-                                details=detail)
+                                details=detail,
+                                loss_scope=scope)
 
                     # Persist Waveform Samples to Sidecar
                     if w_bytes and sidecar_manager:
@@ -488,7 +547,12 @@ class ExportOutcome:
     ok: bool
     output_path: str
     sop_instance_uid: Optional[str] = None
-    losses: List[str] = field(default_factory=list)
+    #: `(scope, detail)` per lost element, where scope is one of
+    #: `LOSS_SCOPE_PRIVATE` / `LOSS_SCOPE_STANDARD`. The scope travels
+    #: with the message rather than being worked out by the parent
+    #: because only the worker still has the tag; by the time
+    #: `_report_export_losses` sees this, the tag is prose (#146).
+    losses: List[Tuple[str, str]] = field(default_factory=list)
     error: Optional[BaseException] = None
 
 
@@ -506,7 +570,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         ExportOutcome: the write's result, plus any elements lost on the
             way out for the parent to log and audit (#126).
     """
-    losses: List[str] = []
+    losses: List[Tuple[str, str]] = []
     uid = getattr(ctx.instance, "sop_instance_uid", None)
 
     try:
@@ -650,10 +714,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # ingest, so it rides the same channel (#126). Only the
                 # empty-samples case: the multiplex-group loss above is
                 # reported at ingest and is not re-reported here.
-                losses.append(
+                #
+                # Scoped STANDARD: what is missing is Waveform Data
+                # (5400,1010), an even group. It is reported and not
+                # graded, on the same rule as the ingest-side multiplex
+                # loss and with the same reservation filed as #150.
+                losses.append((
+                    LOSS_SCOPE_STANDARD,
                     "Waveform Sequence present but no samples are available "
                     "to export; the written file will describe a waveform it "
-                    "does not contain.")
+                    "does not contain."))
 
         if "_ISOCENTER_REDACTION_HASH" in ds:
             del ds["_ISOCENTER_REDACTION_HASH"]
@@ -1223,7 +1293,7 @@ class DicomExporter:
         logger = get_logger()
         count = 0
         for r in results:
-            for loss in getattr(r, "losses", ()):  # Exceptions have none
+            for scope, loss in getattr(r, "losses", ()):  # Exceptions have none
                 uid = r.sop_instance_uid or r.output_path
                 logger.warning(f"{uid}: {loss}")
                 count += 1
@@ -1236,7 +1306,8 @@ class DicomExporter:
                     # The queue is the path #36 uses, and `close()` drains
                     # it.
                     store_backend.log_audit(
-                        action_type="DATA_LOSS", entity_uid=uid, details=loss)
+                        action_type="DATA_LOSS", entity_uid=uid, details=loss,
+                        loss_scope=scope)
         return count
 
     @staticmethod
@@ -1451,10 +1522,12 @@ class DicomExporter:
     def _merge(ds, attrs, losses=None):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
-        `losses` is an optional list that collects a description of every
-        element that could not be written. It is an accumulator rather
-        than a return value because `_merge` is called six times per
-        instance and the loss belongs to the instance, not the call.
+        `losses` is an optional list that collects `(scope, detail)` for
+        every element that could not be written -- the description, plus
+        which side of the private/standard line the tag fell on, which
+        is what grades the run (#146). It is an accumulator rather than
+        a return value because `_merge` is called six times per instance
+        and the loss belongs to the instance, not the call.
         """
         for t, v in attrs.items():
             # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
@@ -1523,8 +1596,13 @@ class DicomExporter:
                 loss = f"Tag {t} not exported (data loss): {exc}"
                 if losses is None:
                     get_logger().warning(loss)
-                elif loss not in losses:
-                    losses.append(loss)
+                    continue
+                # The scope is attached here, where `t` is still a tag,
+                # not in the parent where it is only a substring of a
+                # sentence (#146).
+                entry = (loss_scope_for_tag(t), loss)
+                if entry not in losses:
+                    losses.append(entry)
 
     # PS3.5 6.2: `LO` is a Long String, 64 characters maximum.
     _LO_MAX = 64

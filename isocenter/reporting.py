@@ -25,7 +25,12 @@ class ComplianceReport:
         total_instances (int): Total instances processed.
         audit_summary (Dict[str, int]): Aggregated counts of audit actions.
         exceptions (list): List of error tuples (timestamp, action, details).
-        validation_status (str): Overall status (PASS/FAIL/PENDING).
+        data_losses (list): Elements present in the source and not in the
+            output, as (timestamp, entity_uid, details, loss_scope).
+        validation_status (str): Overall status -- `PENDING` until a
+            report is generated, then `PASS` or `REVIEW_REQUIRED`.
+            Nothing emits `FAIL`: this report describes a run, and a run
+            that fails raises rather than grading itself.
         validation_issues (int): Count of validation issues found.
         verification_details (str): Additional context on verification.
     """
@@ -57,17 +62,21 @@ class ComplianceReport:
     exceptions: list = field(default_factory=list)
 
     # Data Loss
-    # List of "DATA_LOSS" logs: (timestamp, entity_uid, details).
+    # List of "DATA_LOSS" logs: (timestamp, entity_uid, details,
+    # loss_scope), where loss_scope is PRIVATE, STANDARD, or None for a
+    # row written before the column existed.
     #
-    # Its own field rather than more `exceptions` (#146): these are not
-    # errors, nothing failed, and `validation_status` keys off
-    # `exceptions` being empty -- so routing them there would mark every
-    # session that ingested an overlay as REVIEW_REQUIRED as a side
-    # effect of wanting the detail printed.
+    # Its own field rather than more `exceptions` (#146): nothing
+    # failed, and an overlay dropped from an ordinary image belongs
+    # nowhere near a section headed "Exceptions & Errors". The grade is
+    # answered per row, on `loss_scope`, which is what lets the report
+    # say *which* losses were graded rather than grading them alike.
     data_losses: list = field(default_factory=list)
 
     # Validation
-    validation_status: str = "PENDING"  # PASS, FAIL, PENDING
+    # PENDING until graded; then PASS or REVIEW_REQUIRED. No FAIL --
+    # see the class docstring.
+    validation_status: str = "PENDING"
     validation_issues: int = 0
     verification_details: str = ""
 
@@ -140,10 +149,18 @@ The following actions were recorded in the secure audit trail:
         # serial number or a megabyte of vendor telemetry (#146).
         if report.data_losses:
             md_content += "\n## 3. Data Loss\n\n> [!WARNING]\n> Elements below were present in the source and are **not** in the exported data:\n\n"
-            md_content += "| Timestamp | Instance | Element |\n| :--- | :--- | :--- |\n"
+            md_content += "| Timestamp | Instance | Element | Scope |\n| :--- | :--- | :--- | :--- |\n"
             for loss in report.data_losses:
-                # (timestamp, entity_uid, details)
-                md_content += f"| {loss[0]} | {loss[1]} | {loss[2]} |\n"
+                # (timestamp, entity_uid, details, loss_scope)
+                #
+                # The scope is printed because it decides the grade: a
+                # report that reads REVIEW_REQUIRED with no way to see
+                # which row caused it is the same defect as the bare
+                # `DATA_LOSS: 3` this section replaced. "unrecorded" is
+                # a row from a store older than the column, not a third
+                # kind of loss.
+                scope = loss[3] or "unrecorded"
+                md_content += f"| {loss[0]} | {loss[1]} | {loss[2]} | {scope} |\n"
         else:
             md_content += "\n## 3. Data Loss\n\n*No data loss was recorded.*\n"
 
