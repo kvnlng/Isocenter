@@ -65,6 +65,14 @@ Values are automatically split during persistence based on their Group ID:
 | **Vertical Attributes** | `instance_attributes` | `tag_group`, `tag_elem`, `value` | Private Tags (Odd Groups) | **Flexibility**. Private tags are sparse. This EAV storage prevents the Core JSON from becoming bloated with garbage data while keeping private tags queryable. |
 | **Pixel Data** | `[name]_pixels.bin` | Comparison to DB via Offset/Length | Raw Byte Stream | **Offloading**. Gigabytes of pixel data are kept out of the DB to prevent bloating and ensure the index remains lightweight. |
 
+There is no fourth row, and its absence is a design decision rather than an
+omission. Only `PixelData` and `WaveformData` are routed to the sidecar;
+every *other* element with a binary VR (`OB`, `OW`, `OF`, `OD`, `OL`) is
+dropped at ingest and stored nowhere, because the offsets in the last row
+are a representation the EAV table does not have and `session.compact()`
+rewires every one of them. Private vendor blocks are the case that bites --
+see [`false` cannot retain private tags with a binary VR](configuration.md#private-tags).
+
 ### Database Schema Reference
 
 | Table | Purpose | Key Columns |

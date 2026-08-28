@@ -100,19 +100,74 @@ remove_private_tags: true
 * `true`: Removes **ALL** private tags. (Recommended for safety).
 * `false`: Retains them (Use only if you are sure they are safe or strictly needed for analysis).
 
+The flag governs the private tags Isocenter *holds*, which is not every
+private tag in your source files. Where the line falls:
+
+| Private tag, by the VR it is read with | `remove_private_tags: true` | `remove_private_tags: false` |
+| :--- | :--- | :--- |
+| Text and numeric VRs -- `LO`, `SH`, `UN`, `DS` | Removed | **Kept**, and written to the exported file |
+| Binary VRs -- `OB`, `OW`, `OF`, `OD`, `OL` | Gone | **Gone** -- dropped at ingest, before the flag is read |
+
 !!! warning "`false` cannot retain private tags with a binary VR"
 
     Elements with a binary VR (`OB`, `OW`, `OF`, `OD`, `OL`) are skipped
-    at ingest and never enter the object graph, so there is nothing left
-    for this flag to keep by the time it is read. A vendor block
-    routinely carries one. The rule exists to keep pixel and waveform
-    blobs out of resident memory -- an arbitrary private `OB` can be
-    megabytes -- and private tags are collateral.
+    by `populate_attrs` at ingest and never enter the object graph, so
+    there is nothing left for this flag to keep by the time it is read. A
+    vendor block routinely carries one. Setting `false` does not fail: it
+    succeeds on a tag that has been gone since ingest, and the exported
+    file simply does not have it.
 
-    Each one is logged and written to the audit log as a `DATA_LOSS`
-    entry naming the tag and its VR, so the loss is visible rather than
-    silent. Whether these bytes should be retained at all is still open
-    ([#125](https://github.com/kvnlng/Isocenter/issues/125)).
+    **Only that VR family is affected.** Private tags with a text or
+    numeric VR are ingested normally and are governed by this flag in
+    both directions -- swept when it is `true`, kept and written to the
+    exported file when it is `false`. That covers the `LO` private
+    creator and the `SH`/`LO` strings a vendor block is mostly made of,
+    and it covers `UN`, which is deliberately *not* in the binary set
+    because it is usually a small private value rather than a blob.
+    "Private tags are not retained" is the wrong reading; one VR family
+    of them is not.
+
+    **The VR that decides is the one pydicom reads, not the one the
+    vendor wrote**, and for a private tag those differ by transfer
+    syntax. An implicit-VR file carries no VR field at all: pydicom
+    resolves it from the standard dictionary, which has no entry for a
+    private tag, and hands back `UN` -- which is not in the binary set.
+    So the same vendor `OB` element that is dropped out of an
+    explicit-VR source is ingested, retained, exported, and files no
+    `DATA_LOSS` entry when it arrives in an implicit-VR one. Do not plan
+    around that: one study written in the two syntaxes gives two
+    different answers, and only the explicit-VR one is the answer this
+    section describes.
+
+    **The loss is announced, not silent.** Each dropped element is logged
+    as a warning and written to the audit log as a `DATA_LOSS` entry
+    naming the tag *and its VR* -- the VR is the part that says whether
+    you lost a four-byte serial number or a megabyte of vendor
+    telemetry. It reaches you in three places: the session log, section
+    3 (*Data Loss*) of the compliance report written by
+    `session.generate_report(path)`, and
+    `session.store_backend.get_audit_losses()` if you want the rows
+    directly. Read that section before concluding a vendor block came
+    through a run intact.
+
+    **This is settled rather than pending**
+    ([#125](https://github.com/kvnlng/Isocenter/issues/125)). Warning
+    plus an audit entry is the answer; storing the bytes is not planned,
+    and both ways of storing them were considered and rejected. Holding
+    vendor binary in `attributes` makes an arbitrary blob permanently
+    resident, which is exactly what the binary-VR rule exists to prevent
+    -- memory scaling on 100GB+ datasets depends on heavy arrays never
+    being resident by default, and that guarantee is worth more than an
+    unread vendor block. Routing them to the sidecar instead means
+    giving private tags an offset/length representation the EAV table
+    does not have, plus a lazy loader and an export re-merge path -- and
+    `session.compact()` rewrites the sidecar and rewires every offset it
+    knows about, so a class of offset it does not know about is silent
+    corruption after the first compaction. That is design work, not a
+    flag.
+
+    If you need those bytes, keep your source files: Isocenter never
+    modifies them, so the vendor block is still there to go back to.
 
 !!! warning "Standard binary elements are dropped too"
 
