@@ -625,10 +625,16 @@ def test_a_dropped_annotation_is_warned_and_audited(tmp_path, caplog):
                 if r.levelno >= logging.WARNING]
     assert any("multiplex group 2" in m for m in warnings), warnings
 
-    annotation_rows = [r for r in _data_loss_rows(db_path)
-                       if "annotation" in r[0].lower()]
-    assert len(annotation_rows) == 1, _data_loss_rows(db_path)
+    rows = _data_loss_rows(db_path)
+    annotation_rows = [r for r in rows if "annotation" in r[0].lower()]
+    assert len(annotation_rows) == 1, rows
     assert annotation_rows[0][1] == LOSS_SCOPE_STANDARD, annotation_rows
+
+    # Two rows from two emitters, and that is the expected shape rather
+    # than a double count: ingest reports the groups it discarded, export
+    # reports the marks that referenced them. `docs/waveforms.md` says so,
+    # so it is asserted here rather than left as prose.
+    assert len(rows) == 2, rows
 
 
 def test_several_dropped_annotations_file_one_audit_row_naming_every_group(tmp_path):
@@ -676,6 +682,53 @@ def test_several_dropped_annotations_file_one_audit_row_naming_every_group(tmp_p
         findings = json.load(f)["findings"]
     assert len(findings) == 1, findings
     assert findings[0]["startSample"] == 400
+
+
+def test_the_dropped_annotation_row_renders_as_one_report_table_cell(tmp_path):
+    """Section 3 is a markdown table, and this detail carries commas.
+
+    The audit-log assertions above read the row straight out of sqlite,
+    which is the layer under the one #146 and #157 were about. A detail
+    string that breaks the pipe table would leave the Scope column
+    rendering under the wrong header, with the whole suite still green --
+    that is the failure mode #157 pinned for the ingest-side messages,
+    and this message has a shape none of those had.
+    """
+    import pydicom
+    from isocenter.io_handlers import LOSS_SCOPE_STANDARD
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    ds = build_ecg_dataset(num_samples=500, sampling_frequency=500.0)
+    _add_second_group(ds, sampling_frequency=1000.0)
+    add_annotation(ds, start_sample=101, channel=2, group=2)
+    add_annotation(ds, start_sample=201, channel=1, group=3)
+    pydicom.dcmwrite(str(src / "multi.dcm"), ds, enforce_file_format=True)
+
+    report = tmp_path / "report.md"
+    session = DicomSession(persistence_file=str(tmp_path / "report.db"))
+    try:
+        session.ingest(str(src))
+        # generate_report grades the audit log as it stands when called,
+        # and this emitter writes during export() -- see #153 on the two
+        # documented call orders. Export first, or the row is not there.
+        session.export(str(tmp_path / "out"), format="wfdb")
+        session.store_backend.flush_audit_queue()
+        session.generate_report(str(report))
+    finally:
+        session.close()
+
+    lines = report.read_text(encoding="utf-8").splitlines()
+    row = [ln for ln in lines if "waveform annotations" in ln]
+    assert len(row) == 1, lines
+
+    # Header is | Timestamp | Instance | Element | Scope |, so a row that
+    # kept its detail in one cell has exactly four cells.
+    cells = [c.strip() for c in row[0].strip().strip("|").split("|")]
+    assert len(cells) == 4, cells
+    assert "groups 2, 3" in cells[2], cells
+    assert cells[3] == LOSS_SCOPE_STANDARD, cells
 
 
 def test_an_ordinary_single_group_export_records_no_annotation_data_loss(tmp_path):
