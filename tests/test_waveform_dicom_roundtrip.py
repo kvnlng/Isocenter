@@ -152,3 +152,46 @@ def test_a_waveform_sequence_with_no_samples_is_reported_on_export(tmp_path):
     assert outcome.ok
     assert any("does not contain" in detail
                for _scope, detail in outcome.losses), outcome
+
+
+def _rhythm_plus_median(path, rhythm_samples=5000, median_samples=1200):
+    """A two-group ECG: an 8ch/500 Hz rhythm strip plus a 1000 Hz median beat.
+
+    The shape real 12-lead carts emit, and the one that made the defect
+    visible: the second group is at a *different* sampling frequency, so
+    it cannot be folded into the first.
+    """
+    ds = build_ecg_dataset(num_samples=rhythm_samples, sampling_frequency=500.0)
+    median = copy.deepcopy(ds.WaveformSequence[0])
+    median.SamplingFrequency = 1000.0
+    median.NumberOfWaveformSamples = median_samples
+    median.WaveformData = np.zeros(
+        median_samples * int(median.NumberOfWaveformChannels),
+        dtype="<i2").tobytes()
+    ds.WaveformSequence.append(median)
+    pydicom.dcmwrite(str(path), ds, enforce_file_format=True)
+    return str(path)
+
+
+def test_no_exported_multiplex_group_declares_samples_it_does_not_carry(tmp_path):
+    """Waveform Data (5400,1010) is Type 1: required, never absent (#160).
+
+    Ingest keeps group 0's samples and discards the rest (#36), but the
+    sequence *metadata* came in by a different path -- `populate_attrs`
+    walks the whole sequence -- so every group's item reached the graph
+    and was written out. The exported file declared a multiplex group of
+    8 channels at 1000 Hz over 1200 samples and carried none of them: a
+    conformant reader may reject it, and one that trusts Type 1 without
+    checking reads a sample count with nothing behind it.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    path = _rhythm_plus_median(src / "multi.dcm")
+
+    out = _export_roundtrip(tmp_path, path, db_name="orphan.db")
+
+    hollow = [i for i, item in enumerate(out.WaveformSequence)
+              if not getattr(item, "WaveformData", None)]
+    assert not hollow, (
+        f"exported WaveformSequence items {hollow} declare a multiplex "
+        f"group with no Waveform Data")

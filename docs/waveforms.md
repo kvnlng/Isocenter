@@ -290,6 +290,15 @@ the audit log so it appears in the compliance trail and not only in a
 log file. Multi-group support is deferred, but a truncated record should
 never look like a complete one.
 
+"Never enter the object graph" covers the sequence items as well as the
+samples. It did not always: the samples were dropped and the *metadata*
+was not -- `populate_attrs` walks the whole sequence -- so an exported
+file carried an item declaring a multiplex group with no Waveform Data
+`(5400,1010)`, a Type 1 element. The discarded groups' items are now
+dropped alongside their samples, so what is written is a conformant
+single-group record
+([#160](https://github.com/kvnlng/Isocenter/issues/160)).
+
 That entry is scoped `STANDARD` -- a multiplex group lives under Waveform
 Sequence `(5400,0100)`, an even group -- so it is reported in the
 compliance report's Data Loss section but does **not** move Validation
