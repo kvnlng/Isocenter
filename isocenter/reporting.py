@@ -25,6 +25,8 @@ class ComplianceReport:
         total_instances (int): Total instances processed.
         audit_summary (Dict[str, int]): Aggregated counts of audit actions.
         exceptions (list): List of error tuples (timestamp, action, details).
+        data_losses (list): Elements present in the source and not in the
+            output, as (timestamp, entity_uid, details, loss_scope).
         validation_status (str): Overall status -- `PENDING` until a
             report is generated, then `PASS` or `REVIEW_REQUIRED`.
             Nothing emits `FAIL`: this report describes a run, and a run
@@ -64,13 +66,11 @@ class ComplianceReport:
     # loss_scope), where loss_scope is PRIVATE, STANDARD, or None for a
     # row written before the column existed.
     #
-    # Its own field rather than more `exceptions` (#146): these are not
-    # errors, nothing failed, and an overlay dropped from an ordinary
-    # image belongs nowhere near a section headed "Exceptions & Errors".
-    # The grade is a separate question, answered per row: a PRIVATE loss
-    # takes `validation_status` to REVIEW_REQUIRED, a STANDARD one does
-    # not. Keeping the two apart is what lets the report say *which*
-    # losses were graded instead of grading all of them alike.
+    # Its own field rather than more `exceptions` (#146): nothing
+    # failed, and an overlay dropped from an ordinary image belongs
+    # nowhere near a section headed "Exceptions & Errors". The grade is
+    # answered per row, on `loss_scope`, which is what lets the report
+    # say *which* losses were graded rather than grading them alike.
     data_losses: list = field(default_factory=list)
 
     # Validation
@@ -159,7 +159,7 @@ The following actions were recorded in the secure audit trail:
                 # `DATA_LOSS: 3` this section replaced. "unrecorded" is
                 # a row from a store older than the column, not a third
                 # kind of loss.
-                scope = loss[3] if len(loss) > 3 and loss[3] else "unrecorded"
+                scope = loss[3] or "unrecorded"
                 md_content += f"| {loss[0]} | {loss[1]} | {loss[2]} | {scope} |\n"
         else:
             md_content += "\n## 3. Data Loss\n\n*No data loss was recorded.*\n"

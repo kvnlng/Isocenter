@@ -1541,18 +1541,8 @@ class DicomSession:
         # 4. Grade the run
         #
         # A dropped *private* element fails the grade; a dropped
-        # standard one does not (#146). The asymmetry is deliberate and
-        # is not a rule half-applied:
-        #
-        # - A private loss is a vendor block nobody outside the vendor
-        #   can size or identify, and one `remove_private_tags=False`
-        #   may have been set specifically to keep. A run that discarded
-        #   one has questions to answer.
-        # - Overlay Data and the palette LUTs are dropped on ordinary
-        #   images by the thousand. Grading on those would mark most
-        #   real cohorts REVIEW_REQUIRED, and a grade that is almost
-        #   always the same value carries no information -- the failure
-        #   #146 was opened about, in a different place.
+        # standard one does not. The asymmetry is deliberate rather than
+        # a rule half-applied, and is argued once -- CHANGELOG.md, #146.
         #
         # The one loss this rule sits badly on is the discarded waveform
         # multiplex group: standard-group, so PASS, and not obviously

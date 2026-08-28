@@ -658,15 +658,13 @@ class SqliteStore:
         Retrieves every `DATA_LOSS` entry, with the scope it was
         recorded under.
 
-        Still separate from `get_audit_errors` (#146), and the reason is
-        no longer that the grade is untouched -- it is not. A loss
-        scoped `PRIVATE` now takes `validation_status` to
-        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`,
-        because overlays and palette LUTs are dropped on ordinary images
-        by the thousand and a grade that moved on those would carry no
-        information. Folding these rows into `get_audit_errors` would
-        grade all of them alike *and* file a routine drop under
-        "Exceptions & Errors", where nothing failed.
+        Still separate from `get_audit_errors`, and the reason is no
+        longer that the grade is untouched -- it is not. A loss scoped
+        `PRIVATE` now takes `validation_status` to `REVIEW_REQUIRED`;
+        one scoped `STANDARD` leaves it at `PASS` (CHANGELOG.md, #146).
+        Folding these rows into `get_audit_errors` would grade all of
+        them alike *and* file a routine drop under "Exceptions &
+        Errors", where nothing failed.
 
         A row whose `loss_scope` is NULL predates the column and cannot
         be graded; it is reported and left at `PASS`.
@@ -718,24 +716,18 @@ class SqliteStore:
         """
         Batch inserts audit logs.
 
-        entries: List of (action_type, entity_uid, details) or
-        (action_type, entity_uid, details, loss_scope).
-
-        The fourth element is optional because this method has two
-        feeders: the audit queue, whose entries come from `log_audit`
-        and always carry a scope slot, and `RemediationService`, which
-        builds its batch by hand and reports no losses -- there is
-        nothing for it to put there. Padding here keeps that caller
-        honest rather than making it write a `None` it has no opinion
-        about.
+        entries: List of (action_type, entity_uid, details, loss_scope).
+        `loss_scope` is None for everything that is not a `DATA_LOSS`
+        row; a caller with no loss to describe still writes the slot,
+        because one record with two accepted shapes is a fork the
+        reader has to hold in their head.
         """
         if not entries:
             return
 
         timestamp = datetime.now().isoformat()
         # (timestamp, action, uid, details, loss_scope)
-        data = [(timestamp, e[0], e[1], e[2], e[3] if len(e) > 3 else None)
-                for e in entries]
+        data = [(timestamp, e[0], e[1], e[2], e[3]) for e in entries]
 
         try:
             with self._get_connection() as conn:

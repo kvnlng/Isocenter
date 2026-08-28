@@ -19,17 +19,24 @@ The report includes:
 4. **Exceptions**: A detailed list of any warnings or errors encountered (e.g., "Corrupt pixel data in File X", "Burned-In Annotation found").
 5. **Manifest**: A summary of the processed cohort (Top studies by size).
 
-!!! warning "Data Loss does not affect Validation Status"
+!!! warning "Which losses move the Validation Status"
 
-    A session that dropped elements can still be graded `PASS`. The two
-    sections answer different questions: Validation Status reports
-    whether anything *failed*, and dropping a binary element is not a
-    failure -- it is what `populate_attrs` is designed to do for pixels
-    and waveforms, and collateral for everything else with the same VR.
+    A dropped **private** (odd-group) element grades the session
+    `REVIEW_REQUIRED`. It may be a vendor block `remove_private_tags=False`
+    was set specifically to keep, and nobody outside the vendor can size
+    or identify what went missing.
 
-    Read the Data Loss section on its own terms. Whether a run that
-    discarded data should be allowed to grade itself `PASS` is an open
-    question ([#146](https://github.com/kvnlng/Isocenter/issues/146)).
+    A dropped **standard** element -- Overlay Data `(60xx,3000)`, the
+    palette color LUTs `(0028,120x)` -- does not. Those come off ordinary
+    images by the thousand, so a grade that moved on them would read
+    `REVIEW_REQUIRED` for most cohorts and stop carrying information.
+
+    Read the Data Loss section on its own terms either way: its **Scope**
+    column says which rows were graded, and `unrecorded` means a row
+    written by a version that predated the distinction. One case sits on
+    the line: a discarded waveform multiplex group is standard-group and
+    so does not move the grade -- see
+    [#150](https://github.com/kvnlng/Isocenter/issues/150).
 
 !!! tip "Format Options"
     Currently, Isocenter supports Markdown (`.md`) reports. PDF support is planned for future releases via Pandoc integration.
