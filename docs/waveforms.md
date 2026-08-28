@@ -296,3 +296,31 @@ compliance report's Data Loss section but does **not** move Validation
 Status, which only a private-group loss does. Whether a discarded
 multiplex group should be an exception to that is open on
 [#150](https://github.com/kvnlng/Isocenter/issues/150).
+
+**Annotations naming a discarded group are dropped, not re-pointed.**
+Referenced Waveform Channels `(0040,A0B0)` identifies a mark by a
+`(multiplex group, channel)` pair, and DICOM numbers both from 1 -- the
+first channel of the first group is `1\1`, so ordinal 1 is the group
+Isocenter keeps, and the bridge reads that half. A mark that names any
+other group has no placeable home in the exported record:
+its sample positions index that group's samples, and its lead is that
+group's channel. It is therefore left out of `annotations.json`
+entirely, rather than resolved against the surviving group -- which
+produced a plausible lead name at a plausible sample position, both
+belonging to a signal that is not in the record, until
+[#159](https://github.com/kvnlng/Isocenter/issues/159). The `lead`
+resolution described earlier therefore applies to marks on the ingested
+group; there are no others in the file.
+
+That drop is announced the same way the group discard is: a warning, and
+one `DATA_LOSS` entry per instance naming how many annotations were
+dropped and which groups they referenced -- one row, not one per mark,
+so a cart that marks forty beats on a discarded group does not fill the
+report's Data Loss section with forty near-identical lines. It is scoped
+`STANDARD` for the same reason as the entry above, and on the same open
+question ([#150](https://github.com/kvnlng/Isocenter/issues/150)):
+Waveform Annotation Sequence `(0040,B020)` is an even group, and the
+scope states what the element was, not how serious the loss felt. A
+record with two `DATA_LOSS` rows -- one from ingest for the groups, one
+from export for the marks that referenced them -- is the expected shape,
+not a double count: they report different losses.

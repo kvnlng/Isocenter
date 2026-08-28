@@ -463,12 +463,14 @@ def test_dropping_an_annotation_reports_the_group_ordinal_the_file_named():
     _add_second_group(ds)
     add_annotation(ds, start_sample=101, channel=2, group=2)
 
-    dropped = []
+    dropped_groups = []
     build_annotations(_instance_from(ds), _waveform_from(ds), "isocenter/test",
-                      dropped=dropped)
+                      dropped_groups=dropped_groups)
 
-    assert len(dropped) == 1, dropped
-    assert "multiplex group 2" in dropped[0], dropped
+    # Ordinals, not prose. The exporter holds the logger and the store
+    # handle, and it aggregates across the instance before wording
+    # anything -- so what crosses this boundary is which group was named.
+    assert dropped_groups == [2], dropped_groups
 
 
 def test_an_annotation_on_the_ingested_group_still_resolves():
@@ -477,14 +479,14 @@ def test_an_annotation_on_the_ingested_group_still_resolves():
     _add_second_group(ds)
     add_annotation(ds, start_sample=101, channel=2, group=1)
 
-    dropped = []
+    dropped_groups = []
     doc = build_annotations(_instance_from(ds), _waveform_from(ds),
-                            "isocenter/test", dropped=dropped)
+                            "isocenter/test", dropped_groups=dropped_groups)
 
     assert len(doc["findings"]) == 1, doc
     assert doc["findings"][0]["lead"] == "MDC_ECG_LEAD_II"
     assert doc["findings"][0]["startSample"] == 100
-    assert dropped == [], dropped
+    assert dropped_groups == [], dropped_groups
 
 
 def test_a_zero_group_ordinal_is_read_as_the_first_group():
@@ -500,13 +502,13 @@ def test_a_zero_group_ordinal_is_read_as_the_first_group():
     ds = build_ecg_dataset(num_samples=1000)
     add_annotation(ds, start_sample=101, channel=1, group=0)
 
-    dropped = []
+    dropped_groups = []
     doc = build_annotations(_instance_from(ds), _waveform_from(ds),
-                            "isocenter/test", dropped=dropped)
+                            "isocenter/test", dropped_groups=dropped_groups)
 
     assert len(doc["findings"]) == 1, doc
     assert doc["findings"][0]["lead"] == "MDC_ECG_LEAD_I"
-    assert dropped == [], dropped
+    assert dropped_groups == [], dropped_groups
 
 
 def test_an_annotation_with_no_referenced_channels_is_kept_without_a_lead():
@@ -519,14 +521,14 @@ def test_an_annotation_with_no_referenced_channels_is_kept_without_a_lead():
     add_annotation(ds, start_sample=101)
     del ds.WaveformAnnotationSequence[0].ReferencedWaveformChannels
 
-    dropped = []
+    dropped_groups = []
     doc = build_annotations(_instance_from(ds), _waveform_from(ds),
-                            "isocenter/test", dropped=dropped)
+                            "isocenter/test", dropped_groups=dropped_groups)
 
     assert len(doc["findings"]) == 1, doc
     assert "lead" not in doc["findings"][0]
     assert doc["findings"][0]["startSample"] == 100
-    assert dropped == [], dropped
+    assert dropped_groups == [], dropped_groups
 
 
 def test_a_time_offset_annotation_on_the_ingested_group_uses_its_rate():
@@ -554,21 +556,23 @@ def test_an_annotation_naming_both_groups_resolves_against_the_ingested_one():
     # group named first, so the kept pair is only found by looking past it.
     ds.WaveformAnnotationSequence[0].ReferencedWaveformChannels = [2, 3, 1, 2]
 
-    dropped = []
+    dropped_groups = []
     doc = build_annotations(_instance_from(ds), _waveform_from(ds),
-                            "isocenter/test", dropped=dropped)
+                            "isocenter/test", dropped_groups=dropped_groups)
 
     assert len(doc["findings"]) == 1, doc
     assert doc["findings"][0]["lead"] == "MDC_ECG_LEAD_II"
-    assert dropped == [], dropped
+    assert dropped_groups == [], dropped_groups
 
 
 # --- The drop is said out loud, at export (#159) -----------------------
 #
 # `build_annotations` has no logger and no store handle -- it runs inside
 # the WFDB exporter, which has both. The messages ride an out-parameter
-# for the same reason `populate_attrs`'s `dropped` list does (#125): the
-# caller does the warning and the audit entry.
+# for the same reason `populate_attrs`'s `dropped_private_binary` list
+# does (#125): the caller does the warning and the audit entry, and it
+# words the message, because only the caller can see the whole instance
+# and aggregate across it.
 
 
 def _two_group_annotated_file(path, group=2, num_samples=500):
@@ -625,6 +629,53 @@ def test_a_dropped_annotation_is_warned_and_audited(tmp_path, caplog):
                        if "annotation" in r[0].lower()]
     assert len(annotation_rows) == 1, _data_loss_rows(db_path)
     assert annotation_rows[0][1] == LOSS_SCOPE_STANDARD, annotation_rows
+
+
+def test_several_dropped_annotations_file_one_audit_row_naming_every_group(tmp_path):
+    """One row per instance, not one per mark.
+
+    A cart that marks forty beats on a discarded group would otherwise
+    put forty near-identical rows into section 3 of the compliance
+    report, and a section nobody can read reports nothing -- the same
+    argument #146 made for the bare `DATA_LOSS: 3` count, one layer up.
+    #36's emitter, which this descends from, reports the discard once
+    with a count; this matches it. The count is of annotations and the
+    list is of distinct groups, because they answer different questions.
+    """
+    import pydicom
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    ds = build_ecg_dataset(num_samples=500, sampling_frequency=500.0)
+    _add_second_group(ds, sampling_frequency=1000.0)
+    add_annotation(ds, start_sample=101, channel=2, group=2)
+    add_annotation(ds, start_sample=201, channel=3, group=2)
+    add_annotation(ds, start_sample=301, channel=1, group=3)
+    add_annotation(ds, start_sample=401, channel=1, group=1)  # kept: survives
+    pydicom.dcmwrite(str(src / "multi.dcm"), ds, enforce_file_format=True)
+
+    session = DicomSession(persistence_file=str(tmp_path / "many.db"))
+    db_path = session.store_backend.db_path
+    try:
+        session.ingest(str(src))
+        paths = session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    annotation_rows = [r for r in _data_loss_rows(db_path)
+                       if "annotation" in r[0].lower()]
+    assert len(annotation_rows) == 1, _data_loss_rows(db_path)
+    detail = annotation_rows[0][0]
+    assert "3 waveform annotations" in detail, detail
+    assert "groups 2, 3" in detail, detail
+
+    # The one annotation on the ingested group is untouched by any of it.
+    with open(f"{os.path.splitext(paths[0])[0]}.annotations.json",
+              encoding="utf-8") as f:
+        findings = json.load(f)["findings"]
+    assert len(findings) == 1, findings
+    assert findings[0]["startSample"] == 400
 
 
 def test_an_ordinary_single_group_export_records_no_annotation_data_loss(tmp_path):

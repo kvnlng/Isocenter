@@ -237,7 +237,7 @@ def _concept(item, include_text: bool = False):
 
 
 def build_annotations(instance, waveform, source: str, include_text: bool = False,
-                      dropped: Optional[List[str]] = None) -> Dict[str, Any]:
+                      dropped_groups: Optional[List[int]] = None) -> Dict[str, Any]:
     """Build a Murmur annotations document from an instance's annotations.
 
     Args:
@@ -252,15 +252,19 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             because that tag routinely holds free-text clinical
             commentary, and the PHI scan is tag-gated -- so a bare
             Session() would otherwise write it out unremediated.
-        dropped (list, optional): Appended with one message per
-            annotation dropped because it names a multiplex group that
-            was not ingested. It rides an out-parameter rather than the
-            return value for two reasons: the return value is the
-            published Murmur document, so a new key there is a schema
-            change; and this function has neither a logger nor a store
-            handle, so the warning and the `DATA_LOSS` entry belong to
-            the caller. Same channel `populate_attrs` uses for the binary
-            elements it cannot ingest (#125).
+        dropped_groups (list, optional): Appended with the multiplex
+            group ordinal of every annotation dropped because it names a
+            group that was not ingested. It carries ordinals rather than
+            prose, and rides an out-parameter rather than the return
+            value, for three reasons: the return value is the published
+            Murmur document, so a new key there is a schema change; this
+            function has neither a logger nor a store handle, so the
+            warning and the `DATA_LOSS` entry belong to the caller; and
+            the caller aggregates -- one instance with forty marks on a
+            discarded group must file one audit row, not forty. Same
+            channel and same shape as `populate_attrs`'s
+            `dropped_private_binary`, which likewise hands back the tag
+            and lets the caller word the message (#125).
 
     Returns:
         dict: A `schemaVersion: 1` document. `findings` is empty when the
@@ -294,14 +298,8 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             # test becomes "resolve against the right group" and this
             # branch stops firing on its own; nothing here presumes the
             # discard is permanent.
-            if dropped is not None:
-                dropped.append(
-                    f"Waveform annotation references multiplex group "
-                    f"{referenced_group}, which is not the ingested group; "
-                    f"only Waveform Sequence item 0 is kept (#36). Dropped "
-                    f"from annotations.json rather than resolved against "
-                    f"the surviving group, which would have placed it at a "
-                    f"position and lead belonging to a different signal.")
+            if dropped_groups is not None:
+                dropped_groups.append(referenced_group)
             continue
 
         category, label = _concept(item, include_text)

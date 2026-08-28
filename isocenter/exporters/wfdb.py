@@ -452,15 +452,25 @@ class WfdbExporter(Exporter):
         if manufacturer:
             source = f"{source} ({manufacturer})"
 
-        dropped_annotations = []
+        dropped_groups = []
         write_annotations(
             os.path.join(out_dir, f"{record_name}.annotations.json"),
             build_annotations(instance, waveform, source, include_annotation_text,
-                              dropped=dropped_annotations))
+                              dropped_groups=dropped_groups))
 
         # Warn-plus-audit, the shape #36 established for the multiplex
         # discard itself. A dropped annotation that says nothing is a
         # different bug from a mislabelled one, not a fix for it (#159).
+        #
+        # ONE row per instance, naming the count and the groups -- not
+        # one per annotation. #36's emitter, which this descends from,
+        # reports "carried N groups; kept group 0 and discarded N-1"
+        # once; a cart that marks forty beats on a discarded group would
+        # otherwise put forty near-identical rows into section 3 of the
+        # compliance report, and a section nobody can read reports
+        # nothing. Group ordinals are deduplicated but the annotation
+        # count is not, because they answer different questions: which
+        # signal was referenced, and how much was dropped.
         #
         # Scoped STANDARD because Waveform Annotation Sequence
         # (0040,B020) is an even group, so under the #146 parity rule the
@@ -470,7 +480,18 @@ class WfdbExporter(Exporter):
         # ingest-side multiplex emitter in `io_handlers.py` insists.
         # Grading this one harder than the group discard it follows from
         # would decide #150 on the wrong ticket, and in the wrong place.
-        for detail in dropped_annotations:
+        if dropped_groups:
+            count = len(dropped_groups)
+            ordinals = sorted(set(dropped_groups))
+            detail = (
+                f"Dropped {count} waveform "
+                f"{'annotation' if count == 1 else 'annotations'} from "
+                f"annotations.json: referenced multiplex "
+                f"{'group' if len(ordinals) == 1 else 'groups'} "
+                f"{', '.join(str(g) for g in ordinals)}, not ingested. Only "
+                f"Waveform Sequence item 0 is kept (#36); resolving these "
+                f"against the surviving group would have placed each mark at "
+                f"a position and lead belonging to a different signal.")
             logger.warning(f"{instance.sop_instance_uid}: {detail}")
             if store_backend is not None:
                 store_backend.log_audit(
