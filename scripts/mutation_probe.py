@@ -45,9 +45,15 @@ result below it is an artefact -- so it stops rather than reporting.
 
 The mutated file is written in place and restored in a `finally`. Run it
 on a clean tree so `git checkout isocenter/` is always a way out.
+
+**A verdict is only about the mutation if the mutation was compiled.**
+Runs carry `PYTHONDONTWRITEBYTECODE=1` and every write is checked against
+CPython's own `.pyc` validation rule before the tests see it, because a
+stale bytecode cache made this tool report mutations that were never in
+the code it tested. `assert_fresh` has the mechanism (#174).
 """
 
-import ast, subprocess, sys, time
+import ast, importlib.util, os, struct, subprocess, sys, time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -159,8 +165,79 @@ def count_ops(src):
         if m.n <= n: return n
         n += 1
 
+def assert_fresh(path):
+    """Stop the run if a cached `.pyc` would be reused for what was just written.
+
+    CPython validates a timestamp-based `.pyc` against the source's
+    `(mtime, size)` pair, with the mtime truncated to whole seconds.
+    Both halves collide far more easily here than they look.
+
+    *Size* collides by construction. The probe writes `ast.unparse`
+    output, so consecutive mutants differ from each other only by the
+    mutation delta -- and two `Eq -> NotEq` flips, two dropped `not`s,
+    or two `True -> False`s differ by exactly zero bytes. Comparison
+    flips dominate most modules, so equal-size neighbours are the norm,
+    not the exception.
+
+    *Seconds* collide whenever a run is quick. `crypto.py`'s tests take
+    0.6s, so consecutive writes land in the same second about half the
+    time; the 15s runs on `privacy.py` are what makes this intermittent
+    rather than constant.
+
+    When both match, the interpreter hands back the *previous* mutant's
+    bytecode and pytest never sees the mutation being scored. The verdict
+    is then about code that was not there. It is not biased toward
+    survivors either: it repeats the neighbour's verdict, so it invents
+    a coverage gap or hides one depending on which way the neighbour
+    went (#174).
+
+    `PYTHONDONTWRITEBYTECODE=1` in `run()` is the fix -- not because it
+    stops a `.pyc` being *read* (it does not) but because it stops each
+    run planting the trap the next one falls into. A cache left behind by
+    something else cannot spring it: its recorded mtime is in the past
+    and the probe's writes are always later.
+
+    This asserts that rather than trusting it, and aborts instead of
+    printing a verdict. A probe that cannot tell "the suite did not
+    notice" from "the suite was never shown" is exactly the silent
+    failure it exists to hunt for.
+    """
+    cache = Path(importlib.util.cache_from_source(str(path)))
+    if not cache.exists():
+        return
+    head = cache.read_bytes()[:16]
+    if len(head) < 16:
+        return
+    flags, mtime, size = struct.unpack("<III", head[4:16])
+    if flags & 0b1:
+        # Hash-based `.pyc`. CHECKED_HASH is verified against the source's
+        # own hash and cannot go stale; UNCHECKED_HASH is trusted blind,
+        # which is worse than the timestamp case, not better.
+        if flags & 0b10:
+            return
+        why = "an UNCHECKED_HASH .pyc is reused without looking at the source"
+    else:
+        st = path.stat()
+        if not (mtime == int(st.st_mtime) and size == st.st_size):
+            return
+        why = (f"its recorded (mtime={mtime}, size={size}) matches the file "
+               f"just written")
+    raise SystemExit(
+        f"ABORT: {cache} is stale bytecode that CPython would reuse -- {why}. "
+        f"pytest would execute the previous mutant and the verdict would not "
+        f"be about this mutation. See assert_fresh() and #174.")
+
 def run(tests):
-    r = subprocess.run(PYTEST + tests, cwd=REPO, capture_output=True, text=True, timeout=900)
+    # PYTHONDONTWRITEBYTECODE rather than `-B`: `run_parallel()` spawns
+    # worker processes, and a grandchild that writes a `.pyc` plants the
+    # same trap the parent avoided. The variable is inherited
+    # unconditionally; an interpreter flag reaches a spawned child only
+    # through `_args_from_interpreter_flags`, which is not a promise this
+    # script should rest on. `os.environ` is copied, not replaced -- a bare
+    # `env=` dict loses PATH and the failure looks like a killed mutant.
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    r = subprocess.run(PYTEST + tests, cwd=REPO, capture_output=True, text=True,
+                       timeout=900, env=env)
     return r.returncode == 0
 
 def main():
@@ -177,8 +254,11 @@ def main():
         # Control: unparsed-but-unmutated must still pass, or every
         # result below is an artefact of the harness rather than a finding.
         path.write_text(ast.unparse(ast.parse(original)))
-        ok = run(tests)
-        path.write_text(original)
+        try:
+            assert_fresh(path)
+            ok = run(tests)
+        finally:
+            path.write_text(original)
         print(f"\n### {mod}  ({total} mutation sites, sampling {budget})")
         print(f"    control (unparsed, unmutated): {'PASS' if ok else 'FAIL -- results unusable'}")
         if not ok:
@@ -199,6 +279,9 @@ def main():
             if m.desc is None: continue
             try:
                 path.write_text(ast.unparse(ast.fix_missing_locations(tree)))
+                # Not caught by the `except Exception` below on purpose: a
+                # stale cache invalidates the whole run, not one sample.
+                assert_fresh(path)
                 t0 = time.time()
                 if run(tests):
                     survived.append(m.desc)
