@@ -1452,15 +1452,32 @@
 <li><strong>Manifest</strong>: A summary of the processed cohort (Top studies by size).</li>
 </ol>
 <div class="admonition warning">
-<p class="admonition-title">Data Loss does not affect Validation Status</p>
-<p>A session that dropped elements can still be graded <code>PASS</code>. The two
-sections answer different questions: Validation Status reports
-whether anything <em>failed</em>, and dropping a binary element is not a
-failure -- it is what <code>populate_attrs</code> is designed to do for pixels
-and waveforms, and collateral for everything else with the same VR.</p>
-<p>Read the Data Loss section on its own terms. Whether a run that
-discarded data should be allowed to grade itself <code>PASS</code> is an open
-question (<a href="https://github.com/kvnlng/Isocenter/issues/146">#146</a>).</p>
+<p class="admonition-title">Which losses move the Validation Status</p>
+<p>A dropped <strong>private</strong> (odd-group) element grades the session
+<code>REVIEW_REQUIRED</code>. It may be a vendor block <code>remove_private_tags=False</code>
+was set specifically to keep, and nobody outside the vendor can size
+or identify what went missing.</p>
+<p>A dropped <strong>standard</strong> element -- Overlay Data <code>(60xx,3000)</code>, the
+palette color LUTs <code>(0028,120x)</code> -- does not. Those come off ordinary
+images by the thousand, so a grade that moved on them would read
+<code>REVIEW_REQUIRED</code> for most cohorts and stop carrying information.</p>
+<p>Read the Data Loss section on its own terms either way: its <strong>Scope</strong>
+column says which rows were graded, and <code>unrecorded</code> means a row
+written by a version that predated the distinction. One case sits on
+the line: a discarded waveform multiplex group is standard-group and
+so does not move the grade -- see
+<a href="https://github.com/kvnlng/Isocenter/issues/150">#150</a>.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Generate the report after <code>export()</code></p>
+<p><code>generate_report()</code> grades the audit log as it stands when you call
+it. Losses recorded at ingest are already in it; losses recorded on
+the way <em>out</em> -- an element that could not be encoded, a waveform
+with no samples -- are written during <code>export()</code>. Call
+<code>generate_report()</code> <strong>after</strong> <code>export()</code>, as the README's pipeline
+does, or those losses cannot reach the Validation Status no matter
+what group they are in. Which order the pipeline should document is
+<a href="https://github.com/kvnlng/Isocenter/issues/153">#153</a>.</p>
 </div>
 <div class="admonition tip">
 <p class="admonition-title">Format Options</p>
