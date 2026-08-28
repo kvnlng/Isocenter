@@ -37,6 +37,13 @@ from .io_handlers import SidecarPixelLoader
 # column it lands in cannot drift apart.
 _PIXEL_COMPRESSION = 'zlib'
 
+# How many SOP Instance UIDs go into one `instance_attributes` lookup.
+# SQLite's default SQLITE_MAX_VARIABLE_NUMBER has been 999 on builds old
+# enough to still be around, so a chunk has to stay well under it; the
+# point of chunking is that hydrating 10k instances costs a score of
+# queries rather than 10k of them.
+_VERTICAL_UID_CHUNK = 500
+
 _UPSERT_INSTANCE_SQL = """
     INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
                            pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json,
@@ -799,6 +806,15 @@ class SqliteStore:
                         " FROM instance_blobs WHERE kind = 'waveform'").fetchall()
                 }
 
+                # The private tier, in one query for the whole store. Its
+                # rows are the odd-group tags `_split_core_and_private`
+                # kept out of `attributes_json`; nothing read them back
+                # until #158, so `remove_private_tags=False` was honoured
+                # only until the session was closed. Pre-fetched here for
+                # the same reason as `wave_refs` above: per-instance would
+                # be one query per instance on every session open.
+                vertical = self.load_vertical_attributes_bulk(conn=conn)
+
                 se_map = {}
                 for r in se_rows:
                     se = Series(r['series_instance_uid'], r['modality'], r['series_number'])
@@ -827,6 +843,9 @@ class SqliteStore:
                             self.logger.error(
                                 "Could not decode stored attributes for "
                                 "instance %s: %s", r['sop_instance_uid'], exc)
+
+                    self._apply_vertical_attributes(
+                        inst, vertical.get(r['sop_instance_uid'], {}))
 
                     # Wire up Sidecar Loader if present
                     if r['pixel_offset'] is not None and r['pixel_length'] is not None:
@@ -894,6 +913,11 @@ class SqliteStore:
                 p = Patient(p_row['patient_id'], p_row['patient_name'])
                 p_pk = p_row['id']
                 stored_statuses = [(p, p_row['phi_status'])]
+                # Collected during the walk and hydrated from the vertical
+                # table in one pass afterwards. Unlike `load_all` this
+                # filters by UID -- one patient's instances, not the whole
+                # store's rows.
+                hydrated_instances = []
 
                 # Same one-query pre-fetch as load_all; see the note there.
                 wave_refs = {
@@ -960,10 +984,24 @@ class SqliteStore:
                                 inst, wave_refs.get(r['sop_instance_uid']))
 
                             se.instances.append(inst)
+                            hydrated_instances.append(inst)
                             stored_statuses.append((inst, r['phi_status']))
 
                         st.series.append(se)
                     p.studies.append(st)
+
+                # Ahead of the status loop and of `mark_subtree_persisted`,
+                # matching `load_all`. Not load-bearing on its own --
+                # `_apply_vertical_attributes` advances no revision, so the
+                # order is interchangeable today. It is kept because it is
+                # what makes a later `set_attr` slipping in here survivable
+                # rather than a silent UNSCANNED regression; the invariant
+                # itself lives on that helper.
+                vertical = self.load_vertical_attributes_bulk(
+                    [i.sop_instance_uid for i in hydrated_instances], conn=conn)
+                for inst in hydrated_instances:
+                    self._apply_vertical_attributes(
+                        inst, vertical.get(inst.sop_instance_uid, {}))
 
                 for entity, stored in stored_statuses:
                     entity.record_phi_status(_phi_status_from_stored(stored))
@@ -1028,28 +1066,38 @@ class SqliteStore:
         Persists extended attributes to the vertical `instance_attributes` table.
 
         This handles private tags and attributes that don't fit in the core JSON.
-        Uses UPSERT semantics (Delete-Insert logic currently).
+
+        The write **replaces the instance's whole vertical set**: every row
+        for `instance_uid` is deleted first, then the given attributes are
+        inserted. An empty mapping therefore clears the instance, and is not
+        a no-op. That is not tidiness -- it is the only shape that mirrors
+        the read side. Deleting only the keys about to be re-inserted leaves
+        a tag that was *removed* from the graph sitting in the table, and
+        skipping the call when there is nothing to insert leaves the entire
+        stripped block there. Both were invisible while nothing read the
+        rows back; once `load_all` does (#158), either one puts a vendor
+        block that `remove_private_tags=True` deleted back into a
+        de-identified graph on the next reload.
 
         Args:
             instance_uid (str): The SOP Instance UID.
             attributes (Dict[Tuple[str, str], Any]): Mapping of (Group, Element) hex strings to values.
             conn (sqlite3.Connection, optional): An existing database connection to use for the transaction.
         """
-        if not attributes:
-            return
-
         data_rows = []
         for (grp, elem), val in attributes.items():
             vr = "UN"  # Todo: Pass VR from caller
-            # Check for VM > 1
-            if isinstance(val, list):
+            # Check for VM > 1. `MultiValue` is what pydicom hands back for a
+            # multi-valued element and it is a MutableSequence, NOT a list, so
+            # a bare `isinstance(val, list)` sent it down the scalar arm and
+            # stored "['a', 'b', 'c']" in one row -- a string that reloads
+            # looking like a list. `IsocenterJSONEncoder` unwraps MultiValue
+            # for the other tier for the same reason.
+            if isinstance(val, (list, MultiValue)):
                 for idx, atom in enumerate(val):
                     data_rows.append((instance_uid, grp, elem, idx, vr, str(atom)))
             else:
                 data_rows.append((instance_uid, grp, elem, 0, vr, str(val)))
-
-        if not data_rows:
-            return
 
         try:
 
@@ -1058,28 +1106,31 @@ class SqliteStore:
             ctx = self._get_connection() if conn is None else nullcontext(conn)
 
             with ctx as db:
-                # 1. OPTIMIZATION: Delete existing for these keys first?
-                # Or UPSERT.
-                # "test_vertical_update_serialization" requires correctness.
-                # UPSERT based on unique index (uid, grp, elem, atom) works.
-                # But if list shrinks (VM 3 -> VM 1), UPSERT leaves atoms 2,3.
-                # So we MUST DELETE by (uid, grp, elem) before inserting new set for that tag.
+                # Delete-then-insert rather than UPSERT: an UPSERT keyed on
+                # (uid, grp, elem, atom) leaves atoms 1 and 2 behind when a
+                # VM 3 value shrinks to VM 1. The delete is by instance_uid
+                # alone -- see the docstring for why a per-key delete is not
+                # enough.
+                db.execute(
+                    "DELETE FROM instance_attributes WHERE instance_uid=?",
+                    (instance_uid,))
 
-                # We can do this in transaction.
-                keys_to_clear = list(attributes.keys())
-                # Batch delete?
-                # "DELETE FROM instance_attributes WHERE instance_uid=? AND group_id=? AND element_id=?\"
-                del_params = [(instance_uid, k[0], k[1]) for k in keys_to_clear]
-                db.executemany(
-                    "DELETE FROM instance_attributes WHERE instance_uid=? AND group_id=? AND element_id=?",
-                    del_params)
-
-                db.executemany("""
-                    INSERT INTO instance_attributes (instance_uid, group_id, element_id, atom_index, value_rep, value_text)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, data_rows)
+                if data_rows:
+                    db.executemany("""
+                        INSERT INTO instance_attributes (instance_uid, group_id, element_id, atom_index, value_rep, value_text)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, data_rows)
 
         except sqlite3.Error as e:
+            # Re-raised, and that matters more than it used to. The DELETE
+            # above is de-identification work: it is what removes a private
+            # tag the graph no longer has. Swallowing the error here would
+            # let the caller's transaction commit the instance row and mark
+            # the instance persisted, so a save that failed to strip the
+            # vendor block would report success and never be retried. The
+            # raise reaches `save_all`, which rolls back and leaves the
+            # instances dirty (see
+            # `test_a_failed_save_reports_the_error_that_caused_it`).
             self.logger.error(f"Failed to save vertical attributes for {instance_uid}: {e}")
             raise e
 
@@ -1093,44 +1144,118 @@ class SqliteStore:
         Returns:
             Dict[Tuple[str, str], Any]: Dictionary mapping (group, element) tuples to values.
         """
-        results = {}
-        try:
-            with self._get_connection() as conn:
-                rows = conn.execute("""
-                    SELECT group_id, element_id, atom_index, value_text
-                    FROM instance_attributes
-                    WHERE instance_uid=?
-                    ORDER BY group_id, element_id, atom_index
-                """, (instance_uid,)).fetchall()
+        return self.load_vertical_attributes_bulk([instance_uid]).get(instance_uid, {})
 
-                if not rows:
-                    return {}
+    def load_vertical_attributes_bulk(
+            self,
+            instance_uids: Optional[List[str]] = None,
+            conn: sqlite3.Connection = None
+    ) -> Dict[str, Dict[Tuple[str, str], Any]]:
+        """Loads the vertical table for many instances in one pass.
 
-                # Reassemble
-                curr_key = None
-                collect = []
+        Hydration needs this tier for every instance it builds, and the
+        whole point of the standard/private split is that loading 10k
+        instances does not mean 10k queries. `load_vertical_attributes`
+        takes a single UID, so calling it per instance would put exactly
+        that shape on the default session-open path. This is the same move
+        as the `wave_refs` pre-fetch in `load_all`: one query, stitched in
+        memory.
 
-                for r in rows:
-                    key = (r['group_id'], r['element_id'])
-                    val = r['value_text']  # Type conversion? Strings for now.
+        Values come back as they are stored -- `str`, or a `list` of `str`
+        for VM > 1. **No type is restored**, because none is recorded:
+        `value_rep` is hardcoded to "UN" on write and is not read here, so
+        a private `5` reloads as `"5"`. Reconstructing a type by inspecting
+        the text would be a storage-shape decision, and it is #154's, not
+        this method's. For the same reason a saved one-element list reloads
+        as a scalar: the table records no arity either.
 
-                    if key != curr_key:
-                        # Flush previous
-                        if curr_key:
-                            results[curr_key] = collect if len(collect) > 1 else collect[0]
-                        curr_key = key
-                        collect = [val]
-                    else:
-                        collect.append(val)
+        Args:
+            instance_uids (Optional[List[str]]): SOP Instance UIDs to fetch.
+                `None` means every row in the table, which is what a
+                whole-store load wants. A list is chunked to stay under
+                SQLite's bound-parameter limit.
+            conn (sqlite3.Connection, optional): An existing connection to
+                read on. Callers already inside a `_get_connection` block
+                MUST pass theirs -- on a `:memory:` store `_memory_lock` is
+                a plain, non-reentrant lock, so opening a nested connection
+                deadlocks outright. Same convention as
+                `save_vertical_attributes` and `record_blob_ref`.
 
-                # Flush last
-                if curr_key:
-                    results[curr_key] = collect if len(collect) > 1 else collect[0]
+        Returns:
+            Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID ->
+            {(group, element): value}. Instances with no vertical rows are
+            absent rather than present-and-empty.
+        """
+        select = ("SELECT instance_uid, group_id, element_id, value_text"
+                  " FROM instance_attributes")
+        # atom_index is not selected, only ordered by: it decides the order
+        # of a multi-valued element's atoms and carries nothing else.
+        order = " ORDER BY instance_uid, group_id, element_id, atom_index"
 
-            return results
-        except sqlite3.Error as e:
-            self.logger.error(f"Failed to load vertical attributes for {instance_uid}: {e}")
-            return {}
+        if instance_uids is None:
+            queries = [(select + order, ())]
+        else:
+            uids = list(dict.fromkeys(instance_uids))
+            if not uids:
+                return {}
+            queries = []
+            for start in range(0, len(uids), _VERTICAL_UID_CHUNK):
+                chunk = uids[start:start + _VERTICAL_UID_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                queries.append((
+                    f"{select} WHERE instance_uid IN ({placeholders}){order}",
+                    tuple(chunk)))
+
+        # No `except sqlite3.Error: return {}` here, which is what the
+        # per-UID version did. An empty result from this method is
+        # indistinguishable from an instance that genuinely has no private
+        # tags, so swallowing a read failure reproduces #158 exactly --
+        # private tags absent from the graph, absent from the export, and
+        # nothing saying so. `load_all` and `load_patient` have their own
+        # handlers and turn a store-level failure into a logged empty
+        # load, which is loud. Failing that way is the point.
+        atoms: Dict[Tuple[str, str, str], List[str]] = {}
+        ctx = self._get_connection() if conn is None else nullcontext(conn)
+        with ctx as db:
+            for sql, params in queries:
+                # Iterated, not fetchall()'d: the rows are turned into the
+                # grouped result as they arrive rather than held twice,
+                # which matters when the filter is None and the table
+                # covers the whole store.
+                for row in db.execute(sql, params):
+                    key = (row['instance_uid'], row['group_id'], row['element_id'])
+                    atoms.setdefault(key, []).append(row['value_text'])
+
+        results: Dict[str, Dict[Tuple[str, str], Any]] = {}
+        for (uid, grp, elem), values in atoms.items():
+            results.setdefault(uid, {})[(grp, elem)] = (
+                values if len(values) > 1 else values[0])
+        return results
+
+    @staticmethod
+    def _apply_vertical_attributes(instance: Instance,
+                                   private: Dict[Tuple[str, str], Any]) -> None:
+        """Writes loaded private tags onto an instance being hydrated.
+
+        Assigns into `attributes` directly, exactly as `_deserialize_into`
+        does, and never through `set_attr`. That is the invariant, and the
+        reason is `phi_status`, not `has_unsaved_changes`: `set_attr`
+        advances `_revision`, and a status recorded against a revision the
+        entity has since left reads back as `UNSCANNED` by design. An
+        instance rebuilt from a row that recorded a conclusion would then
+        report that nothing is known about it.
+
+        Both callers do apply these values before their
+        `record_phi_status` loop and before `mark_subtree_persisted()`,
+        which between them absorb a stray bump -- so a `set_attr` here
+        would be survivable and, worse, invisible: it passes every
+        round-trip test. The ordering is defence and worth keeping; direct
+        assignment is the rule. Pinned by
+        `test_applying_a_loaded_private_tag_is_not_an_edit`, which is the
+        only test that fails when this line changes.
+        """
+        for (grp, elem), value in private.items():
+            instance.attributes[f"{grp},{elem}"] = value
 
     def persist_blob(self, instance, kind: str, data) -> None:
         """Write a binary blob to the sidecar and record its reference.
@@ -1671,8 +1796,11 @@ class SqliteStore:
 
         for inst in instances:
             core, private = _split_core_and_private(self._serialize_item(inst))
-            if private:
-                vertical_rows.append((inst.sop_instance_uid, private))
+            # Appended even when `private` is empty. An instance whose
+            # private tags were all stripped still has to reach
+            # `save_vertical_attributes`, or its old rows stay in the table
+            # and the next reload puts them back on the graph (#158).
+            vertical_rows.append((inst.sop_instance_uid, private))
 
             frame = self._persist_pixels(inst, tally)
             rows.append((
