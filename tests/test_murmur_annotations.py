@@ -389,10 +389,15 @@ def test_site_defined_concept_text_is_restored_when_opted_in():
 # --- Multiplex group resolution (#159) --------------------------------
 #
 # Referenced Waveform Channels (0040,A0B0) is a list of (multiplex group,
-# channel) pairs, and DICOM numbers both from 1: PS3.3 C.10.9.1.1 gives
-# the first channel of the first multiplex group as 1\1. Group ORDINAL 1
-# is therefore Waveform Sequence ITEM 0 -- the only group ingest keeps
-# (#36). Ordinal 2 is the second group: the discarded one.
+# channel) pairs, and DICOM numbers both from 1. PS3.3 C.10.10.1.1
+# ("Referenced Channels") defines the first value of each pair as the
+# ordinal of the Waveform Sequence (5400,0100) Item, and its worked
+# example writes "the entire first multiplex group and channels 2 and 3
+# of the third multiplex group" as 0001 0000 0003 0002 0003 0003. Group
+# ORDINAL 1 is therefore Waveform Sequence ITEM 0 -- the only group
+# ingest keeps (#36). Ordinal 2 is the second group: the discarded one.
+# The 0000 in that example is the same section's rule that channel 0
+# means every channel in the group.
 #
 # The two conventions differ by exactly one at exactly the place the bug
 # lives, so every test below says "ordinal" where it matters. #159's own
@@ -469,8 +474,9 @@ def test_dropping_an_annotation_reports_the_group_ordinal_the_file_named():
 
     # Ordinals, not prose. The exporter holds the logger and the store
     # handle, and it aggregates across the instance before wording
-    # anything -- so what crosses this boundary is which group was named.
-    assert dropped_groups == [2], dropped_groups
+    # anything -- so what crosses this boundary is which groups were
+    # named, one list per dropped annotation.
+    assert dropped_groups == [[2]], dropped_groups
 
 
 def test_an_annotation_on_the_ingested_group_still_resolves():
@@ -541,6 +547,75 @@ def test_a_time_offset_annotation_on_the_ingested_group_uses_its_rate():
 
     assert len(doc["findings"]) == 1, doc
     assert doc["findings"][0]["startSample"] == 500
+
+
+def test_one_annotation_naming_several_discarded_groups_reports_all_of_them():
+    """The message says "groups"; it has to mean it.
+
+    (0040,A0B0) is VM 2-2n, so one annotation can name several discarded
+    groups at once. Reporting only the first ordinal under-reports the
+    loss the audit entry exists to disclose, while the plural promises
+    otherwise -- and the reader cannot tell a partial list from a
+    complete one.
+    """
+    ds = build_ecg_dataset(num_samples=1000)
+    _add_second_group(ds)
+    add_annotation(ds, start_sample=101, group=2, channel=2)
+    # Ordinal 2 channel 2, then ordinal 3 channel 1: two discarded
+    # groups, neither of them the kept one.
+    ds.WaveformAnnotationSequence[0].ReferencedWaveformChannels = [2, 2, 3, 1]
+
+    dropped_groups = []
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds),
+                            "isocenter/test", dropped_groups=dropped_groups)
+
+    assert doc["findings"] == [], doc
+    assert dropped_groups == [[2, 3]], dropped_groups
+
+
+def test_a_channel_number_of_zero_applies_to_the_whole_kept_group():
+    """PS3.3 C.10.10.1.1: channel 0 means every channel in the group.
+
+    The standard's own worked example uses it -- `0001 0000` is "all of
+    the first multiplex group". The mark belongs to the exported record,
+    so it must survive; it names no single channel, so it carries no
+    `lead`. Dropping it would lose a conformant annotation, and picking
+    a channel for it would invent one.
+    """
+    ds = build_ecg_dataset(num_samples=1000)
+    add_annotation(ds, start_sample=101, group=1, channel=0)
+
+    dropped_groups = []
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds),
+                            "isocenter/test", dropped_groups=dropped_groups)
+
+    assert len(doc["findings"]) == 1, doc
+    assert doc["findings"][0]["startSample"] == 100
+    assert "lead" not in doc["findings"][0], doc
+    assert dropped_groups == [], dropped_groups
+
+
+def test_an_unpaired_trailing_value_is_ignored_not_mispaired():
+    """An odd-length (0040,A0B0) is nonconformant; it must not rescue a drop.
+
+    `[2, 3, 1]` is one pair (ordinal 2, channel 3) plus a stray 1.
+    Sliding the window by one -- or reading the trailing value as a
+    group -- would find "ordinal 1", conclude the annotation names the
+    kept group, and resolve a discarded group's mark against the
+    exported signal: the exact defect #159 is about, reintroduced
+    through a malformed value.
+    """
+    ds = build_ecg_dataset(num_samples=1000)
+    _add_second_group(ds)
+    add_annotation(ds, start_sample=101, group=2, channel=3)
+    ds.WaveformAnnotationSequence[0].ReferencedWaveformChannels = [2, 3, 1]
+
+    dropped_groups = []
+    doc = build_annotations(_instance_from(ds), _waveform_from(ds),
+                            "isocenter/test", dropped_groups=dropped_groups)
+
+    assert doc["findings"] == [], doc
+    assert dropped_groups == [[2]], dropped_groups
 
 
 def test_an_annotation_naming_both_groups_resolves_against_the_ingested_one():

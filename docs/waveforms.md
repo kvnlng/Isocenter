@@ -299,9 +299,15 @@ multiplex group should be an exception to that is open on
 
 **Annotations naming a discarded group are dropped, not re-pointed.**
 Referenced Waveform Channels `(0040,A0B0)` identifies a mark by a
-`(multiplex group, channel)` pair, and DICOM numbers both from 1 -- the
-first channel of the first group is `1\1`, so ordinal 1 is the group
-Isocenter keeps, and the bridge reads that half. A mark that names any
+`(multiplex group, channel)` pair, and DICOM numbers both from 1. PS3.3
+C.10.10.1.1 "Referenced Channels" defines the first value of each pair as
+the ordinal of the Waveform Sequence `(5400,0100)` Item, and its worked
+example writes an annotation covering the entire first multiplex group
+plus channels 2 and 3 of the third as `0001 0000 0003 0002 0003 0003`.
+Ordinal 1 is therefore the group Isocenter keeps, and the bridge reads
+that half. (The `0000` in that example is the same section's rule that a
+channel number of 0 means every channel in the group; Isocenter honours
+it by emitting the mark with no `lead`.) A mark that names any
 other group has no placeable home in the exported record:
 its sample positions index that group's samples, and its lead is that
 group's channel. It is therefore left out of `annotations.json`

@@ -142,13 +142,14 @@ def add_annotation(ds, start_sample=100, end_sample=None,
         scheme (str): Coding scheme designator.
         text (str, optional): Unformatted Text Value.
         channel (int): 1-based Referenced Waveform Channel.
-        group (int): 1-based multiplex group ordinal -- the index of the
-            Waveform Sequence item, where the first group is 1 (PS3.3
-            C.10.9.1.1 numbers the first channel of the first group
-            1\\1). This used to be hardcoded to 0, which is not a valid
-            ordinal; it went unnoticed because the annotation bridge
-            ignored the value entirely (#159). Pass 2 for the second
-            group -- the one ingest discards.
+        group (int): 1-based multiplex group ordinal -- the ordinal of
+            the Waveform Sequence item, where the first group is 1
+            (PS3.3 C.10.10.1.1 "Referenced Channels"; its worked example
+            writes the first multiplex group as `0001`). This used to be
+            hardcoded to 0, which is not a valid ordinal; it went
+            unnoticed because the annotation bridge ignored the value
+            entirely (#159). Pass 2 for the second group -- the one
+            ingest discards.
         time_offsets (list, optional): Referenced Time Offsets in
             seconds. When given, they are written INSTEAD of Referenced
             Sample Positions, which is the only way to exercise the

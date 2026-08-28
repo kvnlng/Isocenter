@@ -83,9 +83,14 @@ def _first_int(values) -> Optional[int]:
 def _item_index(group_ordinal: int) -> int:
     """Convert a multiplex group ordinal to a Waveform Sequence item index.
 
-    DICOM numbers multiplex groups from 1: PS3.3 C.10.9.1.1 gives the
-    first channel of the first multiplex group as 1\\1. Ordinal 1 is
-    therefore item 0 -- the group Isocenter keeps.
+    DICOM numbers multiplex groups from 1. PS3.3 C.10.10.1.1
+    ("Referenced Channels", Waveform Annotation Module) defines the
+    Attribute as pairs (M,C) where M is "the ordinal of the Item of
+    Waveform Sequence (5400,0100)", and its own worked example is
+    explicit about the base: an annotation covering the entire FIRST
+    multiplex group plus channels 2 and 3 of the THIRD is written
+    `0001 0000 0003 0002 0003 0003`. Ordinal 1 is therefore item 0 --
+    the group Isocenter keeps.
 
     A group ordinal of 0 is not a valid 1-based ordinal, and `max` reads
     it as the first group rather than discarding it. That is the only
@@ -122,18 +127,27 @@ def _referenced_channel(referenced_channels):
         pair -- the annotation applies to the whole waveform;
         `(_REF_KEPT, channel_number)` for the first pair naming the
         ingested group, where the channel is 1-based and 0 means "all
-        channels of that group"; `(_REF_OTHER, group_ordinal)` when every
-        pair names a group that was not ingested, carrying the first such
-        ordinal for the message the caller writes.
+        channels of that multiplex group" (PS3.3 C.10.10.1.1: "If the
+        specified channel number is 0, the annotation applies to all
+        channels in the multiplex group"), which resolves to no single
+        lead; `(_REF_OTHER, group_ordinals)` when every pair names a
+        group that was not ingested, carrying ALL of those distinct
+        ordinals in the order the file wrote them.
+
+    The `_REF_OTHER` list is every ordinal, not the first one: a single
+    annotation may name several groups, and a message that says "groups"
+    while reporting one of them under-reports the loss it exists to
+    disclose. The scan only stops early on `_REF_KEPT`, where the
+    annotation survives and no ordinal is reported at all.
     """
-    seen = None
+    others = []
     for group, channel in _channel_pairs(referenced_channels):
         if _item_index(group) == KEPT_WAVEFORM_ITEM_INDEX:
             return _REF_KEPT, channel
-        if seen is None:
-            seen = group
-    if seen is not None:
-        return _REF_OTHER, seen
+        if group not in others:
+            others.append(group)
+    if others:
+        return _REF_OTHER, others
     return _REF_ABSENT, None
 
 
@@ -252,11 +266,16 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             because that tag routinely holds free-text clinical
             commentary, and the PHI scan is tag-gated -- so a bare
             Session() would otherwise write it out unremediated.
-        dropped_groups (list, optional): Appended with the multiplex
-            group ordinal of every annotation dropped because it names a
-            group that was not ingested. It carries ordinals rather than
-            prose, and rides an out-parameter rather than the return
-            value, for three reasons: the return value is the published
+        dropped_groups (list, optional): Appended with one list per
+            annotation dropped because it names no ingested group,
+            holding the distinct multiplex group ordinals that
+            annotation referenced. It nests because the caller needs
+            both numbers and they are not the same: `len()` is how many
+            marks were lost, and the union across the lists is which
+            signals they pointed at -- one annotation may name several
+            groups. It carries ordinals rather than prose, and rides an
+            out-parameter rather than the return value, for three
+            reasons: the return value is the published
             Murmur document, so a new key there is a schema change; this
             function has neither a logger nor a store handle, so the
             warning and the `DATA_LOSS` entry belong to the caller; and
@@ -277,7 +296,7 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
 
     for item in items:
         referenced = item.attributes.get(TAG_REFERENCED_CHANNELS)
-        state, referenced_group = _referenced_channel(referenced)
+        state, referenced_groups = _referenced_channel(referenced)
         if state == _REF_OTHER:
             # #159. Every position on this annotation is expressed on a
             # sample axis that is not in this record: a different rate,
@@ -299,7 +318,7 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             # branch stops firing on its own; nothing here presumes the
             # discard is permanent.
             if dropped_groups is not None:
-                dropped_groups.append(referenced_group)
+                dropped_groups.append(list(referenced_groups))
             continue
 
         category, label = _concept(item, include_text)

@@ -481,8 +481,13 @@ class WfdbExporter(Exporter):
         # Grading this one harder than the group discard it follows from
         # would decide #150 on the wrong ticket, and in the wrong place.
         if dropped_groups:
+            # `dropped_groups` is one list per dropped annotation, so the
+            # count and the group set come from different axes of it: a
+            # single annotation may name several groups, and reporting
+            # only its first would under-report the loss while the word
+            # "groups" promised otherwise.
             count = len(dropped_groups)
-            ordinals = sorted(set(dropped_groups))
+            ordinals = sorted({g for groups in dropped_groups for g in groups})
             detail = (
                 f"Dropped {count} waveform "
                 f"{'annotation' if count == 1 else 'annotations'} from "
