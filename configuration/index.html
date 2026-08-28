@@ -1787,6 +1787,24 @@ entry naming the tag and its VR, so the loss is visible rather than
 silent. Whether these bytes should be retained at all is still open
 (<a href="https://github.com/kvnlng/Isocenter/issues/125">#125</a>).</p>
 </div>
+<div class="admonition warning">
+<p class="admonition-title">Standard binary elements are dropped too</p>
+<p>The same rule takes Overlay Data <code>(60xx,3000)</code> and the palette color
+LUTs <code>(0028,120x)</code>, which are <code>OW</code>. <code>PixelData</code> and <code>WaveformData</code>
+are the only binary elements routed to the sidecar; everything else
+with a binary VR is dropped whatever its group.</p>
+<p>An overlay's <em>descriptors</em> (<code>OverlayRows</code>, <code>OverlayColumns</code>,
+<code>OverlayBitPosition</code> and friends) are <code>US</code>, so they do survive. An
+exported file therefore declares an overlay plane it does not carry.
+The descriptors are deliberately left in place rather than stripped:
+an overlay may legitimately live in the unused high bits of
+<code>PixelData</code> (addressed by <code>OverlayBitPosition</code>), and since Isocenter
+preserves <code>PixelData</code> intact, those overlays survive and their
+descriptors are the only pointer to them. Stripping the descriptors
+would turn a correct passthrough into silent destruction.</p>
+<p>These drops are reported as <code>DATA_LOSS</code> entries the same way
+(<a href="https://github.com/kvnlng/Isocenter/issues/137">#137</a>).</p>
+</div>
 <h3 id="phi-tags">PHI Tags</h3>
 <p>Define specific rules for individual DICOM tags. Keys are <code>"gggg,eeee"</code> hex strings (e.g. <code>"0010,0010"</code>); case is normalised on load, so either case works.</p>
 <p><strong>Supported Actions:</strong></p>
