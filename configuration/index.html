@@ -1774,19 +1774,102 @@
 <li><code>true</code>: Removes <strong>ALL</strong> private tags. (Recommended for safety).</li>
 <li><code>false</code>: Retains them (Use only if you are sure they are safe or strictly needed for analysis).</li>
 </ul>
+<p>The flag governs the private tags Isocenter <em>holds</em>, which is not every
+private tag in your source files. Where the line falls:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Private tag, by the VR it is read with</th>
+<th style="text-align: left;"><code>remove_private_tags: true</code></th>
+<th style="text-align: left;"><code>remove_private_tags: false</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Text, numeric, and <code>UN</code> -- <code>LO</code>, <code>SH</code>, <code>DS</code>, <code>UN</code></td>
+<td style="text-align: left;">Removed</td>
+<td style="text-align: left;"><strong>Kept</strong>, and written to the exported file</td>
+</tr>
+<tr>
+<td style="text-align: left;">Binary VRs -- <code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code></td>
+<td style="text-align: left;">Gone</td>
+<td style="text-align: left;"><strong>Gone</strong> -- dropped at ingest, before the flag is read</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Both rows assume an explicit-VR source.</strong> Under implicit VR there is no VR
+in the file, so pydicom reads <em>every</em> private tag as <code>UN</code> -- the first row
+becomes the whole table, the second applies to nothing, and a vendor <code>OB</code> is
+kept and exported with no <code>DATA_LOSS</code> entry. The first row is therefore not
+the small-strings case it looks like; under implicit VR it is all of your
+private data, blobs included. See below
+(<a href="https://github.com/kvnlng/Isocenter/issues/151">#151</a>).</p>
 <div class="admonition warning">
 <p class="admonition-title"><code>false</code> cannot retain private tags with a binary VR</p>
 <p>Elements with a binary VR (<code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code>) are skipped
-at ingest and never enter the object graph, so there is nothing left
-for this flag to keep by the time it is read. A vendor block
-routinely carries one. The rule exists to keep pixel and waveform
-blobs out of resident memory -- an arbitrary private <code>OB</code> can be
-megabytes -- and private tags are collateral.</p>
-<p>Each one is logged and written to the audit log as a <code>DATA_LOSS</code>
-entry naming the tag and its VR, so the loss is visible rather than
-silent. Whether these bytes should be retained at all is still open
-(<a href="https://github.com/kvnlng/Isocenter/issues/125">#125</a>).</p>
+by <code>populate_attrs</code> at ingest and never enter the object graph, so
+there is nothing left for this flag to keep by the time it is read. A
+vendor block routinely carries one. Setting <code>false</code> does not fail: it
+succeeds on a tag that has been gone since ingest, and the exported
+file simply does not have it.</p>
+<p><strong>Only that VR family is affected.</strong> Private tags with a text or
+numeric VR are ingested normally and are governed by this flag in
+both directions -- swept when it is <code>true</code>, kept and written to the
+exported file when it is <code>false</code>. That covers the <code>LO</code> private
+creator and the <code>SH</code>/<code>LO</code> strings a vendor block is mostly made of.
+"Private tags are not retained" is the wrong reading; one VR family
+of them is not.</p>
+<p><code>UN</code> -- Unknown -- is raw bytes and neither text nor numeric, and it
+is deliberately kept out of the binary set anyway, on the assumption
+that a private <code>UN</code> is a small value rather than a blob. The next
+paragraph is where that assumption stops holding
+(<a href="https://github.com/kvnlng/Isocenter/issues/151">#151</a>).</p>
+<p><strong>The VR that decides is the one pydicom reads, not the one the
+vendor wrote</strong>, and for a private tag those differ by transfer
+syntax. An implicit-VR file carries no VR field at all: pydicom
+resolves it from the standard dictionary, which has no entry for a
+private tag, and hands back <code>UN</code> -- which is not in the binary set.
+So the same vendor <code>OB</code> element that is dropped out of an
+explicit-VR source is ingested, retained, exported, and files no
+<code>DATA_LOSS</code> entry when it arrives in an implicit-VR one. Do not plan
+around that: one study written in the two syntaxes gives two
+different answers, and only the explicit-VR one is the answer this
+section describes.</p>
+<p>That tension is real and is tracked: under implicit VR the blob <em>is</em>
+resident, which is exactly what the rule below exists to prevent
+(<a href="https://github.com/kvnlng/Isocenter/issues/151">#151</a>).</p>
+<p><strong>The loss is announced, not silent.</strong> Each dropped element is logged
+as a warning and written to the audit log as a <code>DATA_LOSS</code> entry
+naming the tag <em>and its VR</em> -- the VR is the part that says whether
+you lost a four-byte serial number or a megabyte of vendor
+telemetry. It reaches you in three places: the session log, section
+3 (<em>Data Loss</em>) of the compliance report written by
+<code>session.generate_report(path)</code>, and
+<code>session.store_backend.get_audit_losses()</code> if you want the rows
+directly. Read that section before concluding a vendor block came
+through a run intact.</p>
+<p><strong>This is settled rather than pending</strong>
+(<a href="https://github.com/kvnlng/Isocenter/issues/125">#125</a>). Warning
+plus an audit entry is the answer; storing the bytes is not planned.
+If you need them, keep your source files -- Isocenter never modifies
+them, so the vendor block is still there to go back to.</p>
 </div>
+<p><strong>Why the bytes are not stored.</strong> Both ways of keeping them were considered
+and rejected. Holding vendor binary in <code>attributes</code> makes an arbitrary blob
+permanently resident, which is what the binary-VR rule exists to prevent:
+memory scaling on 100GB+ datasets depends on heavy arrays never being
+resident by default, and that guarantee is worth more than an unread vendor
+block. The implicit-VR case above is a hole in that rule rather than an
+argument against it -- the rule is worth having <em>and</em> it does not currently
+cover every input, which is why
+<a href="https://github.com/kvnlng/Isocenter/issues/151">#151</a> is open rather than
+closed as intended behaviour.</p>
+<p>Routing them to the sidecar instead means giving private tags an
+offset/length representation the EAV table does not have, plus a lazy
+loader and an export re-merge path. <code>session.compact()</code> rewrites the
+sidecar and rewires every offset it knows about, so a class of offset it
+does not know about is silent corruption after the first compaction. That
+is design work, not a flag.</p>
 <div class="admonition warning">
 <p class="admonition-title">Standard binary elements are dropped too</p>
 <p>The same rule takes Overlay Data <code>(60xx,3000)</code> and the palette color

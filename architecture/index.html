@@ -1527,6 +1527,32 @@
 </tr>
 </tbody>
 </table>
+<p>There is no fourth row for the rest of the binary VRs, and its absence is a
+design decision rather than an omission. Only <code>PixelData</code> and <code>WaveformData</code>
+are routed to the sidecar; every <em>other</em> element <strong>read with</strong> a binary VR
+(<code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code>) is dropped at ingest and stored nowhere. The
+reason is the one behind sequestering the pixel array in section 2: such a
+value can be arbitrarily large, either of the first two rows would hold it
+resident for the lifetime of the session, and memory scaling on 100GB+
+datasets rests on heavy arrays never being resident unless they are asked
+for. Dropping is what this model does with a blob it has nowhere lightweight
+to put.</p>
+<p><strong>"Read with" is load-bearing, and two of the claims above hold only for an
+explicit-VR source</strong> (<a href="https://github.com/kvnlng/Isocenter/issues/151">#151</a>).
+An implicit-VR file carries no VR field, so pydicom resolves a private tag
+from the standard dictionary, finds nothing, and returns <code>UN</code> -- which is
+not in the binary set. Nothing is then dropped and nothing is reported: the
+bytes are held and persisted, base64-encoded, into <code>attributes_json</code>, which
+is the <em>first</em> row of the table above rather than the absent fourth one.
+And that second row's "Private Tags (Odd Groups)" describes where the
+<em>text</em> private tags go; the real split is whether a value serializes to
+text, so a private <code>UN</code> carrying bytes lands in <code>attributes_json</code> even in an
+explicit-VR run. Both are behaviour rather than documentation, and both are
+tracked on #151.</p>
+<p>Private vendor blocks are where this bites in practice, and the rest of the
+trade-off -- including why the sidecar row was not simply widened to take
+them -- is documented with the flag it defeats: see <a href="../configuration/#private-tags"><code>false</code> cannot retain
+private tags with a binary VR</a>.</p>
 <h3 id="database-schema-reference">Database Schema Reference</h3>
 <table>
 <thead>
