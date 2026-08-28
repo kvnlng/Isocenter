@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Overlay Data and the palette color LUTs were dropped at ingest without a word, and the exported file still claimed to have them.** `populate_attrs` skips every element with a binary VR. #125 made that visible for *private* tags only, on the reasoning that the standard ones this rule catches are routed rather than lost. That was true of `(7fe0,0010)` and `(5400,1010)` and false of everything else: Overlay Data `(60xx,3000)` and the palette LUTs `(0028,120x)` are `OW`, standard, and written nowhere.
+
+  The gate is now **"binary VR and routed nowhere"** rather than "odd group", so these are reported as `DATA_LOSS` entries naming the tag and its VR, exactly as private binary tags already were. `_ROUTED_BINARY_TAGS` names the two exclusions and why they exist -- widening the gate naively is not the one-line change it looks like, because reporting `(5400,1010)` would file a loss on every waveform ever ingested, and `tests/test_private_binary_ingest.py` now pins all three cases rather than the odd/even line it pinned before.
+
+  **The descriptors are deliberately left in place.** An overlay's `OverlayRows`, `OverlayColumns`, and `OverlayBitPosition` are `US`, so they survive, and an exported file therefore declares a plane whose data it does not carry -- the shape 0.8.1 removed from the WFDB header. Stripping them anyway would be worse: Overlay Data is Type 1C, required only when the overlay is *not* in the Pixel Data, and the retired bit-plane mechanism put overlays in the unused high bits of `PixelData` addressed by `OverlayBitPosition`. Isocenter preserves `PixelData` intact, so for those files the overlay survives and its descriptors are the only pointer to it. Removing them would turn a correct passthrough into silent destruction. Reporting the loss does not foreclose sidecar routing, which is the same open question as #125's remaining half.
+
+  This closes the reporting half only; the bytes are still dropped. And the entries land somewhere the reader of a compliance report will not see them -- `generate_report()` surfaces a bare `DATA_LOSS: n` count with no detail, and a session that dropped data still renders `validation_status: PASS`. That blind spot predates this change and degrades #125 identically; it is filed as #146. (#137)
+
+
 - **Isocenter no longer calls pydicom APIs that 4.0 removes, and `setup.py`'s cap comment no longer names a blocker that does not exist.** Four changes, none of which alter a single output byte:
 
   - `pixel_analysis.py` imports `apply_voi_lut` from `pydicom.pixels` rather than `pydicom.pixel_data_handlers.util`. This was the only *unguarded module-scope* import of a package 4.0 deletes, and so the only one that would have failed at import time, before any caller could degrade gracefully.

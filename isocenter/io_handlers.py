@@ -45,13 +45,31 @@ from .store import DicomStore
 from .config_manager import ConfigLoader
 
 
+#: Binary elements that `populate_attrs` skips but that are *not* lost --
+#: each is extracted and written to the sidecar elsewhere. They must stay
+#: out of the DATA_LOSS report or every ingest files a loss that did not
+#: happen (#137). (7fe0,0010) is listed for the record; it is excluded by
+#: the group check before the VR check ever sees it.
+_ROUTED_BINARY_TAGS = frozenset({
+    Tag(0x7fe0, 0x0010),   # Pixel Data
+    Tag(0x5400, 0x1010),   # Waveform Data
+})
+
+
 def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
     """
     Standalone function to populate attributes for pickle-compatibility in workers.
 
     Extracts standard DICOM elements from a pydicom Dataset and populates the
     Isocenter DicomItem. Handles Sequences recursively. Skips large binary blobs
-    (PixelData, Overlays) to keep the object graph lightweight.
+    to keep the object graph lightweight.
+
+    Skipping is not the same as routing. `PixelData` and `WaveformData`
+    are extracted and written to the sidecar by `ingest_worker`, so
+    skipping them here loses nothing. Everything else with a binary VR
+    -- private vendor blocks, Overlay Data, the palette LUTs -- is
+    skipped and routed nowhere, which means it is dropped. Those are
+    collected in `dropped` so the caller can report them (#125, #137).
 
     Took a third `text_index` argument until #84, which collected the
     text-VR elements it saw into `Instance.text_index`. Nothing read that
@@ -62,10 +80,10 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
     Args:
         ds: The pydicom Dataset or Sequence Item.
         item (DicomItem): The Isocenter item to populate.
-        dropped (list, optional): Collects `(tag, vr)` for private
-            elements skipped for their VR, so the caller can report them
-            (#125). See `_PRIVATE_BINARY_DROP` below for why only
-            private ones.
+        dropped (list, optional): Collects `(tag, vr)` for every element
+            skipped for its VR that is not routed to the sidecar, so the
+            caller can report them (#125, #137). See
+            `_ROUTED_BINARY_TAGS` for the exclusions and why they exist.
     """
 
     # Binary VRs to explicitly skip (Metadata Refactor)
@@ -80,14 +98,22 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
             # `remove_private_tags=False` cannot keep them -- there is
             # nothing left to keep by the time the flag is consulted.
             #
-            # Reported for odd groups only. The standard binary elements
-            # this skips are not lost: (7fe0,0010) is excluded above and
-            # (5400,1010) is written to the sidecar by the caller, so
-            # reporting them would put a DATA_LOSS entry in the record of
-            # every image ever ingested. Whether private binary should be
-            # *kept* is the open half of #125; that it vanished in
-            # silence is the half this closes.
-            if dropped is not None and elem.tag.group % 2 == 1:
+            # The gate is "binary VR and routed nowhere", not "binary VR"
+            # and not "odd group" (#137). Two standard elements hit this
+            # rule and are *not* lost: (7fe0,0010) never gets here at all
+            # -- the group check above takes it -- and (5400,1010) is
+            # pulled out and written to the sidecar by `ingest_worker`
+            # before this runs. Reporting either would put a DATA_LOSS
+            # entry in the record of every image and every waveform ever
+            # ingested, which is how a compliance trail becomes noise.
+            #
+            # Everything else genuinely vanishes, whatever its group.
+            # Overlay Data and the palette LUTs are `OW`, standard, and
+            # routed nowhere; the odd-group gate this replaces left them
+            # unreported because it read "standard" as "safe". Whether
+            # any of these bytes should be *kept* is the open half of
+            # #125; that they vanished in silence is what this closes.
+            if dropped is not None and elem.tag not in _ROUTED_BINARY_TAGS:
                 dropped.append(
                     (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
             continue  # Skip binary blobs
