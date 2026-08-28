@@ -1648,6 +1648,22 @@ warning naming the number of groups dropped, plus a <code>DATA_LOSS</code> entry
 the audit log so it appears in the compliance trail and not only in a
 log file. Multi-group support is deferred, but a truncated record should
 never look like a complete one.</p>
+<p>"Never enter the object graph" covers the sequence items as well as the
+samples. It did not always: the samples were dropped and the <em>metadata</em>
+was not -- <code>populate_attrs</code> walks the whole sequence -- so an exported
+file carried an item declaring a multiplex group with no Waveform Data
+<code>(5400,1010)</code>, a Type 1 element. The discarded groups' items are now
+dropped alongside their samples, so what is written is a conformant
+single-group record
+(<a href="https://github.com/kvnlng/Isocenter/issues/160">#160</a>).</p>
+<p>That holds for records ingested by 0.9.0 or later. The drop happens in
+<code>ingest_worker</code>, which does not run again on a session opened from an
+existing index, so a database populated by an earlier version still holds
+the extra items and still exports the hollow one; re-ingesting the source
+files into a fresh index is the remedy
+(<a href="https://github.com/kvnlng/Isocenter/issues/168">#168</a>). The same applies
+to a graph built by hand and written with <code>DicomExporter.write_tree()</code>,
+which is the serializer alone and never passes through ingest.</p>
 <p>That entry is scoped <code>STANDARD</code> -- a multiplex group lives under Waveform
 Sequence <code>(5400,0100)</code>, an even group -- so it is reported in the
 compliance report's Data Loss section but does <strong>not</strong> move Validation
