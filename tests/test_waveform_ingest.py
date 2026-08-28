@@ -341,3 +341,24 @@ def test_a_single_group_record_records_no_data_loss(tmp_path):
         ).fetchall()
 
     assert rows == []
+
+
+def test_a_discarded_group_leaves_no_sequence_item_behind(tmp_path):
+    """The graph must not describe a group whose samples were dropped.
+
+    `populate_attrs` walks the whole Waveform Sequence while only group
+    0's samples are extracted, so an item survived for every group the
+    sidecar had no bytes for. Every consumer of the graph -- the DICOM
+    writer, the WFDB record, the annotation bridge -- then described a
+    group this pipeline does not have; the DICOM writer's version of
+    that was an exported file with a Type 1 element missing (#160).
+
+    The count the source carried is not lost with the items: the
+    DATA_LOSS entry above still records it.
+    """
+    _, inst, _, _, _, w_bytes, _, err = ingest_worker(
+        _two_group_file(tmp_path / "multi.dcm"))
+
+    assert err is None
+    assert w_bytes is not None
+    assert len(inst.sequences["5400,0100"].items) == 1
