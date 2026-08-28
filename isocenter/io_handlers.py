@@ -55,13 +55,10 @@ _ROUTED_BINARY_TAGS = frozenset({
     Tag(0x5400, 0x1010),   # Waveform Data
 })
 
-#: How a `DATA_LOSS` audit entry is graded. A private loss flips
-#: `validation_status` to REVIEW_REQUIRED; a standard one does not
-#: (#146). The value is written by the emitter and stored on the audit
-#: row, because the emitter is the last place that still knows what was
-#: dropped -- three emitters write `details` in three shapes and one of
-#: them names no tag at all, so re-deriving the scope downstream would
-#: mean parsing prose and would couple the grade to message wording.
+#: How a `DATA_LOSS` audit entry is graded: PRIVATE takes
+#: `validation_status` to REVIEW_REQUIRED, STANDARD does not. Written by
+#: the emitter and stored on the audit row rather than re-derived, and
+#: why the two differ, are both argued once -- CHANGELOG.md, #146.
 LOSS_SCOPE_PRIVATE = "PRIVATE"
 LOSS_SCOPE_STANDARD = "STANDARD"
 
@@ -70,16 +67,9 @@ def loss_scope_for_tag(tag: str) -> str:
     """Classify a lost element for grading, by the parity of its group.
 
     Odd group is private, even is standard -- the same split the store
-    already uses to decide where an attribute is written.
-
-    The asymmetry in what the two mean is the point, and it is not an
-    oversight to be tidied into one rule. A private element that
-    vanished is a vendor block nobody outside the vendor can size or
-    identify, and one the caller may have explicitly asked to keep. A
-    standard one -- Overlay Data `(60xx,3000)`, the palette LUTs
-    `(0028,120x)` -- is dropped on ordinary images by the thousand; a
-    grade that flipped on those would read REVIEW_REQUIRED for most real
-    cohorts and stop carrying information (#146).
+    already uses to decide where an attribute is written. What each
+    scope does to `validation_status`, and why they differ, is in
+    CHANGELOG.md under #146.
 
     Args:
         tag (str): A `"gggg,eeee"` lowercase-hex tag.
@@ -580,7 +570,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         ExportOutcome: the write's result, plus any elements lost on the
             way out for the parent to log and audit (#126).
     """
-    losses: List[str] = []
+    losses: List[Tuple[str, str]] = []
     uid = getattr(ctx.instance, "sop_instance_uid", None)
 
     try:

@@ -38,6 +38,17 @@ The report includes:
     so does not move the grade -- see
     [#150](https://github.com/kvnlng/Isocenter/issues/150).
 
+!!! warning "Generate the report after `export()`"
+
+    `generate_report()` grades the audit log as it stands when you call
+    it. Losses recorded at ingest are already in it; losses recorded on
+    the way *out* -- an element that could not be encoded, a waveform
+    with no samples -- are written during `export()`. Call
+    `generate_report()` **after** `export()`, as the README's pipeline
+    does, or those losses cannot reach the Validation Status no matter
+    what group they are in. Which order the pipeline should document is
+    [#153](https://github.com/kvnlng/Isocenter/issues/153).
+
 !!! tip "Format Options"
     Currently, Isocenter supports Markdown (`.md`) reports. PDF support is planned for future releases via Pandoc integration.
 
