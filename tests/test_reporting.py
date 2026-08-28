@@ -86,7 +86,8 @@ def test_exception_reporting(clean_env):
     with open(REPORT_FILE, "r") as f:
         content = f.read()
 
-    assert "## 3. Exceptions & Errors" in content
+    # Section 4 since #146 inserted "3. Data Loss" ahead of it.
+    assert "## 4. Exceptions & Errors" in content
     assert "| ERROR | Critical failure |" in content
     s.close()
 

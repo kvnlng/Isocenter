@@ -624,6 +624,35 @@ class SqliteStore:
         except sqlite3.OperationalError:
             return []
 
+    def get_audit_losses(self) -> List[tuple]:
+        """
+        Retrieves every `DATA_LOSS` entry.
+
+        Separate from `get_audit_errors` on purpose (#146). Folding
+        `DATA_LOSS` into that query would surface the detail in one line
+        and also flip `validation_status` to `REVIEW_REQUIRED` for every
+        session that dropped anything -- including an ordinary ingest of
+        a file carrying an overlay. Whether a run that discarded data may
+        call itself PASS is a real decision; this getter reports the loss
+        without making it.
+
+        Returns:
+            List[tuple]: (timestamp, entity_uid, details)
+        """
+        self.flush_audit_queue()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT timestamp, entity_uid, details
+                    FROM audit_log
+                    WHERE action_type = 'DATA_LOSS'
+                    ORDER BY timestamp ASC
+                """)
+                return cursor.fetchall()
+        except sqlite3.OperationalError:
+            return []
+
     def check_unsafe_attributes(self) -> List[tuple]:
         """
         Scans for instances with potentially unsafe attributes (e.g., BurnedInAnnotation="YES").

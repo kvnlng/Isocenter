@@ -56,6 +56,16 @@ class ComplianceReport:
     # List of "ERROR" or "WARNING" logs: (timestamp, action, details)
     exceptions: list = field(default_factory=list)
 
+    # Data Loss
+    # List of "DATA_LOSS" logs: (timestamp, entity_uid, details).
+    #
+    # Its own field rather than more `exceptions` (#146): these are not
+    # errors, nothing failed, and `validation_status` keys off
+    # `exceptions` being empty -- so routing them there would mark every
+    # session that ingested an overlay as REVIEW_REQUIRED as a side
+    # effect of wanting the detail printed.
+    data_losses: list = field(default_factory=list)
+
     # Validation
     validation_status: str = "PENDING"  # PASS, FAIL, PENDING
     validation_issues: int = 0
@@ -120,19 +130,36 @@ The following actions were recorded in the secure audit trail:
         else:
             md_content += "| *No audit logs found* | 0 |\n"
 
+        # Data Loss Section
+        #
+        # Ahead of Exceptions because it is a property of the data that
+        # was written, not of the run: nothing failed, and a reader
+        # skimming for problems would otherwise stop at "no exceptions".
+        # Each row names the element and its VR -- "a tag was dropped" is
+        # not actionable; the VR is what says whether it was a four-byte
+        # serial number or a megabyte of vendor telemetry (#146).
+        if report.data_losses:
+            md_content += "\n## 3. Data Loss\n\n> [!WARNING]\n> Elements below were present in the source and are **not** in the exported data:\n\n"
+            md_content += "| Timestamp | Instance | Element |\n| :--- | :--- | :--- |\n"
+            for loss in report.data_losses:
+                # (timestamp, entity_uid, details)
+                md_content += f"| {loss[0]} | {loss[1]} | {loss[2]} |\n"
+        else:
+            md_content += "\n## 3. Data Loss\n\n*No data loss was recorded.*\n"
+
         # Exceptions Section
         if report.exceptions:
-            md_content += f"\n## 3. Exceptions & Errors\n\n> [!WARNING]\n> The following issues were encountered during processing:\n\n"
+            md_content += f"\n## 4. Exceptions & Errors\n\n> [!WARNING]\n> The following issues were encountered during processing:\n\n"
             md_content += "| Timestamp | Action | Details |\n| :--- | :--- | :--- |\n"
             for exc in report.exceptions:
                 # exc is expected to be (timestamp, action, details)
                 # truncate details if too long?
                 md_content += f"| {exc[0]} | {exc[1]} | {exc[2]} |\n"
         else:
-            md_content += f"\n## 3. Exceptions & Errors\n\n*No exceptions or errors were recorded.*\n"
+            md_content += f"\n## 4. Exceptions & Errors\n\n*No exceptions or errors were recorded.*\n"
 
         md_content += f"""
-## 4. Validation & Verification
+## 5. Validation & Verification
 
 *   **Identified Issues:** {report.validation_issues}
 *   **Methodology:** {report.deid_method}. Metadata was remediated according to the tag policy in force; pixel data was scanned against the configured machine redaction zones. This section records what the tooling was configured to do and what it logged doing -- whether the result meets HIPAA Safe Harbor, a Limited Data Set, or any other standard is a determination for the data steward, not for Isocenter.
