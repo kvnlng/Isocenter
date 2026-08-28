@@ -225,6 +225,18 @@ class SqliteStore:
     - An asynchronous Audit Log for tracking modifications and errors.
     """
 
+    #: Rows `get_flattened_instances` fetches per page (#164).
+    #:
+    #: The knob trades resident memory against query count. A page is
+    #: dominated by `attributes_json` -- every standard attribute of the
+    #: instance, as text -- not by the sixteen scalar columns beside it,
+    #: so the number that matters is roughly `page_size x blob size`.
+    #: At 500 that is single-digit megabytes for ordinary CT metadata,
+    #: which keeps the method's memory promise intact on the 100GB+
+    #: datasets it exists for, while making the per-page cost (one rowid
+    #: seek plus `page_size` primary-key joins) disappear into the noise.
+    FLATTENED_PAGE_SIZE = 500
+
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS patients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1892,61 +1904,135 @@ class SqliteStore:
 
     def get_flattened_instances(self,
                                 patient_ids: List[str] = None,
-                                instance_uids: List[str] = None):
+                                instance_uids: List[str] = None,
+                                page_size: int = FLATTENED_PAGE_SIZE):
         """
         Yields a flat dictionary for every instance in the DB.
 
         Useful for streaming exports or analysis without loading the entire graph into RAM.
 
+        The rows come back one page at a time, and **no database handle is
+        held between pages** (#164). That is not an optimisation; it is
+        the only shape that lets this method do what it advertises. It
+        used to `yield` from inside `with self._get_connection()`, which
+        on a `:memory:` store holds `_memory_lock` -- a plain,
+        non-reentrant lock -- across its own yield. A generator parked
+        between rows therefore held the store's only lock and every other
+        call on it blocked forever. Streaming *is* partial consumption,
+        so the advertised usage was the one that hung; the two callers
+        that worked did `list(...)` first, which defeats the purpose. On
+        a file store nothing deadlocked, but the parked generator kept a
+        connection and a live read snapshot open, which stops WAL
+        checkpointing and lets the `-wal` file grow unbounded.
+
+        Two consequences worth knowing before you rely on this:
+
+        - **Iteration is not one snapshot.** Each page is its own query,
+          so writes that land between pages are visible and rows deleted
+          between pages are not returned. The previous single-cursor
+          version was a single snapshot; that guarantee is gone, and it
+          could not be kept without holding a read open across the yield,
+          which is the defect.
+        - **Order is by `instances.id`.** The walk is a keyset on that
+          column, so the sequence is now defined rather than whatever the
+          join happened to produce.
+
         Args:
             patient_ids (List[str], optional): Filter by list of Patient IDs.
             instance_uids (List[str], optional): Filter by list of SOP Instance UIDs.
+            page_size (int, optional): Rows per page. Trades resident
+                memory against the number of queries; see
+                `FLATTENED_PAGE_SIZE`. Must be >= 1 -- `LIMIT 0` returns
+                an empty page, and an empty page is how the walk decides
+                it has finished, so a zero would silently report an empty
+                store.
 
         Yields:
             dict: Flattend dictionary representing row data (patient, study, series, instance paths).
+
+        Raises:
+            ValueError: If `page_size` is below 1. This is a plain method
+                wrapping a generator precisely so the check fires at the
+                call, not on the first `next()`.
         """
-        # We use a managed connection that stays open during iteration
-        with self._get_connection() as conn:
-            # conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
+        if page_size < 1:
+            raise ValueError(
+                f"page_size must be >= 1, got {page_size}")
+        return self._iter_flattened_instances(
+            patient_ids, instance_uids, page_size)
 
-            query = """
-                SELECT
-                    p.patient_id, p.patient_name,
-                    st.study_instance_uid, st.study_date,
-                    s.series_instance_uid, s.modality, s.series_number, s.manufacturer, s.model_name, s.device_serial_number,
-                    i.sop_instance_uid, i.sop_class_uid, i.instance_number, i.file_path,
-                    i.pixel_offset, i.pixel_length, i.compress_alg, i.attributes_json
-                FROM instances i
-                JOIN series s ON i.series_id_fk = s.id
-                JOIN studies st ON s.study_id_fk = st.id
-                JOIN patients p ON st.patient_id_fk = p.id
-            """
+    def _iter_flattened_instances(self, patient_ids, instance_uids, page_size):
+        """Keyset walk backing `get_flattened_instances`.
 
-            conditions = []
-            params = []
+        Each page opens its own `_get_connection`, so the lock (or the
+        connection, on a file store) is held for the query and nothing
+        else. Paging by re-query rather than by `fetchmany` on a live
+        cursor is not a preference: on the file path `_get_connection`
+        **closes** the connection when its block exits, so a cursor
+        cannot survive to a second page at all.
 
-            if patient_ids:
-                placeholders = ",".join("?" for _ in patient_ids)
-                conditions.append(f"p.patient_id IN ({placeholders})")
-                params.extend(patient_ids)
+        The keyset is `instances.id`, which is an INTEGER PRIMARY KEY and
+        therefore the rowid, so resuming is a seek rather than an OFFSET
+        scan. It is selected as the first column and stripped back off
+        before yielding -- it is a walk cursor, not part of the published
+        row shape.
+        """
+        # `i.id` leads the select list so the keyset column has a fixed
+        # position to slice off, whatever the rest of the list becomes.
+        base_query = """
+            SELECT
+                i.id,
+                p.patient_id, p.patient_name,
+                st.study_instance_uid, st.study_date,
+                s.series_instance_uid, s.modality, s.series_number, s.manufacturer, s.model_name, s.device_serial_number,
+                i.sop_instance_uid, i.sop_class_uid, i.instance_number, i.file_path,
+                i.pixel_offset, i.pixel_length, i.compress_alg, i.attributes_json
+            FROM instances i
+            JOIN series s ON i.series_id_fk = s.id
+            JOIN studies st ON s.study_id_fk = st.id
+            JOIN patients p ON st.patient_id_fk = p.id
+        """
 
-            if instance_uids:
-                placeholders = ",".join("?" for _ in instance_uids)
-                conditions.append(f"i.sop_instance_uid IN ({placeholders})")
-                params.extend(instance_uids)
+        filters = []
+        filter_params = []
 
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+        if patient_ids:
+            placeholders = ",".join("?" for _ in patient_ids)
+            filters.append(f"p.patient_id IN ({placeholders})")
+            filter_params.extend(patient_ids)
 
-            # Execute generator
-            cursor = cur.execute(query, params)
+        if instance_uids:
+            placeholders = ",".join("?" for _ in instance_uids)
+            filters.append(f"i.sop_instance_uid IN ({placeholders})")
+            filter_params.extend(instance_uids)
 
-            # We can map columns to names
-            cols = [desc[0] for desc in cursor.description]
+        after_id = 0
+        while True:
+            # Rebuilt per page: the keyset condition is appended last, so
+            # its bound value must follow the filters' in `params` too.
+            # A mismatch here binds the wrong value to the wrong
+            # placeholder and returns wrong rows without raising.
+            conditions = filters + ["i.id > ?"]
+            params = list(filter_params) + [after_id]
+            query = (base_query + " WHERE " + " AND ".join(conditions)
+                     + " ORDER BY i.id LIMIT ?")
+            params.append(page_size)
 
-            for row in cursor:
-                yield dict(zip(cols, row))
+            with self._get_connection() as conn:
+                cursor = conn.cursor().execute(query, params)
+                cols = [desc[0] for desc in cursor.description][1:]
+                page = cursor.fetchall()
+
+            for row in page:
+                after_id = row[0]
+                yield dict(zip(cols, row[1:]))
+
+            # A short page means `LIMIT` never filled, which only happens
+            # when the scan reached the end. Rows the filter excluded do
+            # not shorten a page -- `LIMIT` counts matches -- so this
+            # cannot stop early on a sparse cohort.
+            if len(page) < page_size:
+                return
 
     def update_attributes(self, instances: List[Patient]):
         """

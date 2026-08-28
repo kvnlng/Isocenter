@@ -2,6 +2,7 @@ import pytest
 import pandas as pd
 import os
 import sqlite3
+import threading
 from isocenter.session import DicomSession
 from isocenter.entities import Patient, Study, Series, Instance
 from isocenter.persistence import IsocenterJSONEncoder
@@ -222,3 +223,242 @@ def test_the_declared_columns_match_the_rows_actually_built(session_with_data):
 
     assert not df.empty, "fixture must produce rows or this pins nothing"
     assert list(df.columns) == COHORT_REPORT_COLUMNS
+
+
+# --- #164: a suspended generator must not hold the store hostage ---------
+
+
+def _store_with_instances(db_path, count=3):
+    """A populated `SqliteStore`, built without a `DicomSession`.
+
+    These tests suspend a generator mid-iteration and then poke the
+    *store*, so they talk to `SqliteStore` directly rather than through a
+    session that would keep handles of its own on it.
+    """
+    from isocenter.persistence import SqliteStore
+
+    store = SqliteStore(db_path)
+    p = Patient("P1", "Test Patient")
+    st = Study("ST1", "20230101")
+    se = Series("SE1", "CT", 101, equipment=None)
+    for i in range(count):
+        inst = Instance(f"I{i}", "1.2.840.123", i)
+        inst.attributes = {"Modality": "CT"}
+        se.instances.append(inst)
+    st.series.append(se)
+    p.studies.append(st)
+    store.save_all([p])
+    return store
+
+
+def _probe_on_a_thread(fn, timeout=2.0):
+    """Runs `fn` on a daemon thread and reports what happened.
+
+    The failure mode under test is a *hang*, so the call must not happen
+    on the test's own thread: a regression would wedge the whole suite
+    rather than fail one test. The probe runs elsewhere, the test waits
+    with a bounded join, and the caller releases the generator afterwards
+    so a blocked probe comes unstuck instead of outliving the test.
+
+    Returns `(thread, box)`. A finished thread is not proof of success --
+    one that raised also finishes -- so callers assert on `box["value"]`,
+    not just on `is_alive()`.
+    """
+    box = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # reported to the test, not swallowed
+            box["error"] = exc
+
+    t = threading.Thread(target=run, daemon=True, name="deadlock-probe")
+    t.start()
+    t.join(timeout=timeout)
+    return t, box
+
+
+def test_a_suspended_flattened_instances_generator_releases_the_memory_lock():
+    """#164, the mechanism.
+
+    `get_flattened_instances` used to `yield` from inside
+    `with self._get_connection()`, and on a `:memory:` store that context
+    manager holds `_memory_lock` -- a plain, non-reentrant
+    `threading.Lock` -- across its own yield. A generator suspended
+    between rows therefore held the store's only lock, and every other
+    database call on it blocked forever.
+
+    Streaming *is* partial consumption, so the one usage the method
+    advertises was the one that deadlocked.
+
+    This is the deterministic half: no threads, no timeout, just the
+    lock's own state while the generator is parked.
+    """
+    store = _store_with_instances(":memory:")
+    gen = None
+    try:
+        gen = store.get_flattened_instances(page_size=1)
+        first = next(gen)
+
+        assert first["sop_instance_uid"] == "I0"
+        assert store._memory_lock.locked() is False
+    finally:
+        # Closed before `stop()`, and unconditionally: a failing assert
+        # above means the lock IS held, and `stop()` flushes the audit
+        # queue through `_get_connection` with no timeout. Releasing the
+        # generator first is what turns a regression into one failed test
+        # rather than a wedged suite.
+        if gen is not None:
+            gen.close()
+        store.stop()
+
+
+def test_a_suspended_flattened_instances_generator_does_not_block_the_store():
+    """#164, the behaviour the lock state above causes: any other call on
+    the same `:memory:` store while a generator is parked mid-stream.
+    """
+    store = _store_with_instances(":memory:")
+    gen = None
+    thread = None
+    try:
+        gen = store.get_flattened_instances(page_size=1)
+        next(gen)
+
+        thread, box = _probe_on_a_thread(store.get_total_instances)
+
+        assert not thread.is_alive(), \
+            "another store call blocked on the parked generator"
+        assert box.get("error") is None, f"probe raised: {box.get('error')!r}"
+        assert box.get("value") == 3
+    finally:
+        # Release the lock whatever the assertions did, so a blocked
+        # probe thread and the store teardown both come unstuck. Without
+        # this, a regression here wedges the rest of the suite.
+        if gen is not None:
+            gen.close()
+        if thread is not None:
+            thread.join(timeout=2.0)
+        store.stop()
+
+
+def test_a_suspended_flattened_instances_generator_holds_no_read_snapshot(tmp_path):
+    """The file-backed path never deadlocked -- `_get_connection` opens a
+    fresh connection per call there -- but a parked generator still held
+    one open with a stepping `SELECT` on it.
+
+    File stores run in WAL mode (`_init_db`), so that reader does *not*
+    block writers. What it blocks is checkpointing: SQLite cannot reset
+    the `-wal` file past the oldest live read snapshot, so the WAL grows
+    unbounded for as long as the generator stays parked. Paging ends the
+    read between pages, which is what this pins -- `wal_checkpoint`
+    reports busy=0 rather than busy=1.
+
+    The audit worker reads through `_get_connection` too, so it is
+    stopped first: otherwise it could hold a snapshot of its own and this
+    would pin the wrong thing.
+    """
+    db_path = str(tmp_path / "streaming.db")
+    store = _store_with_instances(db_path)
+    store.stop()  # quiesce the audit worker's own connections
+
+    probe = sqlite3.connect(db_path, timeout=1.0)
+    try:
+        # The WAL must have something in it or the checkpoint pins
+        # nothing: closing the last connection to a WAL database
+        # truncates the log, and `PRAGMA wal_checkpoint` on an empty log
+        # reports busy=0 whether a reader is parked or not. This write
+        # is what makes the assertion below discriminating -- deleting
+        # it leaves a test that passes against the bug.
+        probe.execute("PRAGMA user_version = 1")
+        probe.commit()
+
+        gen = store.get_flattened_instances(page_size=1)
+        try:
+            next(gen)
+
+            busy, _, _ = probe.execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+
+            assert busy == 0, "a parked generator is still pinning the WAL open"
+        finally:
+            gen.close()
+    finally:
+        probe.close()
+
+
+def test_flattened_instances_pages_without_changing_its_rows():
+    """Paging bounds the lock hold; it must not touch the result. A page
+    size of 1 has to produce exactly what one query did.
+    """
+    store = _store_with_instances(":memory:")
+    try:
+        paged = list(store.get_flattened_instances(page_size=1))
+        one_shot = list(store.get_flattened_instances(page_size=1000))
+
+        assert paged == one_shot
+        assert [r["sop_instance_uid"] for r in paged] == ["I0", "I1", "I2"]
+    finally:
+        store.stop()
+
+
+def test_flattened_instances_pages_a_filtered_cohort_correctly():
+    """`LIMIT` applies after the `WHERE`, and the keyset resumes from the
+    last row *returned*, not the last row scanned. A filter that excludes
+    rows in the middle of a page must therefore neither lose the rows
+    after it nor end the walk early.
+    """
+    store = _store_with_instances(":memory:", count=6)
+    try:
+        wanted = ["I1", "I3", "I5"]
+        rows = list(store.get_flattened_instances(
+            instance_uids=wanted, page_size=1))
+
+        assert [r["sop_instance_uid"] for r in rows] == wanted
+    finally:
+        store.stop()
+
+
+def test_flattened_instances_row_shape_carries_no_paging_key():
+    """The keyset walks `instances.id`, which means selecting a column the
+    method never published. It must not leak into the row: callers read
+    these dicts by key, and #55's changelog names the exact set.
+    """
+    store = _store_with_instances(":memory:")
+    gen = None
+    try:
+        # Bound rather than consumed inline, so the `finally` can close
+        # it: an unbound generator is only released by refcounting, and
+        # if this ever parks with the lock held that timing decides
+        # whether `store.stop()` returns.
+        gen = store.get_flattened_instances(page_size=1)
+        row = next(gen)
+
+        assert "id" not in row
+        assert sorted(row) == sorted([
+            "patient_id", "patient_name",
+            "study_instance_uid", "study_date",
+            "series_instance_uid", "modality", "series_number",
+            "manufacturer", "model_name", "device_serial_number",
+            "sop_instance_uid", "sop_class_uid", "instance_number",
+            "file_path", "pixel_offset", "pixel_length", "compress_alg",
+            "attributes_json",
+        ])
+    finally:
+        if gen is not None:
+            gen.close()
+        store.stop()
+
+
+def test_a_page_size_below_one_is_rejected():
+    """`LIMIT 0` returns an empty page, and an empty page is how the walk
+    decides it has reached the end -- so `page_size=0` would silently
+    report an empty store rather than fail. The check runs at call time,
+    not on first `next()`, which is why the method is a plain function
+    wrapping the generator.
+    """
+    store = _store_with_instances(":memory:")
+    try:
+        with pytest.raises(ValueError):
+            store.get_flattened_instances(page_size=0)
+    finally:
+        store.stop()
