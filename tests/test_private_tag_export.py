@@ -160,14 +160,19 @@ def test_an_unwritable_element_is_named_as_data_loss(caplog):
 
 
 def test_merging_the_same_attributes_twice_is_idempotent():
-    """`_export_instance_worker` merges `inst.attributes` twice.
+    """`_merge` must not be able to poison its own input.
 
-    `_merge` rebinds `v` when it encodes a fallback value, so the second
-    pass must not be handed what the first pass produced. It is not --
-    the rebind is local and the source dict is untouched -- and that is
-    worth pinning, because every exported instance takes this path and
-    none of the round-trip tests above would notice if it stopped being
-    true.
+    It rebinds `v` when the fallback encodes a value, so a second pass
+    over the same mapping must not be handed what the first pass
+    produced. It is not -- the rebind is local and the source dict is
+    untouched.
+
+    Until #179 the reason was blunt: `_export_instance_worker` merged
+    `inst.attributes` twice outright. That copy-paste is gone, and the
+    property is still worth pinning, because the four surviving merges
+    overlap by tag and `write_tree()` merges the same instance mapping
+    on its own path. None of the round-trip tests above would notice if
+    the rebind started leaking.
     """
     attrs = {"0009,1003": b"\x01\x02", "0009,1004": "x" * 80, "0009,1005": 5}
     before = dict(attrs)

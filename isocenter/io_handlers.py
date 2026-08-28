@@ -610,12 +610,6 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # 1. Patient Level
         DicomExporter._merge(ds, ctx.patient_attributes, losses)
-        # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes, losses)
-        DicomExporter._merge_sequences(ds, inst.sequences, losses)
-
-        # 1. Patient Level
-        DicomExporter._merge(ds, ctx.patient_attributes, losses)
 
         # 2. Study Level
         DicomExporter._merge(ds, ctx.study_attributes, losses)
@@ -1631,6 +1625,20 @@ class DicomExporter:
                 # The scope is attached here, where `t` is still a tag,
                 # not in the parent where it is only a substring of a
                 # sentence (#146).
+                #
+                # The dedupe stays, with a narrower reason than it had.
+                # Until #179 the worker merged `inst.attributes` twice,
+                # so *every* loss arrived in duplicate and this was the
+                # only thing keeping section 3 of the compliance report
+                # from double-counting. That is gone. What remains is
+                # that the four surviving merges overlap by tag --
+                # (0010,0010), (0008,0020), (0020,000d), (0020,000e),
+                # (0008,0060) are all in `inst.attributes` *and* in the
+                # patient/study/series mapping stamped over it -- and
+                # the message is deterministic, so one malformed value
+                # present at two levels still lands here twice. Keys
+                # within a single `attrs` are unique, so the duplicate
+                # can only ever come from a second call.
                 entry = (loss_scope_for_tag(t), loss)
                 if entry not in losses:
                     losses.append(entry)
