@@ -1,19 +1,27 @@
-"""Private tags with a binary VR never reach the graph, silently (#125).
+"""Binary-VR elements that reach the graph via nothing, silently (#125, #137).
 
 `populate_attrs` skips every element whose VR is in `BINARY_VRS`. For
-standard tags that is right: the pixel and waveform blobs belong in the
-sidecar, and holding them in `attributes` would undo the memory scaling
-the design depends on.
+`PixelData` and `WaveformData` that is right and lossless: both are
+extracted and written to the sidecar before this runs, and holding them
+in `attributes` would undo the memory scaling the design depends on.
 
-For a *private* tag it is a loss with nothing behind it. A vendor block
-routinely carries `OB` elements, and they are gone before
-`remove_private_tags=False` is ever consulted -- so the flag cannot keep
-what it promises to keep, and nothing said so.
+For everything else with a binary VR there is nothing behind the skip.
+A private vendor block routinely carries `OB` elements, and they are
+gone before `remove_private_tags=False` is ever consulted -- so the flag
+cannot keep what it promises to keep (#125). Overlay Data and the
+palette color LUTs are `OW`, standard, and equally unrouted; the
+exported file keeps their `US` descriptors and so declares a plane it
+does not carry (#137).
 
 Whether those bytes should be *kept* is a real design question and is
 still open. That they are dropped in silence is not; #36 settled the
 pattern for exactly this shape -- warn, and write a `DATA_LOSS` audit
 entry, because the log line alone is not a compliance trail.
+
+The boundary that needs pinning is therefore "binary VR and routed
+nowhere", not "binary VR" and not "odd group": widening it naively puts
+a DATA_LOSS entry in the record of every image and every waveform ever
+ingested.
 """
 import os
 import sqlite3
@@ -157,23 +165,8 @@ def test_a_private_binary_tag_inside_a_sequence_is_reported_too(tmp_path):
     assert any("0009,1003" in d for (d,) in rows), rows
 
 
-def test_a_standard_binary_element_is_not_reported(tmp_path):
-    """The scope line, pinned deliberately rather than left to a gate.
-
-    Overlay Data `(6000,3000)` and the palette LUTs are `OW`, are skipped
-    by the same rule, and are not written to the sidecar -- so they are
-    genuinely dropped, and this does not report them.
-
-    That is a narrower line than "report every loss", and the reason is
-    that these are two different things. `populate_attrs` documents
-    skipping overlays as a design choice, and dropping them costs
-    fidelity but cannot leak: nothing writes an element that is not in
-    the graph, and overlay planes are a classic burned-in PHI vector. A
-    private binary tag was never such a choice -- it is collateral from a
-    rule aimed at pixels, and it makes `remove_private_tags=False` a
-    promise the code cannot keep. Reporting the second is closing a gap;
-    reporting the first is a separate call, tracked separately.
-    """
+def _ingest_with(tmp_path, name, mutate):
+    """Write the base file, apply `mutate`, ingest, return DATA_LOSS rows."""
     import pydicom
 
     src = tmp_path / "src"
@@ -181,22 +174,92 @@ def test_a_standard_binary_element_is_not_reported(tmp_path):
     _write_src(str(src), with_private_binary=False)
     path = os.path.join(str(src), "one.dcm")
     ds = pydicom.dcmread(path)
-    ds.add_new(0x60000010, 'US', 4)                    # OverlayRows
-    ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')  # OverlayData
+    mutate(ds)
     ds.save_as(path, enforce_file_format=True)
 
-    session = DicomSession(persistence_file=str(tmp_path / "ovl.db"))
+    session = DicomSession(persistence_file=str(tmp_path / f"{name}.db"))
     try:
         session.ingest(str(src))
         inst = session.store.patients[0].studies[0].series[0].instances[0]
-        assert "6000,0010" in inst.attributes, "precondition: the overlay was read"
-        assert "6000,3000" not in inst.attributes, "precondition: its data was dropped"
+        attrs = dict(inst.attributes)
         db_path = session.store_backend.db_path
     finally:
         session.close()
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT 1 FROM audit_log WHERE action_type='DATA_LOSS'").fetchall()
+            "SELECT details FROM audit_log "
+            "WHERE action_type='DATA_LOSS'").fetchall()
+    return attrs, [d for (d,) in rows]
 
-    assert rows == []
+
+def test_overlay_data_is_reported(tmp_path):
+    """Overlay Data `(6000,3000)` is `OW`, is skipped for its VR, and --
+    unlike pixels and waveforms -- is routed nowhere. It is simply gone
+    (#137).
+
+    The exported file keeps the overlay *descriptors*, which are `US`
+    and reach the graph, so it declares a plane it does not carry. That
+    is the shape 0.8.1 removed from the WFDB header: an artefact
+    asserting something it does not contain.
+    """
+    def add_overlay(ds):
+        ds.add_new(0x60000010, 'US', 4)                    # OverlayRows
+        ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')  # OverlayData
+
+    attrs, details = _ingest_with(tmp_path, "ovl", add_overlay)
+
+    assert "6000,0010" in attrs, "precondition: the descriptors were read"
+    assert "6000,3000" not in attrs, "precondition: the data was dropped"
+    assert any("6000,3000" in d for d in details), details
+    assert any("OW" in d for d in details), details
+
+
+def test_palette_lut_data_is_reported(tmp_path):
+    """`(0028,1201)` Red Palette Color LUT Data is the same case in an
+    even group that is not an overlay, so it pins the rule rather than
+    the one tag it was found through."""
+    def add_lut(ds):
+        ds.add_new(0x00281201, 'OW', b'\xbb' * 16)
+
+    _attrs, details = _ingest_with(tmp_path, "lut", add_lut)
+
+    assert any("0028,1201" in d for d in details), details
+
+
+def test_waveform_data_is_not_reported(tmp_path):
+    """The false positive the gate has to avoid.
+
+    `(5400,1010)` Waveform Data is `OW` and *is* skipped by the VR rule
+    -- but `ingest_worker` has already pulled it out and written it to
+    the sidecar, exactly as it does for `PixelData`. Reporting it would
+    put a `DATA_LOSS` entry in the record of every waveform ever
+    ingested, which is how a compliance trail becomes noise.
+
+    This is why #137's "widening the gate is one line" is not true: the
+    rule is "binary VR and routed nowhere", not "binary VR".
+    """
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+
+    def add_waveform(ds):
+        item = Dataset()
+        item.NumberOfWaveformChannels = 1
+        item.NumberOfWaveformSamples = 4
+        item.SamplingFrequency = 100
+        item.WaveformBitsAllocated = 16
+        item.WaveformSampleInterpretation = "SS"
+        item.add_new(0x54001010, 'OW', b'\x00\x01' * 4)
+        ds.WaveformSequence = Sequence([item])
+
+    _attrs, details = _ingest_with(tmp_path, "wave", add_waveform)
+
+    assert not any("5400,1010" in d for d in details), details
+
+
+def test_pixel_data_is_not_reported(tmp_path):
+    """The other routed blob. Excluded above the VR check by its group,
+    so it never reaches the gate -- pinned so that stays true."""
+    _attrs, details = _ingest_with(tmp_path, "pix", lambda ds: None)
+
+    assert not any("7fe0,0010" in d for d in details), details
