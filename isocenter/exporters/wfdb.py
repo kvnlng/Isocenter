@@ -11,7 +11,8 @@ from typing import List, Optional
 import numpy as np
 
 from . import Exporter, register
-from ..io_handlers import export_folder_names, format_study_date
+from ..io_handlers import (export_folder_names, format_study_date,
+                           LOSS_SCOPE_STANDARD)
 from ..logger import get_logger
 from ..waveform import Waveform, WaveformChannel
 
@@ -324,6 +325,12 @@ class WfdbExporter(Exporter):
         # This is the auditor's override, not a debug switch -- it says the
         # protocol permits releasing that text.
         include_annotation_text = bool(options.get("include_annotation_text", False))
+        # Passed down explicitly rather than read off `session` inside
+        # `_write_instance`, so the one place that writes an audit entry
+        # names its dependency instead of reaching back through the
+        # facade. `None` is a legitimate value: `_write_instance` is
+        # called directly by tests with no session behind it.
+        store_backend = getattr(session, "store_backend", None)
         written = []
         used_names = {}  # out_dir -> set of record names already claimed
 
@@ -345,7 +352,8 @@ class WfdbExporter(Exporter):
                         try:
                             path = self._write_instance(
                                 folder, patient, study, series, instance, logger,
-                                used_names, include_annotation_text)
+                                used_names, include_annotation_text,
+                                store_backend)
                         except Exception as e:
                             logger.error(
                                 f"WFDB export failed for instance "
@@ -380,7 +388,8 @@ class WfdbExporter(Exporter):
         return candidate
 
     def _write_instance(self, folder, patient, study, series, instance, logger,
-                        used_names, include_annotation_text=False):
+                        used_names, include_annotation_text=False,
+                        store_backend=None):
         """Write one record. Returns the .hea path, or None if not a waveform.
 
         `used_names` is REQUIRED (not `=None`): its absence used to
@@ -443,9 +452,32 @@ class WfdbExporter(Exporter):
         if manufacturer:
             source = f"{source} ({manufacturer})"
 
+        dropped_annotations = []
         write_annotations(
             os.path.join(out_dir, f"{record_name}.annotations.json"),
-            build_annotations(instance, waveform, source, include_annotation_text))
+            build_annotations(instance, waveform, source, include_annotation_text,
+                              dropped=dropped_annotations))
+
+        # Warn-plus-audit, the shape #36 established for the multiplex
+        # discard itself. A dropped annotation that says nothing is a
+        # different bug from a mislabelled one, not a fix for it (#159).
+        #
+        # Scoped STANDARD because Waveform Annotation Sequence
+        # (0040,B020) is an even group, so under the #146 parity rule the
+        # session still grades PASS. That is deliberate and is the one
+        # choice here that does not pre-empt #150: the scope states what
+        # the element *was*, not how bad the loss felt, exactly as the
+        # ingest-side multiplex emitter in `io_handlers.py` insists.
+        # Grading this one harder than the group discard it follows from
+        # would decide #150 on the wrong ticket, and in the wrong place.
+        for detail in dropped_annotations:
+            logger.warning(f"{instance.sop_instance_uid}: {detail}")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="DATA_LOSS",
+                    entity_uid=instance.sop_instance_uid,
+                    details=detail,
+                    loss_scope=LOSS_SCOPE_STANDARD)
 
         return hea_path
 
