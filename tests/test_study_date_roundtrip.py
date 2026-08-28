@@ -41,6 +41,7 @@ from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
 from isocenter.entities import Instance
+from isocenter.persistence import _as_loaded_date, _as_stored_date
 from isocenter.exporters.wfdb import WfdbExporter
 from isocenter.session import DicomSession
 
@@ -183,3 +184,62 @@ def test_the_wfdb_start_time_still_comes_from_the_study_after_a_reload(reloaded)
     # The time-of-day is always the instance's -- SHIFT_DATE never moves
     # one -- so this half staying put is the control, not a second bug.
     assert start == datetime(2024, 1, 15, 10, 15, 30)
+
+
+# --- The pair as a pair -----------------------------------------------
+#
+# The three tests above all drive one input (`"20240115"` at ingest, i.e.
+# a `date` in the store) end to end. That leaves the two rules
+# `_as_loaded_date`'s docstring calls deliberate untested, and a mutation
+# probe confirms it: rewriting the parse as a strict
+# `strptime(value, "%Y-%m-%d")` -- the exact "tightening" the docstring
+# forbids -- and rewriting the `except` to return `None` instead of the
+# stored value both leave every date-related test in the suite green.
+#
+# Asserted against the pair rather than `_as_loaded_date` alone, because
+# the claim being pinned is that it is `_as_stored_date`'s inverse. Two
+# rows are deliberately *not* round-trip-equal and say so in the third
+# column; those are the normalisations the docstring blesses.
+
+@pytest.mark.parametrize("value, stored, loaded", [
+    # NULL stays None: a date we do not have is not one we invent (#60).
+    (None, None, None),
+    # The case ingest actually produces: exact round trip.
+    (date(2024, 1, 15), "2024-01-15", date(2024, 1, 15)),
+    # Pre-1900 and year 1 -- `strftime` territory, but `isoformat` is
+    # unbothered and neither may be silently dropped.
+    (date(1880, 5, 3), "1880-05-03", date(1880, 5, 3)),
+    (date(1, 1, 1), "0001-01-01", date(1, 1, 1)),
+    # Unparseable values are returned as they were stored, never
+    # replaced with None and never guessed at (#60).
+    ("junk", "junk", "junk"),
+    ("2024-13-45", "2024-13-45", "2024-13-45"),
+    ("", "", ""),
+    # Deliberate normalisation, not a round trip: a DA-spelled string set
+    # by hand (rather than parsed at ingest) loads as a `date`, because
+    # one type everywhere is the whole point. Do not "fix" this row by
+    # tightening the parse.
+    ("20240115", "20240115", date(2024, 1, 15)),
+    ("2024-01-15", "2024-01-15", date(2024, 1, 15)),
+])
+def test_the_stored_and_loaded_date_helpers_are_inverses(value, stored, loaded):
+    assert _as_stored_date(value) == stored
+    assert _as_loaded_date(stored) == loaded
+    assert type(_as_loaded_date(stored)) is type(loaded)
+
+
+def test_a_datetime_study_date_does_not_survive_the_round_trip():
+    """The one input the inverse does not restore, pinned as known.
+
+    `_as_stored_date` renders a `datetime` as `'2024-01-15T10:30:00'`,
+    which `date.fromisoformat` rejects, so it comes back a string and
+    still exports as an illegal DA. Nothing in the library produces a
+    `datetime` here -- `io_handlers` parses (0008,0020) with `.date()` --
+    so this is reachable only by hand-setting the field, and it is not a
+    regression: the pre-fix store returned a string for every value.
+    Pinned rather than fixed so that closing it is a visible change.
+    """
+    stored = _as_stored_date(datetime(2024, 1, 15, 10, 30))
+    assert stored == "2024-01-15T10:30:00"
+    assert _as_loaded_date(stored) == "2024-01-15T10:30:00"
+    assert isinstance(_as_loaded_date(stored), str)
