@@ -18,6 +18,8 @@ import numpy as np
 import pydicom
 import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.multival import MultiValue
+from pydicom.tag import Tag
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter.io_handlers import DicomExporter
@@ -43,9 +45,24 @@ def _write_src(folder, private=None):
     ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "OT", 1, 1
     ds.StudyDate = "20230101"
 
+    # The control for #165: a *standard* VM > 1 element. `dictionary_VR`
+    # resolves it, so it never reaches the fallback -- which is what makes
+    # the defect the fallback path specifically rather than list handling.
+    ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
     ds.add_new(0x00090010, 'LO', 'ACME_HEADER')        # Private Creator
     ds.add_new(0x00091001, 'LO', 'acquisition-v7')
     ds.add_new(0x00091002, 'LT', LONG_VALUE)
+
+    # VM > 1, one per value type a real vendor block carries (#165).
+    # pydicom hands these back as `MultiValue`, which is not a `list`
+    # subclass, and the fallback had no arm for either.
+    ds.add_new(0x00091010, 'US', [1, 2, 3])
+    ds.add_new(0x00091011, 'LO', ['alpha', 'beta'])
+    ds.add_new(0x00091012, 'DS', [1.5, 2.5])
+    ds.add_new(0x00091014, 'IS', [4, 5])
+    # Each value inside LO's 64-character cap, their join well past it.
+    ds.add_new(0x00091015, 'LO', ['q' * 50, 'r' * 50])
 
     ds.Rows = ds.Columns = 4
     ds.BitsAllocated = ds.BitsStored = 8
@@ -174,7 +191,8 @@ def test_merging_the_same_attributes_twice_is_idempotent():
     on its own path. None of the round-trip tests above would notice if
     the rebind started leaking.
     """
-    attrs = {"0009,1003": b"\x01\x02", "0009,1004": "x" * 80, "0009,1005": 5}
+    attrs = {"0009,1003": b"\x01\x02", "0009,1004": "x" * 80,
+             "0009,1005": 5, "0009,1006": MultiValue(str, ["a", "b"])}
     before = dict(attrs)
 
     ds = pydicom.Dataset()
@@ -185,3 +203,173 @@ def test_merging_the_same_attributes_twice_is_idempotent():
     assert (ds[0x00091003].VR, ds[0x00091003].value) == ("UN", b"\x01\x02")
     assert (ds[0x00091004].VR, ds[0x00091004].value) == ("UT", "x" * 80)
     assert (ds[0x00091005].VR, ds[0x00091005].value) == ("LO", "5")
+    assert (ds[0x00091006].VR, list(ds[0x00091006].value)) == ("LO", ["a", "b"])
+
+
+# --------------------------------------------------------------------
+# VM > 1 (#165)
+#
+# #118 closed on "private tags reach the exported file". They reached it
+# at VM = 1. `_fallback_encoding` dispatched on the Python type of the
+# value and had an arm for `bytes`, `bool`, `int`/`float` and `str` and
+# none for a sequence of any of them, so it returned None -- the "nothing
+# fits" signal -- and `_merge` turned that into a `DATA_LOSS` entry and
+# wrote no element. Multi-valued private elements are ordinary in real
+# vendor blocks, so `remove_private_tags=False` kept the scalar half of
+# the block and dropped the rest.
+#
+# Loudly, which is the one thing that was already right: the drop files
+# `DATA_LOSS` / `PRIVATE` and grades `REVIEW_REQUIRED` (#146, #148). The
+# fix is to stop losing the values, not to change how the loss is
+# reported.
+# --------------------------------------------------------------------
+
+@pytest.mark.parametrize("tag, expected", [
+    ("0009,1010", ["1", "2", "3"]),          # source US
+    ("0009,1011", ["alpha", "beta"]),        # source LO
+    ("0009,1012", ["1.5", "2.5"]),           # source DS
+    ("0009,1014", ["4", "5"]),               # source IS
+])
+def test_a_multi_valued_private_tag_survives_export(tmp_path, tag, expected):
+    """#165 as reported: present in the graph, absent from the file.
+
+    The values come back as strings because nothing restores the source
+    VR -- that is #154, and deciding it here would be deciding it on the
+    wrong ticket. What this asserts is that the *values* and their
+    multiplicity survive, which they did not.
+    """
+    kept = _private(_roundtrip(tmp_path))
+    assert list(kept.get(tag, [])) == expected, kept
+
+
+def test_a_multi_valued_private_tag_is_not_reported_as_data_loss(tmp_path,
+                                                                caplog):
+    """The loud loss has to stop being filed, not just stop being true.
+
+    A `DATA_LOSS` entry scoped `PRIVATE` grades the whole run
+    `REVIEW_REQUIRED` (#146). Leaving one behind for an element that is
+    now in the file would put a reviewer in front of a loss that did not
+    happen.
+    """
+    with caplog.at_level(logging.WARNING):
+        _roundtrip(tmp_path)
+
+    msgs = [r.getMessage() for r in caplog.records
+            if "not exported" in r.getMessage()]
+    assert not msgs, msgs
+
+
+def test_a_standard_multi_valued_tag_is_unaffected(tmp_path):
+    """The control, and the reason #165 is a fallback defect.
+
+    `ImageOrientationPatient` is VM 6 and survived the whole time, on the
+    same instance, in the same export, because `dictionary_VR` answers
+    for it and the fallback is never consulted. Isocenter is not bad at
+    lists; it was bad at lists whose VR it had to choose. Asserted here
+    so a future change to `_fallback_multivalue` cannot start capturing
+    standard elements without a test noticing.
+    """
+    ds = _roundtrip(tmp_path)
+    assert list(ds.ImageOrientationPatient) == [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    assert ds[0x00200037].VR == "DS"
+
+
+def test_a_multi_valued_value_is_written_as_one_element_not_a_join(tmp_path):
+    """Multiplicity is DICOM's, not a string the exporter builds.
+
+    A joined `"alpha\\\\beta"` under a VM-1 VR would read back as one
+    value containing a literal backslash, which is a different element
+    from the two-valued one that was ingested.
+    """
+    value = _private(_roundtrip(tmp_path))["0009,1011"]
+    assert not isinstance(value, str), value
+    assert len(value) == 2, value
+
+
+# --- the encoder itself, where the arms are ---
+
+def test_the_fallback_encodes_a_MultiValue():
+    """The in-memory shape. `MultiValue` is what pydicom hands back for a
+    multi-valued element, and it is a `MutableSequence`, *not* a `list`
+    subclass -- an `isinstance(value, list)` arm would miss the path
+    `session.export()` actually takes."""
+    assert DicomExporter._fallback_encoding(
+        MultiValue(str, ["alpha", "beta"])) == ('LO', ["alpha", "beta"])
+
+
+def test_the_fallback_encodes_a_plain_list():
+    """The reloaded shape (#158). `load_vertical_attributes` reassembles
+    the EAV rows as a list of strings, so after a save/close/reopen the
+    same tag arrives here as a `list` rather than a `MultiValue`."""
+    assert DicomExporter._fallback_encoding(
+        ["alpha", "beta"]) == ('LO', ["alpha", "beta"])
+
+
+def test_the_LO_cap_is_checked_per_value_not_against_the_join():
+    """PS3.5 6.2 caps each *value* of a multi-valued element at 64
+    characters, not their backslash-joined encoding.
+
+    Measured, not assumed: pydicom writes and reads back two 50-character
+    values under `LO` -- a 101-byte encoding -- with no warning under both
+    implicit and explicit VR. Escalating to `UT` on the joined length
+    would collapse a conformant two-valued element into one string
+    carrying a literal backslash, for no gain.
+    """
+    assert DicomExporter._fallback_encoding(
+        ['q' * 50, 'r' * 50]) == ('LO', ['q' * 50, 'r' * 50])
+
+
+def test_a_value_too_long_for_LO_collapses_the_whole_element_to_UT():
+    """`UT` has a value multiplicity of 1, so this is a real trade.
+
+    One over-long value means no text VR can hold the element *and* its
+    multiplicity: `LO` is 1-n but caps at 64, `UT` is unbounded but VM 1.
+    The element is joined into a single `UT` string carrying literal
+    backslashes, which is exactly what `_fallback_encoding` already does
+    to an over-long single value that contains them. Losing the arity is
+    worse than losing nothing and better than losing the values.
+    """
+    vr, value = DicomExporter._fallback_encoding(['x' * 80, 'y'])
+    assert vr == 'UT'
+    assert value == 'x' * 80 + '\\' + 'y'
+
+
+def test_an_empty_multi_valued_private_tag_is_a_zero_length_element():
+    """An empty value is a legal element, and it was a `DATA_LOSS` entry.
+
+    Behaviour change beyond the headline of #165, so it is stated rather
+    than absorbed: `[]` used to reach the "no VR fits" arm and be
+    reported as loss. A zero-length `LO` says "this tag was here and had
+    no value", which is what the graph held.
+    """
+    assert DicomExporter._fallback_encoding([]) == ('LO', [])
+
+
+def test_a_multi_valued_value_the_encoder_cannot_take_is_still_a_loss():
+    """One unencodable value takes its siblings with it, on purpose.
+
+    There is no half-written element in DICOM, and a partial element --
+    two of three vendor values, silently -- is the corruption shape #165
+    is explicitly not trading a loud loss for. `bytes` inside a sequence
+    is the same case: `UN` is an OB-family VR with no multiplicity, so
+    there is nothing to encode a list of blobs as.
+    """
+    assert DicomExporter._fallback_encoding(["alpha", object()]) is None
+    assert DicomExporter._fallback_encoding([b"\x01", b"\x02"]) is None
+    assert DicomExporter._fallback_encoding([["nested"], "x"]) is None
+
+
+def test_a_multi_valued_AT_stringifies_exactly_as_a_single_one_does():
+    """#154's open question is not answered here, in either direction.
+
+    `Tag` is an `int` subclass whose `str` is `'(0010,0010)'`, so a
+    multi-valued `AT` now takes the same stringification the VM = 1 case
+    has taken since #118. Special-casing it would fork the two
+    multiplicities and pre-empt the VR decision that is #154's to make.
+    """
+    single = DicomExporter._fallback_encoding(Tag(0x0010, 0x0010))
+    multi = DicomExporter._fallback_encoding(
+        MultiValue(Tag, [Tag(0x0010, 0x0010), Tag(0x0010, 0x0020)]))
+
+    assert single == ('LO', '(0010,0010)')
+    assert multi == ('LO', ['(0010,0010)', '(0010,0020)'])

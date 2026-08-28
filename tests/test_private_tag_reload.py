@@ -37,6 +37,7 @@ import numpy as np
 import pydicom
 import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.multival import MultiValue
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter.entities import Patient, Study, Series, Instance
@@ -178,15 +179,14 @@ def test_an_export_from_a_reloaded_session_carries_the_private_block(tmp_path):
     A store can be inspected and its private tags are visibly there. The
     export that runs after a reload had none of them.
 
-    (0009,1002) is deliberately not asserted on: `_fallback_encoding`
-    returns None for any sequence value, so a multi-valued private tag has
-    never reached an exported file, before this fix or after it. That is
-    #165, the exporter's own gap. This fix makes it *more* reachable --
-    the EAV reassembles VM > 1 as a list of strings, where in-memory it
-    was a `MultiValue` that fell down the same hole. The reload's job is
-    to put the value back on the graph and in the store, which
-    `test_a_multi_valued_private_tag_reloads_as_a_list` covers on the
-    graph rather than through the exporter.
+    (0009,1002) is asserted on since #165. It was not when this file was
+    written: `_fallback_encoding` returned None for any sequence value,
+    so a multi-valued private tag had never reached an exported file, and
+    #158 made that gap *more* reachable rather than less -- the EAV
+    reassembles VM > 1 as a list of strings, where in-memory it was a
+    `MultiValue` that fell down the same hole. Both shapes are handled
+    now, and the list is the shape only a reload produces, so this is the
+    end-to-end evidence for that half.
     """
     db = tmp_path / "export.db"
     _ingest_save_close(tmp_path, db)
@@ -205,6 +205,73 @@ def test_an_export_from_a_reloaded_session_carries_the_private_block(tmp_path):
             for el in pydicom.dcmread(written[0]) if el.tag.group % 2 == 1}
     assert kept.get("0009,0010") == "ACME_HEADER", kept
     assert kept.get("0009,1001") == "acquisition-v7", kept
+    assert list(kept.get("0009,1002", [])) == ["alpha", "beta", "gamma"], kept
+
+
+def test_a_reloaded_export_matches_an_in_memory_one(tmp_path):
+    """The #158/#165 interaction, as one comparison rather than two.
+
+    The same value reaches `_fallback_encoding` as two different Python
+    types depending on whether a save and reopen happened in between: a
+    `MultiValue` straight from pydicom, a `list` of strings out of the
+    EAV table. A fix that handled one and not the other would make the
+    exported file depend on session lifetime, which is the shape of #158
+    itself.
+
+    They converge because the EAV writes `str(atom)` and the encoder
+    stringifies each value by the same scalar rules, so the headline
+    assertion is an equality rather than two expected values -- there is
+    nothing to keep in step. Both arms are then anchored against the
+    literal as well: consistency alone is satisfied by two exports that
+    are wrong in the same way.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_src(str(src))
+
+    def _read(out):
+        written = glob.glob(str(out / "**" / "*.dcm"), recursive=True)
+        assert written, "export produced no .dcm files"
+        return _private(
+            {f"{el.tag.group:04x},{el.tag.element:04x}": el.value
+             for el in pydicom.dcmread(written[0])})
+
+    # One session, ingest straight to export: the private values are the
+    # `MultiValue` objects pydicom produced and have never been through
+    # the EAV table. Reopening here instead would hand this arm the same
+    # reassembled strings as the other and the comparison would be
+    # between a path and itself.
+    out_mem = tmp_path / "out_mem"
+    session = DicomSession(persistence_file=str(tmp_path / "mem.db"))
+    try:
+        session.ingest(str(src))
+        session.export(str(out_mem), format="dicom", show_progress=False)
+        assert isinstance(
+            _sole_instance(session).attributes["0009,1002"], MultiValue), (
+                "this arm is only the in-memory path while the value is "
+                "still the MultiValue pydicom handed back")
+    finally:
+        session.close()
+    in_memory = _read(out_mem)
+
+    out_saved = tmp_path / "out_saved"
+    db = tmp_path / "saved.db"
+    _ingest_save_close(tmp_path, db)
+    session = DicomSession(persistence_file=str(db))
+    try:
+        assert _sole_instance(session).attributes["0009,1002"] == [
+            "alpha", "beta", "gamma"], "this arm is the EAV reassembly"
+        session.export(str(out_saved), format="dicom", show_progress=False)
+    finally:
+        session.close()
+    reloaded_out = _read(out_saved)
+
+    # Equality first, because agreeing is the property under test -- and
+    # then both arms against the literal, because two exports that are
+    # wrong in the same way would agree just as well.
+    assert in_memory == reloaded_out, (in_memory, reloaded_out)
+    assert list(in_memory["0009,1002"]) == ["alpha", "beta", "gamma"]
+    assert list(reloaded_out["0009,1002"]) == ["alpha", "beta", "gamma"]
 
 
 # --------------------------------------------------------------------
