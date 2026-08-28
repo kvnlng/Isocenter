@@ -1487,6 +1487,7 @@ class DicomSession:
         # 2. Gather Audit Logs & Exceptions
         audit_summary = self.store_backend.get_audit_summary()
         exceptions = self.store_backend.get_audit_errors()
+        data_losses = self.store_backend.get_audit_losses()
 
         # Check for unsafe attributes (BurnedInAnnotation)
         unsafe_items = self.store_backend.check_unsafe_attributes()
@@ -1549,6 +1550,7 @@ class DicomSession:
             total_instances=n_i,
             audit_summary=audit_summary,
             exceptions=exceptions,
+            data_losses=data_losses,
             validation_status="PASS" if audit_summary and not exceptions else "REVIEW_REQUIRED"
         )
 

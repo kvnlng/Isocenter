@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`DATA_LOSS` audit entries now reach the compliance report, in a section of their own.** #36, #125, and #137 each settled on the same pattern -- warn, *and* write a `DATA_LOSS` audit entry, because the log line alone is not a compliance trail. The entries were written correctly, carrying the tag and its VR, into a table `generate_report()` did not surface.
+
+  What the report showed was a bare `| DATA_LOSS | 3 |` row in the audit summary, because `get_audit_summary()` groups by `action_type`, and nothing else. The detail could not reach the Exceptions section either: `get_audit_errors()` filters to `('ERROR', 'WARNING')`. A count with no detail is worse than silence -- it invites the reader to conclude the number is benign, and the person who hits this reads the report rather than `sqlite3 audit_log`.
+
+  The report gains **section 3, Data Loss**, listing every dropped element with its instance and VR; Exceptions & Errors moves to 4 and Validation & Verification to 5. `SqliteStore.get_audit_losses()` is a separate query rather than a widened `get_audit_errors()`, and that separation is the point rather than an implementation detail -- see below.
+
+  **`validation_status` is deliberately unchanged.** A session that dropped a vendor block still grades `PASS`. Folding `DATA_LOSS` into `get_audit_errors()` would have surfaced the detail in one line and, as a side effect, flipped every ingest of a file carrying an overlay to `REVIEW_REQUIRED`, because the grade keys off `exceptions` being empty. Whether a de-identification run that discarded data may call itself `PASS` is a real question and a much larger blast radius than a reporting fix should carry; it stays open on #146. Both halves are pinned: one test asserts the loss does *not* leak into the exceptions section, another asserts the grade is still `PASS`, and the second one names itself as the test to change if that decision lands. (#146)
+
+
 - **Overlay Data and the palette color LUTs were dropped at ingest without a word, and the exported file still claimed to have them.** `populate_attrs` skips every element with a binary VR. #125 made that visible for *private* tags only, on the reasoning that the standard ones this rule catches are routed rather than lost. That was true of `(7fe0,0010)` and `(5400,1010)` and false of everything else: Overlay Data `(60xx,3000)` and the palette LUTs `(0028,120x)` are `OW`, standard, and written nowhere.
 
   The gate is now **"binary VR and routed nowhere"** rather than "odd group", so these are reported as `DATA_LOSS` entries naming the tag and its VR, exactly as private binary tags already were. `_ROUTED_BINARY_TAGS` names the two exclusions and why they exist -- widening the gate naively is not the one-line change it looks like, because reporting `(5400,1010)` would file a loss on every waveform ever ingested, and `tests/test_private_binary_ingest.py` now pins all three cases rather than the odd/even line it pinned before.
