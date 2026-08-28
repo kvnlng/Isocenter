@@ -374,7 +374,10 @@ def test_a_suspended_flattened_instances_generator_holds_no_read_snapshot(tmp_pa
 
         gen = store.get_flattened_instances(page_size=1)
         try:
-            next(gen)
+            # Asserted, not merely called: a walk that yielded nothing
+            # holds no snapshot either, so busy==0 below would be true
+            # for the wrong reason.
+            assert next(gen)["sop_instance_uid"] == "I0"
 
             busy, _, _ = probe.execute(
                 "PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
@@ -398,6 +401,64 @@ def test_flattened_instances_pages_without_changing_its_rows():
         assert paged == one_shot
         assert [r["sop_instance_uid"] for r in paged] == ["I0", "I1", "I2"]
     finally:
+        store.stop()
+
+
+@pytest.mark.parametrize("page_size", [1, 2, 7, 24, 25, 26, 1000])
+def test_flattened_instances_walks_every_row_once_at_any_page_size(page_size):
+    """The keyset walk must neither lose nor repeat a row, and page sizes
+    that do not divide the cohort are where a keyset goes wrong.
+
+    A three-row store cannot show this: at any page size above 1 it is a
+    single page, so the resume path is never exercised. Twenty-five rows
+    against page sizes either side of the exact divisors is what makes an
+    off-by-one on the cursor (`i.id > ?` written as `>=`, or `after_id`
+    advanced past the row just yielded) visible as a duplicate or a gap.
+    """
+    store = _store_with_instances(":memory:", count=25)
+    try:
+        uids = [r["sop_instance_uid"]
+                for r in store.get_flattened_instances(page_size=page_size)]
+
+        assert uids == [f"I{i}" for i in range(25)]
+    finally:
+        store.stop()
+
+
+def test_flattened_instances_holds_a_connection_only_for_one_page():
+    """`page_size` must actually bound the fetch, not just decorate the
+    signature.
+
+    Every other test here passes against two implementations that are not
+    this one: "ignore `page_size` and always fetch 500", and the
+    one-line fix the changelog disclaims -- `fetchall()` the cohort under
+    the lock, then yield it. Both release the lock, both return the right
+    rows, and neither streams. What separates them from a paged walk is
+    the *number of times a connection is taken*, so that is what this
+    counts: six rows at two per page is three full pages plus the empty
+    page that ends the walk.
+    """
+    store = _store_with_instances(":memory:", count=6)
+    real = store._get_connection
+    calls = []
+
+    def counting_connection(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    store._get_connection = counting_connection
+    try:
+        for page_size, expected_pages in ((2, 4), (3, 3), (6, 2), (500, 1)):
+            calls.clear()
+            rows = list(store.get_flattened_instances(page_size=page_size))
+
+            assert [r["sop_instance_uid"] for r in rows] == \
+                ["I0", "I1", "I2", "I3", "I4", "I5"]
+            assert len(calls) == expected_pages, (
+                f"page_size={page_size} took {len(calls)} connections, "
+                f"expected {expected_pages}")
+    finally:
+        store._get_connection = real
         store.stop()
 
 
