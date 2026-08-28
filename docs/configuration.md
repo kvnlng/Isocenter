@@ -8,11 +8,11 @@ This file allows you to define a reproducible privacy policy that can be shared 
 
 | Section | Description |
 | :--- | :--- |
-| **[privacy_profile](#1-privacy-profile)** | Base set of rules (e.g., "basic", "comprehensive"). |
-| **[date_jitter](#2-date-jitter)** | Randomly shifts dates to preserve intervals while hiding exact dates. |
-| **[remove_private_tags](#3-private-tags)** | Removes vendor-specific private tags (odd groups). |
-| **[phi_tags](#4-phi-tags)** | overrides or adds specific tag rules (e.g., `PatientName`). |
-| **[machines](#5-pixel-redaction-machines)** | Defines burn-in redaction zones for specific equipment. |
+| **[privacy_profile](#privacy-profile)** | Base set of rules (e.g., "basic", "comprehensive"). |
+| **[date_jitter](#date-jitter)** | Randomly shifts dates to preserve intervals while hiding exact dates. |
+| **[remove_private_tags](#private-tags)** | Removes vendor-specific private tags (odd groups). |
+| **[phi_tags](#phi-tags)** | Overrides or adds specific tag rules (e.g., `PatientName`). |
+| **[machines](#pixel-redaction-machines)** | Defines burn-in redaction zones for specific equipment. |
 
 ---
 
