@@ -11,7 +11,8 @@ from typing import List, Optional
 import numpy as np
 
 from . import Exporter, register
-from ..io_handlers import export_folder_names, format_study_date
+from ..io_handlers import (export_folder_names, format_study_date,
+                           LOSS_SCOPE_STANDARD)
 from ..logger import get_logger
 from ..waveform import Waveform, WaveformChannel
 
@@ -324,6 +325,12 @@ class WfdbExporter(Exporter):
         # This is the auditor's override, not a debug switch -- it says the
         # protocol permits releasing that text.
         include_annotation_text = bool(options.get("include_annotation_text", False))
+        # Passed down explicitly rather than read off `session` inside
+        # `_write_instance`, so the one place that writes an audit entry
+        # names its dependency instead of reaching back through the
+        # facade. `None` is a legitimate value: `_write_instance` is
+        # called directly by tests with no session behind it.
+        store_backend = getattr(session, "store_backend", None)
         written = []
         used_names = {}  # out_dir -> set of record names already claimed
 
@@ -345,7 +352,8 @@ class WfdbExporter(Exporter):
                         try:
                             path = self._write_instance(
                                 folder, patient, study, series, instance, logger,
-                                used_names, include_annotation_text)
+                                used_names, include_annotation_text,
+                                store_backend)
                         except Exception as e:
                             logger.error(
                                 f"WFDB export failed for instance "
@@ -380,7 +388,8 @@ class WfdbExporter(Exporter):
         return candidate
 
     def _write_instance(self, folder, patient, study, series, instance, logger,
-                        used_names, include_annotation_text=False):
+                        used_names, include_annotation_text=False,
+                        store_backend=None):
         """Write one record. Returns the .hea path, or None if not a waveform.
 
         `used_names` is REQUIRED (not `=None`): its absence used to
@@ -443,9 +452,58 @@ class WfdbExporter(Exporter):
         if manufacturer:
             source = f"{source} ({manufacturer})"
 
+        dropped_groups = []
         write_annotations(
             os.path.join(out_dir, f"{record_name}.annotations.json"),
-            build_annotations(instance, waveform, source, include_annotation_text))
+            build_annotations(instance, waveform, source, include_annotation_text,
+                              dropped_groups=dropped_groups))
+
+        # Warn-plus-audit, the shape #36 established for the multiplex
+        # discard itself. A dropped annotation that says nothing is a
+        # different bug from a mislabelled one, not a fix for it (#159).
+        #
+        # ONE row per instance, naming the count and the groups -- not
+        # one per annotation. #36's emitter, which this descends from,
+        # reports "carried N groups; kept group 0 and discarded N-1"
+        # once; a cart that marks forty beats on a discarded group would
+        # otherwise put forty near-identical rows into section 3 of the
+        # compliance report, and a section nobody can read reports
+        # nothing. Group ordinals are deduplicated but the annotation
+        # count is not, because they answer different questions: which
+        # signal was referenced, and how much was dropped.
+        #
+        # Scoped STANDARD because Waveform Annotation Sequence
+        # (0040,B020) is an even group, so under the #146 parity rule the
+        # session still grades PASS. That is deliberate and is the one
+        # choice here that does not pre-empt #150: the scope states what
+        # the element *was*, not how bad the loss felt, exactly as the
+        # ingest-side multiplex emitter in `io_handlers.py` insists.
+        # Grading this one harder than the group discard it follows from
+        # would decide #150 on the wrong ticket, and in the wrong place.
+        if dropped_groups:
+            # `dropped_groups` is one list per dropped annotation, so the
+            # count and the group set come from different axes of it: a
+            # single annotation may name several groups, and reporting
+            # only its first would under-report the loss while the word
+            # "groups" promised otherwise.
+            count = len(dropped_groups)
+            ordinals = sorted({g for groups in dropped_groups for g in groups})
+            detail = (
+                f"Dropped {count} waveform "
+                f"{'annotation' if count == 1 else 'annotations'} from "
+                f"annotations.json: referenced multiplex "
+                f"{'group' if len(ordinals) == 1 else 'groups'} "
+                f"{', '.join(str(g) for g in ordinals)}, not ingested. Only "
+                f"Waveform Sequence item 0 is kept (#36); resolving these "
+                f"against the surviving group would have placed each mark at "
+                f"a position and lead belonging to a different signal.")
+            logger.warning(f"{instance.sop_instance_uid}: {detail}")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="DATA_LOSS",
+                    entity_uid=instance.sop_instance_uid,
+                    details=detail,
+                    loss_scope=LOSS_SCOPE_STANDARD)
 
         return hea_path
 

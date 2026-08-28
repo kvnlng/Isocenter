@@ -348,12 +348,19 @@ def test_one_failing_instance_does_not_abort_the_whole_export(tmp_path, monkeypa
 
     original_write_instance = WfdbExporter._write_instance
 
+    # Mirrors `_write_instance`'s real signature including `store_backend`
+    # (#159). A wrapper that is one parameter short does not fail loudly
+    # here: `export()`'s per-instance `except` swallows the TypeError, so
+    # BOTH patients get skipped and the containment assertion below reads
+    # 0 records as "the loop aborted". Keep this in step with the method.
     def _write_instance_maybe_boom(self, folder, patient, study, series, instance,
-                                   logger, used_names, include_annotation_text=False):
+                                   logger, used_names, include_annotation_text=False,
+                                   store_backend=None):
         if patient.patient_id == "BAD01":
             raise RuntimeError("simulated malformed instance from a non-conformant cart")
         return original_write_instance(self, folder, patient, study, series,
-                                       instance, logger, used_names, include_annotation_text)
+                                       instance, logger, used_names,
+                                       include_annotation_text, store_backend)
 
     monkeypatch.setattr(WfdbExporter, "_write_instance", _write_instance_maybe_boom)
 

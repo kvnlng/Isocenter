@@ -129,7 +129,8 @@ def build_ecg_dataset(num_samples=5000,
 
 def add_annotation(ds, start_sample=100, end_sample=None,
                    code_value="164889003", code_meaning="Atrial fibrillation",
-                   scheme="SCT", text=None, channel=1):
+                   scheme="SCT", text=None, channel=1, group=1,
+                   time_offsets=None):
     """Attach a Waveform Annotation Sequence item to `ds`.
 
     Args:
@@ -141,15 +142,32 @@ def add_annotation(ds, start_sample=100, end_sample=None,
         scheme (str): Coding scheme designator.
         text (str, optional): Unformatted Text Value.
         channel (int): 1-based Referenced Waveform Channel.
+        group (int): 1-based multiplex group ordinal -- the ordinal of
+            the Waveform Sequence item, where the first group is 1
+            (PS3.3 C.10.10.1.1 "Referenced Channels"; its worked example
+            writes the first multiplex group as `0001`). This used to be
+            hardcoded to 0, which is not a valid ordinal; it went
+            unnoticed because the annotation bridge ignored the value
+            entirely (#159). Pass 2 for the second group -- the one
+            ingest discards.
+        time_offsets (list, optional): Referenced Time Offsets in
+            seconds. When given, they are written INSTEAD of Referenced
+            Sample Positions, which is the only way to exercise the
+            bridge's seconds-to-samples fallback: DICOM prefers sample
+            positions and so does the bridge.
 
     Returns:
         Dataset: The same dataset, for chaining.
     """
     ann = Dataset()
-    ann.ReferencedWaveformChannels = [0, channel]
+    ann.ReferencedWaveformChannels = [group, channel]
     ann.ConceptNameCodeSequence = [_code(code_value, code_meaning, scheme)]
 
-    if end_sample is None:
+    if time_offsets is not None:
+        offsets = list(time_offsets)
+        ann.TemporalRangeType = "POINT" if len(offsets) < 2 else "SEGMENT"
+        ann.ReferencedTimeOffsets = offsets
+    elif end_sample is None:
         ann.TemporalRangeType = "POINT"
         ann.ReferencedSamplePositions = [start_sample]
     else:

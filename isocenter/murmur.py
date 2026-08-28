@@ -38,6 +38,23 @@ _RANGE_TYPES = {"SEGMENT", "MULTISEGMENT"}
 # name and the grouping are given up.
 UNCODED_CATEGORY = "uncoded"
 
+# Ingest keeps Waveform Sequence (5400,0100) item 0 and discards the rest
+# (#36), so item 0 is the only multiplex group whose samples reach an
+# export. Every position in this file is therefore expressed on item 0's
+# sample axis, at item 0's rate.
+KEPT_WAVEFORM_ITEM_INDEX = 0
+
+# What `_referenced_channel` found in Referenced Waveform Channels.
+#
+# `_REF_ABSENT` is not a failure: (0040,A0B0) is Type 1C, and an
+# annotation that names no channel applies to the whole waveform. It must
+# still produce a finding, without a lead -- collapsing it into
+# `_REF_OTHER` would silently empty annotations.json for a common
+# conformant case.
+_REF_ABSENT = "absent"
+_REF_KEPT = "kept"
+_REF_OTHER = "other"
+
 
 def _as_list(value):
     if value is None:
@@ -63,11 +80,88 @@ def _first_int(values) -> Optional[int]:
     return None
 
 
+def _item_index(group_ordinal: int) -> int:
+    """Convert a multiplex group ordinal to a Waveform Sequence item index.
+
+    DICOM numbers multiplex groups from 1. PS3.3 C.10.10.1.1
+    ("Referenced Channels", Waveform Annotation Module) defines the
+    Attribute as pairs (M,C) where M is "the ordinal of the Item of
+    Waveform Sequence (5400,0100)", and its own worked example is
+    explicit about the base: an annotation covering the entire FIRST
+    multiplex group plus channels 2 and 3 of the THIRD is written
+    `0001 0000 0003 0002 0003 0003`. Ordinal 1 is therefore item 0 --
+    the group Isocenter keeps.
+
+    A group ordinal of 0 is not a valid 1-based ordinal, and `max` reads
+    it as the first group rather than discarding it. That is the only
+    sane reading: 0 cannot be confused with a group that survived,
+    because there is no other group it could name, whereas rejecting it
+    would drop every annotation a 0-counting source carries. Isocenter's
+    own fixture generator wrote 0 until #159, which is exactly how long
+    the value went unread. Do not "simplify" the `max` away.
+    """
+    return max(0, int(group_ordinal) - 1)
+
+
+def _channel_pairs(referenced_channels):
+    """Yield (group ordinal, channel number) pairs, both as DICOM wrote them.
+
+    Referenced Waveform Channels (0040,A0B0) is VM 2-2n -- one annotation
+    may name several (multiplex group, channel) pairs, e.g. all of group
+    1 plus channels 2 and 3 of group 3. An odd trailing value cannot be
+    paired and is ignored.
+    """
+    values = _as_list(referenced_channels)
+    for i in range(0, len(values) - 1, 2):
+        try:
+            yield int(values[i]), int(values[i + 1])
+        except (TypeError, ValueError):
+            continue
+
+
+def _referenced_channel(referenced_channels):
+    """Classify an annotation's channel reference against the kept group.
+
+    Returns:
+        tuple: `(_REF_ABSENT, None)` when the attribute names no usable
+        pair -- the annotation applies to the whole waveform;
+        `(_REF_KEPT, channel_number)` for the first pair naming the
+        ingested group, where the channel is 1-based and 0 means "all
+        channels of that multiplex group" (PS3.3 C.10.10.1.1: "If the
+        specified channel number is 0, the annotation applies to all
+        channels in the multiplex group"), which resolves to no single
+        lead; `(_REF_OTHER, group_ordinals)` when every pair names a
+        group that was not ingested, carrying ALL of those distinct
+        ordinals in the order the file wrote them.
+
+    The `_REF_OTHER` list is every ordinal, not the first one: a single
+    annotation may name several groups, and a message that says "groups"
+    while reporting one of them under-reports the loss it exists to
+    disclose. The scan only stops early on `_REF_KEPT`, where the
+    annotation survives and no ordinal is reported at all.
+    """
+    others = []
+    for group, channel in _channel_pairs(referenced_channels):
+        if _item_index(group) == KEPT_WAVEFORM_ITEM_INDEX:
+            return _REF_KEPT, channel
+        if group not in others:
+            others.append(group)
+    if others:
+        return _REF_OTHER, others
+    return _REF_ABSENT, None
+
+
 def _lead_for(waveform, referenced_channels) -> Optional[str]:
     """Resolve a Referenced Waveform Channels pair to a coded lead name.
 
-    The attribute is a (multiplex group, channel) pair with a 1-based
-    channel number.
+    The attribute is a list of (multiplex group, channel) pairs, both
+    1-based. `waveform.channels` is the INGESTED group's channel list, so
+    a pair naming any other group resolves to nothing here -- until #159
+    the group half was read for the length check and then discarded, and
+    an annotation on group 2 came back wearing group 1's channel name.
+    Callers drop such an annotation outright rather than emit it leadless
+    (see `build_annotations`); returning None keeps this function honest
+    for the case where it is asked anyway.
 
     Sanitized with the same `_sanitize_description` the `.hea` signal
     line gets (`isocenter.exporters.wfdb`): `wfdb_description()` returns a
@@ -77,12 +171,8 @@ def _lead_for(waveform, referenced_channels) -> Optional[str]:
     newline. Without this, `annotations.json` could carry a rawer value
     than the `.hea` file for the identical input.
     """
-    values = _as_list(referenced_channels)
-    if len(values) < 2:
-        return None
-    try:
-        channel_number = int(values[1])
-    except (TypeError, ValueError):
+    state, channel_number = _referenced_channel(referenced_channels)
+    if state != _REF_KEPT:
         return None
 
     index = channel_number - 1
@@ -96,6 +186,15 @@ def _sample_positions(item, waveform) -> List[int]:
 
     Prefers Referenced Sample Positions (1-based in DICOM). Falls back to
     Referenced Time Offsets, converted via the sampling frequency.
+
+    `waveform` is the INGESTED multiplex group, and both branches are
+    expressed on its sample axis: a sample position is an index into it,
+    and `sampling_frequency` is its rate. Callers must therefore have
+    established that the annotation names that group before calling --
+    `build_annotations` does, and drops the ones that do not. Applying
+    this to an annotation on another group is #159's second defect: a
+    1.0 s offset on a 1000 Hz group converted at the kept group's 500 Hz
+    lands at half its true position, in a record it does not describe.
     """
     positions = _as_list(item.attributes.get(TAG_REFERENCED_SAMPLE_POSITIONS))
     resolved = []
@@ -151,18 +250,40 @@ def _concept(item, include_text: bool = False):
     return category, (meaning or None)
 
 
-def build_annotations(instance, waveform, source: str, include_text: bool = False) -> Dict[str, Any]:
+def build_annotations(instance, waveform, source: str, include_text: bool = False,
+                      dropped_groups: Optional[List[int]] = None) -> Dict[str, Any]:
     """Build a Murmur annotations document from an instance's annotations.
 
     Args:
         instance (Instance): The waveform instance, post-remediation.
-        waveform (Waveform): Parsed geometry, used for lead and time lookup.
+        waveform (Waveform): Parsed geometry of the INGESTED multiplex
+            group, used for lead and time lookup. Annotations naming any
+            other group are dropped rather than resolved against it --
+            see `dropped`.
         source (str): Producer identifier written to the document.
         include_text (bool): If True, write Unformatted Text Value
             (0070,0006) into each finding's `note`. Defaults to False
             because that tag routinely holds free-text clinical
             commentary, and the PHI scan is tag-gated -- so a bare
             Session() would otherwise write it out unremediated.
+        dropped_groups (list, optional): Appended with one list per
+            annotation dropped because it names no ingested group,
+            holding the distinct multiplex group ordinals that
+            annotation referenced. It nests because the caller needs
+            both numbers and they are not the same: `len()` is how many
+            marks were lost, and the union across the lists is which
+            signals they pointed at -- one annotation may name several
+            groups. It carries ordinals rather than prose, and rides an
+            out-parameter rather than the return value, for three
+            reasons: the return value is the published
+            Murmur document, so a new key there is a schema change; this
+            function has neither a logger nor a store handle, so the
+            warning and the `DATA_LOSS` entry belong to the caller; and
+            the caller aggregates -- one instance with forty marks on a
+            discarded group must file one audit row, not forty. Same
+            channel and same shape as `populate_attrs`'s
+            `dropped_private_binary`, which likewise hands back the tag
+            and lets the caller word the message (#125).
 
     Returns:
         dict: A `schemaVersion: 1` document. `findings` is empty when the
@@ -174,6 +295,32 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
     items = seq.items if seq is not None else []
 
     for item in items:
+        referenced = item.attributes.get(TAG_REFERENCED_CHANNELS)
+        state, referenced_groups = _referenced_channel(referenced)
+        if state == _REF_OTHER:
+            # #159. Every position on this annotation is expressed on a
+            # sample axis that is not in this record: a different rate,
+            # a different length, different channels. Resolving it
+            # against the surviving group produces a well-formed finding
+            # with a plausible lead name at a plausible sample position,
+            # both wrong -- and a mislabelled clinical mark is worse than
+            # a missing one for the same reason a wrong grade is worse
+            # than a missing row: it is not visibly absent.
+            #
+            # Clearing only the lead would not be enough. Referenced
+            # Sample Positions index the named group's samples, so the
+            # mark would still land at the wrong place in the exported
+            # signal.
+            #
+            # This drop is correct whichever way #150 goes. If multi-rate
+            # support lands and groups 1..n stop being discarded, the
+            # test becomes "resolve against the right group" and this
+            # branch stops firing on its own; nothing here presumes the
+            # discard is permanent.
+            if dropped_groups is not None:
+                dropped_groups.append(list(referenced_groups))
+            continue
+
         category, label = _concept(item, include_text)
         if not category:
             # Without a category there is nothing for Murmur to colour or
@@ -197,7 +344,7 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
         if label:
             finding["label"] = label
 
-        lead = _lead_for(waveform, item.attributes.get(TAG_REFERENCED_CHANNELS))
+        lead = _lead_for(waveform, referenced)
         if lead:
             finding["lead"] = lead
 
