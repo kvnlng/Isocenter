@@ -278,6 +278,33 @@ def ingest_worker(fp: str) -> Tuple:
                 w_bytes = bytes(raw)
                 w_hash = hashlib.sha256(w_bytes).hexdigest()
 
+        # The samples of groups 1..n are discarded just above; their
+        # sequence items go with them. `populate_attrs` walks the whole
+        # sequence, so the graph used to hold one item per group while
+        # the sidecar held one group's bytes -- and the export wrote
+        # every item, producing a file that declared a multiplex group
+        # and carried no Waveform Data for it. (5400,1010) is Type 1
+        # (PS3.3 C.10.9): a conformant reader may reject such a file, and
+        # a trusting one reads `NumberOfWaveformSamples` with nothing
+        # behind it (#160).
+        #
+        # Dropped at ingest rather than at export because the graph is
+        # what every consumer reads -- the DICOM writer, the WFDB record,
+        # the annotation bridge, the PHI report. Patching the writer
+        # alone would leave the rest describing a group whose samples
+        # this pipeline does not have. Nothing is hidden by dropping
+        # them: `import_files` warns and files the DATA_LOSS entry from
+        # `meta['waveform_groups']`, which still carries the source's
+        # original group count.
+        #
+        # This is not a position on #150. It is correct under every
+        # answer there, and if multi-rate support ever lands the block
+        # stops firing on its own -- the items are dropped because the
+        # samples are, and then they would not be.
+        wf_seq = inst.sequences.get("5400,0100")
+        if wf_seq is not None and len(wf_seq.items) > 1:
+            del wf_seq.items[1:]
+
         return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
         return (None, None, None, None, None, None, None, str(e))
@@ -699,10 +726,14 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         if "WaveformSequence" in ds and len(ds.WaveformSequence) > 0:
             w_raw = inst.get_waveform_bytes()
             if w_raw:
-                # Only group 0 is ingested (#36), so only group 0 can be
-                # written. Items 1..n keep their metadata and carry no
-                # samples -- the same state every item is in today, and
-                # the ingest-time warning is where that loss is reported.
+                # Only group 0 is ingested (#36), so only group 0 can
+                # be written -- and by the time the graph gets here it
+                # is the only item there is, because `ingest_worker`
+                # drops the items whose samples it discarded (#160).
+                # Indexing [0] is therefore exhaustive, not a choice
+                # among items: writing samples onto one item of several
+                # is what left the rest declaring a Type 1 element they
+                # did not carry.
                 ds.WaveformSequence[0].WaveformData = w_raw
             else:
                 # Structurally plausible and empty is the failure mode this
