@@ -201,8 +201,22 @@ def _as_loaded_date(value):
     rather than parsed at ingest normalizes to a `date` here too. That
     is deliberate and is the whole point -- one type everywhere. Do not
     "tighten" this to a strict `%Y-%m-%d` parse to keep such a value a
-    string: that restores exactly the second type this exists to remove,
-    and both export paths render either spelling identically anyway.
+    string: that restores exactly the second type this exists to remove.
+
+    The (0008,0020) *element* is unaffected by which spelling arrived,
+    because either one loads as a `date` and both export paths render a
+    `date` as `YYYYMMDD` -- `session.export()` by handing it to pydicom,
+    `write_tree` via `format_study_date`. The exported *directory name*
+    is not: `export_folder_names` builds it with
+    `str(study.study_date or "NoDate")`, not `format_study_date`, so a
+    hand-built graph carrying `"20240101"` files under `Study_20240101_`
+    before a round trip and `Study_2024-01-01_` after one. Ingested
+    studies never see this -- ingest already produces a `date`, so
+    `str()` yields the ISO spelling on both sides -- and routing the
+    folder through `format_study_date` would rename every existing
+    export's directories, which is worse than the divergence it closes.
+    Known and accepted, filed as #189; do not read the element's
+    indifference as the folder's.
     """
     if value is None:
         return None
