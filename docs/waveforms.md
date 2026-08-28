@@ -299,6 +299,15 @@ dropped alongside their samples, so what is written is a conformant
 single-group record
 ([#160](https://github.com/kvnlng/Isocenter/issues/160)).
 
+That holds for records ingested by 0.9.0 or later. The drop happens in
+`ingest_worker`, which does not run again on a session opened from an
+existing index, so a database populated by an earlier version still holds
+the extra items and still exports the hollow one; re-ingesting the source
+files into a fresh index is the remedy
+([#168](https://github.com/kvnlng/Isocenter/issues/168)). The same applies
+to a graph built by hand and written with `DicomExporter.write_tree()`,
+which is the serializer alone and never passes through ingest.
+
 That entry is scoped `STANDARD` -- a multiplex group lives under Waveform
 Sequence `(5400,0100)`, an even group -- so it is reported in the
 compliance report's Data Loss section but does **not** move Validation
