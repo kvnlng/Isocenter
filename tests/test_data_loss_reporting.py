@@ -116,25 +116,40 @@ def _legacy_store(tmp_path, name="legacy.db"):
 
 
 def _loss_table(content):
-    """The Data Loss table, split into header cells and row cells.
+    """The Data Loss table, split into header, delimiter and row cells.
 
     Per *cell*, because the gap #157 was opened about is that a scope
     appearing somewhere in the section says nothing about which row
     carries it: with one private and one standard loss, any permutation
     of the column satisfies a membership check.
 
+    The `| :--- |` delimiter is identified by its content rather than by
+    its position, so a mutation that drops it cannot silently shift the
+    first data row into the header slot. It is *returned* rather than
+    discarded because it is the row that declares the column count:
+    under GFM a delimiter whose cell count disagrees with the header
+    means the block is not a table at all, and the section renders as
+    literal pipes with no Scope column for anyone to read -- the same
+    reader-facing failure as an unlabelled header, which was live and
+    unobservable while this helper filtered the line away (#157).
+
     Returns:
-        tuple: (header_cells, [row_cells, ...]). The `| :--- |`
-        separator is filtered by its content rather than by position, so
-        the helper still returns real rows if a mutation drops it.
+        tuple: (header_cells, delimiter_cells, [row_cells, ...]).
+        `delimiter_cells` is None if the table has no delimiter row.
     """
     section = content.split("Data Loss", 1)[1].split("Exceptions", 1)[0]
     lines = [ln.strip() for ln in section.splitlines()
              if ln.strip().startswith("|")]
-    tables = [[cell.strip() for cell in ln.strip("|").split("|")]
-              for ln in lines
-              if not set(ln) <= set("|:- ")]
-    return tables[0], tables[1:]
+    delimiter = None
+    cells = []
+    for line in lines:
+        row = [cell.strip() for cell in line.strip("|").split("|")]
+        if set(line) <= set("|:- "):
+            if delimiter is None:
+                delimiter = row
+            continue
+        cells.append(row)
+    return cells[0], delimiter, cells[1:]
 
 
 def test_the_report_names_what_was_lost(clean_env):
@@ -238,7 +253,7 @@ def test_the_report_says_which_losses_are_graded(clean_env):
     """
     content = _report_with([PRIVATE_LOSS, STANDARD_LOSS])
 
-    _header, rows = _loss_table(content)
+    _header, _delimiter, rows = _loss_table(content)
     by_tag = {tag: row[3]
               for row in rows
               for tag in ("0009,1002", "6000,3000") if tag in row[2]}
@@ -258,9 +273,16 @@ def test_the_loss_table_is_well_formed(clean_env):
     """
     content = _report_with([PRIVATE_LOSS, STANDARD_LOSS])
 
-    header, rows = _loss_table(content)
+    header, delimiter, rows = _loss_table(content)
 
     assert header == ["Timestamp", "Instance", "Element", "Scope"], header
+    assert delimiter is not None, (
+        "no delimiter row: GFM does not recognise the block as a table "
+        "without one, so the section renders as literal pipe characters")
+    assert len(delimiter) == len(header), (
+        "the delimiter declares the column count and disagrees with the "
+        "header, which un-makes the table and takes the Scope column "
+        "with it", header, delimiter)
     assert rows, content
     for row in rows:
         assert len(row) == len(header), (header, row)
@@ -279,7 +301,7 @@ def test_a_loss_with_no_recorded_scope_reads_as_unrecorded(clean_env,
 
     content = _report_with([], db_path=legacy)
 
-    _header, rows = _loss_table(content)
+    _header, _delimiter, rows = _loss_table(content)
     assert [row[3] for row in rows] == ["unrecorded"], rows
 
 
@@ -317,7 +339,7 @@ def test_an_ungraded_row_and_a_graded_one_keep_their_own_scopes(
 
     content = _report_with([OTHER_PRIVATE_LOSS], db_path=legacy)
 
-    _header, rows = _loss_table(content)
+    _header, _delimiter, rows = _loss_table(content)
     by_tag = {tag: row[3]
               for row in rows
               for tag in ("0009,1002", "0011,1001") if tag in row[2]}
