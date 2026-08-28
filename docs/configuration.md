@@ -105,8 +105,16 @@ private tag in your source files. Where the line falls:
 
 | Private tag, by the VR it is read with | `remove_private_tags: true` | `remove_private_tags: false` |
 | :--- | :--- | :--- |
-| Text and numeric VRs -- `LO`, `SH`, `UN`, `DS` | Removed | **Kept**, and written to the exported file |
+| Text, numeric, and `UN` -- `LO`, `SH`, `DS`, `UN` | Removed | **Kept**, and written to the exported file |
 | Binary VRs -- `OB`, `OW`, `OF`, `OD`, `OL` | Gone | **Gone** -- dropped at ingest, before the flag is read |
+
+**Both rows assume an explicit-VR source.** Under implicit VR there is no VR
+in the file, so pydicom reads *every* private tag as `UN` -- the first row
+becomes the whole table, the second applies to nothing, and a vendor `OB` is
+kept and exported with no `DATA_LOSS` entry. The first row is therefore not
+the small-strings case it looks like; under implicit VR it is all of your
+private data, blobs included. See below
+([#151](https://github.com/kvnlng/Isocenter/issues/151)).
 
 !!! warning "`false` cannot retain private tags with a binary VR"
 
@@ -121,11 +129,15 @@ private tag in your source files. Where the line falls:
     numeric VR are ingested normally and are governed by this flag in
     both directions -- swept when it is `true`, kept and written to the
     exported file when it is `false`. That covers the `LO` private
-    creator and the `SH`/`LO` strings a vendor block is mostly made of,
-    and it covers `UN`, which is deliberately *not* in the binary set
-    because it is usually a small private value rather than a blob.
+    creator and the `SH`/`LO` strings a vendor block is mostly made of.
     "Private tags are not retained" is the wrong reading; one VR family
     of them is not.
+
+    `UN` -- Unknown -- is raw bytes and neither text nor numeric, and it
+    is deliberately kept out of the binary set anyway, on the assumption
+    that a private `UN` is a small value rather than a blob. The next
+    paragraph is where that assumption stops holding
+    ([#151](https://github.com/kvnlng/Isocenter/issues/151)).
 
     **The VR that decides is the one pydicom reads, not the one the
     vendor wrote**, and for a private tag those differ by transfer
@@ -138,6 +150,10 @@ private tag in your source files. Where the line falls:
     around that: one study written in the two syntaxes gives two
     different answers, and only the explicit-VR one is the answer this
     section describes.
+
+    That tension is real and is tracked: under implicit VR the blob *is*
+    resident, which is exactly what the rule below exists to prevent
+    ([#151](https://github.com/kvnlng/Isocenter/issues/151)).
 
     **The loss is announced, not silent.** Each dropped element is logged
     as a warning and written to the audit log as a `DATA_LOSS` entry
@@ -152,22 +168,27 @@ private tag in your source files. Where the line falls:
 
     **This is settled rather than pending**
     ([#125](https://github.com/kvnlng/Isocenter/issues/125)). Warning
-    plus an audit entry is the answer; storing the bytes is not planned,
-    and both ways of storing them were considered and rejected. Holding
-    vendor binary in `attributes` makes an arbitrary blob permanently
-    resident, which is exactly what the binary-VR rule exists to prevent
-    -- memory scaling on 100GB+ datasets depends on heavy arrays never
-    being resident by default, and that guarantee is worth more than an
-    unread vendor block. Routing them to the sidecar instead means
-    giving private tags an offset/length representation the EAV table
-    does not have, plus a lazy loader and an export re-merge path -- and
-    `session.compact()` rewrites the sidecar and rewires every offset it
-    knows about, so a class of offset it does not know about is silent
-    corruption after the first compaction. That is design work, not a
-    flag.
+    plus an audit entry is the answer; storing the bytes is not planned.
+    If you need them, keep your source files -- Isocenter never modifies
+    them, so the vendor block is still there to go back to.
 
-    If you need those bytes, keep your source files: Isocenter never
-    modifies them, so the vendor block is still there to go back to.
+**Why the bytes are not stored.** Both ways of keeping them were considered
+and rejected. Holding vendor binary in `attributes` makes an arbitrary blob
+permanently resident, which is what the binary-VR rule exists to prevent:
+memory scaling on 100GB+ datasets depends on heavy arrays never being
+resident by default, and that guarantee is worth more than an unread vendor
+block. The implicit-VR case above is a hole in that rule rather than an
+argument against it -- the rule is worth having *and* it does not currently
+cover every input, which is why
+[#151](https://github.com/kvnlng/Isocenter/issues/151) is open rather than
+closed as intended behaviour.
+
+Routing them to the sidecar instead means giving private tags an
+offset/length representation the EAV table does not have, plus a lazy
+loader and an export re-merge path. `session.compact()` rewrites the
+sidecar and rewires every offset it knows about, so a class of offset it
+does not know about is silent corruption after the first compaction. That
+is design work, not a flag.
 
 !!! warning "Standard binary elements are dropped too"
 

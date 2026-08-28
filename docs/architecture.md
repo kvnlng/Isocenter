@@ -65,13 +65,34 @@ Values are automatically split during persistence based on their Group ID:
 | **Vertical Attributes** | `instance_attributes` | `tag_group`, `tag_elem`, `value` | Private Tags (Odd Groups) | **Flexibility**. Private tags are sparse. This EAV storage prevents the Core JSON from becoming bloated with garbage data while keeping private tags queryable. |
 | **Pixel Data** | `[name]_pixels.bin` | Comparison to DB via Offset/Length | Raw Byte Stream | **Offloading**. Gigabytes of pixel data are kept out of the DB to prevent bloating and ensure the index remains lightweight. |
 
-There is no fourth row, and its absence is a design decision rather than an
-omission. Only `PixelData` and `WaveformData` are routed to the sidecar;
-every *other* element with a binary VR (`OB`, `OW`, `OF`, `OD`, `OL`) is
-dropped at ingest and stored nowhere, because the offsets in the last row
-are a representation the EAV table does not have and `session.compact()`
-rewires every one of them. Private vendor blocks are the case that bites --
-see [`false` cannot retain private tags with a binary VR](configuration.md#private-tags).
+There is no fourth row for the rest of the binary VRs, and its absence is a
+design decision rather than an omission. Only `PixelData` and `WaveformData`
+are routed to the sidecar; every *other* element **read with** a binary VR
+(`OB`, `OW`, `OF`, `OD`, `OL`) is dropped at ingest and stored nowhere. The
+reason is the one behind sequestering the pixel array in section 2: such a
+value can be arbitrarily large, either of the first two rows would hold it
+resident for the lifetime of the session, and memory scaling on 100GB+
+datasets rests on heavy arrays never being resident unless they are asked
+for. Dropping is what this model does with a blob it has nowhere lightweight
+to put.
+
+**"Read with" is load-bearing, and two of the claims above hold only for an
+explicit-VR source** ([#151](https://github.com/kvnlng/Isocenter/issues/151)).
+An implicit-VR file carries no VR field, so pydicom resolves a private tag
+from the standard dictionary, finds nothing, and returns `UN` -- which is
+not in the binary set. Nothing is then dropped and nothing is reported: the
+bytes are held and persisted, base64-encoded, into `attributes_json`, which
+is the *first* row of the table above rather than the absent fourth one.
+And that second row's "Private Tags (Odd Groups)" describes where the
+*text* private tags go; the real split is whether a value serializes to
+text, so a private `UN` carrying bytes lands in `attributes_json` even in an
+explicit-VR run. Both are behaviour rather than documentation, and both are
+tracked on #151.
+
+Private vendor blocks are where this bites in practice, and the rest of the
+trade-off -- including why the sidecar row was not simply widened to take
+them -- is documented with the flag it defeats: see [`false` cannot retain
+private tags with a binary VR](configuration.md#private-tags).
 
 ### Database Schema Reference
 
