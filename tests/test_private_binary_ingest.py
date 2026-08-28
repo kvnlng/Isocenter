@@ -31,6 +31,7 @@ import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
+from isocenter.io_handlers import LOSS_SCOPE_PRIVATE, LOSS_SCOPE_STANDARD
 from isocenter.session import DicomSession
 
 PRIVATE_BINARY = "0009,1002"
@@ -86,7 +87,7 @@ def _ingest(tmp_path, with_private_binary=True):
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT entity_uid, details FROM audit_log "
+            "SELECT entity_uid, details, loss_scope FROM audit_log "
             "WHERE action_type='DATA_LOSS'").fetchall()
     return uid, attrs, rows
 
@@ -95,9 +96,23 @@ def test_the_dropped_private_binary_tag_is_recorded_in_the_audit_log(tmp_path):
     uid, _attrs, rows = _ingest(tmp_path)
 
     assert len(rows) == 1, rows
-    entity_uid, details = rows[0]
+    entity_uid, details, _scope = rows[0]
     assert entity_uid == uid
     assert PRIVATE_BINARY in details
+
+
+def test_the_private_loss_is_recorded_as_private_scope(tmp_path):
+    """The grade is decided here, not downstream (#146).
+
+    `validation_status` flips to REVIEW_REQUIRED on a private loss and
+    not on a standard one, and the only place that still knows which
+    this was is the emitter. Deriving it later would mean parsing the
+    tag back out of the `details` prose, which three differently-shaped
+    emitters write and one of them does not name a tag at all.
+    """
+    _uid, _attrs, rows = _ingest(tmp_path)
+
+    assert rows[0][2] == LOSS_SCOPE_PRIVATE, rows
 
 
 def test_the_report_names_the_vr_so_the_loss_can_be_acted_on(tmp_path):
@@ -188,9 +203,9 @@ def _ingest_with(tmp_path, name, mutate):
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT details FROM audit_log "
+            "SELECT details, loss_scope FROM audit_log "
             "WHERE action_type='DATA_LOSS'").fetchall()
-    return attrs, [d for (d,) in rows]
+    return attrs, rows
 
 
 def test_overlay_data_is_reported(tmp_path):
@@ -207,12 +222,46 @@ def test_overlay_data_is_reported(tmp_path):
         ds.add_new(0x60000010, 'US', 4)                    # OverlayRows
         ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')  # OverlayData
 
-    attrs, details = _ingest_with(tmp_path, "ovl", add_overlay)
+    attrs, rows = _ingest_with(tmp_path, "ovl", add_overlay)
 
     assert "6000,0010" in attrs, "precondition: the descriptors were read"
     assert "6000,3000" not in attrs, "precondition: the data was dropped"
-    assert any("6000,3000" in d for d in details), details
-    assert any("OW" in d for d in details), details
+    assert any("6000,3000" in d for d, _s in rows), rows
+    assert any("OW" in d for d, _s in rows), rows
+
+
+def test_overlay_data_is_recorded_as_standard_scope(tmp_path):
+    """Reported, and deliberately not graded (#146).
+
+    An overlay is dropped on ordinary images, by the thousand, with no
+    vendor intent behind it. If this scope ever became PRIVATE the grade
+    would read REVIEW_REQUIRED for most real cohorts and stop meaning
+    anything -- the same failure mode #146 opened against a bare
+    `DATA_LOSS: 3`.
+    """
+    def add_overlay(ds):
+        ds.add_new(0x60000010, 'US', 4)
+        ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')
+
+    _attrs, rows = _ingest_with(tmp_path, "ovlscope", add_overlay)
+
+    assert [s for _d, s in rows] == [LOSS_SCOPE_STANDARD], rows
+
+
+def test_a_standard_loss_is_not_described_as_a_private_one(tmp_path):
+    """The entry and its scope have to agree.
+
+    Both losses ride one loop, which said "Private tag" for all of them
+    until the group started deciding the grade -- so the report would
+    have shown `Private tag 6000,3000` on a row scoped STANDARD and
+    invited the reader to distrust whichever half they checked second.
+    """
+    def add_overlay(ds):
+        ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')
+
+    _attrs, rows = _ingest_with(tmp_path, "ovlprose", add_overlay)
+
+    assert not any("Private" in d for d, _s in rows), rows
 
 
 def test_palette_lut_data_is_reported(tmp_path):
@@ -222,9 +271,10 @@ def test_palette_lut_data_is_reported(tmp_path):
     def add_lut(ds):
         ds.add_new(0x00281201, 'OW', b'\xbb' * 16)
 
-    _attrs, details = _ingest_with(tmp_path, "lut", add_lut)
+    _attrs, rows = _ingest_with(tmp_path, "lut", add_lut)
 
-    assert any("0028,1201" in d for d in details), details
+    assert any("0028,1201" in d for d, _s in rows), rows
+    assert [s for _d, s in rows] == [LOSS_SCOPE_STANDARD], rows
 
 
 def test_waveform_data_is_not_reported(tmp_path):
@@ -252,14 +302,14 @@ def test_waveform_data_is_not_reported(tmp_path):
         item.add_new(0x54001010, 'OW', b'\x00\x01' * 4)
         ds.WaveformSequence = Sequence([item])
 
-    _attrs, details = _ingest_with(tmp_path, "wave", add_waveform)
+    _attrs, rows = _ingest_with(tmp_path, "wave", add_waveform)
 
-    assert not any("5400,1010" in d for d in details), details
+    assert not any("5400,1010" in d for d, _s in rows), rows
 
 
 def test_pixel_data_is_not_reported(tmp_path):
     """The other routed blob. Excluded above the VR check by its group,
     so it never reaches the gate -- pinned so that stays true."""
-    _attrs, details = _ingest_with(tmp_path, "pix", lambda ds: None)
+    _attrs, rows = _ingest_with(tmp_path, "pix", lambda ds: None)
 
-    assert not any("7fe0,0010" in d for d in details), details
+    assert not any("7fe0,0010" in d for d, _s in rows), rows

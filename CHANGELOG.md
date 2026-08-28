@@ -23,6 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A run that dropped a private element no longer grades `PASS`.** The reporting half of #146 put every `DATA_LOSS` entry in front of the reader; the grade still ignored them, so a session that discarded a vendor block rendered `validation_status: PASS` above a section listing what it had lost. `generate_report()` now reads a per-entry scope and grades on it:
+
+  ```python
+  # before: a dropped private OB graded PASS
+  validation_status="PASS" if audit_summary and not exceptions else "REVIEW_REQUIRED"
+  # after: a dropped private OB grades REVIEW_REQUIRED; a dropped overlay does not
+  ```
+
+  **The rule discriminates by group, and the asymmetry is deliberate.** A private (odd-group) loss flips the grade. A standard one -- Overlay Data `(60xx,3000)`, the palette LUTs `(0028,120x)` -- does not. A private element that vanished is a vendor block nobody outside the vendor can size or identify, and one `remove_private_tags=False` may have been set specifically to keep; a run that discarded one has questions to answer. The standard ones are dropped from ordinary images by the thousand, and a grade that flipped on those would read `REVIEW_REQUIRED` for most real cohorts -- which is the failure #146 was opened about (a signal that is always the same value carries nothing), relocated rather than fixed. `loss_scope_for_tag()` is where the split is written down, with the reasoning, because a future reader meeting two rules will otherwise "simplify" them into one.
+
+  **The classification is made by the emitter and stored, not re-derived.** `audit_log` gains a `loss_scope` column, written by whichever emitter dropped the element -- ingest, private/standard binary, or export -- and read by the report. The alternative was parsing the tag back out of the `details` prose, which three differently-shaped emitters write and one of which names no tag at all; that would have coupled the grade to message wording, so rephrasing a warning could silently change a compliance verdict. `ExportOutcome.losses` is therefore `List[Tuple[str, str]]` -- `(scope, detail)` -- rather than `List[str]`: the worker holds the tag, and by the time the parent logs the entry it holds only a sentence.
+
+  Existing databases keep opening: the column is added by the `PRAGMA table_info` / `ALTER TABLE` path that already backfills `phi_status`. **A `DATA_LOSS` row written before the column exists reads NULL, is reported, and is not graded.** Back-filling it by parsing `details` is precisely the coupling the column exists to avoid, and guessing "standard" would silently downgrade a real loss. The report's Data Loss table gains a **Scope** column showing `PRIVATE`, `STANDARD`, or `unrecorded`, so a reader who sees `REVIEW_REQUIRED` can see which row caused it -- a grade nobody can trace to a row is the same defect as a count with no detail.
+
+  **Knowingly deferred: the discarded waveform multiplex group still grades `PASS`.** #36 records "kept group 0 and discarded N" against Waveform Sequence `(5400,0100)`, an even group, so the rule above scopes it `STANDARD`. That is the one loss the rule sits badly on -- discarding N-1 groups is not routine the way an overlay is -- and it is filed as #150 rather than special-cased here. It is not fixable by widening the grading test, which would take every overlay with it; the scope is set at the emitter and states what the element *was*, not how bad the loss felt. Both the emitter and the grading site carry a comment saying so, because the mismatch reads as an oversight from either direction.
+
+  One wording fix rides along, because the new Scope column would otherwise contradict it: the ingest emitter's message said "Private tag ..." for every element in the `dropped_private_binary` list, and #137 added standard elements to that list. The report would have shown `Private tag 6000,3000` on a row scoped `STANDARD`. The message is now chosen per tag. (#146)
+
+
 - **BEHAVIOUR: importing Isocenter no longer silences pydicom's warnings for the whole host application.** `isocenter/__init__.py` ran `warnings.filterwarnings("ignore", module="pydicom.*")` before anything else. `filterwarnings` prepends to the process-wide filter list, so it won even over the host's own `-W` flag:
 
   ```
@@ -48,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   The report gains **section 3, Data Loss**, listing every dropped element with its instance and VR; Exceptions & Errors moves to 4 and Validation & Verification to 5. `SqliteStore.get_audit_losses()` is a separate query rather than a widened `get_audit_errors()`, and that separation is the point rather than an implementation detail -- see below.
 
-  **`validation_status` is deliberately unchanged.** A session that dropped a vendor block still grades `PASS`. Folding `DATA_LOSS` into `get_audit_errors()` would have surfaced the detail in one line and, as a side effect, flipped every ingest of a file carrying an overlay to `REVIEW_REQUIRED`, because the grade keys off `exceptions` being empty. Whether a de-identification run that discarded data may call itself `PASS` is a real question and a much larger blast radius than a reporting fix should carry; it stays open on #146. Both halves are pinned: one test asserts the loss does *not* leak into the exceptions section, another asserts the grade is still `PASS`, and the second one names itself as the test to change if that decision lands. (#146)
+  **`validation_status` was left unchanged by this half, and has since been changed by the next one** -- see the entry above. What this change refused to do was fold `DATA_LOSS` into `get_audit_errors()`: that would have surfaced the detail in one line and, as a side effect, flipped every ingest of a file carrying an overlay to `REVIEW_REQUIRED`, because the grade keys off `exceptions` being empty. The grade did need to move, but not for every loss alike, and not by reclassifying a routine drop as an error. The test that asserted `PASS` named itself as the one to change when that decision landed; it landed, and it is now `test_a_private_tag_loss_grades_review_required`. Its sibling, asserting the loss does *not* leak into the exceptions section, is unchanged and still holds. (#146)
 
 
 - **Overlay Data and the palette color LUTs were dropped at ingest without a word, and the exported file still claimed to have them.** `populate_attrs` skips every element with a binary VR. #125 made that visible for *private* tags only, on the reasoning that the standard ones this rule catches are routed rather than lost. That was true of `(7fe0,0010)` and `(5400,1010)` and false of everything else: Overlay Data `(60xx,3000)` and the palette LUTs `(0028,120x)` are `OW`, standard, and written nowhere.
