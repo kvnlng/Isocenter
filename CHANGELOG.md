@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BEHAVIOUR: importing Isocenter no longer silences pydicom's warnings for the whole host application.** `isocenter/__init__.py` ran `warnings.filterwarnings("ignore", module="pydicom.*")` before anything else. `filterwarnings` prepends to the process-wide filter list, so it won even over the host's own `-W` flag:
+
+  ```
+  $ python -W always::DeprecationWarning app.py     # app.py uses pydicom directly
+  without importing isocenter -> 1 pydicom warning shown
+  with    importing isocenter -> 0 pydicom warnings shown
+  ```
+
+  An application that imported Isocenter lost pydicom warnings **in its own pydicom code**, unasked, with nothing pointing at the cause. Choosing to silence a dependency's diagnostics is a reasonable thing for an *application* to do; it is not a library's call to make on its host's behalf, and `-W` is about as explicit as a user instruction gets.
+
+  **The filter was redundant for the reason it existed.** Its comment said "e.g. strict UID validation", and that noise came entirely from this project's own test fixtures -- `SERIES_UID_1`, `SOP_UID_1`, and one private-creator name of ours -- not from user data. `pytest.ini` carries `ignore:::pydicom.*` independently, and with the library filter removed the suite is exactly as quiet as before. So it was paying for a test-suite problem in every user's process.
+
+  **What you may now see:** pydicom `UserWarning`s about non-conformant values in *your* data, most likely `Invalid value for VR UI` on a UID that is not a valid DICOM UID. That is information a de-identification tool should not have been swallowing. Suppress it in your own application if you want it gone -- which is now your decision to make rather than one already made for you.
+
+  It also hid pydicom's deprecation announcements, which are the only signal that says how to lift the `pydicom<4.0` cap in `setup.py`. That is how the calls fixed in #141 accumulated unnoticed.
+
+  Tests run in a subprocess deliberately: `warnings.catch_warnings()` saves and restores the filter list, so a filter installed at import time is invisible from inside a `catch_warnings` block and an in-process test would pass either way. The structural assertion is scoped to filters naming pydicom rather than to "no new filters at all", because importing Isocenter pulls in numpy, urllib3, and requests, each of which installs its own. Making the fixture UIDs conformant, so the suite is quiet honestly rather than by filter, is left as separate work. (#144)
+
+
 - **`DATA_LOSS` audit entries now reach the compliance report, in a section of their own.** #36, #125, and #137 each settled on the same pattern -- warn, *and* write a `DATA_LOSS` audit entry, because the log line alone is not a compliance trail. The entries were written correctly, carrying the tag and its VR, into a table `generate_report()` did not surface.
 
   What the report showed was a bare `| DATA_LOSS | 3 |` row in the audit summary, because `get_audit_summary()` groups by `action_type`, and nothing else. The detail could not reach the Exceptions section either: `get_audit_errors()` filters to `('ERROR', 'WARNING')`. A count with no detail is worse than silence -- it invites the reader to conclude the number is benign, and the person who hits this reads the report rather than `sqlite3 audit_log`.

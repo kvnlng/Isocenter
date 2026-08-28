@@ -1,6 +1,25 @@
-import warnings
-# Suppress all pydicom warnings (e.g. strict UID validation)
-warnings.filterwarnings("ignore", module="pydicom.*")
+# No warning filter is installed here, deliberately (#144).
+#
+# This module used to run `warnings.filterwarnings("ignore",
+# module="pydicom.*")` before anything else. `filterwarnings` prepends
+# to the process-wide filter list, so it won even over the host
+# application's own `-W` flag: importing Isocenter silenced pydicom
+# warnings in the host's own pydicom code, unasked and invisibly.
+#
+# It was there for non-conformant UID noise -- which came entirely from
+# this project's own test fixtures (`SERIES_UID_1` and friends), not
+# from user data. `pytest.ini` silences that for the suite independently,
+# and removing this line leaves the suite just as quiet, so the filter
+# was redundant for the reason it existed and harmful for the reason it
+# did not.
+#
+# It also hid pydicom's own deprecation announcements, which are the
+# only signal that would tell us how to lift the `pydicom<4.0` cap in
+# `setup.py`. See `tests/test_pydicom_deprecations.py`.
+#
+# If Isocenter ever needs to suppress a warning its own operations
+# provoke, scope it to those calls with a context manager. Do not set a
+# global filter at import.
 
 try:
     from .session import DicomSession as Session
