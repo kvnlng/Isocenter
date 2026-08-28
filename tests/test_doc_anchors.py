@@ -28,11 +28,12 @@ from the #152 fix:
   dependency (`setup.py`, `tests` extra) and the real `toc` extension
   assigns the ids.
 
-Three deferrals, listed because each would surface as a *spurious
-failure* -- a link this check calls broken that the site renders fine --
-and a reader who meets one should know it is a known limit rather than a
-defect. All three are places where the renderer here is Python-Markdown
-alone rather than the whole mkdocs pipeline:
+Four deferrals, listed because a reader who meets one should know it is
+a known limit rather than a defect. The first three would surface as a
+*spurious failure* -- a link this check calls broken that the site
+renders fine -- and are places where the renderer here is
+Python-Markdown alone rather than the whole mkdocs pipeline. The fourth
+is the opposite and so the more dangerous kind: a gap in coverage:
 
 - `pymdownx.snippets` is enabled, and an anchor inside a `--8<--`
   included fragment resolves against the *including* page. There are
@@ -45,6 +46,14 @@ alone rather than the whole mkdocs pipeline:
 - `pymdownx.tabbed` is not loaded (see below), so a heading inside a
   `=== "Tab"` body is indented content here and emits no id. `admonition`
   had the same property and is core Python-Markdown, so it is loaded.
+- A fragment link whose *file* half points outside the checked set is
+  skipped rather than resolved. `mkdocs build --strict` covers the
+  missing-file half under `docs/`, but it never builds `README.md`,
+  `CHANGELOG.md`, `CLAUDE.md` or `ROADMAP.md` -- so a broken relative
+  target in one of those is guarded by nothing. There are no such links
+  today. This one is a coverage gap rather than a spurious failure, and
+  is written down here for the same reason #162 was filed: a silent skip
+  reads as a pass.
 """
 import html.parser
 import pathlib
@@ -223,8 +232,13 @@ def broken_fragment_links(root):
             else:
                 destination = (path.parent / urllib.parse.unquote(target)).resolve()
                 if destination not in pages:
-                    # A link to a file outside the checked set; mkdocs
-                    # --strict already fails on a missing one.
+                    # A link to a file outside the checked set. Deferred,
+                    # not covered -- see the fourth bullet in the module
+                    # docstring. `mkdocs build --strict` catches a missing
+                    # target under `docs/`, but it never builds README.md,
+                    # CHANGELOG.md, CLAUDE.md or ROADMAP.md, so a broken
+                    # relative target in one of those is unguarded here
+                    # and unguarded there.
                     continue
             if urllib.parse.unquote(fragment) not in pages[destination].anchors:
                 broken.append(f"{path.relative_to(root)} -> {href}")
