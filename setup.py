@@ -164,7 +164,19 @@ setup(
             # builds its venv fresh every run, fails every time. 70.1 is the
             # first release with bdist_wheel built in, so no separate
             # `wheel` dependency is needed.
-            "setuptools>=70.1"
+            "setuptools>=70.1",
+            # tests/test_doc_anchors.py renders the docs and checks that
+            # every `#fragment` link lands on an anchor a heading really
+            # produces -- `mkdocs build --strict` validates file
+            # references but not fragments, which is why five links in
+            # docs/configuration.md were dead for months (#152). The
+            # renderer has to be the real one: a stdlib slugifier written
+            # during that review disagreed with Python-Markdown's on
+            # underscores, so it would have graded links against slugs
+            # the site never emits. Installed transitively by the `docs`
+            # extra via mkdocs; declared here because the test runs in
+            # the `tests` environment, which does not include it.
+            "markdown>=3.4"
         ],
         # Contributor tooling, deliberately kept out of `tests` and out of
         # install_requires: pylint keeps this codebase readable, and none
