@@ -2197,12 +2197,15 @@ class DicomSession:
             get_logger().warning("No instances found to export.")
             return
 
-        if check_reversibility:
-            self._report_recoverable_identities(tasks)
-
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
         summary = self._run_export_batch(tasks, show_progress,
                                          self.store_backend)
+
+        # After the batch, not before it. The disclosure is a statement
+        # about files a recipient holds, so it has to be made from what
+        # was written rather than from what was planned (#187).
+        if check_reversibility:
+            self._report_recoverable_identities(tasks, summary.written_uids)
 
         # Recorded for `generate_report`, which counted the object graph
         # and nothing else: a run that wrote none of its three instances
@@ -2211,7 +2214,7 @@ class DicomSession:
         self._last_export_requested = len(tasks)
         print("Done.")
 
-    def _report_recoverable_identities(self, tasks) -> int:
+    def _report_recoverable_identities(self, tasks, written_uids) -> int:
         """Report instances whose exported copy still carries its originals.
 
         `lock_identities()` embeds the original identifiers, encrypted,
@@ -2227,18 +2230,37 @@ class DicomSession:
         written that matter, not what this session happens to have
         configured.
 
-        Runs against the export plan, so it counts what will actually be
-        written -- after the subset filter and the burned-in scan have
-        removed whatever they remove.
+        Runs against the *delivered* instances, not the export plan. It
+        ran against the plan until #187, on the reasoning that the plan
+        is what survives the subset filter and the burned-in scan --
+        which is true of those two filters and silent about the third
+        thing that removes instances, the write itself. Its own prose
+        commits to the stronger claim, "N of M exported instances" and
+        "treat the export as re-identifiable", and those are statements
+        about files: with the write failing, the report asserted that
+        three re-identifiable files had been released when none existed.
+        Under-claiming would be worse than the over-claim it replaces,
+        so the delivered set is matched on SOP Instance UID -- which the
+        export plan guarantees, since it names each output file after
+        one.
+
+        Args:
+            tasks: The export plan, for the instances and their tokens.
+            written_uids: The UID of every instance that reached disk.
 
         Returns:
-            int: How many instances carry recoverable identities.
+            int: How many *written* instances carry recoverable
+                identities. Zero when nothing was written, and no audit
+                entry is made -- an export that delivered nothing has
+                disclosed nothing.
         """
+        delivered = set(written_uids)
         affected = [
             task.instance.sop_instance_uid
             for task in tasks
-            if (task.instance.sequences.get(
-                ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ) is not None
+            if (task.instance.sop_instance_uid in delivered
+                and task.instance.sequences.get(
+                    ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ) is not None
                 and task.instance.sequences[
                     ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ].items)
         ]
@@ -2246,7 +2268,7 @@ class DicomSession:
             return 0
 
         detail = (
-            f"{len(affected)} of {len(tasks)} exported instances carry "
+            f"{len(affected)} of {len(delivered)} exported instances carry "
             f"encrypted original identities (0400,0500). They are "
             f"recoverable with the session key; treat the export as "
             f"re-identifiable by any holder of it.")
