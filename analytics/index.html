@@ -1447,9 +1447,21 @@
 <ol>
 <li><strong>Validation Status</strong>: Uses Isocenter's internal audit logic to grade the session (PASS / REVIEW_REQUIRED).</li>
 <li><strong>Audit Trail</strong>: Aggregated counts of actions taken (e.g., number of patients anonymized, pixels redacted).</li>
+<li><strong>Data Loss</strong>: Every element that was present in the source and is not in the exported data, named with its VR.</li>
 <li><strong>Exceptions</strong>: A detailed list of any warnings or errors encountered (e.g., "Corrupt pixel data in File X", "Burned-In Annotation found").</li>
 <li><strong>Manifest</strong>: A summary of the processed cohort (Top studies by size).</li>
 </ol>
+<div class="admonition warning">
+<p class="admonition-title">Data Loss does not affect Validation Status</p>
+<p>A session that dropped elements can still be graded <code>PASS</code>. The two
+sections answer different questions: Validation Status reports
+whether anything <em>failed</em>, and dropping a binary element is not a
+failure -- it is what <code>populate_attrs</code> is designed to do for pixels
+and waveforms, and collateral for everything else with the same VR.</p>
+<p>Read the Data Loss section on its own terms. Whether a run that
+discarded data should be allowed to grade itself <code>PASS</code> is an open
+question (<a href="https://github.com/kvnlng/Isocenter/issues/146">#146</a>).</p>
+</div>
 <div class="admonition tip">
 <p class="admonition-title">Format Options</p>
 <p>Currently, Isocenter supports Markdown (<code>.md</code>) reports. PDF support is planned for future releases via Pandoc integration.</p>
