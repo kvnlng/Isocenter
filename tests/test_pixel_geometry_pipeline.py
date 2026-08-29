@@ -423,6 +423,13 @@ def test_worker_takes_samples_per_pixel_from_the_resolved_geometry(tmp_path):
     writes `SamplesPerPixel=1` beside `Rows=4 Columns=4 NumberOfFrames=2`
     for a `(2,4,4,3)` array: the file decodes cleanly as `(6,4,4)` and is
     simply a different image, which is the silent half of #205.
+
+    These two shapes and not others because they are the only two ways
+    `geom.samples` and the declared `SamplesPerPixel` can disagree:
+    the geometry supplies a count the attributes never declared (here),
+    or it overrides one the attributes declared wrongly (the test
+    below). Every other fixture in the suite has the two agreeing, which
+    is why reverting this line passed all 906 tests.
     """
     arr = np.arange(2 * 4 * 4 * 3, dtype=np.uint8).reshape((2, 4, 4, 3))
     ds = _export_one(tmp_path, arr, {
@@ -583,18 +590,42 @@ def test_redaction_dirties_the_instance_it_redacted():
     not-writeable arm, whose contents at that moment are identical to the
     original; it mutates the copy afterwards. Whichever arm is taken, the
     instance has to end up needing a save.
+
+    **Every descriptor is declared, and declared correctly**, on purpose.
+    An instance missing `PhotometricInterpretation` or `BitsAllocated`
+    gets dirtied by the conditional descriptor writes of §3.11 rule 1 no
+    matter what rule 2 does, so it would pass with `mark_modified()` made
+    conditional and pin nothing this docstring claims. With the full set
+    declared, `set_pixel_data` changes no attribute -- asserted below --
+    and the unconditional `mark_modified()` is the only thing left that
+    can dirty the instance. Redaction is exactly the case §3.11 rule 2
+    exists for: same shape, same dtype, different bytes.
+
+    Note what this deliberately does *not* pin: that the descriptor
+    writes are conditional. Making them unconditional is invisible here
+    and everywhere else in the suite -- an accepted gap, not an
+    oversight, because writing an identical value back is only a
+    performance and revision-churn question, and pinning it would mean
+    asserting on `_revision` arithmetic rather than on behaviour.
     """
     inst = Instance("I_RD", "1.2.826.0.1.3680043.8.498.900010", 1)
     inst.attributes["0028,0002"] = 1
+    inst.attributes["0028,0004"] = "MONOCHROME2"
     inst.attributes["0028,0010"] = 8
     inst.attributes["0028,0011"] = 8
+    inst.attributes["0028,0100"] = 8
     arr = np.ones((8, 8), dtype=np.uint8) * 7
     arr.flags.writeable = False
     inst.pixel_array = arr
+    before = dict(inst.attributes)
     inst.mark_persisted()
     assert inst.has_unsaved_changes is False
 
     service = RedactionService(DicomStore())
     assert service._apply_roi_to_instance(inst, arr, (0, 4, 0, 4)) is True
 
+    assert inst.attributes == before, (
+        "the descriptors already described this array; if redaction "
+        "changed one, this test is dirtying the instance by the wrong "
+        "route and no longer pins the unconditional mark_modified()")
     assert inst.has_unsaved_changes is True
