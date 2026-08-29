@@ -562,6 +562,29 @@ class RedactionService:
         Applies a single ROI to the pixel array in place.
 
         Wrapper around static apply_redaction_to_array for instance management.
+
+        **This method dirties the instance on one arm only, and the callers
+        are load-bearing for the other.** A not-writeable array is copied and
+        handed to `set_pixel_data`, which ends in an unconditional
+        `mark_modified()`, so that arm returns with the instance needing a
+        save. A writeable array is redacted *in place*: `set_pixel_data` is
+        never called, no attribute changes, and this method returns True
+        leaving `has_unsaved_changes` False. Measured, both arms:
+
+            writeable=False  returned=True  dirty=True   zone_zeroed=True
+            writeable=True   returned=True  dirty=False  zone_zeroed=True
+
+        Nothing is wrong today, because both callers close it -- the serial
+        `redact()` (line ~249) and the parallel result loop (line ~450) each
+        call `inst.mark_modified()` under `if modified:` and persist the
+        pixels afterwards. But a third caller that trusts the return value
+        and skips that call silently drops the redacted pixels on the
+        writeable arm: the zone really is zeroed in memory, the instance
+        reports itself saved, and an incremental `save_all` writes nothing,
+        so the exported file still carries the burned-in identifiers. No
+        test can catch that, because the writeable arm's dirtying does not
+        live in the function under test. Move or remove either
+        `mark_modified()` only together with this arm.
         """
         if not arr.flags.writeable:
             arr = arr.copy()
