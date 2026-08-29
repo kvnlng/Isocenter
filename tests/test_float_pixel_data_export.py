@@ -297,3 +297,149 @@ def test_an_unwritable_float_on_an_image_modality_fails_the_export(tmp_path):
     assert isinstance(outcome.error, RuntimeError)
     assert "Pixels missing for Image Modality" in str(outcome.error)
     assert not os.path.exists(str(tmp_path / "f16img.dcm"))
+
+
+# --- The three arms the reworked guard has that nothing pinned ---
+#
+# Each of these was found by mutating the guard and watching the suite
+# stay green. They pin behaviour that is already correct; none of them
+# is a bug report.
+
+
+def _export_one(tmp_path, arr, attrs=None, zones=None, name="x.dcm"):
+    """Drive `_export_instance_worker` on a hand-built instance.
+
+    Direct rather than through a fixture file because two of the three
+    cases below cannot be expressed as a source DICOM at all: a caller's
+    (7fe0,0010) sitting in `attributes` beside a float array, and a
+    `BitsAllocated` that disagrees with the array's width. Both arrive
+    only from `set_pixel_data`/`set_attr`, which is the same arm the
+    float16 case is reachable through.
+    """
+    from isocenter.entities import Instance
+    from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+    rows, cols = arr.shape[-2], arr.shape[-1]
+    inst = Instance("1.2.3.4.5")
+    inst.attributes.update({
+        "0008,0016": PARAMETRIC_MAP,
+        "0008,0060": "OT",
+        "0028,0010": rows, "0028,0011": cols,
+        "0028,0100": 32, "0028,0101": 32, "0028,0102": 31,
+        "0028,0002": 1, "0028,0004": "MONOCHROME2", "0028,0103": 0,
+        "0020,0013": 1,
+    })
+    # `attrs` is applied AFTER `set_pixel_data`, deliberately.
+    # `Instance.set_pixel_data` ends with
+    # `self.set_attr("0028,0100", array.itemsize * 8)`, so anything
+    # written before it is silently corrected to agree with the array --
+    # which is exactly the disagreement two of these tests need to
+    # create. Applying it before produced a test that passed with the
+    # behaviour it names deleted.
+    inst.set_pixel_data(arr)
+    inst.attributes.update(attrs or {})
+
+    out = str(tmp_path / name)
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst,
+        output_path=out,
+        patient_attributes={"0010,0020": "P1"},
+        study_attributes={"0020,000d": "1.2.3"},
+        series_attributes={"0020,000e": "1.2.4"},
+        compression=None,
+        redaction_zones=list(zones or [])))
+    assert outcome.ok, outcome.error
+    return pydicom.dcmread(out), outcome
+
+
+@pytest.mark.parametrize("dtype,tag_kw,bits", [
+    (np.float32, "FloatPixelData", 32),
+    (np.float64, "DoubleFloatPixelData", 64),
+])
+def test_a_redacted_float_image_exports_redacted(tmp_path, dtype, tag_kw,
+                                                 bits):
+    """The guard must stay *below* the redaction block, and only a test
+    keeps it there.
+
+    The float writeback and `RedactionService.apply_redaction_to_array`
+    both consume `arr`, and the guard ends by setting `arr = None`. Put
+    the guard above the redaction block and the zeroing never runs --
+    `if arr is not None` is already False -- so the burned-in
+    identifiers leave inside (7fe0,0008). That is where the guard sat in
+    the first cut of this fix. Mutating the redaction block to
+    `if arr is not None and arr.dtype.kind != 'f':`, which is exactly
+    what the guard sitting above it does, left all 766 tests green while
+    the marker value survived into the exported element.
+
+    Two assertions, because one is not enough. The band must be gone --
+    that is the leak. And the pixel outside it must be untouched: a
+    guard that zeroed the whole array would satisfy the first assertion
+    while destroying the image, and "no PHI" is not the only
+    requirement.
+    """
+    marker = 999.0
+    arr = np.zeros((8, 8), dtype=dtype)
+    arr[0:3, :] = marker      # the burned-in band
+    arr[5, 5] = 42.5          # outside the zone: must survive
+
+    exported, _outcome = _export_one(
+        tmp_path, arr, zones=[(0, 3, 0, 8)], name=f"red{bits}.dcm")
+
+    back = np.frombuffer(getattr(exported, tag_kw), dtype=dtype).reshape(8, 8)
+    assert not (back[0:3, :] == marker).any(), back[0:3, :]
+    assert back[5, 5] == 42.5
+
+
+def test_the_integer_tag_is_deleted_when_a_float_element_is_written(tmp_path):
+    """PS3.5 A.1: one and only one pixel element (#193).
+
+    `_merge` writes whatever `attributes` holds, so an instance carrying
+    a (7fe0,0010) of its own would leave with both elements -- a file
+    pydicom itself refuses to decode: "One and only one of 'Pixel Data',
+    'Float Pixel Data' or 'Double Float Pixel Data' may be present".
+    The guard deletes it rather than merely not writing it, and deleting
+    is the half a reader could mistake for redundant.
+
+    Ingest cannot build this instance: `populate_attrs` skips the whole
+    `7fe0` group, so "7fe0,0010" never enters `attributes`. A caller
+    can, via `set_attr`, which is why the deletion is not dead code.
+    """
+    exported, _outcome = _export_one(
+        tmp_path,
+        (np.arange(16, dtype=np.float32) + 0.5).reshape(4, 4),
+        attrs={"7fe0,0010": np.arange(16, dtype=np.uint16).tobytes()},
+        name="both.dcm")
+
+    assert (0x7FE0, 0x0008) in exported
+    assert (0x7FE0, 0x0010) not in exported
+
+
+@pytest.mark.parametrize("dtype,stated,expected_tag,expected_bits", [
+    (np.float64, 16, (0x7FE0, 0x0009), 64),
+    (np.float32, 64, (0x7FE0, 0x0008), 32),
+])
+def test_bits_allocated_is_decided_by_the_array_not_the_source(
+        tmp_path, dtype, stated, expected_tag, expected_bits):
+    """`test_bits_allocated_agrees_with_the_tag_it_sits_next_to` cannot
+    see this, and that is why this exists.
+
+    That test reads `BitsAllocated == 32` off a fixture whose source
+    already said 32, so it passes with `ds.BitsAllocated = 32` deleted
+    from the guard -- measured. It asserts the source value survived,
+    not that the tag decided it.
+
+    Here the stated width disagrees with the array, which is the only
+    configuration in which the assignment does anything: 16 beside a
+    float64 array, and 64 beside a float32 one. A descriptor left
+    contradicting its element is the internally-coherent-but-wrong file
+    #170 is about, one element over.
+    """
+    exported, _outcome = _export_one(
+        tmp_path,
+        (np.arange(16, dtype=dtype) + 0.5).reshape(4, 4),
+        attrs={"0028,0100": stated, "0028,0101": stated,
+               "0028,0102": stated - 1},
+        name=f"bits{stated}_{np.dtype(dtype).name}.dcm")
+
+    assert expected_tag in exported
+    assert exported.BitsAllocated == expected_bits
