@@ -699,7 +699,9 @@ class Instance(DicomItem):
                 "(0028,0002) nor NumberOfFrames (0028,0008) nor Rows/Columns "
                 "to settle it. Reading it as %d samples per pixel. Set "
                 "SamplesPerPixel before set_pixel_data() to make this "
-                "explicit; an export will refuse to write a guessed geometry.",
+                "explicit -- this call writes the guess into the instance's "
+                "own descriptors, so a later export sees a declared geometry "
+                "and writes it rather than refusing it.",
                 tuple(shape), self.sop_instance_uid,
                 shape[0], shape[1], shape[2],
                 shape[0], shape[1], shape[2],
