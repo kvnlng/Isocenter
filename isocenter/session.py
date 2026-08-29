@@ -12,8 +12,9 @@ import yaml
 from tqdm import tqdm
 
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
-                          SidecarPixelLoader, SidecarWaveformLoader,
-                          export_folder_names, LOSS_SCOPE_PRIVATE)
+                          ExportSummary, SidecarPixelLoader,
+                          SidecarWaveformLoader, export_folder_names,
+                          LOSS_SCOPE_PRIVATE)
 from .store import DicomStore
 from .services import RedactionService
 from .config_manager import ConfigLoader
@@ -555,6 +556,14 @@ class DicomSession:
         # Reversibility
         self.key_manager = None
         self.reversibility_service = None
+
+        # What the last DICOM export delivered, so the compliance report
+        # can say how many instances were written beside how many are
+        # indexed (#181). None means "no export has run in this
+        # session", which is not the same as "nothing was written" --
+        # the report omits the row rather than claiming a zero.
+        self._last_export_written = None
+        self._last_export_requested = None
 
         if os.path.exists("isocenter.key"):
             self.enable_reversible_anonymization("isocenter.key")
@@ -1566,6 +1575,8 @@ class DicomSession:
             total_studies=n_st,
             total_series=n_se,
             total_instances=n_i,
+            instances_written=self._last_export_written,
+            instances_requested=self._last_export_requested,
             audit_summary=audit_summary,
             exceptions=exceptions,
             data_losses=data_losses,
@@ -2144,9 +2155,11 @@ class DicomSession:
             check_burned_in (bool): If True, scans for PHI before exporting and
                 skips every instance that still carries an identifier.
             check_reversibility (bool): If True (the default), warn when the
-                files about to be written still carry the encrypted originals
+                files this export wrote still carry the encrypted originals
                 that `lock_identities()` embeds, and record the disclosure in
-                the audit log. Those identities are recoverable by anyone
+                the audit log. The check runs after the write, against what
+                reached disk, so it describes the cohort as delivered rather
+                than as planned (#187). Those identities are recoverable by anyone
                 holding `isocenter.key`, which a recipient of the cohort has
                 no way to see for themselves. Passing False is the caller
                 stating they already know; it silences the warning and skips
@@ -2186,14 +2199,24 @@ class DicomSession:
             get_logger().warning("No instances found to export.")
             return
 
-        if check_reversibility:
-            self._report_recoverable_identities(tasks)
-
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
-        self._run_export_batch(tasks, show_progress, self.store_backend)
+        summary = self._run_export_batch(tasks, show_progress,
+                                         self.store_backend)
+
+        # After the batch, not before it. The disclosure is a statement
+        # about files a recipient holds, so it has to be made from what
+        # was written rather than from what was planned (#187).
+        if check_reversibility:
+            self._report_recoverable_identities(tasks, summary.written_uids)
+
+        # Recorded for `generate_report`, which counted the object graph
+        # and nothing else: a run that wrote none of its three instances
+        # still reported "Total Instances | 3" under a PASS (#181).
+        self._last_export_written = summary.written
+        self._last_export_requested = len(tasks)
         print("Done.")
 
-    def _report_recoverable_identities(self, tasks) -> int:
+    def _report_recoverable_identities(self, tasks, written_uids) -> int:
         """Report instances whose exported copy still carries its originals.
 
         `lock_identities()` embeds the original identifiers, encrypted,
@@ -2209,18 +2232,65 @@ class DicomSession:
         written that matter, not what this session happens to have
         configured.
 
-        Runs against the export plan, so it counts what will actually be
-        written -- after the subset filter and the burned-in scan have
-        removed whatever they remove.
+        Runs against the *delivered* instances, not the export plan. It
+        ran against the plan until #187, on the reasoning that the plan
+        is what survives the subset filter and the burned-in scan --
+        which is true of those two filters and silent about the third
+        thing that removes instances, the write itself. Its own prose
+        commits to the stronger claim, "N of M exported instances" and
+        "treat the export as re-identifiable", and those are statements
+        about files: with the write failing, the report asserted that
+        three re-identifiable files had been released when none existed.
+
+        **Delivered means a file is there, not that a worker said so**
+        (#198). `ok=False` reports that the write did not complete, and
+        a write that does not complete has usually still created
+        something: `save_as` streams elements in ascending tag order,
+        and the Encrypted Attributes Sequence is group `0400`, so any
+        failure past it -- an `ENOSPC` inside Pixel Data, (7FE0,0010),
+        being the ordinary one -- leaves a short file that `dcmread`
+        accepts and that carries the encrypted originals in full.
+        Keying on the worker's verdict counted two such files out of
+        three and disclosed "2 of 2", which is an under-claim, and an
+        under-claim is what gets a re-identifiable file treated as safe.
+        The over-claim it replaced costs a site a disclosure process for
+        an export that did not happen; this one costs the recipient.
+
+        So a planned path that exists on disk is delivered whatever the
+        worker concluded, and the union runs the safe way in both
+        directions: an instance the worker wrote is delivered even if
+        the file has since been removed. That a file left by an earlier
+        export into the same folder counts too is not a defect -- it is
+        in the folder being released, and it is re-identifiable.
+
+        Only the instances *not* already known to be written are
+        stat-ed, so a clean export does no filesystem work here and a
+        failed one does one call per failure.
+
+        Matching is on SOP Instance UID, which the export plan
+        guarantees: it names each output file after one.
+
+        Args:
+            tasks: The export plan, for the instances, their tokens and
+                the paths their files were to be written to.
+            written_uids: The UID of every instance the workers wrote.
 
         Returns:
-            int: How many instances carry recoverable identities.
+            int: How many *written* instances carry recoverable
+                identities. Zero when nothing was written, and no audit
+                entry is made -- an export that delivered nothing has
+                disclosed nothing.
         """
+        delivered = set(written_uids)
+        delivered |= {task.instance.sop_instance_uid for task in tasks
+                      if task.instance.sop_instance_uid not in delivered
+                      and os.path.exists(task.output_path)}
         affected = [
             task.instance.sop_instance_uid
             for task in tasks
-            if (task.instance.sequences.get(
-                ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ) is not None
+            if (task.instance.sop_instance_uid in delivered
+                and task.instance.sequences.get(
+                    ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ) is not None
                 and task.instance.sequences[
                     ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ].items)
         ]
@@ -2228,7 +2298,7 @@ class DicomSession:
             return 0
 
         detail = (
-            f"{len(affected)} of {len(tasks)} exported instances carry "
+            f"{len(affected)} of {len(delivered)} exported instances carry "
             f"encrypted original identities (0400,0500). They are "
             f"recoverable with the session key; treat the export as "
             f"re-identifiable by any holder of it.")
@@ -2369,7 +2439,8 @@ class DicomSession:
         return rule.get("redaction_zones", []) if rule else []
 
     @staticmethod
-    def _run_export_batch(tasks, show_progress, store_backend=None) -> None:
+    def _run_export_batch(tasks, show_progress,
+                          store_backend=None) -> ExportSummary:
         """Runs the export in worker processes and reports the outcome.
 
         Uses `export_batch`'s own pool rather than `self._executor`: workers
@@ -2379,10 +2450,16 @@ class DicomSession:
         `store_backend` is passed explicitly because this is a static
         method and the workers may be in subprocesses: the handle cannot
         cross that boundary, so the losses come back instead and are
-        audited here, in the parent (#126).
+        audited here, in the parent (#126). A failed *write* travels the
+        same way and is audited on the same trip (#181).
+
+        Returns:
+            ExportSummary: what reached disk and what did not. Returned
+                None until #181, which is why the caller had nothing to
+                report and the count was thrown away here.
         """
         try:
-            success_count = DicomExporter.export_batch(
+            summary = DicomExporter.export_batch(
                 tasks,
                 show_progress=show_progress,
                 total=len(tasks),
@@ -2395,19 +2472,23 @@ class DicomSession:
         finally:
             gc.collect()
 
-        if success_count < len(tasks):
+        if summary.written < len(tasks):
             # Partial failure used to be invisible here: the count came back
             # and was dropped, and "Export complete." printed whether 1200 of
-            # 1200 instances survived or 3 did. Per-file errors are already in
-            # the audit log; this is the summary that says to go and read it.
+            # 1200 instances survived or 3 did. Per-file errors are in the
+            # audit log as of #181 -- when this line was written they were
+            # not, so it told the reader to go and read rows that did not
+            # exist. This is the summary that says to go and read them.
             get_logger().warning(
                 "Export finished with failures: %d of %d instances exported. "
                 "See the audit log for per-instance errors.",
-                success_count, len(tasks))
+                summary.written, len(tasks))
             print(f"Export finished with failures: "
-                  f"{success_count}/{len(tasks)} instances exported.")
+                  f"{summary.written}/{len(tasks)} instances exported.")
         else:
             get_logger().info("Export complete.")
+
+        return summary
 
     def export_dataframe(
             self,
