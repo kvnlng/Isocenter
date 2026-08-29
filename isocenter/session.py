@@ -2155,9 +2155,11 @@ class DicomSession:
             check_burned_in (bool): If True, scans for PHI before exporting and
                 skips every instance that still carries an identifier.
             check_reversibility (bool): If True (the default), warn when the
-                files about to be written still carry the encrypted originals
+                files this export wrote still carry the encrypted originals
                 that `lock_identities()` embeds, and record the disclosure in
-                the audit log. Those identities are recoverable by anyone
+                the audit log. The check runs after the write, against what
+                reached disk, so it describes the cohort as delivered rather
+                than as planned (#187). Those identities are recoverable by anyone
                 holding `isocenter.key`, which a recipient of the cohort has
                 no way to see for themselves. Passing False is the caller
                 stating they already know; it silences the warning and skips
@@ -2239,14 +2241,39 @@ class DicomSession:
         "treat the export as re-identifiable", and those are statements
         about files: with the write failing, the report asserted that
         three re-identifiable files had been released when none existed.
-        Under-claiming would be worse than the over-claim it replaces,
-        so the delivered set is matched on SOP Instance UID -- which the
-        export plan guarantees, since it names each output file after
-        one.
+
+        **Delivered means a file is there, not that a worker said so**
+        (#198). `ok=False` reports that the write did not complete, and
+        a write that does not complete has usually still created
+        something: `save_as` streams elements in ascending tag order,
+        and the Encrypted Attributes Sequence is group `0400`, so any
+        failure past it -- an `ENOSPC` inside Pixel Data, (7FE0,0010),
+        being the ordinary one -- leaves a short file that `dcmread`
+        accepts and that carries the encrypted originals in full.
+        Keying on the worker's verdict counted two such files out of
+        three and disclosed "2 of 2", which is an under-claim, and an
+        under-claim is what gets a re-identifiable file treated as safe.
+        The over-claim it replaced costs a site a disclosure process for
+        an export that did not happen; this one costs the recipient.
+
+        So a planned path that exists on disk is delivered whatever the
+        worker concluded, and the union runs the safe way in both
+        directions: an instance the worker wrote is delivered even if
+        the file has since been removed. That a file left by an earlier
+        export into the same folder counts too is not a defect -- it is
+        in the folder being released, and it is re-identifiable.
+
+        Only the instances *not* already known to be written are
+        stat-ed, so a clean export does no filesystem work here and a
+        failed one does one call per failure.
+
+        Matching is on SOP Instance UID, which the export plan
+        guarantees: it names each output file after one.
 
         Args:
-            tasks: The export plan, for the instances and their tokens.
-            written_uids: The UID of every instance that reached disk.
+            tasks: The export plan, for the instances, their tokens and
+                the paths their files were to be written to.
+            written_uids: The UID of every instance the workers wrote.
 
         Returns:
             int: How many *written* instances carry recoverable
@@ -2255,6 +2282,9 @@ class DicomSession:
                 disclosed nothing.
         """
         delivered = set(written_uids)
+        delivered |= {task.instance.sop_instance_uid for task in tasks
+                      if task.instance.sop_instance_uid not in delivered
+                      and os.path.exists(task.output_path)}
         affected = [
             task.instance.sop_instance_uid
             for task in tasks

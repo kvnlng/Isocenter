@@ -33,12 +33,19 @@ from isocenter.session import DicomSession
 #: Pixel Spacing, Type 1 for a CT image. An instance without it fails
 #: `IODValidator` inside the worker -- a failure made of data alone, no
 #: filesystem and no monkeypatch, which is the only kind that survives
-#: the process boundary `session.export()` always crosses.
+#: the process boundary `session.export()` always crosses. It fails
+#: *before* `save_as` is reached, so nothing is created on disk.
 DROPPED_TAG = "0028,0030"
+
+#: Overlay Rows, VR `US`. A string here encodes fine into the object
+#: graph and raises inside `save_as`, at group `6000` -- which is past
+#: (0400,0500), so the file exists, is readable, and carries the
+#: encrypted originals when the write gives up (#198).
+LATE_FAILURE_TAG = "6000,0010"
 
 
 def _session_with_locked_identity(tmp_path, lock=True, instances=1,
-                                  break_instances=()):
+                                  break_instances=(), truncate_instances=()):
     session = DicomSession(str(tmp_path / "rev.db"))
     session.enable_reversible_anonymization(str(tmp_path / "test.key"))
 
@@ -59,6 +66,8 @@ def _session_with_locked_identity(tmp_path, lock=True, instances=1,
             if n in break_instances and tag == DROPPED_TAG:
                 continue
             inst.set_attr(tag, val)
+        if n in truncate_instances:
+            inst.set_attr(LATE_FAILURE_TAG, "not-a-number")
         inst.set_pixel_data(np.zeros((10, 10), dtype=np.uint16))
         se.instances.append(inst)
 
@@ -217,3 +226,44 @@ def test_a_partial_export_discloses_the_instances_that_were_written(
     assert len(rows) == 1, rows
     assert "2 of 2 exported instances" in rows[0], rows[0]
     assert any("2 of 2" in m for m in _warnings(caplog)), _warnings(caplog)
+
+
+def test_a_truncated_file_still_carrying_its_token_is_disclosed(tmp_path):
+    """`ok=False` is not "nothing reached disk" (#198).
+
+    `save_as` creates the file and streams elements in ascending tag
+    order. (0400,0500) is group `0400`, so a write that gives up after
+    it -- an `ENOSPC` part-way through Pixel Data, (7FE0,0010), being
+    the ordinary way -- leaves a short file that `dcmread` accepts and
+    that carries the encrypted originals in full.
+
+    Keying the disclosure on the worker's verdict counted two of those
+    three files. That is an under-claim, and an under-claim is the
+    direction that gets a re-identifiable file treated as safe: the
+    row this makes wrong is the one a recipient acts on.
+    """
+    import pydicom
+
+    session = _session_with_locked_identity(tmp_path, instances=3,
+                                            truncate_instances=(1,))
+    out = tmp_path / "out"
+    try:
+        session.export(str(out), show_progress=False)
+        db_path = session.store_backend.db_path
+        errors = len(session.store_backend.get_audit_errors())
+    finally:
+        session.close()
+
+    on_disk = sorted(out.rglob("*.dcm"))
+    assert [p.stem for p in on_disk] == ["SOP_0", "SOP_1", "SOP_2"], on_disk
+    assert errors == 1, "the arm did not fail a write"
+
+    truncated = [p for p in on_disk if p.stem == "SOP_1"][0]
+    assert truncated.stat().st_size < on_disk[0].stat().st_size, (
+        "the arm did not truncate the file it was supposed to")
+    assert 0x04000500 in pydicom.dcmread(truncated, force=True), (
+        "the fixture no longer reproduces the case it exists for")
+
+    rows = _disclosures(db_path)
+    assert len(rows) == 1, rows
+    assert "3 of 3 exported instances" in rows[0], rows[0]

@@ -30,6 +30,7 @@ import numpy as np
 import pytest
 
 from isocenter.entities import Instance, Patient, Series, Study
+from isocenter.io_handlers import DicomExporter, ExportOutcome, ExportSummary
 from isocenter.session import DicomSession
 
 CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
@@ -175,3 +176,50 @@ def test_a_clean_export_still_grades_pass_and_reports_a_full_count(tmp_path):
     assert "| **Validation Status** | **PASS** |" in result["report"]
     assert "*No exceptions or errors were recorded.*" in result["report"]
     assert "| Instances Written | 3 of 3 requested |" in result["report"]
+
+
+class _RecordingStore:
+    """The audit-writing half of a store backend, and nothing else."""
+
+    def __init__(self):
+        self.rows = []
+
+    def log_audit(self, action_type, entity_uid, details, loss_scope=None):
+        self.rows.append((action_type, entity_uid, details, loss_scope))
+
+
+def test_a_worker_that_died_without_answering_is_still_a_failure():
+    """`run_parallel` can hand back its own exception instead of an outcome.
+
+    That arm has no `ExportOutcome` to name the instance with, and the
+    row still has to exist -- it is the shape that only happens when
+    something has already gone badly wrong, so it is the one least
+    likely to be noticed missing. Called directly rather than through a
+    real export because a worker that dies mid-batch is not something
+    the pipeline can be asked for on demand; the parent-side contract is
+    what this pins.
+    """
+    store = _RecordingStore()
+    results = [
+        ExportOutcome(ok=True, output_path="/out/a.dcm", sop_instance_uid="A"),
+        ExportOutcome(ok=False, output_path="/out/b.dcm", sop_instance_uid="B",
+                      error=ValueError("Validation Errors:\n['bad | tag']")),
+        RuntimeError("worker died | before it could answer"),
+    ]
+
+    failures = DicomExporter._report_export_failures(results, store)
+
+    assert [uid for uid, _ in failures] == ["B", "UNKNOWN"], failures
+    assert [r[0] for r in store.rows] == ["ERROR", "ERROR"], store.rows
+    assert all("\n" not in details and "|" not in details.replace("\\|", "")
+               for _uid, details in failures), failures
+    assert "worker died" in failures[1][1]
+
+
+def test_the_summary_counts_both_sides_of_what_the_batch_did():
+    """`written` and `failed` are what the parent reports the run by."""
+    summary = ExportSummary(written_uids=["A"],
+                            failures=[("B", "b failed"), ("UNKNOWN", "died")])
+
+    assert summary.written == 1
+    assert summary.failed == 2
