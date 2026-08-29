@@ -160,7 +160,7 @@ redact returned 0    pixel[0,0,0] = 200    audit errors = 0
 ```
 
 Same sink, different source. Both are in scope; §7 uses the malformed
-ROI as the primary fixture and this as a second arm (§7.1).
+ROI as the primary fixture and this as a second arm (§7.2, test 16).
 
 ### 2.4 What a failed redaction leaves behind — and it is not the same on
 both interpreters
@@ -321,6 +321,13 @@ before mutation), for the same reason the mutation dict already carries
 `original_sop_uid`: a redacted image gets a new UID and the parent's map
 is keyed on the old one.
 
+`services.py` imports `hashlib`, `json`, `traceback`, `gc`, `typing`'s
+`Dict`/`List`/`Optional`, `tqdm`, `numpy` and four `isocenter` modules —
+**`dataclasses` is not among them**. Add `from dataclasses import
+dataclass`. It is stdlib, so `tests/test_packaging_contract.py`'s
+module-scope-import check has nothing to say about it, but the decorator
+is not in scope today and the snippet above assumes it is.
+
 ### 3.3 `error` is a string, and that is a deliberate divergence from
 `ExportOutcome`
 
@@ -445,6 +452,25 @@ Defined in `services.py` next to `RedactionService`, and re-exported from
 `isocenter/__init__.py` alongside `Session`, `Builder` and `Equipment`:
 an exception a caller is expected to catch needs a stable import path,
 and `isocenter.services` is not one this package advertises.
+
+**Why `RuntimeError` and not `Exception`, recorded so it is not
+"unified" later.** The package already raises bare `RuntimeError` from
+two places on this same pipeline: `write_tree` wraps export failures in
+one, and `_export_instance_worker` raises one for the `GUESSED` geometry
+refusal (§4.3). So `except RuntimeError` around a full run cannot tell
+the three apart, and someone will eventually notice that and propose
+collapsing them. Subclassing is still the right call: a redaction that
+did not redact *is* a runtime failure, so the base class is honest, and
+inheriting keeps every existing `except RuntimeError` catching it rather
+than turning a caught error into an escaping one — which is what
+subclassing `Exception` directly would do to any caller that already
+guards this pipeline. The reverse move is the one to resist: do not
+demote `RedactionError` back to a bare `RuntimeError` for symmetry with
+the export raises. The asymmetry is the point — the two export raises
+mean "nothing was written", this one means "something unsafe is still in
+the graph", and a caller has to be able to separate them. Giving the
+export raises their own subclasses later is a fine follow-up (§10); it
+does not block this.
 
 **Why raise rather than return a summary.** Four reasons, in order of
 weight:
@@ -584,7 +610,7 @@ integer path's behaviour is unchanged:
 ds.Rows = geom.rows
 ds.Columns = geom.cols
 ds.SamplesPerPixel = geom.samples
-if geom.frames > 1 or TAG_NUMBER_OF_FRAMES in attributes:
+if geom.frames > 1 or "0028,0008" in attributes:
     ds.NumberOfFrames = geom.frames
 
 photometric = resolve_photometric_interpretation(attributes, geom.samples)
@@ -605,9 +631,25 @@ Notes the coder must not "simplify" away:
 - `planar_configuration_default` returns `False` for `samples < 3`, so
   including it costs the float path nothing on any conformant instance
   and keeps one spelling of the block.
-- `TAG_NUMBER_OF_FRAMES` is `pixel_geometry.TAG_NUMBER_OF_FRAMES`
-  (`"0028,0008"`), already imported territory. Tags are lowercase-hex
-  strings.
+- **The `NumberOfFrames` clause is a no-op on every existing float
+  fixture, and that was measured, not assumed.** `Instance.set_pixel_data`
+  writes `0028,0008` into `attributes` only for a rank-3 array — measured:
+  `(4,4)` and `(8,8)` produce `{0028,0002, 0028,0004, 0028,0010, 0028,0011,
+  0028,0100}` and no frame count, `(2,4,8)` produces `0028,0008: 2`. Every
+  float fixture in the suite is rank 2, so both halves of the condition are
+  false and the float path writes no `NumberOfFrames` element where it
+  writes none today. Keep the clause anyway: it is what makes a rank-3
+  float with a declared `SamplesPerPixel` (the §2.3 shape) write a frame
+  count instead of dropping one, and it keeps the helper a single spelling
+  shared with the integer branch.
+- Use the **literal** `"0028,0008"`. `pixel_geometry` defines
+  `TAG_NUMBER_OF_FRAMES`, but `io_handlers.py`'s import at line 40 pulls
+  only `GeometryEvidence`, `planar_configuration_default`,
+  `resolve_photometric_interpretation` and `resolve_pixel_geometry` — no tag
+  constants — and the existing integer branch spells it `"0028,0008"` at
+  line 993. Adding the constant to that import would be harmless, but it
+  would be a second spelling of a tag the file already writes one way.
+  Tags are lowercase-hex strings.
 - **`BitsAllocated` is not in here.** Each branch keeps its own: the
   float arms set 32 or 64 because those are the Enumerated Values the two
   modules require next to the tag they chose, and the integer arm derives
@@ -741,7 +783,7 @@ below.
 
 | Test | Effect |
 | --- | --- |
-| `tests/test_float_pixel_data_export.py`, all 11 test functions (16 cases with parametrisation) | **Unchanged, must keep passing.** Every fixture is rank 2 (4×4 or 8×8) with `Rows`/`Columns` derived from `arr.shape[-2:]` and `SamplesPerPixel = 1` declared, so the resolver returns `STRUCTURAL` and `_write_pixel_geometry` writes the values `_merge` already wrote. `PhotometricInterpretation` is declared `MONOCHROME2` in `_export_one` and in `_write_float_src`, and `resolve_photometric_interpretation` returns `None` for a coherent monochrome pair, so the declared value survives. Checked value by value, not assumed. |
+| `tests/test_float_pixel_data_export.py`, all 11 test functions (16 cases with parametrisation) | **Unchanged, must keep passing.** Every fixture is rank 2 (4×4 or 8×8) with `Rows`/`Columns` derived from `arr.shape[-2:]` and `SamplesPerPixel = 1` declared, so the resolver returns `STRUCTURAL` and `_write_pixel_geometry` writes the values `_merge` already wrote. `PhotometricInterpretation` is declared `MONOCHROME2` in `_export_one` and in `_write_float_src`, and `resolve_photometric_interpretation` returns `None` for a coherent monochrome pair, so the declared value survives. **Measured, not read**: for `(4,4)`/`(8,8)` float32 and float64, for the three attrs-after-`set_pixel_data` variants (`7fe0,0010` bytes, `0028,0100 = 16`, `0028,0100 = 64`), and for the ingest arm (`_write_float_src` written with pydicom, ingested, `get_pixel_data()` back as `(4,4) float32`), the file written today and the resolved geometry agree on every field: `Rows`, `Columns`, `SamplesPerPixel`, `PhotometricInterpretation = MONOCHROME2`, no `NumberOfFrames`, `planar_configuration_default` false, evidence `STRUCTURAL`. The helper writes what `_merge` already wrote. |
 | `tests/test_float_pixel_data_export.py::test_a_float16_array_is_refused_and_reported` and `::test_an_unwritable_float_on_an_image_modality_fails_the_export` | Unchanged: 4×4 float16, rank 2, `STRUCTURAL`, never `GUESSED`; the float16 arm writes no descriptors before and none after. |
 | `tests/test_pixel_geometry_pipeline.py::test_export_worker_refuses_to_write_a_guessed_geometry` | Must keep passing. Same `(100,200,3) uint8` fixture, same `RuntimeError`, raised one block earlier. |
 | `tests/test_pixel_geometry_pipeline.py` (the rest) | Integer path, unchanged. |
@@ -1123,7 +1165,16 @@ that already passes.
    written with a different separator, is invisible to it. Adjacent to
    #213 (§2.7) but a different defect.
 
-5. **`execute_redaction_task` calls `traceback.print_exc()`** on every
+5. **The two export raises are bare `RuntimeError`s.** `write_tree`'s
+   "Export incomplete" wrapper and `_export_instance_worker`'s `GUESSED`
+   geometry refusal both raise the base class, so once `RedactionError`
+   exists, `except RuntimeError` around a pipeline catches three
+   different conditions and can distinguish only one of them. Giving
+   those two their own subclasses is the symmetric follow-up; it is a
+   separate breaking-ish change to the export path and does not belong
+   in either PR here.
+
+6. **`execute_redaction_task` calls `traceback.print_exc()`** on every
    failure, writing an uncaptured traceback to the worker's stderr. With
    the failure now reported structurally, the raw print is noise on a
    cohort run. Left in this design because removing it is a console
