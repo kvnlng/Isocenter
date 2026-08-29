@@ -49,12 +49,125 @@ from .config_manager import ConfigLoader
 #: Binary elements that `populate_attrs` skips but that are *not* lost --
 #: each is extracted and written to the sidecar elsewhere. They must stay
 #: out of the DATA_LOSS report or every ingest files a loss that did not
-#: happen (#137). (7fe0,0010) is listed for the record; it is excluded by
-#: the group check before the VR check ever sees it.
+#: happen (#137).
+#:
+#: This was decorative for (7fe0,0010) until #169: the whole-group skip
+#: above the VR check meant the frozenset was never consulted for it.
+#: It is load-bearing now, and so is the depth it is consulted at --
+#: `_is_routed` below, not `tag in _ROUTED_BINARY_TAGS`.
 _ROUTED_BINARY_TAGS = frozenset({
     Tag(0x7fe0, 0x0010),   # Pixel Data
     Tag(0x5400, 0x1010),   # Waveform Data
 })
+
+#: Tags whose routing depends on where in the instance they sit, and the
+#: depth at which they are routed. `ingest_worker` finds Pixel Data with
+#: `if "PixelData" in ds` -- a top-level lookup -- so the copy inside an
+#: Icon Image Sequence item is routed nowhere. Nothing puts it in the
+#: blob store either: `instance_blobs` is UNIQUE(instance_uid, kind),
+#: one pixel blob per instance, so a second one needs a `kind` that
+#: names the sequence item. That is not a schema change -- `kind` is
+#: unconstrained TEXT and only `persist_blob`'s literal tuple gates it
+#: -- but it is a re-merge path on the export side and a decision about
+#: what `kind` means, which #150 also has an interest in. Filed as #183.
+#:
+#: (5400,1010) is deliberately absent. Waveform Data is *never* at the
+#: top level -- it lives inside Waveform Sequence items -- so a depth
+#: rule would report the one group that is routed. Which of several
+#: multiplex groups was kept is an index question, not a depth question,
+#: and #160 already reports the discarded ones from the group count.
+_ROOT_ONLY_ROUTED_TAGS = frozenset({
+    Tag(0x7fe0, 0x0010),   # Pixel Data
+})
+
+#: The float pixel elements. Also routed, and by a different mechanism
+#: from everything else here: nothing extracts them at ingest, and
+#: `_export_instance_worker` writes them back from the array
+#: `get_pixel_data()` re-reads out of the source file, under their own
+#: tag (#170, #193). That still satisfies `_is_routed`'s question --
+#: something else in the pipeline carries these bytes -- and reporting
+#: them at ingest would file a `DATA_LOSS` row reading "not in the
+#: exported data" about an element that is in the exported data. Which
+#: is the defect #194 opened against the first cut of this fix, pointed
+#: at a second tag.
+#:
+#: Two conditions, both applied in `_is_routed`. Top level only, because
+#: `get_pixel_data()` reads the top level. And only when the instance
+#: has no Pixel Data of its own: the export takes the sidecar array
+#: whenever there is a loader, so in a file carrying both -- which
+#: PS3.5 A.1 forbids, but malformed input exists -- the float half is
+#: genuinely lost and must still be reported.
+#:
+#: The sidecar is still the missing half, and is still #183: an ingest
+#: that could carry these bytes would survive the source file being
+#: moved, which this cannot.
+_FLOAT_PIXEL_TAGS = frozenset({
+    Tag(0x7fe0, 0x0008),   # Float Pixel Data
+    Tag(0x7fe0, 0x0009),   # Double Float Pixel Data
+})
+
+#: Indices into the encapsulated Pixel Data fragment stream. Not data,
+#: and so not a loss -- a different question from `_is_routed`'s, which
+#: is why it is a different name rather than another member of it.
+#:
+#: The Extended Offset Table is byte offsets and lengths relative to the
+#: first fragment item tag, and (7fe0,0003) is that stream's total
+#: length. Ingest decodes the pixel data and the export re-writes it
+#: uncompressed, so the fragment layout these describe does not exist in
+#: the exported file: they cannot be carried, and their absence loses
+#: nothing recoverable. The pixels themselves round-trip exactly.
+#:
+#: Reporting them put two `DATA_LOSS` rows and two warnings on every
+#: encapsulated instance carrying an EOT -- which is the mechanism DICOM
+#: added for large multi-frame objects, so the noise landed where it was
+#: least welcome (#194). It is also the failure the comment inside
+#: `populate_attrs` warns about, arrived at from the other side.
+#:
+#: These three are the group's non-binary members (`OV`, `OV`, `UV`),
+#: and `import_files`' reason clause says "binary-VR elements are not
+#: held in the object graph". Exempting them makes that prose true
+#: again. A future non-binary member of this group has to be added here
+#: *or* given a reason clause of its own -- do not let it inherit this
+#: one.
+_DERIVED_PIXEL_INDEX_TAGS = frozenset({
+    Tag(0x7fe0, 0x0001),   # Extended Offset Table
+    Tag(0x7fe0, 0x0002),   # Extended Offset Table Lengths
+    Tag(0x7fe0, 0x0003),   # Encapsulated Pixel Data Value Total Length
+})
+
+
+def _is_routed(tag, is_root: bool, has_pixel_data: bool = False) -> bool:
+    """Does something else in the pipeline carry this element's bytes?
+
+    Args:
+        tag: The pydicom `Tag` of the element being skipped.
+        is_root (bool): True when the element sits directly on the
+            instance, False when it sits inside a sequence item.
+        has_pixel_data (bool): True when the instance also carries a
+            top-level (7fe0,0010). Only the float pair reads this: the
+            export prefers the sidecar array, so a float element beside
+            Pixel Data is not carried by anything.
+
+    Returns:
+        bool: True if something else in the pipeline carries these bytes,
+        so skipping them here loses nothing.
+    """
+    if tag in _FLOAT_PIXEL_TAGS:
+        return is_root and not has_pixel_data
+    if tag in _ROOT_ONLY_ROUTED_TAGS:
+        return is_root
+    return tag in _ROUTED_BINARY_TAGS
+
+
+#: Modalities that must not export without pixel data. Two places
+#: refuse to write a pixel-less file for one of these -- the missing
+#: source-file guard and the float refusal below it -- and #193 was
+#: opened because they disagreed: the float guard set `arr = None`
+#: *after* the modality check had already passed, producing exactly the
+#: file that check exists to prevent. One constant, consulted twice, is
+#: what makes them agree by construction rather than by review.
+_IMAGE_MODALITIES = frozenset({"CT", "MR", "US", "DX", "CR",
+                               "MG", "NM", "PT", "XA", "RF", "SC", "OT"})
 
 #: How a `DATA_LOSS` audit entry is graded: PRIVATE takes
 #: `validation_status` to REVIEW_REQUIRED, STANDARD does not. Written by
@@ -88,7 +201,8 @@ def loss_scope_for_tag(tag: str) -> str:
     return LOSS_SCOPE_PRIVATE if group % 2 else LOSS_SCOPE_STANDARD
 
 
-def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
+def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
+                   is_root: bool = True):
     """
     Standalone function to populate attributes for pickle-compatibility in workers.
 
@@ -103,6 +217,24 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
     skipped and routed nowhere, which means it is dropped. Those are
     collected in `dropped` so the caller can report them (#125, #137).
 
+    Group `7fe0` used to be taken out above that gate, by a `continue`
+    whose comment read "Skip pixels" -- so nothing in the group could
+    ever reach `dropped`. The group has six assigned members and the
+    skip was only right for some of them. The (7fe0,0010) inside an Icon
+    Image Sequence item vanished with no warning, no audit row and no
+    line in a compliance report that says it lists everything missing
+    from the export (#169). It is still skipped -- keeping it is #183 --
+    but it is reported now.
+
+    Which member is which takes two questions, and they are deliberately
+    two names. `_is_routed` asks whether something else carries the
+    bytes: the sidecar for top-level (7fe0,0010), and the export's
+    source re-read for the float pair (#170, #193).
+    `_DERIVED_PIXEL_INDEX_TAGS` holds the three that are not data at all
+    -- the Extended Offset Table pair and the encapsulated stream's
+    total length -- which describe a fragment layout the exported file
+    does not have and so cannot be lost with it (#194).
+
     Took a third `text_index` argument until #84, which collected the
     text-VR elements it saw into `Instance.text_index`. Nothing read that
     index after the PHI scan became structural, and the VR filter it
@@ -114,30 +246,58 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
         item (DicomItem): The Isocenter item to populate.
         dropped (list, optional): Collects `(tag, vr)` for every element
             skipped for its VR that is not routed to the sidecar, so the
-            caller can report them (#125, #137). See
-            `_ROUTED_BINARY_TAGS` for the exclusions and why they exist.
+            caller can report them (#125, #137). See `_is_routed` and
+            `_DERIVED_PIXEL_INDEX_TAGS` for the exclusions and why each
+            one exists.
+        is_root (bool): True when `ds` is the instance itself, False when
+            it is a sequence item. Only the exemptions read this, and
+            only (7fe0,0010) needs it: the same tag is routed to the
+            sidecar at the top level and routed nowhere one level down
+            (#169). Defaults True so the direct callers that hand this a
+            bare sequence item -- the waveform and Murmur tests -- keep
+            the behaviour they had; they pass no `dropped`, so the flag
+            cannot reach anything for them anyway.
     """
 
     # Binary VRs to explicitly skip (Metadata Refactor)
     # UN left out for safety, usually small private tags
     BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
 
+    # Read once, not per element: the float pair's exemption depends on
+    # whether this instance also carries Pixel Data, and `in` on a
+    # Dataset is a lookup rather than a scan.
+    has_pixel_data = is_root and "PixelData" in ds
+
     for elem in ds:
         if elem.tag.group == 0x7fe0:
-            continue  # Skip pixels
+            # Still skipped -- the group check stays because it is not
+            # only about binary VRs. (7fe0,0001) and (7fe0,0002), the
+            # Extended Offset Table pair, are `OV` and would otherwise
+            # start landing in `attributes` as a side effect of a change
+            # about reporting. What moves is that the skip is now
+            # recorded unless the bytes are carried elsewhere, or are an
+            # index into bytes that are (#169, #194).
+            if (dropped is not None
+                    and elem.tag not in _DERIVED_PIXEL_INDEX_TAGS
+                    and not _is_routed(elem.tag, is_root, has_pixel_data)):
+                dropped.append(
+                    (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
+            continue
         if elem.VR in BINARY_VRS:
             # These bytes do not reach the object graph at all, so
             # `remove_private_tags=False` cannot keep them -- there is
             # nothing left to keep by the time the flag is consulted.
             #
             # The gate is "binary VR and routed nowhere", not "binary VR"
-            # and not "odd group" (#137). Two standard elements hit this
-            # rule and are *not* lost: (7fe0,0010) never gets here at all
-            # -- the group check above takes it -- and (5400,1010) is
-            # pulled out and written to the sidecar by `ingest_worker`
-            # before this runs. Reporting either would put a DATA_LOSS
-            # entry in the record of every image and every waveform ever
-            # ingested, which is how a compliance trail becomes noise.
+            # and not "odd group" (#137). One standard element hits this
+            # rule and is *not* lost: (5400,1010), pulled out and written
+            # to the sidecar by `ingest_worker` before this runs.
+            # Group 7fe0 never gets here -- the group check above takes
+            # it, and answers the same questions there. Reporting either
+            # would put a DATA_LOSS entry in the record of every image
+            # and every waveform ever ingested, which is how a compliance
+            # trail becomes noise. #194 is what that looks like when it
+            # happens: two spurious rows per encapsulated instance.
             #
             # Everything else genuinely vanishes, whatever its group.
             # Overlay Data and the palette LUTs are `OW`, standard, and
@@ -145,7 +305,8 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
             # unreported because it read "standard" as "safe". Whether
             # any of these bytes should be *kept* is the open half of
             # #125; that they vanished in silence is what this closes.
-            if dropped is not None and elem.tag not in _ROUTED_BINARY_TAGS:
+            if dropped is not None and not _is_routed(
+                    elem.tag, is_root, has_pixel_data):
                 dropped.append(
                     (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
             continue  # Skip binary blobs
@@ -162,10 +323,16 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None):
 
 
 def process_sequence(tag, elem, parent_item, dropped: list = None):
-    """Recursively parses Sequence (SQ) items."""
+    """Recursively parses Sequence (SQ) items.
+
+    Everything below the instance is `is_root=False`, at every depth: an
+    element inside a sequence item is inside a sequence item whether it
+    is one level down or four. Only the top-level element of a
+    depth-sensitive tag is routed (#169).
+    """
     for ds_item in elem:
         seq_item = DicomItem()
-        populate_attrs(ds_item, seq_item, dropped)
+        populate_attrs(ds_item, seq_item, dropped, is_root=False)
         parent_item.add_sequence_item(tag, seq_item)
 
 
@@ -634,11 +801,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # Image implementations MUST have pixels.
                 # Non-image (SR, PR, KO, DOC) can proceed without.
                 mod = inst.attributes.get("0008,0060", "OT")
-                IMAGE_MODALITIES = {"CT", "MR", "US", "DX", "CR",
-                                    "MG", "NM", "PT", "XA", "RF", "SC", "OT"}
 
                 # If it claims to be an image but has no pixels, fail hard (Safety)
-                if mod in IMAGE_MODALITIES:
+                if mod in _IMAGE_MODALITIES:
                     raise RuntimeError(f"Pixels missing for Image Modality {mod}")
 
                 # Otherwise (SR, etc.), proceed
@@ -657,6 +822,84 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # Apply zones
                 RedactionService.apply_redaction_to_array(arr, ctx.redaction_zones)
 
+        if arr is not None and arr.dtype.kind == 'f':
+            # A floating-point array is not Pixel Data, and writing it
+            # under (7fe0,0010) does not make it Pixel Data -- it makes a
+            # file that reads 1056964608 where the source said 0.5, with
+            # BitsAllocated=32 and PixelRepresentation=0 next to it so
+            # the result is internally coherent and nothing downstream
+            # errors (#170). PS3.5 A.1 and PS3.3 C.7.6.3 make Pixel Data
+            # and Float Pixel Data mutually exclusive, which is why the
+            # integer element is deleted below rather than merely not
+            # written: `_merge` writes whatever `attributes` holds, and
+            # a file carrying both is nonconformant however it got that
+            # way.
+            #
+            # Refusing to write anything was the first cut of this fix,
+            # and it traded a silent corruption for a quiet
+            # nonconformance: Float Pixel Data is Type 1 in the Floating
+            # Point Image Pixel Module (PS3.3 C.7.6.24), so a Parametric
+            # Map exported with no pixel element at all is invalid in a
+            # way #160 had just finished fixing elsewhere (#193). The
+            # array is *in hand* at this point -- `get_pixel_data()`
+            # re-read it from the source file and pydicom surfaces
+            # (7fe0,0008)/(7fe0,0009) through `.pixel_array` -- so the
+            # dtype is known and the correct tag is a lookup, not a
+            # guess. float32 and float64 round-trip exactly under both
+            # implicit and explicit VR.
+            #
+            # This sits *below* the redaction block, not above it.
+            # Zeroing a zone works on a float array as well as an
+            # integer one, and writing the bytes before the zones were
+            # applied would export the burned-in identifiers this
+            # pipeline exists to remove.
+            #
+            # `itemsize`, not `dtype`, is what selects the tag: it is
+            # the property the two DICOM elements are defined by (32-bit
+            # and 64-bit IEEE-754). float16 has no DICOM home at any
+            # tag, so it is the one arm that still loses the data -- and
+            # it takes the same modality decision as a missing source
+            # file, because the outcome is the same file. Only a caller
+            # handing `set_pixel_data` a float16 array can reach it; no
+            # DICOM element decodes to one.
+            if arr.itemsize == 4:
+                ds.FloatPixelData = arr.tobytes()
+                ds.BitsAllocated = 32
+            elif arr.itemsize == 8:
+                ds.DoubleFloatPixelData = arr.tobytes()
+                ds.BitsAllocated = 64
+            else:
+                mod = inst.attributes.get("0008,0060", "OT")
+                if mod in _IMAGE_MODALITIES:
+                    raise RuntimeError(
+                        f"Pixels missing for Image Modality {mod}: a "
+                        f"{arr.dtype} pixel array has no DICOM element "
+                        f"that can carry it.")
+                # Scoped STANDARD: group 7fe0 is even, the same parity
+                # rule every other loss row uses (#146). Not graded
+                # harder -- that is open on #150.
+                losses.append((
+                    LOSS_SCOPE_STANDARD,
+                    f"Pixel data is {arr.dtype} and was not written: no "
+                    "DICOM pixel element carries it. (7fe0,0008) and "
+                    "(7fe0,0009) are 32- and 64-bit IEEE-754, and "
+                    "writing the bytes as (7fe0,0010) Pixel Data would "
+                    "relabel them as integers. The exported instance "
+                    "has no pixel data."))
+
+            if "PixelData" in ds:
+                del ds.PixelData
+
+            # Geometry is not recomputed from the array here, unlike the
+            # integer path below. The descriptors were merged from
+            # `attributes`, which is the same source file this array was
+            # read back from, so they already agree; and the float
+            # elements have no Bits Stored / High Bit / Pixel
+            # Representation of their own in C.7.6.24, so Bits Allocated
+            # is the only one the tag choice constrains.
+            arr = None
+
+        if arr is not None:
             # MEMORY OPTIMIZATION:
             # If compression is requested, DO NOT convert to bytes here.
             # Pass the numpy array to _finalize_dataset -> _compress_j2k directly.

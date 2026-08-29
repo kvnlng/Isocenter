@@ -313,3 +313,253 @@ def test_pixel_data_is_not_reported(tmp_path):
     _attrs, rows = _ingest_with(tmp_path, "pix", lambda ds: None)
 
     assert not any("7fe0,0010" in d for d, _s in rows), rows
+
+# --- Group 7fe0: skipped by group, before the VR check ever runs (#169) ---
+#
+# `populate_attrs` took group `7fe0` out above the gate, so nothing in it
+# could ever reach `dropped`. The group has six assigned members and the
+# blanket skip was right for some of them and silent about the rest.
+# Deciding which is which per element -- and, for one tag, per depth --
+# is what #169 is:
+#
+#   (7fe0,0001) Extended Offset Table         OV     not data -> not a loss
+#   (7fe0,0002) Extended Offset Table Lengths OV     not data -> not a loss
+#   (7fe0,0003) Encapsulated PD Total Length  UV     not data -> not a loss
+#   (7fe0,0008) Float Pixel Data              OF     routed at the top level
+#   (7fe0,0009) Double Float Pixel Data       OD     routed at the top level
+#   (7fe0,0010) Pixel Data                    OB/OW  routed at the top level
+#   ... any of the last three in a sequence item     lost -> reported
+#
+# The three routed elements are routed by two different mechanisms.
+# (7fe0,0010) goes to the sidecar at ingest. The float pair is not
+# ingested at all: `_export_instance_worker` re-reads it through
+# `get_pixel_data()` and writes it back under its own tag (#170, #193),
+# which is weaker -- it needs the source file to still be there -- but it
+# does reach the exported file, and a `DATA_LOSS` row saying otherwise
+# would be false. The first three are not data at all: they are byte
+# offsets into an encapsulated fragment stream that ingest decodes and
+# export re-writes uncompressed, so they describe a layout the exported
+# file does not have. Reporting them put two spurious rows on every
+# encapsulated instance carrying an Extended Offset Table (#194).
+
+
+def _float_src(tag, vr, dtype, keep_pixels=False):
+    """Return a mutator that puts one float pixel element on the file."""
+    def mutate(ds):
+        if not keep_pixels:
+            del ds.PixelData
+        ds.add_new(tag, vr, np.arange(4, dtype=dtype).tobytes())
+    return mutate
+
+
+def test_float_pixel_data_is_not_reported_at_the_top_level(tmp_path):
+    """(7fe0,0008) reaches the exported file, so it is not a loss (#193).
+
+    It is not ingested -- `attributes` never holds it, and there is no
+    sidecar blob for it -- but the export re-reads the source and writes
+    it back under (7fe0,0008). `reporting.py`'s section 3 promises the
+    elements it lists "were present in the source and are **not** in the
+    exported data", so a row here would say something untrue about a
+    file whose payload survived. That is the defect #194 opened against
+    the first cut of this fix, and it applies to this tag for exactly
+    the same reason.
+    """
+    attrs, rows = _ingest_with(tmp_path, "fpx",
+                               _float_src(0x7FE00008, 'OF', np.float32))
+
+    assert "7fe0,0008" not in attrs, "precondition: it does not reach the graph"
+    assert rows == [], rows
+
+
+def test_double_float_pixel_data_is_not_reported_either(tmp_path):
+    """(7fe0,0009) is the same shape one VR over, and takes the same
+    route out -- pinned so the rule reads as the pair and not as the one
+    tag it was found through."""
+    _attrs, rows = _ingest_with(tmp_path, "dfpx",
+                                _float_src(0x7FE00009, 'OD', np.float64))
+
+    assert rows == [], rows
+
+
+def test_float_pixel_data_beside_pixel_data_is_reported():
+    """The exemption is conditional, because the carrying is.
+
+    PS3.5 A.1 makes Pixel Data and Float Pixel Data mutually exclusive,
+    but malformed input exists. When both are present the sidecar wins:
+    `ingest_worker` writes (7fe0,0010) to it, `get_pixel_data()` returns
+    that array through the loader, and the float half is carried by
+    nothing at all. Exempting it unconditionally would have restored the
+    silence #169 exists to end, in the one case where the bytes really
+    do vanish.
+
+    Driven through `populate_attrs` rather than a fixture file, because
+    `session.ingest()` cannot reach it: pydicom refuses to decode a
+    dataset carrying two pixel elements, so `ingest_worker` returns
+    "Decompression Failed" and the instance never enters the store --
+    loud, and a different outcome from the one being pinned here. The
+    guard covers `populate_attrs`' own callers, which include the
+    fixture generators in `scripts/`, and it costs one boolean.
+    """
+    from pydicom.dataset import Dataset
+
+    from isocenter.entities import DicomItem
+    from isocenter.io_handlers import populate_attrs
+
+    ds = Dataset()
+    ds.Rows = ds.Columns = 2
+    ds.BitsAllocated = 8
+    ds.add_new(0x7FE00010, 'OW', b'\x01\x02\x03\x04')
+    ds.add_new(0x7FE00008, 'OF', np.arange(4, dtype=np.float32).tobytes())
+
+    dropped = []
+    populate_attrs(ds, DicomItem(), dropped)
+
+    assert dropped == [("7fe0,0008", "OF")], dropped
+
+
+def test_the_extended_offset_table_is_not_reported(tmp_path):
+    """(7fe0,0001) and (7fe0,0002) are an index, not data (#194).
+
+    They are byte offsets and lengths into the encapsulated Pixel Data
+    fragment stream. Isocenter decodes the pixels at ingest and re-writes
+    them uncompressed, so the fragment layout the table describes does
+    not exist in the exported file -- the table cannot be carried, and
+    its absence loses nothing recoverable, because the pixels it indexes
+    round-trip exactly.
+
+    Reporting them cost two `DATA_LOSS` rows and two warnings on every
+    instance stored with one. The Extended Offset Table is the mechanism
+    DICOM added for large multi-frame objects, so that is precisely
+    where a spurious per-instance pair is least welcome -- the noise
+    failure the gate's own comment warns about, reached from the other
+    side.
+    """
+    def add_eot(ds):
+        ds.add_new(0x7FE00001, 'OV', b'\x00' * 8)
+        ds.add_new(0x7FE00002, 'OV', b'\x10' * 8)
+
+    attrs, rows = _ingest_with(tmp_path, "eot", add_eot)
+
+    assert "7fe0,0001" not in attrs, "precondition: still skipped"
+    assert rows == [], rows
+
+
+def test_the_encapsulated_total_length_is_not_reported(tmp_path):
+    """(7fe0,0003) is the same index by another name, and the tag that
+    made the emitter's prose wrong.
+
+    It is `UV`, a 64-bit unsigned integer -- not a binary VR at all --
+    so it never reaches the VR gate, and the row it used to get read
+    "binary-VR elements are not held in the object graph", which is not
+    the reason it was skipped. Exempting the three non-binary members of
+    the group is what makes that clause true of everything still
+    reported (#194).
+    """
+    def add_total_length(ds):
+        ds.add_new(0x7FE00003, 'UV', 4096)
+
+    _attrs, rows = _ingest_with(tmp_path, "eotlen", add_total_length)
+
+    assert rows == [], rows
+
+
+def test_nothing_reported_from_this_group_misstates_its_own_reason(tmp_path):
+    """The emitter has one reason clause; everything reaching it must fit.
+
+    `import_files` words a standard loss as "binary-VR elements are not
+    held in the object graph". That is a claim about the element, and
+    the group-level append is the one path that can reach the emitter
+    with an element the VR gate never saw. Whatever survives the
+    exemptions has to be a binary VR for the sentence to be true.
+    """
+    def add_everything(ds):
+        ds.add_new(0x7FE00001, 'OV', b'\x00' * 8)
+        ds.add_new(0x7FE00002, 'OV', b'\x10' * 8)
+        ds.add_new(0x7FE00003, 'UV', 4096)
+
+    _attrs, rows = _ingest_with(tmp_path, "prose", add_everything)
+
+    assert not any("OV" in d or "UV" in d for d, _s in rows), rows
+
+
+def test_pixel_data_inside_a_sequence_item_is_reported(tmp_path):
+    """The same tag, routed at one depth and nowhere at the other (#169).
+
+    An Icon Image Sequence item carries its own (7fe0,0010). The sidecar
+    holds one pixel blob per instance today, so the nested one is routed
+    nowhere, while the item's eight `0028,xxxx` descriptors reach the
+    graph normally and are exported. The result declares a 2x2 8-bit
+    icon and carries no bytes for it, with Pixel Data Type 1 in the Icon
+    Image Macro (PS3.3 C.7.6.1.1.6). That is #160's shape at a second
+    site. Carrying it is #183.
+
+    The exemption is therefore per-depth, not per-tag: this file has a
+    top-level (7fe0,0010) too, and reporting *that* would file a loss on
+    every image ever ingested.
+    """
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+
+    def add_icon(ds):
+        item = Dataset()
+        item.Rows = item.Columns = 2
+        item.BitsAllocated = item.BitsStored = 8
+        item.HighBit = 7
+        item.SamplesPerPixel = 1
+        item.PhotometricInterpretation = "MONOCHROME2"
+        item.PixelRepresentation = 0
+        item.PlanarConfiguration = 0
+        item.add_new(0x7FE00010, 'OW', b'\x01\x02\x03\x04')
+        ds.IconImageSequence = Sequence([item])
+
+    _attrs, rows = _ingest_with(tmp_path, "icon", add_icon)
+
+    assert len(rows) == 1, rows
+    assert "7fe0,0010" in rows[0][0], rows
+    assert rows[0][1] == LOSS_SCOPE_STANDARD, rows
+
+
+def test_the_top_level_pixel_data_of_that_same_file_is_still_not_reported(
+        tmp_path):
+    """The false positive the depth rule has to avoid.
+
+    One row, not two: the instance's own pixels went to the sidecar.
+    Widening the group exemption into a blanket one would put a
+    `DATA_LOSS` entry in the record of every image ever ingested, which
+    is how a compliance trail becomes noise.
+    """
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+
+    def add_icon(ds):
+        item = Dataset()
+        item.Rows = item.Columns = 2
+        item.add_new(0x7FE00010, 'OW', b'\x01\x02\x03\x04')
+        ds.IconImageSequence = Sequence([item])
+
+    _attrs, rows = _ingest_with(tmp_path, "icontop", add_icon)
+
+    assert len(rows) == 1, rows
+
+
+def test_float_pixel_data_inside_a_sequence_item_is_reported(tmp_path):
+    """The float exemption is depth-sensitive for the same reason.
+
+    `get_pixel_data()` re-reads the *top level*, so a float element one
+    level down is carried by nothing. Unreachable from a conformant
+    file, and pinned anyway: the exemption's condition is the depth, and
+    a rule that only happens to be right at the depth it was tested is
+    the shape #169 started from.
+    """
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+
+    def add_nested_float(ds):
+        item = Dataset()
+        item.Rows = item.Columns = 2
+        item.add_new(0x7FE00008, 'OF', np.arange(4, dtype=np.float32).tobytes())
+        ds.AnatomicRegionSequence = Sequence([item])
+
+    _attrs, rows = _ingest_with(tmp_path, "nestfloat", add_nested_float)
+
+    assert any("7fe0,0008" in d for d, _s in rows), rows
