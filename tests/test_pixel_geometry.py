@@ -121,6 +121,28 @@ def test_rank3_colour(shape, attrs, expected):
     # Both arms match Rows/Columns, so step 3 cannot discriminate either.
     ((4, 4, 4), {"0028,0010": 4, "0028,0011": 4},
      PixelGeometry(1, 4, 4, 4, GeometryEvidence.GUESSED)),
+    # ---- Step 3 with only ONE of Rows/Columns declared. -------------------
+    # Every row above declares both, which leaves the four `x_d is None`
+    # disjuncts and the guard's `or` unexercised: a mutation run killed
+    # 42/50 in this module and five of the eight survivors were here. With
+    # both declared, an `is None` that becomes `is not None` is masked by
+    # the `==` beside it, and a guard narrowed from `or` to `and` still
+    # passes. Declaring one at a time is what separates them, and it is
+    # also the ordinary shape of a real graph -- Rows without Columns is
+    # what a partially populated instance looks like.
+    ((5, 4, 3), {"0028,0010": 5},
+     PixelGeometry(1, 5, 4, 3, GeometryEvidence.MATCHED)),
+    ((5, 4, 3), {"0028,0010": 4},
+     PixelGeometry(5, 4, 3, 1, GeometryEvidence.MATCHED)),
+    ((5, 4, 3), {"0028,0011": 4},
+     PixelGeometry(1, 5, 4, 3, GeometryEvidence.MATCHED)),
+    ((5, 4, 3), {"0028,0011": 3},
+     PixelGeometry(5, 4, 3, 1, GeometryEvidence.MATCHED)),
+    # Step 4's arm-A fallback: both arms admissible (s_d == 1 == shape[2]),
+    # nothing to discriminate, and a last axis outside {3, 4} so the guess
+    # goes to A rather than B. Nothing reached this `return` before.
+    ((4, 4, 1), {"0028,0002": 1},
+     PixelGeometry(4, 4, 1, 1, GeometryEvidence.GUESSED)),
 ])
 def test_rank3_tiebreaks(shape, attrs, expected):
     assert resolve_pixel_geometry(shape, attrs) == expected
@@ -343,3 +365,22 @@ def test_module_imports_nothing_heavy():
     assert "pydicom" not in imported
     assert "entities" not in imported
     assert "io_handlers" not in imported
+
+
+def test_planar_configuration_default_survives_attributes_that_cannot_be_searched():
+    """The `except` arm of `planar_configuration_default` had no caller.
+
+    A mutation run left `return True` here alive: nothing passed an
+    `attributes` that raises on `in`. The branch exists so a odd mapping
+    proxy cannot make an export crash on a descriptor question, and the
+    answer is deliberately True -- write the neutral interleaved default
+    rather than leave a colour instance with no PlanarConfiguration at
+    all, which is the value pydicom then demands and cannot find.
+    """
+    class Hostile:
+        def __contains__(self, key):
+            raise RuntimeError("not searchable")
+
+    assert planar_configuration_default(Hostile(), 3) is True
+    # Still short-circuits on sample count before it ever looks.
+    assert planar_configuration_default(Hostile(), 1) is False
