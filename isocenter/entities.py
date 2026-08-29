@@ -676,6 +676,18 @@ class Instance(DicomItem):
             else:
                 array = array.reshape((geom.rows, geom.cols))
             self.pixel_array = array
+            # Writes nothing back, but is still a change, and this call is
+            # the one behavioural difference from `692218c` in the whole
+            # fix. This branch returns before reaching any descriptor
+            # write, so leaving it out is the conditional-dirtying bug in
+            # its purest form: no descriptor changes because none is
+            # written at all, while `self.pixel_array` has been replaced
+            # and the store's copy is now stale. An incremental `save_all`
+            # then skips the instance. The declared descriptors are the
+            # *input* to this reshape, so nothing here can notice.
+            # `tests/test_pixel_geometry_pipeline.py::
+            # test_a_flat_buffer_reshaped_from_the_descriptors_still_dirties`
+            # is the pin, and it fails on `692218c`.
             self.mark_modified()
             return
 

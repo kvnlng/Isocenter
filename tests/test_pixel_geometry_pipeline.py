@@ -532,3 +532,53 @@ def test_redaction_dirties_the_instance_it_redacted():
     assert service._apply_roi_to_instance(inst, arr, (0, 4, 0, 4)) is True
 
     assert inst.has_unsaved_changes is True
+
+
+# ---------------------------------------------------------------------------
+# Rank 1 -- the one behavioural change here that is not a bug fix
+# ---------------------------------------------------------------------------
+
+def test_a_flat_buffer_reshaped_from_the_descriptors_still_dirties():
+    """§7.21: the rank-1 early return dirties the instance. A regression.
+
+    Unlike §7.17 and §7.18 above, this **fails on `692218c`**, and it fails
+    there because the behaviour is new rather than because it was broken.
+    The 1-D branch reshapes, assigns `pixel_array` and `return`s before
+    reaching any descriptor write, so under a literal reading of §3.7
+    ("keep it verbatim") a flat array replaces what the store holds and
+    leaves the instance clean -- §11.1's defect in its purest form, no
+    descriptor changing because none is written at all. §3.7 was amended to
+    say the early return must `mark_modified()`.
+
+    Built to §7's fixture-hygiene rule 2: a *complete* descriptor set, an
+    explicit `mark_persisted()`, and `has_unsaved_changes is False`
+    asserted immediately before the call. A fresh `Instance` has empty
+    `attributes`, so every descriptor write is a change and it would dirty
+    under any rule -- which is exactly how
+    `test_persistence_incremental.py::test_unsaved_tracking_pixel_change`
+    came to look like a pin for this without being one.
+
+    The reshape assertion is what pins the *arm*: the general path leaves a
+    1-D array 1-D, so only the early return can produce `(8, 8)`.
+    """
+    inst = Instance("I_FLAT", "1.2.826.0.1.3680043.8.498.900011", 1)
+    inst.set_attr("0028,0010", 8)          # Rows
+    inst.set_attr("0028,0011", 8)          # Columns
+    inst.set_attr("0028,0002", 1)          # SamplesPerPixel
+    inst.set_attr("0028,0008", 1)          # NumberOfFrames
+    inst.set_attr("0028,0100", 8)          # BitsAllocated
+    inst.set_attr("0028,0004", "MONOCHROME2")
+    inst.mark_persisted()
+    assert inst.has_unsaved_changes is False, "setup must leave a clean instance"
+    before = dict(inst.attributes)
+
+    inst.set_pixel_data(np.arange(64, dtype=np.uint8))
+
+    assert inst.attributes == before, (
+        "the declared descriptors are the input to this reshape, so the "
+        "early return writes nothing back")
+    assert inst.pixel_array.shape == (8, 8), (
+        "only the early return reshapes a flat buffer -- the general path "
+        "would leave it 1-D, so this pins the arm as well as the effect")
+    assert inst.has_unsaved_changes is True, (
+        "a reshaped flat buffer is still a new array the store has to hold")
