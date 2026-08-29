@@ -471,15 +471,101 @@ def test_nothing_reported_from_this_group_misstates_its_own_reason(tmp_path):
     the group-level append is the one path that can reach the emitter
     with an element the VR gate never saw. Whatever survives the
     exemptions has to be a binary VR for the sentence to be true.
+
+    The fixture carries a private `OB` alongside the three index tags so
+    the assertion has a non-empty list to filter. Run against the three
+    on their own it would pass over no rows at all -- true, and true of
+    a build where the emitter had stopped running.
     """
     def add_everything(ds):
         ds.add_new(0x7FE00001, 'OV', b'\x00' * 8)
         ds.add_new(0x7FE00002, 'OV', b'\x10' * 8)
         ds.add_new(0x7FE00003, 'UV', 4096)
+        ds.add_new(0x00090010, 'LO', 'ACME_HEADER')
+        ds.add_new(0x00091002, 'OB', b'\x01\x02\x03\x04')
 
     _attrs, rows = _ingest_with(tmp_path, "prose", add_everything)
 
+    assert rows, "precondition: the emitter ran and wrote something"
+    assert any("0009,1002" in d for d, _s in rows), rows
     assert not any("OV" in d or "UV" in d for d, _s in rows), rows
+
+
+def test_an_encapsulated_instance_keeps_its_pixels_and_reports_nothing(
+        tmp_path):
+    """The claim under the Extended Offset Table exemption, on the input
+    that makes it (#194).
+
+    "Not a loss" rests on the pixels the table indexes coming through
+    intact. An uncompressed fixture cannot show that -- it has no
+    fragment stream for the offsets to describe -- so this one is RLE
+    encapsulated, two frames, with an Extended Offset Table built to
+    PS3.5 A.4: per-frame byte offsets and lengths relative to the first
+    fragment item tag, plus (7fe0,0003) for the stream's total length.
+
+    Ingest decodes to raw and the export re-writes uncompressed, so the
+    layout the table describes genuinely does not exist on the way out.
+    The table is gone from the exported file and the pixels are
+    identical -- which is the whole argument for not filing a row about
+    it.
+    """
+    import struct
+
+    import pydicom
+    from pydicom.uid import RLELossless
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_src(str(src), with_private_binary=False)
+    path = os.path.join(str(src), "one.dcm")
+
+    ds = pydicom.dcmread(path)
+    # 8 columns, not the base fixture's 4: `_export_instance_worker`
+    # reads a 3-D array whose last axis is 3 or 4 as interleaved
+    # samples, so a 2-frame 4x4 image comes back out as a 2x4 RGBA one.
+    # Pre-existing and unrelated to the exemption under test; sidestep
+    # it rather than assert around it.
+    ds.Rows = ds.Columns = 8
+    source = np.arange(2 * 8 * 8, dtype=np.uint8).reshape(2, 8, 8)
+    ds.NumberOfFrames = 2
+    ds.PixelData = source.tobytes()
+    ds.compress(RLELossless)
+
+    fragments = list(pydicom.encaps.generate_fragmented_frames(ds.PixelData))
+    offsets, lengths, pos = [], [], 0
+    for frag in fragments:
+        blob = b"".join(frag)
+        offsets.append(pos)
+        lengths.append(len(blob))
+        pos += 8 + len(blob)          # 8 = the item tag and length header
+    ds.add_new(0x7FE00001, 'OV', struct.pack(f"<{len(offsets)}Q", *offsets))
+    ds.add_new(0x7FE00002, 'OV', struct.pack(f"<{len(lengths)}Q", *lengths))
+    ds.add_new(0x7FE00003, 'UV', pos)
+    ds.save_as(path, enforce_file_format=True)
+
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=str(tmp_path / "eot.db"))
+    try:
+        session.ingest(str(src))
+        session.export(str(out), format="dicom", use_compression=False)
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT details FROM audit_log "
+            "WHERE action_type='DATA_LOSS'").fetchall()
+
+    written = [os.path.join(r, f) for r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    assert len(written) == 1, written
+    exported = pydicom.dcmread(written[0])
+
+    assert rows == [], rows
+    assert (0x7FE0, 0x0001) not in exported, "the table cannot survive"
+    assert np.array_equal(exported.pixel_array, source), (
+        "the pixels it indexed must, or the exemption is wrong")
 
 
 def test_pixel_data_inside_a_sequence_item_is_reported(tmp_path):
