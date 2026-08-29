@@ -786,3 +786,45 @@ def test_export_writes_bits_allocated_the_array_actually_has(tmp_path):
         "the file declares a width its Pixel Data does not have")
     assert ds.pixel_array.shape == (2, 4, 8), ds.pixel_array.shape
     assert np.array_equal(ds.pixel_array, arr)
+
+
+def test_export_writes_bits_allocated_a_wide_array_actually_has(tmp_path):
+    """Test 22, second arm: the one that tells `itemsize * 8` from `default_bits`.
+
+    **Mutation killed:** `ds.BitsAllocated = arr.itemsize * 8` mutated to
+    `ds.BitsAllocated = default_bits`, and equally to the original
+    `inst.attributes.get("0028,0100", default_bits)`. Both write 16
+    here; only the shipped expression writes 32.
+
+    The first arm cannot kill either. Its array is `uint8`, where
+    `itemsize * 8`, `default_bits` and the declared width all agree on
+    8 -- it pins that *some* reconciliation happens, not which one, so
+    the capped form could be reintroduced with the suite green.
+    `default_bits` is `8 if arr.itemsize == 1 else 16`, so it is wrong
+    for every width above 16, and `692218c` was right there: its
+    `set_pixel_data` wrote `array.itemsize * 8` unconditionally.
+
+    Fixture hygiene (section 7, trap 1): the array is assigned straight
+    to `inst.pixel_array`, never through `set_pixel_data`, because the
+    setter would overwrite `0028,0100` with 32 itself and the assertion
+    would then hold no matter what the export line said. The declared
+    width is left at 16 -- a value both rejected expressions produce --
+    so the export is the only thing that can make this 32.
+
+    Measured: 64 bytes of Pixel Data for 16 uint32 pixels, and pydicom
+    round-trips it to `uint32 (4, 4)` even beside a stale `BitsStored`
+    of 16, which stays declared because it does not constrain how many
+    bytes `tobytes()` emits (section 8).
+    """
+    arr = np.arange(4 * 4, dtype=np.uint32).reshape((4, 4))
+    ds = _export_one(tmp_path, arr, {
+        "0028,0010": 4, "0028,0011": 4, "0028,0002": 1,
+        "0028,0004": "MONOCHROME2",
+        "0028,0100": 16, "0028,0101": 16, "0028,0102": 15, "0028,0103": 0,
+    }, name="u32.dcm")
+
+    assert ds.BitsAllocated == 32, (
+        "the width came from the declaration or from default_bits, not "
+        "from the array whose bytes were written")
+    assert len(ds.PixelData) == 4 * 4 * 4
+    assert np.array_equal(ds.pixel_array, arr)
