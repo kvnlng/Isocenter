@@ -182,6 +182,35 @@ def test_the_export_still_succeeds_despite_the_loss(tmp_path):
     assert ds.PatientID == "PAT1"
 
 
+def test_one_tag_lost_at_two_levels_is_reported_once():
+    """The surviving reason `_merge` dedupes its losses (#179).
+
+    The dedupe used to be load-bearing for a blunt reason: the worker
+    merged `inst.attributes` twice, so every loss arrived in duplicate.
+    That copy-paste is gone, and the dedupe is not -- because the four
+    remaining merges overlap by tag. `(0010,0010)` is in the instance
+    mapping *and* in the patient mapping stamped over it, so one value
+    the encoder cannot take is offered to `_merge` twice, fails
+    identically twice, and would be counted twice in section 3 of the
+    compliance report.
+
+    Reachable in principle rather than routine -- the overlapping tags
+    all have dictionary VRs, so it takes a malformed value rather than
+    an exotic one. That is a thinner reason than the one it replaces,
+    which is why it is written down here instead of left to be inferred.
+    """
+    losses = []
+    ds = pydicom.Dataset()
+
+    # The two mappings are distinct objects on purpose: this is the
+    # instance/patient overlap, not the same dict merged twice.
+    DicomExporter._merge(ds, {"0010,0010": UNENCODABLE}, losses)
+    DicomExporter._merge(ds, {"0010,0010": UNENCODABLE}, losses)
+
+    assert len(losses) == 1, losses
+    assert losses[0][0] == LOSS_SCOPE_STANDARD, losses
+
+
 def test_a_waveform_with_no_samples_writes_a_data_loss_audit_entry(tmp_path):
     """The second loss on the channel, end to end (#126).
 
