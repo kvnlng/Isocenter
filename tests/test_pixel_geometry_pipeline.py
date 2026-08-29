@@ -671,7 +671,7 @@ def test_a_flat_buffer_reshaped_from_the_descriptors_still_dirties():
     The reshape assertion is what pins the *arm*: the general path leaves a
     1-D array 1-D, so only the early return can produce `(8, 8)`.
     """
-    inst = Instance("I_FLAT", "1.2.826.0.1.3680043.8.498.900011", 1)
+    inst = Instance("I_FLAT", "1.2.826.0.1.3680043.8.498.900021", 1)
     inst.set_attr("0028,0010", 8)          # Rows
     inst.set_attr("0028,0011", 8)          # Columns
     inst.set_attr("0028,0002", 1)          # SamplesPerPixel
