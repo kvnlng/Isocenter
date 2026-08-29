@@ -7,6 +7,13 @@ import pydicom
 from pydicom.uid import generate_uid
 import isocenter.imagecodecs_handler as h
 from .logger import get_logger
+from .pixel_geometry import (
+    GeometryEvidence,
+    declared_int,
+    planar_configuration_default,
+    resolve_photometric_interpretation,
+    resolve_pixel_geometry,
+)
 
 
 def _canonical_tag(tag: str) -> str:
@@ -438,10 +445,17 @@ class Instance(DicomItem):
             try:
                 # Invoke callback (e.g. sidecar read)
                 arr = self._pixel_loader()
-                # Use set_pixel_data to ensure attributes (rows, cols) are synced
-                # This is critical if the loader returns a raw array but
-                # attributes were not yet set/restored
-                self.set_pixel_data(arr)
+                # A read must not write. This used to call set_pixel_data
+                # "to ensure attributes (rows, cols) are synced", and the
+                # sync could only ever disagree: SidecarPixelLoader reshaped
+                # this array *from* those same attributes, so re-deriving
+                # them from the result overwrote the input with a guess
+                # about which axis was which. On a 3-frame 4-column
+                # grayscale instance that guess rewrote SamplesPerPixel
+                # 1->4, PhotometricInterpretation MONOCHROME2->RGB and
+                # Rows 4->3 -- and since set_pixel_data ends in
+                # mark_modified(), the next save() wrote it to SQLite (#186).
+                self.pixel_array = arr
                 return self.pixel_array
             except Exception as e:
                 raise RuntimeError(f"Pixel Loader failed for {self.sop_instance_uid}: {e}") from e
@@ -453,7 +467,12 @@ class Instance(DicomItem):
                 try:
                     ds = pydicom.dcmread(self.file_path)
 
-                    self.set_pixel_data(ds.pixel_array)  # Cache it in memory
+                    # Cache it in memory. Assigned, not set through
+                    # set_pixel_data: pydicom shaped this array from the
+                    # file's own descriptors, which are the descriptors
+                    # `attributes` holds, so a re-derivation could only
+                    # disagree with them (#186).
+                    self.pixel_array = ds.pixel_array
                     return self.pixel_array
                 except (AttributeError, TypeError):
                     # No pixel data element
@@ -470,7 +489,9 @@ class Instance(DicomItem):
                 try:
                     if ds is not None and h.is_available() and h.supports_transfer_syntax(ds.file_meta.TransferSyntaxUID):
                         arr = h.get_pixel_data(ds)
-                        self.set_pixel_data(arr)
+                        # Same reasoning as the two branches above: a read
+                        # must not write (#186).
+                        self.pixel_array = arr
                         return self.pixel_array
                 except (ImportError, AttributeError, RuntimeError):
                     # Fallback failed, proceed to raise original error
@@ -566,95 +587,165 @@ class Instance(DicomItem):
 
         return None
 
+    def _write_int_if_changed(self, tag: str, value: int) -> bool:
+        """Write an integer descriptor only when it actually differs.
+
+        This is not an optimisation. `set_attr` bumps `_revision`, so an
+        idempotent call would otherwise dirty the instance and have the
+        next `save()` rewrite a row that did not change (#186).
+
+        The comparison parses the stored value the way the resolver does,
+        so an instance holding `"3"` from the old string form of
+        NumberOfFrames compares equal to `3` and is left alone. The
+        canonicalisation to `int` therefore does not churn existing graphs.
+        """
+        if declared_int(self.attributes, tag) == value:
+            return False
+        self.set_attr(tag, value)
+        return True
+
+    def _write_str_if_changed(self, tag: str, value: str) -> bool:
+        """Write a string descriptor only when it actually differs."""
+        raw = self.attributes.get(tag)
+        if raw is not None and str(raw).strip().upper() == str(value).strip().upper():
+            return False
+        self.set_attr(tag, value)
+        return True
+
     def set_pixel_data(self, array: np.ndarray):
         """
-        Sets the pixel array and automatically updates metadata tags.
+        Sets the pixel array and updates the descriptors that describe it.
 
-        Updates tags:
+        Which axis of the array means what is decided by the instance's own
+        attributes (`isocenter.pixel_geometry.resolve_pixel_geometry`), not
+        by the array's shape: `(frames, rows, cols)` and
+        `(rows, cols, samples)` are the same rank, so the old
+        `if shape[-1] in [3, 4]` test was a guess that relabelled every
+        multi-frame 3- or 4-column image and every non-RGB colour space
+        (#186, #205). How *large* each axis is still comes from the array --
+        replacing the pixels with a differently-sized array is what a setter
+        is for.
+
+        Updates tags, each only when the value actually changes:
             - Rows (0028,0010)
             - Columns (0028,0011)
             - SamplesPerPixel (0028,0002)
-            - NumberOfFrames (0028,0008) (if > 1)
-            - PhotometricInterpretation (0028,0004) (RGB if samples >= 3)
-            - PlanarConfiguration (0028,0006) (0 if RGB)
+            - NumberOfFrames (0028,0008), if > 1 or already declared
+            - PhotometricInterpretation (0028,0004), only to correct an
+              outright contradiction -- YBR_FULL and MONOCHROME1 survive
+            - PlanarConfiguration (0028,0006), only when colour and undeclared
+            - BitsAllocated (0028,0100), from the array's itemsize
+
+        A genuinely ambiguous shape is **accepted** with a WARNING rather
+        than refused, because a hand-built graph has to be able to take
+        pixels before its attributes -- that is what
+        `DicomExporter.write_tree()` exists to serve. The export worker
+        refuses the same geometry, because that is where a guess would
+        become a file on disk. The asymmetry is deliberate.
 
         Args:
             array (np.ndarray): The pixel data to set. Can be 1D, 2D, 3D, or 4D.
+
+        Raises:
+            ValueError: If the instance declares a SamplesPerPixel that no
+                axis of `array` can carry, or if the rank is unsupported.
+                The two statements cannot both be right and neither
+                trusting the attributes (descriptors that do not describe
+                the bytes) nor trusting the array (this is how #186
+                happened) is honest.
         """
         self.pixel_array = array
         shape = array.shape
-        ndim = len(shape)
 
-        # Defaults
-        samples = 1
-        frames = 1
+        geom = resolve_pixel_geometry(shape, self.attributes)
 
-        if ndim == 1:
-            # Flattened array (e.g. from Sidecar loader)
-            # Attempt to reshape using existing metadata if available
-            try:
-                r = int(self.attributes.get("0028,0010", 0))
-                c = int(self.attributes.get("0028,0011", 0))
-                s = int(self.attributes.get("0028,0002", 1))
-                f = int(self.attributes.get("0028,0008", 1))
-
-                expected_size = r * c * s * f
-                if expected_size > 0 and array.size >= expected_size:
-                    # Truncate padding if present (DICOM alignment)
-                    if array.size > expected_size:
-                        array = array[:expected_size]
-
-                    # Reshape logic
-                    if f > 1:
-                        array = array.reshape((f, r, c, s)) if s > 1 else array.reshape((f, r, c))
-                    elif s > 1:
-                        array = array.reshape((r, c, s))
-                    else:
-                        array = array.reshape((r, c))
-                    self.pixel_array = array
-                    return  # Done, attributes already match
-                elif expected_size == 0:
-                    # Metadata missing, treat as linear?
-                    pass
-
-            except ValueError:
-                pass
-
-            # Only raise if we couldn't resolve it
-            if len(array.shape) == 1:  # Still 1D
-                rows, cols = 1, shape[0]
-
-        elif ndim == 2:
-            rows, cols = shape
-        elif ndim == 3:
-            if shape[-1] in [3, 4]:
-                rows, cols, samples = shape
+        if len(shape) == 1 and geom.evidence is GeometryEvidence.DECLARED:
+            # A flat buffer the declared descriptors already describe:
+            # reshape to them and write nothing back. The attributes are the
+            # input to this reshape, so they need no correcting.
+            expected = geom.frames * geom.rows * geom.cols * geom.samples
+            if array.size > expected:
+                # DICOM alignment padding.
+                array = array[:expected]
+            if geom.frames > 1:
+                array = (array.reshape((geom.frames, geom.rows, geom.cols, geom.samples))
+                         if geom.samples > 1
+                         else array.reshape((geom.frames, geom.rows, geom.cols)))
+            elif geom.samples > 1:
+                array = array.reshape((geom.rows, geom.cols, geom.samples))
             else:
-                frames, rows, cols = shape
-        elif ndim == 4:
-            frames, rows, cols, samples = shape
-        else:
-            raise ValueError(f"Unknown shape: {shape}")
+                array = array.reshape((geom.rows, geom.cols))
+            self.pixel_array = array
+            self.mark_modified()
+            return
 
-        self.set_attr("0028,0010", rows)
-        self.set_attr("0028,0011", cols)
-        self.set_attr("0028,0002", samples)
-        if frames > 1:
-            self.set_attr("0028,0008", str(frames))
-        if samples >= 3:
-            self.set_attr("0028,0004", "RGB")
-            self.set_attr("0028,0006", 0)  # Force Interleaved (standard numpy)
-        else:
-            # Preserve existing PhotometricInterpretation (e.g. MONOCHROME1)
-            # Only set default if missing
-            if not self.attributes.get("0028,0004"):
-                self.set_attr("0028,0004", "MONOCHROME2")
+        if geom.evidence is GeometryEvidence.GUESSED:
+            get_logger().warning(
+                "Pixel array shape %s for %s is ambiguous: it is equally a "
+                "%d-frame %dx%d image and a %dx%d image with %d samples per "
+                "pixel, and the instance declares neither SamplesPerPixel "
+                "(0028,0002) nor NumberOfFrames (0028,0008) nor Rows/Columns "
+                "to settle it. Reading it as %d samples per pixel. Set "
+                "SamplesPerPixel before set_pixel_data() to make this "
+                "explicit; an export will refuse to write a guessed geometry.",
+                tuple(shape), self.sop_instance_uid,
+                shape[0], shape[1], shape[2],
+                shape[0], shape[1], shape[2],
+                geom.samples)
 
-        # Ensure BitsAllocated matches array data type
-        # SidecarPixelLoader relies on this to determine uint8 vs uint16
+        self._write_int_if_changed("0028,0010", geom.rows)
+        self._write_int_if_changed("0028,0011", geom.cols)
+        self._write_int_if_changed("0028,0002", geom.samples)
+
+        # An int, matching what `ingest_worker` stores. This used to be
+        # written as `str(frames)`, so a graph that went through it once
+        # held "3" where ingest had 3 -- two spellings of the same
+        # descriptor in one store. A declared NumberOfFrames of 1 is not
+        # the same as an absent one, so it is written back rather than
+        # dropped once it exists.
+        if geom.frames > 1 or "0028,0008" in self.attributes:
+            self._write_int_if_changed("0028,0008", geom.frames)
+
+        photometric = resolve_photometric_interpretation(
+            self.attributes, geom.samples)
+        if photometric is not None:
+            self._write_str_if_changed("0028,0004", photometric)
+
+        if planar_configuration_default(self.attributes, geom.samples):
+            self._write_int_if_changed("0028,0006", 0)
+
+        # BitsAllocated stays derived from the array, deliberately, and is
+        # not the same defect as the geometry. The frames-vs-samples
+        # question has no attribute-free answer; the storage width does --
+        # `array.itemsize * 8` is exact. And the export writes
+        # `arr.tobytes()`, so a BitsAllocated disagreeing with the array's
+        # itemsize produces a file that cannot be decoded at all: "the
+        # attributes win" is not an option here, because the attribute
+        # cannot be honoured. SidecarPixelLoader also relies on this to
+        # tell uint8 from uint16.
         bits = array.itemsize * 8
-        self.set_attr("0028,0100", bits)
+        previous = declared_int(self.attributes, "0028,0100")
+        if self._write_int_if_changed("0028,0100", bits) and previous is not None:
+            get_logger().debug(
+                "BitsAllocated for %s corrected from %s to %d by a %s pixel "
+                "array.", self.sop_instance_uid, previous, bits, array.dtype)
 
+        # Unconditional, and separate from the conditional descriptor writes
+        # above. The array's *contents* are part of what the store holds, and
+        # they are invisible to every comparison in this method: a redacted
+        # frame has exactly the Rows, Columns, SamplesPerPixel and
+        # BitsAllocated of the frame it replaced, so "no descriptor changed"
+        # is not "nothing changed". Dirtying only on a descriptor change
+        # leaves an incremental `save_all` skipping the instance and the
+        # redacted pixels never reaching the sidecar --
+        # `tests/test_blob_storage.py::
+        # test_compaction_does_not_resurrect_pre_redaction_pixels` and
+        # `::test_save_all_keeps_the_blob_table_in_step_with_instances` are
+        # the executable proof. Setting pixel data is a mutation of what the
+        # store holds, full stop; do not make that conditional on anything,
+        # including object identity -- callers mutate arrays in place
+        # (`RedactionService._apply_roi_to_instance`), so identity does not
+        # track content.
         self.mark_modified()
 
 

@@ -10,11 +10,12 @@ import hashlib
 import json
 import traceback
 import gc
-from typing import Dict, List
+from typing import Dict, List, Optional
 from tqdm import tqdm
 import numpy as np
 
 from .entities import Instance, DicomItem, DicomSequence
+from .pixel_geometry import PixelGeometry, resolve_pixel_geometry
 from .store import DicomStore
 from .logger import get_logger
 
@@ -468,13 +469,23 @@ class RedactionService:
                 inst.unload_pixel_data()
 
     @staticmethod
-    def apply_redaction_to_array(arr: np.ndarray, rois: List[tuple]) -> bool:
+    def apply_redaction_to_array(arr: np.ndarray, rois: List[tuple],
+                                 geometry: Optional[PixelGeometry] = None) -> bool:
         """
         Applies a list of ROIs to the pixel array in place.
 
         Args:
             arr (np.ndarray): The pixel array to modify.
             rois (List[tuple]): List of (y1, y2, x1, x2) regions.
+            geometry (PixelGeometry, optional): The instance's resolved
+                geometry, from `isocenter.pixel_geometry`. Both in-tree
+                callers pass it. Without it this falls back to the
+                last-axis heuristic, which cannot tell a 2-frame 8x4
+                grayscale array from a 2x8 RGBA one -- and getting that
+                wrong zeroes the wrong region, so the burned-in identifier
+                stays in the pixels while the pipeline reports a successful
+                redaction (#186, #205). The fallback exists only for
+                third-party callers of this public static method.
 
         Returns:
             bool: True if any modification was applied.
@@ -482,14 +493,26 @@ class RedactionService:
         modified = False
 
         ndim = len(arr.shape)
-        # Default to the last two dimensions (standard grayscale/planar).
-        row_dim = ndim - 2
-        col_dim = ndim - 1
+        if geometry is not None:
+            # No `ndim >= 3` guard on this arm, unlike the fallback below,
+            # and the invariant that makes that safe lives in the caller:
+            # `geometry` must have been resolved from the shape of *this*
+            # array, and `resolve_pixel_geometry` cannot return samples > 1
+            # for a rank-2 one. Both in-tree callers do exactly that. A
+            # geometry borrowed from a different array could pair samples > 1
+            # with ndim == 2 and silently address `row_dim=-1, col_dim=0`.
+            interleaved = geometry.samples > 1
+        else:
+            interleaved = ndim >= 3 and arr.shape[-1] in [3, 4]
 
-        if ndim >= 3 and arr.shape[-1] in [3, 4]:
+        if interleaved:
             # RGB/RGBA interleaved: (..., Rows, Cols, Channels)
             row_dim = ndim - 3
             col_dim = ndim - 2
+        else:
+            # Standard grayscale/planar: the last two dimensions.
+            row_dim = ndim - 2
+            col_dim = ndim - 1
 
         rows = arr.shape[row_dim]
         cols = arr.shape[col_dim]
@@ -544,7 +567,12 @@ class RedactionService:
             arr = arr.copy()
             inst.set_pixel_data(arr)
 
-        return self.apply_redaction_to_array(arr, [roi])
+        # The instance is in hand, so the axes are a lookup rather than a
+        # guess. Resolved after the copy above, not before: `set_pixel_data`
+        # can correct a descriptor, and the redaction has to address the
+        # array the way the instance now describes it.
+        geometry = resolve_pixel_geometry(arr.shape, inst.attributes)
+        return self.apply_redaction_to_array(arr, [roi], geometry=geometry)
 
     def _apply_redaction_flags(self, inst: Instance):
         """
