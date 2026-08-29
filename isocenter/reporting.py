@@ -1,6 +1,6 @@
 import datetime
 from dataclasses import dataclass, field
-from typing import Dict, Protocol
+from typing import Dict, Optional, Protocol
 
 
 @dataclass
@@ -23,6 +23,14 @@ class ComplianceReport:
         total_studies (int): Total studies processed.
         total_series (int): Total series processed.
         total_instances (int): Total instances processed.
+        instances_written (int, optional): How many instances the last
+            export in this session actually wrote. None when no export
+            has run here -- which is not the same as zero, so the row is
+            omitted rather than rendered as one.
+        instances_requested (int, optional): How many that export asked
+            for. The pair is what stops `total_instances` -- a count of
+            the object graph -- from reading as a count of delivered
+            files (#181).
         audit_summary (Dict[str, int]): Aggregated counts of audit actions.
         exceptions (list): List of error tuples (timestamp, action, details).
         data_losses (list): Elements present in the source and not in the
@@ -52,6 +60,16 @@ class ComplianceReport:
     total_studies: int = 0
     total_series: int = 0
     total_instances: int = 0
+
+    # Export Delivery
+    #
+    # `total_instances` counts the graph, and used to be the only count
+    # in the Executive Summary: a run that wrote none of its three
+    # instances reported "Total Instances | 3" beneath a PASS. These two
+    # say what was written, and are None when this session has not
+    # exported (#181).
+    instances_written: Optional[int] = None
+    instances_requested: Optional[int] = None
 
     # Audit / Processing Statistics
     # e.g., {'ANONYMIZE_METADATA': 1200, 'REDACT_PIXELS': 50, 'EXPORT': 1200}
@@ -109,6 +127,16 @@ class MarkdownRenderer:
             report (ComplianceReport): The data to render.
             output_path (str): Path to write the .md file.
         """
+        # Rendered only when an export ran in this session. An absent
+        # row says "not answered here"; a zero would say "nothing was
+        # written", and the report cannot tell those apart for a session
+        # that never exported (#181).
+        written_row = ""
+        if report.instances_written is not None:
+            written_row = (
+                f"| Instances Written | {report.instances_written} of "
+                f"{report.instances_requested} requested |\n")
+
         md_content = f"""# Compliance Report
 
 **Generated At:** {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')}
@@ -122,7 +150,7 @@ class MarkdownRenderer:
 | **Validation Status** | **{report.validation_status}** |
 | Total Patients | {report.total_patients} |
 | Total Instances | {report.total_instances} |
-| Privacy Profile | {report.privacy_profile} |
+{written_row}| Privacy Profile | {report.privacy_profile} |
 | De-ID Method | {report.deid_method} |
 
 ## 2. Processing Audit
