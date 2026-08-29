@@ -2,9 +2,11 @@
 
 **Date:** 2026-08-29
 **Status:** Design approved, in implementation
-**Amended:** 2026-08-29 (three passes) — see §11. The most consequential:
-the original §3.11 was wrong and dropped redacted pixels, and §7 never
-asked for a test on the line §4.3 calls "the single most important".
+**Amended:** 2026-08-29 (four passes) — see §11. The most consequential:
+the original §3.11 was wrong and dropped redacted pixels; §7 never asked
+for a test on the line §4.3 calls "the single most important"; and §4.3
+left `BitsAllocated` read from `attributes`, contradicting §3.10 and
+shipping a silently wrong image.
 **Tracking:** #186, #205 (same defect, two entry points). Folds in the same
 expression at `services.py:489` and `pixel_analysis.py:209`.
 **Base:** `main` at `692218c`
@@ -509,6 +511,16 @@ third calls and forbids a dtype change through the public setter. This is
 a judgement call; it is recorded here so a reviewer can disagree with it
 on the record rather than discover it.
 
+**Where the reconciliation lives (amended 2026-08-29).** On `692218c`
+this happened twice: once in `set_pixel_data`, and again — implicitly —
+every time `get_pixel_data` called it on the load path. §4.1 deletes the
+second, so the setter is no longer reached on a read and a declared width
+can survive all the way to the export. §4.3 therefore writes
+`ds.BitsAllocated = arr.itemsize * 8` **at the write**, which is where
+`arr.tobytes()` fixes the bytes per pixel. The rule in this section is
+unchanged; only the second place it is applied is new. §11.4 records why
+the original text of §4.3 contradicted this section.
+
 **Out-of-scope hygiene note.** `BitsStored` (0028,0101), `HighBit`
 (0028,0102) and `PixelRepresentation` (0028,0103) are *not* derived from
 the array, so a corrected `BitsAllocated` can sit beside a stale
@@ -691,8 +703,53 @@ if geom.samples >= 3 and "0028,0006" not in inst.attributes:
                                  # §3.9; §3.9 governs
 ```
 
-`BitsAllocated`/`BitsStored`/`HighBit`/`PixelRepresentation` keep their
-current `inst.attributes.get(..., default)` form.
+```python
+ds.BitsAllocated = arr.itemsize * 8      # amended -- see below
+ds.BitsStored = inst.attributes.get("0028,0101", default_bits)
+ds.HighBit = inst.attributes.get("0028,0102", default_bits - 1)
+ds.PixelRepresentation = inst.attributes.get("0028,0103", 0)
+```
+
+**Amended 2026-08-29 — `BitsAllocated` is written from the array, not
+read from `attributes`.** The original text said all four width
+descriptors "keep their current `inst.attributes.get(..., default)`
+form", which contradicted §3.10's own argument that a `BitsAllocated`
+disagreeing with `itemsize` *cannot be honoured*, because the export
+writes `arr.tobytes()`. The coder implemented §4.3, faithfully, and it
+was a blocker. See §11.4.
+
+Why it became reachable only under this design: on `692218c` the last
+act of `set_pixel_data` — called by `get_pixel_data` on every load path —
+was an unconditional `set_attr("0028,0100", array.itemsize * 8)`, and
+that was the **only** reconciliation between a declared `BitsAllocated`
+and the dtype the loader actually produced. §4.1 removes that call, for
+good reasons, and removes the reconciliation with it.
+`SidecarPixelLoader` buckets dtype as `uint16 if bits > 8 else uint8`, so
+a declared `BitsAllocated = 1` yields a `uint8` array; the export then
+wrote `BitsAllocated=1` beside bytes at 8 bits per pixel, and pydicom
+read a 2-frame 4×8 Segmentation mask back as **16 frames**. Measured:
+`BA=8, match=True` on `692218c`; `BA=1, match=False` on the branch.
+**Any declared width outside `{8, 16}` reaches the export disagreeing
+with the bytes written.**
+
+The reconciliation belongs **at the write, not at the read**.
+`ds.PixelData = arr.tobytes()` is three lines above; that is where the
+number of bytes per pixel is decided, so that is where the descriptor
+naming it is decided.
+
+Use `arr.itemsize * 8`, **not** `default_bits`. `default_bits` caps at
+16 (`8 if arr.itemsize == 1 else 16`), so a directly-assigned `uint32`
+array would be written `BitsAllocated=16` beside 4-byte pixels — the same
+class of bug, reintroduced by the fix. `692218c` wrote 32 there, via
+`set_pixel_data`.
+
+`BitsStored`, `HighBit` and `PixelRepresentation` stay declared. They do
+not constrain how many bytes `tobytes()` emits, and §8 already scopes
+their coherence out.
+
+Both public DICOM write paths funnel through `_export_instance_worker`,
+so `write_tree` is covered by the same line and `tests/test_api_coherence.py`
+stays satisfied.
 
 **The single most important line is `ds.SamplesPerPixel = geom.samples`.**
 Today `Rows`/`Columns` come from the shape and `SamplesPerPixel` comes
@@ -849,7 +906,7 @@ test call sites across 27 files.
 
 | Caller | Shapes passed | Effect of this design |
 | --- | --- | --- |
-| `Instance.get_pixel_data` ×3 (`entities.py:444,456,473`) | whatever the loader/pydicom returns | **No longer calls it.** Behaviour change: a load no longer writes attributes and no longer dirties the entity. No test asserts either (checked: `test_sidecar.py:92`, `test_metadata_refactor_full.py:110`, `test_compaction.py:79,155`, `test_blob_storage.py:220`, `test_entities.py:52`, `test_memory_redaction.py:58,81`, `test_redaction_parallel.py:105,150`, `test_redact_error.py:50`, `test_session.py:77`, `test_redaction_wildcard.py:114` all assert on the array only). |
+| `Instance.get_pixel_data` ×3 (`entities.py:444,456,473`) | whatever the loader/pydicom returns | **Row corrected — this survey asked the wrong question.** "No longer calls it" is right, and a load no longer writing attributes or dirtying the entity is right. The survey then checked which **tests** asserted on the load-path write and found none (`test_sidecar.py:92`, `test_metadata_refactor_full.py:110`, `test_compaction.py:79,155`, `test_blob_storage.py:220`, `test_entities.py:52`, `test_memory_redaction.py:58,81`, `test_redaction_parallel.py:105,150`, `test_redact_error.py:50`, `test_session.py:77`, `test_redaction_wildcard.py:114` all assert on the array only). It never asked which **non-test consumer** depended on it — and one did: `_export_instance_worker` read `0028,0100` back out, and the load-path `set_attr("0028,0100", array.itemsize * 8)` was the only thing reconciling it with the dtype the loader produced. §4.3 now writes that descriptor at the write instead. See §11.4. |
 | `RedactionService._apply_roi_to_instance` (`services.py:545`) | the instance's own array, same shape | **Row corrected.** Same shape, full attributes → DECLARED, so no descriptor is written — but the instance **is** marked modified (§3.11), which is what the redacted bytes need. The earlier text said "no dirtying" and was the first instance of the conflation §11.1 describes. Fixes the multi-frame corruption on the not-writeable path. Note this method's *other* arm mutates the array in place and never calls `set_pixel_data` at all; it relies on `redact()`'s explicit `mark_modified()` at `services.py:449`, unchanged here. |
 | `InstanceContextBuilder.set_pixel_data` (`builders.py:98`) | pass-through | Unchanged. |
 | `scripts/generate_ocr_test_data.py:405` | 2-D CT `(512,512)`; XA multi-frame `(frames,512,512)`; **and Secondary Capture RGB `(rows,cols,3)`** (`:162-163`), whose `0028,0004` is set at `:419`, after. | **Row corrected — the original said "no guess, no warning" and was wrong.** The CT and XA arms are arm A / rank 2, STRUCTURAL, silent, as predicted. The SC RGB arm is rank 3 with nothing declared, so both arms are admissible and it resolves `GUESSED`. Measured by the reviewer: **270 files, 10 warnings**, all at the setter, every worker resolution DECLARED or STRUCTURAL, all files decode unchanged. Output is identical; only the log is louder. |
@@ -886,7 +943,12 @@ test call sites across 27 files.
 3. **`write_tree` can now raise** where it previously wrote a wrong file.
 4. The three `scripts/` generators are unaffected — verified by reading
    the shapes they pass, not assumed.
-5. **No cost from the amended §3.11.** Unconditional `mark_modified()`
+5. **§4.1 removes a side effect that had a consumer**, and §4.3 replaces
+   it at the write (`ds.BitsAllocated = arr.itemsize * 8`). Net effect on
+   `692218c` behaviour: none — the same number reaches the file by a
+   shorter route. Without the replacement, any instance whose declared
+   `BitsAllocated` is outside `{8, 16}` exports a silently wrong image.
+6. **No cost from the amended §3.11.** Unconditional `mark_modified()`
    restores exactly today's dirtying behaviour for `set_pixel_data`; the
    only thing this design removes is the *read* path's dirtying, and it
    removes it by not calling the setter at all (§4.1).
@@ -1022,6 +1084,24 @@ create: all four descriptors come from one resolved geometry, so
     This is the one behavioural change in the work that is not a bug fix
     (§3.7) and it must not arrive unannounced.
 
+### Must pin the width the export actually writes (added by PR review)
+
+22. **`test_export_writes_bits_allocated_the_array_actually_has`.**
+    Export an instance whose declared `0028,0100` is outside `{8, 16}` —
+    a `BitsAllocated = 1` Segmentation mask, 2 frames of 4×8, is the
+    measured case — and assert that the written file carries
+    `BitsAllocated == arr.itemsize * 8` and that `ds.pixel_array`
+    round-trips `np.array_equal` against the source. With §4.3's
+    amendment reverted, pydicom reads the 2-frame mask back as 16 frames.
+
+    Add a second instance with a directly-assigned `uint32` array and
+    assert `BitsAllocated == 32`. That arm is what distinguishes
+    `arr.itemsize * 8` from `default_bits`, which caps at 16; without it
+    the fix can be silently downgraded to the capped form.
+
+    **This test's polarity is the inverse of every other test on this
+    branch** — see the non-vacuity categories below.
+
 ### Fixture hygiene — why four tests on this work guarded less than they looked
 
 This is not a general lecture; it is a list of the two specific traps in
@@ -1044,7 +1124,8 @@ The two traps:
   `has_unsaved_changes` is asserting that `attributes` was empty.
 
 The four casualties, each with the fixture detail that made it pass for
-the wrong reason:
+the wrong reason (a fifth, of the mirrored kind, is item 3 in the
+requirements below):
 
 | Test | What it looks like it pins | Why it does not |
 | --- | --- | --- |
@@ -1063,7 +1144,25 @@ the wrong reason:
    and must assert `has_unsaved_changes is False` immediately before the
    call under test. Tests 17, 18 and 21 are written this way; that is not
    incidental.
-3. **§3.11 rule 1 (conditional descriptor writes) is currently unpinned
+3. **The same error, pointed the other way: do not delete a side effect
+   because no test covers it — ask who *consumes* it.** §6's survey of
+   `get_pixel_data` checked which tests asserted on the load-path
+   `set_attr` and found none, and concluded it was safe to remove. One
+   non-test consumer depended on it (`_export_instance_worker` reading
+   `0028,0100` back out), and removing it shipped a silently wrong image
+   (§11.4). The five casualties above trust a test that guards nothing;
+   this trusts the *absence* of a test to mean the absence of a
+   dependency. Both substitute coverage for consumers.
+
+   Concretely, for anything removed under §4.1 or added under §4.3: for
+   each attribute the deleted call wrote, `grep` for readers of that tag
+   across `isocenter/` — not across `tests/` — and say for each whether
+   it still gets its value and from where. `0028,0100` has readers in
+   `io_handlers.py` (the export worker and `SidecarPixelLoader`); a
+   survey that had listed them would have caught this before
+   implementation.
+
+4. **§3.11 rule 1 (conditional descriptor writes) is currently unpinned
    by design.** Nothing distinguishes "wrote the same value" from "did
    not write". If a test for it is wanted, it has to observe `_revision`
    directly — assert that a `set_pixel_data` call resolving to identical
@@ -1080,9 +1179,24 @@ body rather than listing them as regressions. Tests 19 and 20 **fail** on
 `692218c` (verified by review) and must also fail against an
 implementation with `ds.SamplesPerPixel = geom.samples` reverted — state
 both. Test 21 fails on `692218c` because the behaviour is new, not
-because it was broken; say which. State the
-observed failure mode for each in the PR body. A test that passes before
-the fix is testing something else.
+because it was broken; say which.
+
+**Four polarities, and the PR body must say which each test has** —
+"fails on `692218c`" is *not* by itself the mark of a good regression
+test here:
+
+| shape | tests | fails on `692218c`? | what it pins |
+| --- | --- | --- | --- |
+| reproduces a bug this change fixes | 1, 3, 4, 5, 6, 19, 20 | yes | the fix |
+| guards existing correct behaviour | 17, 18 | no | that this change does not break it |
+| pins a new, deliberate behaviour change | 21 | yes, but only because the behaviour is new | the decision, not a bug |
+| **pins a regression this branch introduced** | **22** | **no — it passes on `692218c` and failed on `cf9dcd6`** | that §4.1's deletion did not take a consumer's value with it |
+
+Test 22 is the only one with that fourth polarity. A reviewer scanning
+for "fails before the fix" will misread it as broken unless the PR body
+names it. State the observed failure mode for each test in the PR body.
+For every test in the first row, a test that passes before the fix is
+testing something else.
 
 ---
 
@@ -1260,3 +1374,53 @@ parenthetical missed the `s_d == 1, shape[2] == 1` case.
 Review also swept for a fifth instance of the read-must-not-write
 conflation, instrumenting child processes rather than reading code, and
 found none. §2's four sites are the complete set.
+
+### 11.4 PR review (2026-08-29): §4.3 contradicted §3.10, and the coder implemented §4.3
+
+**The blocker.** §4.1 removes `set_pixel_data()` from `get_pixel_data()`'s
+load branches, which is right and is the core of the fix. It also removes
+that call's last act — an unconditional
+`set_attr("0028,0100", array.itemsize * 8)` — which was the **only**
+reconciliation between a declared `BitsAllocated` and the dtype
+`SidecarPixelLoader` actually produces. The loader buckets dtype as
+`uint16 if bits > 8 else uint8`, so a declared `BitsAllocated = 1` yields
+a `uint8` array; the export wrote `BitsAllocated=1` beside bytes at 8
+bits per pixel, and pydicom read a 2-frame 4×8 Segmentation mask back as
+16 frames. `BA=8, match=True` on `692218c`; `BA=1, match=False` on the
+branch. Any declared width outside `{8, 16}` was affected.
+
+**The spec is squarely implicated.** §3.10 argues that a `BitsAllocated`
+disagreeing with `itemsize` cannot be honoured, because the export writes
+`arr.tobytes()` — so "attributes win" was never available for it. §4.3
+then said all four width descriptors "keep their current
+`inst.attributes.get(..., default)` form". Those contradict. The coder
+implemented §4.3. §4.3 now writes `ds.BitsAllocated = arr.itemsize * 8`
+at the write, where `tobytes()` fixes the bytes per pixel — deliberately
+not `default_bits`, which caps at 16 and would mis-size a `uint32` array
+that `692218c` wrote as 32.
+
+**The methodological point — this is the sixth.** §6's survey row for
+`get_pixel_data` checked which **tests** asserted on the load-path write
+and found none. It never asked which **non-test consumer** depended on
+it. That is the same error as the five fixture-hygiene casualties in §7,
+pointed the other way: those trust a test that guards nothing; this
+trusts the *absence* of a test to mean the absence of a dependency. Both
+substitute coverage for consumers. §7's fixture-hygiene section covered
+only the first direction; it now covers both, with the concrete
+instruction — for each attribute a deleted call wrote, grep for readers
+across `isocenter/`, not across `tests/`, and say for each whether it
+still gets its value and from where.
+
+Worth recording plainly: this got through design, implementation, **and a
+clause-by-clause conformance review**. A conformance review that matches
+the implementation against §6 will faithfully reproduce §6's error. The
+only thing that caught it was running the pipeline. That is the third
+finding on this work that measurement caught and reading did not (after
+§6's two generator rows and the unpinned `SamplesPerPixel` line), and it
+is the argument for §7's non-vacuity requirement being stated in terms of
+the mutation each test kills.
+
+**Test 22** pins the regression, and has a polarity no other test on this
+branch has: it **passes** on `692218c` and failed on the branch. §7's
+non-vacuity section now tabulates all four polarities so a reviewer
+scanning for "fails before the fix" does not misread it.
