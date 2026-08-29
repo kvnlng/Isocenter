@@ -201,6 +201,18 @@ def assert_fresh(path):
     printing a verdict. A probe that cannot tell "the suite did not
     notice" from "the suite was never shown" is exactly the silent
     failure it exists to hunt for.
+
+    **One known hole, #201, and it is in the documented invocation.**
+    `cache_from_source` names the file from the *parent* interpreter's
+    cache tag, while `PYTEST` hardcodes `.venv/bin/python`. Run
+    `python -m scripts.mutation_probe` -- the command CLAUDE.md gives --
+    under anything but the venv's interpreter and this inspects a `.pyc`
+    the subprocess never reads, finds nothing, and returns. It degrades
+    to a no-op silently and in one direction only: never a false abort,
+    always a false pass, so running the probe would not reveal that the
+    check had been off. The fix itself is unaffected either way, since
+    `PYTHONDONTWRITEBYTECODE` is inherited whichever interpreter
+    launched the probe -- only the guard goes quiet.
     """
     cache = Path(importlib.util.cache_from_source(str(path)))
     if not cache.exists():
@@ -208,6 +220,11 @@ def assert_fresh(path):
     head = cache.read_bytes()[:16]
     if len(head) < 16:
         return
+    # Two deliberate divergences from `_validate_timestamp_pyc`: the
+    # `& 0xFFFFFFFF` masking on both halves is omitted, which matters in
+    # 2106 or on a 4GB source, and the magic number CPython checks first
+    # is not, which matters only across a pre-release magic bump inside
+    # one cache tag. Neither can reach this script.
     flags, mtime, size = struct.unpack("<III", head[4:16])
     if flags & 0b1:
         # Hash-based `.pyc`. CHECKED_HASH is verified against the source's
