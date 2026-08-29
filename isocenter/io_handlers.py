@@ -584,6 +584,43 @@ class ExportOutcome:
     error: Optional[BaseException] = None
 
 
+@dataclass
+class ExportSummary:
+    """What a batch delivered, for the parent that has to report it.
+
+    `export_batch` used to return a bare success count, and that count
+    was the only thing to survive the batch: the failures -- their UIDs
+    and their exceptions -- were dropped inside it. So an instance that
+    never reached disk produced no audit row, the compliance report
+    graded a run in which every write failed exactly as it grades a
+    clean one, and the recoverable-identity disclosure had to be written
+    from the export *plan* because there was no delivered set to write
+    it from (#181, #187).
+
+    The delivered instances are kept as UIDs rather than as a number
+    because the number is derivable from them and the identities are
+    not: the disclosure has to say which files went out, not how many
+    were meant to.
+    """
+    #: SOP Instance UID per instance that reached disk. Falls back to
+    #: the output path for an instance carrying no UID, which the export
+    #: plan cannot produce -- it names the file after that UID.
+    written_uids: List[str] = field(default_factory=list)
+    #: `(entity_uid, details)` per instance that did not reach disk,
+    #: already audited by `_report_export_failures`.
+    failures: List[Tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def written(self) -> int:
+        """How many instances reached disk."""
+        return len(self.written_uids)
+
+    @property
+    def failed(self) -> int:
+        """How many instances did not."""
+        return len(self.failures)
+
+
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
@@ -1337,6 +1374,57 @@ class DicomExporter:
         return count
 
     @staticmethod
+    def _report_export_failures(results, store_backend=None):
+        """Log every instance the workers could not write, and audit it.
+
+        The mirror of `_report_export_losses`, for the same reason
+        (#126): the code that hits the exception is in a subprocess with
+        no store handle, so the failure travels back in the
+        `ExportOutcome` and is recorded here, in the parent.
+
+        `ERROR` is the existing vocabulary, not a new one. The reader has
+        always been there -- `get_audit_errors()` selects `ERROR` and
+        `WARNING`, and the report renders them under "Exceptions &
+        Errors" -- and nothing in the package had ever written a row it
+        could return. That is why a failed export graded `PASS` and said
+        "No exceptions or errors were recorded" (#181).
+
+        The detail is flattened to one line and its pipes escaped
+        because it is rendered straight into a markdown table row; a
+        validator error is a repr'd list and arrives with both. It is
+        not truncated: a compliance record that drops the end of the
+        reason is its own small lie.
+
+        Returns:
+            List[Tuple[str, str]]: `(entity_uid, details)` per failure.
+        """
+        logger = get_logger()
+        failures = []
+        for r in results:
+            if isinstance(r, ExportOutcome):
+                if r.ok:
+                    continue
+                uid = r.sop_instance_uid or r.output_path
+                reason = r.error if r.error is not None else "unknown error"
+                detail = f"Export failed for {r.output_path}: {reason}"
+            else:
+                # `run_parallel` returns its own exception when a worker
+                # dies before it can answer. There is no outcome to name
+                # the instance with, and the row still has to exist.
+                uid = "UNKNOWN"
+                detail = f"Export worker failed: {r}"
+
+            detail = " ".join(str(detail).split()).replace("|", "\\|")
+            logger.error("%s: %s", uid, detail)
+            failures.append((uid, detail))
+            if store_backend is not None:
+                # `log_audit`, not `log_audit_batch` -- see the note in
+                # `_report_export_losses`.
+                store_backend.log_audit(action_type="ERROR", entity_uid=uid,
+                                        details=detail)
+        return failures
+
+    @staticmethod
     def write_tree(
             patient: Patient,
             out_dir: str,
@@ -1460,9 +1548,12 @@ class DicomExporter:
                 only logged (#126).
 
         Returns:
-            int: Number of successfully exported instances. An instance
-                that was written but lost an element counts as a success;
-                the loss is reported separately.
+            ExportSummary: what reached disk and what did not. An
+                instance that was written but lost an element counts as
+                written; the loss is reported separately. Returned an
+                `int` until #181 -- the count was all the parent could
+                see, so a failed instance was invisible to the audit log
+                and to the compliance report.
         """
         logger = get_logger()
         # if not export_tasks: return # Cannot easily check empty iterator without consuming
@@ -1486,14 +1577,18 @@ class DicomExporter:
         # Two passes -- see the note in `write_tree`.
         results = list(results)
         DicomExporter._report_export_losses(results, store_backend)
-        success_count = sum(1 for r in results if getattr(r, "ok", False))
-        # We don't raise here by default (batch mode); `success_count`
-        # counts only instances that were actually written. An instance
-        # that was written *and* lost an element counts as a success and
-        # is reported through the loss channel above, not this number.
+        # We don't raise here by default (batch mode). The failures are
+        # audited rather than raised, and the summary is what lets the
+        # caller say how many of the requested instances exist (#181).
+        failures = DicomExporter._report_export_failures(results, store_backend)
+        summary = ExportSummary(
+            written_uids=[r.sop_instance_uid or r.output_path
+                          for r in results
+                          if isinstance(r, ExportOutcome) and r.ok],
+            failures=failures)
 
-        logger.info(f"Export Complete. Success: {success_count}/{total or '?'}")
-        return success_count
+        logger.info(f"Export Complete. Success: {summary.written}/{total or '?'}")
+        return summary
 
     @staticmethod
     def _finalize_dataset(ds, compression=None, pixel_array=None):
