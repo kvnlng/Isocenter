@@ -31,6 +31,7 @@ try:
     from pydicom.encapsulate import encapsulate
 except ImportError:
     from pydicom.encaps import encapsulate
+from pydicom.multival import MultiValue
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
 
@@ -604,12 +605,6 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         inst = ctx.instance
         ds = DicomExporter._create_ds(inst)
 
-        # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes, losses)
-        DicomExporter._merge_sequences(ds, inst.sequences, losses)
-
-        # 1. Patient Level
-        DicomExporter._merge(ds, ctx.patient_attributes, losses)
         # 0. Base Attributes
         DicomExporter._merge(ds, inst.attributes, losses)
         DicomExporter._merge_sequences(ds, inst.sequences, losses)
@@ -1631,6 +1626,20 @@ class DicomExporter:
                 # The scope is attached here, where `t` is still a tag,
                 # not in the parent where it is only a substring of a
                 # sentence (#146).
+                #
+                # The dedupe stays, with a narrower reason than it had.
+                # Until #179 the worker merged `inst.attributes` twice,
+                # so *every* loss arrived in duplicate and this was the
+                # only thing keeping section 3 of the compliance report
+                # from double-counting. That is gone. What remains is
+                # that the four surviving merges overlap by tag --
+                # (0010,0010), (0008,0020), (0020,000d), (0020,000e),
+                # (0008,0060) are all in `inst.attributes` *and* in the
+                # patient/study/series mapping stamped over it -- and
+                # the message is deterministic, so one malformed value
+                # present at two levels still lands here twice. Keys
+                # within a single `attrs` are unique, so the duplicate
+                # can only ever come from a second call.
                 entry = (loss_scope_for_tag(t), loss)
                 if entry not in losses:
                     losses.append(entry)
@@ -1662,9 +1671,17 @@ class DicomExporter:
         of 1, where `LO` is 1-n. A backslash-delimited value past 64
         characters therefore round-trips as one string containing literal
         backslashes rather than a list. Widening `LO` to cover it would
-        be worse -- an over-long `LO` is non-conformant -- and nothing
-        downstream reads these as lists anyway, because they arrive from
-        `value_text` already flattened to a single string.
+        be worse -- an over-long `LO` is non-conformant.
+
+        That paragraph used to end "and nothing downstream reads these as
+        lists anyway, because they arrive from `value_text` already
+        flattened to a single string". That describes the EAV round-trip
+        and *only* it. `populate_attrs` calls `set_attr(tag, elem.value)`
+        with whatever pydicom produced, and for VM > 1 that is a
+        `MultiValue` -- on the in-memory path, which is the one
+        `session.export()` takes. The reasoning was the gap: no arm
+        matched, so every multi-valued private element was reported as
+        data loss and written nowhere (#165). See `_fallback_multivalue`.
 
         Returns None when nothing fits, which the caller reports as data
         loss rather than encoding something it would have to guess at.
@@ -1682,7 +1699,83 @@ class DicomExporter:
         if isinstance(value, str):
             vr = 'LO' if len(value) <= DicomExporter._LO_MAX else 'UT'
             return vr, value
+        # Last, because `str`, `bytes` and `bytearray` are sequences too
+        # and each has its own answer above.
+        if isinstance(value, (list, tuple, MultiValue)):
+            return DicomExporter._fallback_multivalue(value)
         return None
+
+    @staticmethod
+    def _fallback_multivalue(values) -> Optional[Tuple[str, Any]]:
+        """The same decision for a value with more than one value (#165).
+
+        Two shapes arrive here and both must work. In memory, pydicom
+        hands back a `MultiValue`, which is a `MutableSequence` and *not*
+        a `list` subclass -- `isinstance(value, list)` misses it, which
+        is the same trap `save_vertical_attributes` documents on the
+        storage side. After a save/close/reopen,
+        `load_vertical_attributes` reassembles the EAV rows as a plain
+        list of strings (#158), so the reloaded path arrives as a `list`.
+        The two converge: the EAV stores `str(atom)`, and each atom here
+        is encoded by the same scalar rules that produced that string, so
+        an in-memory `US [1, 2, 3]` and its reloaded `['1', '2', '3']`
+        export to the identical element.
+
+        **No VR is restored and no type is inferred.** `[1, 2, 3]` is not
+        worked back to `US`; the values are encoded elementwise by the
+        scalar arms above and written as a multi-valued *string* element,
+        which is how DICOM expresses multiplicity natively -- one element,
+        backslash-separated on the wire, and pydicom does the separating.
+        What VR a private tag should be written under is #154 and the
+        repo owner's call; this only stops the values from vanishing.
+        A multi-valued `AT` therefore stringifies to `(0010,0010)` per
+        value exactly as the VM = 1 case already does, rather than being
+        forked here into a second answer.
+
+        **The 64-character cap is checked per value, not against the
+        join.** PS3.5 6.2 bounds each *value* of a multi-valued element,
+        so two 50-character values under `LO` are conformant even though
+        their encoding is 101 bytes; verified by writing and reading one
+        back under both implicit and explicit VR with no warning. When a
+        single value *does* exceed 64 there is no text VR that holds both
+        the length and the multiplicity -- `LO` is 1-n and capped, `UT` is
+        unbounded and VM 1 -- so the element collapses to one `UT` string
+        with literal backslashes, which is the trade the single-value `UT`
+        branch above already documents.
+
+        An empty sequence is a zero-length `LO`: a legal element saying
+        the tag was present with no value, where before it reached the
+        "nothing fits" arm and was reported as loss.
+
+        Returns None if any one value has no text encoding -- an `object`,
+        or `bytes`, whose `UN` is an OB-family VR with no multiplicity to
+        put a list into. The whole element is then reported as data loss,
+        siblings included: there is no half-written element in DICOM, and
+        two of three vendor values written silently is the disguised loss
+        this is meant to avoid, not a smaller version of it.
+        """
+        atoms = []
+        for atom in values:
+            encoded = DicomExporter._fallback_encoding(atom)
+            if encoded is None:
+                return None
+            text = encoded[1]
+            # `bytes` (from the `UN` arm) and `list` (from a nested
+            # sequence) both land here and neither can be a value of a
+            # multi-valued text element.
+            if not isinstance(text, str):
+                return None
+            atoms.append(text)
+
+        if not atoms:
+            return 'LO', []
+
+        # A new list every time, never the input: `_merge` rebinds the
+        # value it is handed, and the mapping it read belongs to the live
+        # object graph.
+        if all(len(atom) <= DicomExporter._LO_MAX for atom in atoms):
+            return 'LO', atoms
+        return 'UT', '\\'.join(atoms)
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any], losses=None):

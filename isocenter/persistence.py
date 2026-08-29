@@ -19,7 +19,7 @@ import base64
 import traceback
 from typing import List, Optional, Dict, Any, Tuple, NamedTuple
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from contextlib import nullcontext
 
 from pydicom.multival import MultiValue
@@ -173,6 +173,57 @@ def _as_stored_date(value) -> Optional[str]:
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return str(value)
+
+
+def _as_loaded_date(value):
+    """The inverse of `_as_stored_date`: text back into a `date`.
+
+    Hydration had no inverse, so `Study.study_date` came back as the ISO
+    string `_as_stored_date` wrote where `ingest` had produced a
+    `datetime.date`. Nothing checks the type and both exporters read the
+    field, so the same code emitted a legal (0008,0020) on a fresh
+    session and `'2024-01-15'` -- not a DA value, which PS3.5 Table
+    6.2-1 fixes at eight digits -- on a reloaded one, and WFDB's
+    `_start_datetime` quietly fell through to the instance's own
+    never-shifted date tags because its `strptime` raised inside a
+    `try`. Restoring the type here rather than patching each exporter is
+    what makes `study_date` one type everywhere; a normaliser at an
+    export boundary leaves the next consumer meeting the same trap
+    (#171).
+
+    An unparseable value is returned as it was stored, not replaced:
+    same rule as ingest's, where a date we cannot read is a date we do
+    not have rather than one we invent (#60). NULL stays None for the
+    same reason.
+
+    `date.fromisoformat` also accepts the basic form `YYYYMMDD` on the
+    3.12 floor, so a study whose date was set as a DICOM-spelled string
+    rather than parsed at ingest normalizes to a `date` here too. That
+    is deliberate and is the whole point -- one type everywhere. Do not
+    "tighten" this to a strict `%Y-%m-%d` parse to keep such a value a
+    string: that restores exactly the second type this exists to remove.
+
+    The (0008,0020) *element* is unaffected by which spelling arrived,
+    because either one loads as a `date` and both export paths render a
+    `date` as `YYYYMMDD` -- `session.export()` by handing it to pydicom,
+    `write_tree` via `format_study_date`. The exported *directory name*
+    is not: `export_folder_names` builds it with
+    `str(study.study_date or "NoDate")`, not `format_study_date`, so a
+    hand-built graph carrying `"20240101"` files under `Study_20240101_`
+    before a round trip and `Study_2024-01-01_` after one. Ingested
+    studies never see this -- ingest already produces a `date`, so
+    `str()` yields the ISO spelling on both sides -- and routing the
+    folder through `format_study_date` would rename every existing
+    export's directories, which is worse than the divergence it closes.
+    Known and accepted, filed as #189; do not read the element's
+    indifference as the folder's.
+    """
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return value
 
 
 def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
@@ -802,7 +853,7 @@ class SqliteStore:
 
                 st_map = {}
                 for r in st_rows:
-                    st = Study(r['study_instance_uid'], r['study_date'])
+                    st = Study(r['study_instance_uid'], _as_loaded_date(r['study_date']))
                     st_map[r['id']] = st
                     stored_statuses.append((st, r['phi_status']))
                     if r['patient_id_fk'] in p_map:
@@ -943,7 +994,8 @@ class SqliteStore:
                 st_rows = cur.execute(
                     "SELECT * FROM studies WHERE patient_id_fk = ?", (p_pk,)).fetchall()
                 for st_r in st_rows:
-                    st = Study(st_r['study_instance_uid'], st_r['study_date'])
+                    st = Study(st_r['study_instance_uid'],
+                               _as_loaded_date(st_r['study_date']))
                     st_pk = st_r['id']
                     stored_statuses.append((st, st_r['phi_status']))
 
