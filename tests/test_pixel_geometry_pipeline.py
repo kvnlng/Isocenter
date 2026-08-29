@@ -390,6 +390,79 @@ def test_set_pixel_data_accepts_a_resized_array():
 
 
 # ---------------------------------------------------------------------------
+# The descriptors the worker writes come from one geometry, not two sources
+# ---------------------------------------------------------------------------
+
+def _export_one(tmp_path, arr, attrs, name="one.dcm"):
+    """Put one hand-built instance through the export worker."""
+    inst = Instance("I_COH", "1.2.826.0.1.3680043.8.498.900011", 1)
+    inst.attributes["0008,0060"] = "OT"
+    inst.attributes.update(attrs)
+    inst.pixel_array = arr
+
+    out_path = str(tmp_path / name)
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst, output_path=out_path,
+        patient_attributes={}, study_attributes={}, series_attributes={}))
+    assert outcome.ok is True, outcome.error
+    return pydicom.dcmread(out_path)
+
+
+def test_worker_takes_samples_per_pixel_from_the_resolved_geometry(tmp_path):
+    """Rows/Columns and SamplesPerPixel must come from the *same* answer.
+
+    §4.3 of the spec calls `ds.SamplesPerPixel = geom.samples` the single
+    most important line, and until this test nothing pinned it: taking
+    Rows and Columns from the geometry while reading SamplesPerPixel
+    straight out of `attributes` is the incoherence that made #186's
+    export undecodable rather than merely wrong, and every existing
+    fixture happens to have the two agreeing.
+
+    A multi-frame colour instance that never declared SamplesPerPixel is
+    the reachable case. Sourcing it from `attributes.get("0028,0002", 1)`
+    writes `SamplesPerPixel=1` beside `Rows=4 Columns=4 NumberOfFrames=2`
+    for a `(2,4,4,3)` array: the file decodes cleanly as `(6,4,4)` and is
+    simply a different image, which is the silent half of #205.
+
+    These two shapes and not others because they are the only two ways
+    `geom.samples` and the declared `SamplesPerPixel` can disagree:
+    the geometry supplies a count the attributes never declared (here),
+    or it overrides one the attributes declared wrongly (the test
+    below). Every other fixture in the suite has the two agreeing, which
+    is why reverting this line passed all 906 tests.
+    """
+    arr = np.arange(2 * 4 * 4 * 3, dtype=np.uint8).reshape((2, 4, 4, 3))
+    ds = _export_one(tmp_path, arr, {
+        "0028,0100": 8, "0028,0101": 8, "0028,0102": 7, "0028,0103": 0,
+    }, name="rank4.dcm")
+
+    assert ds.SamplesPerPixel == 3
+    assert ds.Rows == 4
+    assert ds.Columns == 4
+    assert int(ds.NumberOfFrames) == 2
+    assert np.array_equal(ds.pixel_array, arr)
+
+
+def test_worker_overrides_a_stale_samples_per_pixel(tmp_path):
+    """A rank-2 array has one reading, whatever the attributes still say.
+
+    The other half of the same guarantee, and the loud failure rather
+    than the silent one: `SamplesPerPixel=3` beside a `(8,8)` array
+    writes 64 bytes of Pixel Data under a header claiming 192, and
+    `dcmread(...).pixel_array` raises `AttributeError: Missing required
+    element (0028,0006)` -- spec §1.3's third row exactly.
+    """
+    arr = np.arange(8 * 8, dtype=np.uint8).reshape((8, 8))
+    ds = _export_one(tmp_path, arr, {
+        "0028,0002": 3,
+        "0028,0100": 8, "0028,0101": 8, "0028,0102": 7, "0028,0103": 0,
+    }, name="rank2.dcm")
+
+    assert ds.SamplesPerPixel == 1
+    assert np.array_equal(ds.pixel_array, arr)
+
+
+# ---------------------------------------------------------------------------
 # Tests 9 and 10 -- the deliberate asymmetry
 # ---------------------------------------------------------------------------
 
@@ -514,23 +587,60 @@ def test_redaction_dirties_the_instance_it_redacted():
     """The production path the identity rule would have got wrong.
 
     `_apply_roi_to_instance` calls `set_pixel_data` with a *copy* on the
-    not-writeable arm, whose contents at that moment are identical to the
-    original; it mutates the copy afterwards. Whichever arm is taken, the
-    instance has to end up needing a save.
+    **not-writeable arm** -- the arm this test forces, and the only one
+    that reaches `set_pixel_data` at all. The copy's contents at that
+    moment are identical to the original; it is mutated afterwards. So
+    the setter is handed an array indistinguishable from the one already
+    on the instance, and everything that dirties it has to be
+    unconditional.
+
+    The writeable arm does not go through the setter: it mutates in
+    place and returns True, and `_apply_roi_to_instance` leaves the
+    instance *clean* (measured). Its dirtying comes from the caller --
+    `RedactionService.redact` and the parallel worker both call
+    `inst.mark_modified()` under `if modified:`, and both persist the
+    pixels afterwards -- so the end-to-end behaviour is the same and
+    nothing is wrong. It is simply not this test's subject, and the
+    asymmetry between the two arms is worth knowing before moving code
+    across it.
+
+    **Every descriptor is declared, and declared correctly**, on purpose.
+    An instance missing `PhotometricInterpretation` or `BitsAllocated`
+    gets dirtied by the conditional descriptor writes of §3.11 rule 1 no
+    matter what rule 2 does, so it would pass with `mark_modified()` made
+    conditional and pin nothing this docstring claims. With the full set
+    declared, `set_pixel_data` changes no attribute -- asserted below --
+    and the unconditional `mark_modified()` is the only thing left that
+    can dirty the instance. Redaction is exactly the case §3.11 rule 2
+    exists for: same shape, same dtype, different bytes.
+
+    Note what this deliberately does *not* pin: that the descriptor
+    writes are conditional. Making them unconditional is invisible here
+    and everywhere else in the suite -- an accepted gap, not an
+    oversight, because writing an identical value back is only a
+    performance and revision-churn question, and pinning it would mean
+    asserting on `_revision` arithmetic rather than on behaviour.
     """
     inst = Instance("I_RD", "1.2.826.0.1.3680043.8.498.900010", 1)
     inst.attributes["0028,0002"] = 1
+    inst.attributes["0028,0004"] = "MONOCHROME2"
     inst.attributes["0028,0010"] = 8
     inst.attributes["0028,0011"] = 8
+    inst.attributes["0028,0100"] = 8
     arr = np.ones((8, 8), dtype=np.uint8) * 7
     arr.flags.writeable = False
     inst.pixel_array = arr
+    before = dict(inst.attributes)
     inst.mark_persisted()
     assert inst.has_unsaved_changes is False
 
     service = RedactionService(DicomStore())
     assert service._apply_roi_to_instance(inst, arr, (0, 4, 0, 4)) is True
 
+    assert inst.attributes == before, (
+        "the descriptors already described this array; if redaction "
+        "changed one, this test is dirtying the instance by the wrong "
+        "route and no longer pins the unconditional mark_modified()")
     assert inst.has_unsaved_changes is True
 
 
