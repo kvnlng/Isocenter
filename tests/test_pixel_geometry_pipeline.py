@@ -390,6 +390,72 @@ def test_set_pixel_data_accepts_a_resized_array():
 
 
 # ---------------------------------------------------------------------------
+# The descriptors the worker writes come from one geometry, not two sources
+# ---------------------------------------------------------------------------
+
+def _export_one(tmp_path, arr, attrs, name="one.dcm"):
+    """Put one hand-built instance through the export worker."""
+    inst = Instance("I_COH", "1.2.826.0.1.3680043.8.498.900011", 1)
+    inst.attributes["0008,0060"] = "OT"
+    inst.attributes.update(attrs)
+    inst.pixel_array = arr
+
+    out_path = str(tmp_path / name)
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst, output_path=out_path,
+        patient_attributes={}, study_attributes={}, series_attributes={}))
+    assert outcome.ok is True, outcome.error
+    return pydicom.dcmread(out_path)
+
+
+def test_worker_takes_samples_per_pixel_from_the_resolved_geometry(tmp_path):
+    """Rows/Columns and SamplesPerPixel must come from the *same* answer.
+
+    §4.3 of the spec calls `ds.SamplesPerPixel = geom.samples` the single
+    most important line, and until this test nothing pinned it: taking
+    Rows and Columns from the geometry while reading SamplesPerPixel
+    straight out of `attributes` is the incoherence that made #186's
+    export undecodable rather than merely wrong, and every existing
+    fixture happens to have the two agreeing.
+
+    A multi-frame colour instance that never declared SamplesPerPixel is
+    the reachable case. Sourcing it from `attributes.get("0028,0002", 1)`
+    writes `SamplesPerPixel=1` beside `Rows=4 Columns=4 NumberOfFrames=2`
+    for a `(2,4,4,3)` array: the file decodes cleanly as `(6,4,4)` and is
+    simply a different image, which is the silent half of #205.
+    """
+    arr = np.arange(2 * 4 * 4 * 3, dtype=np.uint8).reshape((2, 4, 4, 3))
+    ds = _export_one(tmp_path, arr, {
+        "0028,0100": 8, "0028,0101": 8, "0028,0102": 7, "0028,0103": 0,
+    }, name="rank4.dcm")
+
+    assert ds.SamplesPerPixel == 3
+    assert ds.Rows == 4
+    assert ds.Columns == 4
+    assert int(ds.NumberOfFrames) == 2
+    assert np.array_equal(ds.pixel_array, arr)
+
+
+def test_worker_overrides_a_stale_samples_per_pixel(tmp_path):
+    """A rank-2 array has one reading, whatever the attributes still say.
+
+    The other half of the same guarantee, and the loud failure rather
+    than the silent one: `SamplesPerPixel=3` beside a `(8,8)` array
+    writes 64 bytes of Pixel Data under a header claiming 192, and
+    `dcmread(...).pixel_array` raises `AttributeError: Missing required
+    element (0028,0006)` -- spec §1.3's third row exactly.
+    """
+    arr = np.arange(8 * 8, dtype=np.uint8).reshape((8, 8))
+    ds = _export_one(tmp_path, arr, {
+        "0028,0002": 3,
+        "0028,0100": 8, "0028,0101": 8, "0028,0102": 7, "0028,0103": 0,
+    }, name="rank2.dcm")
+
+    assert ds.SamplesPerPixel == 1
+    assert np.array_equal(ds.pixel_array, arr)
+
+
+# ---------------------------------------------------------------------------
 # Tests 9 and 10 -- the deliberate asymmetry
 # ---------------------------------------------------------------------------
 
