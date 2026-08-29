@@ -393,7 +393,7 @@ def test_set_pixel_data_accepts_a_resized_array():
 # The descriptors the worker writes come from one geometry, not two sources
 # ---------------------------------------------------------------------------
 
-def _export_one(tmp_path, arr, attrs, name="one.dcm"):
+def _export_one(tmp_path, arr, attrs, name="one.dcm", zones=None):
     """Put one hand-built instance through the export worker."""
     inst = Instance("I_COH", "1.2.826.0.1.3680043.8.498.900011", 1)
     inst.attributes["0008,0060"] = "OT"
@@ -403,7 +403,8 @@ def _export_one(tmp_path, arr, attrs, name="one.dcm"):
     out_path = str(tmp_path / name)
     outcome = _export_instance_worker(ExportContext(
         instance=inst, output_path=out_path,
-        patient_attributes={}, study_attributes={}, series_attributes={}))
+        patient_attributes={}, study_attributes={}, series_attributes={},
+        redaction_zones=list(zones or [])))
     assert outcome.ok is True, outcome.error
     return pydicom.dcmread(out_path)
 
@@ -827,4 +828,114 @@ def test_export_writes_bits_allocated_a_wide_array_actually_has(tmp_path):
         "the width came from the declaration or from default_bits, not "
         "from the array whose bytes were written")
     assert len(ds.PixelData) == 4 * 4 * 4
+    assert np.array_equal(ds.pixel_array, arr)
+
+
+# ---------------------------------------------------------------------------
+# Gaps found by auditing this branch's own commits with the mutation probe.
+# Each one is a production line that no test noticed the loss of.
+# ---------------------------------------------------------------------------
+
+def test_export_redacts_every_frame_of_a_multiframe_array(tmp_path):
+    """The export worker's *own* redaction call, not the service's.
+
+    **Mutation killed:** dropping `geometry=geom` from
+    `RedactionService.apply_redaction_to_array(arr, ctx.redaction_zones,
+    geometry=geom)` in `_export_instance_worker`. That reverts this call
+    to the last-axis heuristic and survived the full 917-test suite.
+
+    `test_redaction_zeroes_the_zone_in_every_frame` above looks like it
+    covers this and does not: it exercises
+    `RedactionService._apply_roi_to_instance`, which is the *session*
+    path. `session.export(redaction_zones=...)` reaches a second,
+    independent call inside the worker, and that one had nothing on it.
+    The site matters more than the one that was covered, because this is
+    the last place the pixels are touched before they become a file --
+    with the wrong axes the zone lands on rows 0-1 of a (2,8,4) array
+    read as (rows=2, cols=8, samples=4), the pipeline reports a
+    successful redaction, and the burned-in identifier is in the
+    exported file.
+
+    The shape is the same one §7.6 uses, for the same reason: a last
+    axis of 4 is exactly where "frames" and "samples" are
+    indistinguishable without the descriptors.
+    """
+    arr = np.ones((2, 8, 4), dtype=np.uint8) * 7
+    ds = _export_one(tmp_path, arr, {
+        "0028,0002": 1, "0028,0008": 2,
+        "0028,0010": 8, "0028,0011": 4,
+        "0028,0004": "MONOCHROME2",
+        "0028,0100": 8, "0028,0101": 8, "0028,0102": 7, "0028,0103": 0,
+    }, name="redacted.dcm", zones=[(0, 3, 0, 4)])
+
+    out = ds.pixel_array
+    assert out.shape == (2, 8, 4)
+    for frame in range(2):
+        assert np.all(out[frame, 0:3, :] == 0), (
+            f"frame {frame} rows 0-2 reached the file unredacted:\n"
+            f"{out[frame]}")
+        assert np.all(out[frame, 3:, :] == 7), (
+            f"frame {frame} rows 3+ were zeroed and should not have been:\n"
+            f"{out[frame]}")
+
+
+def test_set_pixel_data_corrects_a_stale_number_of_frames():
+    """A NumberOfFrames the array contradicts is corrected, not left.
+
+    **Mutation killed:** narrowing
+    `if geom.frames > 1 or "0028,0008" in self.attributes:` to
+    `if geom.frames > 1:` in `set_pixel_data`. That arm survived the full
+    suite: every fixture either has no NumberOfFrames or has a correct
+    one, so the `or` clause never decided anything.
+
+    The reachable case is replacing a multi-frame array with a
+    single-frame one. Rank 2 has one reading whatever the attributes
+    say, so `geom.frames` is 1 and the declared 5 is now false. Leaving
+    it is the same class of incoherence as #186: descriptors that
+    describe an array the instance no longer holds, and the next export
+    writes 64 bytes under a header claiming five frames of them.
+
+    Note this does *not* pin the string-to-int canonicalisation the same
+    clause also performs -- `_write_int_if_changed` compares through
+    `declared_int`, so a stored `"1"` equals `1` and is deliberately left
+    alone rather than churning the graph.
+    """
+    inst = Instance("I_NF", "1.2.826.0.1.3680043.8.498.900021", 1)
+    inst.attributes["0028,0008"] = 5
+    inst.attributes["0028,0010"] = 8
+    inst.attributes["0028,0011"] = 8
+    inst.attributes["0028,0002"] = 1
+
+    inst.set_pixel_data(np.zeros((8, 8), dtype=np.uint8))
+
+    assert inst.attributes["0028,0008"] == 1, (
+        "a NumberOfFrames the array contradicts survived the setter")
+
+
+def test_export_corrects_a_stale_number_of_frames(tmp_path):
+    """The same clause in the export worker, and the louder failure.
+
+    **Mutation killed:** narrowing
+    `if geom.frames > 1 or "0028,0008" in inst.attributes:` to
+    `if geom.frames > 1:` in `_export_instance_worker`. Survived the full
+    suite for the same reason as the setter's copy.
+
+    Here the consequence is on disk rather than in memory: the generic
+    attribute merge has already put the declared `NumberOfFrames=5` on
+    the dataset, so skipping this write leaves a file whose header
+    claims five frames beside 64 bytes of Pixel Data. Writing
+    `geom.frames` is what makes the header agree with the bytes that
+    were actually emitted.
+    """
+    arr = np.arange(8 * 8, dtype=np.uint8).reshape((8, 8))
+    ds = _export_one(tmp_path, arr, {
+        "0028,0008": 5,
+        "0028,0010": 8, "0028,0011": 8, "0028,0002": 1,
+        "0028,0004": "MONOCHROME2",
+        "0028,0100": 8, "0028,0101": 8, "0028,0102": 7, "0028,0103": 0,
+    }, name="stale_frames.dcm")
+
+    assert int(ds.NumberOfFrames) == 1, (
+        "the file claims more frames than its Pixel Data carries")
+    assert len(ds.PixelData) == 8 * 8
     assert np.array_equal(ds.pixel_array, arr)
