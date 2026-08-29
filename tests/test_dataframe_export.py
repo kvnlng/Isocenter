@@ -439,6 +439,13 @@ def test_flattened_instances_holds_a_connection_only_for_one_page():
     page that ends the walk.
     """
     store = _store_with_instances(":memory:", count=6)
+    # The audit worker reaches the database through `_get_connection` too
+    # (`log_audit_batch`), so it is stopped before the counter goes in:
+    # a batch it drains inside the counting window would add connections
+    # this test would blame on the walk, and it would do so only
+    # sometimes. The WAL test above stops the store for the same reason,
+    # and shows the walk still works afterwards.
+    store.stop()
     real = store._get_connection
     calls = []
 
@@ -471,11 +478,131 @@ def test_flattened_instances_pages_a_filtered_cohort_correctly():
     store = _store_with_instances(":memory:", count=6)
     try:
         wanted = ["I1", "I3", "I5"]
+        # Two per page over three matches, deliberately: at `page_size=1`
+        # every page is either full or empty, so the walk never resumes
+        # from a *partial* page and the interesting path is not taken.
+        # Three matches at two per page gives a full page, then a short
+        # one, which is where a keyset that resumed from the last row
+        # scanned rather than the last row returned goes wrong.
         rows = list(store.get_flattened_instances(
-            instance_uids=wanted, page_size=1))
+            instance_uids=wanted, page_size=2))
 
         assert [r["sop_instance_uid"] for r in rows] == wanted
     finally:
+        store.stop()
+
+
+def test_flattened_instances_pages_a_patient_filter_across_a_boundary():
+    """The keyset condition is appended *after* the caller's filters, so
+    its bound value has to follow theirs in the parameter list.
+
+    A mismatch there binds a patient ID where the cursor belongs and
+    returns wrong rows without raising -- and it cannot show up on a
+    cohort that fits in one page, because page one binds `after_id = 0`
+    and any mis-ordering still happens to look plausible. This needs a
+    filter that excludes a patient *and* a page boundary inside the
+    survivors, so the second page's parameters are actually exercised.
+    """
+    from isocenter.persistence import SqliteStore
+
+    store = SqliteStore(":memory:")
+    graph = []
+    for pid in ("P0", "P1", "P2"):
+        p = Patient(pid, f"Name {pid}")
+        st = Study(f"ST-{pid}", "20230101")
+        se = Series(f"SE-{pid}", "CT", 101, equipment=None)
+        for i in range(4):
+            inst = Instance(f"{pid}-I{i}", "1.2.840.123", i)
+            inst.attributes = {"Modality": "CT"}
+            se.instances.append(inst)
+        st.series.append(se)
+        p.studies.append(st)
+        graph.append(p)
+    store.save_all(graph)
+
+    try:
+        # P0 and P2 are not adjacent, so the survivors straddle a gap in
+        # `instances.id` as well as a page boundary.
+        wanted = [f"P0-I{i}" for i in range(4)] + \
+                 [f"P2-I{i}" for i in range(4)]
+        for page_size in (1, 2, 3, 5, 7, 8, 9):
+            rows = [r["sop_instance_uid"] for r in
+                    store.get_flattened_instances(
+                        patient_ids=["P0", "P2"], page_size=page_size)]
+
+            assert rows == wanted, f"page_size={page_size} gave {rows}"
+    finally:
+        store.stop()
+
+
+def test_flattened_instances_survives_a_write_landing_between_pages():
+    """The docstring promises iteration is *not* one snapshot -- each page
+    is its own query -- and that is a contract, not an accident. It is the
+    price of releasing the lock, and it has to be safe as well as
+    documented.
+
+    The cursor is a plain integer captured from the last row yielded, not
+    a live cursor handle, so deleting the row it sits on must not derail
+    the walk: `i.id > ?` compares against a value that no longer needs to
+    exist. Rows appearing above the cursor are picked up; rows appearing
+    below it are not. Pinning this stops a future "optimisation" back to
+    one long-lived cursor -- which is #164 -- from looking like a no-op.
+    """
+    store = _store_with_instances(":memory:", count=6)
+    gen = None
+    writer = None
+    try:
+        gen = store.get_flattened_instances(page_size=2)
+        seen = [next(gen)["sop_instance_uid"], next(gen)["sop_instance_uid"]]
+        assert seen == ["I0", "I1"]
+
+        def mutate():
+            with store._get_connection() as conn:
+                cursor_id = conn.execute(
+                    "SELECT id FROM instances "
+                    "WHERE sop_instance_uid = 'I1'").fetchone()[0]
+                series_id = conn.execute(
+                    "SELECT id FROM series").fetchone()[0]
+                # `BELOW` takes the id `I0` just vacated, so it lands
+                # under the cursor but still above the walk's `after_id`
+                # floor of 0. Skipping it therefore says something about
+                # the cursor. A negative rowid would be excluded by the
+                # floor whatever the cursor did, and would pin a
+                # different, accidental property.
+                conn.execute(
+                    "DELETE FROM instances WHERE sop_instance_uid = 'I0'")
+                conn.execute(
+                    "INSERT INTO instances "
+                    "(id, series_id_fk, sop_instance_uid) "
+                    "VALUES (1, ?, 'BELOW')", (series_id,))
+                conn.execute(
+                    "INSERT INTO instances (series_id_fk, sop_instance_uid) "
+                    "VALUES (?, 'ABOVE')", (series_id,))
+                conn.execute(
+                    "DELETE FROM instances WHERE id = ?", (cursor_id,))
+            return "written"
+
+        # On a thread with a bounded join, not inline: writing through
+        # `_get_connection` while a generator is parked is precisely what
+        # #164 deadlocked on, so doing it on this thread would wedge the
+        # suite against a regression instead of failing one test.
+        writer, box = _probe_on_a_thread(mutate)
+
+        assert box.get("error") is None, f"writer raised: {box.get('error')!r}"
+        assert box.get("value") == "written", \
+            "a mid-walk write blocked on the parked generator (#164)"
+
+        rest = [r["sop_instance_uid"] for r in gen]
+
+        assert rest == ["I2", "I3", "I4", "I5", "ABOVE"], (
+            "the walk must resume from the deleted cursor's id without "
+            "repeating or skipping a row, and must see the later insert")
+        assert "BELOW" not in rest
+    finally:
+        if gen is not None:
+            gen.close()
+        if writer is not None:
+            writer.join(timeout=2.0)
         store.stop()
 
 
