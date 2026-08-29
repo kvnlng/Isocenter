@@ -391,7 +391,7 @@ redaction is a failed *operation*, which is precisely what
 `_report_export_failures` writes `ERROR` for.
 
 *Grading.* A `DATA_LOSS` row is graded by `loss_scope`
-(`session.py:1576`): `STANDARD` leaves the run at `PASS`, which is the
+(`session.py:1565`): `STANDARD` leaves the run at `PASS`, which is the
 opposite of what is needed, and `PRIVATE` would be a lie about the tag,
 since there is no tag. An `ERROR` row lands in `get_audit_errors()`,
 which selects `action_type IN ('ERROR','WARNING')`, which populates
@@ -741,7 +741,7 @@ below.
 
 | Test | Effect |
 | --- | --- |
-| `tests/test_float_pixel_data_export.py`, all 12 | **Unchanged, must keep passing.** Every fixture is rank 2 (4×4 or 8×8) with `Rows`/`Columns` derived from `arr.shape[-2:]` and `SamplesPerPixel = 1` declared, so the resolver returns `STRUCTURAL` and `_write_pixel_geometry` writes the values `_merge` already wrote. `PhotometricInterpretation` is declared `MONOCHROME2` in `_export_one` and in `_write_float_src`, and `resolve_photometric_interpretation` returns `None` for a coherent monochrome pair, so the declared value survives. Checked value by value, not assumed. |
+| `tests/test_float_pixel_data_export.py`, all 11 test functions (16 cases with parametrisation) | **Unchanged, must keep passing.** Every fixture is rank 2 (4×4 or 8×8) with `Rows`/`Columns` derived from `arr.shape[-2:]` and `SamplesPerPixel = 1` declared, so the resolver returns `STRUCTURAL` and `_write_pixel_geometry` writes the values `_merge` already wrote. `PhotometricInterpretation` is declared `MONOCHROME2` in `_export_one` and in `_write_float_src`, and `resolve_photometric_interpretation` returns `None` for a coherent monochrome pair, so the declared value survives. Checked value by value, not assumed. |
 | `tests/test_float_pixel_data_export.py::test_a_float16_array_is_refused_and_reported` and `::test_an_unwritable_float_on_an_image_modality_fails_the_export` | Unchanged: 4×4 float16, rank 2, `STRUCTURAL`, never `GUESSED`; the float16 arm writes no descriptors before and none after. |
 | `tests/test_pixel_geometry_pipeline.py::test_export_worker_refuses_to_write_a_guessed_geometry` | Must keep passing. Same `(100,200,3) uint8` fixture, same `RuntimeError`, raised one block earlier. |
 | `tests/test_pixel_geometry_pipeline.py` (the rest) | Integer path, unchanged. |
@@ -900,7 +900,7 @@ That file is the home of the float branch and already has the direct
    the serializer path the `scripts/` generators use, which is the path
    #205 measured and the one `session.export()` cannot exercise.
 
-7. **Must keep passing, unmodified** *(guard)*: all 12 existing tests in
+7. **Must keep passing, unmodified** *(guard)*: all 11 existing test functions in
    `tests/test_float_pixel_data_export.py`;
    `tests/test_pixel_geometry_pipeline.py::test_export_worker_refuses_to_write_a_guessed_geometry`;
    `tests/test_api_coherence.py`.
