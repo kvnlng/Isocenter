@@ -36,6 +36,29 @@ class ConstantPixelLoader:
         return np.full((self.size, self.size), self.fill, dtype=np.uint8)
 
 
+def _declare_geometry(inst, size=50):
+    """Give a hand-built instance the descriptors an ingested one would have.
+
+    `get_pixel_data()` used to call `set_pixel_data()` on the way back from
+    the loader, which had the side effect of populating Rows and Columns
+    from whatever the loader returned. That sync is gone -- a read must not
+    write, because on a multi-frame image it wrote a *guess* about which
+    axis was which (#186) -- so an instance that declares no geometry no
+    longer acquires one by being read. `persist_pixel_data` builds the
+    replacement `SidecarPixelLoader` from these attributes, so without them
+    the redacted pixels come back as an empty array.
+
+    Nothing was weakened here: the assertions are untouched. A real
+    ingested instance always carries these, so declaring them makes the
+    fixture more like the thing it stands in for, not less.
+    """
+    inst.attributes["0028,0010"] = size   # Rows
+    inst.attributes["0028,0011"] = size   # Columns
+    inst.attributes["0028,0002"] = 1      # SamplesPerPixel
+    inst.attributes["0028,0004"] = "MONOCHROME2"
+    inst.attributes["0028,0100"] = 8      # BitsAllocated
+
+
 class TestRedactionParallel(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
@@ -66,8 +89,7 @@ class TestRedactionParallel(unittest.TestCase):
             se.equipment = Equipment("Man", "Mod", serial)
 
             inst = Instance(f"I{i}", f"1.2.3.{i}", 1)
-            # inst.rows = 50
-            # inst.columns = 50
+            _declare_geometry(inst)
 
             # Mock Pixel Data Loader
             # We create a unique array for each to verify modification
@@ -127,6 +149,7 @@ class TestRedactionParallel(unittest.TestCase):
 
         for i in range(50):
             inst = Instance(f"I{i}", f"1.2.3.{i}", 1)
+            _declare_geometry(inst)
 
             inst._pixel_loader = ConstantPixelLoader()
             se.instances.append(inst)

@@ -7,6 +7,7 @@ from pydicom.dataset import Dataset
 from pydicom.pixels import apply_voi_lut
 from isocenter.entities import Instance
 from isocenter.logger import get_logger
+from isocenter.pixel_geometry import resolve_pixel_geometry
 
 logger = logging.getLogger(__name__)
 
@@ -196,25 +197,21 @@ def analyze_pixels(instance: Instance) -> List[TextRegion]:
             get_logger().debug("VOI LUT application failed: %s", exc)
             pass
 
-        frames = []
-        shape = pixel_array.shape
-
-        # Heuristic to detect frames vs RGB
-        # If RGB, shape is (H, W, 3). If MultiFrame, (N, H, W).
-        # CAUTION: apply_voi_lut might change shape? No, usually preserves.
-
-        if pixel_array.ndim == 2:
-            frames.append(pixel_array)
-        elif pixel_array.ndim == 3:
-            if pixel_array.shape[-1] in [3, 4]:
-                frames.append(pixel_array) # Single RGB frame
-            else:
-                for i in range(shape[0]):
-                    frames.append(pixel_array[i])
-        elif pixel_array.ndim == 4:
-            # (Frames, Rows, Cols, Samples)
-            for i in range(shape[0]):
-                frames.append(pixel_array[i])
+        # Frames vs. samples is decided from the instance's descriptors,
+        # not from the array's last axis. The old `shape[-1] in [3, 4]`
+        # test handed a 3-frame 8x3 grayscale image to OCR as one RGB
+        # frame, so text burned into frames 1 and 2 was never looked at
+        # (#186, #205). This runs after apply_voi_lut, which preserves
+        # shape.
+        #
+        # `geom.frames` is the array's first axis on every frames-major
+        # arm and 1 on the others, never the declared NumberOfFrames, so
+        # this range is in bounds by construction rather than by luck.
+        geom = resolve_pixel_geometry(pixel_array.shape, instance.attributes)
+        if geom.frames > 1:
+            frames = [pixel_array[i] for i in range(geom.frames)]
+        else:
+            frames = [pixel_array]
 
         for i, frame in enumerate(frames):
             regions = detect_text_regions(frame, frame_idx=i)

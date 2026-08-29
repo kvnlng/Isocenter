@@ -37,6 +37,12 @@ from pydicom.dataset import Dataset
 
 from .entities import Patient, Study, Series, Instance, Equipment, DicomItem
 from .logger import get_logger
+from .pixel_geometry import (
+    GeometryEvidence,
+    planar_configuration_default,
+    resolve_photometric_interpretation,
+    resolve_pixel_geometry,
+)
 from .parallel import run_parallel
 from .validation import IODValidator
 from .sidecar import SidecarManager
@@ -846,6 +852,22 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # Otherwise (SR, etc.), proceed
                 arr = None
 
+        # Resolve the geometry once, here, and use the same answer for the
+        # redaction axes and the descriptors written below. It has to
+        # happen before the redaction block: getting the axes wrong applies
+        # a zone to the wrong region, so the burned-in identifier stays in
+        # the exported pixels while the pipeline reports a successful
+        # redaction -- the most severe of the four sites this heuristic
+        # reached, and the one neither #186 nor #205 names.
+        #
+        # A ValueError here (the instance declares a SamplesPerPixel no
+        # axis of the array can carry) propagates to the except below and
+        # becomes ExportOutcome(ok=False): audited, counted in
+        # ExportSummary.failed and surfaced by the compliance report
+        # (#181), which is where a contradiction belongs.
+        geom = resolve_pixel_geometry(arr.shape, inst.attributes) \
+            if arr is not None else None
+
         if arr is not None:
             # APPLY REDACTION (Fix for Export Compression Bug)
             if ctx.redaction_zones:
@@ -857,7 +879,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                     arr = arr.copy()
 
                 # Apply zones
-                RedactionService.apply_redaction_to_array(arr, ctx.redaction_zones)
+                RedactionService.apply_redaction_to_array(
+                    arr, ctx.redaction_zones, geometry=geom)
 
         if arr is not None and arr.dtype.kind == 'f':
             # A floating-point array is not Pixel Data, and writing it
@@ -945,36 +968,76 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if not ctx.compression:
                 ds.PixelData = arr.tobytes()
 
-            # Recalculate dimensions based on array shape
-            # Logic mirrored from Instance.set_pixel_data
-            shape = arr.shape
-            ndim = len(shape)
+            # Every descriptor here comes from one resolved geometry.
+            # Rows and Columns used to be recomputed from the array's shape
+            # while SamplesPerPixel was read straight out of `attributes`,
+            # and it is that *incoherence* -- not the wrong axis on its own
+            # -- that turned #186 into a file pydicom refuses to decode:
+            # Rows=3, Columns=4 beside SamplesPerPixel=4. Writing all four
+            # from `geom` makes them agree by construction.
+            if geom.evidence is GeometryEvidence.GUESSED:
+                raise RuntimeError(
+                    f"Refusing to write {ctx.output_path}: the pixel "
+                    f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
+                    f"equally a multi-frame grayscale image and a "
+                    f"single-frame image with {arr.shape[-1]} samples per "
+                    f"pixel -- and the instance declares no SamplesPerPixel "
+                    f"(0028,0002), NumberOfFrames (0028,0008) or "
+                    f"Rows/Columns to resolve it. Writing it would guess "
+                    f"the image's geometry, and a recipient cannot tell a "
+                    f"guess apart from a correct answer.")
 
-            rows, cols = 0, 0
-            # defaults
-            if ndim == 2:
-                rows, cols = shape
-            elif ndim == 3:
-                if shape[-1] in [3, 4]:
-                    rows, cols, _ = shape
-                else:
-                    _, rows, cols = shape
-            elif ndim == 4:
-                _, rows, cols, _ = shape  # frames, rows, cols, samples
+            ds.Rows = geom.rows
+            ds.Columns = geom.cols
+            ds.SamplesPerPixel = geom.samples
+            if geom.frames > 1 or "0028,0008" in inst.attributes:
+                ds.NumberOfFrames = geom.frames
 
-            if rows > 0 and cols > 0:
-                ds.Rows = rows
-                ds.Columns = cols
+            # Photometric Interpretation is not derivable from an array --
+            # three samples are equally RGB, YBR_FULL or YBR_RCT -- so only
+            # an outright contradiction is corrected. None means the
+            # declared value is coherent and `_merge` already put it on
+            # `ds`; overwriting it is what relabelled every YBR instance.
+            photometric = resolve_photometric_interpretation(
+                inst.attributes, geom.samples)
+            if photometric is None:
+                photometric = inst.attributes.get("0028,0004")
+            if photometric:
+                ds.PhotometricInterpretation = photometric
 
-            ds.SamplesPerPixel = inst.attributes.get("0028,0002", 1)
-            ds.PhotometricInterpretation = inst.attributes.get("0028,0004", "MONOCHROME2")
+            if planar_configuration_default(inst.attributes, geom.samples):
+                ds.PlanarConfiguration = 0
 
             if arr.itemsize == 1:
                 default_bits = 8
             else:
                 default_bits = 16
 
-            ds.BitsAllocated = inst.attributes.get("0028,0100", default_bits)
+            # Derived from the array, never read from `attributes`, for the
+            # same reason Rows and SamplesPerPixel now are -- and here the
+            # reason is stronger, because `ds.PixelData = arr.tobytes()` is
+            # three lines above. A declared width that disagrees with
+            # `itemsize` cannot be honoured by the bytes being written, so
+            # "the attributes win" is not one of the options (spec §3.10).
+            #
+            # This used to be reconciled on the *read* path: the
+            # `set_pixel_data()` call that `get_pixel_data()` made ended in
+            # an unconditional `set_attr("0028,0100", itemsize * 8)`.
+            # Removing that call was right -- a read must not write -- but
+            # it was the only thing correcting a declared width, and
+            # `SidecarPixelLoader` buckets dtype as `uint16 if bits > 8
+            # else uint8`, so every declared value outside {8, 16} reaches
+            # here disagreeing with the array. A binary Segmentation
+            # (BitsAllocated=1) exported as 1-bit beside 8-bit bytes, and
+            # pydicom read a 2-frame 4x8 mask back as 16 frames: decodable,
+            # internally coherent, and a different image. Reconciling it
+            # where the bytes are produced is the fix that does not put a
+            # write back on the load path.
+            #
+            # BitsStored, HighBit and PixelRepresentation stay declared:
+            # they do not constrain how many bytes `tobytes()` emits, and
+            # their coherence is out of scope (spec §8).
+            ds.BitsAllocated = arr.itemsize * 8
             ds.BitsStored = inst.attributes.get("0028,0101", default_bits)
             ds.HighBit = inst.attributes.get("0028,0102", default_bits - 1)
             ds.PixelRepresentation = inst.attributes.get("0028,0103", 0)
