@@ -1013,7 +1013,31 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             else:
                 default_bits = 16
 
-            ds.BitsAllocated = inst.attributes.get("0028,0100", default_bits)
+            # Derived from the array, never read from `attributes`, for the
+            # same reason Rows and SamplesPerPixel now are -- and here the
+            # reason is stronger, because `ds.PixelData = arr.tobytes()` is
+            # three lines above. A declared width that disagrees with
+            # `itemsize` cannot be honoured by the bytes being written, so
+            # "the attributes win" is not one of the options (spec §3.10).
+            #
+            # This used to be reconciled on the *read* path: the
+            # `set_pixel_data()` call that `get_pixel_data()` made ended in
+            # an unconditional `set_attr("0028,0100", itemsize * 8)`.
+            # Removing that call was right -- a read must not write -- but
+            # it was the only thing correcting a declared width, and
+            # `SidecarPixelLoader` buckets dtype as `uint16 if bits > 8
+            # else uint8`, so every declared value outside {8, 16} reaches
+            # here disagreeing with the array. A binary Segmentation
+            # (BitsAllocated=1) exported as 1-bit beside 8-bit bytes, and
+            # pydicom read a 2-frame 4x8 mask back as 16 frames: decodable,
+            # internally coherent, and a different image. Reconciling it
+            # where the bytes are produced is the fix that does not put a
+            # write back on the load path.
+            #
+            # BitsStored, HighBit and PixelRepresentation stay declared:
+            # they do not constrain how many bytes `tobytes()` emits, and
+            # their coherence is out of scope (spec §8).
+            ds.BitsAllocated = arr.itemsize * 8
             ds.BitsStored = inst.attributes.get("0028,0101", default_bits)
             ds.HighBit = inst.attributes.get("0028,0102", default_bits - 1)
             ds.PixelRepresentation = inst.attributes.get("0028,0103", 0)

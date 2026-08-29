@@ -692,3 +692,97 @@ def test_a_flat_buffer_reshaped_from_the_descriptors_still_dirties():
         "would leave it 1-D, so this pins the arm as well as the effect")
     assert inst.has_unsaved_changes is True, (
         "a reshaped flat buffer is still a new array the store has to hold")
+
+
+# ---------------------------------------------------------------------------
+# BitsAllocated -- the descriptor the removed load-path write used to fix
+# ---------------------------------------------------------------------------
+
+def _write_binary_segmentation(path, arr):
+    """A `BitsAllocated=1` source: 1 bit per pixel, packed, as PS3.5 requires.
+
+    `write_source` derives the width from the dtype, so it can only build
+    the coherent case. This builds the one that matters -- a declared
+    width that no numpy array can have, which is exactly the class the
+    load path used to reconcile and nothing does now.
+    """
+    sop_uid = pydicom.uid.generate_uid()
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.66.4"
+    file_meta.MediaStorageSOPInstanceUID = sop_uid
+    file_meta.TransferSyntaxUID = ImplicitVRLittleEndian
+
+    ds = FileDataset(str(path), {}, file_meta=file_meta, preamble=b"\0" * 128)
+    ds.PatientName = "TestBits"
+    ds.PatientID = "PID_BITS"
+    ds.SOPInstanceUID = sop_uid
+    ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
+    ds.SeriesInstanceUID = "1.2.826.0.1.3680043.8.498.900301"
+    ds.StudyInstanceUID = "1.2.826.0.1.3680043.8.498.900300"
+    ds.Modality = "SEG"
+    ds.StudyDate = "20230101"
+    ds.SeriesNumber = 1
+    ds.InstanceNumber = 1
+
+    frames, rows, cols = arr.shape
+    ds.NumberOfFrames = frames
+    ds.Rows = rows
+    ds.Columns = cols
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 1
+    ds.BitsStored = 1
+    ds.HighBit = 0
+    ds.PixelRepresentation = 0
+    ds.PixelData = np.packbits(arr.ravel(), bitorder="little").tobytes()
+    ds.save_as(str(path), enforce_file_format=True)
+    return sop_uid
+
+
+def test_export_writes_bits_allocated_the_array_actually_has(tmp_path):
+    """A declared BitsAllocated of 1 must not be written beside 8-bit bytes.
+
+    **This is a regression test in the unusual direction: it fails on
+    `cf9dcd6` and passes on `692218c`.** It is not a guard. Removing
+    `set_pixel_data()` from `get_pixel_data()` was right for geometry,
+    but that call's last act was an unconditional
+    `set_attr("0028,0100", array.itemsize * 8)`, and that was the only
+    thing reconciling a declared width with the dtype the loader
+    actually produces. `SidecarPixelLoader` buckets dtype as
+    `uint16 if bits > 8 else uint8`, so a declared 1 yields a `uint8`
+    array, and the export then wrote `BitsAllocated=1` beside
+    `arr.tobytes()` at 8 bits per pixel: pydicom reads 8x the pixels and
+    reshapes a 2-frame 4x8 segmentation into 16 frames. Decodable,
+    coherent, and a different image -- #186's failure mode exactly,
+    reintroduced through the descriptor that was supposed to be immune.
+
+    The fix puts the reconciliation where the bytes are produced, three
+    lines below `ds.PixelData = arr.tobytes()`, which is what §3.10
+    argues for: a width that disagrees with the array cannot be
+    honoured, so "the attributes win" was never an option here.
+    """
+    arr = np.zeros((2, 4, 8), dtype=np.uint8)
+    arr[0, 1, 2] = 1
+    arr[1, 3, 7] = 1
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_binary_segmentation(src / "seg.dcm", arr)
+
+    session = DicomSession(str(tmp_path / "bits.db"))
+    try:
+        session.ingest(str(src))
+        assert only_instance(session).attributes["0028,0100"] in (1, "1"), (
+            "the fixture must carry the declared width the defect needs")
+        out = tmp_path / "out"
+        session.export(str(out), show_progress=False)
+    finally:
+        session.close()
+
+    written = sorted(out.rglob("*.dcm"))
+    assert len(written) == 1, written
+    ds = pydicom.dcmread(written[0])
+
+    assert ds.BitsAllocated == 8, (
+        "the file declares a width its Pixel Data does not have")
+    assert ds.pixel_array.shape == (2, 4, 8), ds.pixel_array.shape
+    assert np.array_equal(ds.pixel_array, arr)
