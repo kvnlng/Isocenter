@@ -319,6 +319,30 @@ def test_the_LO_cap_is_checked_per_value_not_against_the_join():
         ['q' * 50, 'r' * 50]) == ('LO', ['q' * 50, 'r' * 50])
 
 
+def test_the_LO_cap_admits_a_value_of_exactly_64_characters():
+    """The boundary itself, because `<= 64` and `< 64` are one keystroke
+    apart and only one of them is right.
+
+    Added in review of #165: nothing pinned the edge. The fixture's
+    longest multi-valued atom is 50 characters and the next case up is
+    80, so changing the comparison in `_fallback_multivalue` from `<=` to
+    `<` left the whole suite green while quietly sending a conformant
+    two-valued element to `UT` and collapsing its multiplicity to 1.
+    Measured as a mutant that SURVIVED before this test and is killed by
+    it.
+
+    64 is legal and 65 is not, measured rather than read off the spec:
+    pydicom writes and reads `['a' * 64, 'b' * 64]` back under `LO` with
+    no warning, and warns "The value length (65) exceeds the maximum
+    length of 64 allowed for VR LO" one character later.
+    """
+    assert DicomExporter._fallback_encoding(['a' * 64, 'b' * 64]) == (
+        'LO', ['a' * 64, 'b' * 64])
+    # One past the cap and no text VR holds both the length and the
+    # multiplicity, so the element collapses to `UT`.
+    assert DicomExporter._fallback_encoding(['a' * 65, 'b'])[0] == 'UT'
+
+
 def test_a_value_too_long_for_LO_collapses_the_whole_element_to_UT():
     """`UT` has a value multiplicity of 1, so this is a real trade.
 
