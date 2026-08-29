@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-29
 **Status:** Design approved, in implementation
-**Amended:** 2026-08-29 — §3.11 rewritten, §6 corrected, §7 gains one test.
-See §11 for what changed and why; the original §3.11 was wrong and dropped
-redacted pixels.
+**Amended:** 2026-08-29 (three passes) — see §11. The most consequential:
+the original §3.11 was wrong and dropped redacted pixels, and §7 never
+asked for a test on the line §4.3 calls "the single most important".
 **Tracking:** #186, #205 (same defect, two entry points). Folds in the same
 expression at `services.py:489` and `pixel_analysis.py:209`.
 **Base:** `main` at `692218c`
@@ -316,8 +316,12 @@ ambiguous case is refused at the export boundary instead (§4.2).
 - Exactly one admissible → take it, `evidence = DECLARED` if `s_d` is not
   `None`, else `STRUCTURAL`.
 - Neither admissible → contradiction, §3.6.
-- Both admissible → step 2. (Reachable only when `s_d is None and
-  shape[2] in (3, 4)`.)
+- Both admissible → step 2. Two ways to get here: `s_d is None and
+  shape[2] in (3, 4)`, and `s_d == 1 and shape[2] == 1` — a declared
+  single-sample instance whose array's last axis is 1 satisfies arm A
+  (`s_d == 1`) and arm B (`s_d == shape[2]`) at once. *(Amended: the
+  original text named only the first and said "reachable only when",
+  which is over-strong.)*
 
 **Step 2 — NumberOfFrames as tiebreak:**
 
@@ -401,9 +405,24 @@ job.
 
 The existing 1-D branch of `set_pixel_data` already consults
 `0028,0010`/`0028,0011`/`0028,0002`/`0028,0008`, truncates DICOM padding,
-reshapes and returns without writing anything. Keep it verbatim; move it
-into the resolver only if that is free. Its one fall-through — declared
-size is 0, so `rows, cols = 1, shape[0]` — stays.
+reshapes and returns without writing anything. Keep its *resolution
+logic* verbatim; move it into the resolver only if that is free. Its one
+fall-through — declared size is 0, so `rows, cols = 1, shape[0]` — stays.
+
+**Amended 2026-08-29 — this clause and §3.11 rule 2 contradicted each
+other, and rule 2 governs.** The rank-1 branch takes an early `return`
+before reaching the descriptor writes, so "keep it verbatim" would have
+meant a flat array assigned through `set_pixel_data` leaves the instance
+clean — `has_unsaved_changes` False on `692218c`, and False after the
+fix. That is the §11.1 defect in its purest form: no descriptor changes
+because none is written *at all*, yet `self.pixel_array` was replaced and
+the store's copy is now stale.
+
+The early return must therefore call `mark_modified()` before returning.
+"Unchanged" in this section's heading means the **geometry it derives**
+is unchanged, not that the branch is byte-identical. This is a
+behavioural change on `692218c` — the only one in the change that is not
+a bug fix — and it needs its own test and its own CHANGELOG line.
 
 The sidecar loader returns a 1-D array only when the stored metadata is
 too small for the buffer, in which case the resolver's 1-D branch is
@@ -667,8 +686,9 @@ ds.SamplesPerPixel = geom.samples
 if geom.frames > 1 or "0028,0008" in inst.attributes:
     ds.NumberOfFrames = geom.frames
 ds.PhotometricInterpretation = <§3.8 applied to inst.attributes and geom.samples>
-if geom.samples > 1 and "0028,0006" not in inst.attributes:
-    ds.PlanarConfiguration = 0
+if geom.samples >= 3 and "0028,0006" not in inst.attributes:
+    ds.PlanarConfiguration = 0   # amended: was `> 1` here and `>= 3` in
+                                 # §3.9; §3.9 governs
 ```
 
 `BitsAllocated`/`BitsStored`/`HighBit`/`PixelRepresentation` keep their
@@ -815,15 +835,26 @@ test call sites across 27 files.
 > that were wrong are marked below. Rows covering a *first* set on a fresh
 > instance are unaffected: the descriptors go from absent to present, so
 > they change under any rule.
+>
+> **Second amendment pass, same day:** the re-audit above was still
+> reading code, and it missed the RGB arms of two `scripts/` generators.
+> Those two rows are corrected below from *measurement* — the reviewer
+> instrumented the child processes (three hooks via `sitecustomize.py` on
+> `PYTHONPATH`; 136 pids recorded probe output in one generator run) and
+> swept the `get_pixel_data` side that this table cannot reach. It found
+> **no fifth instance** of the read-must-not-write conflation: three
+> candidates were rank-2, unambiguous, or byte-identical on `692218c`.
+> The four sites in §2 are the complete set, established by measurement
+> rather than by argument.
 
 | Caller | Shapes passed | Effect of this design |
 | --- | --- | --- |
 | `Instance.get_pixel_data` ×3 (`entities.py:444,456,473`) | whatever the loader/pydicom returns | **No longer calls it.** Behaviour change: a load no longer writes attributes and no longer dirties the entity. No test asserts either (checked: `test_sidecar.py:92`, `test_metadata_refactor_full.py:110`, `test_compaction.py:79,155`, `test_blob_storage.py:220`, `test_entities.py:52`, `test_memory_redaction.py:58,81`, `test_redaction_parallel.py:105,150`, `test_redact_error.py:50`, `test_session.py:77`, `test_redaction_wildcard.py:114` all assert on the array only). |
 | `RedactionService._apply_roi_to_instance` (`services.py:545`) | the instance's own array, same shape | **Row corrected.** Same shape, full attributes → DECLARED, so no descriptor is written — but the instance **is** marked modified (§3.11), which is what the redacted bytes need. The earlier text said "no dirtying" and was the first instance of the conflation §11.1 describes. Fixes the multi-frame corruption on the not-writeable path. Note this method's *other* arm mutates the array in place and never calls `set_pixel_data` at all; it relies on `redact()`'s explicit `mark_modified()` at `services.py:449`, unchanged here. |
 | `InstanceContextBuilder.set_pixel_data` (`builders.py:98`) | pass-through | Unchanged. |
-| `scripts/generate_ocr_test_data.py:405` | 2-D CT `(512,512)`; XA multi-frame `(frames,512,512)`. Sets `0028,0008` at `:440`, i.e. **after**. | `512 ∉ {3,4}` → arm A, STRUCTURAL. **No guess, no warning, no change in output.** |
-| `scripts/generate_redaction_example.py:129` | `(frames,rows,cols)` CT, rows/cols ≥ 64. Sets Rows/Cols/BitsAllocated at `:131+`, after. | Arm A, STRUCTURAL. Unchanged. |
-| `scripts/generate_test_dataset.py:258` | 2-D and multi-frame, 512×512 | Arm A / rank 2. Unchanged. |
+| `scripts/generate_ocr_test_data.py:405` | 2-D CT `(512,512)`; XA multi-frame `(frames,512,512)`; **and Secondary Capture RGB `(rows,cols,3)`** (`:162-163`), whose `0028,0004` is set at `:419`, after. | **Row corrected — the original said "no guess, no warning" and was wrong.** The CT and XA arms are arm A / rank 2, STRUCTURAL, silent, as predicted. The SC RGB arm is rank 3 with nothing declared, so both arms are admissible and it resolves `GUESSED`. Measured by the reviewer: **270 files, 10 warnings**, all at the setter, every worker resolution DECLARED or STRUCTURAL, all files decode unchanged. Output is identical; only the log is louder. |
+| `scripts/generate_redaction_example.py:129` | `(frames,rows,cols)` CT, rows/cols ≥ 64. Sets Rows/Cols/BitsAllocated at `:131+`, after. | Arm A, STRUCTURAL. Unchanged — measured **12 files, 0 warnings**. The one generator row that was right. |
+| `scripts/generate_test_dataset.py:258` | 2-D and multi-frame greyscale, **plus US `(480,640,10,3)`, SC `(512,512,1,3)` and OT `(128,128,1,3)` RGB** (`:154-163`) | **Row corrected — the original said "unchanged" and missed the RGB modalities.** The multi-frame US array is rank 4 and unambiguous; the single-frame SC and OT arrays are rank 3 with nothing declared and resolve `GUESSED`. Measured: **18 files, 2 warnings** — one per single-frame RGB instance. Output identical. |
 | ~50 test sites passing 2-D `np.zeros((10,10))`-shaped arrays | rank 2 | Unchanged. |
 | `tests/test_entities.py::test_pixel_unpacking_rgb` — `(100,200,3)`, nothing declared | GUESSED | Passes; **emits a new WARNING**. |
 | `tests/test_entities.py::test_photometric_defaults` case 3 — `(10,10,3)`, PI=MONOCHROME2 | GUESSED | Passes (PI corrected per §3.8, PC set); emits a WARNING. |
@@ -843,10 +874,12 @@ test call sites across 27 files.
 
 **Costs to accept, stated rather than discovered:**
 
-1. **New WARNING noise** in three or four tests and in any user code that
-   sets a colour array on an instance before its attributes. Declaring
-   `SamplesPerPixel` before the call silences it. This is the intended
-   price of "the guess must not be silent".
+1. **New WARNING noise** in three or four tests, in **two of the three
+   `scripts/` generators** (12 warnings across 300 generated files —
+   §6's corrected rows), and in any user code that sets a colour array on
+   an instance before its attributes. Declaring `SamplesPerPixel` before
+   the call silences it. This is the intended price of "the guess must
+   not be silent". No generated file changes.
 2. **`session.export()` can now fail an instance** that previously
    succeeded (wrongly). This is the point; the audit trail (#181) reports
    it.
@@ -951,12 +984,103 @@ those are not repeated here.
     the identity test in §3.11 so it is not reintroduced as an
     optimisation.
 
+### Must pin `ds.SamplesPerPixel = geom.samples` (added by review)
+
+§4.3 calls this line **"the single most important"** in the change, and
+§7 originally asked for no test that touches it. Reverting it to
+`inst.attributes.get("0028,0002", 1)` passed the entire suite. The
+reviewer proved it reachable in both directions and wrote two tests that
+kill the mutation; both fail on `692218c`.
+
+19. **Resolved samples exceed the declared ones.** Export an instance
+    whose array is rank 4 colour — `(2, 4, 4, 3)` — with **no** declared
+    `0028,0002`. The resolver returns `samples=3`. With the line reverted
+    the file is written `SamplesPerPixel=1`, and `pydicom` reshapes it to
+    `(6, 4, 4)` — a decodable file describing six greyscale frames where
+    there are two colour ones. Assert `ds.SamplesPerPixel == 3` and that
+    `ds.pixel_array` round-trips `np.array_equal` against the source.
+
+20. **Resolved samples fall below a stale declared value.** Export an
+    instance holding a rank-2 `(8, 8)` array beside a stale
+    `0028,0002 = 3` (the shape a caller leaves behind after replacing a
+    colour array with a greyscale one — §5's rank-2 row). The resolver
+    returns `samples=1`. With the line reverted the file claims 3 samples
+    over 64 pixels' worth of bytes and fails to decode. Assert
+    `ds.SamplesPerPixel == 1` and that `ds.pixel_array` round-trips.
+
+Together these pin both directions of the coherence §4.3 exists to
+create: all four descriptors come from one resolved geometry, so
+`SamplesPerPixel` can neither exceed nor undershoot what the bytes hold.
+
+### Must pin the rank-1 behavioural change (§3.7)
+
+21. **A flat array set through `set_pixel_data` dirties the instance.**
+    Build an instance with full descriptors, `mark_persisted()`, assert
+    `has_unsaved_changes is False`, then `set_pixel_data` a 1-D array
+    that reshapes cleanly from those descriptors. Assert
+    `has_unsaved_changes is True` and that no geometry attribute changed.
+    This is the one behavioural change in the work that is not a bug fix
+    (§3.7) and it must not arrive unannounced.
+
+### Fixture hygiene — why four tests on this work guarded less than they looked
+
+This is not a general lecture; it is a list of the two specific traps in
+`set_pixel_data` that have now produced four misleading tests on this
+change alone. **A test here must be built on a fixture in which the
+behaviour under test is the only thing that could produce the result.**
+
+The two traps:
+
+- **`set_pixel_data` overwrites `BitsAllocated` from `array.itemsize`**
+  (§3.10). Any pixel descriptor written to `attributes` *before* the call
+  is silently corrected to agree with the array. A test that sets
+  `BitsAllocated = 32` and then calls `set_pixel_data` is asserting the
+  array's dtype, not the production assignment — it passes with that
+  assignment deleted. `tests/test_float_pixel_data_export.py:332-338`
+  documents the workaround: apply the `attrs` **after** the call.
+- **A fresh `Instance` has empty `attributes`, so every descriptor write
+  is a change** and the instance dirties under any rule, conditional or
+  not. A test that sets pixels on a fresh instance and asserts
+  `has_unsaved_changes` is asserting that `attributes` was empty.
+
+The four casualties, each with the fixture detail that made it pass for
+the wrong reason:
+
+| Test | What it looks like it pins | Why it does not |
+| --- | --- | --- |
+| the `BitsAllocated == 32` assertion in the float export tests | that the export writes the declared width | trap 1 — corrected by `set_pixel_data` before the assertion could see a disagreement |
+| `test_persistence_incremental.py::test_unsaved_tracking_pixel_change` | that `set_pixel_data` dirties the instance | trap 2 — fresh instance, descriptors change, passes under a conditional `mark_modified()` too. This is why §11.1 reached implementation. |
+| `test_redaction_dirties_the_instance_it_redacted` | the same, through redaction | trap 2 in partial form — its instance lacks `0028,0004` and `0028,0100`, so those two writes dirty it regardless. Survives the conditional-`mark_modified()` mutation. |
+| `ds.SamplesPerPixel = geom.samples` | — | pinned by **nothing**; tests 19 and 20 above exist because reverting it passed the whole suite |
+
+**Requirements that follow, for anything added under §7:**
+
+1. Any test asserting a *descriptor value* must set that descriptor
+   **after** `set_pixel_data`, or use an array whose dtype and shape make
+   the derived value differ from the asserted one.
+2. Any test asserting *dirtiness* must start from an instance with a
+   **complete** set of descriptors and an explicit `mark_persisted()`,
+   and must assert `has_unsaved_changes is False` immediately before the
+   call under test. Tests 17, 18 and 21 are written this way; that is not
+   incidental.
+3. **§3.11 rule 1 (conditional descriptor writes) is currently unpinned
+   by design.** Nothing distinguishes "wrote the same value" from "did
+   not write". If a test for it is wanted, it has to observe `_revision`
+   directly — assert that a `set_pixel_data` call resolving to identical
+   descriptors advances `_revision` by exactly the one bump
+   `mark_modified()` contributes, not by one per descriptor. Recorded as
+   a known gap rather than silently left out.
+
 ### Non-vacuity requirement
 
 Tests 1, 3, 4, 5 and 6 must each fail on `main` at `692218c`.
 Tests 17 and 18 will *pass* on `692218c` — they pin behaviour that is
 already correct and that this design must not break. Say so in the PR
-body rather than listing them as regressions. State the
+body rather than listing them as regressions. Tests 19 and 20 **fail** on
+`692218c` (verified by review) and must also fail against an
+implementation with `ds.SamplesPerPixel = geom.samples` reverted — state
+both. Test 21 fails on `692218c` because the behaviour is new, not
+because it was broken; say which. State the
 observed failure mode for each in the PR body. A test that passes before
 the fix is testing something else.
 
@@ -1093,3 +1217,46 @@ path; §7 gained tests 17 and 18.
 declared `NumberOfFrames` (§3.5), and §8 corrected to stop claiming the
 float export branch was wholly unchanged (§4.3 gives it one new failure
 mode). Both found in design review before any code was written.
+
+### 11.3 Review pass (2026-08-29, post-implementation)
+
+Review returned **ship**, with four spec corrections and one finding that
+matters more than the corrections.
+
+**The finding: the spec's own most-emphasised line was pinned by
+nothing.** §4.3 calls `ds.SamplesPerPixel = geom.samples` "the single
+most important line" in the change — it is what turns #186 from a wrong
+file into an *undecodable* one — and §7's test list did not ask for a
+test that touches it. Reverting it passed the entire suite. It survived
+design, implementation and into review unpinned.
+
+That is worth recording rather than quietly fixing, because **§7 is what
+the implementation was checked against.** A spec that emphasises a line
+in prose and omits it from the test list has moved the omission
+downstream: the coder implemented it correctly and the suite could not
+have told anyone if they had not. The lesson for the next spec of this
+shape is mechanical — every line the prose singles out as load-bearing
+needs a numbered test beside it, and the non-vacuity requirement needs to
+name the *mutation* each test kills, not just the bug it reproduces.
+Tests 19 and 20 now do that.
+
+The same pass added §7's **fixture hygiene** section. Four tests on this
+change guarded less than they appeared to, all with one shape: the
+fixture made the assertion pass for a reason unrelated to the behaviour
+under test. Two mechanisms account for all four —
+`set_pixel_data` silently correcting `BitsAllocated` from the array's
+dtype, and a fresh `Instance` dirtying under any rule because its
+`attributes` are empty. Both are now named in the spec with the
+requirements that follow, because the next person implementing against
+this document will hit them.
+
+The other three corrections: §3.7 and §3.11 rule 2 contradicted each
+other over the rank-1 early return (rule 2 governs; the branch must
+`mark_modified()`, which is the one non-bug-fix behavioural change in the
+work and now has test 21); §4.3's PlanarConfiguration snippet said `> 1`
+where §3.9 says `>= 3` (§3.9 governs); and §3.5's "reachable only when"
+parenthetical missed the `s_d == 1, shape[2] == 1` case.
+
+Review also swept for a fifth instance of the read-must-not-write
+conflation, instrumenting child processes rather than reading code, and
+found none. §2's four sites are the complete set.
