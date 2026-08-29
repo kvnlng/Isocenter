@@ -1,7 +1,10 @@
 # Pixel Geometry Authority
 
 **Date:** 2026-08-29
-**Status:** Design approved, not yet implemented
+**Status:** Design approved, in implementation
+**Amended:** 2026-08-29 — §3.11 rewritten, §6 corrected, §7 gains one test.
+See §11 for what changed and why; the original §3.11 was wrong and dropped
+redacted pixels.
 **Tracking:** #186, #205 (same defect, two entry points). Folds in the same
 expression at `services.py:489` and `pixel_analysis.py:209`.
 **Base:** `main` at `692218c`
@@ -477,8 +480,9 @@ It is still different in kind from the geometry:
   instance with `uint8`, `uint16`, `int32` and asserts 8, 16, 32.
 
 Changes: write it only when the value actually differs (so a no-op call
-does not dirty the entity, §3.11), and log at `DEBUG` when it changes a
-previously declared value.
+does not churn `_revision` with a redundant `set_attr` — §3.11 rule 1;
+the instance is still marked modified either way, §3.11 rule 2), and log
+at `DEBUG` when it changes a previously declared value.
 
 **Rejected alternative:** raise on a declared/derived mismatch, matching
 §3.6. Rejected because it breaks `test_pixel_bits_allocated`'s second and
@@ -493,16 +497,61 @@ the array, so a corrected `BitsAllocated` can sit beside a stale
 noted so a reviewer does not have to ask why one of four width
 descriptors is derived.
 
-### 3.11 Write only what changes
+### 3.11 Write only what changes — but always `mark_modified()`
 
-Every descriptor write in `set_pixel_data` becomes conditional on the
-value actually differing from the parsed declared value, and
-`mark_modified()` is called only if at least one write happened.
+**Amended 2026-08-29.** The original text made `mark_modified()`
+conditional too. That was wrong; see §11.1. The rule is now two rules
+that must not be collapsed back into one:
 
-This is not an optimisation. `set_attr` bumps `_revision`, so today a pure
-read marks the instance dirty and the next `save()` writes the wrong
-geometry into SQLite (§1.2). Even with the correct geometry, an idempotent
-call must not dirty the graph.
+1. **Each descriptor write is conditional** on the value actually
+   differing from the parsed declared value. `set_attr` bumps
+   `_revision`, and an idempotent call should not churn it.
+2. **`mark_modified()` is unconditional.** `set_pixel_data` always
+   marks the instance modified, whether or not any descriptor changed.
+
+**Why (2) cannot be conditional.** The descriptors are not the only thing
+the store holds for an instance; the pixel bytes are, in the sidecar. The
+incremental save path filters on exactly this flag —
+
+```python
+# persistence.py:1823-1824
+unsaved = [(inst, inst._revision)
+           for inst in series.instances if inst.has_unsaved_changes]
+```
+
+— so an instance whose array was replaced with one of the same shape and
+dtype but different **contents** resolves to an identical geometry, writes
+no descriptor, stays clean, and is skipped by `save_all()`. The new pixels
+never reach the sidecar. Measured during implementation:
+`Save (Inc) complete. P:1 St:1 Se:1 I:0`.
+
+The arrays this happens to are redacted ones. `test_blob_storage.py:201`
+replaces a `(64,64) uint8` original with a `(64,64) uint8` zeroed
+redaction; `:393` replaces `np.full((16,16), 1)` with
+`np.full((16,16), 2)`. Both are same-shape, same-dtype, different-bytes,
+and both fail under a conditional `mark_modified()`.
+
+**The justification the original gave no longer applies.** It cited §1.2
+— a pure read dirtying the instance and `save()` then writing the wrong
+geometry. §4.1 cures that at the source by removing the
+`get_pixel_data` → `set_pixel_data` call entirely, so nothing on the read
+path calls the setter at all. The suppression bought nothing for the
+defect it named and cost redacted pixels.
+
+**Rejected alternative — dirty only when the array is not the identical
+object already held** (`array is not self.pixel_array`). It makes
+correctness depend on no caller mutating an array in place, and
+`RedactionService._apply_roi_to_instance` (`services.py:536-547`) already
+does exactly that in its writeable arm: it mutates the instance's own
+array and never calls `set_pixel_data`. Redaction survives today only
+because `redact()` calls `inst.mark_modified()` explicitly at
+`services.py:449`. An identity test would leave a silent invariant that
+the next in-place caller breaks with no test to catch it.
+
+**Rejected alternative — keep the suppression and let callers mark.**
+That is the invariant above, written out longhand: every caller of
+`set_pixel_data` would have to know whether its array's *contents*
+changed. `set_pixel_data` is public API; it cannot delegate that.
 
 Note the coercion interaction: comparing `int(str(raw))` against the new
 value means an instance holding `"3"` from the old string form and
@@ -566,8 +615,10 @@ if geom.evidence is GeometryEvidence.GUESSED:
 Then write, conditionally per §3.11: Rows, Columns, SamplesPerPixel;
 NumberOfFrames as an `int` when `geom.frames > 1` or `0028,0008` is
 already declared; PhotometricInterpretation per §3.8;
-PlanarConfiguration per §3.9; BitsAllocated per §3.10. `mark_modified()`
-only if something changed.
+PlanarConfiguration per §3.9; BitsAllocated per §3.10. Then
+`mark_modified()` **unconditionally** (§3.11) — the array's contents are
+part of what the store holds, and the incremental save path filters on
+this flag.
 
 `set_pixel_data` **accepts** a GUESSED geometry, because refusing it would
 make it impossible to set pixels on a hand-built instance before its
@@ -753,10 +804,22 @@ written back (as `1`) rather than dropped.
 (via `InstanceContextBuilder.set_pixel_data`, `builders.py:96`) and ~55
 test call sites across 27 files.
 
+> **Amended 2026-08-29 — the method that built this table was wrong, not
+> just three of its rows.** Each row was checked by asking *"does the
+> resolver return the right geometry for this shape?"* and never *"does
+> this caller depend on the write's side effects?"*. Three rows asserted
+> "no writes, no dirtying" as if that were self-evidently harmless; two of
+> them named the exact test lines that then failed. Every row involving a
+> **second** `set_pixel_data` call on an instance that already has
+> descriptors has been re-checked against the save path, and the ones
+> that were wrong are marked below. Rows covering a *first* set on a fresh
+> instance are unaffected: the descriptors go from absent to present, so
+> they change under any rule.
+
 | Caller | Shapes passed | Effect of this design |
 | --- | --- | --- |
 | `Instance.get_pixel_data` ×3 (`entities.py:444,456,473`) | whatever the loader/pydicom returns | **No longer calls it.** Behaviour change: a load no longer writes attributes and no longer dirties the entity. No test asserts either (checked: `test_sidecar.py:92`, `test_metadata_refactor_full.py:110`, `test_compaction.py:79,155`, `test_blob_storage.py:220`, `test_entities.py:52`, `test_memory_redaction.py:58,81`, `test_redaction_parallel.py:105,150`, `test_redact_error.py:50`, `test_session.py:77`, `test_redaction_wildcard.py:114` all assert on the array only). |
-| `RedactionService._apply_roi_to_instance` (`services.py:545`) | the instance's own array, same shape | Same shape, full attributes → DECLARED, no writes, no dirtying. Fixes the multi-frame corruption on the not-writeable path. |
+| `RedactionService._apply_roi_to_instance` (`services.py:545`) | the instance's own array, same shape | **Row corrected.** Same shape, full attributes → DECLARED, so no descriptor is written — but the instance **is** marked modified (§3.11), which is what the redacted bytes need. The earlier text said "no dirtying" and was the first instance of the conflation §11.1 describes. Fixes the multi-frame corruption on the not-writeable path. Note this method's *other* arm mutates the array in place and never calls `set_pixel_data` at all; it relies on `redact()`'s explicit `mark_modified()` at `services.py:449`, unchanged here. |
 | `InstanceContextBuilder.set_pixel_data` (`builders.py:98`) | pass-through | Unchanged. |
 | `scripts/generate_ocr_test_data.py:405` | 2-D CT `(512,512)`; XA multi-frame `(frames,512,512)`. Sets `0028,0008` at `:440`, i.e. **after**. | `512 ∉ {3,4}` → arm A, STRUCTURAL. **No guess, no warning, no change in output.** |
 | `scripts/generate_redaction_example.py:129` | `(frames,rows,cols)` CT, rows/cols ≥ 64. Sets Rows/Cols/BitsAllocated at `:131+`, after. | Arm A, STRUCTURAL. Unchanged. |
@@ -765,9 +828,13 @@ test call sites across 27 files.
 | `tests/test_entities.py::test_pixel_unpacking_rgb` — `(100,200,3)`, nothing declared | GUESSED | Passes; **emits a new WARNING**. |
 | `tests/test_entities.py::test_photometric_defaults` case 3 — `(10,10,3)`, PI=MONOCHROME2 | GUESSED | Passes (PI corrected per §3.8, PC set); emits a WARNING. |
 | `tests/test_sidecar.py:67` — `(50,50,3)`, nothing declared | GUESSED | Passes; emits a WARNING. Reload still `(50,50,3)`. |
-| `tests/test_redaction_rgb.py:19-20` — `(100,100,3)` twice | 1st GUESSED, 2nd DECLARED (SPP=3 now present) | Passes. The second call now writes nothing and does not dirty the instance — nothing asserts `has_unsaved_changes` here. |
+| `tests/test_redaction_rgb.py:19-20` — `(100,100,3)` twice | 1st GUESSED, 2nd DECLARED (SPP=3 now present) | **Row corrected.** Passes. The second call writes no descriptor but still marks the instance modified (§3.11). The earlier text said it "does not dirty the instance", which was the conflation. Nothing asserts `has_unsaved_changes` here either way. |
 | `tests/test_compaction.py:106` — replaces `(100,1000)` with `(100,1000)` | rank 2 | Unchanged. |
-| `tests/test_blob_storage.py:201,393,438` — 2-D replacements | rank 2 | Unchanged. |
+| `tests/test_blob_storage.py:201` — `(64,64) uint8` original replaced by a `(64,64) uint8` zeroed redaction | rank 2, DECLARED, **no descriptor changes** | **Row corrected — this was predicted safe and is not.** Under the original §3.11 the instance stayed clean, `save_all` skipped it, and `test_compaction_does_not_resurrect_pre_redaction_pixels` failed. Passes under the amended §3.11. |
+| `tests/test_blob_storage.py:393` — `np.full((16,16),1)` replaced by `np.full((16,16),2)` | rank 2, DECLARED, no descriptor changes | **Row corrected — same failure.** `test_save_all_keeps_the_blob_table_in_step_with_instances`. Passes under the amended §3.11. |
+| `tests/test_blob_storage.py:438` and `:160,247,332,530,624` | rank 2, first set on a fresh `Instance` | Genuinely unchanged: attributes go from empty to populated, so descriptors change under any rule. Re-verified. |
+| `tests/test_compaction.py:106` — `(100,1000)` replaced by a different `(100,1000)` | rank 2, DECLARED, no descriptor changes | Passes under either rule, but **not** for the reason the original row implied: the test calls `store_backend.persist_pixel_data(i1)` explicitly at `:113` and never goes through the `has_unsaved_changes` gate. It was luck, not safety. |
+| `tests/test_persistence_incremental.py::test_unsaved_tracking_pixel_change` | first set on a fresh instance | Passes under either rule, which is why it did not catch this. It is the closest existing pin on "set_pixel_data dirties the instance" and it does not cover the same-shape case — hence test 17 in §7. |
 | `tests/test_entities.py::test_pixel_bits_allocated` — 3 dtypes, one instance | rank 2 | Unchanged (§3.10). |
 | `tests/test_float_pixel_data_export.py` `_export_one` | rank 2 float | Unchanged; its "apply attrs after set_pixel_data" comment stays accurate. |
 | `DicomExporter.write_tree` (fixture generators, no session) | — | Only newly raises on GUESSED or contradiction, neither of which the three generators produce. |
@@ -786,6 +853,10 @@ test call sites across 27 files.
 3. **`write_tree` can now raise** where it previously wrote a wrong file.
 4. The three `scripts/` generators are unaffected — verified by reading
    the shapes they pass, not assumed.
+5. **No cost from the amended §3.11.** Unconditional `mark_modified()`
+   restores exactly today's dirtying behaviour for `set_pixel_data`; the
+   only thing this design removes is the *read* path's dirtying, and it
+   removes it by not calling the setter at all (§4.1).
 
 ---
 
@@ -856,9 +927,36 @@ those are not repeated here.
     still produce identical trees.
 16. Full suite on 3.12 and 3.14t.
 
+### Must now be pinned directly (previously pinned only by accident)
+
+17. **`set_pixel_data` with a same-shape, same-dtype, different-bytes
+    array leaves `has_unsaved_changes` True.** Build an instance with
+    full descriptors, `mark_persisted()`, assert
+    `has_unsaved_changes is False`, then `set_pixel_data` a second array
+    of identical shape and dtype and different contents, and assert
+    `has_unsaved_changes is True`. Assert also that no geometry attribute
+    changed — the point is that the instance is dirty *despite* that.
+
+    This guarantee is currently pinned only indirectly, through
+    `test_blob_storage.py`'s two compaction/blob-table tests, and a
+    reader of `set_pixel_data` has no local reason to believe it.
+    `test_persistence_incremental.py::test_unsaved_tracking_pixel_change`
+    looks like this test but is not: it sets pixels on a *fresh*
+    instance, so the descriptors change and it passes under a conditional
+    `mark_modified()` too. That is why the defect reached implementation.
+
+18. **`set_pixel_data` with the identical array object still dirties.**
+    `inst.set_pixel_data(arr)` twice with the same `arr` leaves
+    `has_unsaved_changes` True on the second call. Pins the rejection of
+    the identity test in §3.11 so it is not reintroduced as an
+    optimisation.
+
 ### Non-vacuity requirement
 
-Tests 1, 3, 4, 5 and 6 must each fail on `main` at `692218c`. State the
+Tests 1, 3, 4, 5 and 6 must each fail on `main` at `692218c`.
+Tests 17 and 18 will *pass* on `692218c` — they pin behaviour that is
+already correct and that this design must not break. Say so in the PR
+body rather than listing them as regressions. State the
 observed failure mode for each in the PR body. A test that passes before
 the fix is testing something else.
 
@@ -948,3 +1046,50 @@ Not folded in; listed for the maintainer to file or discard.
 
 Steps 2–5 are independently revertible. Step 1 is a prerequisite for all
 of them.
+
+---
+
+## 11. Amendments
+
+### 11.1 §3.11 dropped redacted pixels (2026-08-29)
+
+**Caught by the implementing coder during step 2, who flagged it rather
+than deviating from the spec. The defect was mine.**
+
+The original §3.11 made both the descriptor writes *and* `mark_modified()`
+conditional on a descriptor having changed. Implemented literally, a
+`set_pixel_data` call with a same-shape, same-dtype, different-bytes array
+resolves to an identical geometry, writes nothing, leaves
+`has_unsaved_changes` False, and is skipped by the incremental
+`save_all()` — so the new pixels never reach the sidecar. The arrays this
+happens to are redacted ones.
+
+It was a spec bug, not a test problem, for two reasons:
+
+- It conflated **"no descriptor changed"** with **"nothing changed"**. The
+  array's contents are part of what the store holds.
+- The spec contradicted itself: §6 predicted
+  `tests/test_blob_storage.py:201,393,438` unchanged, and `:201` and
+  `:393` were exactly the tests that failed.
+
+The justification also did not survive contact: §3.11 cited §1.2, but
+§4.1 already cures that by removing the `get_pixel_data` →
+`set_pixel_data` call, so the suppression bought nothing.
+
+Resolution: conditional descriptor writes kept (that half is independent
+and fine), `mark_modified()` made unconditional. Two rejected
+alternatives are recorded in §3.11 — the literal original, and an
+identity test on the array object — so the suppression is not re-derived
+later as an optimisation.
+
+Also amended in the same pass: §6 gained a note that the *method* which
+produced its rows was wrong, not just the three rows, and every row
+involving a second `set_pixel_data` call was re-checked against the save
+path; §7 gained tests 17 and 18.
+
+### 11.2 Earlier amendment (2026-08-29, pre-implementation)
+
+`PixelGeometry.frames` pinned to the array's axis rather than to a
+declared `NumberOfFrames` (§3.5), and §8 corrected to stop claiming the
+float export branch was wholly unchanged (§4.3 gives it one new failure
+mode). Both found in design review before any code was written.
