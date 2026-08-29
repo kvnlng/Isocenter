@@ -587,9 +587,22 @@ def test_redaction_dirties_the_instance_it_redacted():
     """The production path the identity rule would have got wrong.
 
     `_apply_roi_to_instance` calls `set_pixel_data` with a *copy* on the
-    not-writeable arm, whose contents at that moment are identical to the
-    original; it mutates the copy afterwards. Whichever arm is taken, the
-    instance has to end up needing a save.
+    **not-writeable arm** -- the arm this test forces, and the only one
+    that reaches `set_pixel_data` at all. The copy's contents at that
+    moment are identical to the original; it is mutated afterwards. So
+    the setter is handed an array indistinguishable from the one already
+    on the instance, and everything that dirties it has to be
+    unconditional.
+
+    The writeable arm does not go through the setter: it mutates in
+    place and returns True, and `_apply_roi_to_instance` leaves the
+    instance *clean* (measured). Its dirtying comes from the caller --
+    `RedactionService.redact` and the parallel worker both call
+    `inst.mark_modified()` under `if modified:`, and both persist the
+    pixels afterwards -- so the end-to-end behaviour is the same and
+    nothing is wrong. It is simply not this test's subject, and the
+    asymmetry between the two arms is worth knowing before moving code
+    across it.
 
     **Every descriptor is declared, and declared correctly**, on purpose.
     An instance missing `PhotometricInterpretation` or `BitsAllocated`
