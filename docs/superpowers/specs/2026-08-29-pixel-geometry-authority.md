@@ -344,6 +344,24 @@ declared `Rows` that participated in the tiebreak necessarily equals the
 array's, so this only matters on the DECLARED and STRUCTURAL paths, where
 it is the setter contract of §3.1.
 
+**`frames` is never `f_d`.** This is worth stating on its own, because
+`f_d` is the one declared descriptor that both selects an arm (step 2)
+*and* names a magnitude, so it is the one an implementer is tempted to
+copy into the result. It must not be: `PixelGeometry.frames` is always
+`shape[0]` on the frames-major arms and always `1` on the others. A
+declared `NumberOfFrames=5` on a `(3,8,8)` array with `SamplesPerPixel=1`
+takes arm A by admissibility alone and resolves to `frames=3`, not 5 —
+that is the setter overwriting a stale descriptor, exactly as it
+overwrites a stale `Rows`.
+
+The consequence is a bound the callers rely on: `geom.frames <=
+shape[0]` for every rank and every arm, with equality on the frames-major
+arms. §4.5 iterates `range(geom.frames)` over the array's first axis and
+is in bounds *because* of this, not by coincidence. The resolver's unit
+tests must assert it directly — a case with `f_d` disagreeing with
+`shape[0]` in each direction (`f_d=5` on `(3,8,8)`, `f_d=2` on `(7,8,8)`,
+both with `SPP=1`), asserting `geom.frames == shape[0]`.
+
 ### 3.6 Contradiction
 
 The only way to reach "neither arm admissible" at rank 3 is
@@ -575,9 +593,12 @@ is the machinery a contradiction should land in.
 Then:
 
 1. **Redaction** passes `geom` to `apply_redaction_to_array` (§4.4).
-2. **The float branch is unchanged.** It still writes no geometry, for
-   the reason already documented there. It benefits only through the
-   redaction axes.
+2. **The float branch still writes no geometry**, for the reason already
+   documented there. It benefits from the resolved redaction axes, and it
+   inherits exactly one new failure mode: a §3.6 contradiction raised by
+   the early resolve fails the write. It does **not** inherit the
+   `GUESSED` refusal, which lives in the integer descriptor block below
+   (see §8).
 3. **The integer branch** replaces the `ndim` block entirely:
 
 ```python
@@ -776,9 +797,17 @@ those are not repeated here.
 
 ### Must now pass (regressions that are currently failures)
 
-1. `ingest → release_memory → get_pixel_data` on a 3-frame 4×4
+1. `ingest → save → release_memory → get_pixel_data` on a 3-frame 4×4
    `MONOCHROME2` instance leaves **every** attribute in §1.1's table
    unchanged, and leaves `has_unsaved_changes` **False**.
+
+   The dirtiness half of that assertion is safe: `set_pixel_data` is the
+   only writer reachable from `get_pixel_data` (verified — the other two
+   branches call it too, `SidecarPixelLoader.__call__` holds primitives
+   and no `Instance` reference at all, and `unload_pixel_data` assigns
+   the `pixel_array` field without touching `_revision`). Assert
+   `has_unsaved_changes is False` **before** the call as well, so a test
+   failure distinguishes "the load dirtied it" from "it arrived dirty".
 2. The same, saved and reloaded from a fresh `Session`: the DB holds
    `SamplesPerPixel=1, PI=MONOCHROME2, Rows=4, Columns=4, NumberOfFrames=3`.
 3. `ingest → export → pydicom.dcmread(...).pixel_array` round-trips
@@ -838,9 +867,19 @@ the fix is testing something else.
 ## 8. Out of scope
 
 - **`BitsStored`/`HighBit`/`PixelRepresentation` coherence** (§3.10).
-- **The float pixel branch** of `_export_instance_worker` — unchanged; it
-  deliberately writes no geometry and that reasoning is already recorded
-  there.
+- **The float pixel branch** of `_export_instance_worker` — it still
+  writes no geometry, and that reasoning is already recorded there. It is
+  *not* wholly untouched, and the earlier draft of this spec claimed it
+  was: §4.3 resolves the geometry before the redaction block, which is
+  above the float branch, so a float instance whose declared
+  `SamplesPerPixel` contradicts its array (§3.6) now fails the write
+  instead of being written. That is one new failure mode, deliberate and
+  consistent with the integer path, and it is the price of giving
+  redaction the correct axes on the float path too. A float instance
+  with a `GUESSED` geometry is **not** refused — the `GUESSED` check
+  lives in the integer descriptor block, because it is writing a guessed
+  descriptor that the refusal exists to prevent, and the float branch
+  writes none.
 - **`SidecarPixelLoader`'s planar-configuration-1 branch.** For
   `frames > 1, planar_conf == 1` it builds `(frames, rows, cols, samples)`,
   which is the interleaved layout, not the planar one. It is **unreachable
