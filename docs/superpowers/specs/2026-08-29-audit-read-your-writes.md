@@ -160,8 +160,7 @@ report, is what went red on the 3.12 CI leg.
 ### 1.6 Two construction paths, both start a worker
 
 `SqliteStore.__init__` (`:400`) starts an `AuditWorker` at `:431-435`.
-`__setstate__` (`:448`) — the unpickling path, reached whenever a store
-crosses a process boundary on a `run_parallel` route — starts another at
+`__setstate__` (`:448`) — the unpickling path — starts another at
 `:462-466`. `__getstate__` (`:437`) drops five keys so the store can
 pickle at all. There is one `__init__`; the second block the issue comment
 points at is `__setstate__`. **Both are construction, both start a worker,
@@ -337,9 +336,21 @@ keep those two facts apart when reviewing.
 ### 3.6 Pickling — the highest-consequence clause
 
 `_audit_write_lock` and `_audit_wakeup` are both unpicklable
-(`TypeError: cannot pickle '_thread.lock' object`, measured). The store
-crosses process boundaries on the `run_parallel` routes; that is why
-`__setstate__` exists.
+(`TypeError: cannot pickle '_thread.lock' object`, measured).
+`__getstate__`/`__setstate__` exist precisely so a `SqliteStore` can cross
+a process boundary, and the store pickles cleanly on `258331c` today.
+
+**Nothing in the suite pins that, and no production path was found that
+sends the store to a worker** — grepping `pickle`, `run_parallel`,
+`ProcessPool` and `multiprocessing` across
+`tests/test_persistence_concurrency.py`,
+`tests/test_concurrency_stress.py` and `tests/test_multiprocessing.py`
+returns no file, and neither `parallel.py` nor `session.py` passes
+`store_backend` into a worker (the export failure and loss rows are
+written in the parent — `io_handlers.py:1650`, `:1681`). So the
+pickle path is live API surface with zero coverage, which is why T4
+(§7) is the *only* thing standing between this change and a store that
+stops pickling. It is not optional.
 
 1. Create **both** in `__init__` **before** `self._audit_thread.start()`
    (`:431-435`).
@@ -422,6 +433,21 @@ reachable on `258331c`. And it is bounded by *one* batch: producers never
 hold the lock, so no amount of logging traffic can extend a single
 acquisition.
 
+**The sharpest form of the objection, and the honest answer.** On a
+`:memory:` store the chain is longer: the worker holds
+`_audit_write_lock` while `log_audit_batch` waits on `_memory_lock`
+(`:478`), and `PersistenceManager`'s save thread can hold `_memory_lock`
+across a large save. A reader's barrier can therefore block behind *the
+worker blocked behind a save*, where on `258331c` the same reader found
+an empty queue and returned in 0.00 s. The kind of exposure is inherited;
+the **probability** is not, because after this change a reader waits
+whenever the worker owns rows, not only when the queue happens to be
+non-empty. That is the price of the guarantee, and it is the right
+trade: a compliance read that takes a second is recoverable, and one
+that reports `PASS` on a private-tag loss is not. If it ever becomes a
+practical problem, the fix is to shrink what `log_audit_batch` holds —
+not to bound the barrier (§3.8's first paragraph).
+
 `stop()` keeps its `join(timeout=2.0)` — a shutdown concern, not a read
 concern. It should additionally `self._audit_wakeup.set()` after
 `self._stop_event.set()` so the worker wakes immediately instead of
@@ -454,9 +480,18 @@ named in the PR body rather than discovered:
 
 | file | change |
 | --- | --- |
-| `isocenter/persistence.py` | `_audit_write_lock` + `_audit_wakeup` in `__init__` and `__setstate__`; both added to `__getstate__`; new `_drain_and_write`; `_audit_worker` rewritten (§3.4); `flush_audit_queue` delegates (§3.5); `get_audit_summary` loses `stop()`/restart (§3.5 clause 3); `stop()` sets the wakeup (§3.8) |
+| `isocenter/persistence.py` | `_audit_write_lock` + `_audit_wakeup` created in `__init__` and `__setstate__`, both added to `__getstate__` (§3.6); **`log_audit()` sets `_audit_wakeup` after the `put`** (§3.4); new `_drain_and_write` (§3.3); `_audit_worker` rewritten (§3.4); `flush_audit_queue` delegates to it (§3.5); `get_audit_summary` loses `stop()`/restart (§3.5 clause 3); `stop()` sets the wakeup (§3.8) |
 | `tests/test_audit_read_barrier.py` | new; §7 |
 | `CHANGELOG.md` | entry naming the exact wrong outcome (a `PASS` grade on a run that dropped a private tag), per the project's convention that breaking/behavioural entries carry the reasoning |
+
+The `log_audit()` row is bolded because it is the one a coder working
+down this table will skip — it is a one-line addition to a method the
+rest of the design never mentions. Skipping it is a **latency** bug, not
+a correctness bug: the Event is never set, the worker drains only on its
+1.0 s tick, and read-your-writes still holds because the barrier drains
+under the lock itself (§3.4's last paragraph). Fix it anyway; a
+one-second lag on every audit write is not the shape this subsystem is
+supposed to have.
 
 `session.py` is **not** touched. Nothing is added at `1497-1499`; the
 dependence is removed by making the readers independent, not by annotating
@@ -619,9 +654,11 @@ asserts on counts, not on timing) and cheap.
 - `tests/test_api_coherence.py::…close…` — `close()` still runs
   `store_backend.stop()`.
 - `tests/test_check_reversibility.py` — green, with an empty diff (§6).
-- `tests/test_persistence_concurrency.py`, `tests/test_concurrency_stress.py`,
-  `tests/test_multiprocessing.py` — the pickle and worker changes are
-  exercised here.
+- `tests/test_persistence_concurrency.py`, `tests/test_concurrency_stress.py`
+  — they exercise the worker under load. They do **not** cover the pickle
+  path: none of them mentions `pickle`, `run_parallel`, `ProcessPool` or
+  `multiprocessing` (checked). T4 is the only pin on §3.6; do not
+  substitute these for it.
 - Full suite on **3.12 and 3.14t**. A local 3.14.6 pass exercises one of
   the two gate versions and neither of them exactly; 3.14t is the one that
   matters for §3.7's no-GIL clause and it must be run, not reasoned about.
