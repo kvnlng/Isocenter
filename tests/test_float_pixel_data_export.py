@@ -665,6 +665,15 @@ def test_a_guessed_float_geometry_stops_write_tree_too(tmp_path):
     `session.export()` cannot exercise, and it surfaces the refusal
     through its own "Export incomplete" `RuntimeError` wrapper rather
     than as an `ExportOutcome`.
+
+    The message is asserted, not just the type. That wrapper raises a
+    bare `RuntimeError` for *any* per-instance failure, and this fixture
+    declares no Rows, no Columns, no BitsAllocated and no
+    PixelRepresentation -- so a `pytest.raises(RuntimeError)` alone would
+    pass just as well if the write had failed for an unrelated reason,
+    and this test would be pinning "something went wrong" rather than
+    which refusal caught it. The wrapper interpolates the first failure's
+    message, so the geometry refusal's own words survive into it.
     """
     from isocenter.entities import Equipment, Instance, Patient, Series, Study
     from isocenter.io_handlers import DicomExporter
@@ -683,8 +692,12 @@ def test_a_guessed_float_geometry_stops_write_tree_too(tmp_path):
     patient.studies.append(study)
 
     out = tmp_path / "tree"
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as excinfo:
         DicomExporter.write_tree(patient, str(out), show_progress=False)
+
+    msg = str(excinfo.value)
+    assert "(5, 6, 3)" in msg, msg
+    assert "SamplesPerPixel" in msg, msg
 
     written = [f for _r, _d, files in os.walk(str(out))
                for f in files if f.endswith(".dcm")]
