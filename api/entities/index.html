@@ -3742,7 +3742,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-758" name="__codelineno-0-758"></a>        <span class="c1"># the executable proof. Setting pixel data is a mutation of what the</span>
 <a id="__codelineno-0-759" name="__codelineno-0-759"></a>        <span class="c1"># store holds, full stop; do not make that conditional on anything,</span>
 <a id="__codelineno-0-760" name="__codelineno-0-760"></a>        <span class="c1"># including object identity -- callers mutate arrays in place</span>
-<a id="__codelineno-0-761" name="__codelineno-0-761"></a>        <span class="c1"># (`RedactionService._apply_roi_to_instance`), so identity does not</span>
+<a id="__codelineno-0-761" name="__codelineno-0-761"></a>        <span class="c1"># (`RedactionService._redact_instance_pixels`), so identity does not</span>
 <a id="__codelineno-0-762" name="__codelineno-0-762"></a>        <span class="c1"># track content.</span>
 <a id="__codelineno-0-763" name="__codelineno-0-763"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">mark_modified</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
@@ -4731,7 +4731,7 @@ happened) is honest.</p>
 <a id="__codelineno-0-758" name="__codelineno-0-758"></a>    <span class="c1"># the executable proof. Setting pixel data is a mutation of what the</span>
 <a id="__codelineno-0-759" name="__codelineno-0-759"></a>    <span class="c1"># store holds, full stop; do not make that conditional on anything,</span>
 <a id="__codelineno-0-760" name="__codelineno-0-760"></a>    <span class="c1"># including object identity -- callers mutate arrays in place</span>
-<a id="__codelineno-0-761" name="__codelineno-0-761"></a>    <span class="c1"># (`RedactionService._apply_roi_to_instance`), so identity does not</span>
+<a id="__codelineno-0-761" name="__codelineno-0-761"></a>    <span class="c1"># (`RedactionService._redact_instance_pixels`), so identity does not</span>
 <a id="__codelineno-0-762" name="__codelineno-0-762"></a>    <span class="c1"># track content.</span>
 <a id="__codelineno-0-763" name="__codelineno-0-763"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">mark_modified</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
