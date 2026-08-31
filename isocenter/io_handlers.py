@@ -794,6 +794,68 @@ class ExportSummary:
         return len(self.failures)
 
 
+def _write_pixel_geometry(ds, geom, attributes) -> None:
+    """Write the descriptors that describe the pixel element just written.
+
+    Both pixel branches call this, so `Rows`, `Columns`,
+    `SamplesPerPixel` and `NumberOfFrames` agree with the bytes by
+    construction rather than by review. They are Type 1 in the Image
+    Pixel Module and Type 1 again in the Floating Point and Double
+    Floating Point Image Pixel Modules (PS3.3 C.7.6.24, C.7.6.25), so
+    "the float element does not need them" was never true -- and worse,
+    `_merge` had already written whatever `attributes` declared, so an
+    instance whose descriptors were stale exported a file describing a
+    different image (#216).
+
+    Every descriptor here comes from one resolved geometry. Rows and
+    Columns used to be recomputed from the array's shape while
+    SamplesPerPixel was read straight out of `attributes`, and it is that
+    *incoherence* -- not the wrong axis on its own -- that turned #186
+    into a file pydicom refuses to decode: Rows=3, Columns=4 beside
+    SamplesPerPixel=4. Writing all four from `geom` makes them agree by
+    construction.
+
+    `BitsAllocated` is deliberately **not** written here. Each branch
+    keeps its own: the float arms set 32 or 64 because those are the
+    Enumerated Values the two float modules require next to the tag they
+    chose, and the integer arm derives `arr.itemsize * 8` from the bytes
+    it is about to emit. They happen to agree numerically; they are not
+    the same statement.
+
+    Args:
+        ds (Dataset): The dataset being written.
+        geom (PixelGeometry): The one resolved geometry.
+        attributes (dict): The instance's attributes, read only to decide
+            whether a frame count was declared and for the photometric
+            fallback.
+    """
+    ds.Rows = geom.rows
+    ds.Columns = geom.cols
+    ds.SamplesPerPixel = geom.samples
+    # The literal, not `pixel_geometry.TAG_NUMBER_OF_FRAMES`: this module
+    # imports no tag constants and already spells every tag this way, and
+    # a second spelling of a tag one file writes one way is how the two
+    # answers start to disagree. Tags are lowercase-hex strings.
+    if geom.frames > 1 or "0028,0008" in attributes:
+        ds.NumberOfFrames = geom.frames
+
+    # Photometric Interpretation is not derivable from an array --
+    # three samples are equally RGB, YBR_FULL or YBR_RCT -- so only
+    # an outright contradiction is corrected. None means the
+    # declared value is coherent and `_merge` already put it on
+    # `ds`; overwriting it is what relabelled every YBR instance.
+    # This is *not* an `or`: the None arm is what lets YBR_FULL,
+    # YBR_ICT and MONOCHROME1 survive a round trip.
+    photometric = resolve_photometric_interpretation(attributes, geom.samples)
+    if photometric is None:
+        photometric = attributes.get("0028,0004")
+    if photometric:
+        ds.PhotometricInterpretation = photometric
+
+    if planar_configuration_default(attributes, geom.samples):
+        ds.PlanarConfiguration = 0
+
+
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
@@ -968,13 +1030,6 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if not ctx.compression:
                 ds.PixelData = arr.tobytes()
 
-            # Every descriptor here comes from one resolved geometry.
-            # Rows and Columns used to be recomputed from the array's shape
-            # while SamplesPerPixel was read straight out of `attributes`,
-            # and it is that *incoherence* -- not the wrong axis on its own
-            # -- that turned #186 into a file pydicom refuses to decode:
-            # Rows=3, Columns=4 beside SamplesPerPixel=4. Writing all four
-            # from `geom` makes them agree by construction.
             if geom.evidence is GeometryEvidence.GUESSED:
                 raise RuntimeError(
                     f"Refusing to write {ctx.output_path}: the pixel "
@@ -987,26 +1042,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                     f"the image's geometry, and a recipient cannot tell a "
                     f"guess apart from a correct answer.")
 
-            ds.Rows = geom.rows
-            ds.Columns = geom.cols
-            ds.SamplesPerPixel = geom.samples
-            if geom.frames > 1 or "0028,0008" in inst.attributes:
-                ds.NumberOfFrames = geom.frames
-
-            # Photometric Interpretation is not derivable from an array --
-            # three samples are equally RGB, YBR_FULL or YBR_RCT -- so only
-            # an outright contradiction is corrected. None means the
-            # declared value is coherent and `_merge` already put it on
-            # `ds`; overwriting it is what relabelled every YBR instance.
-            photometric = resolve_photometric_interpretation(
-                inst.attributes, geom.samples)
-            if photometric is None:
-                photometric = inst.attributes.get("0028,0004")
-            if photometric:
-                ds.PhotometricInterpretation = photometric
-
-            if planar_configuration_default(inst.attributes, geom.samples):
-                ds.PlanarConfiguration = 0
+            _write_pixel_geometry(ds, geom, inst.attributes)
 
             if arr.itemsize == 1:
                 default_bits = 8
