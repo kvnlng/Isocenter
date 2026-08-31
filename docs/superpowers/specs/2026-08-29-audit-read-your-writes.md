@@ -340,34 +340,86 @@ keep those two facts apart when reviewing.
 `__getstate__`/`__setstate__` exist precisely so a `SqliteStore` can cross
 a process boundary, and the store pickles cleanly on `258331c` today.
 
-**Corrected at review (2026-08-31). The paragraph this replaces claimed
-"nothing in the suite pins that, and no production path was found that
-sends the store to a worker." Both halves are false**, and the survey
-that produced them was scoped to the wrong three test files
-(`test_persistence_concurrency.py`, `test_concurrency_stress.py`,
-`test_multiprocessing.py` — none of which does mention pickling).
+**Corrected twice at review. The original paragraph claimed "nothing in
+the suite pins that, and no production path was found that sends the
+store to a worker"; both halves are false. The first correction
+(`d17d65b`, 2026-08-31) got the conclusion right and every identifier
+wrong.** What follows is re-verified against the code, with a traceback,
+on 2026-08-31.
 
-`redact_pixels()` sends the store across a process boundary on every
-run. The per-instance callable is a **bound method** of
-`RedactionService` (`services.py:_process_single_instance`), so `self`
-— and with it `self.store_backend` — is pickled into every worker
-submitted to `Session._executor` (`session.py:572`). Measured: deleting
-the two `keys_to_remove` entries turns **eight** existing tests red with
-`TypeError: cannot pickle '_thread.lock' object`, raised from
-`multiprocessing.reduction._ForkingPickler.dumps` on a
-`concurrent.futures.process._CallItem`:
+`Session.redact()` (`session.py:1920`) sends the store across a process
+boundary — but only on a build that has a GIL, and not via
+`Session._executor`. The corrected chain:
+
+- `redact()` → `_apply_redaction_rules` (`session.py:2001`) →
+  `_apply_redaction_mutations` (`:2027`), which consumes the generator
+  from `run_parallel(service.execute_redaction_task, ...)`
+  (`session.py:1993`).
+- That call passes **no `executor=` and no `maxtasksperchild`**, so
+  `run_parallel`'s dispatch falls through to `_run_on_new_executor`
+  (`parallel.py:209-222`), which builds its own
+  `ProcessPoolExecutor(max_workers=...)` — with no `mp_context`.
+- The callable is a **bound method** of `RedactionService`
+  (`services.py:208`, `execute_redaction_task`), so `self` — and with
+  it `self.store_backend`, assigned at `services.py:79` — is pickled
+  into every worker.
+
+Three identifiers in the previous correction do not exist or are wrong,
+and each is worth naming so the error is not made a third time. There is
+**no `redact_pixels()`**; the method is `Session.redact()`, and the name
+survives only in a stale tip string at `session.py:921`, which is what
+misled the review. There is **no
+`RedactionService._process_single_instance`**; it is
+`execute_redaction_task`. And **`Session._executor` is not involved** —
+it is created at `session.py:572` and passed as `executor=` at exactly
+one site, `ingest()` (`session.py:862`), whose callable is the
+module-scope `ingest_worker` (`io_handlers.py:345`) and therefore
+carries no store.
+
+Verified traceback on 3.12.13, with the two `keys_to_remove` entries
+deleted:
 
 ```
-tests/test_redaction_parallel.py            (2)
-tests/test_redact_reports_outcome.py        (4)
-tests/test_redaction_wildcard.py            (1)
-tests/test_session.py::test_execute_config_integration
+session.py:1950  in redact
+session.py:2001  in _apply_redaction_rules
+session.py:2027  in _apply_redaction_mutations
+parallel.py:222  in _run_on_new_executor
+...
+multiprocessing/queues.py:264  obj = _ForkingPickler.dumps(obj)
+multiprocessing/reduction.py:51  cls(buf, protocol).dump(obj)
+TypeError: cannot pickle '_thread.lock' object
 ```
 
-T4 is therefore the *direct* pin on §3.6, not the only one. It is still
-worth having — it fails on the same mutation and names the reason — but
-the change was never one `keys_to_remove` entry away from shipping
-silently broken. Clauses 1–3 below are unchanged and still correct.
+**The coverage is version-conditional, and that is the whole claim —
+not a caveat on it.** The gate runs 3.12 *and* 3.14t, and the two legs
+disagree:
+
+| build | `_use_threads(False, None)` | `redact()` runs on | mutation turns red |
+| --- | --- | --- | --- |
+| 3.12 / 3.13 / 3.14 (GIL) | `False` | `ProcessPoolExecutor` | **9** — eight redaction tests + T4 |
+| 3.14t (free-threaded) | `True` | `ThreadPoolExecutor` | **1** — T4 only |
+
+`_use_threads` (`parallel.py:133-151`) returns `True` when
+`sys._is_gil_enabled()` is `False`, so on the free-threaded build
+nothing is pickled and the eight redaction tests pass with the entries
+missing. Measured 2026-08-31, mutation applied:
+
+```
+3.12.13   full suite: 9 failed, 920 passed
+          tests/test_redaction_parallel.py            (2)
+          tests/test_redact_reports_outcome.py        (4)
+          tests/test_redaction_wildcard.py            (1)
+          tests/test_session.py::test_execute_config_integration
+          tests/test_audit_read_barrier.py::…pickles…  (T4)
+
+3.14.7t   the same four files + T4: 1 failed, 19 passed
+          only T4
+```
+
+So **T4 is the sole pin on §3.6 for one of the two gate legs**, and one
+of nine on the other. It is not redundant on any build, and a future
+reader who finds the eight redaction tests must not conclude it can be
+deleted. Clauses 1–3 below are unchanged and still correct.
 
 1. Create **both** in `__init__` **before** `self._audit_thread.start()`
    (`:431-435`).
@@ -446,9 +498,25 @@ pathologically contended database could hold a reader for a long time.
 Two things about that. It is **inherited, not introduced** —
 `get_audit_errors()` already calls `log_audit_batch` inline on the
 caller's thread whenever the queue is non-empty, so the same 900 s is
-reachable on `258331c`. And it is bounded by *one* batch: producers never
-hold the lock, so no amount of logging traffic can extend a single
-acquisition.
+reachable on `258331c`.
+
+And — **corrected at review** — what is bounded is the *acquisition*,
+not the *call*. One acquisition is one `log_audit_batch`: at most 100
+rows plus a commit, and producers never hold the lock, so no volume of
+logging can extend it. But `_drain_and_write` **releases between
+batches and re-acquires**, and its loop exits only on a short batch, so
+under sustained logging a reader can loop past many batches and the
+total call duration is unbounded. The original sentence — "bounded by
+*one* batch" — claimed more than it bounds, and it claimed it in the
+reassuring direction, which is the direction that matters for a clause
+whose job is to justify shipping with no timeout.
+
+The unboundedness is inherited rather than introduced, but the loop
+shapes differ and the difference should not be glossed: pre-fix,
+`flush_audit_queue` drained `while not self.audit_queue.empty()` into a
+single uncapped batch and wrote once; post-fix it caps at 100 per
+acquisition and loops. Each post-fix iteration includes a database
+write, which gives producers more room to refill the queue in between.
 
 **The sharpest form of the objection, and the honest answer.** On a
 `:memory:` store the chain is longer: the worker holds
@@ -477,7 +545,10 @@ set — nothing clears it any more — and exits after its current iteration.
 
 ### 3.9 Deliberate behaviour changes
 
-Both follow from §3.5 clause 3, both are improvements, and both must be
+**There are three, not two** (corrected at review, 2026-08-31). The
+first two follow from §3.5 clause 3 and are improvements. The third
+follows from §3.3 and is **not** an improvement; it was found by the
+reviewer, not by this spec, and is filed as #219. All three must be
 named in the PR body rather than discovered:
 
 1. **`generate_report()` no longer stops and restarts the audit worker.**
@@ -490,6 +561,32 @@ named in the PR body rather than discovered:
    calls `generate_report()` or `get_audit_summary()` after `close()`
    (verified), so nothing depends on the resurrection — but it is a
    behaviour change, not a refactor.
+3. **The worker no longer retries a failed batch write; those rows are
+   dropped** (#219). On `258331c`, `_audit_worker` owned `batch` across
+   loop iterations and cleared it *only after a successful write*, so a
+   raising `log_audit_batch` left the rows in place and the next
+   iteration retried them. In §3.3 `batch` is created fresh inside every
+   acquisition, so an exception escaping `log_audit_batch` propagates
+   out of `_drain_and_write` to the worker's `except`, which logs and
+   continues — and those rows have already left the queue. They are
+   gone.
+
+   **It cannot simply be reverted, and that is the point.** Rows
+   retained in a worker-local `batch` across iterations are precisely
+   the "owned by a local variable no reader can see" state §3.1 exists
+   to make impossible; restoring the old retry reopens #218. A retry
+   that preserved the invariant would have to put the rows **back on
+   the queue under the lock**, not hold them in a local.
+
+   Blast radius is narrow and the net loss surface **strictly
+   narrows**: `log_audit_batch` already swallows `sqlite3.Error` itself
+   (§9 item 1), so only the non-sqlite tail — `OSError`/`MemoryError`
+   from the connection, or a malformed tuple raising `IndexError` in
+   the `data = [...]` comprehension — ever reached the retry, and
+   nothing in the package enqueues a malformed tuple today. §9 item 2
+   reasons about this same exception path but asks only whether a
+   raising write can wedge the barrier (it cannot); it does not notice
+   that the batch is now lost rather than retried.
 
 ---
 
@@ -674,9 +771,11 @@ asserts on counts, not on timing) and cheap.
 - `tests/test_persistence_concurrency.py`, `tests/test_concurrency_stress.py`
   — they exercise the worker under load. They do **not** cover the pickle
   path: none of them mentions `pickle`, `run_parallel`, `ProcessPool` or
-  `multiprocessing` (checked). The pickle path *is* covered, but by the
-  redaction tests, via `redact_pixels()`'s process isolation — see the
-  correction in §3.6.
+  `multiprocessing` (checked). The pickle path is covered by the
+  **redaction** tests instead — but only on a build with a GIL, where
+  `Session.redact()` runs on a `ProcessPoolExecutor`. On 3.14t it runs
+  in threads and pickles nothing, so on that leg T4 is the only pin.
+  See §3.6, which was wrong twice before it was right.
 - Full suite on **3.12 and 3.14t**. A local 3.14.6 pass exercises one of
   the two gate versions and neither of them exactly; 3.14t is the one that
   matters for §3.7's no-GIL clause and it must be run, not reasoned about.

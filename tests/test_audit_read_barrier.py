@@ -211,18 +211,32 @@ def test_report_grades_a_private_loss_without_the_summary_settling_it(tmp_path,
 
 
 # --------------------------------------------------------------------------
-# T4 -- the pickle round trip. Guards a path with no other coverage.
+# T4 -- the pickle round trip. The only pin on __getstate__ when redact()
+# runs in threads; one of nine when it runs in processes.
 # --------------------------------------------------------------------------
 
 def test_store_still_pickles_and_the_copy_logs_and_reads(tmp_path):
     """`__getstate__` must drop every audit primitive.
 
     A lock and an Event both raise `TypeError: cannot pickle
-    '_thread.lock' object`. `__getstate__`/`__setstate__` exist so a
-    store can cross a process boundary, and nothing else in the suite
-    pickles one -- so adding a primitive to `__init__` without adding
-    it to `keys_to_remove` would break every pickle of a store with
-    only this test to notice.
+    '_thread.lock' object`, and `__getstate__`/`__setstate__` exist so
+    a store can cross a process boundary. Whether anything *else*
+    catches a missing `keys_to_remove` entry depends on the build, and
+    both halves matter because the CI gate runs both:
+
+    - **On a GIL build (3.12, 3.13, 3.14)** `redact()` reaches
+      `_run_on_new_executor`, which builds a `ProcessPoolExecutor`, so
+      the bound method `service.execute_redaction_task` pickles
+      `RedactionService.store_backend` into every worker. Dropping the
+      two entries turns eight other tests red as well as this one.
+    - **On the free-threaded build (3.14t)** `_use_threads`
+      (`parallel.py:133`) returns True, `redact()` runs in threads, and
+      nothing is pickled. Those eight tests pass with the entries
+      missing. **This test is the only thing that fails.**
+
+    So it is never redundant: on one of the two gate legs it is the
+    sole pin. Measured 2026-08-31 on 3.14.7t -- mutation applied, 19
+    passed, this one failed.
 
     Passes before the fix as well (the baseline pickles today): its
     polarity is against the mutation, not against the parent commit.
