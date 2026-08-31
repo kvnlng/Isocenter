@@ -17,7 +17,7 @@ from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           LOSS_SCOPE_PRIVATE)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
-                       report_redaction_failures)
+                       _report_redaction_failures)
 from .config_manager import ConfigLoader
 from .privacy import PhiInspector, PhiFinding, PhiReport
 from .logger import configure_logger, get_logger
@@ -2118,7 +2118,7 @@ class DicomSession:
             instance.mark_modified()
             applied += 1
 
-        return applied, report_redaction_failures(failures, store_backend)
+        return applied, _report_redaction_failures(failures, store_backend)
 
     def redact_by_machine(self, serial_number: str, roi: List[int]):
         """

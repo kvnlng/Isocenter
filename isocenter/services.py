@@ -123,7 +123,7 @@ class RedactionError(RuntimeError):
             f"{first[1]}. See the audit log for the rest.")
 
 
-def report_redaction_failures(failures, store_backend=None):
+def _report_redaction_failures(failures, store_backend=None):
     """Log every zone that could not be applied, and audit it if we can.
 
     The mirror of `DicomExporter._report_export_failures`, and one
@@ -658,7 +658,7 @@ class RedactionService:
         # After the pass, so every instance that could be redacted was.
         if failures:
             raise RedactionError(
-                report_redaction_failures(failures, self.store_backend),
+                _report_redaction_failures(failures, self.store_backend),
                 len(targets))
 
     @staticmethod
