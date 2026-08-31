@@ -663,22 +663,23 @@ class RedactionService:
 
     @staticmethod
     def apply_redaction_to_array(arr: np.ndarray, rois: List[tuple],
-                                 geometry: Optional[PixelGeometry] = None) -> bool:
+                                 geometry: PixelGeometry) -> bool:
         """
         Applies a list of ROIs to the pixel array in place.
 
         Args:
             arr (np.ndarray): The pixel array to modify.
             rois (List[tuple]): List of (y1, y2, x1, x2) regions.
-            geometry (PixelGeometry, optional): The instance's resolved
-                geometry, from `isocenter.pixel_geometry`. Both in-tree
-                callers pass it. Without it this falls back to the
-                last-axis heuristic, which cannot tell a 2-frame 8x4
-                grayscale array from a 2x8 RGBA one -- and getting that
-                wrong zeroes the wrong region, so the burned-in identifier
-                stays in the pixels while the pipeline reports a successful
-                redaction (#186, #205). The fallback exists only for
-                third-party callers of this public static method.
+            geometry (PixelGeometry): The instance's resolved geometry,
+                from `isocenter.pixel_geometry`. **It must have been
+                resolved from the shape of *this* array** -- that is the
+                invariant the axis selection below depends on, and nothing
+                here can check it. Required, with no default: the default
+                was the last-axis heuristic, which could not tell a
+                4-frame 8x4 grayscale array from a 2x8 RGBA one and
+                addressed the wrong axes, so 32 of 32 identifier cells
+                reached an exported file while redaction reported success
+                (#186, #205, #217).
 
         Returns:
             bool: True if any modification was applied.
@@ -686,17 +687,16 @@ class RedactionService:
         modified = False
 
         ndim = len(arr.shape)
-        if geometry is not None:
-            # No `ndim >= 3` guard on this arm, unlike the fallback below,
-            # and the invariant that makes that safe lives in the caller:
-            # `geometry` must have been resolved from the shape of *this*
-            # array, and `resolve_pixel_geometry` cannot return samples > 1
-            # for a rank-2 one. Both in-tree callers do exactly that. A
-            # geometry borrowed from a different array could pair samples > 1
-            # with ndim == 2 and silently address `row_dim=-1, col_dim=0`.
-            interleaved = geometry.samples > 1
-        else:
-            interleaved = ndim >= 3 and arr.shape[-1] in [3, 4]
+        # No `ndim >= 3` guard here, and the invariant that makes that safe
+        # lives in the caller: `geometry` must have been resolved from the
+        # shape of *this* array, and `resolve_pixel_geometry` cannot return
+        # samples > 1 for a rank-2 one. Both in-tree callers do exactly
+        # that. A geometry borrowed from a different array could pair
+        # samples > 1 with ndim == 2 and silently address
+        # `row_dim=-1, col_dim=0`. That invariant is the only thing standing
+        # here now, which is why `geometry` is required rather than
+        # defaulted (#217).
+        interleaved = geometry.samples > 1
 
         if interleaved:
             # RGB/RGBA interleaved: (..., Rows, Cols, Channels)
