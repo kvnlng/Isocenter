@@ -20,10 +20,14 @@ import sqlite3
 
 import numpy as np
 import pytest
+from pydicom.dataset import Dataset, FileMetaDataset
+from pydicom.uid import ExplicitVRLittleEndian
 
 from isocenter.entities import Equipment, Instance, Patient, Series, Study
 from isocenter.services import RedactionError, RedactionService
 from isocenter.session import DicomSession
+
+SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
 
 SN_OK = "SERIAL_OK"
 SN_BAD = "SERIAL_BAD"
@@ -249,6 +253,60 @@ def test_the_serial_path_reports_the_same_failure_as_the_parallel_one(
     assert "ValueError" in rows[0][1], rows[0][1]
 
 
+def test_the_serial_path_also_leaves_a_failed_instance_as_it_was_found(
+        tmp_path):
+    """`redact_machine_instances` has the same unconditional persist.
+
+    Its `finally` called `persist_pixel_data` whatever happened, so a
+    partially-zeroed array became durable and the instance picked up a
+    sidecar loader pointing at it -- with no hash and no `DERIVED` to say
+    a redaction had been attempted. The parallel path's gate would not
+    have covered this one; it is a second `finally`, in a different
+    method, and it needs its own test. Same file-backed fixture as test
+    14, for the same reason (see `_write_source`).
+    """
+    source = tmp_path / "src_serial.dcm"
+    _write_source(source)
+
+    session = DicomSession(str(tmp_path / "serial_partial.db"))
+    patient = Patient("P1", "Test^Patient")
+    study = Study("ST_1", "20230101")
+    series = Series("SE_1", "OT", 1)
+    series.equipment = Equipment("Acme", "Scanner", SN_BAD)
+    inst = Instance("1.2.3.partial", SC_STORAGE, 1)
+    inst.file_path = str(source)
+    for tag, value in (("0028,0010", 32), ("0028,0011", 32),
+                       ("0028,0002", 1), ("0028,0100", 8)):
+        inst.set_attr(tag, value)
+    series.instances.append(inst)
+    study.series.append(series)
+    patient.studies.append(study)
+    session.store.patients.append(patient)
+
+    assert inst.get_pixel_data().flags.writeable, (
+        "the fixture stopped being file-backed; a read-only array is copied "
+        "per ROI and this test would pass with the persist gate deleted")
+    inst.unload_pixel_data()
+
+    service = RedactionService(session.store, session.store_backend)
+    try:
+        with pytest.raises(RedactionError):
+            service.process_machine_rules(
+                {"serial_number": SN_BAD,
+                 "redaction_zones": [[0, 8, 0, 8], [1, "abc", 0, 8]]},
+                show_progress=False)
+
+        inst.unload_pixel_data()
+        arr = inst.get_pixel_data()
+        assert int(arr[0:8, 0:8].sum()) == 8 * 8 * 200, (
+            "the serial path persisted a partially-applied redaction")
+        assert int(arr.sum()) == 32 * 32 * 200
+        assert inst._pixel_loader is None
+        assert "_ISOCENTER_REDACTION_HASH" not in inst.attributes
+    finally:
+        session.close()
+
+
 # --- 13 --------------------------------------------------------------------
 
 def test_a_task_with_nothing_to_do_is_not_a_failure(tmp_path):
@@ -287,6 +345,47 @@ def test_an_instance_with_no_pixel_data_is_skipped_not_failed(
 
 # --- 14 --------------------------------------------------------------------
 
+def _write_source(path):
+    """A real one-instance DICOM file, 32x32 uint8 all 200.
+
+    **The instance under test must be backed by a source file, and that is
+    the whole design of this test.** Measured three shapes:
+
+    * *reloaded from the sidecar* -- `SidecarPixelLoader` returns a
+      **read-only** array, so `_apply_roi_to_instance` copies it afresh for
+      every ROI and the instance ends holding a copy of the *pristine*
+      original. A partial mutation can never accumulate, so this shape
+      cannot detect the persist at all.
+    * *built in memory and never reloaded* -- writeable and mutated in
+      place, but `unload_pixel_data()` refuses (no loader, no file path,
+      clearing would be a silent discard), so the mutated array stays
+      resident whatever the persist does. This is the case the design
+      states it cannot reach.
+    * *backed by a source file* -- pydicom hands back a **writeable**
+      array, so zone 1 really is zeroed in place when zone 2 raises, and
+      `unload_pixel_data()` succeeds because the file can restore it. This
+      is the only shape in which the persist decides the outcome, and it is
+      the ordinary one: every ingested instance is this shape.
+    """
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta.MediaStorageSOPClassUID = SC_STORAGE
+    ds.file_meta.MediaStorageSOPInstanceUID = "1.2.3.partial"
+    ds.SOPClassUID = SC_STORAGE
+    ds.SOPInstanceUID = "1.2.3.partial"
+    ds.Rows = 32
+    ds.Columns = 32
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 8
+    ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    ds.PixelData = np.full((32, 32), 200, dtype=np.uint8).tobytes()
+    ds.save_as(str(path), enforce_file_format=True)
+
+
 @pytest.mark.parametrize("lever", ["ISOCENTER_FORCE_THREADS",
                                    "ISOCENTER_FORCE_PROCESSES"])
 def test_a_failed_instance_is_left_as_it_was_found(tmp_path, monkeypatch,
@@ -295,12 +394,16 @@ def test_a_failed_instance_is_left_as_it_was_found(tmp_path, monkeypatch,
 
     `apply_redaction_to_array` raises *mid-loop*, so zone 1 is already
     zeroed when zone 2 fails, and `execute_redaction_task`'s `finally`
-    persisted unconditionally. Measured on `258331c`: under threads
-    (3.14t's default) zone 1 came back zeroed through save/close/reopen;
-    under processes (3.12's default) the instance was untouched, and the
-    worker's mutated copy went into the shared sidecar as orphan bytes.
-    The same failed redaction, two different stores, decided by the
-    interpreter.
+    called `persist_pixel_data` unconditionally. Under threads -- 3.14t's
+    default -- the worker mutates the parent's own array and then wrote it
+    to the sidecar, attaching a loader, so the partial redaction became
+    **durable**: an instance carrying half a redaction, no
+    `_ISOCENTER_REDACTION_HASH`, no `DERIVED`, and nothing saying so.
+    Under processes -- 3.12's default -- the child mutated a copy the
+    parent never sees, so the instance was untouched. The same failed
+    redaction, two different stores, decided by the interpreter. Measured
+    with the persist gate removed and everything else in place: zone 1
+    comes back `0` on threads and `12800` on processes.
 
     The `monkeypatch.setenv` is legitimate here and would not be on the
     export path: `_resolve_strategy` reads these variables **in the
@@ -308,20 +411,30 @@ def test_a_failed_instance_is_left_as_it_was_found(tmp_path, monkeypatch,
     passes no `maxtasksperchild`, so the parent's environment decides.
     `session.export()`'s workers are always separate processes and a
     parent monkeypatch is invisible to them.
-
-    Fails on `258331c` under threads; passes there under processes.
     """
     monkeypatch.setenv(lever, "1")
-    db_file = tmp_path / f"leftalone_{lever}.db"
+    source = tmp_path / f"src_{lever}.dcm"
+    _write_source(source)
 
-    def build(sess):
-        patient = Patient("P1", "Test^Patient")
-        study = Study("ST_1", "20230101")
-        study.series.append(_series(SN_BAD, ["1.2.3.partial"]))
-        patient.studies.append(study)
-        sess.store.patients.append(patient)
+    session = DicomSession(str(tmp_path / f"leftalone_{lever}.db"))
+    patient = Patient("P1", "Test^Patient")
+    study = Study("ST_1", "20230101")
+    series = Series("SE_1", "OT", 1)
+    series.equipment = Equipment("Acme", "Scanner", SN_BAD)
+    inst = Instance("1.2.3.partial", SC_STORAGE, 1)
+    inst.file_path = str(source)
+    for tag, value in (("0028,0010", 32), ("0028,0011", 32),
+                       ("0028,0002", 1), ("0028,0100", 8)):
+        inst.set_attr(tag, value)
+    series.instances.append(inst)
+    study.series.append(series)
+    patient.studies.append(study)
+    session.store.patients.append(patient)
 
-    session = _hydrated(db_file, build)
+    assert inst.get_pixel_data().flags.writeable, (
+        "the fixture stopped being file-backed; a read-only array is copied "
+        "per ROI and this test would pass with the persist gate deleted")
+    inst.unload_pixel_data()
 
     # First elements differ, so `sorted(valid_rois)` never compares the
     # string to an int. Zone 1 applies; zone 2 raises.
@@ -333,23 +446,21 @@ def test_a_failed_instance_is_left_as_it_was_found(tmp_path, monkeypatch,
     try:
         with pytest.raises(RedactionError):
             session.redact(show_progress=False)
-        session.save()
-    finally:
-        session.close()
 
-    reopened = DicomSession(str(db_file))
-    try:
-        reloaded = _instances(reopened)["1.2.3.partial"]
-        arr = reloaded.get_pixel_data()
+        inst.unload_pixel_data()
+        arr = inst.get_pixel_data()
         assert arr is not None, "the fixture lost its pixels; the test is vacuous"
-        assert arr[0:8, 0:8].sum() == 8 * 8 * 200, (
+        assert int(arr[0:8, 0:8].sum()) == 8 * 8 * 200, (
             "a partially-applied redaction was persisted; the failed "
             "instance is not as it was found")
         assert int(arr.sum()) == 32 * 32 * 200
-        assert "_ISOCENTER_REDACTION_HASH" not in reloaded.attributes
-        assert "DERIVED" not in reloaded.attributes.get("0008,0008", [])
+        assert "_ISOCENTER_REDACTION_HASH" not in inst.attributes
+        assert "DERIVED" not in inst.attributes.get("0008,0008", [])
+        assert inst._pixel_loader is None, (
+            "a failed instance was given a sidecar loader, which means its "
+            "partial redaction reached the store")
     finally:
-        reopened.close()
+        session.close()
 
 
 # --- 15 --------------------------------------------------------------------
