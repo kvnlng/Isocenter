@@ -16,7 +16,8 @@ from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           SidecarWaveformLoader, export_folder_names,
                           LOSS_SCOPE_PRIVATE)
 from .store import DicomStore
-from .services import RedactionService
+from .services import (RedactionService, RedactionOutcome, RedactionError,
+                       _report_redaction_failures)
 from .config_manager import ConfigLoader
 from .privacy import PhiInspector, PhiFinding, PhiReport
 from .logger import configure_logger, get_logger
@@ -1934,6 +1935,17 @@ class DicomSession:
                 was redacted -- no rules loaded, or no image matched one.
 
         Raises:
+            RedactionError: If any instance's zone could not be applied.
+                Raised at the *end* of the pass, not at the first failure:
+                the instances that could be redacted are redacted, the
+                failures are already `ERROR` rows in the audit log, and the
+                console summary has been printed -- so a caller that catches
+                it still has a correct object graph and a compliance report
+                that grades `REVIEW_REQUIRED`. `.failures` carries
+                `(sop_uid, detail)` per failed instance. A failed instance is
+                left exactly as it was found: no `DERIVED` flag, no
+                `_ISOCENTER_REDACTION_HASH`, nothing persisted, so a
+                corrected configuration retries it.
             Exception: Whatever the redaction backend raised, after logging it.
                 Redaction is the step that removes burned-in PHI, so a failure
                 here must reach the caller. This used to be caught, printed as
@@ -1998,7 +2010,8 @@ class DicomSession:
             chunksize=1,
             progress=show_progress)
 
-        applied = self._apply_redaction_mutations(mutations, instances)
+        applied, failures = self._apply_redaction_outcomes(
+            mutations, instances, self.store_backend)
 
         if applied < len(tasks):
             get_logger().warning(
@@ -2011,23 +2024,72 @@ class DicomSession:
 
         print(f"Redaction complete: {applied} of {len(tasks)} images updated. "
               "Remember to call .save() to persist.")
+
+        # Last, deliberately. The RISK rows `scan_burned_in_annotations`
+        # writes and the summary a user reads have to be in place whether
+        # or not the caller catches this, and every successful mutation is
+        # already on the graph -- so a caller that catches `RedactionError`
+        # still has a correct object graph and a report that grades
+        # REVIEW_REQUIRED (#213).
+        if failures:
+            raise RedactionError(failures, len(tasks))
         return applied
 
     @staticmethod
-    def _apply_redaction_mutations(mutations, instances):
+    def _apply_redaction_outcomes(outcomes, instances, store_backend=None):
         """Copies each worker's result back onto the in-memory instance.
 
         `instances` maps pre-redaction SOP UID to the instance in this
         process. Workers operate on copies, so a mutation that is never
-        applied here is a redaction that did not happen. Returns how many
-        landed.
+        applied here is a redaction that did not happen.
+
+        Three result shapes have to survive this, mirroring
+        `_report_export_failures`: a `RedactionOutcome`, an `Exception` from
+        a worker that died before it could answer, and anything else --
+        including a bare `None`, which is a failure row rather than a silent
+        skip. Tolerating `None` here would re-create exactly the conflation
+        #213 removes, and would let a stubbed test go on passing against a
+        contract it no longer implements.
+
+        The audit write is **in the parent** and must stay there.
+        `SqliteStore.__getstate__` drops the queue, the stop event and the
+        audit thread, and `__setstate__` starts a *new* thread in the child
+        that is torn down at pool shutdown without `stop()` -- so a queued
+        row can be lost, and for a `:memory:` database the child writes
+        nowhere at all. Same reason `_report_export_failures` runs here
+        (#126).
+
+        Returns:
+            Tuple[int, List[Tuple[str, str]]]: how many mutations landed,
+            and `(entity_uid, details)` per failure.
         """
         applied = 0
+        failures = []
 
-        for mutation in mutations:
-            if not mutation:
-                # The worker reported no change. It logs its own reason;
-                # the shortfall is summarised by the caller.
+        for outcome in outcomes:
+            if isinstance(outcome, RedactionOutcome):
+                if not outcome.ok:
+                    sop = outcome.sop_instance_uid or "UNKNOWN"
+                    failures.append(
+                        (sop, f"Redaction failed for {sop}: {outcome.error}"))
+                    continue
+                mutation = outcome.mutation
+                if not mutation:
+                    # A legitimate skip: already redacted under this
+                    # configuration, or no pixel data to redact. The
+                    # shortfall is summarised by the caller.
+                    continue
+            elif isinstance(outcome, Exception):
+                # `run_parallel` handing back a worker that died. There is
+                # no outcome to name the instance with, and the row still
+                # has to exist.
+                failures.append(
+                    ("UNKNOWN", f"Redaction worker failed: {outcome}"))
+                continue
+            else:
+                failures.append(
+                    ("UNKNOWN", "Redaction worker returned an unrecognised "
+                                f"result: {outcome!r}"))
                 continue
 
             sop = mutation.get('original_sop_uid') or mutation.get('sop_uid')
@@ -2056,7 +2118,7 @@ class DicomSession:
             instance.mark_modified()
             applied += 1
 
-        return applied
+        return applied, _report_redaction_failures(failures, store_backend)
 
     def redact_by_machine(self, serial_number: str, roi: List[int]):
         """
@@ -2067,6 +2129,12 @@ class DicomSession:
         Args:
             serial_number (str): The device serial number to target.
             roi (List[int]): The Region of Interest as [y1, y2, x1, x2].
+
+        Raises:
+            RedactionError: Propagated from `redact()` when the zone could
+                not be applied. The `finally` restores the original rules
+                first, so the configuration is intact when it reaches the
+                caller (#213).
         """
         # Swap in a single-rule configuration, run redact() against it, then
         # restore the original rules in `finally` regardless of outcome.

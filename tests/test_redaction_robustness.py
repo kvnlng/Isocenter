@@ -90,6 +90,8 @@ def test_log_throttling(mock_store):
 import logging
 import numpy as np
 
+from isocenter.pixel_geometry import resolve_pixel_geometry
+
 
 def test_a_zone_that_cannot_be_applied_raises_instead_of_reporting_nothing():
     """Silence here means PHI ships. The caller has to be told."""
@@ -97,7 +99,8 @@ def test_a_zone_that_cannot_be_applied_raises_instead_of_reporting_nothing():
     arr.flags.writeable = False
 
     with pytest.raises(ValueError):
-        RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)])
+        RedactionService.apply_redaction_to_array(
+            arr, [(0, 10, 0, 10)], geometry=resolve_pixel_geometry(arr.shape, {}))
 
 
 def test_a_failed_zone_is_logged_with_enough_detail_to_find_it(caplog):
@@ -107,7 +110,9 @@ def test_a_failed_zone_is_logged_with_enough_detail_to_find_it(caplog):
 
     with caplog.at_level(logging.ERROR):
         with pytest.raises(ValueError):
-            RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)])
+            RedactionService.apply_redaction_to_array(
+                arr, [(0, 10, 0, 10)],
+                geometry=resolve_pixel_geometry(arr.shape, {}))
 
     assert caplog.records, "a failed redaction produced no log record at all"
     logged = " ".join(r.getMessage() for r in caplog.records)
@@ -119,13 +124,43 @@ def test_having_no_zones_to_apply_is_not_a_failure():
     """The legitimate no-op must stay distinguishable from a failure."""
     arr = np.ones((64, 64), dtype=np.uint16)
 
-    assert RedactionService.apply_redaction_to_array(arr, []) is False
+    assert RedactionService.apply_redaction_to_array(
+        arr, [], geometry=resolve_pixel_geometry(arr.shape, {})) is False
     assert arr.sum() == 64 * 64, "an empty zone list must not modify the array"
 
 
 def test_a_zone_that_applies_cleanly_still_reports_success():
     arr = np.ones((64, 64), dtype=np.uint16)
 
-    assert RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)]) is True
+    assert RedactionService.apply_redaction_to_array(
+        arr, [(0, 10, 0, 10)],
+        geometry=resolve_pixel_geometry(arr.shape, {})) is True
     assert arr[0:10, 0:10].sum() == 0
     assert arr[10:, 10:].sum() == 54 * 54
+
+
+def test_the_geometry_argument_has_no_default():
+    """#217: the default arm was the heuristic that shipped the identifier.
+
+    `geometry=None` meant `arr.shape[-1] in [3, 4]`, which cannot tell
+    `(frames, rows, cols)` from `(rows, cols, samples)`. On a 4-frame 8x4
+    volume with an identifier at rows 6-7 of every frame, zone
+    `(6, 8, 0, 4)` addressed frames `6:8` of a 4-frame array -- an empty
+    slice -- so all 32 identifier cells reached the exported file while
+    redaction reported success. A default here is not a convenience; it is
+    the leak, reachable by any caller who does not know to pass a keyword.
+
+    This is the only test in the suite that fails if the default comes
+    back. The four above assert the *passing* case and pass on both sides
+    of #217, which is why this one exists.
+
+    `match="geometry"` is load-bearing. A bare `pytest.raises(TypeError)`
+    also passes on a malformed zone -- measured, `(0, None, 0, 8)` and
+    `(0, [1], 0, 8)` both raise `TypeError` from inside the loop -- so it
+    would keep passing against a restored default that then failed for an
+    unrelated reason. The interpreter's message names the parameter.
+    """
+    arr = np.ones((64, 64), dtype=np.uint16)
+
+    with pytest.raises(TypeError, match="geometry"):
+        RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)])

@@ -10,6 +10,7 @@ import hashlib
 import json
 import traceback
 import gc
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 from tqdm import tqdm
 import numpy as np
@@ -61,6 +62,111 @@ class MachinePixelIndex:
 
     def get_by_machine(self, sn):
         return self._index.get(sn, [])
+
+
+@dataclass
+class RedactionOutcome:
+    """What one worker has to tell the parent about one instance (#213).
+
+    `None` used to mean three things -- already redacted under this
+    configuration, no pixel data to redact, and an exception -- and the
+    parent read all three as "nothing to apply". Only the third is a
+    failure, and it is the one that leaves burned-in PHI in an instance
+    the pipeline then reports as fine.
+
+    `sop_instance_uid` is the **pre-redaction** UID, for the same reason
+    the mutation dict carries `original_sop_uid`: a redacted image gets a
+    new UID and the parent's map is keyed on the old one.
+
+    `error` is prose, not a `BaseException`, and that is a deliberate
+    divergence from `ExportOutcome.error`. Every consumer of that field
+    stringifies it, and carrying an object across a process boundary adds
+    a failure mode that turns a reportable failure into an unreportable
+    one: an exception whose `__init__` does not round-trip through
+    `pickle` fails to serialise, and what the parent receives is a
+    pickling error about the *result* rather than the failure the worker
+    was trying to report.
+    """
+    ok: bool
+    sop_instance_uid: str
+    mutation: Optional[dict] = None
+    error: Optional[str] = None
+
+
+class RedactionError(RuntimeError):
+    """Redaction did not remove what it was asked to remove (#213).
+
+    Raised after the whole pass, not at the first failure: the instances
+    that could be redacted are redacted, and the failures are already in
+    the audit log, so a caller that catches this still gets a compliance
+    report that grades REVIEW_REQUIRED.
+
+    **`RuntimeError`, not `Exception`, and not to be demoted to a bare
+    `RuntimeError` later for symmetry.** `write_tree` and
+    `_export_instance_worker` already raise bare `RuntimeError`s on this
+    same pipeline, so `except RuntimeError` around a full run cannot tell
+    the three apart -- but subclassing keeps every existing
+    `except RuntimeError` catching this one, where subclassing `Exception`
+    directly would turn a caught error into an escaping one. The
+    asymmetry with the export raises is the point: those mean "nothing
+    was written", this one means "something unsafe is still in the graph".
+    """
+
+    def __init__(self, failures, attempted):
+        self.failures = list(failures)   # [(entity_uid, details)]
+        self.attempted = attempted
+        first = self.failures[0] if self.failures else ("UNKNOWN", "unknown")
+        super().__init__(
+            f"Redaction failed for {len(self.failures)} of {attempted} "
+            "instances; their pixel data still carries whatever the "
+            f"configured zones were meant to remove. First: {first[0]}: "
+            f"{first[1]}. See the audit log for the rest.")
+
+
+def _report_redaction_failures(failures, store_backend=None):
+    """Log every zone that could not be applied, and audit it if we can.
+
+    The mirror of `DicomExporter._report_export_failures`, and one
+    spelling shared by both redaction paths -- the parallel one in
+    `Session._apply_redaction_outcomes` and the serial one in
+    `RedactionService.redact_machine_instances`.
+
+    `ERROR`, not `DATA_LOSS`, for two independent reasons. *Vocabulary*:
+    nothing was dropped -- the burned-in identifier is **present**, and
+    being present is the problem, which is a failed operation and exactly
+    what `_report_export_failures` writes `ERROR` for. *Grading*: a
+    `DATA_LOSS` row is graded by `loss_scope`, and `STANDARD` leaves the
+    run at `PASS` while `PRIVATE` would be a lie about a tag that does not
+    exist. An `ERROR` row lands in `get_audit_errors()`, populates
+    `exceptions`, and takes `validation_status` to `REVIEW_REQUIRED`.
+
+    Warning and auditing are deliberately not the same condition, for the
+    reason `_report_export_losses` gives: `RedactionService(store)` with no
+    backend is a supported construction, and gating the report on one would
+    lose the failure entirely.
+
+    The detail is flattened to one line and its pipes escaped because it is
+    rendered straight into a markdown table row in the compliance report.
+    It is **not** truncated.
+
+    Returns:
+        List[Tuple[str, str]]: `(entity_uid, details)` per failure, flattened.
+    """
+    logger = get_logger()
+    reported = []
+    for uid, detail in failures:
+        detail = " ".join(str(detail).split()).replace("|", "\\|")
+        logger.error("%s: %s", uid, detail)
+        reported.append((uid, detail))
+        if store_backend is not None:
+            # `log_audit`, not `log_audit_batch` -- the batch method writes
+            # straight to the database while the audit writer thread is
+            # live and swallows `sqlite3.Error` into a log line, so
+            # contention would lose the very entry that exists because a
+            # log line was not enough.
+            store_backend.log_audit(action_type="ERROR", entity_uid=uid,
+                                    details=detail)
+    return reported
 
 
 class RedactionService:
@@ -216,25 +322,38 @@ class RedactionService:
             task (dict): The task structure created by `prepare_redaction_tasks`.
 
         Returns:
-            dict: A mutation dictionary containing changes to apply in the main process, or None.
+            RedactionOutcome: `ok=True` with a mutation dict when zones were
+                applied, `ok=True` with `mutation=None` for a legitimate
+                skip (already redacted under this configuration, or no pixel
+                data), and `ok=False` with an `error` string when a zone
+                could not be applied.
+
+        **The worker never raises.** `_apply_redaction_rules` consumes
+        `run_parallel(..., return_generator=True)` incrementally, and an
+        exception escaping a worker terminates that generator mid-iteration
+        -- so every mutation still queued behind it would be lost, and the
+        instances that *were* redacted would silently never reach the graph.
+        Returning an outcome is what makes "all successful mutations are
+        applied before the raise" true rather than aspirational (#213).
         """
         inst = task["instance"]
         original_uid = inst.sop_instance_uid  # Capture before mutation
         rois = task["rois"]
         config_hash = task["config_hash"]
+        failed = False
 
         try:
             # Optimized: Skip if already redacted with same config
             current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
 
             if current_hash == config_hash:
-                return None
+                return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
             # Triggers Lazy Load from disk
             arr = inst.get_pixel_data()
 
             if arr is None:
-                return None
+                return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
             modified = False
             for roi in rois:
@@ -275,15 +394,50 @@ class RedactionService:
             }
             # DEBUG
             # print(f"DEBUG: Worker returning mutation for {inst.sop_instance_uid}", file=sys.stderr)
-            return mutation
+            return RedactionOutcome(ok=True, sop_instance_uid=original_uid,
+                                    mutation=mutation)
 
         except Exception as e:
+            # The catch stays broad, and a missing-argument `TypeError` from
+            # `apply_redaction_to_array` is audited here like any other
+            # failure. That collision is deliberate: a malformed zone in a
+            # JSON config raises `TypeError` too -- `(0, None, 0, 8)` and
+            # `(0, [1], 0, 8)` both do -- so narrowing this catch to make
+            # room for the programming error would drop real failed
+            # redactions and re-open #213. Do not add traceback-frame
+            # inspection to tell the two apart (#217).
+            failed = True
             traceback.print_exc()
             self.logger.error(f"  Failed {inst.sop_instance_uid}: {e}")
-            return None
+            return RedactionOutcome(ok=False, sop_instance_uid=original_uid,
+                                    error=f"{type(e).__name__}: {e}")
         finally:
             # Persistence & Memory Cleanup
-            if self.store_backend and hasattr(self.store_backend, 'persist_pixel_data'):
+            #
+            # Not persisted on a failure, and that gate is the whole of
+            # #213's "a failed instance is left as it was found".
+            # `apply_redaction_to_array` raises *mid-loop*, so zones 1..k-1
+            # are already zeroed when zone k fails; persisting made that
+            # partial mutation durable on the threads path (3.14t's default)
+            # while the processes path (3.12's) mutated a copy and left the
+            # instance untouched -- the same failed redaction leaving two
+            # different sidecars depending on the interpreter. Without the
+            # persist, the unconditional `unload_pixel_data()` below drops
+            # the mutated array and the next `get_pixel_data()` reloads the
+            # original through the loader.
+            #
+            # The one instance this cannot reach is one with neither a
+            # loader nor a `file_path` -- a graph built in memory and never
+            # reloaded. `unload_pixel_data()` refuses there, deliberately,
+            # because clearing would be a silent discard, so it keeps the
+            # zones applied before the failure. That is accepted: zeroing is
+            # monotone, so a partial redaction has removed *more* PHI than
+            # none. What matters is that it is not reported as a success and
+            # carries no hash, so the next run retries it. Do not "fix" it
+            # with a pre-image copy of every array -- that is exactly the
+            # resident-memory cost the lazy-pixel design exists to avoid.
+            if (not failed and self.store_backend
+                    and hasattr(self.store_backend, 'persist_pixel_data')):
                 try:
                     self.store_backend.persist_pixel_data(inst)
                 except Exception as pe:
@@ -308,6 +462,12 @@ class RedactionService:
             machine_rules (dict): The rule configuration.
             show_progress (bool): If True, shows progress bar.
             verbose (bool): If True, logs details.
+
+        Raises:
+            RedactionError: Propagated from `redact_machine_instances` when
+                any instance's zone could not be applied. This method used
+                to return normally in that case, because the failure was
+                logged and dropped one frame down (#213).
         """
         serial = machine_rules.get("serial_number")
         zones = machine_rules.get("redaction_zones", [])
@@ -382,6 +542,21 @@ class RedactionService:
             rois (List[tuple]): List of (y1, y2, x1, x2) ROIs.
             targets (List[Instance], optional): Pre-filtered list of instances.
             show_progress (bool): If True, shows progress bar.
+
+        Raises:
+            RedactionError: If any instance's zone could not be applied.
+                Raised at the end of the pass, for the same reasons as
+                `Session.redact()`: the instances that could be redacted
+                are redacted and every failure is already an `ERROR` row.
+                This is the serial path, so it must answer the same
+                question the parallel one does -- it is public, it is what
+                `process_machine_rules` calls, and a failure here left the
+                burned-in identifier in the pixels just as silently (#213).
+
+        Returns:
+            None. The signature is unchanged;
+            `test_redaction_optimization.py` mocks this method and asserts
+            on the call, not the result.
         """
         if targets is None:
             targets = self.index.get_by_machine(machine_sn)
@@ -402,11 +577,15 @@ class RedactionService:
         config_str = json.dumps({"serial": machine_sn, "rois": rois_stable}, sort_keys=True)
         config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
 
+        failures = []
+
         for inst in tqdm(
                 targets,
                 desc=f"Redacting {machine_sn}",
                 unit="img",
                 disable=not show_progress):
+            original_uid = inst.sop_instance_uid  # Capture before mutation
+            failed = False
             try:
                 # Optimized: Skip if already redacted with same config
                 current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
@@ -451,12 +630,26 @@ class RedactionService:
                     self.logger.debug(f"  Modified {inst.sop_instance_uid}")
 
             except Exception as e:
+                # Broad on purpose, and a missing-argument `TypeError` is
+                # audited here like any other failure -- see the note in
+                # `execute_redaction_task` (#217).
+                failed = True
+                failures.append(
+                    (original_uid,
+                     f"Redaction failed for {original_uid}: "
+                     f"{type(e).__name__}: {e}"))
                 self.logger.error(f"  Failed {inst.sop_instance_uid}: {e}")
             finally:
                 # OPTIMIZATION: Release memory immediately after processing
                 # If modified, we MUST persist pixels to sidecar, otherwise unload_pixel_data returns False (unsafe)
                 # We check for store_backend availability.
-                if self.store_backend and hasattr(self.store_backend, 'persist_pixel_data'):
+                #
+                # Not on a failure: zones before the one that raised are
+                # already zeroed, and persisting them makes a partial
+                # redaction durable. See `execute_redaction_task`'s `finally`
+                # for the whole argument (#213).
+                if (not failed and self.store_backend
+                        and hasattr(self.store_backend, 'persist_pixel_data')):
                     # We only strictly NEED to persist if we hold dirty pixels in memory.
                     # But persist_pixel_data handles checks (returns if no pixels).
                     try:
@@ -468,24 +661,31 @@ class RedactionService:
 
                 inst.unload_pixel_data()
 
+        # After the pass, so every instance that could be redacted was.
+        if failures:
+            raise RedactionError(
+                _report_redaction_failures(failures, self.store_backend),
+                len(targets))
+
     @staticmethod
     def apply_redaction_to_array(arr: np.ndarray, rois: List[tuple],
-                                 geometry: Optional[PixelGeometry] = None) -> bool:
+                                 geometry: PixelGeometry) -> bool:
         """
         Applies a list of ROIs to the pixel array in place.
 
         Args:
             arr (np.ndarray): The pixel array to modify.
             rois (List[tuple]): List of (y1, y2, x1, x2) regions.
-            geometry (PixelGeometry, optional): The instance's resolved
-                geometry, from `isocenter.pixel_geometry`. Both in-tree
-                callers pass it. Without it this falls back to the
-                last-axis heuristic, which cannot tell a 2-frame 8x4
-                grayscale array from a 2x8 RGBA one -- and getting that
-                wrong zeroes the wrong region, so the burned-in identifier
-                stays in the pixels while the pipeline reports a successful
-                redaction (#186, #205). The fallback exists only for
-                third-party callers of this public static method.
+            geometry (PixelGeometry): The instance's resolved geometry,
+                from `isocenter.pixel_geometry`. **It must have been
+                resolved from the shape of *this* array** -- that is the
+                invariant the axis selection below depends on, and nothing
+                here can check it. Required, with no default: the default
+                was the last-axis heuristic, which could not tell a
+                4-frame 8x4 grayscale array from a 2x8 RGBA one and
+                addressed the wrong axes, so 32 of 32 identifier cells
+                reached an exported file while redaction reported success
+                (#186, #205, #217).
 
         Returns:
             bool: True if any modification was applied.
@@ -493,17 +693,16 @@ class RedactionService:
         modified = False
 
         ndim = len(arr.shape)
-        if geometry is not None:
-            # No `ndim >= 3` guard on this arm, unlike the fallback below,
-            # and the invariant that makes that safe lives in the caller:
-            # `geometry` must have been resolved from the shape of *this*
-            # array, and `resolve_pixel_geometry` cannot return samples > 1
-            # for a rank-2 one. Both in-tree callers do exactly that. A
-            # geometry borrowed from a different array could pair samples > 1
-            # with ndim == 2 and silently address `row_dim=-1, col_dim=0`.
-            interleaved = geometry.samples > 1
-        else:
-            interleaved = ndim >= 3 and arr.shape[-1] in [3, 4]
+        # No `ndim >= 3` guard here, and the invariant that makes that safe
+        # lives in the caller: `geometry` must have been resolved from the
+        # shape of *this* array, and `resolve_pixel_geometry` cannot return
+        # samples > 1 for a rank-2 one. Both in-tree callers do exactly
+        # that. A geometry borrowed from a different array could pair
+        # samples > 1 with ndim == 2 and silently address
+        # `row_dim=-1, col_dim=0`. That invariant is the only thing standing
+        # here now, which is why `geometry` is required rather than
+        # defaulted (#217).
+        interleaved = geometry.samples > 1
 
         if interleaved:
             # RGB/RGBA interleaved: (..., Rows, Cols, Channels)
@@ -550,6 +749,19 @@ class RedactionService:
                 # skip ships the unredacted image while reporting success.
                 # The bool return cannot express "tried and failed": False
                 # already means "no zones matched". (#66)
+                #
+                # The premise above was only half true, and which half is
+                # worth knowing before changing either end. The **export
+                # worker's** call (`io_handlers._export_instance_worker`)
+                # has no handler between it and the worker's outermost
+                # `except`, so this raise did propagate, did become
+                # `ExportOutcome(ok=False)`, and no file was written. The
+                # two callers it does *not* name -- `redact_machine_instances`
+                # and `execute_redaction_task` -- each caught bare
+                # `Exception` one frame up and only logged, so the raise
+                # travelled exactly one stack frame and the instance stayed
+                # in the graph for `export()` to write. Both now audit an
+                # ERROR row and raise `RedactionError` after the pass (#213).
                 get_logger().error(
                     "Redaction zone %s could not be applied to an array of "
                     "shape %s: %s", tuple(roi), arr.shape, exc)
