@@ -56,13 +56,16 @@ def _hydrated(db_file, build):
     after `session.save()` an instance built in memory still has
     `_pixel_loader is None` and `file_path is None`, so
     `unload_pixel_data()` refuses -- correctly, since clearing would be a
-    silent discard -- and the mutated array stays resident for the next
-    `save()` to write. Only a *reloaded* instance carries the
-    `SidecarPixelLoader` that makes "drop the array and read the original
-    back" possible, which is what leaves a failed instance as it was found.
-    An ingested instance has a `file_path` and behaves the same way; the
-    build-save-redact-in-one-session shape is the case §3.7 of the design
-    states it cannot reach.
+    silent discard -- and there is no way to read the stored pixels back at
+    all. Only a *reloaded* instance carries the `SidecarPixelLoader` these
+    tests need in order to drop the resident array and see what the store
+    actually holds.
+
+    This shape does not settle whether a *failed* task persisted, and no
+    test here asks it to: a sidecar-loaded array is read-only, so the
+    partial mutation the persist gate exists to keep out never forms. See
+    `_write_source` for the shape that does decide it, and for the
+    measurements behind both statements.
     """
     session = DicomSession(str(db_file))
     build(session)
