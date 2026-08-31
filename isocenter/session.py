@@ -2129,6 +2129,12 @@ class DicomSession:
         Args:
             serial_number (str): The device serial number to target.
             roi (List[int]): The Region of Interest as [y1, y2, x1, x2].
+
+        Raises:
+            RedactionError: Propagated from `redact()` when the zone could
+                not be applied. The `finally` restores the original rules
+                first, so the configuration is intact when it reaches the
+                caller (#213).
         """
         # Swap in a single-rule configuration, run redact() against it, then
         # restore the original rules in `finally` regardless of outcome.

@@ -462,6 +462,12 @@ class RedactionService:
             machine_rules (dict): The rule configuration.
             show_progress (bool): If True, shows progress bar.
             verbose (bool): If True, logs details.
+
+        Raises:
+            RedactionError: Propagated from `redact_machine_instances` when
+                any instance's zone could not be applied. This method used
+                to return normally in that case, because the failure was
+                logged and dropped one frame down (#213).
         """
         serial = machine_rules.get("serial_number")
         zones = machine_rules.get("redaction_zones", [])
