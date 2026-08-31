@@ -980,8 +980,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # the result is internally coherent and nothing downstream
             # errors (#170). PS3.5 Section 8.2 -- not A.1, which is the
             # Implicit VR Little Endian Transfer Syntax and says nothing
-            # about this -- makes Pixel Data and Float Pixel Data mutually
-            # exclusive, which is why the
+            # about this -- makes Pixel Data and Float Pixel Data
+            # mutually exclusive, which is why the
             # integer element is deleted below rather than merely not
             # written: `_merge` writes whatever `attributes` holds, and
             # a file carrying both is nonconformant however it got that
@@ -1102,11 +1102,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if not ctx.compression:
                 ds.PixelData = arr.tobytes()
 
-            # The third direction of PS3.5 Section 8.2's exclusion. The
-            # section is 8.2, "Native or Encapsulated Format Encoding" --
-            # A.1, cited here and in #170 before it, is the Implicit VR
-            # Little Endian Transfer Syntax and says nothing about which
-            # pixel elements may coexist.
+            # The second of PS3.5 Section 8.2's three reachable
+            # directions -- the float branch above carries the first and
+            # the third. The section is 8.2, "Native or Encapsulated
+            # Format Encoding"; A.1, cited here and in #170 before it, is
+            # the Implicit VR Little Endian Transfer Syntax and says
+            # nothing about which pixel elements may coexist.
             #
             # The float branch has deleted (7fe0,0010)
             # since #170 for exactly this reason; the integer branch never
