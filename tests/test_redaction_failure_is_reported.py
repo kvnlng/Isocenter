@@ -401,7 +401,12 @@ def _write_source(path):
       **read-only** array, so `_apply_roi_to_instance` copies it afresh for
       every ROI and the instance ends holding a copy of the *pristine*
       original. A partial mutation can never accumulate, so this shape
-      cannot detect the persist at all.
+      cannot detect the persist at all. **That same mechanism is a live
+      defect in its own right and not only an inconvenience here**: a copy
+      taken from the pristine original per ROI discards the zones already
+      applied, so a rule with N zones applies only the Nth to a reloaded
+      instance and reports success. Filed as #229; nothing in this file
+      covers it, and a test that does needs two zones in one rule.
     * *built in memory and never reloaded* -- writeable and mutated in
       place, but `unload_pixel_data()` refuses (no loader, no file path,
       clearing would be a silent discard), so the mutated array stays
