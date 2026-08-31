@@ -298,8 +298,10 @@ def test_the_serial_path_also_leaves_a_failed_instance_as_it_was_found(
     session.store.patients.append(patient)
 
     assert inst.get_pixel_data().flags.writeable, (
-        "the fixture stopped being file-backed; a read-only array is copied "
-        "per ROI and this test would pass with the persist gate deleted")
+        "the fixture stopped being file-backed; this test is written "
+        "against the writeable arm, which mutates the instance's own "
+        "array in place -- see `_write_source` for why that shape was "
+        "chosen, and test 18 for the reloaded one")
     inst.unload_pixel_data()
 
     service = RedactionService(session.store, session.store_backend)
@@ -502,8 +504,10 @@ def test_a_failed_instance_is_left_as_it_was_found(tmp_path, monkeypatch,
     session.store.patients.append(patient)
 
     assert inst.get_pixel_data().flags.writeable, (
-        "the fixture stopped being file-backed; a read-only array is copied "
-        "per ROI and this test would pass with the persist gate deleted")
+        "the fixture stopped being file-backed; this test is written "
+        "against the writeable arm, which mutates the instance's own "
+        "array in place -- see `_write_source` for why that shape was "
+        "chosen, and test 18 for the reloaded one")
     inst.unload_pixel_data()
 
     # First elements differ, so `sorted(valid_rois)` never compares the

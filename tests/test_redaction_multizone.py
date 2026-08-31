@@ -273,21 +273,28 @@ def test_a_rule_that_applied_nothing_returns_False_and_attests_nothing(
     deliberately not asserted here; only the return value and the absence
     of the attestation are, both of which #235's fix leaves alone.
     """
-    session, inst = reloaded_redaction_session(
-        [[100, 200, 100, 200], [200, 300, 200, 300]], name="nothing")
-    arr = inst.get_pixel_data()
+    zones = [[100, 200, 100, 200], [200, 300, 200, 300]]
+    rois = [tuple(z) for z in zones]
+
+    # Two instances, one per half. Calling the method directly leaves the
+    # instance holding a *writeable* copy on the not-writeable arm, so
+    # reusing it below would run the second half against the other arm.
+    session, direct = reloaded_redaction_session(zones)
+    arr = direct.get_pixel_data()
     assert arr.flags.writeable is False, "vacuous on a writeable array"
 
     service = RedactionService(session.store, session.store_backend)
-    assert service._redact_instance_pixels(
-        inst, arr, [(100, 200, 100, 200), (200, 300, 200, 300)]) is False, (
+    assert service._redact_instance_pixels(direct, arr, rois) is False, (
         "every zone was off-image and nothing was redacted, but the method "
         "reported a modification -- its callers write a redaction hash on "
         "that bool")
 
-    service.redact_machine_instances(
-        "SN_RELOAD", [(100, 200, 100, 200), (200, 300, 200, 300)],
-        targets=[inst], show_progress=False)
+    session2, inst = reloaded_redaction_session(zones)
+    assert inst.get_pixel_data().flags.writeable is False
+    inst.unload_pixel_data()
+    service2 = RedactionService(session2.store, session2.store_backend)
+    service2.redact_machine_instances(
+        "SN_RELOAD", rois, targets=[inst], show_progress=False)
 
     assert not inst.attributes.get("_ISOCENTER_REDACTION_HASH"), (
         "an image nothing was applied to carries a redaction hash")
