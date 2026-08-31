@@ -380,7 +380,15 @@ class RedactionService:
             # Prepare Mutated State to return (for Process Isolation)
             mutation = {
                 "original_sop_uid": original_uid,  # KEY FIX: Mapped to Main Process
-                "sop_uid": inst.sop_instance_uid,  # New UID
+                # The post-redaction UID, and the parent **assigns** it
+                # (`_apply_redaction_outcomes`, #228). It equals
+                # `original_sop_uid` whenever nothing was modified,
+                # because `regenerate_uid()` above is called only inside
+                # `if modified:` -- and that inequality is the parent's
+                # gate. Move the `regenerate_uid()` call out of that
+                # branch and every skipped instance silently takes a new
+                # identity.
+                "sop_uid": inst.sop_instance_uid,
                 "pixel_loader": inst._pixel_loader,
                 "pixel_hash": getattr(inst, "_pixel_hash", None),
                 "attributes": {
