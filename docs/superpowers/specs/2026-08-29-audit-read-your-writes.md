@@ -340,17 +340,34 @@ keep those two facts apart when reviewing.
 `__getstate__`/`__setstate__` exist precisely so a `SqliteStore` can cross
 a process boundary, and the store pickles cleanly on `258331c` today.
 
-**Nothing in the suite pins that, and no production path was found that
-sends the store to a worker** — grepping `pickle`, `run_parallel`,
-`ProcessPool` and `multiprocessing` across
-`tests/test_persistence_concurrency.py`,
-`tests/test_concurrency_stress.py` and `tests/test_multiprocessing.py`
-returns no file, and neither `parallel.py` nor `session.py` passes
-`store_backend` into a worker (the export failure and loss rows are
-written in the parent — `io_handlers.py:1650`, `:1681`). So the
-pickle path is live API surface with zero coverage, which is why T4
-(§7) is the *only* thing standing between this change and a store that
-stops pickling. It is not optional.
+**Corrected at review (2026-08-31). The paragraph this replaces claimed
+"nothing in the suite pins that, and no production path was found that
+sends the store to a worker." Both halves are false**, and the survey
+that produced them was scoped to the wrong three test files
+(`test_persistence_concurrency.py`, `test_concurrency_stress.py`,
+`test_multiprocessing.py` — none of which does mention pickling).
+
+`redact_pixels()` sends the store across a process boundary on every
+run. The per-instance callable is a **bound method** of
+`RedactionService` (`services.py:_process_single_instance`), so `self`
+— and with it `self.store_backend` — is pickled into every worker
+submitted to `Session._executor` (`session.py:572`). Measured: deleting
+the two `keys_to_remove` entries turns **eight** existing tests red with
+`TypeError: cannot pickle '_thread.lock' object`, raised from
+`multiprocessing.reduction._ForkingPickler.dumps` on a
+`concurrent.futures.process._CallItem`:
+
+```
+tests/test_redaction_parallel.py            (2)
+tests/test_redact_reports_outcome.py        (4)
+tests/test_redaction_wildcard.py            (1)
+tests/test_session.py::test_execute_config_integration
+```
+
+T4 is therefore the *direct* pin on §3.6, not the only one. It is still
+worth having — it fails on the same mutation and names the reason — but
+the change was never one `keys_to_remove` entry away from shipping
+silently broken. Clauses 1–3 below are unchanged and still correct.
 
 1. Create **both** in `__init__` **before** `self._audit_thread.start()`
    (`:431-435`).
@@ -657,8 +674,9 @@ asserts on counts, not on timing) and cheap.
 - `tests/test_persistence_concurrency.py`, `tests/test_concurrency_stress.py`
   — they exercise the worker under load. They do **not** cover the pickle
   path: none of them mentions `pickle`, `run_parallel`, `ProcessPool` or
-  `multiprocessing` (checked). T4 is the only pin on §3.6; do not
-  substitute these for it.
+  `multiprocessing` (checked). The pickle path *is* covered, but by the
+  redaction tests, via `redact_pixels()`'s process isolation — see the
+  correction in §3.6.
 - Full suite on **3.12 and 3.14t**. A local 3.14.6 pass exercises one of
   the two gate versions and neither of them exactly; 3.14t is the one that
   matters for §3.7's no-GIL clause and it must be run, not reasoned about.
@@ -667,9 +685,18 @@ asserts on counts, not on timing) and cheap.
 
 | polarity | tests | fails on `258331c`? |
 | --- | --- | --- |
-| reproduces the defect this change fixes | T2 (`get_audit_errors`, `get_audit_losses`), T3, T5 | **yes** — measured |
-| pins the new mechanism; the behaviour did not exist before | T1, T6 | **yes**, because there is no lock to hold |
+| reproduces the defect this change fixes | T2 (`get_audit_errors`, `get_audit_losses`), T3, T5, T6, the `:memory:` case | **yes** — measured |
+| pins the new mechanism; the behaviour did not exist before | T1 | **yes**, with `AttributeError: _audit_write_lock` — there is no lock to hold |
 | guards behaviour that is already correct | T2 (`get_audit_summary`), T4 | **no** — and the PR body must say so, or a reviewer scanning for "red before, green after" will read them as broken |
+
+Row 2 held only T1 as written. **T6 belongs in row 1, and its mechanism
+is not "no lock to hold"** (corrected at review, 2026-08-31). Pre-fix,
+`flush_audit_queue` was an unsynchronised drain, so eight concurrent
+readers *split* one 500-row backlog between them and each `SELECT`ed
+before the others had committed their share. Measured on `258331c`:
+15 runs, 15 red. That is a reproduction of the defect, not a pin on a
+mechanism that did not exist — the same reader race the whole spec is
+about, seen from the concurrent side rather than the in-flight side.
 
 For every test in the first row, a version that passes on `258331c` is
 testing something else. The implementation must run each of T1–T6 against
