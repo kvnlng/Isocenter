@@ -743,6 +743,19 @@ class RedactionService:
                 # skip ships the unredacted image while reporting success.
                 # The bool return cannot express "tried and failed": False
                 # already means "no zones matched". (#66)
+                #
+                # The premise above was only half true, and which half is
+                # worth knowing before changing either end. The **export
+                # worker's** call (`io_handlers._export_instance_worker`)
+                # has no handler between it and the worker's outermost
+                # `except`, so this raise did propagate, did become
+                # `ExportOutcome(ok=False)`, and no file was written. The
+                # two callers it does *not* name -- `redact_machine_instances`
+                # and `execute_redaction_task` -- each caught bare
+                # `Exception` one frame up and only logged, so the raise
+                # travelled exactly one stack frame and the instance stayed
+                # in the graph for `export()` to write. Both now audit an
+                # ERROR row and raise `RedactionError` after the pass (#213).
                 get_logger().error(
                     "Redaction zone %s could not be applied to an array of "
                     "shape %s: %s", tuple(roi), arr.shape, exc)
