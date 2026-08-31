@@ -19,6 +19,7 @@ it was found -- on **both** gate interpreters, which used to disagree
 import sqlite3
 
 import numpy as np
+import pydicom
 import pytest
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
@@ -391,7 +392,7 @@ def test_a_worker_result_that_is_not_an_outcome_is_a_failure(
 
 # --- 14 --------------------------------------------------------------------
 
-def _write_source(path):
+def _write_source(path, uid="1.2.3.partial"):
     """A real one-instance DICOM file, 32x32 uint8 all 200.
 
     **The instance under test must be backed by a source file, and that is
@@ -422,9 +423,9 @@ def _write_source(path):
     ds.file_meta = FileMetaDataset()
     ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
     ds.file_meta.MediaStorageSOPClassUID = SC_STORAGE
-    ds.file_meta.MediaStorageSOPInstanceUID = "1.2.3.partial"
+    ds.file_meta.MediaStorageSOPInstanceUID = uid
     ds.SOPClassUID = SC_STORAGE
-    ds.SOPInstanceUID = "1.2.3.partial"
+    ds.SOPInstanceUID = uid
     ds.Rows = 32
     ds.Columns = 32
     ds.SamplesPerPixel = 1
@@ -575,3 +576,141 @@ def test_the_geometry_contradiction_reaches_the_same_report(tmp_path):
     assert len(rows) == 1, rows
     assert rows[0][0] == "1.2.3.contradiction"
     assert "ValueError" in rows[0][1], rows[0][1]
+
+
+# --- 17 --------------------------------------------------------------------
+
+def _file_backed(serial, uid, source):
+    """One file-backed instance under its own series, keyed by scanner."""
+    series = Series(f"SE_{serial}", "OT", 1)
+    series.equipment = Equipment("Acme", "Scanner", serial)
+    inst = Instance(uid, SC_STORAGE, 1)
+    inst.file_path = str(source)
+    for tag, value in (("0028,0010", 32), ("0028,0011", 32),
+                       ("0028,0002", 1), ("0028,0100", 8)):
+        inst.set_attr(tag, value)
+    series.instances.append(inst)
+    return series
+
+
+def test_a_zone_that_could_not_be_applied_never_reaches_disk(tmp_path):
+    """The failure half of the headline safety claim, which nothing asserts.
+
+    `redact()` now raises, but a caller who catches it -- or ignores it,
+    which the audit row and the `REVIEW_REQUIRED` grade exist for -- can
+    still call `export()`. What keeps the burned-in identifier off disk on
+    that route is not the raise: it is that `_export_instance_worker`
+    re-applies `ctx.redaction_zones` to the array it is about to write, so
+    the zone that failed in `redact()` fails again in the worker and the
+    write is refused.
+
+    The re-application was not wholly untested -- `test_export_contract.py
+    ::test_an_export_plan_carries_the_configured_redaction_zones` asserts
+    the plan carries the zones, and `test_redaction_export.py
+    ::test_export_compressed_redaction` exports a *successfully* redacted
+    instance and reads the zeroed pixels back. What neither says anything
+    about is a zone that **raises**, which is the only case #213 is about:
+    they show that a zone which works is carried and applied, not that a
+    zone which fails stops the write.
+
+    Measured with `redaction_zones=[]` left at the single population site
+    (`DicomSession._build_export_tasks`) and nothing else changed: the
+    failed instance exports a file, and its pixels read 200 across the
+    region the rule was meant to zero -- 12800 over the 8x8 zone -- on
+    both gate interpreters. That is the whole of #213 arriving on disk
+    through a route the raise does not guard. The full suite under that
+    mutation fails three tests: this one and the two named above.
+
+    Two arms, and only one of them carries that polarity:
+
+    * The **failed** instance has no `_pixel_loader` -- the persist gate
+      saw to that -- so the worker re-reads the pristine source file and
+      the zones are the only thing standing between it and the write. This
+      arm fails under the mutation.
+    * The **successful** instance is here for selectivity: a refusal that
+      refuses everything would satisfy the first arm on its own. It does
+      *not* fail under the mutation, and cannot -- its redaction was
+      persisted, so `get_pixel_data()` comes back through a
+      `SidecarPixelLoader` already zeroed and the worker's re-application
+      has nothing left to do. Measured, not assumed.
+
+    No monkeypatch anywhere: `session.export()`'s workers are separate
+    processes on every interpreter (#185 pins `maxtasksperchild=25`, which
+    rules threads out), so a patch installed in the parent would never
+    reach the code under test. The zone is genuinely malformed instead.
+
+    The successful instance's filename is read off the live object rather
+    than written down, because the two interpreters disagree about it.
+    `redact()` is *not* export -- it takes the threads path on 3.14t --
+    and there the worker regenerates the UID on the parent's own object,
+    so the exported file is named for the new UID; on 3.12's processes
+    path the parent keeps `1.2.3.ok`. The export reads the same object, so
+    reading it back is right on both. The failed instance's UID is
+    asserted unchanged in the same breath: a redaction that did not happen
+    regenerates nothing.
+
+    This covers `session.export()` and only that. `write_tree()` is the
+    other public way to write DICOM and carries the same leak, and it is
+    not coverable from here: it takes no configuration, sets no
+    `redaction_zones`, and says so in its own docstring. What closes that
+    route is `redact()` raising, upstream of any call to it.
+    """
+    src_ok = tmp_path / "src_ok.dcm"
+    src_bad = tmp_path / "src_bad.dcm"
+    _write_source(src_ok, uid="1.2.3.ok")
+    _write_source(src_bad, uid="1.2.3.bad")
+
+    # If the source were already clean, the export could refuse for any
+    # reason at all and this test would still pass.
+    assert int(pydicom.dcmread(str(src_bad)).pixel_array.sum()) == 32 * 32 * 200
+
+    session = DicomSession(str(tmp_path / "export_refusal.db"))
+    patient = Patient("P1", "Test^Patient")
+    study = Study("ST_1", "20230101")
+    study.series.append(_file_backed(SN_OK, "1.2.3.ok", src_ok))
+    study.series.append(_file_backed(SN_BAD, "1.2.3.bad", src_bad))
+    patient.studies.append(study)
+    session.store.patients.append(patient)
+
+    session.configuration.rules = [
+        {"serial_number": SN_OK, "redaction_zones": [GOOD_ZONE]},
+        {"serial_number": SN_BAD,
+         "redaction_zones": [[0, 8, 0, 8], [1, "abc", 0, 8]]},
+    ]
+
+    out = tmp_path / "out"
+    db_path = session.store_backend.db_path
+    good, bad = _instances(session)["1.2.3.ok"], _instances(session)["1.2.3.bad"]
+    try:
+        with pytest.raises(RedactionError):
+            session.redact(show_progress=False)
+
+        # j2k off: a compression failure is another producer of
+        # `ExportOutcome(ok=False)`, and this test must not be able to pass
+        # on one.
+        session.export(str(out), use_compression=False, show_progress=False)
+    finally:
+        session.close()
+
+    assert bad.sop_instance_uid == "1.2.3.bad", (
+        "the failed instance's UID was regenerated, so it was treated as "
+        "redacted somewhere")
+    written = sorted(p.name for p in out.rglob("*.dcm"))
+    assert written == [f"{good.sop_instance_uid}.dcm"], (
+        "the instance whose zone could not be applied was written to disk "
+        "with its burned-in identifier intact")
+
+    arr = pydicom.dcmread(str(next(out.rglob(written[0])))).pixel_array
+    assert int(arr[0:8, 0:8].sum()) == 0, (
+        "the export refused every instance rather than the failed one")
+    assert int(arr.sum()) == 32 * 32 * 200 - 8 * 8 * 200
+
+    # `redact()` wrote an ERROR row for this instance too; the export's is
+    # a second, separate row and the one under test here.
+    rows = [(uid, detail) for uid, detail in _audit(db_path)
+            if "Export failed for" in detail]
+    assert len(rows) == 1, rows
+    assert rows[0][0] == "1.2.3.bad", rows
+    assert "invalid literal for int" in rows[0][1], (
+        "the export refused for some other reason -- a guessed geometry, a "
+        f"missing pixel element -- not the zone: {rows[0][1]}")
