@@ -255,7 +255,7 @@ def test_a_rule_redacts_the_same_zones_whichever_order_they_are_written_in(
     and is the leg nothing else in the suite covers: every other
     multi-zone test applies every zone it lists, so no test has a valid
     zone *after* a skipped one. Measured: turning that `continue` into a
-    `break` leaves the whole suite green (966 passed) while silently
+    `break` leaves the whole suite green while silently
     reinstating exactly the order dependence this fix removed -- a rule
     ordered `[off-image, valid]` would redact nothing and still write the
     attestation. Only `skipped_first` goes red on it.
