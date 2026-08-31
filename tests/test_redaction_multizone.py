@@ -26,6 +26,7 @@ import pytest
 
 from isocenter.entities import Instance
 from isocenter.services import RedactionService
+from isocenter.session import DicomSession
 
 #: Two disjoint zones on a 32x32 image, applied in config order.
 TWO_ZONES = [[0, 8, 0, 8], [16, 24, 16, 24]]
@@ -98,40 +99,66 @@ def test_every_zone_of_a_rule_is_applied_on_the_serial_path(
 
 # --- T3 --------------------------------------------------------------------
 
-def test_every_zone_reaches_the_exported_file(reloaded_redaction_session,
-                                              tmp_path):
-    """End to end: the burned-in identifier is not in the written DICOM.
+def test_every_zone_reaches_the_store_and_the_exported_file(
+        reloaded_redaction_session, tmp_path):
+    """`redact()` -> `save()` -> reopen -> `export()`, the route that leaks.
 
-    **Clearing the rules before `export()` is load-bearing, not tidiness.**
-    `_export_instance_worker` re-applies `ctx.redaction_zones` in a single
-    `apply_redaction_to_array` call, so an export running under the same
-    configuration silently repairs the damage on the way out. That repair
-    is what hid #229. It is unavailable on every other ordinary route: a
-    second session that loaded the store without the config,
-    `DicomExporter.write_tree()` (#78, applies no zones at all), a serial
-    that no longer matches at export time, or simply reading the saved
-    store -- `save()` persists the half-redacted array to the sidecar. Do
-    not "simplify" the two lines below away; they turn this back into a
-    test that passes on `4507d48`.
+    **The reopen is what makes this test say anything the in-memory ones
+    do not.** `_export_instance_worker` re-applies `ctx.redaction_zones`
+    in a single `apply_redaction_to_array` call, so an export running
+    under the same configuration silently repairs the damage on the way
+    out -- and that repair is what hid #229. A second session that loaded
+    the store carries **no rules** (asserted below, so this is structural
+    rather than a `configuration.rules = []` line someone can tidy away),
+    which is one of the four ordinary routes where the repair is
+    unavailable. The others: `DicomExporter.write_tree()` (#78, applies no
+    zones at all), a serial that no longer matches at export time, and
+    simply *reading* the saved store.
 
-    The `len(files) == 1` assertion comes first for the same reason.
+    So the store is asserted before the export is, and it is the stronger
+    of the two: `save()` persists the array to the sidecar, so a
+    half-redacted array there carries the burned-in identifier whatever a
+    later export does.
+
+    The `len(files) == 1` assertion comes before any pixel assertion.
     `export()` does not raise when an instance fails module validation, so
-    a non-exportable fixture leaves an empty tree and every pixel
-    assertion below would be skipped rather than run.
+    a non-exportable fixture leaves an empty tree and everything below it
+    would be skipped rather than run.
 
     `export()` uses processes on **every** interpreter (#185), so only the
     `redact()` half differs between 3.12 and 3.14t -- and it does not.
-    On `4507d48`: red, `zone1 == 12800` on disk, under a report grading
-    `PASS`.
+    On `4507d48`: red, `zone1 == 12800` in the store and on disk, under a
+    report grading `PASS`.
     """
     session, _inst = reloaded_redaction_session(TWO_ZONES, name="ondisk")
+    db_path = session.store_backend.db_path
 
     assert session.redact(show_progress=False) == 1
-    session.save(sync=True)
+    session.save()
+    session.close()
 
-    session.configuration.rules = []          # see the docstring
-    out_dir = tmp_path / "export_ondisk"
-    session.export(str(out_dir), use_compression=False, show_progress=False)
+    reopened = DicomSession(db_path)
+    try:
+        assert not reopened.configuration.rules, (
+            "the reopened session carries rules, so `export()` below would "
+            "re-apply the zones and repair the damage under test")
+
+        stored = next(i
+                      for p in reopened.store.patients
+                      for st in p.studies
+                      for se in st.series
+                      for i in se.instances)
+        zone1, zone2 = _zone_sums(stored.get_pixel_data())
+        assert zone2 == 0
+        assert zone1 == 0, (
+            f"the saved store holds zone 1 with sum {zone1}: the sidecar "
+            "carries the burned-in identifier (#229)")
+
+        out_dir = tmp_path / "export_ondisk"
+        reopened.export(str(out_dir), use_compression=False,
+                        show_progress=False)
+    finally:
+        reopened.close()
 
     files = sorted(out_dir.rglob("*.dcm"))
     assert len(files) == 1, (

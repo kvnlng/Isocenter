@@ -62,15 +62,21 @@ def _hydrated(db_file, build):
     tests need in order to drop the resident array and see what the store
     actually holds.
 
-    This shape *does* now settle whether a failed task persisted, and
-    `test_a_failed_reloaded_instance_is_left_as_it_was_found` (test 18)
-    asks it. Until #229 it could not: the read-only array was copied
-    afresh for every zone, so the partial mutation the persist gate exists
-    to keep out never formed on a reloaded instance. Since #229 the copy
-    is made once, the zones before the failure really are zeroed in it,
-    and the gate plus the unconditional `unload_pixel_data()` are what
-    keep them out of the store. See `_write_source` for the file-backed
-    shape, which decided this before a reloaded one could.
+    **A reloaded instance can now hold a partial mutation, which it could
+    not before #229**, and the change is mechanical rather than anything
+    about this helper: the read-only array used to be copied afresh for
+    every zone, so zones 1..k-1 were never in the array the instance ended
+    up with when zone k raised. `_redact_instance_pixels` copies once, so
+    they are. What keeps them out of the store is the persist gate plus
+    the unconditional `unload_pixel_data()`.
+
+    No caller of this helper exercises that: `_session()` gives each
+    machine a **one-zone** rule, deliberately (see its docstring), and a
+    single zone cannot fail after another has applied. The reloaded case
+    that does ask the question is test 18, which builds its own instance
+    through `reloaded_redaction_session` rather than through here. See
+    `_write_source` for the file-backed shape, which decided this before a
+    reloaded one could.
     """
     session = DicomSession(str(db_file))
     build(session)
