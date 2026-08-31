@@ -346,6 +346,49 @@ def test_an_instance_with_no_pixel_data_is_skipped_not_failed(
     assert _audit(db_path) == []
 
 
+def test_a_worker_result_that_is_not_an_outcome_is_a_failure(
+        tmp_path, monkeypatch):
+    """A bare `None` from the worker is a failure row, not a silent skip.
+
+    This is the third result shape `_apply_redaction_outcomes` has to
+    survive, and the one with no production caller: `execute_redaction_task`
+    always returns a `RedactionOutcome` today. It is pinned anyway because
+    tolerating an unrecognised result is exactly the conflation #213
+    removes -- `None` used to mean "already redacted", "no pixels" and "it
+    blew up" at once -- and because the only place a bare `None` ever
+    reached the parent was a test stub, which this change had to edit. A
+    stub is precisely what would go on passing against a contract the code
+    no longer implements, so the clause needs a guard that is not a stub's
+    incidental behaviour.
+
+    `run_parallel` is replaced with a serial map rather than forcing
+    threads, the way `test_redact_reports_outcome.py` does it: a
+    monkeypatched worker cannot reach a separate process, and this way the
+    test does not depend on which executor the interpreter picks.
+    """
+    import isocenter.services as services
+
+    session = _session(tmp_path, bad_zone=GOOD_ZONE, name="unrecognised")
+    db_path = session.store_backend.db_path
+    monkeypatch.setattr(services.RedactionService, "execute_redaction_task",
+                        lambda self, task: None)
+    monkeypatch.setattr("isocenter.session.run_parallel",
+                        lambda fn, items, **_kwargs: [fn(i) for i in items])
+
+    try:
+        with pytest.raises(RedactionError) as excinfo:
+            session.redact(show_progress=False)
+        assert len(excinfo.value.failures) == 3, (
+            "a worker result the parent cannot read was skipped, not counted")
+    finally:
+        session.close()
+
+    rows = _audit(db_path)
+    assert len(rows) == 3, rows
+    assert all(uid == "UNKNOWN" for uid, _ in rows), rows
+    assert all("unrecognised" in detail for _, detail in rows), rows
+
+
 # --- 14 --------------------------------------------------------------------
 
 def _write_source(path):
