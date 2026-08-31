@@ -245,3 +245,53 @@ def test_the_reloaded_fixture_really_is_read_only(reloaded_redaction_session):
     assert isinstance(arr, np.ndarray)
     assert arr.flags.writeable is False
     assert int(arr.sum()) == 32 * 32 * 200
+
+
+def test_a_rule_that_applied_nothing_returns_False_and_attests_nothing(
+        reloaded_redaction_session):
+    """Guard on the one bit the redaction attestation hangs on.
+
+    Selectivity guard, not evidence for #229: it needs
+    `_redact_instance_pixels` to exist, so it cannot be run against
+    `4507d48` at all, and it is green under the multi-zone defect.
+
+    It is here because that method's **return value** was the one thing
+    the whole suite did not check. Measured: replacing its body's
+    `return self.apply_redaction_to_array(...)` with a call plus an
+    unconditional `return True` left **964 passed, 1 skipped** -- the
+    entire suite green -- while a rule whose zones are all off-image
+    gained a real `_ISOCENTER_REDACTION_HASH` and `BurnedInAnnotation`
+    `NO` on an image whose pixels were never touched. That bool gates
+    `_apply_redaction_flags`, `regenerate_uid` and the hash in both
+    callers, so a wrong `True` there is an attestation that a redaction
+    happened when none did.
+
+    A zone starting past the edge describes nothing to redact and
+    `apply_redaction_to_array` skips it without raising, so this is the
+    reachable shape of "nothing applied". The *reporting* of that run --
+    `applied: 1` and `(0028,0301)` written as `None` -- is #235 and is
+    deliberately not asserted here; only the return value and the absence
+    of the attestation are, both of which #235's fix leaves alone.
+    """
+    session, inst = reloaded_redaction_session(
+        [[100, 200, 100, 200], [200, 300, 200, 300]], name="nothing")
+    arr = inst.get_pixel_data()
+    assert arr.flags.writeable is False, "vacuous on a writeable array"
+
+    service = RedactionService(session.store, session.store_backend)
+    assert service._redact_instance_pixels(
+        inst, arr, [(100, 200, 100, 200), (200, 300, 200, 300)]) is False, (
+        "every zone was off-image and nothing was redacted, but the method "
+        "reported a modification -- its callers write a redaction hash on "
+        "that bool")
+
+    service.redact_machine_instances(
+        "SN_RELOAD", [(100, 200, 100, 200), (200, 300, 200, 300)],
+        targets=[inst], show_progress=False)
+
+    assert not inst.attributes.get("_ISOCENTER_REDACTION_HASH"), (
+        "an image nothing was applied to carries a redaction hash")
+    inst.unload_pixel_data()
+    assert int(inst.get_pixel_data().sum()) == 32 * 32 * 200, (
+        "something was zeroed after all; this test is not asking its "
+        "question")
