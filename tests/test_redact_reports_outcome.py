@@ -126,6 +126,13 @@ def test_a_partially_applied_redaction_is_reported(session, monkeypatch,
     failure cannot reach them. `run_parallel` is replaced with a serial
     map so the real worker and the real accounting run in-process; only
     the concurrency is stubbed out.
+
+    The stub returns a benign no-mutation outcome rather than a bare
+    `None`, because since #213 a `None` is a *failure* the parent audits
+    and raises on -- not the "nothing to apply" it used to conflate with
+    two other things. Both assertions below are unchanged; the test's
+    meaning is exactly preserved, and is now stated in the vocabulary that
+    distinguishes it from a failure.
     """
     import isocenter.services as services
 
@@ -134,7 +141,11 @@ def test_a_partially_applied_redaction_is_reported(session, monkeypatch,
 
     def fail_after_the_first(self, task):
         calls["n"] += 1
-        return real(self, task) if calls["n"] == 1 else None
+        if calls["n"] == 1:
+            return real(self, task)
+        return services.RedactionOutcome(
+            ok=True, sop_instance_uid=task["instance"].sop_instance_uid,
+            mutation=None)
 
     monkeypatch.setattr(services.RedactionService, "execute_redaction_task",
                         fail_after_the_first)

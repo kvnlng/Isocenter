@@ -123,6 +123,52 @@ class RedactionError(RuntimeError):
             f"{first[1]}. See the audit log for the rest.")
 
 
+def report_redaction_failures(failures, store_backend=None):
+    """Log every zone that could not be applied, and audit it if we can.
+
+    The mirror of `DicomExporter._report_export_failures`, and one
+    spelling shared by both redaction paths -- the parallel one in
+    `Session._apply_redaction_outcomes` and the serial one in
+    `RedactionService.redact_machine_instances`.
+
+    `ERROR`, not `DATA_LOSS`, for two independent reasons. *Vocabulary*:
+    nothing was dropped -- the burned-in identifier is **present**, and
+    being present is the problem, which is a failed operation and exactly
+    what `_report_export_failures` writes `ERROR` for. *Grading*: a
+    `DATA_LOSS` row is graded by `loss_scope`, and `STANDARD` leaves the
+    run at `PASS` while `PRIVATE` would be a lie about a tag that does not
+    exist. An `ERROR` row lands in `get_audit_errors()`, populates
+    `exceptions`, and takes `validation_status` to `REVIEW_REQUIRED`.
+
+    Warning and auditing are deliberately not the same condition, for the
+    reason `_report_export_losses` gives: `RedactionService(store)` with no
+    backend is a supported construction, and gating the report on one would
+    lose the failure entirely.
+
+    The detail is flattened to one line and its pipes escaped because it is
+    rendered straight into a markdown table row in the compliance report.
+    It is **not** truncated.
+
+    Returns:
+        List[Tuple[str, str]]: `(entity_uid, details)` per failure, flattened.
+    """
+    logger = get_logger()
+    reported = []
+    for uid, detail in failures:
+        detail = " ".join(str(detail).split()).replace("|", "\\|")
+        logger.error("%s: %s", uid, detail)
+        reported.append((uid, detail))
+        if store_backend is not None:
+            # `log_audit`, not `log_audit_batch` -- the batch method writes
+            # straight to the database while the audit writer thread is
+            # live and swallows `sqlite3.Error` into a log line, so
+            # contention would lose the very entry that exists because a
+            # log line was not enough.
+            store_backend.log_audit(action_type="ERROR", entity_uid=uid,
+                                    details=detail)
+    return reported
+
+
 class RedactionService:
     """
     Applies pixel redaction to DICOM instances based on configuration rules.
@@ -276,25 +322,38 @@ class RedactionService:
             task (dict): The task structure created by `prepare_redaction_tasks`.
 
         Returns:
-            dict: A mutation dictionary containing changes to apply in the main process, or None.
+            RedactionOutcome: `ok=True` with a mutation dict when zones were
+                applied, `ok=True` with `mutation=None` for a legitimate
+                skip (already redacted under this configuration, or no pixel
+                data), and `ok=False` with an `error` string when a zone
+                could not be applied.
+
+        **The worker never raises.** `_apply_redaction_rules` consumes
+        `run_parallel(..., return_generator=True)` incrementally, and an
+        exception escaping a worker terminates that generator mid-iteration
+        -- so every mutation still queued behind it would be lost, and the
+        instances that *were* redacted would silently never reach the graph.
+        Returning an outcome is what makes "all successful mutations are
+        applied before the raise" true rather than aspirational (#213).
         """
         inst = task["instance"]
         original_uid = inst.sop_instance_uid  # Capture before mutation
         rois = task["rois"]
         config_hash = task["config_hash"]
+        failed = False
 
         try:
             # Optimized: Skip if already redacted with same config
             current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
 
             if current_hash == config_hash:
-                return None
+                return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
             # Triggers Lazy Load from disk
             arr = inst.get_pixel_data()
 
             if arr is None:
-                return None
+                return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
             modified = False
             for roi in rois:
@@ -335,15 +394,50 @@ class RedactionService:
             }
             # DEBUG
             # print(f"DEBUG: Worker returning mutation for {inst.sop_instance_uid}", file=sys.stderr)
-            return mutation
+            return RedactionOutcome(ok=True, sop_instance_uid=original_uid,
+                                    mutation=mutation)
 
         except Exception as e:
+            # The catch stays broad, and a missing-argument `TypeError` from
+            # `apply_redaction_to_array` is audited here like any other
+            # failure. That collision is deliberate: a malformed zone in a
+            # JSON config raises `TypeError` too -- `(0, None, 0, 8)` and
+            # `(0, [1], 0, 8)` both do -- so narrowing this catch to make
+            # room for the programming error would drop real failed
+            # redactions and re-open #213. Do not add traceback-frame
+            # inspection to tell the two apart (#217).
+            failed = True
             traceback.print_exc()
             self.logger.error(f"  Failed {inst.sop_instance_uid}: {e}")
-            return None
+            return RedactionOutcome(ok=False, sop_instance_uid=original_uid,
+                                    error=f"{type(e).__name__}: {e}")
         finally:
             # Persistence & Memory Cleanup
-            if self.store_backend and hasattr(self.store_backend, 'persist_pixel_data'):
+            #
+            # Not persisted on a failure, and that gate is the whole of
+            # #213's "a failed instance is left as it was found".
+            # `apply_redaction_to_array` raises *mid-loop*, so zones 1..k-1
+            # are already zeroed when zone k fails; persisting made that
+            # partial mutation durable on the threads path (3.14t's default)
+            # while the processes path (3.12's) mutated a copy and left the
+            # instance untouched -- the same failed redaction leaving two
+            # different sidecars depending on the interpreter. Without the
+            # persist, the unconditional `unload_pixel_data()` below drops
+            # the mutated array and the next `get_pixel_data()` reloads the
+            # original through the loader.
+            #
+            # The one instance this cannot reach is one with neither a
+            # loader nor a `file_path` -- a graph built in memory and never
+            # reloaded. `unload_pixel_data()` refuses there, deliberately,
+            # because clearing would be a silent discard, so it keeps the
+            # zones applied before the failure. That is accepted: zeroing is
+            # monotone, so a partial redaction has removed *more* PHI than
+            # none. What matters is that it is not reported as a success and
+            # carries no hash, so the next run retries it. Do not "fix" it
+            # with a pre-image copy of every array -- that is exactly the
+            # resident-memory cost the lazy-pixel design exists to avoid.
+            if (not failed and self.store_backend
+                    and hasattr(self.store_backend, 'persist_pixel_data')):
                 try:
                     self.store_backend.persist_pixel_data(inst)
                 except Exception as pe:
