@@ -57,7 +57,16 @@ PARAMETRIC_MAP = "1.2.840.10008.5.1.4.1.1.30"
 
 
 def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
-                     bits=32):
+                     bits=32, samples=1, photometric="MONOCHROME2"):
+    """Write a Parametric Map carrying its float payload under `tag`.
+
+    `samples` and `photometric` are parameters because the #222 case
+    needs a source that declares three samples beside a monochrome
+    interpretation. That instance is self-contradictory by C.7.6.3.1.2
+    -- MONOCHROME2 is permitted only at one sample -- but it is a real
+    file a real scanner can emit, and every descriptor on it survives
+    ingest, which is the whole point of the test that uses it.
+    """
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = PARAMETRIC_MAP
     meta.MediaStorageSOPInstanceUID = generate_uid()
@@ -73,10 +82,21 @@ def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
     ds.Rows = ds.Columns = 4
     ds.BitsAllocated = ds.BitsStored = bits
     ds.HighBit = bits - 1
-    ds.SamplesPerPixel = 1
-    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.SamplesPerPixel = samples
+    ds.PhotometricInterpretation = photometric
+    if samples > 1:
+        # Type 1C in C.7.6.3.1.3, required once SamplesPerPixel > 1, and
+        # not optional here in practice: pydicom's decoder raises
+        # `AttributeError: Missing required element: (0028,0006) 'Planar
+        # Configuration'` without it, so `get_pixel_data()` yields no
+        # array, the export writes no pixel element, and a test asserting
+        # on Photometric Interpretation passes for the wrong reason --
+        # `_merge` copied the declared value and the geometry block never
+        # ran at all. Found by exactly that vacuity.
+        ds.PlanarConfiguration = 0
     ds.PixelRepresentation = 0
-    ds.add_new(tag, vr, (np.arange(16, dtype=dtype) + 0.5).tobytes())
+    ds.add_new(tag, vr,
+               (np.arange(16 * samples, dtype=dtype) + 0.5).tobytes())
 
     ds.save_as(os.path.join(folder, "one.dcm"), enforce_file_format=True)
     return ds.SOPInstanceUID
@@ -766,3 +786,139 @@ def test_a_guessed_float_geometry_stops_write_tree_too(tmp_path):
     written = [f for _r, _d, files in os.walk(str(out))
                for f in files if f.endswith(".dcm")]
     assert written == [], written
+
+
+# --- #222: RGB must not be written onto a float pixel element ---
+#
+# `_write_pixel_geometry` is shared by both pixel branches, and
+# `resolve_photometric_interpretation` returns "RGB" whenever three or
+# more samples sit beside a declared monochrome value. That correction is
+# right on the integer path -- three interleaved samples read neutrally as
+# RGB -- and wrong on this one: PS3.3 C.7.6.24 and C.7.6.25 both enumerate
+# `MONOCHROME2` and nothing else, so RGB is a value neither module permits
+# and overwriting the source's own word with it replaces one
+# nonconformance with another.
+
+
+def test_a_declared_monochrome_survives_a_float_export_with_three_samples(
+        tmp_path):
+    """#222, through plain ingest -> export. Nothing is hand-built here.
+
+    This test is at the pipeline level rather than the worker level
+    because the reachability is the fact that changed the decision. #222
+    was filed rather than fixed on the reasoning that the affected
+    instances were "reachable only from a hand-built graph or a
+    `set_attr` call, since `populate_attrs` skips group `7fe0`". Group
+    `7fe0` is indeed skipped -- and it is irrelevant. The float array
+    reaches the worker from `get_pixel_data()` re-reading the source file
+    with pydicom, which is the entire #170 mechanism, while
+    `SamplesPerPixel` (0028,0002) and `PhotometricInterpretation`
+    (0028,0004) are ordinary group-0028 elements that pass straight
+    through ingest. So a source declaring three samples beside
+    MONOCHROME2 needs no API call at all.
+
+    Measured on this exact fixture: `258331c` exported `MONOCHROME2`, and
+    the first four commits of this branch exported **`RGB`** -- a
+    regression this PR introduced and now removes.
+
+    The instance is self-contradictory whichever half is wrong
+    (C.7.6.3.1.2 permits MONOCHROME2 only at `SamplesPerPixel = 1`), and
+    that is not the point. The point is that the exporter's job is to
+    stop inventing and mis-stating what it was told, not to arbitrate
+    which of the source's two statements to discard -- and of the two
+    available answers, only the source's own is a value the module
+    enumerates.
+
+    **Not asserted here: `PlanarConfiguration`.** It appears in neither
+    float module's attribute table, so pinning what the exporter writes
+    for it would cement an element the IOD does not define. That is
+    #222's option 2 and is deliberately still open.
+
+    **Also not asserted: the residual.** An instance declaring *no*
+    Photometric Interpretation beside three samples still exports `RGB`.
+    That is #222's own assessment of the fix applied here -- the
+    narrowest of the three shapes it offers -- and pinning it would
+    cement a behaviour the remaining options may change.
+    """
+    exported, rows = _run(tmp_path, name="m222", samples=3,
+                          photometric="MONOCHROME2")
+
+    assert exported.SamplesPerPixel == 3
+    assert exported.PhotometricInterpretation == "MONOCHROME2"
+    assert (0x7FE0, 0x0008) in exported
+    assert rows == [], rows
+
+
+@pytest.mark.parametrize("declared", ["MONOCHROME1", "PALETTE COLOR"])
+def test_every_monochrome_interpretation_survives_the_float_path(
+        tmp_path, declared):
+    """MONOCHROME2 is not a special case, and a guard could make it one.
+
+    `resolve_photometric_interpretation`'s RGB arm tests membership of
+    `MONOCHROME_PHOTOMETRIC`, which is `{MONOCHROME1, MONOCHROME2,
+    PALETTE COLOR}` -- `PALETTE COLOR` included, because it is a single
+    sample indexing a lookup table rather than three interleaved ones.
+    A guard written as `== "MONOCHROME2"` would satisfy the test above
+    and still relabel the other two, so the fix is pinned across the
+    whole set it is defined over.
+    """
+    arr = np.zeros((4, 4, 3), dtype=np.float32)
+    _inst, outcome, out = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4, "0028,0002": 3,
+                       "0028,0004": declared}),
+        f"mono_{declared.replace(' ', '_')}.dcm")
+    assert outcome.ok, outcome.error
+
+    assert pydicom.dcmread(out).PhotometricInterpretation == declared
+
+
+def test_the_integer_path_still_corrects_monochrome_beside_three_samples(
+        tmp_path):
+    """The guard is float-only, and this is what says so.
+
+    `resolve_photometric_interpretation` is shared, and on the integer
+    path its RGB arm is correct: a monochrome interpretation beside three
+    samples is nonconformant whichever half is wrong, and RGB is the
+    neutral reading of three interleaved samples -- there *is* a right
+    answer to correct to, which is exactly what the float modules deny.
+    Fixing #222 inside the resolver, or by dropping the `float_element`
+    argument, would silently revert #186's colour half. This fails in
+    both of those worlds and passes on `258331c`, so it is a
+    regression-guard rather than a fix.
+    """
+    arr = np.zeros((4, 4, 3), dtype=np.uint8)
+    _inst, outcome, out = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4, "0028,0002": 3,
+                       "0028,0004": "MONOCHROME2", "0028,0100": 8,
+                       "0028,0101": 8, "0028,0102": 7}),
+        "int_rgb.dcm")
+    assert outcome.ok, outcome.error
+
+    exported = pydicom.dcmread(out)
+    assert (0x7FE0, 0x0010) in exported
+    assert exported.PhotometricInterpretation == "RGB"
+
+
+def test_a_declared_colour_interpretation_still_survives_the_float_path(
+        tmp_path):
+    """The guard must not become "never write Photometric Interpretation".
+
+    A float instance declaring `YBR_FULL` beside three samples is
+    coherent by C.7.6.3.1.2 even though neither float module permits it,
+    so `resolve_photometric_interpretation` returns None and the declared
+    value is what `_merge` already wrote. That arm never reaches the
+    guard, and this pins that widening the guard to swallow it would be
+    caught -- it is the same round-trip property #186 restored for every
+    YBR instance on the integer path.
+    """
+    arr = np.zeros((4, 4, 3), dtype=np.float32)
+    _inst, outcome, out = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4, "0028,0002": 3,
+                       "0028,0004": "YBR_FULL"}),
+        "ybr_float.dcm")
+    assert outcome.ok, outcome.error
+
+    assert pydicom.dcmread(out).PhotometricInterpretation == "YBR_FULL"

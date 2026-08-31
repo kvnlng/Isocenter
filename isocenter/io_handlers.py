@@ -794,7 +794,7 @@ class ExportSummary:
         return len(self.failures)
 
 
-def _write_pixel_geometry(ds, geom, attributes) -> None:
+def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
     """Write the descriptors that describe the pixel element just written.
 
     Both pixel branches call this, so `Rows`, `Columns`,
@@ -828,6 +828,11 @@ def _write_pixel_geometry(ds, geom, attributes) -> None:
         attributes (dict): The instance's attributes, read only to decide
             whether a frame count was declared and for the photometric
             fallback.
+        float_element (bool): Whether the pixel element just written was
+            (7fe0,0008) or (7fe0,0009). Keyword-only and **without a
+            default**, so a third call site has to decide which module's
+            Photometric Interpretation rules apply rather than inheriting
+            the integer path's by omission (#222).
     """
     ds.Rows = geom.rows
     ds.Columns = geom.cols
@@ -847,6 +852,40 @@ def _write_pixel_geometry(ds, geom, attributes) -> None:
     # This is *not* an `or`: the None arm is what lets YBR_FULL,
     # YBR_ICT and MONOCHROME1 survive a round trip.
     photometric = resolve_photometric_interpretation(attributes, geom.samples)
+
+    if float_element and photometric == "RGB":
+        # `RGB` is right on the integer path and wrong on this one, and
+        # the resolver is shared, so the difference has to be made here
+        # rather than in it (#222).
+        #
+        # C.7.6.24 and C.7.6.25 both enumerate `MONOCHROME2` and nothing
+        # else for Photometric Interpretation, so there is no value the
+        # resolver could correct a float declaration *to* that either
+        # module permits -- `RGB` least of all. On the integer path the
+        # correction is the neutral reading of three interleaved samples
+        # and it stays; here it replaces one nonconformance with another
+        # and throws away the only word the source file ever said about
+        # its own pixels.
+        #
+        # The resolver returns `"RGB"` from exactly two arms: nothing was
+        # declared, or a monochrome value was declared beside three or
+        # more samples. Asking it again at `samples = 1` -- the count
+        # C.7.6.3.1.2 permits `MONOCHROME2` at, and therefore the count
+        # both float modules imply -- separates them: it returns None
+        # only for a declared monochrome value. That is also why the test
+        # is a second call rather than a `in MONOCHROME_PHOTOMETRIC`
+        # membership check here: the declared value needs stripping and
+        # upper-casing before it can be compared, and `pixel_geometry`
+        # already does that. A second copy of that normalisation is a
+        # second answer to "what did the instance declare".
+        #
+        # Only the declared-monochrome row moves. An instance declaring
+        # nothing still exports `RGB`, which is #222's own assessment of
+        # this fix: it is the narrowest of the three shapes that issue
+        # offers, not a complete answer to it.
+        if resolve_photometric_interpretation(attributes, 1) is None:
+            photometric = None
+
     if photometric is None:
         photometric = attributes.get("0028,0004")
     if photometric:
@@ -1089,7 +1128,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # enumerate beside the tag this branch chose, not a width
             # derived from the bytes.
             if arr.itemsize in (4, 8):
-                _write_pixel_geometry(ds, geom, inst.attributes)
+                _write_pixel_geometry(ds, geom, inst.attributes,
+                                      float_element=True)
 
             arr = None
 
@@ -1126,7 +1166,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 if kw in ds:
                     del ds[kw]
 
-            _write_pixel_geometry(ds, geom, inst.attributes)
+            _write_pixel_geometry(ds, geom, inst.attributes,
+                                  float_element=False)
 
             if arr.itemsize == 1:
                 default_bits = 8
