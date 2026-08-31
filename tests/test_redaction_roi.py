@@ -8,11 +8,11 @@ class MockStore:
     def __init__(self):
         self.patients = []
 
-def test_apply_roi_to_instance_floats():
+def test_redact_instance_pixels_floats():
     """
     Regression Test for Float ROI Coordinates.
     Ensures that passing float coordinates (e.g. from JSON) does not cause
-    silent failure in _apply_roi_to_instance due to TypeError in slicing.
+    silent failure in _redact_instance_pixels due to TypeError in slicing.
     """
     inst = Instance("1.2.3", "1.2.3", 1)
 
@@ -27,7 +27,7 @@ def test_apply_roi_to_instance_floats():
     roi = (10.5, 20.5, 10.0, 20.0)
 
     # Call internal method directly
-    success = service._apply_roi_to_instance(inst, arr, roi)
+    success = service._redact_instance_pixels(inst, arr, [roi])
 
     assert success is True, "Operation returned False (Silent Failure)"
 
@@ -52,7 +52,7 @@ def test_apply_roi_dimensions():
     service = RedactionService(MockStore(), None)
 
     roi = (10, 20, 10, 20)
-    success = service._apply_roi_to_instance(inst, arr, roi)
+    success = service._redact_instance_pixels(inst, arr, [roi])
 
     assert success is True
 
@@ -61,5 +61,5 @@ def test_apply_roi_dimensions():
     assert np.all(region == 0)
 
 if __name__ == "__main__":
-    test_apply_roi_to_instance_floats()
+    test_redact_instance_pixels_floats()
     test_apply_roi_dimensions()

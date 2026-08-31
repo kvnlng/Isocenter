@@ -69,3 +69,104 @@ def config_file(tmp_path):
     with open(p, "w") as f:
         yaml.dump(data, f)
     return str(p)
+
+
+#: Secondary Capture Image Storage. `reloaded_redaction_session` uses it
+#: deliberately -- see that fixture's docstring.
+SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
+
+
+@pytest.fixture
+def reloaded_redaction_session(tmp_path):
+    """A saved-and-reopened session whose pixels arrive read-only.
+
+    Build -> save() -> close() -> reopen, so `get_pixel_data()` comes back
+    through `SidecarPixelLoader`, which builds its array with
+    `np.frombuffer` over an immutable `bytes` buffer and is therefore
+    **not writeable**. That is the ordinary shape for any instance loaded
+    from a saved store -- the documented ingest -> save -> reopen ->
+    redact workflow -- and until #229 no redaction test in the suite used
+    it. Every other fixture builds the graph in memory or reads a source
+    file, and both give a *writeable* array, where the redaction path
+    mutates in place and is correct. That is the only reason a rule with
+    N zones applying only its Nth zone survived the whole suite.
+
+    The `flags.writeable is False` assertion is the fixture's guard on
+    itself: give this instance a `file_path` and pydicom hands back a
+    writeable array, at which point every test built on it goes vacuous
+    rather than red.
+
+    **The instance is exportable, and that is not decoration.**
+    `session.export()` does not raise when an instance fails module
+    validation -- it logs and writes nothing -- so a fixture missing a
+    Type 1 element leaves an empty output tree, and any test that walks
+    that tree iterates an empty list and passes. Measured on `4507d48`: a
+    CT-class instance without these fails with `['[Type 1 Error] Missing
+    0008,0030 in Common', '[Type 2 Error] Missing 0018,0050 in CTImage',
+    ...]`. Under SC Image Storage the CTImage module does not apply, which
+    is why only the Common-module elements have to be supplied here.
+
+    Yields:
+        A callable `make(zones, ...)` returning `(session, instance)`. The
+        returned session already carries a rule matching the instance's
+        serial. Every session handed out is closed at teardown -- an
+        unclosed one leaks worker subprocesses.
+    """
+    from isocenter.session import DicomSession
+
+    opened = []
+
+    def make(zones, *, serial="SN_RELOAD", uid="1.2.3.reload",
+             shape=(32, 32), fill=200, sop_class=SC_STORAGE, name="reload"):
+        db_file = tmp_path / f"{name}.db"
+
+        session = DicomSession(str(db_file))
+        opened.append(session)
+        patient = Patient("P_RELOAD", "Test^Patient")
+        study = Study(f"ST_{name}", "20230101")
+        series = Series(f"SE_{name}", "OT", 1)
+        series.equipment = Equipment("Acme", "Scanner", serial)
+        inst = Instance(uid, sop_class, 1)
+        inst.file_path = None
+        inst.set_pixel_data(np.full(shape, fill, dtype=np.uint8))
+        inst.set_attr("0008,0016", sop_class)
+        inst.set_attr("0008,0030", "120000")
+        inst.set_attr("0008,0060", "OT")
+        inst.set_attr("0028,0004", "MONOCHROME2")
+        series.instances.append(inst)
+        study.series.append(series)
+        patient.studies.append(study)
+        session.store.patients.append(patient)
+
+        session.save()
+        session.close()
+
+        session = DicomSession(str(db_file))
+        opened.append(session)
+        inst = next(i
+                    for p in session.store.patients
+                    for st in p.studies
+                    for se in st.series
+                    for i in se.instances
+                    if i.sop_instance_uid == uid)
+
+        arr = inst.get_pixel_data()
+        assert arr is not None, "the reopened instance lost its pixels"
+        assert arr.flags.writeable is False, (
+            "this fixture exists to supply a read-only array; a writeable "
+            "one makes every test built on it vacuous rather than red")
+        # Drop the resident array so the redaction re-reads through the
+        # loader rather than the copy this assertion just materialised.
+        inst.unload_pixel_data()
+
+        session.configuration.rules = [
+            {"serial_number": serial, "redaction_zones": zones}]
+        return session, inst
+
+    yield make
+
+    for session in opened:
+        try:
+            session.close()
+        except Exception:  # pragma: no cover - teardown must not mask failures
+            pass

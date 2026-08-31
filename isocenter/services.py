@@ -355,10 +355,11 @@ class RedactionService:
             if arr is None:
                 return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
-            modified = False
-            for roi in rois:
-                if self._apply_roi_to_instance(inst, arr, roi):
-                    modified = True
+            # The whole zone list in one call. A loop here was #229: the
+            # callee rebinds `arr` locally when it copies a read-only array,
+            # so the next iteration handed it the pristine original again
+            # and only the last zone survived.
+            modified = self._redact_instance_pixels(inst, arr, rois)
 
             if modified:
                 self._apply_redaction_flags(inst)
@@ -615,10 +616,10 @@ class RedactionService:
                 # If persist/save fails later, we don't want to match the Old Hash.
                 inst._pixel_hash = None
 
-                modified = False
-                for roi in rois:
-                    if self._apply_roi_to_instance(inst, arr, roi):
-                        modified = True
+                # One call, the whole zone list. See the note in
+                # `execute_redaction_task`: a per-zone loop here kept only
+                # the last zone's work on a reloaded instance (#229).
+                modified = self._redact_instance_pixels(inst, arr, rois)
 
                 if modified:
                     self._apply_redaction_flags(inst)
@@ -718,7 +719,7 @@ class RedactionService:
 
         # Writeability is the caller's responsibility: this returns a bool,
         # so it has no way to hand a copy back. Both callers
-        # (_apply_roi_to_instance and the export worker) copy first. A
+        # (_redact_instance_pixels and the export worker) copy first. A
         # read-only array reaching here now raises below rather than being
         # silently skipped.
 
@@ -769,11 +770,22 @@ class RedactionService:
 
         return modified
 
-    def _apply_roi_to_instance(self, inst: Instance, arr, roi: tuple) -> bool:
+    def _redact_instance_pixels(self, inst: Instance, arr,
+                                rois: List[tuple]) -> bool:
         """
-        Applies a single ROI to the pixel array in place.
+        Applies **every** ROI to one instance's pixel array, in one pass.
 
         Wrapper around static apply_redaction_to_array for instance management.
+
+        **Call this at most once per instance per pass, with the full zone
+        list.** It rebinds `arr` locally on the not-writeable arm, so a
+        caller that called it once per zone would hand it the pristine
+        original again every time and keep only the last zone's work -- with
+        `modified` True, a redaction hash written, and a report grading
+        PASS. That was #229. There is deliberately no per-zone entry point
+        to call in a loop, and a caller must not read its own `arr` after
+        this returns: on the not-writeable arm the array the instance now
+        holds is a different object.
 
         **This method dirties the instance on one arm only, and the callers
         are load-bearing for the other.** A not-writeable array is copied and
@@ -787,16 +799,16 @@ class RedactionService:
             writeable=True   returned=True  dirty=False  zone_zeroed=True
 
         Nothing is wrong today, because both callers close it -- the serial
-        `redact()` (line ~249) and the parallel result loop (line ~450) each
-        call `inst.mark_modified()` under `if modified:` and persist the
-        pixels afterwards. But a third caller that trusts the return value
-        and skips that call silently drops the redacted pixels on the
-        writeable arm: the zone really is zeroed in memory, the instance
-        reports itself saved, and an incremental `save_all` writes nothing,
-        so the exported file still carries the burned-in identifiers. No
-        test can catch that, because the writeable arm's dirtying does not
-        live in the function under test. Move or remove either
-        `mark_modified()` only together with this arm.
+        `redact_machine_instances` and `execute_redaction_task` each call
+        `inst.mark_modified()` under `if modified:` and persist the pixels
+        afterwards. But a third caller that trusts the return value and
+        skips that call silently drops the redacted pixels on the writeable
+        arm: the zone really is zeroed in memory, the instance reports
+        itself saved, and an incremental `save_all` writes nothing, so the
+        exported file still carries the burned-in identifiers. No test can
+        catch that, because the writeable arm's dirtying does not live in
+        the function under test. Move or remove either `mark_modified()`
+        only together with this arm.
         """
         if not arr.flags.writeable:
             arr = arr.copy()
@@ -807,7 +819,7 @@ class RedactionService:
         # can correct a descriptor, and the redaction has to address the
         # array the way the instance now describes it.
         geometry = resolve_pixel_geometry(arr.shape, inst.attributes)
-        return self.apply_redaction_to_array(arr, [roi], geometry=geometry)
+        return self.apply_redaction_to_array(arr, rois, geometry=geometry)
 
     def _apply_redaction_flags(self, inst: Instance):
         """
