@@ -230,6 +230,54 @@ def test_a_reloaded_instance_is_copied_exactly_once(
         "more or less than the three zones was zeroed")
 
 
+# --- T5 --------------------------------------------------------------------
+
+@pytest.mark.parametrize("order", ["valid_first", "skipped_first"])
+def test_a_rule_redacts_the_same_zones_whichever_order_they_are_written_in(
+        reloaded_redaction_session, order):
+    """Order independence, which is how #229 was measured at its worst.
+
+    The pre-fix rule was not "only the Nth zone" but "only the last
+    *applicable* zone": every zone took a fresh copy of the pristine
+    original whether or not it changed anything, and
+    `apply_redaction_to_array` `continue`s past a zone starting outside
+    the image without raising. So on `4507d48` the pair
+    `[[0,8,0,8],[100,200,100,200]]` left the store at `total = 204800` --
+    not one zone applied -- under `applied = 1`, a real
+    `_ISOCENTER_REDACTION_HASH` and `BurnedInAnnotation = NO`, while the
+    same two zones the other way round redacted correctly. Both orders
+    are asserted here because that is the claim: the outcome no longer
+    depends on the order the zones happen to be written in.
+
+    **The two legs have different polarity, and both are wanted.**
+    `valid_first` is a detection guard for #229 -- red on `4507d48` with
+    `zone1 == 12800`, like T1-T3. `skipped_first` is green on `4507d48`
+    and is the leg nothing else in the suite covers: every other
+    multi-zone test applies every zone it lists, so no test has a valid
+    zone *after* a skipped one. Measured: turning that `continue` into a
+    `break` leaves the whole suite green (966 passed) while silently
+    reinstating exactly the order dependence this fix removed -- a rule
+    ordered `[off-image, valid]` would redact nothing and still write the
+    attestation. Only `skipped_first` goes red on it.
+    """
+    zones = ([[0, 8, 0, 8], [100, 200, 100, 200]] if order == "valid_first"
+             else [[100, 200, 100, 200], [0, 8, 0, 8]])
+    session, inst = reloaded_redaction_session(zones, name=f"order_{order}")
+
+    assert session.redact(show_progress=False) == 1, (
+        "no image matched the rule; the assertions below would be vacuous")
+
+    inst.unload_pixel_data()
+    arr = inst.get_pixel_data()
+    assert int(arr[0:8, 0:8].sum()) == 0, (
+        "the in-image zone was not applied when it was written "
+        f"{'before' if order == 'valid_first' else 'after'} an off-image "
+        "one; whether the rule redacts anything depends on zone order "
+        "(#229)")
+    assert int(arr.sum()) == 32 * 32 * 200 - PRISTINE_ZONE_SUM, (
+        "more or less than the one applicable zone was zeroed")
+
+
 # --- the fixture's own guard ------------------------------------------------
 
 def test_the_reloaded_fixture_really_is_read_only(reloaded_redaction_session):

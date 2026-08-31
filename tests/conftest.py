@@ -119,16 +119,23 @@ def reloaded_redaction_session(tmp_path):
     opened = []
     made = itertools.count()
 
-    def make(zones, *, serial="SN_RELOAD", uid="1.2.3.reload",
+    def make(zones, *, serial="SN_RELOAD", uid=None,
              shape=(32, 32), fill=200, sop_class=SC_STORAGE, name=None):
-        # `name` names the database file, so it defaults to a
-        # per-call value rather than a constant. Two `make()` calls
-        # in one test used to share `tmp_path/reload.db` *and*
-        # `uid`, so the second reopened the first's store and the
-        # `next(...)` below could hand back the first call's
-        # instance -- the vacuous-fixture failure this fixture
-        # exists to prevent, reintroduced by its own defaults.
-        name = f"reload{next(made)}" if name is None else name
+        # **`name` and `uid` both default per call, and they have to be
+        # the same counter.** `name` names the database file and `uid`
+        # identifies the instance inside it; two `make()` calls in one
+        # test used to share `tmp_path/reload.db` *and* `1.2.3.reload`,
+        # so the second reopened the first's store and the `next(...)`
+        # below could hand back the first call's instance -- the
+        # vacuous-fixture failure this fixture exists to prevent,
+        # reintroduced by its own defaults. Deriving only `name` closes
+        # it for the default call and leaves it open for the documented
+        # one: `make(z, name="x")` twice lands two instances carrying
+        # one UID in one database, which is the same collision through
+        # the parameter instead of the default.
+        n = next(made)
+        name = f"reload{n}" if name is None else name
+        uid = f"1.2.3.reload{n}" if uid is None else uid
         db_file = tmp_path / f"{name}.db"
 
         session = DicomSession(str(db_file))
