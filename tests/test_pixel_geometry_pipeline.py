@@ -563,7 +563,7 @@ def test_setting_the_same_array_object_twice_still_dirties():
     """§7.18: object identity is not evidence that the contents are unchanged.
 
     Dirtying only when the array is a different object was considered and
-    rejected: `RedactionService._apply_roi_to_instance` mutates the
+    rejected: `RedactionService._redact_instance_pixels` mutates the
     instance's own array in place, so the object can be identical while
     every pixel in it has changed. Setting pixel data is a mutation of what
     the store holds, full stop.
@@ -587,7 +587,7 @@ def test_setting_the_same_array_object_twice_still_dirties():
 def test_redaction_dirties_the_instance_it_redacted():
     """The production path the identity rule would have got wrong.
 
-    `_apply_roi_to_instance` calls `set_pixel_data` with a *copy* on the
+    `_redact_instance_pixels` calls `set_pixel_data` with a *copy* on the
     **not-writeable arm** -- the arm this test forces, and the only one
     that reaches `set_pixel_data` at all. The copy's contents at that
     moment are identical to the original; it is mutated afterwards. So
@@ -596,7 +596,7 @@ def test_redaction_dirties_the_instance_it_redacted():
     unconditional.
 
     The writeable arm does not go through the setter: it mutates in
-    place and returns True, and `_apply_roi_to_instance` leaves the
+    place and returns True, and `_redact_instance_pixels` leaves the
     instance *clean* (measured). Its dirtying comes from the caller --
     `RedactionService.redact` and the parallel worker both call
     `inst.mark_modified()` under `if modified:`, and both persist the
@@ -636,7 +636,7 @@ def test_redaction_dirties_the_instance_it_redacted():
     assert inst.has_unsaved_changes is False
 
     service = RedactionService(DicomStore())
-    assert service._apply_roi_to_instance(inst, arr, (0, 4, 0, 4)) is True
+    assert service._redact_instance_pixels(inst, arr, [(0, 4, 0, 4)]) is True
 
     assert inst.attributes == before, (
         "the descriptors already described this array; if redaction "
@@ -846,7 +846,7 @@ def test_export_redacts_every_frame_of_a_multiframe_array(tmp_path):
 
     `test_redaction_zeroes_the_zone_in_every_frame` above looks like it
     covers this and does not: it exercises
-    `RedactionService._apply_roi_to_instance`, which is the *session*
+    `RedactionService._redact_instance_pixels`, which is the *session*
     path. `session.export(redaction_zones=...)` reaches a second,
     independent call inside the worker, and that one had nothing on it.
     The site matters more than the one that was covered, because this is

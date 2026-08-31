@@ -758,7 +758,7 @@ class Instance(DicomItem):
         # the executable proof. Setting pixel data is a mutation of what the
         # store holds, full stop; do not make that conditional on anything,
         # including object identity -- callers mutate arrays in place
-        # (`RedactionService._apply_roi_to_instance`), so identity does not
+        # (`RedactionService._redact_instance_pixels`), so identity does not
         # track content.
         self.mark_modified()
 

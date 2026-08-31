@@ -62,11 +62,21 @@ def _hydrated(db_file, build):
     tests need in order to drop the resident array and see what the store
     actually holds.
 
-    This shape does not settle whether a *failed* task persisted, and no
-    test here asks it to: a sidecar-loaded array is read-only, so the
-    partial mutation the persist gate exists to keep out never forms. See
-    `_write_source` for the shape that does decide it, and for the
-    measurements behind both statements.
+    **A reloaded instance can now hold a partial mutation, which it could
+    not before #229**, and the change is mechanical rather than anything
+    about this helper: the read-only array used to be copied afresh for
+    every zone, so zones 1..k-1 were never in the array the instance ended
+    up with when zone k raised. `_redact_instance_pixels` copies once, so
+    they are. What keeps them out of the store is the persist gate plus
+    the unconditional `unload_pixel_data()`.
+
+    No caller of this helper exercises that: `_session()` gives each
+    machine a **one-zone** rule, deliberately (see its docstring), and a
+    single zone cannot fail after another has applied. The reloaded case
+    that does ask the question is test 18, which builds its own instance
+    through `reloaded_redaction_session` rather than through here. See
+    `_write_source` for the file-backed shape, which decided this before a
+    reloaded one could.
     """
     session = DicomSession(str(db_file))
     build(session)
@@ -288,8 +298,10 @@ def test_the_serial_path_also_leaves_a_failed_instance_as_it_was_found(
     session.store.patients.append(patient)
 
     assert inst.get_pixel_data().flags.writeable, (
-        "the fixture stopped being file-backed; a read-only array is copied "
-        "per ROI and this test would pass with the persist gate deleted")
+        "the fixture stopped being file-backed; this test is written "
+        "against the writeable arm, which mutates the instance's own "
+        "array in place -- see `_write_source` for why that shape was "
+        "chosen, and test 18 for the reloaded one")
     inst.unload_pixel_data()
 
     service = RedactionService(session.store, session.store_backend)
@@ -395,19 +407,27 @@ def test_a_worker_result_that_is_not_an_outcome_is_a_failure(
 def _write_source(path, uid="1.2.3.partial"):
     """A real one-instance DICOM file, 32x32 uint8 all 200.
 
-    **The instance under test must be backed by a source file, and that is
-    the whole design of this test.** Measured three shapes:
+    **The instance under test is backed by a source file, and that was the
+    whole design of this test when it was written.** Measured three
+    shapes, on `4507d48`:
 
     * *reloaded from the sidecar* -- `SidecarPixelLoader` returns a
-      **read-only** array, so `_apply_roi_to_instance` copies it afresh for
-      every ROI and the instance ends holding a copy of the *pristine*
-      original. A partial mutation can never accumulate, so this shape
-      cannot detect the persist at all. **That same mechanism is a live
-      defect in its own right and not only an inconvenience here**: a copy
-      taken from the pristine original per ROI discards the zones already
-      applied, so a rule with N zones applies only the Nth to a reloaded
-      instance and reports success. Filed as #229; nothing in this file
-      covers it, and a test that does needs two zones in one rule.
+      **read-only** array, and the redaction wrapper copied it afresh for
+      every ROI, so the instance ended holding a copy of the *pristine*
+      original. A partial mutation could never accumulate, so this shape
+      could not detect the persist at all. **That same mechanism was a
+      live defect in its own right and not only an inconvenience here**: a
+      copy taken from the pristine original per ROI discarded the zones
+      already applied, so a rule with N zones applied only the Nth to a
+      reloaded instance and reported success. That was #229, and it is
+      fixed: `_redact_instance_pixels` copies **once** and applies the
+      whole zone list to that copy. **The consequence for this file is
+      that the reloaded shape now behaves like this one** -- zone 1 really
+      is zeroed when zone 2 raises -- so it detects the persist too, and
+      test 18 uses it. What keeps the partial mutation out of the store
+      there is the same `finally` gate this test pins, plus the
+      unconditional `unload_pixel_data()`, which succeeds because
+      `set_pixel_data` does not clear `_pixel_loader`.
     * *built in memory and never reloaded* -- writeable and mutated in
       place, but `unload_pixel_data()` refuses (no loader, no file path,
       clearing would be a silent discard), so the mutated array stays
@@ -484,8 +504,10 @@ def test_a_failed_instance_is_left_as_it_was_found(tmp_path, monkeypatch,
     session.store.patients.append(patient)
 
     assert inst.get_pixel_data().flags.writeable, (
-        "the fixture stopped being file-backed; a read-only array is copied "
-        "per ROI and this test would pass with the persist gate deleted")
+        "the fixture stopped being file-backed; this test is written "
+        "against the writeable arm, which mutates the instance's own "
+        "array in place -- see `_write_source` for why that shape was "
+        "chosen, and test 18 for the reloaded one")
     inst.unload_pixel_data()
 
     # First elements differ, so `sorted(valid_rois)` never compares the
@@ -714,3 +736,86 @@ def test_a_zone_that_could_not_be_applied_never_reaches_disk(tmp_path):
     assert "invalid literal for int" in rows[0][1], (
         "the export refused for some other reason -- a guessed geometry, a "
         f"missing pixel element -- not the zone: {rows[0][1]}")
+
+
+# --- 18 --------------------------------------------------------------------
+
+@pytest.mark.parametrize("lever", ["ISOCENTER_FORCE_THREADS",
+                                   "ISOCENTER_FORCE_PROCESSES"])
+def test_a_failed_reloaded_instance_is_left_as_it_was_found(
+        reloaded_redaction_session, monkeypatch, lever):
+    """The reloaded shape, where #229's fix created a partial mutation.
+
+    **This is a guard on a new risk, not a reproduction of #229.** It
+    passes on `4507d48` too, and for a reason worth stating: there, a
+    read-only array was copied *afresh for every zone*, so zones 1..k-1
+    were never in the array the instance ended up holding when zone k
+    raised. No partial mutation could form. #229's fix makes the copy once,
+    so the good zone **is** zeroed in the instance's array when the bad one
+    raises. What this test asserts is that the end state is unchanged
+    anyway, by the chain the fix relies on:
+
+    1. `failed = True`, so the `finally` block's persist gate does not run
+       and nothing partial reaches the sidecar. That gate is the whole of
+       #213's "a failed instance is left as it was found".
+    2. `inst.unload_pixel_data()` then runs unconditionally, and succeeds,
+       because `set_pixel_data` **does not clear `_pixel_loader`**. The
+       partially-zeroed copy is dropped.
+    3. The next `get_pixel_data()` reloads the original through the loader.
+
+    So this is a detection guard for a *different* mutation than #229's:
+    an implementation that also moves, weakens or reorders the persist
+    gate. Do not count it as evidence the multi-zone loss was fixed.
+
+    The `monkeypatch.setenv` lever is the one
+    `test_a_failed_instance_is_left_as_it_was_found` already uses and is
+    legitimate for the same reason: `_resolve_strategy` reads these
+    variables **in the parent**. The threads leg is the one that can
+    exercise the risk at all -- under processes the child mutates a copy
+    the parent never sees -- and the processes leg is kept because these
+    two `finally` blocks have diverged before (#213), which is precisely
+    how the interpreter-dependent store happened.
+
+    Unlike test 14 this instance has a `SidecarPixelLoader` by
+    construction, so it asserts on what the **store** holds after a
+    save/close/reopen rather than on `_pixel_loader is None`.
+    """
+    monkeypatch.setenv(lever, "1")
+
+    # First elements differ, so `prepare_redaction_tasks`'s
+    # `sorted(valid_rois)` compares 0 against 1 and never `8` against
+    # `"x"`. The `[0, "abc", 0, 8]` spelling used above raises `TypeError`
+    # out of `sorted` before any worker runs when it shares a rule with an
+    # int zone -- a different, louder defect that would mask this one.
+    session, inst = reloaded_redaction_session(
+        [[0, 8, 0, 8], [1, "x", 0, 8]], name=f"partial_{lever}")
+    db_path = session.store_backend.db_path
+
+    with pytest.raises(RedactionError):
+        session.redact(show_progress=False)
+
+    assert "_ISOCENTER_REDACTION_HASH" not in inst.attributes
+    assert "DERIVED" not in inst.attributes.get("0008,0008", [])
+
+    session.save()
+    session.close()
+
+    rows = _audit(db_path)
+    assert len(rows) == 1, rows
+    assert "invalid literal for int" in rows[0][1], rows
+
+    reopened = DicomSession(db_path)
+    try:
+        stored = next(i
+                      for p in reopened.store.patients
+                      for st in p.studies
+                      for se in st.series
+                      for i in se.instances)
+        arr = stored.get_pixel_data()
+        assert arr is not None, "the fixture lost its pixels; this is vacuous"
+        assert int(arr[0:8, 0:8].sum()) == 8 * 8 * 200, (
+            "the zone applied before the failure was persisted; the failed "
+            "instance is not as it was found")
+        assert int(arr.sum()) == 32 * 32 * 200
+    finally:
+        reopened.close()
