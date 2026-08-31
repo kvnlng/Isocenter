@@ -1076,6 +1076,24 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if not ctx.compression:
                 ds.PixelData = arr.tobytes()
 
+            # The other half of PS3.5 A.1's mutual exclusion, and the half
+            # nobody checked. The float branch has deleted (7fe0,0010)
+            # since #170 for exactly this reason; the integer branch never
+            # deleted its counterpart, so an instance carrying a
+            # (7fe0,0008) of its own in `attributes` -- `_merge` writes
+            # whatever it holds -- left with *both* pixel elements, which
+            # pydicom itself refuses to decode: "One and only one of
+            # 'Pixel Data', 'Float Pixel Data' or 'Double Float Pixel
+            # Data' may be present". Measured reachable (#216).
+            #
+            # `populate_attrs` skips the whole 7fe0 group at ingest, so
+            # this arrives only from a hand-built graph or a `set_attr`
+            # call -- the same reachability class the float16 arm above
+            # already serves, and not dead code.
+            for kw in ("FloatPixelData", "DoubleFloatPixelData"):
+                if kw in ds:
+                    del ds[kw]
+
             _write_pixel_geometry(ds, geom, inst.attributes)
 
             if arr.itemsize == 1:
