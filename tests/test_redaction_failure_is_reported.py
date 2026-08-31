@@ -221,6 +221,34 @@ def test_a_failed_redaction_grades_the_report_review_required(
     assert expected in report.read_text(encoding="utf-8")
 
 
+# --- 12 --------------------------------------------------------------------
+
+def test_the_serial_path_reports_the_same_failure_as_the_parallel_one(
+        tmp_path):
+    """`redact_machine_instances` is public and swallowed just as quietly.
+
+    It is what `process_machine_rules` calls, it is exercised directly by
+    five test files, and its `except Exception` logged and moved on --
+    the same silence in the same operation, one method over.
+    """
+    session = _session(tmp_path, name="serial")
+    db_path = session.store_backend.db_path
+    service = RedactionService(session.store, session.store_backend)
+    try:
+        with pytest.raises(RedactionError) as excinfo:
+            service.process_machine_rules(
+                {"serial_number": SN_BAD, "redaction_zones": [BAD_ZONE]},
+                show_progress=False)
+        assert len(excinfo.value.failures) == 1
+    finally:
+        session.close()
+
+    rows = _audit(db_path)
+    assert len(rows) == 1, rows
+    assert rows[0][0] == "1.2.3.bad.1"
+    assert "ValueError" in rows[0][1], rows[0][1]
+
+
 # --- 13 --------------------------------------------------------------------
 
 def test_a_task_with_nothing_to_do_is_not_a_failure(tmp_path):

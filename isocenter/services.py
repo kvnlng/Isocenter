@@ -536,6 +536,21 @@ class RedactionService:
             rois (List[tuple]): List of (y1, y2, x1, x2) ROIs.
             targets (List[Instance], optional): Pre-filtered list of instances.
             show_progress (bool): If True, shows progress bar.
+
+        Raises:
+            RedactionError: If any instance's zone could not be applied.
+                Raised at the end of the pass, for the same reasons as
+                `Session.redact()`: the instances that could be redacted
+                are redacted and every failure is already an `ERROR` row.
+                This is the serial path, so it must answer the same
+                question the parallel one does -- it is public, it is what
+                `process_machine_rules` calls, and a failure here left the
+                burned-in identifier in the pixels just as silently (#213).
+
+        Returns:
+            None. The signature is unchanged;
+            `test_redaction_optimization.py` mocks this method and asserts
+            on the call, not the result.
         """
         if targets is None:
             targets = self.index.get_by_machine(machine_sn)
@@ -556,11 +571,15 @@ class RedactionService:
         config_str = json.dumps({"serial": machine_sn, "rois": rois_stable}, sort_keys=True)
         config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
 
+        failures = []
+
         for inst in tqdm(
                 targets,
                 desc=f"Redacting {machine_sn}",
                 unit="img",
                 disable=not show_progress):
+            original_uid = inst.sop_instance_uid  # Capture before mutation
+            failed = False
             try:
                 # Optimized: Skip if already redacted with same config
                 current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
@@ -605,12 +624,26 @@ class RedactionService:
                     self.logger.debug(f"  Modified {inst.sop_instance_uid}")
 
             except Exception as e:
+                # Broad on purpose, and a missing-argument `TypeError` is
+                # audited here like any other failure -- see the note in
+                # `execute_redaction_task` (#217).
+                failed = True
+                failures.append(
+                    (original_uid,
+                     f"Redaction failed for {original_uid}: "
+                     f"{type(e).__name__}: {e}"))
                 self.logger.error(f"  Failed {inst.sop_instance_uid}: {e}")
             finally:
                 # OPTIMIZATION: Release memory immediately after processing
                 # If modified, we MUST persist pixels to sidecar, otherwise unload_pixel_data returns False (unsafe)
                 # We check for store_backend availability.
-                if self.store_backend and hasattr(self.store_backend, 'persist_pixel_data'):
+                #
+                # Not on a failure: zones before the one that raised are
+                # already zeroed, and persisting them makes a partial
+                # redaction durable. See `execute_redaction_task`'s `finally`
+                # for the whole argument (#213).
+                if (not failed and self.store_backend
+                        and hasattr(self.store_backend, 'persist_pixel_data')):
                     # We only strictly NEED to persist if we hold dirty pixels in memory.
                     # But persist_pixel_data handles checks (returns if no pixels).
                     try:
@@ -621,6 +654,12 @@ class RedactionService:
                                 inst.sop_instance_uid}: {pe}")
 
                 inst.unload_pixel_data()
+
+        # After the pass, so every instance that could be redacted was.
+        if failures:
+            raise RedactionError(
+                report_redaction_failures(failures, self.store_backend),
+                len(targets))
 
     @staticmethod
     def apply_redaction_to_array(arr: np.ndarray, rois: List[tuple],
