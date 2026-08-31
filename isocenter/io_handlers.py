@@ -101,7 +101,7 @@ _ROOT_ONLY_ROUTED_TAGS = frozenset({
 #: `get_pixel_data()` reads the top level. And only when the instance
 #: has no Pixel Data of its own: the export takes the sidecar array
 #: whenever there is a loader, so in a file carrying both -- which
-#: PS3.5 A.1 forbids, but malformed input exists -- the float half is
+#: PS3.5 Section 8.2 forbids, but malformed input exists -- the float half is
 #: genuinely lost and must still be reported.
 #:
 #: The sidecar is still the missing half, and is still #183: an ingest
@@ -978,8 +978,10 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # file that reads 1056964608 where the source said 0.5, with
             # BitsAllocated=32 and PixelRepresentation=0 next to it so
             # the result is internally coherent and nothing downstream
-            # errors (#170). PS3.5 A.1 and PS3.3 C.7.6.3 make Pixel Data
-            # and Float Pixel Data mutually exclusive, which is why the
+            # errors (#170). PS3.5 Section 8.2 -- not A.1, which is the
+            # Implicit VR Little Endian Transfer Syntax and says nothing
+            # about this -- makes Pixel Data and Float Pixel Data mutually
+            # exclusive, which is why the
             # integer element is deleted below rather than merely not
             # written: `_merge` writes whatever `attributes` holds, and
             # a file carrying both is nonconformant however it got that
@@ -1040,6 +1042,30 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if "PixelData" in ds:
                 del ds.PixelData
 
+            # The *other* float element, too -- the exclusion has three
+            # reachable directions and deleting (7fe0,0010) alone closes
+            # one of them. PS3.5 Section 8.2: "It is not permitted to have
+            # more than one of Pixel Data Provider URL (0028,7FE0), Pixel
+            # Data (7FE0,0010), Float Pixel Data (7FE0,0008) or Double
+            # Float Pixel Data (7FE0,0009) in the top level Data Set."
+            # Measured: a float32 array on an instance whose `attributes`
+            # carry a "7fe0,0009" exported with (7fe0,0008) *and*
+            # (7fe0,0009), and `dcmread(...).pixel_array` raises the same
+            # "One and only one of ..." pydicom refuses the other two
+            # directions with. Same reachability class as the rest of this
+            # branch: `populate_attrs` skips group 7fe0 at ingest, so it
+            # arrives from a hand-built graph or a `set_attr` call.
+            #
+            # The float16 arm is deliberately outside this: it writes no
+            # element at all, so there is nothing here for it to be
+            # exclusive *with*, and stripping a "7fe0,0008" `_merge` put
+            # on the dataset would be a data-loss action that owes the
+            # caller a loss row rather than a conformance correction.
+            other = {4: "DoubleFloatPixelData",
+                     8: "FloatPixelData"}.get(arr.itemsize)
+            if other is not None and other in ds:
+                del ds[other]
+
             # "The descriptors were merged from `attributes`, which is the
             # same source file this array was read back from, so they
             # already agree" is what used to stand here instead of this
@@ -1076,8 +1102,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if not ctx.compression:
                 ds.PixelData = arr.tobytes()
 
-            # The other half of PS3.5 A.1's mutual exclusion, and the half
-            # nobody checked. The float branch has deleted (7fe0,0010)
+            # The third direction of PS3.5 Section 8.2's exclusion. The
+            # section is 8.2, "Native or Encapsulated Format Encoding" --
+            # A.1, cited here and in #170 before it, is the Implicit VR
+            # Little Endian Transfer Syntax and says nothing about which
+            # pixel elements may coexist.
+            #
+            # The float branch has deleted (7fe0,0010)
             # since #170 for exactly this reason; the integer branch never
             # deleted its counterpart, so an instance carrying a
             # (7fe0,0008) of its own in `attributes` -- `_merge` writes

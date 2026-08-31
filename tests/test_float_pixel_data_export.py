@@ -26,7 +26,7 @@ is #183. But the array is in hand at the export writeback anyway,
 because `get_pixel_data()` re-read it from the source file, so the right
 tag is a lookup rather than a guess. It is written under (7fe0,0008) or
 (7fe0,0009) by `itemsize`, and (7fe0,0010) is guaranteed absent -- PS3.5
-A.1 makes them mutually exclusive.
+Section 8.2 makes them mutually exclusive.
 
 Refusing to write anything was the first cut, and it is what #193
 rejected: it swapped a silent corruption for a quiet nonconformance,
@@ -391,7 +391,7 @@ def test_a_redacted_float_image_exports_redacted(tmp_path, dtype, tag_kw,
 
 
 def test_the_integer_tag_is_deleted_when_a_float_element_is_written(tmp_path):
-    """PS3.5 A.1: one and only one pixel element (#193).
+    """PS3.5 Section 8.2: one and only one pixel element (#193).
 
     `_merge` writes whatever `attributes` holds, so an instance carrying
     a (7fe0,0010) of its own would leave with both elements -- a file
@@ -547,11 +547,20 @@ def test_the_float_path_writes_the_geometry_it_resolved_not_the_one_declared(
     with this clause deleted, because `_merge` wrote the right values by
     luck. That is why they disagree here, and why the byte-length
     identity is asserted rather than the numbers alone.
+
+    `SamplesPerPixel` is declared **3**, not 1, for the same reason.
+    Declaring the value the resolver was going to produce made that
+    assertion vacuous: `_merge` had already put it on the dataset, so
+    deleting `ds.SamplesPerPixel = geom.samples` from
+    `_write_pixel_geometry` left every one of the #216 tests green and
+    only the integer-path tests in `test_pixel_geometry_pipeline.py`
+    noticed -- measured. A rank-2 array has one reading whatever the
+    attributes claim, so 3 is stale and 1 is resolved.
     """
     arr = (np.arange(16, dtype=np.float32) + 0.5).reshape(4, 4)
     _inst, outcome, out = _export_raw(
         tmp_path, arr,
-        dict(_BARE, **{"0028,0010": 10, "0028,0011": 10, "0028,0002": 1}),
+        dict(_BARE, **{"0028,0010": 10, "0028,0011": 10, "0028,0002": 3}),
         "stale.dcm")
     assert outcome.ok, outcome.error
 
@@ -566,16 +575,25 @@ def test_the_float_path_writes_the_geometry_it_resolved_not_the_one_declared(
 def test_a_multiframe_float_carries_the_frame_count_it_resolved(tmp_path):
     """The same relabelling one rank up, and the frame count with it.
 
-    `(2,4,8)` float32 with `NumberOfFrames = 2` declared resolves to two
+    `(2,4,8)` float32 with a declared `NumberOfFrames` resolves to two
     4x8 frames -- the declaration settles which axis is which -- but on
     258331c the file left with the declared `Rows = Columns = 99` beside
     256 bytes. Asserting `NumberOfFrames` too is what stops a helper that
     writes Rows and Columns and quietly drops the frame count.
+
+    The declared frame count is **5**, and it has to be a number the
+    resolver will not produce. `PixelGeometry.frames` is never the
+    declared value -- it is the array's first axis on the frames-major
+    arm -- so declaring 2 asserted the number `_merge` had already
+    written: deleting the `NumberOfFrames` clause from
+    `_write_pixel_geometry` left all six #216 tests green, and only
+    `test_export_corrects_a_stale_number_of_frames` on the integer path
+    caught it. Measured, not reasoned.
     """
     arr = np.zeros((2, 4, 8), dtype=np.float32)
     _inst, outcome, out = _export_raw(
         tmp_path, arr,
-        dict(_BARE, **{"0028,0002": 1, "0028,0008": 2,
+        dict(_BARE, **{"0028,0002": 1, "0028,0008": 5,
                        "0028,0010": 99, "0028,0011": 99}),
         "mf.dcm")
     assert outcome.ok, outcome.error
@@ -629,7 +647,7 @@ def test_photometric_interpretation_is_written_on_the_float_path(tmp_path):
 
 
 def test_the_float_elements_are_deleted_when_pixel_data_is_written(tmp_path):
-    """PS3.5 A.1 in the direction nobody checked (#216).
+    """PS3.5 Section 8.2 in the second of its three directions (#216).
 
     `test_the_integer_tag_is_deleted_when_a_float_element_is_written`
     above pins the float branch deleting (7fe0,0010). The integer branch
@@ -653,6 +671,52 @@ def test_the_float_elements_are_deleted_when_pixel_data_is_written(tmp_path):
     assert (0x7FE0, 0x0010) in exported
     assert (0x7FE0, 0x0008) not in exported
     assert (0x7FE0, 0x0009) not in exported
+
+
+@pytest.mark.parametrize("dtype,written,stale,stale_len", [
+    (np.float32, (0x7FE0, 0x0008), "7fe0,0009", 128),
+    (np.float64, (0x7FE0, 0x0009), "7fe0,0008", 64),
+])
+def test_the_other_float_element_is_deleted_too(
+        tmp_path, dtype, written, stale, stale_len):
+    """The third direction, and the one both halves of the pair missed.
+
+    PS3.5 Section 8.2: "It is not permitted to have more than one of
+    Pixel Data Provider URL (0028,7FE0), Pixel Data (7FE0,0010), Float
+    Pixel Data (7FE0,0008) or Double Float Pixel Data (7FE0,0009) in the
+    top level Data Set." Three of those four are reachable here, which
+    makes three directions, not two: the float branch deleted
+    (7fe0,0010) and the integer branch was taught to delete both float
+    keywords, and neither of them stops a float32 array leaving beside a
+    (7fe0,0009) that `_merge` copied out of `attributes`.
+
+    Measured on `258331c` *and* on the first cut of the #216 fix: both
+    exported a file carrying (7fe0,0008) and (7fe0,0009) together, on
+    which `dcmread(...).pixel_array` raises the same `AttributeError`
+    -- "One and only one of 'Pixel Data', 'Float Pixel Data' or 'Double
+    Float Pixel Data' may be present" -- that the other two directions
+    are pinned by.
+
+    The array is assigned through `_export_raw`, not `_export_one`:
+    `set_pixel_data` writes nothing to group 7fe0, but `_export_one`
+    asserts `outcome.ok` and seeds descriptors this case does not want
+    to depend on.
+    """
+    arr = (np.arange(16, dtype=dtype) + 0.5).reshape(4, 4)
+    _inst, outcome, out = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0002": 1, "0028,0004": "MONOCHROME2",
+                       "0028,0010": 4, "0028,0011": 4,
+                       stale: b"\x00" * stale_len}),
+        f"other_{np.dtype(dtype).name}.dcm")
+    assert outcome.ok, outcome.error
+
+    ds = pydicom.dcmread(out)
+    assert written in ds
+    assert (int(stale.split(",")[0], 16),
+            int(stale.split(",")[1], 16)) not in ds
+    # The point of the deletion, rather than a restatement of it.
+    assert np.array_equal(ds.pixel_array, arr)
 
 
 def test_a_guessed_float_geometry_stops_write_tree_too(tmp_path):
