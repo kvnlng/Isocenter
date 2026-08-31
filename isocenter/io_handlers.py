@@ -944,6 +944,34 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 RedactionService.apply_redaction_to_array(
                     arr, ctx.redaction_zones, geometry=geom)
 
+        # This refusal used to live inside the integer branch below, which
+        # meant the float branch -- which sits above it and ends with
+        # `arr = None` -- never reached it. A float array whose geometry
+        # was a guess exported a file with no Rows, no Columns and no
+        # SamplesPerPixel, all three Type 1 in the Floating Point Image
+        # Pixel Module (PS3.3 C.7.6.24), while the identical uint8 graph
+        # was correctly refused (#216). Which pixel element carries the
+        # bytes has nothing to do with whether the geometry is known, so
+        # the check belongs to neither branch.
+        #
+        # It sits *below* the redaction block rather than above it, which
+        # costs one redaction pass on an instance that is about to be
+        # refused and buys a source order that still reads
+        # resolve -> redact -> write. Nothing between the resolution and
+        # here can change `geom`: the redaction block copies the array
+        # when it is not writeable, which does not change its shape.
+        if arr is not None and geom.evidence is GeometryEvidence.GUESSED:
+            raise RuntimeError(
+                f"Refusing to write {ctx.output_path}: the pixel "
+                f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
+                f"equally a multi-frame grayscale image and a "
+                f"single-frame image with {arr.shape[-1]} samples per "
+                f"pixel -- and the instance declares no SamplesPerPixel "
+                f"(0028,0002), NumberOfFrames (0028,0008) or "
+                f"Rows/Columns to resolve it. Writing it would guess "
+                f"the image's geometry, and a recipient cannot tell a "
+                f"guess apart from a correct answer.")
+
         if arr is not None and arr.dtype.kind == 'f':
             # A floating-point array is not Pixel Data, and writing it
             # under (7fe0,0010) does not make it Pixel Data -- it makes a
@@ -1029,18 +1057,6 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
             if not ctx.compression:
                 ds.PixelData = arr.tobytes()
-
-            if geom.evidence is GeometryEvidence.GUESSED:
-                raise RuntimeError(
-                    f"Refusing to write {ctx.output_path}: the pixel "
-                    f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
-                    f"equally a multi-frame grayscale image and a "
-                    f"single-frame image with {arr.shape[-1]} samples per "
-                    f"pixel -- and the instance declares no SamplesPerPixel "
-                    f"(0028,0002), NumberOfFrames (0028,0008) or "
-                    f"Rows/Columns to resolve it. Writing it would guess "
-                    f"the image's geometry, and a recipient cannot tell a "
-                    f"guess apart from a correct answer.")
 
             _write_pixel_geometry(ds, geom, inst.attributes)
 
