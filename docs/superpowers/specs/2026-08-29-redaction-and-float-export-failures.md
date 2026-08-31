@@ -52,6 +52,10 @@ implementation order that works either way.
 
 ---
 
+> **Amended 2026-08-31.** #217 was decided after this spec was written
+> and lands in the same method as #213. **§12** carries it, and marks
+> the five clauses here that it contradicts. #216 is unaffected.
+
 ## 1. Corrections to the issues and to the brief
 
 Verified against `258331c`. Every one of these matters to the design.
@@ -552,9 +556,15 @@ files. It gets the same treatment, in-process:
 
 ### 3.9 What is deliberately not changed
 
-- **`apply_redaction_to_array`.** Signature, bool return, and the raise
-  all stay. Its four tests in `test_redaction_robustness.py` must pass
-  unmodified. Its comment at `services.py:546-553` is **corrected in
+- **`apply_redaction_to_array`'s bool return and its #66 raise.**
+  **Amended 2026-08-31 (#217) — see §12.** The *signature* is no longer
+  unchanged: #217 makes `geometry` required, so the sentence that stood
+  here — "Signature, bool return, and the raise all stay. Its four tests
+  in `test_redaction_robustness.py` must pass unmodified" — is now true
+  of the return and the raise and false of the signature and of the four
+  tests. The bool return and the raise do stay; the signature and the
+  four tests change, per §12.1 and §12.3.
+  Its comment at `services.py:546-553` is **corrected in
   place** to say which caller propagates and which swallowed, per
   CLAUDE.md's "comments explain the trap": the export worker's call
   propagates and always did; `redact_machine_instances` and
@@ -821,7 +831,7 @@ below.
 | `isocenter/__init__.py` | Gains `RedactionError` in the export block, next to `Session`, `Builder` and `Equipment`. |
 | `scripts/mutation_probe.py` `TARGETS` and CLAUDE.md's module→test table | **No change.** Neither `services.py` nor `session.py` is a probe target, and `test_mutation_probe_targets.py` pins the table against `TARGETS`, not against the set of modules that exist. Adding one would require a CLAUDE.md edit and is out of scope. |
 | `automation.py`, `profiles.py`, `verification.py` | No redaction calls (grepped). |
-| Third-party callers of `RedactionService.apply_redaction_to_array` | Unchanged: signature, bool return and raise all stay. |
+| Third-party callers of `RedactionService.apply_redaction_to_array` | **Amended 2026-08-31 (#217) — see §12.** **Broken, deliberately.** `geometry` becomes required; a call omitting it raises `TypeError`. Bool return and raise unchanged. §12.1, §12.6. |
 
 ### Tests
 
@@ -830,7 +840,7 @@ below.
 | `tests/test_redact_reports_outcome.py::test_a_partially_applied_redaction_is_reported` | **Must be edited, and this is the one edit the change forces.** It monkeypatches `execute_redaction_task` to return `None` for tasks 2 and 3 and asserts `redacted == 1` plus a "1 of 3" warning. Under §3.4 a bare `None` is a *failure*, so the un-edited stub would raise. Change the stub's fallback from `None` to `RedactionOutcome(ok=True, sop_instance_uid=task["instance"].sop_instance_uid, mutation=None)`. **Both assertions survive verbatim**, because the benign no-mutation arm still counts toward the shortfall warning. The test's meaning — a task that produced no mutation must not vanish — is exactly preserved, and it is now stated in the vocabulary that distinguishes it from a failure. |
 | `tests/test_redact_reports_outcome.py`, the other six | Unchanged, must keep passing: `== 3`, `== 0`, the setup-failure `pytest.raises(RuntimeError)`, the two console tests, and the `ISOCENTER_MAX_WORKERS=banana` test. All are happy-path or setup-path. |
 | `tests/test_redaction_robustness.py::test_redaction_crash_prevention` | Must keep passing **verbatim**, including its exact warning-string assertion. A `None` pixel array is a silent skip, not a failure (§3.1). |
-| `tests/test_redaction_robustness.py`, the four `apply_redaction_to_array` tests | Unchanged; that method is untouched. |
+| `tests/test_redaction_robustness.py`, the four `apply_redaction_to_array` tests | **Amended 2026-08-31 (#217) — see §12.** **All four break** — they omit `geometry`. Each gains one keyword argument; every assertion survives verbatim. §12.2, §12.3. |
 | `tests/test_redaction_robustness.py::test_log_throttling` | Unchanged. |
 | `tests/test_redaction_optimization.py` | Mocks `redact_machine_instances` and asserts `assert_called_once()`; also calls it for real at `:63` with a valid ROI. The signature does not change and the valid path does not raise. |
 | `tests/test_redact_error.py::test_execute_config_crash_repro` | `process_machine_rules` with a list-form zone `[10,50,10,50]`, which is valid. No failure, no raise. |
@@ -1075,6 +1085,10 @@ on it.
   than listing them as regressions.
 - Test 14 fails on `258331c` under threads and passes under processes.
   Both must be stated.
+- **Test 18** (§12.5, #217) fails on `258331c` with `DID NOT RAISE`:
+  measured, the call with `geometry` omitted currently succeeds and
+  returns `True`. The four #66 tests beside it pass both before and
+  after, which is why 18 exists.
 - Each of tests 1, 2, 3, 5, 10, 12 must also be checked against an
   implementation with **only its own clause** reverted, not only against
   `258331c`. Test 1 in particular passes with §4.2 reverted (the file is
@@ -1092,7 +1106,7 @@ on it.
 - **Refusing a float element with `samples > 1`.** §4.4, filed in §10.
 - **Any change to `verify()`.** It is an OCR pass comparing detected text
   boxes against configured zones and has no view of either defect.
-- **`apply_redaction_to_array`'s signature, bool return, or raise.**
+- **`apply_redaction_to_array`'s bool return or raise.** **Amended 2026-08-31 (#217) — see §12.** Its *signature* is now in scope: §12.1.
 - **The `int` return of `session.redact()`.**
 - **Compressing float pixel data.**
 - **A pre-image copy of every pixel array**, so that a partially-applied
@@ -1130,6 +1144,8 @@ guessed one (#216)`)
 10. Correct the comment at `services.py:546-553` (§3.9), and the
     `redact()` docstring's `Raises:` clause (§6).
 11. `CHANGELOG.md`.
+
+**PR 2 gains steps 12-14 for #217 — see §12.7.**
 
 Full suite on 3.12 and 3.14t for both. The local venv is 3.14.6, so a
 local pass exercises **one** gate version and — for test 14 — the arm
@@ -1206,7 +1222,9 @@ primary design record.
   second path into #213 ... filed, not fixed here".
 - That `apply_redaction_to_array`'s #66 raise is unchanged, and that its
   comment's premise was half-true: the export worker's call always did
-  propagate; the other two callers did not.
+  propagate; the other two callers did not. **Amended 2026-08-31 (#217) — see §12.** Its
+  *signature* is not unchanged — say so here and cross-reference the
+  #217 entry (§12.6).
 
 **#216's entry must contain, explicitly:**
 
@@ -1223,3 +1241,363 @@ primary design record.
 - That a file carrying both `(7fe0,0010)` and `(7fe0,0008)` was
   reachable, that PS3.5 A.1 forbids it, and that the deletion now runs in
   both directions rather than one.
+
+---
+
+## 12. Amendment, 2026-08-31 — #217 folds into the #213 pass
+
+Kevin decided #217 on 2026-08-31 (option 1, comment on the issue):
+`RedactionService.apply_redaction_to_array`'s `geometry` parameter
+becomes **required** and the `None` arm — the `arr.shape[-1] in [3, 4]`
+heuristic that put 32 of 32 identifier cells into an exported file before
+#215 — is **deleted, not defaulted**. It lands in the same method §3
+rewrites the error handling around, so it is one pass over `services.py`
+and one PR with #213.
+
+The clauses below are additive. **§4 and everything else about #216 is
+unchanged** — that branch (`code/216-float-export-geometry`) is live and
+this amendment does not touch `io_handlers.py`.
+
+Five earlier clauses are contradicted by it and are marked in place with
+`**Amended 2026-08-31 (#217) — see §12.**`: §3.9's first bullet, §6's
+non-test row for third-party callers, §6's test row for the four
+`apply_redaction_to_array` tests, §8's "signature, bool return, or raise"
+bullet, and §11's "#66 raise is unchanged" bullet.
+
+### 12.1 The signature
+
+```python
+@staticmethod
+def apply_redaction_to_array(arr: np.ndarray, rois: List[tuple],
+                             geometry: PixelGeometry) -> bool:
+```
+
+Three deletions, all in `services.py`:
+
+1. The default. `geometry: Optional[PixelGeometry] = None` becomes
+   `geometry: PixelGeometry`, positional-or-keyword, third.
+2. **The annotation, not only the default.** Leaving `Optional` while
+   removing the default is a self-contradicting signature and is exactly
+   the "one spelling per behaviour" concern #217 invokes: it would tell a
+   reader `None` is still a legal value while the interpreter says the
+   argument is mandatory. `Optional` stays imported — `RedactionOutcome`
+   (§3.2) uses it.
+3. The docstring paragraph documenting the fallback, from "Without it
+   this falls back to the last-axis heuristic" through "The fallback
+   exists only for third-party callers of this public static method."
+   What replaces it is one line stating the invariant the surviving
+   comment at `services.py:496-503` already depends on: **the geometry
+   must have been resolved from the shape of *this* array.**
+
+And one deletion in the body — the `else` arm and the `if geometry is not
+None:` that selects it:
+
+```python
+interleaved = geometry.samples > 1
+```
+
+The comment above it survives, because the invariant it states is now the
+only thing standing between a borrowed geometry and `row_dim=-1`.
+
+### 12.2 Callers — verified, and the issue's note is half right
+
+`grep -rn "apply_redaction_to_array" --include="*.py" --include="*.md"`
+returns **eleven** hits. Every one classified:
+
+| Site | Passes `geometry` today? | Effect |
+| --- | --- | --- |
+| `isocenter/services.py:598` (`_apply_roi_to_instance`) | yes, keyword | No change. |
+| `isocenter/io_handlers.py:882` (`_export_instance_worker`) | yes, keyword | No change. **Not edited by this PR** — #216's branch owns that file. |
+| `tests/test_redaction_robustness.py:100` | **no** | Breaks. §12.3. |
+| `tests/test_redaction_robustness.py:110` | **no** | Breaks. §12.3. |
+| `tests/test_redaction_robustness.py:122` | **no** | Breaks. §12.3. |
+| `tests/test_redaction_robustness.py:129` | **no** | Breaks. §12.3. |
+| `tests/test_pixel_geometry_pipeline.py:843` | docstring prose only | No change. |
+| `tests/test_float_pixel_data_export.py:364` | docstring prose only | No change. |
+| `CHANGELOG.md:44`, `:60`, `:739` | prose | `:60` becomes wrong-in-the-present; §12.6 supersedes it. |
+
+**`scripts/` is clean, and this was checked as a separate question rather
+than inferred from the test sweep.** `grep -rn "redact\|RedactionService"
+scripts/` returns nothing: no fixture generator constructs a redaction, so
+none calls this method, directly or through the session. That is the
+survey question the pixel-geometry spec got wrong twice — which *non-test
+consumer* depends on the behaviour — and here the answer is genuinely
+none.
+
+**But the issue's implementation note is only half right.** It says "Both
+in-tree callers already pass `geometry`, so no in-tree call changes."
+That is true of the two *production* callers and **false of the test
+suite**: four tests call the method with the argument omitted and all
+four break with `TypeError`. This is the same survey inversion in the
+other direction — the issue asked which non-test consumers depended on
+the default and never asked which tests did. The coder must expect a red
+suite after step 12 of §12.7 until step 13 lands.
+
+`_apply_roi_to_instance` was checked for a default of its own, because a
+deleted default that reappears one frame up is not deleted. It has none:
+its signature is `(self, inst, arr, roi)`, and it resolves the geometry
+itself at `services.py:596` from `arr.shape` and `inst.attributes`, after
+the writeability copy. §3.9's "`_apply_roi_to_instance`. Untouched"
+bullet stands.
+
+### 12.3 The four `test_redaction_robustness.py` edits
+
+All four are the #66 regression guards — the tests that pin "a zone that
+cannot be applied raises instead of reporting nothing". **They are
+edited, not rewritten and not deleted.** The edit is *adding one keyword
+argument*; every assertion, every fixture, every docstring survives
+verbatim:
+
+```python
+geometry=resolve_pixel_geometry(arr.shape, {})
+```
+
+with `from isocenter.pixel_geometry import resolve_pixel_geometry` added
+to the file's imports.
+
+Resolve it, do not construct the `NamedTuple` literal. Two reasons: it is
+what both production callers do, so the test exercises the invariant
+`services.py:496-503` states rather than asserting around it; and a
+literal pins field order, which a `NamedTuple` makes silently wrong to
+reorder.
+
+Measured, so the coder does not have to guess what it returns:
+
+```
+resolve_pixel_geometry((64, 64), {})
+  -> PixelGeometry(frames=1, rows=64, cols=64, samples=1,
+                   evidence=GeometryEvidence.STRUCTURAL)
+```
+
+`samples == 1`, so `interleaved` is `False`, so `row_dim, col_dim = -2,
+-1` — identical to what the deleted heuristic computed for a rank-2
+array. Measured for each of the four:
+
+- `:100` read-only `(64,64)` — still `ValueError: assignment destination
+  is read-only`. `pytest.raises(ValueError)` passes.
+- `:110` same array, same raise, `caplog` still gets `(0, 10, 0, 10)` and
+  `(64, 64)`.
+- `:122` empty zone list — still returns `False`, array still sums to
+  `64*64`.
+- `:129` `(0,10,0,10)` on a writeable array — still returns `True`,
+  `arr[0:10,0:10].sum() == 0`, `arr[10:,10:].sum() == 54*54`.
+
+Because all four outcomes are unchanged, none of them is the test that
+guards #217. That test is §12.5.
+
+### 12.4 The `TypeError` collision — caught and audited, deliberately
+
+**The question.** After #217, `apply_redaction_to_array` can raise
+`TypeError` for a missing `geometry` in addition to the `TypeError` it
+already re-raises from inside its per-ROI loop. §3's design catches
+broadly in `execute_redaction_task` and `redact_machine_instances` and
+turns what it catches into an audited `ERROR` row. Should the
+missing-argument `TypeError` be caught and reported as a failed
+redaction, or propagate as the programming error it is?
+
+**The answer: caught and audited, and the catch stays broad.** Not a
+compromise — the alternative is worse, for four reasons that had to be
+measured rather than reasoned about.
+
+**1. A `TypeError` from a malformed zone is reachable from data, so
+`TypeError` cannot be excluded from the audited set.** Measured, all
+three through the real method with a valid geometry:
+
+```
+zone (0, None, 0, 8) -> TypeError: int() argument must be a string,
+                        a bytes-like object or a real number, not 'NoneType'
+zone (0, [1],  0, 8) -> TypeError: ... not 'list'
+zone (0, 'abc',0, 8) -> ValueError: invalid literal for int() with base 10
+```
+
+A configuration holding a `null` or a nested list in a zone — a JSON
+config is the normal way these arrive — produces a `TypeError` from
+inside the loop, and that is precisely a failed redaction that #213
+exists to report. Narrowing the catch to make room for the
+missing-argument case would drop these on the floor and re-open the hole.
+
+**2. The two populations are structurally distinct but not
+`except`-distinguishable, and the introspection that would separate them
+is worse than the ambiguity.** A missing-argument `TypeError` is raised
+by the interpreter at *binding* time; the body never executes. Measured
+on a minimal reproduction: the traceback of such a `TypeError` contains
+**no frame for the callee**, only the caller's. So it is separable by
+walking `exc.__traceback__` and checking whether
+`apply_redaction_to_array` appears in it. Do **not** do this. It is a
+frame-name string comparison in the middle of a PHI-safety path, it
+breaks under any rename or decorator, and CLAUDE.md's "one spelling"
+convention is not served by two ways of asking what went wrong. The
+inner `except (ValueError, IndexError, TypeError)` inside
+`apply_redaction_to_array` is not part of this collision at all — it is
+inside the loop, and a binding error never reaches the body.
+
+**3. The failure a missing argument produces is total and loud, which is
+not the #213 defect class.** #213 is *silence*: one instance fails, the
+count says it succeeded, the report grades `PASS`, the file ships. A
+deleted `geometry=` argument fails **every** instance in the pass. Under
+§3.4 that is an `ERROR` row per instance, `report.exceptions` non-empty,
+`validation_status = REVIEW_REQUIRED`, and then §3.6's `RedactionError`
+raised from the public entry point. Nothing is exported as clean and
+nothing reports success. A caller's bug becoming a very loud audit *plus*
+an exception is an acceptable presentation of a caller's bug; it is the
+silent single row that would not be.
+
+The audit row is also self-identifying, because §3.2's detail is
+`f"{type(exc).__name__}: {exc}"`. It reads `TypeError:
+apply_redaction_to_array() missing 1 required positional argument:
+'geometry'` — which names the defect precisely enough that a reviewer
+reads it as a bug in the caller, not as a compliance finding about the
+data.
+
+**4. Every public entry point that can reach the method terminates in a
+raise — verified, not assumed.** This is what claim 3 rests on, so all
+five were read:
+
+| Entry point | Ends in a raise on total failure? |
+| --- | --- |
+| `Session.redact()` | Yes — §3.6, `RedactionError` after the pass. |
+| `Session.redact_by_machine()` (`session.py:2061`) | Yes. It calls `self.redact()` inside `try/finally` with **no `except`**; the `finally` restores `configuration.rules` and the exception propagates through it. |
+| `RedactionService.redact_machine_instances()` | Yes — §3.8. |
+| `RedactionService.process_machine_rules()` | Yes — it calls `redact_machine_instances`; §6 already records that it newly propagates. |
+| `_export_instance_worker`'s own call | Yes, and unchanged: it propagates to `ExportOutcome(ok=False)` and no file is written. |
+
+There is no audits-and-returns path. If one is ever added, this clause is
+the one that breaks, and it should be re-read before it is.
+
+**The residue, stated rather than discovered.** #217 stops the *omission*
+of `geometry`; it does not stop an explicit `geometry=None`, which
+remains a legal call and dies at `geometry.samples` with an
+`AttributeError` — *before* the loop, so outside the inner handler, and
+caught by the broad catch as a failed redaction. That is accepted. The
+annotation change in §12.1 clause 2 is the mitigation that matters, and
+the important property is the direction of the failure: the deleted
+heuristic failed **open** — it zeroed the wrong region and reported
+success — whereas `geometry=None` after this change fails **closed** —
+nothing is zeroed, the instance is not persisted (§3.7), no
+`_ISOCENTER_REDACTION_HASH` is written, the row is audited, and the pass
+raises. Trading a fail-open for a fail-closed is the whole of #217.
+
+### 12.5 Test 18 — the default coming back
+
+Added to `tests/test_redaction_robustness.py`, beside the four #66
+guards. **Numbered 18** to continue §7's list; §7.4's non-vacuity list
+gains a bullet for it.
+
+```python
+def test_the_geometry_argument_has_no_default():
+    """#217: the default arm was the heuristic that shipped 32 of 32
+    identifier cells. A default here is not a convenience -- it is the
+    leak, reachable by any caller who does not know to pass a keyword."""
+    arr = np.ones((64, 64), dtype=np.uint16)
+
+    with pytest.raises(TypeError, match="geometry"):
+        RedactionService.apply_redaction_to_array(arr, [(0, 10, 0, 10)])
+```
+
+Three things about it that are the point, not decoration:
+
+- **It asserts the `TypeError`, not correct behaviour when the argument
+  is passed.** The four tests in §12.3 all pass both before and after
+  #217 — they assert the passing case. Per §7.4's discipline a test that
+  passes on both sides of the change is worth nothing as a guard, and
+  those four are guards for #66, not for #217. This is the only test in
+  the suite that fails if the default is restored.
+- **`match="geometry"` is required.** Bare `pytest.raises(TypeError)`
+  passes on *any* `TypeError`, including one from a malformed zone
+  (§12.4 clause 1, measured: two of three zone shapes produce one), so it
+  would keep passing against a restored default that then raised for an
+  unrelated reason. The interpreter's message is
+  `apply_redaction_to_array() missing 1 required positional argument:
+  'geometry'`, which contains the parameter name.
+- **It calls the static method directly**, not through
+  `execute_redaction_task`, so it is independent of §12.4's decision. If
+  someone later narrows the catch, this test is unaffected; if someone
+  restores the default, it fails regardless of what the catch does.
+
+**Non-vacuity, to run before the fix**: with the current signature the
+call succeeds and returns `True` (measured), so the test fails on `DID
+NOT RAISE`. Confirm that, then make the change.
+
+### 12.6 `CHANGELOG.md` — two entries, one PR
+
+One PR now carries #213 and #217, and it gets **two** entries under
+`### Fixed`. Not one: the audiences are disjoint. #213's reader is
+someone who calls `session.redact()` and got a number back; #217's is
+someone who calls a public static method directly, and is the only one of
+the two who has a call that stops working.
+
+§11's requirements for #213's entry stand, with **one correction**: its
+last bullet said "`apply_redaction_to_array`'s #66 raise is unchanged".
+The *raise* is still unchanged; the *signature* is not. Say so, and
+cross-reference the #217 entry.
+
+**#217's entry must contain, explicitly:**
+
+- The exact exception a previously-working call now raises, quoted:
+  `TypeError: apply_redaction_to_array() missing 1 required positional
+  argument: 'geometry'`, from
+  `RedactionService.apply_redaction_to_array(arr, rois)` — a call that
+  worked in 0.9.0 and silently used the heuristic.
+- **Why the old behaviour was wrong**, in the terms CLAUDE.md asks for:
+  the default arm was `arr.shape[-1] in [3, 4]`, which cannot tell
+  `(frames, rows, cols)` from `(rows, cols, samples)`; on a 4-frame 8×4
+  volume with an identifier at rows 6–7 of every frame, zone `(6,8,0,4)`
+  addressed frames `6:8` of a 4-frame array — an empty slice — so all 32
+  identifier cells reached the exported file while `redact()` reported
+  "1 of 1 images updated". Reproduced during #215's review: 32/32
+  surviving on `692218c`, 0/32 on `cf9dcd6`.
+- That this **supersedes** the sentence in 0.9.0's `#186, #205` entry
+  reading "A caller of the public static
+  `RedactionService.apply_redaction_to_array` outside this tree keeps the
+  old behaviour" (`CHANGELOG.md:60`). That promise is withdrawn on
+  purpose, one release later, under the pre-1.0 convention — and the
+  entry should say that rather than leaving two entries disagreeing.
+- The migration, in one line: resolve it —
+  `from isocenter.pixel_geometry import resolve_pixel_geometry;
+  resolve_pixel_geometry(arr.shape, instance.attributes)` — which is what
+  both in-tree callers do.
+- That there was no way for a third-party caller to get the *correct*
+  behaviour from the default, so nothing usable is being taken away.
+
+### 12.7 Implementation order — §9's PR 2 becomes PR 2 + #217
+
+§9 steps 6–11 are unchanged and still run first: #213's machinery lands
+before the signature changes, so a failure in either is attributable.
+Three steps are appended.
+
+12. Make `geometry` required in `services.py` (§12.1): default deleted,
+    annotation narrowed, docstring paragraph deleted, `else` arm and its
+    `if` deleted. **The suite goes red here** — four tests in
+    `test_redaction_robustness.py`. That is expected and is the survey's
+    finding, not a mistake.
+13. Add `geometry=resolve_pixel_geometry(arr.shape, {})` to those four
+    calls and the import (§12.3). Suite green again, all four assertions
+    untouched.
+14. Test 18 (§12.5), then the second `CHANGELOG.md` entry (§12.6).
+
+Steps 12 and 13 are one commit, not two: a deliberately red intermediate
+commit in `main`'s history is worse than a slightly larger one, and a
+`git bisect` that lands on a known-red commit is the cost.
+
+Full suite on **3.12 and 3.14t**. Nothing in #217 is
+interpreter-dependent — the signature change is bytecode-level and the
+four edited tests never enter `run_parallel` — but §2.4's divergence is
+in the same PR and test 14 still needs both gate versions, so the matrix
+requirement is unchanged from §9.
+
+### 12.8 What #217 does *not* change in the earlier design
+
+- **§3.1 through §3.8 stand as written.** The outcome shape, the parent
+  audit, `ERROR` over `DATA_LOSS`, the end-of-pass raise, the
+  not-persisting of a failed instance, and the serial path all read the
+  same with a required `geometry` as with a defaulted one.
+- **§2.4's interpreter divergence is untouched and still needs pinning.**
+  The measurement stands: with zones `[[0,8,0,8],[1,"abc",0,8]]` on a
+  saved instance, the threads path (3.14t default) leaves zone 1 zeroed
+  *and persisted through save/close/reopen* while the processes path
+  (3.12 default) leaves the instance untouched. Test 14 pins it, and it
+  must run on both gate versions — a local 3.14.6 pass exercises the arm
+  that already behaves, so a green local run is not evidence for the 3.12
+  arm. The parent-monkeypatch-invisible-in-the-child rule applies
+  unchanged.
+- **§4, all of #216.** Different file, different branch, different PR.
