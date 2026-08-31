@@ -430,6 +430,10 @@ class SqliteStore:
         # Async Audit Queue
         self.audit_queue = queue.Queue()
         self._stop_event = threading.Event()
+        # Both must exist before the worker starts -- it touches them on
+        # its first tick (#218).
+        self._audit_write_lock = threading.Lock()
+        self._audit_wakeup = threading.Event()
         self._audit_thread = threading.Thread(
             target=self._audit_worker, daemon=True, name="AuditWorker")
         self._audit_thread.start()
@@ -442,6 +446,11 @@ class SqliteStore:
             '_memory_conn',
             'audit_queue',
             '_stop_event',
+            # A lock and an Event both raise `TypeError: cannot pickle
+            # '_thread.lock' object`. Adding an audit primitive without
+            # adding it here breaks *every* pickle of a store (#218).
+            '_audit_write_lock',
+            '_audit_wakeup',
             '_audit_thread']
         for k in keys_to_remove:
             state.pop(k, None)
@@ -461,6 +470,9 @@ class SqliteStore:
 
         self.audit_queue = queue.Queue()
         self._stop_event = threading.Event()
+        # See `__init__`: before the worker starts, not after (#218).
+        self._audit_write_lock = threading.Lock()
+        self._audit_wakeup = threading.Event()
         self._audit_thread = threading.Thread(
             target=self._audit_worker, daemon=True, name="AuditWorker")
         self._audit_thread.start()
@@ -600,62 +612,101 @@ class SqliteStore:
                 f"Waveform blob for {instance.sop_instance_uid} has no "
                 "Waveform Sequence; skipping loader.")
 
-    def _audit_worker(self):
-        """Background thread to batch write audit logs."""
-        batch = []
-        while not self._stop_event.is_set():
-            try:
-                # Collect items with timeout
-                try:
-                    item = self.audit_queue.get(timeout=1.0)
-                    batch.append(item)
+    def _drain_and_write(self):
+        """Move every currently queued audit row into the database.
 
-                    # Drain queue up to limit
-                    while len(batch) < 100:
-                        try:
-                            item = self.audit_queue.get_nowait()
-                            batch.append(item)
-                        except queue.Empty:
-                            break
+        The only place rows leave `audit_queue`, and the lock is what
+        makes `flush_audit_queue` a barrier rather than a hopeful drain
+        (#218). Rows leave the queue only under `_audit_write_lock` and
+        are in the database before it is released, so a row is never
+        owned by a local variable a reader cannot see. The worker used
+        to `get()` rows into its own local `batch` and write them later;
+        between those two points a row was in neither the queue nor the
+        table, and a reader that "flushed" found nothing to do and
+        selected without it.
 
-                except queue.Empty:
-                    pass
-
+        `log_audit_batch` must never acquire `_audit_write_lock`: it is
+        called here *while holding it*, and `threading.Lock` is not
+        reentrant, so a defensive acquire would self-deadlock on the
+        first row.
+        """
+        while True:
+            with self._audit_write_lock:
+                batch = []
+                while len(batch) < 100:
+                    try:
+                        batch.append(self.audit_queue.get_nowait())
+                    except queue.Empty:
+                        break
                 if batch:
                     self.log_audit_batch(batch)
-                    batch = []
+            # A full batch means there may be more behind it; anything
+            # short means the queue went empty under the lock, which is
+            # the barrier's guarantee and the loop's exit.
+            if len(batch) < 100:
+                return
 
-            except Exception as e:
+    def _audit_worker(self):
+        """Background thread to batch write audit logs.
+
+        It waits on `_audit_wakeup` rather than on the queue, and owns
+        nothing while it waits. Blocking on `audit_queue.get()` is the
+        defect this fixes: `get()` returns a row into a local name
+        *before* any lock can be taken, so a barrier could still slip
+        into the gap between the return and the acquisition (#218).
+
+        The barrier's correctness does not depend on this Event at all
+        -- `flush_audit_queue` drains under the lock itself. A broken
+        wakeup costs background-write latency, never read-your-writes.
+        """
+        while not self._stop_event.is_set():
+            self._audit_wakeup.wait(timeout=1.0)
+            # Clear before draining, never after: a `put`+`set` landing
+            # here has its `set` erased, but the row is in the queue
+            # before the clear, so the drain below still takes it.
+            self._audit_wakeup.clear()
+            try:
+                self._drain_and_write()
+            except Exception as e:  # pylint: disable=broad-except
                 # Don't crash thread
                 self.logger.error(f"Audit Worker Error: {e}")
 
         # Flush remaining
-        while not self.audit_queue.empty():
-            try:
-                batch.append(self.audit_queue.get_nowait())
-            except queue.Empty:
-                break
-        if batch:
-            self.log_audit_batch(batch)
+        self._drain_and_write()
 
     def stop(self):
         """Stops the audit worker and flushes queue."""
         self._stop_event.set()
+        # Wake the worker now instead of letting it wait out its 1.0 s
+        # tick, so the join below rarely has to fire at all.
+        self._audit_wakeup.set()
         if self._audit_thread.is_alive():
             self._audit_thread.join(timeout=2.0)
+        # A timed-out join no longer loses rows: this waits out any
+        # in-flight write on the lock and drains the rest itself.
         self.flush_audit_queue()
 
     def flush_audit_queue(self):
-        """Manually processes all pending items in the audit queue."""
-        batch = []
-        while not self.audit_queue.empty():
-            try:
-                batch.append(self.audit_queue.get_nowait())
-            except queue.Empty:
-                break
+        """Settle the audit log.
 
-        if batch:
-            self.log_audit_batch(batch)
+        Returns only when every row enqueued before this call is
+        readable from `audit_log`. This is a barrier, not a poll.
+
+        Before #218 it drained the queue and returned, which said
+        nothing about rows the worker had already taken out of the
+        queue and not yet written. A compliance report reading through
+        it graded `PASS` a run that dropped a private tag, because the
+        `DATA_LOSS`/`PRIVATE` row was in the worker's local batch when
+        `get_audit_losses()` looked.
+
+        There is deliberately no timeout. A bounded barrier would
+        reintroduce `stop()`'s failure mode -- a compliance read that
+        quietly gives up cannot be told apart from one that found
+        nothing. The worst case is one `log_audit_batch`; producers
+        never hold the lock, so no volume of logging can extend a
+        single acquisition.
+        """
+        self._drain_and_write()
 
     def log_audit(self, action_type: str, entity_uid: str, details: str,
                   loss_scope: Optional[str] = None):
@@ -672,36 +723,41 @@ class SqliteStore:
                 `details` because only the caller still holds the tag
                 (#146).
         """
-        # Push to queue instead of writing directly
+        # Push to queue instead of writing directly. Producers take
+        # neither lock and are never blocked by a database write.
         self.audit_queue.put((action_type, entity_uid, details, loss_scope))
+        self._audit_wakeup.set()
 
     def get_audit_summary(self) -> Dict[str, int]:
         """
         Returns an aggregated summary of actions from the audit log.
-        Stops and restarts the background audit worker to ensure consistency.
+
+        It used to `stop()` the worker and restart it in a `finally`,
+        which was not a barrier but a race with a two-second head start
+        (#218). When the join timed out the caller got `{}` for a store
+        with rows recorded, silently, and the restart started a second
+        worker while the first was still alive -- one leaked thread per
+        timed-out read. Both are gone: this reads through the barrier
+        and starts nothing.
+
         Returns:
             Dict[str, int]: e.g., {'ANONYMIZE': 500, 'EXPORT': 500}
         """
-        # Stop worker to ensure all in-flight batches are written
-        # This joins the thread and flushes the queue.
-        self.stop()
+        # Above the connection, never inside it: the lock order is
+        # `_audit_write_lock` -> `_memory_lock`, and flushing from
+        # within `_get_connection` would invert it on a `:memory:`
+        # store and deadlock.
+        self.flush_audit_queue()
 
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                try:
-                    cursor.execute(
-                        "SELECT action_type, COUNT(*) FROM audit_log GROUP BY action_type")
-                    rows = cursor.fetchall()
-                    return {row[0]: row[1] for row in rows}
-                except sqlite3.OperationalError:
-                    return {}
-        finally:
-            # Restart the worker
-            self._stop_event.clear()
-            self._audit_thread = threading.Thread(
-                target=self._audit_worker, daemon=True, name="AuditWorker")
-            self._audit_thread.start()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "SELECT action_type, COUNT(*) FROM audit_log GROUP BY action_type")
+                rows = cursor.fetchall()
+                return {row[0]: row[1] for row in rows}
+            except sqlite3.OperationalError:
+                return {}
 
     def get_audit_errors(self) -> List[tuple]:
         """

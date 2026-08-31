@@ -101,7 +101,7 @@ _ROOT_ONLY_ROUTED_TAGS = frozenset({
 #: `get_pixel_data()` reads the top level. And only when the instance
 #: has no Pixel Data of its own: the export takes the sidecar array
 #: whenever there is a loader, so in a file carrying both -- which
-#: PS3.5 A.1 forbids, but malformed input exists -- the float half is
+#: PS3.5 Section 8.2 forbids, but malformed input exists -- the float half is
 #: genuinely lost and must still be reported.
 #:
 #: The sidecar is still the missing half, and is still #183: an ingest
@@ -794,6 +794,107 @@ class ExportSummary:
         return len(self.failures)
 
 
+def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
+    """Write the descriptors that describe the pixel element just written.
+
+    Both pixel branches call this, so `Rows`, `Columns`,
+    `SamplesPerPixel` and `NumberOfFrames` agree with the bytes by
+    construction rather than by review. They are Type 1 in the Image
+    Pixel Module and Type 1 again in the Floating Point and Double
+    Floating Point Image Pixel Modules (PS3.3 C.7.6.24, C.7.6.25), so
+    "the float element does not need them" was never true -- and worse,
+    `_merge` had already written whatever `attributes` declared, so an
+    instance whose descriptors were stale exported a file describing a
+    different image (#216).
+
+    Every descriptor here comes from one resolved geometry. Rows and
+    Columns used to be recomputed from the array's shape while
+    SamplesPerPixel was read straight out of `attributes`, and it is that
+    *incoherence* -- not the wrong axis on its own -- that turned #186
+    into a file pydicom refuses to decode: Rows=3, Columns=4 beside
+    SamplesPerPixel=4. Writing all four from `geom` makes them agree by
+    construction.
+
+    `BitsAllocated` is deliberately **not** written here. Each branch
+    keeps its own: the float arms set 32 or 64 because those are the
+    Enumerated Values the two float modules require next to the tag they
+    chose, and the integer arm derives `arr.itemsize * 8` from the bytes
+    it is about to emit. They happen to agree numerically; they are not
+    the same statement.
+
+    Args:
+        ds (Dataset): The dataset being written.
+        geom (PixelGeometry): The one resolved geometry.
+        attributes (dict): The instance's attributes, read only to decide
+            whether a frame count was declared and for the photometric
+            fallback.
+        float_element (bool): Whether the pixel element just written was
+            (7fe0,0008) or (7fe0,0009). Keyword-only and **without a
+            default**, so a third call site has to decide which module's
+            Photometric Interpretation rules apply rather than inheriting
+            the integer path's by omission (#222).
+    """
+    ds.Rows = geom.rows
+    ds.Columns = geom.cols
+    ds.SamplesPerPixel = geom.samples
+    # The literal, not `pixel_geometry.TAG_NUMBER_OF_FRAMES`: this module
+    # imports no tag constants and already spells every tag this way, and
+    # a second spelling of a tag one file writes one way is how the two
+    # answers start to disagree. Tags are lowercase-hex strings.
+    if geom.frames > 1 or "0028,0008" in attributes:
+        ds.NumberOfFrames = geom.frames
+
+    # Photometric Interpretation is not derivable from an array --
+    # three samples are equally RGB, YBR_FULL or YBR_RCT -- so only
+    # an outright contradiction is corrected. None means the
+    # declared value is coherent and `_merge` already put it on
+    # `ds`; overwriting it is what relabelled every YBR instance.
+    # This is *not* an `or`: the None arm is what lets YBR_FULL,
+    # YBR_ICT and MONOCHROME1 survive a round trip.
+    photometric = resolve_photometric_interpretation(attributes, geom.samples)
+
+    if float_element and photometric == "RGB":
+        # `RGB` is right on the integer path and wrong on this one, and
+        # the resolver is shared, so the difference has to be made here
+        # rather than in it (#222).
+        #
+        # C.7.6.24 and C.7.6.25 both enumerate `MONOCHROME2` and nothing
+        # else for Photometric Interpretation, so there is no value the
+        # resolver could correct a float declaration *to* that either
+        # module permits -- `RGB` least of all. On the integer path the
+        # correction is the neutral reading of three interleaved samples
+        # and it stays; here it replaces one nonconformance with another
+        # and throws away the only word the source file ever said about
+        # its own pixels.
+        #
+        # The resolver returns `"RGB"` from exactly two arms: nothing was
+        # declared, or a monochrome value was declared beside three or
+        # more samples. Asking it again at `samples = 1` -- the count
+        # C.7.6.3.1.2 permits `MONOCHROME2` at, and therefore the count
+        # both float modules imply -- separates them: it returns None
+        # only for a declared monochrome value. That is also why the test
+        # is a second call rather than a `in MONOCHROME_PHOTOMETRIC`
+        # membership check here: the declared value needs stripping and
+        # upper-casing before it can be compared, and `pixel_geometry`
+        # already does that. A second copy of that normalisation is a
+        # second answer to "what did the instance declare".
+        #
+        # Only the declared-monochrome row moves. An instance declaring
+        # nothing still exports `RGB`, which is #222's own assessment of
+        # this fix: it is the narrowest of the three shapes that issue
+        # offers, not a complete answer to it.
+        if resolve_photometric_interpretation(attributes, 1) is None:
+            photometric = None
+
+    if photometric is None:
+        photometric = attributes.get("0028,0004")
+    if photometric:
+        ds.PhotometricInterpretation = photometric
+
+    if planar_configuration_default(attributes, geom.samples):
+        ds.PlanarConfiguration = 0
+
+
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
@@ -882,14 +983,44 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 RedactionService.apply_redaction_to_array(
                     arr, ctx.redaction_zones, geometry=geom)
 
+        # This refusal used to live inside the integer branch below, which
+        # meant the float branch -- which sits above it and ends with
+        # `arr = None` -- never reached it. A float array whose geometry
+        # was a guess exported a file with no Rows, no Columns and no
+        # SamplesPerPixel, all three Type 1 in the Floating Point Image
+        # Pixel Module (PS3.3 C.7.6.24), while the identical uint8 graph
+        # was correctly refused (#216). Which pixel element carries the
+        # bytes has nothing to do with whether the geometry is known, so
+        # the check belongs to neither branch.
+        #
+        # It sits *below* the redaction block rather than above it, which
+        # costs one redaction pass on an instance that is about to be
+        # refused and buys a source order that still reads
+        # resolve -> redact -> write. Nothing between the resolution and
+        # here can change `geom`: the redaction block copies the array
+        # when it is not writeable, which does not change its shape.
+        if arr is not None and geom.evidence is GeometryEvidence.GUESSED:
+            raise RuntimeError(
+                f"Refusing to write {ctx.output_path}: the pixel "
+                f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
+                f"equally a multi-frame grayscale image and a "
+                f"single-frame image with {arr.shape[-1]} samples per "
+                f"pixel -- and the instance declares no SamplesPerPixel "
+                f"(0028,0002), NumberOfFrames (0028,0008) or "
+                f"Rows/Columns to resolve it. Writing it would guess "
+                f"the image's geometry, and a recipient cannot tell a "
+                f"guess apart from a correct answer.")
+
         if arr is not None and arr.dtype.kind == 'f':
             # A floating-point array is not Pixel Data, and writing it
             # under (7fe0,0010) does not make it Pixel Data -- it makes a
             # file that reads 1056964608 where the source said 0.5, with
             # BitsAllocated=32 and PixelRepresentation=0 next to it so
             # the result is internally coherent and nothing downstream
-            # errors (#170). PS3.5 A.1 and PS3.3 C.7.6.3 make Pixel Data
-            # and Float Pixel Data mutually exclusive, which is why the
+            # errors (#170). PS3.5 Section 8.2 -- not A.1, which is the
+            # Implicit VR Little Endian Transfer Syntax and says nothing
+            # about this -- makes Pixel Data and Float Pixel Data
+            # mutually exclusive, which is why the
             # integer element is deleted below rather than merely not
             # written: `_merge` writes whatever `attributes` holds, and
             # a file carrying both is nonconformant however it got that
@@ -950,13 +1081,56 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if "PixelData" in ds:
                 del ds.PixelData
 
-            # Geometry is not recomputed from the array here, unlike the
-            # integer path below. The descriptors were merged from
-            # `attributes`, which is the same source file this array was
-            # read back from, so they already agree; and the float
-            # elements have no Bits Stored / High Bit / Pixel
-            # Representation of their own in C.7.6.24, so Bits Allocated
-            # is the only one the tag choice constrains.
+            # The *other* float element, too -- the exclusion has three
+            # reachable directions and deleting (7fe0,0010) alone closes
+            # one of them. PS3.5 Section 8.2: "It is not permitted to have
+            # more than one of Pixel Data Provider URL (0028,7FE0), Pixel
+            # Data (7FE0,0010), Float Pixel Data (7FE0,0008) or Double
+            # Float Pixel Data (7FE0,0009) in the top level Data Set."
+            # Measured: a float32 array on an instance whose `attributes`
+            # carry a "7fe0,0009" exported with (7fe0,0008) *and*
+            # (7fe0,0009), and `dcmread(...).pixel_array` raises the same
+            # "One and only one of ..." pydicom refuses the other two
+            # directions with. Same reachability class as the rest of this
+            # branch: `populate_attrs` skips group 7fe0 at ingest, so it
+            # arrives from a hand-built graph or a `set_attr` call.
+            #
+            # The float16 arm is deliberately outside this: it writes no
+            # element at all, so there is nothing here for it to be
+            # exclusive *with*, and stripping a "7fe0,0008" `_merge` put
+            # on the dataset would be a data-loss action that owes the
+            # caller a loss row rather than a conformance correction.
+            other = {4: "DoubleFloatPixelData",
+                     8: "FloatPixelData"}.get(arr.itemsize)
+            if other is not None and other in ds:
+                del ds[other]
+
+            # "The descriptors were merged from `attributes`, which is the
+            # same source file this array was read back from, so they
+            # already agree" is what used to stand here instead of this
+            # call, and it was true only of the ingest path. `attributes`
+            # is also whatever a caller last wrote, so a stale
+            # Rows/Columns exported a *decodable* file describing a
+            # different image -- measured Rows=10 Columns=10 beside 16
+            # floats, and Rows=99 Columns=99 beside a (2,4,8) array --
+            # which is worse than the absent-descriptor case #216 filed,
+            # because nothing invites the reader to go back. Rows, Columns
+            # and SamplesPerPixel are Type 1 in C.7.6.24 and C.7.6.25
+            # exactly as they are in the Image Pixel Module, and
+            # PhotometricInterpretation is Type 1 there with Enumerated
+            # Value MONOCHROME2.
+            #
+            # Only on the arms that actually wrote a pixel element. The
+            # float16 arm below writes none, so it writes no descriptors
+            # -- the same rule `BitsAllocated`'s placement above already
+            # follows. BitsAllocated stays out of the helper for that
+            # reason too: 32 and 64 are what the two float modules
+            # enumerate beside the tag this branch chose, not a width
+            # derived from the bytes.
+            if arr.itemsize in (4, 8):
+                _write_pixel_geometry(ds, geom, inst.attributes,
+                                      float_element=True)
+
             arr = None
 
         if arr is not None:
@@ -968,45 +1142,32 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if not ctx.compression:
                 ds.PixelData = arr.tobytes()
 
-            # Every descriptor here comes from one resolved geometry.
-            # Rows and Columns used to be recomputed from the array's shape
-            # while SamplesPerPixel was read straight out of `attributes`,
-            # and it is that *incoherence* -- not the wrong axis on its own
-            # -- that turned #186 into a file pydicom refuses to decode:
-            # Rows=3, Columns=4 beside SamplesPerPixel=4. Writing all four
-            # from `geom` makes them agree by construction.
-            if geom.evidence is GeometryEvidence.GUESSED:
-                raise RuntimeError(
-                    f"Refusing to write {ctx.output_path}: the pixel "
-                    f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
-                    f"equally a multi-frame grayscale image and a "
-                    f"single-frame image with {arr.shape[-1]} samples per "
-                    f"pixel -- and the instance declares no SamplesPerPixel "
-                    f"(0028,0002), NumberOfFrames (0028,0008) or "
-                    f"Rows/Columns to resolve it. Writing it would guess "
-                    f"the image's geometry, and a recipient cannot tell a "
-                    f"guess apart from a correct answer.")
+            # The second of PS3.5 Section 8.2's three reachable
+            # directions -- the float branch above carries the first and
+            # the third. The section is 8.2, "Native or Encapsulated
+            # Format Encoding"; A.1, cited here and in #170 before it, is
+            # the Implicit VR Little Endian Transfer Syntax and says
+            # nothing about which pixel elements may coexist.
+            #
+            # The float branch has deleted (7fe0,0010)
+            # since #170 for exactly this reason; the integer branch never
+            # deleted its counterpart, so an instance carrying a
+            # (7fe0,0008) of its own in `attributes` -- `_merge` writes
+            # whatever it holds -- left with *both* pixel elements, which
+            # pydicom itself refuses to decode: "One and only one of
+            # 'Pixel Data', 'Float Pixel Data' or 'Double Float Pixel
+            # Data' may be present". Measured reachable (#216).
+            #
+            # `populate_attrs` skips the whole 7fe0 group at ingest, so
+            # this arrives only from a hand-built graph or a `set_attr`
+            # call -- the same reachability class the float16 arm above
+            # already serves, and not dead code.
+            for kw in ("FloatPixelData", "DoubleFloatPixelData"):
+                if kw in ds:
+                    del ds[kw]
 
-            ds.Rows = geom.rows
-            ds.Columns = geom.cols
-            ds.SamplesPerPixel = geom.samples
-            if geom.frames > 1 or "0028,0008" in inst.attributes:
-                ds.NumberOfFrames = geom.frames
-
-            # Photometric Interpretation is not derivable from an array --
-            # three samples are equally RGB, YBR_FULL or YBR_RCT -- so only
-            # an outright contradiction is corrected. None means the
-            # declared value is coherent and `_merge` already put it on
-            # `ds`; overwriting it is what relabelled every YBR instance.
-            photometric = resolve_photometric_interpretation(
-                inst.attributes, geom.samples)
-            if photometric is None:
-                photometric = inst.attributes.get("0028,0004")
-            if photometric:
-                ds.PhotometricInterpretation = photometric
-
-            if planar_configuration_default(inst.attributes, geom.samples):
-                ds.PlanarConfiguration = 0
+            _write_pixel_geometry(ds, geom, inst.attributes,
+                                  float_element=False)
 
             if arr.itemsize == 1:
                 default_bits = 8

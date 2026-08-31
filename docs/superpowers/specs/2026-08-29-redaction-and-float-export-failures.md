@@ -234,7 +234,7 @@ path does not.
 why §4 states the clause as "the float path writes its descriptors from
 the resolved geometry" and treats the hoist as one consequence of it.
 
-Case **f** is the PS3.5 A.1 gap the brief asked about, confirmed
+Case **f** is the PS3.5 Section 8.2 gap the brief asked about, confirmed
 reachable: the float branch deletes `(7fe0,0010)`, the integer branch
 does not delete `(7fe0,0008)`/`(7fe0,0009)`. `populate_attrs` skips the
 whole `7fe0` group at ingest, so this arrives only from a hand-built
@@ -705,7 +705,7 @@ if arr is not None:
     if not ctx.compression:
         ds.PixelData = arr.tobytes()
 
-    # (C) New: the other half of PS3.5 A.1's mutual exclusion.
+    # (C) New: the other half of PS3.5 Section 8.2's mutual exclusion.
     for kw in ("FloatPixelData", "DoubleFloatPixelData"):
         if kw in ds:
             del ds[kw]
@@ -941,7 +941,7 @@ That file is the home of the float branch and already has the direct
    *(fix)* `(4,4) uint8` with `attrs={"7fe0,0008": b"\x00" * 64}` applied
    after. Assert `(0x7FE0, 0x0008) not in ds` and `"PixelData" in ds`.
    Kills clause §4.3(C). On `258331c` the file carries both, violating
-   PS3.5 A.1 (§2.5 case f). Mirrors the existing
+   PS3.5 Section 8.2 (§2.5 case f). Mirrors the existing
    `test_the_integer_tag_is_deleted_when_a_float_element_is_written`,
    which is why it belongs beside it.
 
@@ -1239,7 +1239,7 @@ primary design record.
   instance whose geometry is a guess, and that no `scripts/` generator
   produces one (verified: zero float arrays under `scripts/`).
 - That a file carrying both `(7fe0,0010)` and `(7fe0,0008)` was
-  reachable, that PS3.5 A.1 forbids it, and that the deletion now runs in
+  reachable, that PS3.5 Section 8.2 forbids it, and that the deletion now runs in
   both directions rather than one.
 
 ---
