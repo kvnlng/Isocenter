@@ -443,3 +443,249 @@ def test_bits_allocated_is_decided_by_the_array_not_the_source(
 
     assert expected_tag in exported
     assert exported.BitsAllocated == expected_bits
+
+
+# --- #216: the float path's geometry descriptors ---
+#
+# `_export_instance_worker` resolved one `PixelGeometry` and then used it
+# on the integer branch only. The float branch wrote no descriptors at
+# all, and #215's refusal to write a guessed geometry sat *inside* the
+# integer branch -- below a float branch that ends with `arr = None`, so
+# a float array reached neither.
+#
+# Two shapes, and the filed one is the milder. Descriptors absent is
+# undecodable and loud; descriptors present and stale is decodable and
+# describes a different image. Every test below that names a declared
+# Rows/Columns is pinning the second shape, which a fix that only hoists
+# the refusal leaves standing.
+
+
+def _export_raw(tmp_path, arr, attrs, name):
+    """Drive the worker on an instance whose attributes are *exactly* `attrs`.
+
+    `_export_one` above cannot express these cases. It seeds Rows,
+    Columns, SamplesPerPixel and PhotometricInterpretation from the
+    array's own shape and then calls `set_pixel_data`, which writes
+    `0028,0002`, `0028,0004`, `0028,0010` and `0028,0011` back into
+    `attributes` -- so every fixture built through it declares a geometry
+    that already agrees with its array, which is the one configuration in
+    which none of the clauses below does anything. It also asserts
+    `outcome.ok`, and two of these expect a refusal.
+
+    `inst.pixel_array = arr` is a plain assignment and writes nothing.
+    """
+    from isocenter.entities import Instance
+    from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+    inst = Instance("1.2.3.4.5")
+    inst.attributes.update(attrs)
+    inst.pixel_array = arr
+
+    out = str(tmp_path / name)
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst,
+        output_path=out,
+        patient_attributes={"0010,0020": "P1"},
+        study_attributes={"0020,000d": "1.2.3"},
+        series_attributes={"0020,000e": "1.2.4"},
+        compression=None))
+    return inst, outcome, out
+
+
+#: Enough to build a dataset and no descriptor of any kind. Every
+#: geometry element is left out deliberately: the point of the fixtures
+#: below is what `attributes` does and does not say.
+_BARE = {"0008,0016": PARAMETRIC_MAP, "0008,0060": "OT", "0020,0013": 1}
+
+
+def test_a_guessed_geometry_is_refused_on_the_float_path(tmp_path):
+    """The issue as filed: a (5,6,3) float32 with nothing declared.
+
+    Rank 3 with no `SamplesPerPixel`, no `NumberOfFrames` and no
+    `Rows`/`Columns` is equally a 5-frame 6x3 grayscale image and a 5x6
+    image with 3 samples per pixel. #215 decided that a guess must not
+    become a file, and put the refusal in the integer branch -- which the
+    float branch, sitting above it and ending in `arr = None`, never
+    reaches. Measured on 258331c: this exact graph exported a file with
+    `Rows`, `Columns` and `SamplesPerPixel` all absent, while the
+    byte-for-byte identical uint8 graph was correctly refused. All three
+    are Type 1 in the Floating Point Image Pixel Module (PS3.3 C.7.6.24).
+
+    Fixture trap, and it is the mirror of the pixel-geometry spec's. The
+    array must be assigned directly, never through `set_pixel_data`: the
+    setter writes `SamplesPerPixel = 3` back into `attributes`, which
+    makes the resolution DECLARED and leaves this test passing with the
+    hoist deleted. The assertion below the call is what fails loudly if
+    a future edit reintroduces the setter.
+    """
+    inst, outcome, out = _export_raw(
+        tmp_path, np.zeros((5, 6, 3), dtype=np.float32), _BARE, "guess.dcm")
+
+    assert "0028,0002" not in inst.attributes, (
+        "the fixture declared SamplesPerPixel, so the geometry is DECLARED "
+        "and this test cannot see the guess it exists to catch")
+
+    assert outcome.ok is False
+    assert not os.path.exists(out)
+    msg = str(outcome.error)
+    assert "(5, 6, 3)" in msg
+    assert "SamplesPerPixel" in msg
+
+
+def test_the_float_path_writes_the_geometry_it_resolved_not_the_one_declared(
+        tmp_path):
+    """The shape the issue does not measure, and the worse one.
+
+    A `(4,4)` float32 array beside a declared `Rows = Columns = 10`
+    exported, on 258331c, a file announcing 100 pixels and carrying 16 --
+    `_merge` writes whatever `attributes` holds and only the integer
+    branch corrected it. Not undecodable: a file describing a different
+    image, which is the relabelling this project's changelog argues is
+    worse than a drop because nothing invites the reader to go back.
+
+    A fixture whose declared descriptors *agree* with the array passes
+    with this clause deleted, because `_merge` wrote the right values by
+    luck. That is why they disagree here, and why the byte-length
+    identity is asserted rather than the numbers alone.
+    """
+    arr = (np.arange(16, dtype=np.float32) + 0.5).reshape(4, 4)
+    _inst, outcome, out = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0010": 10, "0028,0011": 10, "0028,0002": 1}),
+        "stale.dcm")
+    assert outcome.ok, outcome.error
+
+    ds = pydicom.dcmread(out)
+    assert ds.Rows == 4
+    assert ds.Columns == 4
+    assert ds.SamplesPerPixel == 1
+    assert ds.Rows * ds.Columns * ds.SamplesPerPixel * 4 == \
+        len(ds.FloatPixelData)
+
+
+def test_a_multiframe_float_carries_the_frame_count_it_resolved(tmp_path):
+    """The same relabelling one rank up, and the frame count with it.
+
+    `(2,4,8)` float32 with `NumberOfFrames = 2` declared resolves to two
+    4x8 frames -- the declaration settles which axis is which -- but on
+    258331c the file left with the declared `Rows = Columns = 99` beside
+    256 bytes. Asserting `NumberOfFrames` too is what stops a helper that
+    writes Rows and Columns and quietly drops the frame count.
+    """
+    arr = np.zeros((2, 4, 8), dtype=np.float32)
+    _inst, outcome, out = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0002": 1, "0028,0008": 2,
+                       "0028,0010": 99, "0028,0011": 99}),
+        "mf.dcm")
+    assert outcome.ok, outcome.error
+
+    ds = pydicom.dcmread(out)
+    assert ds.Rows == 4
+    assert ds.Columns == 8
+    assert ds.SamplesPerPixel == 1
+    assert int(ds.NumberOfFrames) == 2
+    assert (ds.Rows * ds.Columns * ds.SamplesPerPixel
+            * int(ds.NumberOfFrames) * 4) == len(ds.FloatPixelData)
+
+
+def test_photometric_interpretation_is_written_on_the_float_path(tmp_path):
+    """Type 1, Enumerated Value MONOCHROME2 -- and still not forced.
+
+    PS3.3 C.7.6.24 and C.7.6.25 both make Photometric Interpretation
+    Type 1 and enumerate MONOCHROME2. On 258331c the element was simply
+    absent from every exported float instance that had not declared one.
+
+    The second arm is the guard against the obvious over-correction. "The
+    module enumerates MONOCHROME2, so write MONOCHROME2" would put a
+    second, disagreeing answer next to
+    `resolve_photometric_interpretation`, whose whole `None` arm exists
+    so a declared MONOCHROME1 (or YBR_ICT, on the integer path) survives
+    a round trip.
+
+    Both arms assign `pixel_array` directly: `set_pixel_data` writes
+    `0028,0004` into `attributes`, so a fixture built through it declares
+    a Photometric Interpretation whatever the caller intended and the
+    first arm goes vacuous.
+    """
+    arr = (np.arange(16, dtype=np.float32) + 0.5).reshape(4, 4)
+
+    inst, outcome, out = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4}), "pi_absent.dcm")
+    assert "0028,0004" not in inst.attributes, (
+        "the fixture declared a Photometric Interpretation, so this arm "
+        "asserts that _merge copied it rather than that the float path "
+        "supplied it")
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(out).PhotometricInterpretation == "MONOCHROME2"
+
+    _inst2, outcome2, out2 = _export_raw(
+        tmp_path, arr,
+        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4,
+                       "0028,0004": "MONOCHROME1"}), "pi_mono1.dcm")
+    assert outcome2.ok, outcome2.error
+    assert pydicom.dcmread(out2).PhotometricInterpretation == "MONOCHROME1"
+
+
+def test_the_float_elements_are_deleted_when_pixel_data_is_written(tmp_path):
+    """PS3.5 A.1 in the direction nobody checked (#216).
+
+    `test_the_integer_tag_is_deleted_when_a_float_element_is_written`
+    above pins the float branch deleting (7fe0,0010). The integer branch
+    never deleted its counterparts, so on 258331c a uint8 instance
+    carrying a "7fe0,0008" of its own in `attributes` exported a file
+    with *both* pixel elements -- the same file pydicom refuses to
+    decode, arrived at from the other side.
+
+    Not writing the element was never the same as removing it: `_merge`
+    writes whatever `attributes` holds. Both keywords are deleted
+    because both are reachable the same way, through `set_attr` on a tag
+    `populate_attrs` skips at ingest.
+    """
+    exported, _outcome = _export_one(
+        tmp_path,
+        np.zeros((4, 4), dtype=np.uint8),
+        attrs={"7fe0,0008": b"\x00" * 64,
+               "7fe0,0009": b"\x00" * 128},
+        name="both_ways.dcm")
+
+    assert (0x7FE0, 0x0010) in exported
+    assert (0x7FE0, 0x0008) not in exported
+    assert (0x7FE0, 0x0009) not in exported
+
+
+def test_a_guessed_float_geometry_stops_write_tree_too(tmp_path):
+    """The serializer takes the same refusal, and only a test says so.
+
+    `DicomExporter.write_tree` applies none of the pipeline -- no PHI
+    scan, no subset filter, no redaction -- but it routes through the
+    same `_export_instance_worker`, so the guess has to stop there too.
+    It is the path the `scripts/` fixture generators use and the one
+    `session.export()` cannot exercise, and it surfaces the refusal
+    through its own "Export incomplete" `RuntimeError` wrapper rather
+    than as an `ExportOutcome`.
+    """
+    from isocenter.entities import Equipment, Instance, Patient, Series, Study
+    from isocenter.io_handlers import DicomExporter
+
+    inst = Instance("I_FLOAT", "1.2.826.0.1.3680043.8.498.216001", 1)
+    inst.attributes.update(_BARE)
+    inst.pixel_array = np.zeros((5, 6, 3), dtype=np.float32)
+    assert "0028,0002" not in inst.attributes
+
+    patient = Patient("P_FLOAT", "Float Test")
+    study = Study("S_FLOAT", "20230101")
+    series = Series("SE_FLOAT", "OT", 1)
+    series.equipment = Equipment("Man", "Mod", "SN-FLOAT")
+    series.instances.append(inst)
+    study.series.append(series)
+    patient.studies.append(study)
+
+    out = tmp_path / "tree"
+    with pytest.raises(RuntimeError):
+        DicomExporter.write_tree(patient, str(out), show_progress=False)
+
+    written = [f for _r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    assert written == [], written
