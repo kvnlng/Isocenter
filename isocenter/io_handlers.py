@@ -1040,13 +1040,31 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if "PixelData" in ds:
                 del ds.PixelData
 
-            # Geometry is not recomputed from the array here, unlike the
-            # integer path below. The descriptors were merged from
-            # `attributes`, which is the same source file this array was
-            # read back from, so they already agree; and the float
-            # elements have no Bits Stored / High Bit / Pixel
-            # Representation of their own in C.7.6.24, so Bits Allocated
-            # is the only one the tag choice constrains.
+            # "The descriptors were merged from `attributes`, which is the
+            # same source file this array was read back from, so they
+            # already agree" is what used to stand here instead of this
+            # call, and it was true only of the ingest path. `attributes`
+            # is also whatever a caller last wrote, so a stale
+            # Rows/Columns exported a *decodable* file describing a
+            # different image -- measured Rows=10 Columns=10 beside 16
+            # floats, and Rows=99 Columns=99 beside a (2,4,8) array --
+            # which is worse than the absent-descriptor case #216 filed,
+            # because nothing invites the reader to go back. Rows, Columns
+            # and SamplesPerPixel are Type 1 in C.7.6.24 and C.7.6.25
+            # exactly as they are in the Image Pixel Module, and
+            # PhotometricInterpretation is Type 1 there with Enumerated
+            # Value MONOCHROME2.
+            #
+            # Only on the arms that actually wrote a pixel element. The
+            # float16 arm below writes none, so it writes no descriptors
+            # -- the same rule `BitsAllocated`'s placement above already
+            # follows. BitsAllocated stays out of the helper for that
+            # reason too: 32 and 64 are what the two float modules
+            # enumerate beside the tag this branch chose, not a width
+            # derived from the bytes.
+            if arr.itemsize in (4, 8):
+                _write_pixel_geometry(ds, geom, inst.attributes)
+
             arr = None
 
         if arr is not None:
