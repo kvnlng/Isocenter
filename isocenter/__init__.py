@@ -30,6 +30,10 @@ try:
     # Expose Equipment for type hinting
     from .entities import Equipment
 
+    # An exception a caller is expected to catch needs a stable import
+    # path, and `isocenter.services` is not one this package advertises.
+    from .services import RedactionError
+
     # Expose handler for direct import check
     from . import imagecodecs_handler
 
@@ -80,4 +84,4 @@ except ImportError as e:
 # WFDB annotations.json as producer provenance, so a wrong one becomes a
 # wrong claim inside a delivered dataset.
 from ._version import __version__
-__all__ = ["Session", "Builder", "Equipment"]
+__all__ = ["Session", "Builder", "Equipment", "RedactionError"]

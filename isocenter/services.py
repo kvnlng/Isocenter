@@ -10,6 +10,7 @@ import hashlib
 import json
 import traceback
 import gc
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 from tqdm import tqdm
 import numpy as np
@@ -61,6 +62,65 @@ class MachinePixelIndex:
 
     def get_by_machine(self, sn):
         return self._index.get(sn, [])
+
+
+@dataclass
+class RedactionOutcome:
+    """What one worker has to tell the parent about one instance (#213).
+
+    `None` used to mean three things -- already redacted under this
+    configuration, no pixel data to redact, and an exception -- and the
+    parent read all three as "nothing to apply". Only the third is a
+    failure, and it is the one that leaves burned-in PHI in an instance
+    the pipeline then reports as fine.
+
+    `sop_instance_uid` is the **pre-redaction** UID, for the same reason
+    the mutation dict carries `original_sop_uid`: a redacted image gets a
+    new UID and the parent's map is keyed on the old one.
+
+    `error` is prose, not a `BaseException`, and that is a deliberate
+    divergence from `ExportOutcome.error`. Every consumer of that field
+    stringifies it, and carrying an object across a process boundary adds
+    a failure mode that turns a reportable failure into an unreportable
+    one: an exception whose `__init__` does not round-trip through
+    `pickle` fails to serialise, and what the parent receives is a
+    pickling error about the *result* rather than the failure the worker
+    was trying to report.
+    """
+    ok: bool
+    sop_instance_uid: str
+    mutation: Optional[dict] = None
+    error: Optional[str] = None
+
+
+class RedactionError(RuntimeError):
+    """Redaction did not remove what it was asked to remove (#213).
+
+    Raised after the whole pass, not at the first failure: the instances
+    that could be redacted are redacted, and the failures are already in
+    the audit log, so a caller that catches this still gets a compliance
+    report that grades REVIEW_REQUIRED.
+
+    **`RuntimeError`, not `Exception`, and not to be demoted to a bare
+    `RuntimeError` later for symmetry.** `write_tree` and
+    `_export_instance_worker` already raise bare `RuntimeError`s on this
+    same pipeline, so `except RuntimeError` around a full run cannot tell
+    the three apart -- but subclassing keeps every existing
+    `except RuntimeError` catching this one, where subclassing `Exception`
+    directly would turn a caught error into an escaping one. The
+    asymmetry with the export raises is the point: those mean "nothing
+    was written", this one means "something unsafe is still in the graph".
+    """
+
+    def __init__(self, failures, attempted):
+        self.failures = list(failures)   # [(entity_uid, details)]
+        self.attempted = attempted
+        first = self.failures[0] if self.failures else ("UNKNOWN", "unknown")
+        super().__init__(
+            f"Redaction failed for {len(self.failures)} of {attempted} "
+            "instances; their pixel data still carries whatever the "
+            f"configured zones were meant to remove. First: {first[0]}: "
+            f"{first[1]}. See the audit log for the rest.")
 
 
 class RedactionService:
