@@ -384,8 +384,8 @@ def test_double_float_pixel_data_is_not_reported_either(tmp_path):
 def test_float_pixel_data_beside_pixel_data_is_reported():
     """The exemption is conditional, because the carrying is.
 
-    PS3.5 A.1 makes Pixel Data and Float Pixel Data mutually exclusive,
-    but malformed input exists. When both are present the sidecar wins:
+    PS3.5 Section 8.2 makes Pixel Data and Float Pixel Data mutually
+    exclusive, but malformed input exists. When both are present the sidecar wins:
     `ingest_worker` writes (7fe0,0010) to it, `get_pixel_data()` returns
     that array through the loader, and the float half is carried by
     nothing at all. Exempting it unconditionally would have restored the
