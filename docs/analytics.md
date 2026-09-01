@@ -17,12 +17,16 @@ The report includes:
 2. **Audit Trail**: Aggregated counts of actions taken (e.g., number of patients anonymized, pixels redacted).
 3. **Data Loss & Unscanned Content**: 3.1 lists every element that was
    present in the source and is not in the exported data, named with its
-   VR. 3.2 lists the opposite case -- content that *is* in the exported
-   data and that the PHI scan could not open, which is a private value
-   whose bytes look like a sequence and do not parse as one. Any entry
-   in 3.2 grades the session `REVIEW_REQUIRED`, with no scope test: a
-   run that cannot vouch for what it exported does not get to call
-   itself PASS.
+   VR. 3.2 lists content the PHI scan could not open -- a private value
+   whose bytes look like a sequence and do not parse as one -- with a
+   **Disposition** column resolved against the object graph at report
+   time: `removed before export` (the private-tag sweep deleted the
+   bytes; grades `PASS`, exactly as a swept parseable sequence does),
+   `retained for export`, or `unresolved` (the instance's UID changed
+   after ingest, e.g. by `redact()`, so the row cannot be matched back).
+   The latter two grade the session `REVIEW_REQUIRED`, with no scope
+   test: a run that exports bytes it could not read does not get to
+   call itself PASS.
 4. **Exceptions**: A detailed list of any warnings or errors encountered (e.g., "Corrupt pixel data in File X", "Burned-In Annotation found").
 5. **Manifest**: A summary of the processed cohort (Top studies by size).
 

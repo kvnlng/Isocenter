@@ -38,7 +38,6 @@ from pydicom.tag import Tag
 from pydicom.uid import ExplicitVRLittleEndian, ImplicitVRLittleEndian
 
 from isocenter import Session
-from isocenter.reporting import GAP_REMOVED, GAP_RETAINED
 
 SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7"
 PRIVATE_SQ = "0009,1003"
@@ -481,6 +480,7 @@ def test_an_unscanned_candidate_is_reported_and_grades_review_required(
     is inside them, and a run that cannot vouch for what it exported
     does not get to grade itself PASS.
     """
+    from isocenter.reporting import GAP_REMOVED, GAP_RETAINED
     sess = sessions(remove_private=False)
     sess.ingest(implicit_file(
         tmp_path / "src", value=ADVERSARIAL["coincidental vendor blob"]))
@@ -532,6 +532,7 @@ def test_a_swept_unscanned_candidate_is_not_reported_as_exported(
     `test_an_unscanned_candidate_is_reported_and_grades_review_required`
     keeps.
     """
+    from isocenter.reporting import GAP_REMOVED, GAP_RETAINED
     sess = sessions(remove_private=True)
     sess.ingest(implicit_file(
         tmp_path / "src", value=ADVERSARIAL["coincidental vendor blob"]))

@@ -134,8 +134,12 @@ PHI scan walks inside it, remediation reaches the values there, and
 follow the ordinary rules, binary-VR children included, so a vendor `OB`
 inside such a sequence is dropped at ingest and reported like any other.
 A candidate that does *not* re-encode exactly keeps its bytes untouched
-and files a `SCAN_GAP` entry, which appears in section 3.2 of the
-compliance report and grades the session `REVIEW_REQUIRED`.
+at ingest and files a `SCAN_GAP` entry, which appears in section 3.2 of
+the compliance report with a disposition resolved at report time: under
+`remove_private_tags: true` the sweep removes the bytes like any other
+private attribute and the entry reads `removed before export` (grading
+`PASS`); under `false` they are retained byte-for-byte, the entry reads
+`retained for export`, and the session grades `REVIEW_REQUIRED`.
 
 !!! warning "`false` cannot retain private tags with a binary VR"
 
