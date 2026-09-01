@@ -1081,9 +1081,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if "PixelData" in ds:
                 del ds.PixelData
 
-            # The *other* float element, too -- the exclusion has three
-            # reachable directions and deleting (7fe0,0010) alone closes
-            # one of them. PS3.5 Section 8.2: "It is not permitted to have
+            # The *other* float element, too -- the exclusion names four
+            # elements and deleting (7fe0,0010) alone closes one direction
+            # of it. PS3.5 Section 8.2: "It is not permitted to have
             # more than one of Pixel Data Provider URL (0028,7FE0), Pixel
             # Data (7FE0,0010), Float Pixel Data (7FE0,0008) or Double
             # Float Pixel Data (7FE0,0009) in the top level Data Set."
@@ -1100,6 +1100,22 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # exclusive *with*, and stripping a "7fe0,0008" `_merge` put
             # on the dataset would be a data-loss action that owes the
             # caller a loss row rather than a conformance correction.
+            #
+            # The fourth member of the sentence, Pixel Data Provider URL
+            # (0028,7FE0), is deleted below in the `itemsize in (4, 8)`
+            # arm instead of here, and it is the one member that leaves
+            # with a DATA_LOSS row. The asymmetry is *reachability*.
+            # `populate_attrs` skips the whole 7fe0 group at ingest, so a
+            # second pixel element can only arrive from a hand-built
+            # graph -- but (0028,7FE0) has VR UR, is not binary, and
+            # survives `populate_attrs`, so it comes straight through an
+            # ordinary ingest of a real file that declares one (#223,
+            # measured: (7fe0,0008) and the URL both present in the
+            # exported file, no audit row, graded PASS). Deleting a
+            # caller's URL removes information the exported file does not
+            # otherwise carry, so it owes them a row; deleting a
+            # duplicate pixel element is a conformance correction on a
+            # file pydicom refuses to read back at all.
             other = {4: "DoubleFloatPixelData",
                      8: "FloatPixelData"}.get(arr.itemsize)
             if other is not None and other in ds:
@@ -1128,6 +1144,65 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # enumerate beside the tag this branch chose, not a width
             # derived from the bytes.
             if arr.itemsize in (4, 8):
+                # PS3.5 Section 8.2's *other* sentence, the one this
+                # branch has never enforced: "Bits Stored (0028,0101),
+                # High Bit (0028,0102) and Pixel Representation
+                # (0028,0103) shall not be present." Deleted rather than
+                # merely not written, for the same reason the pixel
+                # elements above are: `_merge` has already put whatever
+                # `attributes` holds onto `ds`, and `populate_attrs`
+                # skips only group 7fe0, so all three arrive from an
+                # ordinary ingest of a real Parametric Map (#223).
+                # Measured before the fix: BitsStored 32, HighBit 31,
+                # PixelRepresentation 0 beside (7fe0,0008), no loss row,
+                # graded PASS. This branch writes none of the three
+                # itself, so "stop writing them" was never available.
+                #
+                # No DATA_LOSS row, and that is the deliberate difference
+                # from the Pixel Data Provider URL below. These three
+                # carry nothing a recipient can want: PS3.3 C.7.6.24 says
+                # they are "not used because the stored pixel values
+                # always occupy the entire word" and "always signed", so
+                # their content is fixed by the standard rather than by
+                # the source file. The same sentence fixes BitsAllocated
+                # to 32 or 64 and this branch has silently overwritten
+                # *that* since #170 -- one sentence, one class of
+                # element, one silent action.
+                #
+                # From `ds`, never from `inst.attributes`: the graph is
+                # re-exportable and `SidecarPixelLoader` reads
+                # "0028,0103" to reconstruct dtype. Mutating the graph
+                # here would be a read-path write and a real loss.
+                #
+                # Inside this arm rather than at branch level, for the
+                # reason the `del ds[other]` above is not: the float16
+                # arm writes no pixel element, so nothing there forbids
+                # the three. Not inside `_write_pixel_geometry` either --
+                # that helper is shared with the integer branch, which
+                # *requires* all three, and its contract is "write the
+                # descriptors that describe the pixel element just
+                # written", not "delete some".
+                for kw in ("BitsStored", "HighBit", "PixelRepresentation"):
+                    if kw in ds:
+                        del ds[kw]
+
+                # The fourth direction of the exclusion quoted above.
+                # Reachable from an ordinary ingest, unlike the 7fe0
+                # members, which is why this one is reported (#223).
+                if "PixelDataProviderURL" in ds:
+                    del ds.PixelDataProviderURL
+                    losses.append((
+                        LOSS_SCOPE_STANDARD,
+                        "Pixel Data Provider URL (0028,7fe0) was not "
+                        "exported: PS3.5 Section 8.2 permits only one of "
+                        "it, Pixel Data (7FE0,0010), Float Pixel Data "
+                        "(7FE0,0008) and Double Float Pixel Data "
+                        "(7FE0,0009) in the top level Data Set, and this "
+                        "instance's pixels were written under "
+                        "(7fe0,0008)/(7fe0,0009). The URL named pixel "
+                        "data held elsewhere; the exported file carries "
+                        "its own."))
+
                 _write_pixel_geometry(ds, geom, inst.attributes,
                                       float_element=True)
 
@@ -1165,6 +1240,36 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             for kw in ("FloatPixelData", "DoubleFloatPixelData"):
                 if kw in ds:
                     del ds[kw]
+
+            # And the fourth member of the same sentence, which neither
+            # branch deleted until #223: Pixel Data Provider URL
+            # (0028,7FE0). It is the only one of the four that reaches
+            # here from an ordinary ingest -- VR UR, not binary, and
+            # `populate_attrs` skips only group 7fe0 -- so it is the only
+            # one whose removal takes a caller's value with it, and it
+            # leaves with a DATA_LOSS row rather than in silence. Scoped
+            # STANDARD: group 0028 is even, the parity rule every other
+            # loss row uses (#146). Per #146 a STANDARD loss does not by
+            # itself move `validation_status`.
+            #
+            # The gate is this `arr is not None` block, not
+            # `"PixelData" in ds`: with `ctx.compression` set the worker
+            # never assigns `ds.PixelData` at all -- `_finalize_dataset`
+            # compresses from the array -- so a membership test would let
+            # the URL survive every compressed export. Measured. Do not
+            # "simplify" it into one.
+            if "PixelDataProviderURL" in ds:
+                del ds.PixelDataProviderURL
+                losses.append((
+                    LOSS_SCOPE_STANDARD,
+                    "Pixel Data Provider URL (0028,7fe0) was not "
+                    "exported: PS3.5 Section 8.2 permits only one of it, "
+                    "Pixel Data (7FE0,0010), Float Pixel Data "
+                    "(7FE0,0008) and Double Float Pixel Data "
+                    "(7FE0,0009) in the top level Data Set, and this "
+                    "instance's pixels were written under (7fe0,0010). "
+                    "The URL named pixel data held elsewhere; the "
+                    "exported file carries its own."))
 
             _write_pixel_geometry(ds, geom, inst.attributes,
                                   float_element=False)

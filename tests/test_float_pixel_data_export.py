@@ -57,7 +57,8 @@ PARAMETRIC_MAP = "1.2.840.10008.5.1.4.1.1.30"
 
 
 def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
-                     bits=32, samples=1, photometric="MONOCHROME2"):
+                     bits=32, samples=1, photometric="MONOCHROME2",
+                     url=None):
     """Write a Parametric Map carrying its float payload under `tag`.
 
     `samples` and `photometric` are parameters because the #222 case
@@ -66,6 +67,17 @@ def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
     -- MONOCHROME2 is permitted only at one sample -- but it is a real
     file a real scanner can emit, and every descriptor on it survives
     ingest, which is the whole point of the test that uses it.
+
+    `url` adds Pixel Data Provider URL (0028,7fe0), the fourth member of
+    PS3.5 Section 8.2's mutual exclusion, for #223. It defaults to None
+    and adds nothing: this helper has a dozen callers and none of the
+    others wants it.
+
+    `BitsStored`, `HighBit` and `PixelRepresentation` are written
+    unconditionally and that is load-bearing for #223's tests. A source
+    declaring none of them exports none of them *before* the fix too
+    (measurement G), so a fixture that drops them makes
+    `assert "BitsStored" not in exported` vacuous.
     """
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = PARAMETRIC_MAP
@@ -95,6 +107,8 @@ def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
         # ran at all. Found by exactly that vacuity.
         ds.PlanarConfiguration = 0
     ds.PixelRepresentation = 0
+    if url is not None:
+        ds.add_new(0x00287FE0, 'UR', url)
     ds.add_new(tag, vr,
                (np.arange(16 * samples, dtype=dtype) + 0.5).tobytes())
 
@@ -102,11 +116,56 @@ def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
     return ds.SOPInstanceUID
 
 
-def _run(tmp_path, name="fpx", **kwargs):
-    """Ingest, export uncompressed, return (exported dataset, DATA_LOSS rows)."""
+def _write_int_src(folder, url=None):
+    """Write the same instance with a plain 8-bit payload under (7fe0,0010).
+
+    A separate helper rather than a `dtype` of `_write_float_src`,
+    because that one's payload is `arange + 0.5` -- the half is the
+    point of it, and it is meaningless once the element is integer.
+    The three descriptors PS3.5 Section 8.2 forbids beside a *float*
+    element are required beside this one, which is what the integer
+    selectivity guard needs (#223).
+    """
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = PARAMETRIC_MAP
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
+    ds.PatientID, ds.PatientName = "PAT1", "DOE^JOHN"
+    ds.StudyInstanceUID, ds.SeriesInstanceUID = generate_uid(), generate_uid()
+    ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
+    ds.SOPClassUID = PARAMETRIC_MAP
+    ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "OT", 1, 1
+    ds.StudyDate = "20230101"
+    ds.Rows = ds.Columns = 4
+    ds.BitsAllocated = ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelRepresentation = 0
+    if url is not None:
+        ds.add_new(0x00287FE0, 'UR', url)
+    ds.add_new(0x7FE00010, 'OB', np.arange(16, dtype=np.uint8).tobytes())
+
+    ds.save_as(os.path.join(folder, "one.dcm"), enforce_file_format=True)
+    return ds.SOPInstanceUID
+
+
+def _run(tmp_path, name="fpx", writer=None, src_check=None, **kwargs):
+    """Ingest, export uncompressed, return (exported dataset, DATA_LOSS rows).
+
+    `writer` defaults to `_write_float_src`; `_write_int_src` is the
+    other one. `src_check`, when given, is handed the source dataset
+    read back from disk *before* the export -- somewhere to pin the
+    precondition an assertion depends on, which for #223 is that the
+    source really declared the elements the export is expected to drop.
+    """
     src = tmp_path / "src"
     src.mkdir()
-    _write_float_src(str(src), **kwargs)
+    (writer or _write_float_src)(str(src), **kwargs)
+    if src_check is not None:
+        src_check(pydicom.dcmread(str(src / "one.dcm")))
     out = tmp_path / "out"
 
     session = DicomSession(persistence_file=str(tmp_path / f"{name}.db"))
@@ -922,3 +981,235 @@ def test_a_declared_colour_interpretation_still_survives_the_float_path(
     assert outcome.ok, outcome.error
 
     assert pydicom.dcmread(out).PhotometricInterpretation == "YBR_FULL"
+
+
+# --- PS3.5 Section 8.2's *other* two sentences (#223) ---------------
+#
+# "Bits Stored (0028,0101), High Bit (0028,0102) and Pixel
+# Representation (0028,0103) shall not be present" beside Float Pixel
+# Data, and Pixel Data Provider URL (0028,7FE0) is the fourth member of
+# the mutual exclusion the tests above already pin three directions of.
+#
+# Both halves are reachable from an ordinary `ingest -> export` of a
+# file pydicom itself writes -- unlike most of #216's blast radius,
+# which needs a hand-built graph -- so the detection tests below drive
+# the whole pipeline and the selectivity guards drive the worker.
+#
+# Every fixture here declares the elements under test. A source that
+# declares none of the three exports none of them on the *unfixed*
+# code, so a fixture that forgets makes the assertion vacuous; that is
+# what `src_check` is for.
+
+
+def _declares_all_three(src):
+    """Precondition: the source really carries what the export must drop."""
+    for kw in ("BitsStored", "HighBit", "PixelRepresentation"):
+        assert kw in src, (
+            f"vacuous fixture: the source declares no {kw}, so the "
+            f"assertion that the export drops it would pass with the "
+            f"fix reverted")
+
+
+def test_a_float32_export_drops_bits_stored_high_bit_and_pixel_representation(
+        tmp_path):
+    """The defect as filed, from a plain ingest of a Parametric Map.
+
+    Measured before the fix: `BitsAllocated 32 BitsStored 32 HighBit 31
+    PixelRepresentation 0` beside (7fe0,0008), no DATA_LOSS row, graded
+    PASS. All three are forbidden there by PS3.5 Section 8.2, and PS3.3
+    C.7.6.24 does not list them in Table C.7.6.24-1 at all.
+
+    The decode assertion is not decoration. The whole of the silent
+    strip rests on the three carrying nothing a reader needs, and the
+    only way to say that in a test is to read the file back without
+    them.
+    """
+    exported, rows = _run(tmp_path, name="f32strip",
+                          src_check=_declares_all_three)
+
+    assert (0x7FE0, 0x0008) in exported, "the payload must still be written"
+    assert exported.BitsAllocated == 32
+    for kw in ("BitsStored", "HighBit", "PixelRepresentation"):
+        assert kw not in exported, (
+            f"PS3.5 Section 8.2: {kw} shall not be present beside "
+            f"(7fe0,0008)")
+
+    arr = exported.pixel_array
+    assert arr.dtype == np.float32 and arr.shape == (4, 4)
+    np.testing.assert_array_equal(
+        arr.ravel(), np.arange(16, dtype=np.float32) + 0.5)
+
+    assert rows == [], f"nothing is lost by this strip: {rows}"
+
+
+def test_a_float64_export_drops_them_too(tmp_path):
+    """Section 8.2 states the rule twice, once per element.
+
+    Separate from the float32 case because a fix keyed on
+    `itemsize == 4` would pass that one alone. Measured before the fix:
+    `64 / 63 / 0` beside (7fe0,0009).
+    """
+    exported, rows = _run(tmp_path, name="f64strip", tag=0x7FE00009, vr='OD',
+                          dtype=np.float64, bits=64,
+                          src_check=_declares_all_three)
+
+    assert (0x7FE0, 0x0009) in exported
+    assert exported.BitsAllocated == 64
+    for kw in ("BitsStored", "HighBit", "PixelRepresentation"):
+        assert kw not in exported, (
+            f"PS3.5 Section 8.2: {kw} shall not be present beside "
+            f"(7fe0,0009)")
+
+    arr = exported.pixel_array
+    assert arr.dtype == np.float64 and arr.shape == (4, 4)
+    assert rows == []
+
+
+def test_the_float16_arm_keeps_all_three_and_its_url(tmp_path):
+    """Selectivity guard, not evidence: nothing is written, nothing is forbidden.
+
+    float16 has no DICOM element, so this arm writes no pixel element at
+    all -- and Section 8.2 forbids the three descriptors *beside* one.
+    With none written there is nothing for them to contradict, and a
+    Pixel Data Provider URL alone in the top level Data Set is legal:
+    the sentence forbids more than one of the four, not the URL.
+
+    This is what fails if either deletion is hoisted out of the
+    `itemsize in (4, 8)` arm up to the float branch as a whole.
+
+    `0008,0060` is `SR` for the reason the float16 test above gives: an
+    image modality takes the "Pixels missing for Image Modality"
+    refusal instead.
+    """
+    from isocenter.entities import Instance
+    from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+    inst = Instance("1.2.3.4.7")
+    inst.attributes.update({
+        "0008,0016": "1.2.840.10008.5.1.4.1.1.7",   # Secondary Capture
+        "0008,0060": "SR",
+        "0028,0010": 4, "0028,0011": 4,
+        "0028,0100": 16, "0028,0101": 16, "0028,0102": 15,
+        "0028,0002": 1, "0028,0004": "MONOCHROME2", "0028,0103": 0,
+        "0028,7fe0": "http://example.org/px",
+        "0020,0013": 1,
+    })
+    # `set_pixel_data` writes 0028,0100/0002/0004/0010/0011 and never
+    # 0028,0101/0102/0103, so the three under test come from the update
+    # above and stay there. Stated because a later edit that supplies
+    # them through a setter would make this test vacuous.
+    inst.set_pixel_data((np.arange(16, dtype=np.float16) + 0.5).reshape(4, 4))
+    assert inst.attributes["0028,0101"] == 16
+
+    out = str(tmp_path / "f16keep.dcm")
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst,
+        output_path=out,
+        patient_attributes={"0010,0020": "P1"},
+        study_attributes={"0020,000d": "1.2.3"},
+        series_attributes={"0020,000e": "1.2.4"},
+        compression=None))
+
+    assert outcome.ok, outcome.error
+    assert [scope for scope, _m in outcome.losses] == [LOSS_SCOPE_STANDARD]
+    assert "float16" in outcome.losses[0][1], outcome.losses
+
+    exported = pydicom.dcmread(out)
+    assert (0x7FE0, 0x0008) not in exported
+    assert (0x7FE0, 0x0009) not in exported
+    assert (0x7FE0, 0x0010) not in exported
+    assert exported.BitsStored == 16
+    assert exported.HighBit == 15
+    assert exported.PixelRepresentation == 0
+    assert 0x00287FE0 in exported
+
+
+def test_an_integer_export_still_carries_all_three(tmp_path):
+    """Selectivity guard, not evidence: the integer path requires them.
+
+    Bits Stored, High Bit and Pixel Representation are Type 1 in the
+    Image Pixel Module, and the integer branch writes all three from
+    `attributes`. This is what fails if the strip is made unconditional
+    -- without it every float assertion above still passes.
+    """
+    exported, rows = _run(tmp_path, name="u8keep", writer=_write_int_src,
+                          src_check=_declares_all_three)
+
+    assert (0x7FE0, 0x0010) in exported
+    assert exported.BitsAllocated == 8
+    assert exported.BitsStored == 8
+    assert exported.HighBit == 7
+    assert exported.PixelRepresentation == 0
+    assert rows == []
+
+
+@pytest.mark.parametrize("writer,kwargs,pixel_tag", [
+    (None, {}, (0x7FE0, 0x0008)),
+    (_write_int_src, {}, (0x7FE0, 0x0010)),
+])
+def test_pixel_data_provider_url_is_deleted_and_a_loss_row_says_so(
+        tmp_path, writer, kwargs, pixel_tag):
+    """The fourth direction of the exclusion, on both branches.
+
+    Measured before the fix: (7fe0,0008) *and* the URL in the exported
+    file, and the same for (7fe0,0010) -- with `audit_log` empty in both
+    cases, so the run graded PASS.
+
+    Both halves are asserted deliberately. Absence alone would pass if
+    `_merge` had dropped the element for some unrelated reason; the row
+    is what pins that the exporter removed it on purpose. Unlike the
+    three descriptors above, this is a caller's value that the exported
+    file does not otherwise carry, which is why it is reported rather
+    than dropped in silence.
+    """
+    exported, rows = _run(tmp_path, name="url", writer=writer,
+                          url="http://example.org/px", **kwargs)
+
+    assert pixel_tag in exported, "the payload must still be written"
+    assert 0x00287FE0 not in exported, (
+        "PS3.5 Section 8.2 permits only one of Pixel Data Provider URL, "
+        "(7fe0,0010), (7fe0,0008) and (7fe0,0009)")
+
+    assert [scope for _d, scope in rows] == [LOSS_SCOPE_STANDARD], rows
+    assert "0028,7fe0" in rows[0][0], rows
+
+
+def test_a_url_with_no_pixel_element_of_its_own_survives(tmp_path):
+    """Selectivity guard: a URL alone in the top level Data Set is legal.
+
+    Section 8.2 forbids *more than one* of the four. An instance with no
+    array writes no pixel element, so its Pixel Data Provider URL is the
+    only member present and there is nothing to exclude it with --
+    deleting it there would be pure data loss dressed as conformance.
+
+    This is what fails if either deletion is hoisted above the
+    `arr is not None` gate.
+    """
+    from isocenter.entities import Instance
+    from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+    inst = Instance("1.2.3.4.8")
+    inst.attributes.update({
+        "0008,0016": "1.2.840.10008.5.1.4.1.1.7",
+        "0008,0060": "SR",
+        "0028,7fe0": "http://example.org/px",
+        "0020,0013": 1,
+    })
+    assert inst.pixel_array is None
+
+    out = str(tmp_path / "urlonly.dcm")
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst,
+        output_path=out,
+        patient_attributes={"0010,0020": "P1"},
+        study_attributes={"0020,000d": "1.2.3"},
+        series_attributes={"0020,000e": "1.2.4"},
+        compression=None))
+
+    assert outcome.ok, outcome.error
+    assert outcome.losses == []
+
+    exported = pydicom.dcmread(out)
+    assert (0x7FE0, 0x0010) not in exported
+    assert (0x7FE0, 0x0008) not in exported
+    assert exported[0x00287FE0].value == "http://example.org/px"
