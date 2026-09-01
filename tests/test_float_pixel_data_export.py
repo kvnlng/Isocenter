@@ -1289,6 +1289,29 @@ def test_a_compressed_integer_export_still_drops_the_url(tmp_path):
     np.testing.assert_array_equal(arr.ravel()[:3], [0, 1, 2])
 
 
+# --- #226: a pixel element that will not decode is not "no pixels" ---
+#
+# `Instance.get_pixel_data()` ended its `dcmread` arm with
+# `except (AttributeError, TypeError): return None`, under a comment
+# reading "No pixel data element". `.pixel_array` raises `AttributeError`
+# for a family of reasons that are not that, and every one of them was
+# turned into "this instance has no pixels" without a word. An ordinary
+# ingest -> export of the source below then wrote a 4x4 three-sample
+# 32-bit image carrying **no pixel element of any kind** -- Float Pixel
+# Data is Type 1 in C.7.6.24 -- and the run graded `PASS` with "No
+# exceptions or errors were recorded".
+#
+# The issue blames the export-side modality guard for letting this
+# through. It does not: `"OT"` has been in `_IMAGE_MODALITIES` since
+# #208. The guard sits inside `except FileNotFoundError`, and
+# `get_pixel_data()` *returns* None rather than raising, so the guard is
+# never consulted. Widening it was measured and rejected --
+# `tests/test_io_no_pixels.py`'s fixture declares no Modality at all, so
+# the `"OT"` default would refuse a legitimately pixel-less instance.
+# The distinction is only knowable in `get_pixel_data()`, which is where
+# it now lives.
+
+
 def _run_undecodable(tmp_path, name, report_path=None):
     """Full pipeline over one undecodable float source; report what came of it.
 
