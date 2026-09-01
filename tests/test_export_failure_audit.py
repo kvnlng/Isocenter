@@ -184,7 +184,8 @@ class _RecordingStore:
     def __init__(self):
         self.rows = []
 
-    def log_audit(self, action_type, entity_uid, details, loss_scope=None):
+    def log_audit(self, action_type, entity_uid, details, loss_scope=None,
+                  element_tag=None):
         self.rows.append((action_type, entity_uid, details, loss_scope))
 
 

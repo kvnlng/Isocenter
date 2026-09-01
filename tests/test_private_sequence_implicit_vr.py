@@ -38,6 +38,7 @@ from pydicom.tag import Tag
 from pydicom.uid import ExplicitVRLittleEndian, ImplicitVRLittleEndian
 
 from isocenter import Session
+from isocenter.reporting import GAP_REMOVED, GAP_RETAINED
 
 SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7"
 PRIVATE_SQ = "0009,1003"
@@ -499,6 +500,73 @@ def test_an_unscanned_candidate_is_reported_and_grades_review_required(
         "defect #146 argues against")
     assert "Unscanned" in content, (
         "the row needs a section that does not claim the bytes are missing")
+    assert GAP_RETAINED in content, (
+        "the element is in the export and the row has to say so")
+
+
+def test_a_swept_unscanned_candidate_is_not_reported_as_exported(
+        tmp_path, sessions):
+    """Section 3.2 must not contradict section 2 (#167).
+
+    Every other test of an unverifiable blob runs with
+    `remove_private_tags=False`, and every test of the sweep uses a
+    blob that *parses*. Nothing crossed them, and the crossing is the
+    shipped default: the sweep deletes the element -- section 2 files a
+    `REMEDIATION_REMOVE` and the exported file has no `0009,1003` -- and
+    section 3.2 went on rendering "retained in the exported data",
+    under a `REVIEW_REQUIRED` grade. Two sections of one compliance
+    report, describing the same element, disagreeing about whether it
+    shipped.
+
+    The row is written by `DicomImporter` at ingest, which cannot know:
+    `remove_private_tags` is applied later. So it states ingest
+    knowledge and `generate_report` resolves the rest against the
+    object graph.
+
+    The grade is the other half. `test_a_verified_sequence_does_not_
+    raise_the_grade` above swept a *parseable* private sequence under
+    the same default and got PASS; this one got REVIEW_REQUIRED for
+    bytes equally absent from the export. That asymmetry had no
+    argument behind it and is gone -- what costs the run its PASS is an
+    unreadable element the export still carries, which is the test
+    `test_an_unscanned_candidate_is_reported_and_grades_review_required`
+    keeps.
+    """
+    sess = sessions(remove_private=True)
+    sess.ingest(implicit_file(
+        tmp_path / "src", value=ADVERSARIAL["coincidental vendor blob"]))
+    sess.audit()
+    sess.anonymize()
+    out = str(tmp_path / "out")
+    sess.export(out, use_compression=False)
+    report = str(tmp_path / "report.md")
+    sess.generate_report(report)
+
+    data, ds = _exported(out)
+    with open(report) as handle:
+        content = handle.read()
+
+    # The export first: every claim below is about this file.
+    assert (0x0009, 0x1003) not in ds, "the sweep did not remove the blob"
+    assert ADVERSARIAL["coincidental vendor blob"][-8:] not in data, (
+        "the vendor payload is still on disk")
+
+    section2 = content.split("## 2.", 1)[1].split("## 3.", 1)[0]
+    assert "REMEDIATION_REMOVE" in section2, (
+        "the removal has to be in the audit trail for the two sections "
+        "to be comparable at all")
+
+    gap_row = [line for line in content.splitlines()
+               if PRIVATE_SQ in line and "do not parse" in line]
+    assert len(gap_row) == 1, gap_row
+    assert GAP_REMOVED in gap_row[0], gap_row
+    assert GAP_RETAINED not in content, (
+        "section 3.2 says the element was exported and section 2 says "
+        "it was removed")
+
+    assert "**PASS**" in content, (
+        "nothing unreadable reached the export, and a parseable "
+        "sequence swept the same way grades PASS")
 
 
 def test_a_verified_sequence_does_not_raise_the_grade(tmp_path, sessions):

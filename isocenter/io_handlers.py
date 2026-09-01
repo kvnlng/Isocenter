@@ -242,6 +242,14 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
     The last one is the reason this is not "parse and hope": it decodes
     to one empty item, and accepting it would delete the payload.
 
+    Those three are the *shape* of what rule 4 refuses, not the set the
+    tests use. `tests/test_private_sequence_implicit_vr.py` parametrizes
+    a different four, chosen so each names the rule that refuses it and
+    so every one can be written into a DICOM file -- an
+    undefined-length item with no delimiter is a description, not a
+    fixture. Kept separate on purpose: this paragraph is the refusal
+    space, the test set is what is pinned (#167).
+
     Returns None for every failure, and the caller keeps the bytes. An
     ingest must not raise on a malformed private element: the file is
     still readable, and the value is still exportable.
@@ -804,30 +812,40 @@ class DicomImporter:
                                 loss_scope=scope)
 
                     # Retained, not lost -- and that is exactly why this
-                    # is not a DATA_LOSS row. The bytes are in the
-                    # exported file; what is missing is any assurance
+                    # is not a DATA_LOSS row. The bytes are whole in the
+                    # object graph; what is missing is any assurance
                     # about what is inside them. Section 3.1 of the
                     # compliance report is headed "present in the source
                     # and not in the exported data", so filing this
                     # there would make that header false (#167).
                     #
+                    # This row says what ingest knows and stops there.
+                    # It used to end "was retained verbatim and
+                    # exported", which ingest cannot know: the default
+                    # `remove_private_tags=True` deletes the element
+                    # during `anonymize()`, and the report then carried
+                    # a REMEDIATION_REMOVE row in section 2 and the
+                    # claim that the same bytes shipped in section 3.2.
+                    # `generate_report` resolves that against the graph;
+                    # `element_tag` is what it resolves (#167).
+                    #
                     # No `loss_scope`: the column grades losses, and
-                    # this is not one. `generate_report` grades the
-                    # presence of the row itself.
+                    # this is not one.
                     for tag, nbytes in meta.get(
                             'unscanned_private_sequences', ()):
                         detail = (f"Private tag {tag} holds {nbytes} bytes "
                                   f"that begin with the item tag "
                                   f"(FFFE,E000) but do not parse as an "
-                                  f"implicit-VR sequence. It was retained "
-                                  f"verbatim and exported; the PHI scan "
-                                  f"could not open it.")
+                                  f"implicit-VR sequence. It was ingested "
+                                  f"verbatim; the PHI scan could not open "
+                                  f"it.")
                         logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
                             store_backend.log_audit(
                                 action_type="SCAN_GAP",
                                 entity_uid=inst.sop_instance_uid,
-                                details=detail)
+                                details=detail,
+                                element_tag=tag)
 
                     # Persist Waveform Samples to Sidecar
                     if w_bytes and sidecar_manager:

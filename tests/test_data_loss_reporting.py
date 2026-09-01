@@ -34,6 +34,7 @@ import pytest
 from isocenter import Session
 from isocenter.io_handlers import (LOSS_SCOPE_PRIVATE, LOSS_SCOPE_STANDARD,
                                    loss_scope_for_tag)
+from isocenter.reporting import GAP_UNRESOLVED
 
 TEST_DB = "test_data_loss_report.db"
 REPORT_FILE = "test_data_loss_report.md"
@@ -69,12 +70,18 @@ def _report_with(losses, db_path=TEST_DB, gaps=()):
     for entity, details, scope in losses:
         s.store_backend.log_audit("DATA_LOSS", entity, details,
                                   loss_scope=scope)
-    # `SCAN_GAP` rows are the opposite claim -- content that *is* in the
-    # export and was never read -- and they render as section 3.2 beside
-    # 3.1's table (#167). They are logged here rather than in their own
-    # file because the shape this file has to survive is *both* sections
-    # present at once, which is what a real store produces and what no
-    # test emitted until now.
+    # `SCAN_GAP` rows are the opposite claim -- content ingested whole
+    # that the scan could not read -- and they render as section 3.2
+    # beside 3.1's table (#167). They are logged here rather than in
+    # their own file because the shape this file has to survive is
+    # *both* sections present at once, which is what a real store
+    # produces and what no test emitted until now.
+    #
+    # No `element_tag`, and none of these sessions ingests anything, so
+    # every row here resolves to `GAP_UNRESOLVED`. That is the point for
+    # this file: it is about the rendering of two tables, and a
+    # disposition that varied per row would make the table shape depend
+    # on a graph these tests do not build.
     for entity, details in gaps:
         s.store_backend.log_audit("SCAN_GAP", entity, details)
     s.store_backend.flush_audit_queue()
@@ -84,7 +91,7 @@ def _report_with(losses, db_path=TEST_DB, gaps=()):
         return f.read()
 
 
-def _legacy_store(tmp_path, name="legacy.db"):
+def _legacy_store(tmp_path, name="legacy.db", scan_gap=None):
     """A store with the 0.8.x `audit_log` shape and one ungraded row.
 
     The table is written out by hand, with no `loss_scope` column at
@@ -95,9 +102,16 @@ def _legacy_store(tmp_path, name="legacy.db"):
     else in the suite. Do not "simplify" this to the current schema --
     the migration would lose its only coverage and stay green (#157).
 
+    The same argument covers `element_tag` (#167): a `SCAN_GAP` row
+    written before that column has no tag, so nothing can say whether
+    the element it named is still held for export, and the report says
+    `unresolved` rather than guessing.
+
     Args:
         tmp_path: pytest's per-test directory.
         name (str): Filename, so one test can build two distinct stores.
+        scan_gap (tuple, optional): `(entity_uid, details)` for one
+            extra `SCAN_GAP` row in the same pre-migration shape.
 
     Returns:
         str: Path to the store. Its single `DATA_LOSS` row names
@@ -118,6 +132,11 @@ def _legacy_store(tmp_path, name="legacy.db"):
         "INSERT INTO audit_log (timestamp, action_type, entity_uid, details) "
         "VALUES ('2024-01-01T00:00:00', 'DATA_LOSS', '1.2.3.4', "
         "'Dropped private binary element 0009,1002 (VR OB)')")
+    if scan_gap is not None:
+        conn.execute(
+            "INSERT INTO audit_log (timestamp, action_type, entity_uid, "
+            "details) VALUES ('2024-01-01T00:00:01', 'SCAN_GAP', ?, ?)",
+            scan_gap)
     conn.commit()
     conn.close()
     return path
@@ -143,13 +162,17 @@ def _loss_table(content):
 
     Bounded by the *subheadings*, not by "Data Loss" and "Exceptions".
     Section 3 became `## 3. Data Loss & Unscanned Content` with `### 3.1
-    Data Loss` and `### 3.2 Unscanned Content` under it (#167), and 3.2
-    is a three-column table. Slicing on the first "Data Loss" and the
-    next "Exceptions" swallows both tables: 3.2's header arrives as a
-    three-cell row of 3.1's, `test_the_loss_table_is_well_formed` goes
-    red, and every scope assertion here shifts. It was invisible only
-    because no test in this file emitted a `SCAN_GAP` -- one now does,
-    below. Do not widen these bounds back.
+    Data Loss` and `### 3.2 Unscanned Content` under it (#167). Slicing
+    on the first "Data Loss" and the next "Exceptions" swallows both
+    tables: 3.2's header and rows arrive as rows of 3.1's and every
+    scope assertion here shifts. It was invisible only because no test
+    in this file emitted a `SCAN_GAP` -- one now does, below. Do not
+    widen these bounds back.
+
+    Both tables are four columns wide, so the damage is a wrong row
+    *count* and wrong row *contents*, not a ragged table --
+    `test_the_two_tables_of_section_3_do_not_read_as_one` asserts on
+    those rather than on the width for that reason.
 
     Returns:
         tuple: (header_cells, delimiter_cells, [row_cells, ...]).
@@ -412,17 +435,24 @@ SCAN_GAP = ("1.2.3.6",
 def test_the_two_tables_of_section_3_do_not_read_as_one(clean_env):
     """A store can hit 3.1 and 3.2 at once, and nothing emitted both.
 
-    3.1 is four columns and 3.2 is three, so a reader -- or a helper --
-    that treats section 3 as one table gets 3.2's header handed to it as
-    a row of 3.1's. That is not hypothetical: it is what `_loss_table`
-    did while its bounds were "Data Loss" to "Exceptions", and the only
-    reason it never fired is that no test in this file wrote a
-    `SCAN_GAP` row. This is that test.
+    A reader -- or a helper -- that treats section 3 as one table gets
+    3.2's header handed to it as a row of 3.1's. That is not
+    hypothetical: it is what `_loss_table` did while its bounds were
+    "Data Loss" to "Exceptions", and the only reason it never fired is
+    that no test in this file wrote a `SCAN_GAP` row. This is that test.
+
+    The discriminator is deliberately *not* the column count. Both
+    tables were four columns wide the moment 3.2 gained Disposition
+    (#167), so a width test would have gone green on that change alone
+    and stopped pinning the bounds it exists to pin. What it asserts
+    instead is the row count and the identity of the rows: with the old
+    bounds, 3.2's header and its row are counted as losses, and the
+    scan gap's UID appears in a Data Loss cell.
 
     The two claims are opposites -- 3.1 is content that is *not* in the
-    export, 3.2 is content that *is* and was never read -- so a row
-    landing in the wrong one makes its own section header false, which
-    is the whole argument for the split (#167).
+    export, 3.2 is content the scan could not read -- so a row landing
+    in the wrong one makes its own section header false, which is the
+    whole argument for the split (#167).
     """
     content = _report_with([PRIVATE_LOSS, STANDARD_LOSS], gaps=[SCAN_GAP])
 
@@ -446,18 +476,23 @@ def test_the_two_tables_of_section_3_do_not_read_as_one(clean_env):
                 for ln in gap_section.splitlines()
                 if ln.strip().startswith("|")
                 and not set(ln.strip()) <= set("|:- ")]
-    assert gap_rows[0] == ["Timestamp", "Instance", "Element"], gap_rows
+    assert gap_rows[0] == ["Timestamp", "Instance", "Element",
+                           "Disposition"], gap_rows
     assert [r[1] for r in gap_rows[1:]] == [SCAN_GAP[0]], gap_rows
-    assert all(len(r) == 3 for r in gap_rows), gap_rows
+    assert all(len(r) == 4 for r in gap_rows), gap_rows
+    assert [r[3] for r in gap_rows[1:]] == [GAP_UNRESOLVED], gap_rows
 
 
 def test_a_scan_gap_alone_grades_review_required(clean_env):
     """Section 3.2 is a grade, not a footnote.
 
     Unlike a loss, there is no scope test: the row only exists for a
-    private element, and a run that cannot vouch for what it exported
-    does not get to call itself PASS. Asserted without any `DATA_LOSS`
-    row present, so the grade cannot be coming from the other half.
+    private element. The grade turns on the *disposition* (#167), and
+    these rows carry no `element_tag` against a store that ingested
+    nothing, so they are `GAP_UNRESOLVED` -- which grades like a
+    retained one, because a disposition nothing could establish is not
+    a clean one. Asserted without any `DATA_LOSS` row present, so the
+    grade cannot be coming from the other half.
     """
     content = _report_with([], gaps=[SCAN_GAP])
 
@@ -465,3 +500,39 @@ def test_a_scan_gap_alone_grades_review_required(clean_env):
     assert "*No data loss was recorded.*" in content, (
         "3.1 must still say nothing was lost -- the bytes were kept")
     assert "0009,1003" in content.split("### 3.2 Unscanned Content", 1)[1]
+
+
+def test_a_scan_gap_from_a_store_with_no_element_tag_is_unresolved(
+        clean_env, tmp_path):
+    """The `element_tag` migration, exercised rather than trusted.
+
+    A store written before #167 has a `SCAN_GAP` row and no column to
+    say which element it named, so `generate_report` cannot ask the
+    graph whether that element is still held for export. `unresolved`
+    is the honest answer and it keeps the run at REVIEW_REQUIRED --
+    back-filling the tag out of `details` is the coupling the column
+    exists to avoid, and defaulting it to "removed" would hand a legacy
+    store a PASS it never earned.
+
+    Built from the hand-written 0.8.x `audit_log`, so disabling the
+    `ALTER TABLE` in `SqliteStore._add_missing_columns` is caught here.
+    Without the migration the report's `SELECT ... element_tag` raises
+    `OperationalError` and the section renders empty, which is a
+    silently *better* grade -- exactly the direction a migration
+    failure must not fail in.
+    """
+    legacy = _legacy_store(
+        tmp_path, name="legacy_gap.db",
+        scan_gap=("1.2.3.7",
+                  "Private tag 0009,1005 holds 16 bytes that begin with "
+                  "the item tag (FFFE,E000) but do not parse as an "
+                  "implicit-VR sequence."))
+
+    content = _report_with([], db_path=legacy)
+
+    gap_section = content.split("### 3.2 Unscanned Content", 1)[1]
+    gap_section = gap_section.split("## 4.", 1)[0]
+    assert "0009,1005" in gap_section, (
+        "the migrated row never reached the report at all")
+    assert GAP_UNRESOLVED in gap_section, gap_section
+    assert "REVIEW_REQUIRED" in content, content

@@ -372,7 +372,17 @@ class SqliteStore:
         -- `generate_report` to grade the run (#146). NULL everywhere
         -- else, and on DATA_LOSS rows written before this column
         -- existed -- those cannot be graded and are not guessed at.
-        loss_scope TEXT
+        loss_scope TEXT,
+        -- Set only on SCAN_GAP rows, by the emitter: the `gggg,eeee`
+        -- of the element the parse gate refused. `generate_report`
+        -- resolves it against the object graph to say whether that
+        -- element is still held for export, which is what the row's
+        -- section header claims and what the grade turns on (#167).
+        -- The tag is stored rather than read back out of `details`
+        -- for the reason `loss_scope` is: only the emitter still holds
+        -- it, and re-deriving it from prose is a second answer to
+        -- "which element is this".
+        element_tag TEXT
     );
     CREATE TABLE IF NOT EXISTS phi_findings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -554,6 +564,14 @@ class SqliteStore:
         if "loss_scope" not in audit_columns:
             conn.execute("ALTER TABLE audit_log ADD COLUMN loss_scope TEXT")
 
+        # `element_tag` on audit_log (#167), by the same argument. A
+        # SCAN_GAP row written before this column reads NULL, and NULL
+        # is unresolved: nothing here can know which element it named,
+        # so the report says so and the run keeps its REVIEW_REQUIRED
+        # rather than being graded on a guess.
+        if "element_tag" not in audit_columns:
+            conn.execute("ALTER TABLE audit_log ADD COLUMN element_tag TEXT")
+
     def _backfill_legacy_blobs(self, conn):
         """Migrate 0.6.x pixel_* columns into instance_blobs.
 
@@ -709,7 +727,8 @@ class SqliteStore:
         self._drain_and_write()
 
     def log_audit(self, action_type: str, entity_uid: str, details: str,
-                  loss_scope: Optional[str] = None):
+                  loss_scope: Optional[str] = None,
+                  element_tag: Optional[str] = None):
         """Records an action in the audit log (Async).
 
         Args:
@@ -722,10 +741,16 @@ class SqliteStore:
                 grades on, and it is passed in rather than derived from
                 `details` because only the caller still holds the tag
                 (#146).
+            element_tag (str, optional): For `SCAN_GAP` only: the
+                `gggg,eeee` the parse gate refused. `generate_report`
+                resolves it against the object graph to say whether the
+                element is still held for export (#167). Passed in for
+                the same reason `loss_scope` is.
         """
         # Push to queue instead of writing directly. Producers take
         # neither lock and are never blocked by a database write.
-        self.audit_queue.put((action_type, entity_uid, details, loss_scope))
+        self.audit_queue.put(
+            (action_type, entity_uid, details, loss_scope, element_tag))
         self._audit_wakeup.set()
 
     def get_audit_summary(self) -> Dict[str, int]:
@@ -813,27 +838,35 @@ class SqliteStore:
             return []
 
     def get_audit_scan_gaps(self) -> List[tuple]:
-        """Every `SCAN_GAP` entry: content retained but not scanned.
+        """Every `SCAN_GAP` entry: an element the PHI scan could not open.
 
         Separate from `get_audit_losses` because it is a different
-        claim. A loss says an element is not in the output; this says an
-        element *is* in the output and the PHI scan could not read it
-        (#167). Both take the grade to REVIEW_REQUIRED, and folding them
+        claim. A loss says an element was dropped at ingest and cannot
+        reach the output; this says an element was kept whole and the
+        scan could not read what is inside it (#167). Folding them
         together would file one under a section header that denies it.
+
+        The row states ingest-time knowledge only. Whether the element
+        reaches the exported file is decided later, by
+        `remove_private_tags`, and `generate_report` resolves that
+        against the object graph -- the row itself must not claim it
+        (#167).
 
         No `loss_scope` column: these are private by construction --
         only an odd-group tag reaches the parse gate -- so the column
-        would hold one value and grade nothing.
+        would hold one value and grade nothing. `element_tag` is
+        selected instead, and is NULL for a row written before that
+        column existed.
 
         Returns:
-            List[tuple]: (timestamp, entity_uid, details)
+            List[tuple]: (timestamp, entity_uid, details, element_tag)
         """
         self.flush_audit_queue()
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT timestamp, entity_uid, details
+                    SELECT timestamp, entity_uid, details, element_tag
                     FROM audit_log
                     WHERE action_type = 'SCAN_GAP'
                     ORDER BY timestamp ASC
@@ -872,24 +905,27 @@ class SqliteStore:
         """
         Batch inserts audit logs.
 
-        entries: List of (action_type, entity_uid, details, loss_scope).
+        entries: List of
+        (action_type, entity_uid, details, loss_scope, element_tag).
         `loss_scope` is None for everything that is not a `DATA_LOSS`
-        row; a caller with no loss to describe still writes the slot,
-        because one record with two accepted shapes is a fork the
+        row and `element_tag` for everything that is not a `SCAN_GAP`
+        one; a caller with neither to describe still writes both slots,
+        because one record with several accepted shapes is a fork the
         reader has to hold in their head.
         """
         if not entries:
             return
 
         timestamp = datetime.now().isoformat()
-        # (timestamp, action, uid, details, loss_scope)
-        data = [(timestamp, e[0], e[1], e[2], e[3]) for e in entries]
+        # (timestamp, action, uid, details, loss_scope, element_tag)
+        data = [(timestamp, e[0], e[1], e[2], e[3], e[4]) for e in entries]
 
         try:
             with self._get_connection() as conn:
                 conn.executemany(
-                    "INSERT INTO audit_log (timestamp, action_type, entity_uid, details, loss_scope) "
-                    "VALUES (?, ?, ?, ?, ?)", data)
+                    "INSERT INTO audit_log (timestamp, action_type, entity_uid, "
+                    "details, loss_scope, element_tag) "
+                    "VALUES (?, ?, ?, ?, ?, ?)", data)
                 conn.commit()
         except sqlite3.Error as e:
             self.logger.error(f"Failed to batch log audit: {e}")

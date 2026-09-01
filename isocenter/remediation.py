@@ -246,11 +246,12 @@ class RemediationService:
             self.logger.info(details)
             if self.store_backend:
                 if audit_buffer is not None:
-                    # Four elements, including the `loss_scope` slot no
-                    # remediation ever fills: `log_audit_batch` takes one
-                    # shape, not one-or-the-other (#146).
+                    # Five elements, including the `loss_scope` (#146)
+                    # and `element_tag` (#167) slots no remediation ever
+                    # fills: `log_audit_batch` takes one shape, not one
+                    # of several.
                     audit_buffer.append(
-                        (action_type, finding.entity_uid, details, None))
+                        (action_type, finding.entity_uid, details, None, None))
                 else:
                     self.store_backend.log_audit(action_type, finding.entity_uid, details)
 
