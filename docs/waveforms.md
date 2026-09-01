@@ -308,12 +308,14 @@ files into a fresh index is the remedy
 to a graph built by hand and written with `DicomExporter.write_tree()`,
 which is the serializer alone and never passes through ingest.
 
-That entry is scoped `STANDARD` -- a multiplex group lives under Waveform
-Sequence `(5400,0100)`, an even group -- so it is reported in the
-compliance report's Data Loss section but does **not** move Validation
-Status, which only a private-group loss does. Whether a discarded
-multiplex group should be an exception to that is open on
-[#150](https://github.com/kvnlng/Isocenter/issues/150).
+That entry is scoped `SIGNAL`, and it **does** move Validation Status:
+a session that discarded a multiplex group grades `REVIEW_REQUIRED`,
+not `PASS` ([#150](https://github.com/kvnlng/Isocenter/issues/150)).
+The tag is standard -- Waveform Sequence `(5400,0100)` is an even group
+-- but what was discarded is acquired signal that was in the source and
+is not in the export, which is not routine the way a dropped overlay
+is. Routine standard-group losses keep the `STANDARD` scope and keep
+grading `PASS`.
 
 **Annotations naming a discarded group are dropped, not re-pointed.**
 Referenced Waveform Channels `(0040,A0B0)` identifies a mark by a
@@ -341,10 +343,11 @@ one `DATA_LOSS` entry per instance naming how many annotations were
 dropped and which groups they referenced -- one row, not one per mark,
 so a cart that marks forty beats on a discarded group does not fill the
 report's Data Loss section with forty near-identical lines. It is scoped
-`STANDARD` for the same reason as the entry above, and on the same open
-question ([#150](https://github.com/kvnlng/Isocenter/issues/150)):
-Waveform Annotation Sequence `(0040,B020)` is an even group, and the
-scope states what the element was, not how serious the loss felt. A
+`STANDARD` even though the group discard itself is scoped `SIGNAL`
+([#150](https://github.com/kvnlng/Isocenter/issues/150)): an annotation
+is a mark *about* the signal, the acquired-samples loss it described
+already moves Validation Status via the ingest-side row, and grading
+the bookkeeping too would double-charge one loss under two entries. A
 record with two `DATA_LOSS` rows -- one from ingest for the groups, one
 from export for the marks that referenced them -- is the expected shape,
 not a double count: they report different losses.

@@ -15,7 +15,7 @@ from tqdm import tqdm
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
-                          LOSS_SCOPE_PRIVATE)
+                          GRADED_LOSS_SCOPES)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        _report_redaction_failures)
@@ -1663,18 +1663,19 @@ class DicomSession:
         # A dropped *private* element fails the grade; a dropped
         # standard one does not. The asymmetry is deliberate rather than
         # a rule half-applied, and is argued once -- CHANGELOG.md, #146.
+        # The one loss parity sat badly on -- the discarded waveform
+        # multiplex group, standard-group and not remotely routine -- is
+        # scoped SIGNAL by its emitter since #150 and grades here too.
         #
-        # The one loss this rule sits badly on is the discarded waveform
-        # multiplex group: standard-group, so PASS, and not obviously
-        # routine. That is known and open on #150. Do not resolve it by
-        # widening this test -- the scope is set by the emitter, so
-        # widening here would take every overlay with it.
+        # Membership in GRADED_LOSS_SCOPES, never a wider test: the
+        # scope is set by the emitter, and grading STANDARD here would
+        # take every overlay with it.
         #
         # `row[3]` is `loss_scope`. NULL for rows written before the
         # column existed, which read as ungraded rather than as
         # standard, because nothing here can know which they were.
         graded_losses = [row for row in data_losses
-                         if row[3] == LOSS_SCOPE_PRIVATE]
+                         if row[3] in GRADED_LOSS_SCOPES]
 
         # A scan gap is graded on its disposition, not on its existence.
         # The row says the scan could not read an element; that only

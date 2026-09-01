@@ -482,14 +482,12 @@ class WfdbExporter(Exporter):
         # count is not, because they answer different questions: which
         # signal was referenced, and how much was dropped.
         #
-        # Scoped STANDARD because Waveform Annotation Sequence
-        # (0040,B020) is an even group, so under the #146 parity rule the
-        # session still grades PASS. That is deliberate and is the one
-        # choice here that does not pre-empt #150: the scope states what
-        # the element *was*, not how bad the loss felt, exactly as the
-        # ingest-side multiplex emitter in `io_handlers.py` insists.
-        # Grading this one harder than the group discard it follows from
-        # would decide #150 on the wrong ticket, and in the wrong place.
+        # Scoped STANDARD, even now that #150 grades the group discard
+        # itself as SIGNAL. An annotation is a mark *about* the signal,
+        # not the signal: the acquired-samples loss these annotations
+        # described already costs the run its PASS via the ingest-side
+        # multiplex row, and grading the bookkeeping that follows from
+        # it would double-charge one loss under two rows.
         if dropped_groups:
             # `dropped_groups` is one list per dropped annotation, so the
             # count and the group set come from different axes of it: a

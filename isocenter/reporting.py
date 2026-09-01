@@ -115,8 +115,8 @@ class ComplianceReport:
 
     # Data Loss
     # List of "DATA_LOSS" logs: (timestamp, entity_uid, details,
-    # loss_scope), where loss_scope is PRIVATE, STANDARD, or None for a
-    # row written before the column existed.
+    # loss_scope), where loss_scope is PRIVATE, STANDARD, SIGNAL, or
+    # None for a row written before the column existed.
     #
     # Its own field rather than more `exceptions` (#146): nothing
     # failed, and an overlay dropped from an ordinary image belongs

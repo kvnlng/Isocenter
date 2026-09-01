@@ -189,12 +189,30 @@ def _is_routed(tag, is_root: bool, has_pixel_data: bool = False) -> bool:
 _IMAGE_MODALITIES = frozenset({"CT", "MR", "US", "DX", "CR",
                                "MG", "NM", "PT", "XA", "RF", "SC", "OT"})
 
-#: How a `DATA_LOSS` audit entry is graded: PRIVATE takes
+#: How a `DATA_LOSS` audit entry is graded: PRIVATE and SIGNAL take
 #: `validation_status` to REVIEW_REQUIRED, STANDARD does not. Written by
 #: the emitter and stored on the audit row rather than re-derived, and
-#: why the two differ, are both argued once -- CHANGELOG.md, #146.
+#: why they differ, are argued once each -- CHANGELOG.md, #146 and #150.
+#:
+#: SIGNAL exists because group parity turned out to be a proxy for "how
+#: much should the reader care", and one emitter broke the proxy: a
+#: discarded waveform multiplex group lives under a standard tag, and it
+#: is acquired signal that was in the source and is not in the export --
+#: not an annotation layer with a defined home elsewhere, which is what
+#: makes an overlay routine (#150). The discriminator is what the loss
+#: *was*, not how bad it felt: STANDARD stays the scope for routine
+#: standard-group drops, and widening the report's grading test to
+#: STANDARD would take every overlay with it.
 LOSS_SCOPE_PRIVATE = "PRIVATE"
 LOSS_SCOPE_STANDARD = "STANDARD"
+LOSS_SCOPE_SIGNAL = "SIGNAL"
+
+#: The scopes that cost a run its PASS. `generate_report` tests
+#: membership here rather than naming scopes itself, so the
+#: classification stays emitter-side: adding a scope means deciding, at
+#: the emitter, whether it grades -- never teaching the report to
+#: re-derive the answer from prose (#146, #150).
+GRADED_LOSS_SCOPES = frozenset({LOSS_SCOPE_PRIVATE, LOSS_SCOPE_SIGNAL})
 
 
 def loss_scope_for_tag(tag: str) -> str:
@@ -813,22 +831,21 @@ class DicomImporter:
                         # goes to a file the user may never open. The audit
                         # entry is what puts this in the record.
                         #
-                        # Scoped STANDARD, so it is reported and not
-                        # graded: what was discarded lives under Waveform
-                        # Sequence (5400,0100), an even group. This is
-                        # the one loss where that rule is uncomfortable
-                        # -- a discarded multiplex group is not routine
-                        # the way an overlay is -- and it is open on
-                        # #150, deliberately, rather than special-cased
-                        # here. Do not "fix" it to PRIVATE: the scope
-                        # states what the element was, not how bad the
-                        # loss felt.
+                        # Scoped SIGNAL, so it is reported AND graded:
+                        # the run does not PASS (#150). The tag is
+                        # standard -- Waveform Sequence (5400,0100), an
+                        # even group -- but what was discarded is
+                        # acquired signal, and a 12-lead ECG that came
+                        # out holding group 0 under a PASS grade is the
+                        # case parity was wrong for. Still not PRIVATE:
+                        # the scope states what the element was, and
+                        # this one was neither private nor routine.
                         if store_backend is not None:
                             store_backend.log_audit(
                                 action_type="DATA_LOSS",
                                 entity_uid=inst.sop_instance_uid,
                                 details=detail,
-                                loss_scope=LOSS_SCOPE_STANDARD)
+                                loss_scope=LOSS_SCOPE_SIGNAL)
 
                     # Private binary elements never reached the graph, so
                     # `remove_private_tags=False` could not have kept
@@ -1392,7 +1409,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                         f"that can carry it.")
                 # Scoped STANDARD: group 7fe0 is even, the same parity
                 # rule every other loss row uses (#146). Not graded
-                # harder -- that is open on #150.
+                # harder: #150 carved out SIGNAL for the multiplex
+                # discard only, and widening it to this branch is its
+                # own call, not a ride-along.
                 losses.append((
                     LOSS_SCOPE_STANDARD,
                     f"Pixel data is {arr.dtype} and was not written: no "
@@ -1675,9 +1694,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # reported at ingest and is not re-reported here.
                 #
                 # Scoped STANDARD: what is missing is Waveform Data
-                # (5400,1010), an even group. It is reported and not
-                # graded, on the same rule as the ingest-side multiplex
-                # loss and with the same reservation filed as #150.
+                # (5400,1010), an even group, and unlike the ingest-side
+                # multiplex loss -- scoped SIGNAL since #150 -- nothing
+                # was discarded by this pipeline. This branch is
+                # reachable only from a source that never carried
+                # samples, so the export is not smaller than the
+                # acquisition; it is the acquisition, said out loud.
                 losses.append((
                     LOSS_SCOPE_STANDARD,
                     "Waveform Sequence present but no samples are available "

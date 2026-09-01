@@ -280,6 +280,24 @@ def test_one_private_loss_among_standard_ones_still_grades_review_required(
     assert "**REVIEW_REQUIRED**" in content, content
 
 
+def test_a_signal_scoped_loss_grades_review_required(clean_env):
+    """SIGNAL is the third scope, and it grades (#150).
+
+    Written by the multiplex-discard emitter for acquired signal lost
+    under a standard tag -- the case group parity was wrong for. The
+    report grades by membership in `GRADED_LOSS_SCOPES` rather than by
+    naming scopes, so the classification stays with the emitter.
+    """
+    content = _report_with([
+        ("1.2.3.7",
+         "WaveformSequence carried 2 multiplex groups; kept group 0 and "
+         "discarded 1. Multi-rate records are not yet supported.",
+         "SIGNAL")])
+
+    assert "**REVIEW_REQUIRED**" in content, content
+    assert "| SIGNAL |" in content, "graded AND traceable to its row"
+
+
 def test_the_report_says_which_losses_are_graded(clean_env):
     """A grade the reader cannot trace back to a row is the same defect
     as a count with no detail. The scope column is what connects

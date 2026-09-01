@@ -290,7 +290,7 @@ def test_a_multi_group_record_warns_that_groups_were_discarded(tmp_path, caplog)
 
 def test_a_multi_group_record_records_an_audit_entry(tmp_path):
     """A log line the user may never read is not a compliance trail."""
-    from isocenter.io_handlers import LOSS_SCOPE_STANDARD
+    from isocenter.io_handlers import LOSS_SCOPE_SIGNAL
     from isocenter.session import DicomSession
 
     src = tmp_path / "src"
@@ -314,10 +314,10 @@ def test_a_multi_group_record_records_an_audit_entry(tmp_path):
     assert len(rows) == 1
     assert "2" in rows[0][0]
     # Multiplex groups live under Waveform Sequence (5400,0100), a
-    # standard element, so this loss is scoped STANDARD and does not
-    # move `validation_status` (#146). Whether it should is #150 --
-    # deliberately open, not an oversight in the classification.
-    assert rows[0][1] == LOSS_SCOPE_STANDARD, rows
+    # standard element, but what was discarded is acquired signal, so
+    # the loss is scoped SIGNAL and moves `validation_status` (#150
+    # decided the question #146 left open).
+    assert rows[0][1] == LOSS_SCOPE_SIGNAL, rows
 
 
 def test_a_single_group_record_records_no_data_loss(tmp_path):
@@ -362,3 +362,96 @@ def test_a_discarded_group_leaves_no_sequence_item_behind(tmp_path):
     assert err is None
     assert w_bytes is not None
     assert len(inst.sequences["5400,0100"].items) == 1
+
+
+# --- How the discard is graded (#150) ---------------------------------
+#
+# 146 decided that a DATA_LOSS row's scope is written by the emitter and
+# graded by the report: PRIVATE costs the run its PASS, STANDARD does
+# not, because standard-group losses (overlays, palette LUTs) are
+# routine. The multiplex discard broke that proxy: the tag is standard,
+# the loss is acquired signal. #150 resolves it -- the emitter files the
+# loss as SIGNAL, which grades.
+
+
+def test_a_discarded_multiplex_group_is_scoped_signal(tmp_path):
+    """The emitter classifies the loss; the report must not re-derive it.
+
+    Standard-group by parity, but not routine the way an overlay is: a
+    12-lead ECG stored as multiple multiplex groups comes out the far
+    side holding group 0 only. Group parity was a proxy for "how much
+    should the reader care", and for this emitter the proxy broke
+    (#150).
+    """
+    from isocenter.io_handlers import LOSS_SCOPE_SIGNAL
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _two_group_file(src / "multi.dcm")
+
+    session = DicomSession(persistence_file=str(tmp_path / "signal.db"))
+    try:
+        session.ingest(str(src))
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT loss_scope FROM audit_log WHERE action_type='DATA_LOSS'"
+        ).fetchall()
+
+    assert rows == [(LOSS_SCOPE_SIGNAL,)], rows
+
+
+def test_a_discarded_multiplex_group_costs_the_run_its_pass(tmp_path):
+    """An ECG that lost a multiplex group must not grade PASS.
+
+    Under the parity rule this loss was STANDARD and the compliance
+    report graded the session PASS -- for a record that dropped acquired
+    signal that was in the source file and is not in the export (#150).
+    """
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _two_group_file(src / "multi.dcm")
+
+    report = str(tmp_path / "report.md")
+    session = DicomSession(persistence_file=str(tmp_path / "grade.db"))
+    try:
+        session.ingest(str(src))
+        session.generate_report(report)
+    finally:
+        session.close()
+
+    with open(report, "r") as f:
+        content = f.read()
+    assert "**REVIEW_REQUIRED**" in content, content
+
+
+def test_a_single_group_record_still_grades_pass(tmp_path):
+    """The flip is scoped to the discard, not to waveforms in general."""
+    from isocenter.session import DicomSession
+
+    src = tmp_path / "src"
+    src.mkdir()
+    write_fixture(str(src / "ecg.dcm"), num_samples=200)
+
+    report = str(tmp_path / "report.md")
+    session = DicomSession(persistence_file=str(tmp_path / "pass.db"))
+    try:
+        session.ingest(str(src))
+        # An empty audit trail grades REVIEW_REQUIRED on its own; one
+        # benign row keeps this test about the loss scope, not about
+        # whether anything was recorded at all.
+        session.store_backend.log_audit(
+            "ANONYMIZE_METADATA", "1.2.3", "baseline row")
+        session.generate_report(report)
+    finally:
+        session.close()
+
+    with open(report, "r") as f:
+        content = f.read()
+    assert "**PASS**" in content, content

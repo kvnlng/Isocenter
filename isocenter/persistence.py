@@ -774,8 +774,8 @@ class SqliteStore:
             entity_uid (str): The instance (or path) the action concerns.
             details (str): Prose for the human reading the report.
             loss_scope (str, optional): For `DATA_LOSS` only:
-                `io_handlers.LOSS_SCOPE_PRIVATE` or
-                `LOSS_SCOPE_STANDARD`. This is what `generate_report`
+                `io_handlers.LOSS_SCOPE_PRIVATE`, `LOSS_SCOPE_STANDARD`
+                or `LOSS_SCOPE_SIGNAL`. This is what `generate_report`
                 grades on, and it is passed in rather than derived from
                 `details` because only the caller still holds the tag
                 (#146).
@@ -849,8 +849,9 @@ class SqliteStore:
 
         Still separate from `get_audit_errors`, and the reason is no
         longer that the grade is untouched -- it is not. A loss scoped
-        `PRIVATE` now takes `validation_status` to `REVIEW_REQUIRED`;
-        one scoped `STANDARD` leaves it at `PASS` (CHANGELOG.md, #146).
+        `PRIVATE` or `SIGNAL` takes `validation_status` to
+        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`
+        (CHANGELOG.md, #146 and #150).
         Folding these rows into `get_audit_errors` would grade all of
         them alike *and* file a routine drop under "Exceptions &
         Errors", where nothing failed.

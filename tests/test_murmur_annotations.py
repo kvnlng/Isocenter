@@ -671,13 +671,11 @@ def _data_loss_rows(db_path):
 def test_a_dropped_annotation_is_warned_and_audited(tmp_path, caplog):
     """Warn-plus-audit, the shape #36 established for the group discard.
 
-    The audit row is scoped STANDARD because Waveform Annotation Sequence
-    (0040,B020) is an even group -- the scope states what the element
-    *was*, not how bad the loss felt, exactly as `io_handlers`' multiplex
-    emitter insists. Whether a multiplex-group loss should move
-    `validation_status` is open on #150; classifying this one by anything
-    other than parity would decide that question here, on the wrong
-    ticket.
+    The audit row is scoped STANDARD even though #150 grades the group
+    discard itself as SIGNAL: an annotation is a mark *about* the
+    signal, and the acquired-samples loss it described already costs the
+    run its PASS via the ingest-side multiplex row. Grading this row too
+    would double-charge one loss under two entries.
     """
     import logging
     from isocenter.io_handlers import LOSS_SCOPE_STANDARD
