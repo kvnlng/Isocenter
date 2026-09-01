@@ -102,7 +102,7 @@ def _tasks_for(session):
 
 @pytest.mark.parametrize("lever", LEVERS)
 def test_a_rule_whose_zones_all_miss_reports_nothing_applied(
-        reloaded_redaction_session, monkeypatch, lever):
+        reloaded_redaction_session, monkeypatch, caplog, lever):
     """`applied` counts pixels changed, not instances a rule matched.
 
     **Detection.** Measured `applied == 1` on `84113ab`, both levers,
@@ -114,6 +114,14 @@ def test_a_rule_whose_zones_all_miss_reports_nothing_applied(
     second count of "instances a rule matched" -- pre-1.0 the project
     deletes rather than doubles a spelling, and "how many images did you
     change" is the question the sentence a user reads is asking.
+
+    **The shortfall warning is asserted here rather than left to the
+    reader.** A smaller count is only half the repair: the number drops
+    and nothing in the run says why. `_apply_redaction_rules` enumerates
+    the reasons a task returned no change, and #235 adds a fourth one to
+    that sentence. Measured during review: deleting that fourth clause
+    leaves the whole suite green, so without this assertion the sentence
+    a user reads is the one part of this change nothing holds still.
     """
     monkeypatch.setenv(lever, "1")
     session, _inst = reloaded_redaction_session(
@@ -123,8 +131,19 @@ def test_a_rule_whose_zones_all_miss_reports_nothing_applied(
         "the rule matched no instance, so a count of zero would be the "
         "absence of work rather than the absence of a change")
 
-    assert session.redact(show_progress=False) == 0, (
+    with caplog.at_level("WARNING"):
+        applied = session.redact(show_progress=False)
+
+    assert applied == 0, (
         "a rule that changed no pixel reported that it updated an image")
+
+    messages = [record.message for record in caplog.records]
+    assert any("0 of 1" in message for message in messages), (
+        f"the shortfall was not reported anywhere: {messages}")
+    assert any("no configured zone that landed inside the image" in message
+               for message in messages), (
+        "the shortfall warning does not name the reason this run applied "
+        f"nothing, so the smaller count is unexplained: {messages}")
 
 
 # --- T2 ---------------------------------------------------------------------
