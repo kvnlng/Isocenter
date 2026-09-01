@@ -434,14 +434,39 @@ def test_the_pre_redaction_identity_is_recorded_under_either_executor(
 
 # --- T9 ---------------------------------------------------------------------
 
-def test_a_forced_second_redaction_keeps_the_first_identity(ingested):
+@pytest.mark.parametrize("lever", LEVERS)
+def test_a_forced_second_redaction_keeps_the_first_identity(ingested,
+                                                            monkeypatch,
+                                                            lever):
     """Write-once: the first identity, the one a file can carry.
 
     `redact(force=True)` (#237) re-redacts and takes another generated
     UID. An unconditional assignment would record that one -- a UID that
     exists in no file on disk -- and the ingest gate would stop matching
     the real source, which is the whole point of the record.
+
+    Parametrised for the same reason T8 is, and the reason is sharper
+    here: write-once is enforced at **two** sites and each one only
+    answers on one executor. `regenerate_uid()`'s `not in` guard is the
+    one that holds under threads; `_apply_redaction_outcomes`'
+    `setdefault` holds under both. Measured on `d0e72f6`, one mutation
+    at a time, `force=True` twice:
+
+    * `regenerate_uid()` made unconditional -- threads records the
+      first pass's generated UID, processes still records `1.2.3.phi`;
+    * `setdefault` made a plain assignment -- both record the generated
+      UID.
+
+    So the first mutation is invisible to whichever leg the default
+    executor happens to pick. Un-parametrised, this test passed 15/15 on
+    3.12 (processes) with `regenerate_uid()`'s guard deleted, and only
+    3.14t (threads) caught it -- a guard pinned on one of the two gate
+    interpreters and nowhere else. That guard is also the *only* one on
+    `RedactionService.redact_machine_instances(force=True)`, the serial
+    path, which has no `_apply_redaction_outcomes` behind it on any
+    interpreter.
     """
+    monkeypatch.setenv(lever, "1")
     session, _, _ = ingested
     source_uid = _instances(session)[0].sop_instance_uid
 
@@ -457,6 +482,11 @@ def test_a_forced_second_redaction_keeps_the_first_identity(ingested):
         f"generated UID ({inst.attributes[SOURCE_SOP_UID_ATTR]!r}); "
         f"the first pass produced {first_pass_uid!r}, which no source "
         "file carries")
+    # The consequence, not just the field: gate 2 reads this map, and a
+    # record naming a UID no file carries is a gate that matches nothing.
+    assert source_uid in session.store.get_superseded_uids(), (
+        "after a forced re-redaction the store no longer recognises the "
+        "identity its source file actually carries")
 
 
 # --- Selectivity guards -----------------------------------------------------
