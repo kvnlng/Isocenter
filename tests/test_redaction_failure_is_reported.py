@@ -819,3 +819,121 @@ def test_a_failed_reloaded_instance_is_left_as_it_was_found(
         assert int(arr.sum()) == 32 * 32 * 200
     finally:
         reopened.close()
+
+
+# --- 19 --------------------------------------------------------------------
+
+PARAMETRIC_MAP = "1.2.840.10008.5.1.4.1.1.30"
+
+
+def _write_undecodable_float(path, uid="1.2.3.undecodable"):
+    """A Parametric Map whose declared float pixels pydicom cannot decode.
+
+    `SamplesPerPixel 3` with no Planar Configuration (0028,0006), which is
+    Type 1C in C.7.6.3.1.3 once samples exceed one. pydicom raises
+    `AttributeError: Missing required element: (0028,0006) 'Planar
+    Configuration'` reading `.pixel_array` from it, so this is the #226
+    fixture: a file that *declares* a pixel element the library cannot
+    decode, as distinct from one that carries none.
+
+    Written with pydicom rather than through `set_pixel_data`, which
+    supplies Planar Configuration itself for a colour array and would
+    write the very element under test.
+    """
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta.MediaStorageSOPClassUID = PARAMETRIC_MAP
+    ds.file_meta.MediaStorageSOPInstanceUID = uid
+    ds.SOPClassUID = PARAMETRIC_MAP
+    ds.SOPInstanceUID = uid
+    ds.Modality = "OT"
+    ds.Rows = 32
+    ds.Columns = 32
+    ds.SamplesPerPixel = 3
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 32
+    ds.BitsStored = 32
+    ds.HighBit = 31
+    ds.PixelRepresentation = 0
+    ds.add_new(0x7FE00008, 'OF',
+               np.zeros(32 * 32 * 3, dtype=np.float32).tobytes())
+    ds.save_as(str(path), enforce_file_format=True)
+    return uid
+
+
+def test_pixels_that_will_not_decode_are_a_redaction_failure_not_a_skip(
+        tmp_path):
+    """The other half of #226, on the path that carries the PHI.
+
+    `execute_redaction_task` reads its array through `get_pixel_data()`,
+    which used to answer "pixels this library cannot decode" with `None`
+    -- the same answer it gives for "this instance has no pixels". So an
+    instance whose declared pixels would not decode was reported as
+    successfully redacted while nothing had touched its pixels: the same
+    "reports success while wrong" shape as the export half of #226, on
+    the PHI-bearing path. Measured before the fix: `redact()` returned
+    without raising and wrote no audit row at all.
+
+    `get_pixel_data()` now raises for that case, the raise becomes a
+    `RedactionOutcome(ok=False)` in the worker, and the parent turns it
+    into a `RedactionError` plus an `ERROR` row -- the machinery #213
+    already built, reached by one more failure shape.
+
+    This is a **strengthening**, and it is pinned in this file rather
+    than in `tests/test_float_pixel_data_export.py` because the
+    newly-raised exception is `RedactionError` and this file owns it. Its
+    deliberate counterpart is
+    `test_an_instance_with_no_pixel_data_is_skipped_not_failed` above:
+    genuinely absent pixels are still a silent skip and always were, so
+    the two together say which of the two conflated cases moved.
+
+    The row's *text* is asserted, not just its existence. Every failure
+    shape in this file files an `ERROR` row, so a count alone would pass
+    if the redaction had failed over the zone, the geometry or the
+    serial instead of over the decode.
+    """
+    source = tmp_path / "undecodable.dcm"
+    uid = _write_undecodable_float(source)
+
+    # If the source decoded, `get_pixel_data()` would return an array and
+    # this test would be pinning nothing.
+    with pytest.raises(AttributeError):
+        _ = pydicom.dcmread(str(source)).pixel_array
+
+    session = DicomSession(str(tmp_path / "undecodable.db"))
+    # Not `_file_backed`: its descriptors are the 8-bit single-sample ones
+    # its own source carries, and an instance whose graph disagreed with
+    # its file would leave a reader wondering which of the two the
+    # redaction tripped over.
+    series = Series(f"SE_{SN_BAD}", "OT", 1)
+    series.equipment = Equipment("Acme", "Scanner", SN_BAD)
+    inst = Instance(uid, PARAMETRIC_MAP, 1)
+    inst.file_path = str(source)
+    for tag, value in (("0028,0010", 32), ("0028,0011", 32),
+                       ("0028,0002", 3), ("0028,0100", 32),
+                       ("0028,0004", "MONOCHROME2")):
+        inst.set_attr(tag, value)
+    series.instances.append(inst)
+
+    patient = Patient("P1", "Test^Patient")
+    study = Study("ST_1", "20230101")
+    study.series.append(series)
+    patient.studies.append(study)
+    session.store.patients.append(patient)
+    session.configuration.rules = [
+        {"serial_number": SN_BAD, "redaction_zones": [GOOD_ZONE]},
+    ]
+
+    db_path = session.store_backend.db_path
+    try:
+        with pytest.raises(RedactionError) as excinfo:
+            session.redact(show_progress=False)
+        assert len(excinfo.value.failures) == 1, excinfo.value.failures
+    finally:
+        session.close()
+
+    rows = _audit(db_path)
+    assert len(rows) == 1, rows
+    assert rows[0][0] == uid, rows
+    assert "Planar Configuration" in rows[0][1], rows

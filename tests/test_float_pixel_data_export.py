@@ -57,7 +57,8 @@ PARAMETRIC_MAP = "1.2.840.10008.5.1.4.1.1.30"
 
 
 def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
-                     bits=32, samples=1, photometric="MONOCHROME2"):
+                     bits=32, samples=1, photometric="MONOCHROME2",
+                     planar=True):
     """Write a Parametric Map carrying its float payload under `tag`.
 
     `samples` and `photometric` are parameters because the #222 case
@@ -66,6 +67,10 @@ def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
     -- MONOCHROME2 is permitted only at one sample -- but it is a real
     file a real scanner can emit, and every descriptor on it survives
     ingest, which is the whole point of the test that uses it.
+
+    `planar=False` omits Planar Configuration at `samples > 1`, which
+    makes the source *undecodable* rather than merely nonconformant.
+    That is #226's fixture, and only #226's tests want it.
     """
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = PARAMETRIC_MAP
@@ -84,15 +89,33 @@ def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
     ds.HighBit = bits - 1
     ds.SamplesPerPixel = samples
     ds.PhotometricInterpretation = photometric
-    if samples > 1:
+    if samples > 1 and planar:
         # Type 1C in C.7.6.3.1.3, required once SamplesPerPixel > 1, and
         # not optional here in practice: pydicom's decoder raises
         # `AttributeError: Missing required element: (0028,0006) 'Planar
         # Configuration'` without it, so `get_pixel_data()` yields no
-        # array, the export writes no pixel element, and a test asserting
-        # on Photometric Interpretation passes for the wrong reason --
-        # `_merge` copied the declared value and the geometry block never
-        # ran at all. Found by exactly that vacuity.
+        # array and the geometry block never runs at all.
+        #
+        # It stays because exactly one test needs a *decodable* three-
+        # sample source to reach its subject:
+        # `test_a_declared_monochrome_survives_a_float_export_with_three
+        # _samples`, the #222 case. Without it that test's two
+        # PhotometricInterpretation assertions do pass for the wrong
+        # reason -- `_merge` copied the declared value rather than the
+        # geometry block writing it -- but the test does *not* pass:
+        # measured with these two lines removed, it fails one assertion
+        # later at `assert (0x7FE0, 0x0008) in exported`, catching the
+        # hollow file. "The test passes" was the old comment's claim here
+        # and it was overstated; the vacuity is local to two assertions.
+        #
+        # Before #226 omitting this element also produced a silently
+        # hollow *exported file*, which is why asserting on the file was
+        # the only way to notice. It no longer does: `get_pixel_data()`
+        # now raises for a declared-but-undecodable pixel element, so the
+        # omission is a loud export failure. That is what
+        # `test_a_float_instance_whose_pixels_will_not_decode_fails_the
+        # _export` pins, and why it builds its own `planar=False` source
+        # instead of reusing this default.
         ds.PlanarConfiguration = 0
     ds.PixelRepresentation = 0
     ds.add_new(tag, vr,
@@ -922,3 +945,152 @@ def test_a_declared_colour_interpretation_still_survives_the_float_path(
     assert outcome.ok, outcome.error
 
     assert pydicom.dcmread(out).PhotometricInterpretation == "YBR_FULL"
+
+
+# --- #226: a pixel element that will not decode is not "no pixels" ---
+#
+# `Instance.get_pixel_data()` ended its `dcmread` arm with
+# `except (AttributeError, TypeError): return None`, under a comment
+# reading "No pixel data element". `.pixel_array` raises `AttributeError`
+# for a family of reasons that are not that, and every one of them was
+# turned into "this instance has no pixels" without a word. An ordinary
+# ingest -> export of the source below then wrote a 4x4 three-sample
+# 32-bit image carrying **no pixel element of any kind** -- Float Pixel
+# Data is Type 1 in C.7.6.24 -- and the run graded `PASS` with "No
+# exceptions or errors were recorded".
+#
+# The issue blames the export-side modality guard for letting this
+# through. It does not: `"OT"` has been in `_IMAGE_MODALITIES` since
+# #208. The guard sits inside `except FileNotFoundError`, and
+# `get_pixel_data()` *returns* None rather than raising, so the guard is
+# never consulted. Widening it was measured and rejected --
+# `tests/test_io_no_pixels.py`'s fixture declares no Modality at all, so
+# the `"OT"` default would refuse a legitimately pixel-less instance.
+# The distinction is only knowable in `get_pixel_data()`, which is where
+# it now lives.
+
+
+def _run_undecodable(tmp_path, name, report_path=None):
+    """Full pipeline over one undecodable float source; report what came of it.
+
+    Not `_run`: that helper asserts exactly one `.dcm` was written, which
+    is the thing under test here.
+
+    `anonymize()` is not decoration. An empty audit summary grades
+    `REVIEW_REQUIRED` on its own (`tests/test_export_failure_audit.py`),
+    so a pipeline that skipped it would grade `REVIEW_REQUIRED` whatever
+    the export did, and the test below would pin nothing.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_float_src(str(src), samples=3, planar=False)
+    out = tmp_path / "out"
+
+    session = DicomSession(persistence_file=str(tmp_path / f"{name}.db"))
+    try:
+        session.ingest(str(src))
+        session.examine()
+        session.anonymize()
+        session.export(str(out), format="dicom",
+                       use_compression=False, show_progress=False)
+        db_path = session.store_backend.db_path
+        if report_path is not None:
+            session.generate_report(str(report_path))
+    finally:
+        session.close()
+
+    written = [os.path.join(r, f)
+               for r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    with sqlite3.connect(db_path) as conn:
+        errors = conn.execute(
+            "SELECT entity_uid, details FROM audit_log "
+            "WHERE action_type='ERROR'").fetchall()
+    return written, errors
+
+
+def test_a_float_instance_whose_pixels_will_not_decode_fails_the_export(
+        tmp_path):
+    """#226, through plain ingest -> export. Nothing is monkeypatched.
+
+    The source is built by pydicom on disk rather than through
+    `set_pixel_data`, because that setter writes `PlanarConfiguration`
+    itself when the array is colour and the attribute is undeclared -- it
+    would supply the exact element under test and the assertion would
+    pin nothing. And the export runs through `session.export()`, whose
+    workers are always separate processes (#185), so a parent-side
+    monkeypatch would be invisible in the child even if one were wanted.
+
+    The audit row's **text** is asserted, not only its existence. The
+    export worker files an `ERROR` row for every failure shape, so a
+    count alone would pass just as well if the write had failed for an
+    unrelated reason. The message survives because the re-raise lands in
+    the outer handler's `RuntimeError(f"Lazy load failed for
+    {self.file_path}: {e}")`, which interpolates pydicom's own words --
+    `__cause__` does not survive the pickle back from the worker, the
+    message does.
+    """
+    written, errors = _run_undecodable(tmp_path, "u226")
+
+    assert written == [], written
+    assert len(errors) == 1, errors
+    _uid, details = errors[0]
+    assert "Lazy load failed" in details, details
+    assert "Planar Configuration" in details, details
+
+
+def test_an_undecodable_float_reaches_the_compliance_report(tmp_path):
+    """The grade is the headline of the document, and it graded PASS.
+
+    An assertion on the exported file alone would miss this: there is no
+    exported file to read. The report is the surface the issue title is
+    about -- "grades PASS" -- so both halves are asserted, the grade and
+    the sentence that used to stand in the Exceptions & Errors section.
+    """
+    report = tmp_path / "report.md"
+    _written, _errors = _run_undecodable(tmp_path, "r226", report)
+
+    content = report.read_text(encoding="utf-8")
+    assert "| **Validation Status** | **REVIEW_REQUIRED** |" in content, content
+    assert "*No exceptions or errors were recorded.*" not in content, content
+    assert "## 4. Exceptions & Errors" in content
+    assert "ERROR" in content.split("## 4. Exceptions & Errors")[1], content
+    assert "| Instances Written | 0 of 1 requested |" in content, content
+
+
+def test_an_instance_with_no_pixel_element_at_all_still_returns_none(tmp_path):
+    """Selectivity guard -- not evidence that #226 was fixed.
+
+    This is the case the swallowed `except` was written for and it is
+    unchanged: a file holding none of (7fe0,0010), (7fe0,0008) or
+    (7fe0,0009) still yields `None` from `get_pixel_data()`, quietly.
+    Implement the narrowing as an unconditional `raise` and this goes
+    red while the two tests above stay green.
+
+    The pipeline half of the same guard is
+    `tests/test_io_no_pixels.py::test_reproduce_no_pixel_data_crash`,
+    which is already exactly this end to end -- it is the test that went
+    red under the rejected modality-guard fix. Cited rather than
+    duplicated.
+    """
+    from isocenter.entities import Instance
+
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.200.1"
+    meta.MediaStorageSOPInstanceUID = "1.2.3.4.5"
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
+    ds.PatientID = "123"
+    ds.StudyInstanceUID, ds.SeriesInstanceUID = "1.2.3", "1.2.3.4"
+    ds.SOPInstanceUID = "1.2.3.4.5"
+    path = tmp_path / "no_pixels.dcm"
+    ds.save_as(str(path), enforce_file_format=True)
+
+    reread = pydicom.dcmread(str(path))
+    for tag in (0x7FE00010, 0x7FE00008, 0x7FE00009):
+        assert tag not in reread, "the fixture is supposed to carry no pixels"
+
+    inst = Instance("1.2.3.4.5")
+    inst.file_path = str(path)
+    assert inst.get_pixel_data() is None
