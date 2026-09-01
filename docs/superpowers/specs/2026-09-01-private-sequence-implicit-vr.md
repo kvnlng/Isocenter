@@ -184,6 +184,32 @@ The `coincidental OB` case is the false-positive the brief asks about: a
 empty item and, without rule 4, its five payload bytes would be silently
 destroyed. With rule 4 it falls back untouched.
 
+> **Corrected in review.** Two of the rule attributions above do not
+> reproduce on pydicom 3.0.2, and the shipped tests use a different set
+> because of it. Re-measured element by element
+> (`scratchpad/probe/gate.py`, `pydicom 3.0.2`):
+>
+> ```
+> real sequence                      ACCEPTED (1 item(s))
+> spec 9-byte coincidental blob      rule 2 (OSError: No tag to read at file position 9)
+> 16-byte coincidental blob          rule 4 (re-encode 16 vs 16 bytes)
+> truncated item header              rule 2 (OSError: No tag to read at file position 6)
+> item then garbage                  rule 4 (re-encode 16 vs 16 bytes)
+> huge item length                   rule 4 (re-encode 16 vs 16 bytes)
+> plain vendor blob                  rule 1 (not item-tag prefixed)
+> ```
+>
+> The 9-byte blob never reaches rule 4 -- `read_sequence` raises on the
+> odd trailing byte -- and it cannot be written into a DICOM file
+> anyway, since element values are even-length. `item then garbage` is
+> refused at rule 4, not at rule 2. Neither correction weakens the
+> argument: rule 4 is still the only thing that refuses three of the
+> four adversarial values, measured by deleting the
+> `out.getvalue() == raw` comparison and running the suite -- five
+> tests go red, three of them `test_an_unverifiable_candidate_keeps_its_bytes_exactly`
+> parameters. The shipped fixture is a **16-byte** empty-item-plus-payload
+> blob, which is writable and does reach rule 4.
+
 `reencode_probe.py` confirms rule 4 does not reject well-formed input —
 seven shapes, all byte-identical on re-encode, no warnings:
 
@@ -929,10 +955,28 @@ mark them xfail.
    should be split and 4/5 renumbered in one deliberate change rather
    than a third subheading.
 4. **`_export_instance_worker` calls `populate_attrs(ds, inst)` on the
-   dataset it has just built** (io_handlers.py:968), which would append
-   duplicate items to `inst.sequences` if `inst` were the live object.
-   Probed on main under `ISOCENTER_FORCE_THREADS=1` (`thread_dup.py`):
-   item count stayed 1 across two exports, so the worker is operating on
-   a copy on both paths and there is no live bug. Recorded because the
-   call reads like one, and this fix adds a branch to the function it
-   calls.
+   dataset it has just built** (io_handlers.py:1121), which appends
+   duplicate items to `inst.sequences` whenever `inst` is the live
+   object.
+
+   Corrected in review. The original probe set
+   `ISOCENTER_FORCE_THREADS=1` and saw the item count stay at 1, and
+   concluded the worker always operates on a copy. It does not: the env
+   var was inert for that probe because `DicomSession` passes its own
+   `self._executor` -- a `ProcessPoolExecutor`, constructed
+   unconditionally at `session.py:573` -- into `run_parallel`, so
+   `session.export()` pickles the instance on *every* interpreter and
+   the mutation lands on a copy. `DicomExporter.write_tree()` passes no
+   executor, so `run_parallel` chooses for itself, and on a
+   free-threaded build it chooses threads. Measured on 3.14.7t with a
+   hand-built graph carrying one standard `(0008,1140)` item:
+   `before: 1` / `after: 1` on 3.12.13, `before: 1` / `after: 2` on
+   3.14.7t. The caller's graph is mutated by the serializer.
+
+   Pre-existing and independent of #167 -- the probe uses a *standard*
+   sequence and the call is untouched by this change -- but #167 puts
+   private sequences into `inst.sequences` for the first time, so it
+   widens the population. Not fixed here: `write_tree` is the serializer
+   the `scripts/` fixture generators use, the written file is unaffected
+   (the mutation happens after `ds` is assembled), and removing the call
+   is an export-semantics change that wants its own issue.
