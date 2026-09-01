@@ -1585,6 +1585,22 @@ class DicomSession:
                      "COMPLIANCE_CHECK",
                      f"{msg} - {uid}"))
 
+        # Audit rows a failed batch write dropped (#219). Filed as an
+        # exception -- not merely rendered -- because everything above
+        # was read from a table those rows never reached: any count,
+        # loss, or error here may under-state what happened, and a
+        # report that cannot vouch for its own inputs must not PASS.
+        # The rows are dropped rather than retried; the reasoning lives
+        # on `SqliteStore.log_audit_batch`.
+        dropped_audit_rows = self.store_backend.get_audit_drops()
+        if dropped_audit_rows:
+            exceptions.append(
+                (datetime.datetime.now().isoformat(),
+                 "AUDIT_DROP",
+                 f"{dropped_audit_rows} audit row(s) failed to write and "
+                 "were dropped; this report under-counts the actions "
+                 "actually taken"))
+
         # 3. Determine Context
         #
         # Describe what was configured, never what standard it might
