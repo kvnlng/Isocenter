@@ -898,8 +898,8 @@ class RedactionService:
                 # `RedactionError` on both redact paths, a failed
                 # outcome and no file in the export worker. One common
                 # source of this shape is a box in x,y,w,h order --
-                # `discovery.py` converts to (y1, y2, x1, x2) and
-                # `automation.py` does not (#258).
+                # `discovery.py` converts to (y1, y2, x1, x2), and
+                # `automation.py` did not until #258.
                 if r2 <= r1 or c2 <= c1:
                     raise ValueError(
                         f"redaction zone {tuple(roi)} selects no pixels: "
