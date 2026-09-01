@@ -131,6 +131,19 @@ ADVERSARIAL = {
                                  + b"\x01\x02\x03\x04\x05\x06\x07\x08"),
 }
 
+#: The same nesting as `PRIVATE_IN_PRIVATE_BYTES`, with an unverifiable
+#: candidate for a child instead of PHI. Defined here rather than beside
+#: it because it reads a value out of `ADVERSARIAL`. The inner tag is
+#: deliberately *not* `PRIVATE_SQ`: the report assertion has to name the
+#: element that earned the row, and an assertion on `0009,1003` would be
+#: satisfied by the outer sequence's own name.
+PRIVATE_SQ_INNER = "0009,1004"
+
+PRIVATE_IN_PRIVATE_UNSCANNED_BYTES = _item(
+    _elem(0x0009, 0x0010, b"ACME_HEADER ")
+    + _elem(0x0009, 0x1004, ADVERSARIAL["coincidental vendor blob"])
+    + _elem(0x0010, 0x0010, SECRET_NAME.encode()))
+
 
 # --------------------------------------------------------------------------
 # Fixtures on disk
@@ -726,3 +739,87 @@ def test_a_nested_private_sequence_is_removed_before_its_container(
     assert SECRET_NAME.encode() not in data
     leftover = [str(elem.tag) for elem in ds if elem.tag.group % 2]
     assert leftover == [], f"private elements survived the sweep: {leftover}"
+
+
+def test_an_unscanned_candidate_inside_a_recovered_sequence_is_reported(
+        tmp_path, sessions):
+    """The UN arm forwards `unscanned` too, and only this notices.
+
+    There are two `process_sequence` call sites in `populate_attrs`. The
+    standard-`SQ` one is covered by the test above, whose fixture hangs
+    a private value off Referenced Image Sequence. This is the other
+    one: the container is itself recovered from `UN` bytes, and the
+    unverifiable candidate sits inside the dataset the gate just
+    produced. Dropping `unscanned` from that call left the whole suite
+    green -- the value was exported with nothing saying so, which is the
+    failure this fix exists to close, one level down a path nothing
+    walked.
+
+    The inner tag is `0009,1004`, not the outer `0009,1003`: a report
+    assertion on the outer tag passes on the outer sequence's own name
+    and would say nothing about the row.
+    """
+    sess = sessions(remove_private=False)
+    sess.ingest(implicit_file(tmp_path / "src",
+                              value=PRIVATE_IN_PRIVATE_UNSCANNED_BYTES))
+
+    item = _instance(sess).sequences[PRIVATE_SQ].items[0]
+    assert item.attributes[PRIVATE_SQ_INNER] == (
+        ADVERSARIAL["coincidental vendor blob"]), (
+        "the candidate did not survive ingest byte for byte")
+
+    sess.audit()
+    sess.anonymize()
+    out = str(tmp_path / "out")
+    sess.export(out, use_compression=False)
+    report = str(tmp_path / "report.md")
+    sess.generate_report(report)
+
+    data, _ds = _exported(out)
+    assert ADVERSARIAL["coincidental vendor blob"] in data, (
+        "the retained bytes have to reach the exported file")
+
+    with open(report) as handle:
+        content = handle.read()
+
+    gaps = content.split("### 3.2 Unscanned Content", 1)[1].split("## 4.", 1)[0]
+    assert PRIVATE_SQ_INNER in gaps, (
+        "the unscanned child of a recovered sequence earned no row")
+    assert "REVIEW_REQUIRED" in content
+
+
+def test_one_session_can_report_a_loss_and_a_scan_gap_at_once(
+        tmp_path, sessions):
+    """Sections 3.1 and 3.2 are not alternatives, and a store proves it.
+
+    `tests/test_data_loss_reporting.py` pins how the two tables are read
+    apart, but it logs its audit rows by hand. This is the ingest that
+    produces them: one instance whose recovered private sequence carries
+    a binary-VR child (a private `DATA_LOSS`) and one whose private `UN`
+    value does not verify (a `SCAN_GAP`). Both claims in one report, and
+    they are opposites -- 3.1 is content that is not in the export, 3.2
+    is content that is and was never read.
+    """
+    sess = sessions(remove_private=False)
+    sess.ingest(implicit_file(tmp_path / "loss", value=BINARY_CHILD_BYTES,
+                              uid_suffix="1"))
+    sess.ingest(implicit_file(tmp_path / "gap",
+                              value=ADVERSARIAL["coincidental vendor blob"],
+                              uid_suffix="7"))
+    sess.audit()
+    sess.anonymize()
+    sess.export(str(tmp_path / "out"), use_compression=False)
+    report = str(tmp_path / "report.md")
+    sess.generate_report(report)
+
+    with open(report) as handle:
+        content = handle.read()
+
+    losses = content.split("### 3.1 Data Loss", 1)[1].split("### 3.2", 1)[0]
+    gaps = content.split("### 3.2 Unscanned Content", 1)[1].split("## 4.", 1)[0]
+
+    assert "0009,1002" in losses and "0009,1002" not in gaps, (
+        "the dropped binary child belongs in 3.1 and only there")
+    assert PRIVATE_SQ in gaps and "0009,1002" not in gaps, (
+        "the unverifiable candidate belongs in 3.2 and only there")
+    assert "REVIEW_REQUIRED" in content
