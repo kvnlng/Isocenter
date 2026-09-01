@@ -21,9 +21,17 @@ class ConfigAutomator:
             {
                 "serial": str,
                 "action": "ADD_ZONE" | "EXPAND_ZONE",
-                "zone": [x, y, w, h],
+                "zone": [y1, y2, x1, x2],
                 "reason": str
             }
+
+        Zones are emitted in config space -- (y1, y2, x1, x2), the order
+        every consumer of ``redaction_zones`` reads. OCR metadata arrives
+        in box space -- (x, y, w, h) -- and the conversion happens here,
+        mirroring ``discovery.py``: automation used to append raw boxes,
+        so an applied suggestion redacted rows x:y and columns w:h -- the
+        wrong region, or nothing at all -- while the leak it was created
+        for stayed in the image (#258).
         """
         suggestions = []
 
@@ -56,16 +64,19 @@ class ConfigAutomator:
                     # Suggest expanding the best_zone to cover text_box
                     best_zone = meta.get("best_zone")
                     if best_zone:
-                        # Calculate union box
+                        # text_box is box space; best_zone is a config
+                        # zone verbatim (verification.py stores the rule's
+                        # own entry), so the union is taken in zone space
+                        # and best_zone is NOT converted (#258).
                         tx, ty, tw, th = text_box
-                        zx, zy, zw, zh = best_zone
+                        zy1, zy2, zx1, zx2 = best_zone
 
-                        ux = min(tx, zx)
-                        uy = min(ty, zy)
-                        ur = max(tx+tw, zx+zw)
-                        ub = max(ty+th, zy+zh)
-
-                        union_zone = [int(ux), int(uy), int(ur-ux), int(ub-uy)]
+                        union_zone = [
+                            int(min(ty, zy1)),
+                            int(max(ty + th, zy2)),
+                            int(min(tx, zx1)),
+                            int(max(tx + tw, zx2)),
+                        ]
 
                         suggestions.append({
                             "serial": serial,
@@ -76,10 +87,11 @@ class ConfigAutomator:
                         })
 
                 elif l_type == "NEW_LEAK":
-                    # Suggest adding the text box as a new zone
-                    # Add some padding?
-                    # Ensure ints
-                    zone = [int(x) for x in text_box]
+                    # Suggest adding the text box as a new zone.
+                    # Convert (x, y, w, h) -> [y1, y2, x1, x2], as
+                    # discovery.py does before a zone reaches config.
+                    tx, ty, tw, th = text_box
+                    zone = [int(ty), int(ty + th), int(tx), int(tx + tw)]
 
                     suggestions.append({
                         "serial": serial,
