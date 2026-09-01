@@ -689,8 +689,9 @@ class DicomImporter:
                             continue
                         all_files.append(os.path.join(root, filename))
 
-        known_files = store.get_known_files()
-        new_files = [fp for fp in all_files if os.path.abspath(fp) not in known_files]
+        known_paths = store.get_ingested_paths()
+        new_files = [fp for fp in all_files
+                     if os.path.abspath(fp) not in known_paths]
 
         logger = get_logger()
         skipped_count = len(all_files) - len(new_files)
@@ -728,6 +729,14 @@ class DicomImporter:
             return_generator=True)
 
         # 3. Aggregation (Streaming)
+        #
+        # Snapshotted once, before the loop. Nothing this loop appends to
+        # the graph carries a retired identity -- only `regenerate_uid()`
+        # writes one -- so a snapshot taken here cannot go stale during
+        # it, and re-querying per result would walk the whole graph once
+        # per file.
+        superseded = store.get_superseded_uids()
+        declined = 0
         count = 0
         for meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, err in results:
             # Clear result components from scope as soon as possible after use to help GC
@@ -737,6 +746,49 @@ class DicomImporter:
                 continue
             if inst:
                 try:
+                    # Above the sidecar write, deliberately. This file is
+                    # the un-redacted original of an image the store
+                    # already holds in redacted form -- it kept its SOP
+                    # Instance UID while the redacted copy took a
+                    # generated one (#228), so nothing else in the graph
+                    # can tell they are the same image. Linking it back
+                    # in puts the burned-in identifier into the store,
+                    # the sidecar and the export (#238), and
+                    # `persist_pixel_data` does not de-duplicate, so a
+                    # write here would also strand the frame (#235).
+                    supersedes = superseded.get(inst.sop_instance_uid)
+                    if supersedes:
+                        detail = (
+                            f"Not importing {inst.file_path}: SOP Instance "
+                            f"UID {inst.sop_instance_uid} is the "
+                            f"pre-redaction identity of {supersedes}, which "
+                            f"this session already holds. The file still "
+                            f"carries the un-redacted original.")
+                        declined += 1
+                        # First five individually, as
+                        # `scan_burned_in_annotations` does: a re-run over
+                        # a large redacted cohort would otherwise print a
+                        # line per file. The audit row is per file
+                        # regardless -- it is the compliance trail, and
+                        # DATA_LOSS rows are per instance for the same
+                        # reason.
+                        if declined <= 5:
+                            logger.warning(detail)
+                        elif declined == 6:
+                            logger.warning(
+                                "... (suppressing further per-file messages "
+                                "for superseded sources) ...")
+                        # Written in the parent: `import_files` runs here,
+                        # so this is not the worker-audit hazard of #126.
+                        # Guarded because two test callers pass a bare
+                        # `DicomStore` and no backend at all.
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="WARNING",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail)
+                        continue
+
                     # Persist Pixels to Sidecar (Main Thread Sequential Write)
                     if p_bytes and sidecar_manager:
                         off, leng = sidecar_manager.write_frame(p_bytes, p_alg)
@@ -916,6 +968,11 @@ class DicomImporter:
                     logger.error(f"Linkage Failed: {e}")
 
         logger.info(f"Successfully ingested {count} instances.")
+        if declined:
+            logger.warning(
+                f"Declined {declined} file(s) whose SOP Instance UID is the "
+                "pre-redaction identity of an instance already in this "
+                "session; see the compliance report.")
 
 
 @dataclass

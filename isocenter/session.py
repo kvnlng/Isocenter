@@ -30,8 +30,8 @@ from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import run_parallel, _env_int
 from .configuration import IsocenterConfiguration, FlowList
-from .entities import (PhiStatus, clone_sequences, resolve_item_path,
-                       iter_item_tree)
+from .entities import (PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
+                       resolve_item_path, iter_item_tree)
 from .profiles import PRIVACY_PROFILES
 from . import pixel_analysis
 from .automation import ConfigAutomator
@@ -2285,6 +2285,17 @@ class DicomSession:
                 # persisted under the regenerated UID was stranded.
                 instance.sop_instance_uid = new_uid
                 instance.attributes["0008,0018"] = new_uid
+                # Recorded here as well as in `regenerate_uid()`, and
+                # both are needed. Under threads the worker *is* this
+                # object and has already written it; under processes it
+                # wrote it on a copy that is discarded, and `sop` --
+                # `mutation['original_sop_uid']` -- is this process's own
+                # authority for the same fact. `setdefault` makes the
+                # two paths agree and keeps a `force=True` re-redaction
+                # from replacing the original identity with a generated
+                # one (#237, #238). Same shape and same reason as the
+                # `file_path = None` below it (#228).
+                instance.attributes.setdefault(SOURCE_SOP_UID_ATTR, sop)
                 # `regenerate_uid()` ends the same way, deliberately: the
                 # instance no longer matches the file it was read from.
                 instance.file_path = None
@@ -2907,6 +2918,14 @@ class DicomSession:
                         sop_class_uid=i.sop_class_uid,
                         file_path=i.file_path
                     )
+                    # `source_path` is not carried across deliberately.
+                    # `__post_init__` derives it from the `file_path`
+                    # above, which is what a scan worker would see
+                    # anyway; the clone is read by `scan_worker` and
+                    # discarded, and no finding carries provenance back.
+                    # If a clone is ever written to the store, this is
+                    # the line that has to change first (#238).
+                    #
                     # Key: Ensure attributes are copied so workers can scan tags
                     if hasattr(i, 'attributes'):
                         i_new.attributes = i.attributes.copy()

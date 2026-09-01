@@ -27,6 +27,18 @@ def _canonical_tag(tag: str) -> str:
     return tag.lower() if isinstance(tag, str) else tag
 
 
+#: Attribute key under which an instance records the SOP Instance UID it
+#: carried before `regenerate_uid()` first replaced it.
+#:
+#: Assigned into `attributes` **directly, never through `set_attr`** --
+#: `set_attr` runs the key through `_canonical_tag`, which lowercases it,
+#: and every reader spells it upper-case. `_ISOCENTER_REDACTION_HASH` is
+#: written the same way in `services.py` for the same reason; it stays a
+#: bare literal at its five sites there because renaming them is not this
+#: fix.
+SOURCE_SOP_UID_ATTR = "_ISOCENTER_SOURCE_SOP_UID"
+
+
 @dataclass(slots=True)
 class DicomSequence:
     """
@@ -330,6 +342,19 @@ class Instance(DicomItem):
     # Persistence: Link to original file for lazy loading
     file_path: Optional[str] = None
 
+    # Persistence: the file this instance was *read from*, which stays
+    # true after redaction detaches `file_path`.
+    #
+    # `file_path` answers "where are bytes that match this instance now",
+    # and `regenerate_uid()` must clear it -- `get_pixel_data()` falls
+    # back to it, and a redacted instance that still pointed at its
+    # source would silently reload the un-redacted frame. `source_path`
+    # answers "which file did this come from", which redaction does not
+    # change. Ingest de-duplication keys on this one (#238).
+    #
+    # Never read to load pixels. Nothing may assign `file_path` from it.
+    source_path: Optional[str] = None
+
     # Transient: Actual pixel data (NOT persisted to pickle)
     pixel_array: Optional[np.ndarray] = field(default=None, repr=False)
 
@@ -357,6 +382,17 @@ class Instance(DicomItem):
         self.attributes = {}
         self.sequences = {}
 
+        # An instance constructed from a file records that file as its
+        # origin, structurally rather than by convention: every
+        # construction site that knows a path passes `file_path`, and a
+        # site that had to remember a second argument is a site that can
+        # forget one. `and not self.source_path` is what lets an
+        # explicit value win -- passed here, or assigned straight
+        # afterwards, which is how the store's load path restores the
+        # origin of an instance whose `file_path` redaction cleared.
+        if self.file_path and not self.source_path:
+            self.source_path = self.file_path
+
         self.set_attr("0008,0018", self.sop_instance_uid)
         self.set_attr("0008,0016", self.sop_class_uid)
         self.set_attr("0020,0013", self.instance_number)
@@ -372,8 +408,12 @@ class Instance(DicomItem):
             1. Generates a new SOP Instance UID.
             2. Updates the internal object property.
             3. Updates the '0008,0018' DICOM attribute.
-            4. Detaches the instance from its physical file path (since consistent hash changed).
+            4. Records the retired SOP Instance UID under
+               `SOURCE_SOP_UID_ATTR`, the first time only (#238).
+            5. Detaches the instance from its physical file path (since consistent hash changed).
         """
+        previous_uid = self.sop_instance_uid
+
         # 1. Generate new UID using pydicom's generator (or your org root)
         new_uid = generate_uid()
 
@@ -383,9 +423,26 @@ class Instance(DicomItem):
         # 3. Update the DICOM Attribute Dictionary
         self.set_attr("0008,0018", new_uid)
 
-        # 4. Detach from physical file
+        # 4. Record the identity this instance is leaving behind, once.
+        #
+        # Only the first one. The UIDs generated here exist in no file,
+        # so recording a later one would replace the single value a
+        # re-ingested source file could actually carry -- which is what
+        # the ingest gate matches on (#238). A second redaction
+        # (`force=True`, #237) must therefore leave this alone.
+        #
+        # Direct assignment, not `set_attr`: `set_attr` lowercases the
+        # key. The revision already moved on the `set_attr` above, so
+        # the store still sees this instance as unsaved.
+        if previous_uid and SOURCE_SOP_UID_ATTR not in self.attributes:
+            self.attributes[SOURCE_SOP_UID_ATTR] = previous_uid
+
+        # 5. Detach from physical file
         # Since this object is now a "new" instance in memory,
         # it no longer matches the file on disk.
+        #
+        # `source_path` is deliberately not touched here: it records
+        # where the bytes came from, which redaction does not change.
         self.file_path = None
 
         get_logger().debug(f"  -> Identity regenerated: {new_uid}")

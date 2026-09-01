@@ -93,7 +93,7 @@ class TestSharedExecutorLifecycle(unittest.TestCase):
         # Assert
         # Check that run_parallel was called with executor=self.session._executor
         # We need to ensure new_files was populated. Reference io_handlers.py
-        # DicomStore.get_known_files returns set(). Defaults are fine.
+        # DicomStore.get_ingested_paths returns set(). Defaults are fine.
 
         self.assertTrue(mock_run_parallel.called)
         args, kwargs = mock_run_parallel.call_args
