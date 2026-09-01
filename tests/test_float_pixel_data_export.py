@@ -1131,6 +1131,12 @@ def test_an_integer_export_still_carries_all_three(tmp_path):
     Image Pixel Module, and the integer branch writes all three from
     `attributes`. This is what fails if the strip is made unconditional
     -- without it every float assertion above still passes.
+
+    Placement-sensitive: a strip placed *before* the integer branch's
+    `ds.BitsStored = inst.attributes.get(...)` writes is
+    behaviour-preserving (those lines re-supply all three from
+    `attributes`, not from `ds`), so it leaves this test green. Only a
+    strip placed *after* them is the mutation this test catches.
     """
     exported, rows = _run(tmp_path, name="u8keep", writer=_write_int_src,
                           src_check=_declares_all_three)
@@ -1213,3 +1219,49 @@ def test_a_url_with_no_pixel_element_of_its_own_survives(tmp_path):
     assert (0x7FE0, 0x0010) not in exported
     assert (0x7FE0, 0x0008) not in exported
     assert exported[0x00287FE0].value == "http://example.org/px"
+
+
+def test_a_compressed_integer_export_still_drops_the_url(tmp_path):
+    """The gate is structural, and this is what fails if it is not.
+
+    With `use_compression=True` the worker never assigns `ds.PixelData`
+    -- `_finalize_dataset` compresses from the array -- so the obvious
+    `if "PixelData" in ds` spelling of the gate lets the URL survive
+    every compressed export. Measured: with that spelling, this test is
+    the only red one in the file.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_int_src(str(src), url="http://example.org/px")
+    out = tmp_path / "out"
+
+    session = DicomSession(persistence_file=str(tmp_path / "urlz.db"))
+    try:
+        session.ingest(str(src))
+        session.export(str(out), format="dicom", use_compression=True)
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    written = [os.path.join(r, f)
+               for r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    assert len(written) == 1, written
+    exported = pydicom.dcmread(written[0])
+
+    # Either J2K syntax, matching `tests/test_redaction_export.py`.
+    assert exported.file_meta.TransferSyntaxUID in (
+        "1.2.840.10008.1.2.4.90", "1.2.840.10008.1.2.4.91")
+    assert 0x00287FE0 not in exported, (
+        "a membership gate on PixelData would let the URL survive here")
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT details, loss_scope FROM audit_log "
+            "WHERE action_type='DATA_LOSS'").fetchall()
+    assert [scope for _d, scope in rows] == [LOSS_SCOPE_STANDARD], rows
+    assert "0028,7fe0" in rows[0][0], rows
+
+    arr = exported.pixel_array
+    assert arr.shape == (4, 4) and arr.dtype == np.uint8
+    np.testing.assert_array_equal(arr.ravel()[:3], [0, 1, 2])
