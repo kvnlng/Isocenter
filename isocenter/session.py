@@ -1918,7 +1918,7 @@ class DicomSession:
     # REDACTION & REMEDIATION
     # =========================================================================
 
-    def redact(self, show_progress=True):
+    def redact(self, show_progress=True, force=False):
         """
         Applies pixel redaction rules to the current session.
 
@@ -1929,10 +1929,41 @@ class DicomSession:
 
         Args:
             show_progress (bool): If True, displays a progress bar.
+            force (bool): Re-redact instances whose
+                `_ISOCENTER_REDACTION_HASH` already matches this
+                configuration, instead of skipping them.
+
+                This exists for one population: stores redacted with a
+                rule carrying **two or more zones**, against a store that
+                had been saved and reopened, on **0.9.0 or earlier**. That
+                release applied only the last applicable zone (#229) and
+                still wrote a full attestation, and the attestation is
+                computed over the configuration rather than over the
+                pixels -- so the corrected code reads a hash it agrees
+                with and declines to look. `force=True` is what makes such
+                a store repairable without hand-editing a private tag
+                (#237). The burned-in identifier is still in the store's
+                own pixels, so no source file is needed:
+                `session.redact(force=True)` then `session.save()`.
+
+                **Its cost, because you are choosing it.** Every instance
+                the rules match is redacted again, and every one of them
+                takes a **new SOP Instance UID**, a new exported filename
+                (#78) and `file_path = None` -- which widens #238's
+                exposure to instances that had already been redacted once.
+                That is why it is opt-in rather than automatic: an
+                attestation epoch would impose all of it on every store in
+                existence, including the ones that were never damaged.
 
         Returns:
-            int: How many instances were updated in memory. Zero means nothing
-                was redacted -- no rules loaded, or no image matched one.
+            int: How many instances had at least one configured zone
+                applied to their pixels. Two boundaries, both deliberate:
+                an instance a rule *matched* but whose every zone fell
+                outside the image is **not** counted, and a zone that is
+                in bounds but selects zero pixels **is**. Zero means
+                nothing was redacted -- no rules loaded, no image matched
+                one, every match was already redacted under this
+                configuration, or no zone landed.
 
         Raises:
             RedactionError: If any instance's zone could not be applied.
@@ -1959,23 +1990,25 @@ class DicomSession:
 
         service = RedactionService(self.store, self.store_backend)
         try:
-            return self._apply_redaction_rules(service, show_progress)
+            return self._apply_redaction_rules(service, show_progress, force)
         except Exception:
             get_logger().exception(
                 "Redaction failed. Images already processed are still redacted "
                 "in memory; the rest are untouched.")
             raise
 
-    def _apply_redaction_rules(self, service, show_progress):
+    def _apply_redaction_rules(self, service, show_progress, force=False):
         """Runs every loaded rule and applies the results to the store.
 
-        Returns the number of instances updated. Raises on failure; the
-        caller logs and re-raises.
+        Returns the number of instances whose pixels a zone was applied
+        to. Raises on failure; the caller logs and re-raises. `force` is
+        threaded into every task and read only by the attestation skip
+        (#237).
         """
         tasks = []
         get_logger().info("Analyzing workload...")
         for rule in self.configuration.rules:
-            tasks.extend(service.prepare_redaction_tasks(rule))
+            tasks.extend(service.prepare_redaction_tasks(rule, force=force))
 
         if not tasks:
             get_logger().warning("No matching images found for any loaded rules.")
@@ -2017,8 +2050,9 @@ class DicomSession:
             get_logger().warning(
                 f"Redaction updated {applied} of {len(tasks)} targeted images. "
                 "The remainder returned no change: already redacted under this "
-                "configuration, pixel data that would not load, or a worker "
-                "that failed -- see the entries above for which.")
+                "configuration, pixel data that would not load, no configured "
+                "zone that landed inside the image, or a worker that failed "
+                "-- see the entries above for which.")
 
         service.scan_burned_in_annotations()
 
@@ -2049,11 +2083,17 @@ class DicomSession:
         lands by itself; under processes it lands on a copy and used to
         be dropped, so the same input produced a different SOP Instance
         UID -- and a different exported filename, since files are named
-        by it -- depending only on which executor ran (#228). The gate is
-        `sop_uid != original_sop_uid`, not the presence of a mutation:
-        the mutation dict is built unconditionally, so it comes back for
-        an instance whose zones all missed and which must keep its
-        identity.
+        by it -- depending only on which executor ran (#228).
+
+        **The gate is the existence of the mutation.** It used to be
+        `sop_uid != original_sop_uid`, because the worker built its
+        mutation dict unconditionally and a mutation therefore came back
+        for an instance whose zones all missed, which must keep its
+        identity. That is no longer true: `execute_redaction_task` builds
+        the dict only inside `if modified:`, so a mutation is now itself
+        the claim that pixels changed and the inequality it was checked
+        against became a condition that decided nothing (#235). Two gates
+        on one question is how #228 happened; there is one.
 
         Three result shapes have to survive this, mirroring
         `_report_export_failures`: a `RedactionOutcome`, an `Exception` from
@@ -2088,7 +2128,8 @@ class DicomSession:
                 mutation = outcome.mutation
                 if not mutation:
                     # A legitimate skip: already redacted under this
-                    # configuration, or no pixel data to redact. The
+                    # configuration, no pixel data to redact, or no
+                    # configured zone that landed inside the image. The
                     # shortfall is summarised by the caller.
                     continue
             elif isinstance(outcome, Exception):
@@ -2135,15 +2176,27 @@ class DicomSession:
                 instance._pixel_hash = mutation['pixel_hash']
 
             new_uid = mutation.get('sop_uid')
-            if new_uid and new_uid != sop:
-                # The worker regenerated. It does that only inside
-                # `if modified:`, which makes "the UID differs" the
-                # parent's only honest signal that pixels actually
-                # changed -- the mutation dict itself is built
-                # unconditionally and comes back for an instance nothing
-                # was applied to (#228, and see the note in
-                # `execute_redaction_task`). Do not widen this to
-                # `if new_uid:` or `if mutation:`.
+            if new_uid:
+                # A `None`-safety guard on a `dict.get`, not a gate. The
+                # gate was passed above: reaching here means the worker
+                # returned a mutation, which it does only after
+                # `regenerate_uid()` (#235). `and new_uid != sop` used to
+                # stand here as #228's gate, back when the mutation dict
+                # was built outside `if modified:` -- it is provably
+                # always true now, and a condition that reads as a gate
+                # while deciding nothing is the second answer #235 was
+                # deferred to avoid.
+                #
+                # Re-widening the mutation construction is what that
+                # inequality guarded against, and it is still guarded --
+                # measured, by re-widening it on this tree.
+                # `tests/test_redaction_attestation.py` catches it four
+                # ways (the count, the absent attributes, the absent
+                # exported elements, the risk-scan crash), and
+                # `test_an_instance_nothing_was_applied_to_keeps_its_identity`
+                # catches it on `file_path`: the two UID assignments below
+                # become no-ops when `new_uid == sop`, but the third
+                # statement beside them does not.
                 #
                 # Assign all three or none. Under processes the child
                 # mutated a copy, so without this the parent kept the

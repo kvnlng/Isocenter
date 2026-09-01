@@ -78,6 +78,34 @@ session.redact()
 session.export("/path/to/export_clean", check_burned_in=True, use_compression=True)
 ```
 
+`session.redact()` returns how many instances had at least one configured
+zone applied to their pixels. An instance a rule matched but whose every
+zone fell outside the image is not counted, and nothing is written onto
+it.
+
+!!! warning "Redacted on 0.9.0 or earlier with a multi-zone rule?"
+
+    Releases up to and including 0.9.0 applied only the last applicable
+    zone of a multi-zone rule to an instance loaded from a saved store,
+    and still recorded a full redaction. Because that record is a hash of
+    the *configuration* rather than of the pixels, the corrected code
+    agrees with it and skips the instance: `session.redact()` returns `0`
+    and the burned-in identifier stays where it is.
+
+    If you redacted with a rule carrying two or more zones, against a
+    store that had been saved and reopened, on 0.9.0 or earlier, repair it
+    with:
+
+    ```python
+    session.redact(force=True)
+    session.save()
+    ```
+
+    No source file is needed -- the identifier is still in the store's own
+    pixels. The cost: every instance the rules match is redacted again,
+    and each takes a **new SOP Instance UID**, so its exported filename
+    changes and it stops matching the source file it was ingested from.
+
 Progress for the save, memory release, and export phases will be displayed:
 
 ```text
