@@ -304,6 +304,7 @@ class SqliteStore:
         patient_id_fk INTEGER,
         study_instance_uid TEXT NOT NULL,
         study_date TEXT,
+        date_shifted INTEGER,
         phi_status TEXT,
         FOREIGN KEY(patient_id_fk) REFERENCES patients(id),
         UNIQUE(study_instance_uid)
@@ -585,6 +586,20 @@ class SqliteStore:
             "PRAGMA table_info(instances)").fetchall()}
         if "source_path" not in instance_columns:
             conn.execute("ALTER TABLE instances ADD COLUMN source_path TEXT")
+
+        # `date_shifted` on studies (#182). SHIFT_DATE sets the flag and
+        # the WFDB exporter reads it to decide whether the header's date
+        # comment may say "de-identified"; without a column every save
+        # dropped it and a reloaded export declined to claim a genuine
+        # de-identification. Rows predating the column read NULL, which
+        # hydrates as False -- correct, not a loss: the old schema never
+        # recorded whether a date was shifted, and a provenance claim the
+        # store cannot back must not be fabricated (the same direction
+        # the exporter's own comment enforces).
+        study_columns = {row[1] for row in conn.execute(
+            "PRAGMA table_info(studies)").fetchall()}
+        if "date_shifted" not in study_columns:
+            conn.execute("ALTER TABLE studies ADD COLUMN date_shifted INTEGER")
 
     def _backfill_legacy_blobs(self, conn):
         """Migrate 0.6.x pixel_* columns into instance_blobs.
@@ -990,6 +1005,10 @@ class SqliteStore:
                 st_map = {}
                 for r in st_rows:
                     st = Study(r['study_instance_uid'], _as_loaded_date(r['study_date']))
+                    # NULL (a row from before the column, #182) and 0 both
+                    # read False: only a store that recorded the shift may
+                    # claim one.
+                    st.date_shifted = bool(r['date_shifted'])
                     st_map[r['id']] = st
                     stored_statuses.append((st, r['phi_status']))
                     if r['patient_id_fk'] in p_map:
@@ -1141,6 +1160,9 @@ class SqliteStore:
                 for st_r in st_rows:
                     st = Study(st_r['study_instance_uid'],
                                _as_loaded_date(st_r['study_date']))
+                    # Same NULL-reads-False rule as load_all; see the
+                    # note there. (#182)
+                    st.date_shifted = bool(st_r['date_shifted'])
                     st_pk = st_r['id']
                     stored_statuses.append((st, st_r['phi_status']))
 
@@ -1829,14 +1851,16 @@ class SqliteStore:
         """Writes the study row if dirty; returns its primary key."""
         if study.has_unsaved_changes:
             cur.execute("""
-                INSERT INTO studies (patient_id_fk, study_instance_uid, study_date, phi_status)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO studies (patient_id_fk, study_instance_uid, study_date, date_shifted, phi_status)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(study_instance_uid) DO UPDATE SET
                     study_date=excluded.study_date,
+                    date_shifted=excluded.date_shifted,
                     patient_id_fk=excluded.patient_id_fk,
                     phi_status=excluded.phi_status
             """, (patient_pk, study.study_instance_uid,
                   _as_stored_date(study.study_date),
+                  1 if study.date_shifted else 0,
                   study.phi_status.value))
             tally.studies += 1
 
