@@ -120,6 +120,54 @@ def test_an_unencodable_private_tag_is_recorded_as_private_scope(tmp_path):
     assert [scope for _u, _d, scope in rows] == [LOSS_SCOPE_PRIVATE], rows
 
 
+def test_a_backslash_bearing_atom_is_a_loud_loss_not_a_wrong_element(tmp_path):
+    """#190/#195, the VM > 1 half, end to end.
+
+    `\\` is DICOM's value separator (PS3.5 6.2), so no text VR can carry
+    both a backslash-bearing atom and the element's arity: `LO` splits
+    it (VM 2 -> 3, silently, which is what shipped), and a `UT` join is
+    ambiguous in the same way. This shape is reachable only through
+    `set_attr` -- pydicom splits source elements at ingest, so
+    file-sourced atoms are separator-free -- and the answer is the one
+    #165's CHANGELOG already gives for a partial element: a loud loss
+    beats a silent wrong value. So: a `DATA_LOSS` row scoped `PRIVATE`,
+    a `REVIEW_REQUIRED` grade, and no element in the file.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    uid = _write_src(str(src))
+    out = tmp_path / "out"
+
+    session = DicomSession(persistence_file=str(tmp_path / "bs.db"))
+    try:
+        session.ingest(str(src))
+        for inst in _instances(session):
+            inst.set_attr("0009,1022", ["se\\rial", "ok"])
+        session.export(str(out), format="dicom", show_progress=False)
+        report_path = tmp_path / "report.md"
+        session.generate_report(str(report_path))
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    written = [os.path.join(r, f) for r, _, fs in os.walk(str(out))
+               for f in fs if f.endswith(".dcm")]
+    assert len(written) == 1, "the loss is one element, not the file"
+    ds = pydicom.dcmread(written[0])
+    assert 0x00091022 not in ds, (
+        "a wrong element was written instead of the loss being reported",
+        ds[0x00091022])
+
+    rows = _data_loss_rows(db_path)
+    assert len(rows) == 1, rows
+    entity_uid, details, scope = rows[0]
+    assert entity_uid == uid
+    assert "0009,1022" in details, details
+    assert scope == LOSS_SCOPE_PRIVATE, rows
+
+    assert "REVIEW_REQUIRED" in report_path.read_text()
+
+
 def test_a_clean_export_records_no_data_loss(tmp_path):
     """Nothing lost, nothing logged -- or the entry means nothing."""
     _uid, rows = _export(tmp_path)
