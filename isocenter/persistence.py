@@ -46,14 +46,16 @@ _VERTICAL_UID_CHUNK = 500
 
 _UPSERT_INSTANCE_SQL = """
     INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
+                           source_path,
                            pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json,
                            phi_status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(sop_instance_uid) DO UPDATE SET
         series_id_fk=excluded.series_id_fk,
         sop_class_uid=excluded.sop_class_uid,
         instance_number=excluded.instance_number,
         file_path=excluded.file_path,
+        source_path=COALESCE(excluded.source_path, instances.source_path),
         attributes_json=excluded.attributes_json,
         phi_status=excluded.phi_status,
         pixel_offset=COALESCE(excluded.pixel_offset, instances.pixel_offset),
@@ -327,6 +329,7 @@ class SqliteStore:
         sop_class_uid TEXT,
         instance_number INTEGER,
         file_path TEXT,
+        source_path TEXT,
         pixel_file_id INTEGER DEFAULT 0,
         pixel_offset INTEGER,
         pixel_length INTEGER,
@@ -571,6 +574,17 @@ class SqliteStore:
         # rather than being graded on a guess.
         if "element_tag" not in audit_columns:
             conn.execute("ALTER TABLE audit_log ADD COLUMN element_tag TEXT")
+
+        # `source_path` on instances (#238). Rows predating the column
+        # read NULL; for an un-redacted instance `Instance.__post_init__`
+        # re-derives it from `file_path` on load, so only instances
+        # already redacted in an older release stay without provenance
+        # -- their `file_path` was cleared before anything recorded it,
+        # and nothing here can recover it.
+        instance_columns = {row[1] for row in conn.execute(
+            "PRAGMA table_info(instances)").fetchall()}
+        if "source_path" not in instance_columns:
+            conn.execute("ALTER TABLE instances ADD COLUMN source_path TEXT")
 
     def _backfill_legacy_blobs(self, conn):
         """Migrate 0.6.x pixel_* columns into instance_blobs.
@@ -1017,6 +1031,15 @@ class SqliteStore:
                         r['instance_number'],
                         file_path=r['file_path']
                     )
+                    # After construction, so a stored value wins over the
+                    # `file_path` derivation in `__post_init__`. For a
+                    # redacted instance `file_path` is NULL and this is
+                    # the only thing that brings its origin back; without
+                    # it the field is memory-only, ingest de-duplication
+                    # is correct in the session that redacted and wrong
+                    # in every session that reopens the store (#238).
+                    if r['source_path']:
+                        inst.source_path = r['source_path']
 
                     # Restore extra attributes
                     if r['attributes_json']:
@@ -1144,6 +1167,12 @@ class SqliteStore:
                                 r['instance_number'],
                                 file_path=r['file_path']
                             )
+                            # See load_all: after construction, so the
+                            # stored origin wins, and it is the only
+                            # thing that restores it for a redacted
+                            # instance whose `file_path` is NULL (#238).
+                            if r['source_path']:
+                                inst.source_path = r['source_path']
                             # Wire up Sidecar (Copy-Paste logic from load_all, keep generic?)
                             if r['attributes_json']:
                                 try:
@@ -1991,7 +2020,12 @@ class SqliteStore:
             frame = self._persist_pixels(inst, tally)
             rows.append((
                 series_pk, inst.sop_instance_uid, inst.sop_class_uid,
-                inst.instance_number, inst.file_path,
+                # Positional, and nothing checks this tuple against
+                # `_UPSERT_INSTANCE_SQL`'s column list: `source_path`
+                # sits immediately after `file_path` in both, and an
+                # insertion in one and not the other writes the sidecar
+                # offset into the path column without raising (#238).
+                inst.instance_number, inst.file_path, inst.source_path,
                 frame.offset, frame.length, frame.hash, frame.alg,
                 json.dumps(core, cls=IsocenterJSONEncoder),
                 # The property, not the stored field: an entity edited since
