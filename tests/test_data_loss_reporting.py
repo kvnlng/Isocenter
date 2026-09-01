@@ -64,11 +64,19 @@ def clean_env():
             os.remove(f)
 
 
-def _report_with(losses, db_path=TEST_DB):
+def _report_with(losses, db_path=TEST_DB, gaps=()):
     s = Session(db_path)
     for entity, details, scope in losses:
         s.store_backend.log_audit("DATA_LOSS", entity, details,
                                   loss_scope=scope)
+    # `SCAN_GAP` rows are the opposite claim -- content that *is* in the
+    # export and was never read -- and they render as section 3.2 beside
+    # 3.1's table (#167). They are logged here rather than in their own
+    # file because the shape this file has to survive is *both* sections
+    # present at once, which is what a real store produces and what no
+    # test emitted until now.
+    for entity, details in gaps:
+        s.store_backend.log_audit("SCAN_GAP", entity, details)
     s.store_backend.flush_audit_queue()
     s.generate_report(REPORT_FILE)
     s.close()
@@ -133,11 +141,21 @@ def _loss_table(content):
     reader-facing failure as an unlabelled header, which was live and
     unobservable while this helper filtered the line away (#157).
 
+    Bounded by the *subheadings*, not by "Data Loss" and "Exceptions".
+    Section 3 became `## 3. Data Loss & Unscanned Content` with `### 3.1
+    Data Loss` and `### 3.2 Unscanned Content` under it (#167), and 3.2
+    is a three-column table. Slicing on the first "Data Loss" and the
+    next "Exceptions" swallows both tables: 3.2's header arrives as a
+    three-cell row of 3.1's, `test_the_loss_table_is_well_formed` goes
+    red, and every scope assertion here shifts. It was invisible only
+    because no test in this file emitted a `SCAN_GAP` -- one now does,
+    below. Do not widen these bounds back.
+
     Returns:
         tuple: (header_cells, delimiter_cells, [row_cells, ...]).
         `delimiter_cells` is None if the table has no delimiter row.
     """
-    section = content.split("Data Loss", 1)[1].split("Exceptions", 1)[0]
+    section = content.split("### 3.1 Data Loss", 1)[1].split("### 3.2", 1)[0]
     lines = [ln.strip() for ln in section.splitlines()
              if ln.strip().startswith("|")]
     delimiter = None
@@ -380,3 +398,70 @@ def test_an_unparseable_tag_raises_rather_than_defaulting(tag):
     """
     with pytest.raises(ValueError):
         loss_scope_for_tag(tag)
+
+
+# --------------------------------------------------------------------------
+# Section 3 carries two tables (#167)
+# --------------------------------------------------------------------------
+
+SCAN_GAP = ("1.2.3.6",
+            "Private tag 0009,1003 holds 16 bytes that begin with the item "
+            "tag (FFFE,E000) but do not parse as an implicit-VR sequence.")
+
+
+def test_the_two_tables_of_section_3_do_not_read_as_one(clean_env):
+    """A store can hit 3.1 and 3.2 at once, and nothing emitted both.
+
+    3.1 is four columns and 3.2 is three, so a reader -- or a helper --
+    that treats section 3 as one table gets 3.2's header handed to it as
+    a row of 3.1's. That is not hypothetical: it is what `_loss_table`
+    did while its bounds were "Data Loss" to "Exceptions", and the only
+    reason it never fired is that no test in this file wrote a
+    `SCAN_GAP` row. This is that test.
+
+    The two claims are opposites -- 3.1 is content that is *not* in the
+    export, 3.2 is content that *is* and was never read -- so a row
+    landing in the wrong one makes its own section header false, which
+    is the whole argument for the split (#167).
+    """
+    content = _report_with([PRIVATE_LOSS, STANDARD_LOSS], gaps=[SCAN_GAP])
+
+    header, delimiter, rows = _loss_table(content)
+
+    assert header == ["Timestamp", "Instance", "Element", "Scope"], header
+    assert delimiter is not None and len(delimiter) == len(header)
+    for row in rows:
+        assert len(row) == len(header), (header, row)
+    assert len(rows) == 2, ("3.2's rows were counted as losses", rows)
+    assert not any(SCAN_GAP[0] in cell for row in rows for cell in row), (
+        "an unscanned element was tabulated as a data loss")
+
+    gap_section = content.split("### 3.2 Unscanned Content", 1)[1]
+    gap_section = gap_section.split("## 4.", 1)[0]
+    # Same delimiter test as `_loss_table`: a line made only of pipes,
+    # colons, dashes and spaces is the `| :--- |` row. Anything stricter
+    # (a superset test, say) also throws away a header whose words
+    # happen to contain no dash.
+    gap_rows = [[c.strip() for c in ln.strip().strip("|").split("|")]
+                for ln in gap_section.splitlines()
+                if ln.strip().startswith("|")
+                and not set(ln.strip()) <= set("|:- ")]
+    assert gap_rows[0] == ["Timestamp", "Instance", "Element"], gap_rows
+    assert [r[1] for r in gap_rows[1:]] == [SCAN_GAP[0]], gap_rows
+    assert all(len(r) == 3 for r in gap_rows), gap_rows
+
+
+def test_a_scan_gap_alone_grades_review_required(clean_env):
+    """Section 3.2 is a grade, not a footnote.
+
+    Unlike a loss, there is no scope test: the row only exists for a
+    private element, and a run that cannot vouch for what it exported
+    does not get to call itself PASS. Asserted without any `DATA_LOSS`
+    row present, so the grade cannot be coming from the other half.
+    """
+    content = _report_with([], gaps=[SCAN_GAP])
+
+    assert "REVIEW_REQUIRED" in content, content
+    assert "*No data loss was recorded.*" in content, (
+        "3.1 must still say nothing was lost -- the bytes were kept")
+    assert "0009,1003" in content.split("### 3.2 Unscanned Content", 1)[1]
