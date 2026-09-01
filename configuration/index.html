@@ -1774,6 +1774,13 @@
 <li><code>true</code>: Removes <strong>ALL</strong> private tags. (Recommended for safety).</li>
 <li><code>false</code>: Retains them (Use only if you are sure they are safe or strictly needed for analysis).</li>
 </ul>
+<p>"All" includes private <em>sequences</em>, at every depth, and that is newer
+than it sounds: until
+<a href="https://github.com/kvnlng/Isocenter/issues/167">#167</a> the sweep read an
+instance's attributes only, so a private <code>SQ</code> was never a candidate and
+survived into the exported file with its private creator stripped off
+it. A private sequence nested inside another sequence is swept on the
+same rule.</p>
 <p>The flag governs the private tags Isocenter <em>holds</em>, which is not every
 private tag in your source files. Where the line falls:</p>
 <table>
@@ -1804,6 +1811,22 @@ kept and exported with no <code>DATA_LOSS</code> entry. The first row is therefo
 the small-strings case it looks like; under implicit VR it is all of your
 private data, blobs included. See below
 (<a href="https://github.com/kvnlng/Isocenter/issues/151">#151</a>).</p>
+<p><strong>One <code>UN</code> value is resolved rather than kept opaque.</strong> If a private
+<code>UN</code> value begins with the item tag <code>(FFFE,E000)</code> and re-encodes byte
+for byte as an implicit-VR sequence, it is ingested as a sequence -- the
+same graph the explicit-VR reading of the same file produces -- so the
+PHI scan walks inside it, remediation reaches the values there, and
+<code>remove_private_tags: true</code> removes it
+(<a href="https://github.com/kvnlng/Isocenter/issues/167">#167</a>). Its items then
+follow the ordinary rules, binary-VR children included, so a vendor <code>OB</code>
+inside such a sequence is dropped at ingest and reported like any other.
+A candidate that does <em>not</em> re-encode exactly keeps its bytes untouched
+at ingest and files a <code>SCAN_GAP</code> entry, which appears in section 3.2 of
+the compliance report with a disposition resolved at report time: under
+<code>remove_private_tags: true</code> the sweep removes the bytes like any other
+private attribute and the entry reads <code>removed before export</code> (grading
+<code>PASS</code>); under <code>false</code> they are retained byte-for-byte, the entry reads
+<code>retained for export</code>, and the session grades <code>REVIEW_REQUIRED</code>.</p>
 <div class="admonition warning">
 <p class="admonition-title"><code>false</code> cannot retain private tags with a binary VR</p>
 <p>Elements with a binary VR (<code>OB</code>, <code>OW</code>, <code>OF</code>, <code>OD</code>, <code>OL</code>) are skipped
@@ -1843,7 +1866,8 @@ as a warning and written to the audit log as a <code>DATA_LOSS</code> entry
 naming the tag <em>and its VR</em> -- the VR is the part that says whether
 you lost a four-byte serial number or a megabyte of vendor
 telemetry. It reaches you in three places: the session log, section
-3 (<em>Data Loss</em>) of the compliance report written by
+3.1 (<em>Data Loss</em>, under <em>Data Loss &amp; Unscanned Content</em>) of the
+compliance report written by
 <code>session.generate_report(path)</code>, and
 <code>session.store_backend.get_audit_losses()</code> if you want the rows
 directly. Read that section before concluding a vendor block came

@@ -1447,7 +1447,18 @@
 <ol>
 <li><strong>Validation Status</strong>: Uses Isocenter's internal audit logic to grade the session (PASS / REVIEW_REQUIRED).</li>
 <li><strong>Audit Trail</strong>: Aggregated counts of actions taken (e.g., number of patients anonymized, pixels redacted).</li>
-<li><strong>Data Loss</strong>: Every element that was present in the source and is not in the exported data, named with its VR.</li>
+<li><strong>Data Loss &amp; Unscanned Content</strong>: 3.1 lists every element that was
+   present in the source and is not in the exported data, named with its
+   VR. 3.2 lists content the PHI scan could not open -- a private value
+   whose bytes look like a sequence and do not parse as one -- with a
+   <strong>Disposition</strong> column resolved against the object graph at report
+   time: <code>removed before export</code> (the private-tag sweep deleted the
+   bytes; grades <code>PASS</code>, exactly as a swept parseable sequence does),
+   <code>retained for export</code>, or <code>unresolved</code> (the instance's UID changed
+   after ingest, e.g. by <code>redact()</code>, so the row cannot be matched back).
+   The latter two grade the session <code>REVIEW_REQUIRED</code>, with no scope
+   test: a run that exports bytes it could not read does not get to
+   call itself PASS.</li>
 <li><strong>Exceptions</strong>: A detailed list of any warnings or errors encountered (e.g., "Corrupt pixel data in File X", "Burned-In Annotation found").</li>
 <li><strong>Manifest</strong>: A summary of the processed cohort (Top studies by size).</li>
 </ol>
