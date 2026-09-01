@@ -448,6 +448,13 @@ class SqliteStore:
         # its first tick (#218).
         self._audit_write_lock = threading.Lock()
         self._audit_wakeup = threading.Event()
+        # Rows a failed `log_audit_batch` dropped. Its own lock, not
+        # `_audit_write_lock`: the increment happens inside
+        # `log_audit_batch`, which the worker calls while already
+        # holding the write lock (non-reentrant), and which
+        # `remediation.py` calls holding nothing.
+        self._audit_drop_lock = threading.Lock()
+        self._audit_rows_dropped = 0
         self._audit_thread = threading.Thread(
             target=self._audit_worker, daemon=True, name="AuditWorker")
         self._audit_thread.start()
@@ -465,6 +472,7 @@ class SqliteStore:
             # adding it here breaks *every* pickle of a store (#218).
             '_audit_write_lock',
             '_audit_wakeup',
+            '_audit_drop_lock',
             '_audit_thread']
         for k in keys_to_remove:
             state.pop(k, None)
@@ -487,6 +495,7 @@ class SqliteStore:
         # See `__init__`: before the worker starts, not after (#218).
         self._audit_write_lock = threading.Lock()
         self._audit_wakeup = threading.Event()
+        self._audit_drop_lock = threading.Lock()
         self._audit_thread = threading.Thread(
             target=self._audit_worker, daemon=True, name="AuditWorker")
         self._audit_thread.start()
@@ -904,6 +913,24 @@ class SqliteStore:
         except sqlite3.OperationalError:
             return []
 
+    def get_audit_drops(self) -> int:
+        """How many audit rows were dropped by a failed batch write.
+
+        The rows themselves are unrecoverable -- see `log_audit_batch`
+        for why they are counted rather than retried (#219). A non-zero
+        count means the audit table under-states what happened, which
+        is why `generate_report` grades it like an exception rather
+        than mentioning it: an audit trail with holes cannot support a
+        PASS.
+
+        Flushes first, like every other audit reader: a row still in
+        the queue has not met the failing write yet, so counting before
+        the barrier would miss it.
+        """
+        self.flush_audit_queue()
+        with self._audit_drop_lock:
+            return self._audit_rows_dropped
+
     def check_unsafe_attributes(self) -> List[tuple]:
         """
         Scans for instances with potentially unsafe attributes (e.g., BurnedInAnnotation="YES").
@@ -941,23 +968,42 @@ class SqliteStore:
         one; a caller with neither to describe still writes both slots,
         because one record with several accepted shapes is a fork the
         reader has to hold in their head.
+
+        A batch that fails to insert -- for any reason, sqlite or not --
+        is *dropped and counted*, never retried and never raised (#219).
+        Retrying would mean holding the rows somewhere: a local survives
+        no reader's barrier (that was #218's defect), and re-enqueueing
+        under the lock loops forever on a permanently failing write and
+        reorders the log besides. Raising is no better -- this used to
+        swallow `sqlite3.Error` into a log line while the worker's
+        `except` swallowed the rest, and both were the same silent
+        under-report. The count is the one trace that reaches a reader:
+        `generate_report` files a non-zero `get_audit_drops()` as an
+        exception, which costs the run its PASS.
         """
         if not entries:
             return
 
-        timestamp = datetime.now().isoformat()
-        # (timestamp, action, uid, details, loss_scope, element_tag)
-        data = [(timestamp, e[0], e[1], e[2], e[3], e[4]) for e in entries]
-
         try:
+            timestamp = datetime.now().isoformat()
+            # (timestamp, action, uid, details, loss_scope, element_tag)
+            data = [(timestamp, e[0], e[1], e[2], e[3], e[4]) for e in entries]
+
             with self._get_connection() as conn:
                 conn.executemany(
                     "INSERT INTO audit_log (timestamp, action_type, entity_uid, "
                     "details, loss_scope, element_tag) "
                     "VALUES (?, ?, ?, ?, ?, ?)", data)
                 conn.commit()
-        except sqlite3.Error as e:
-            self.logger.error(f"Failed to batch log audit: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            # `_audit_drop_lock`, never `_audit_write_lock`: the worker
+            # calls this while holding the write lock, which is not
+            # reentrant.
+            with self._audit_drop_lock:
+                self._audit_rows_dropped += len(entries)
+            self.logger.error(
+                f"Failed to batch log audit; {len(entries)} row(s) "
+                f"dropped: {e}")
 
     def load_all(self) -> List[Patient]:
         """
