@@ -39,38 +39,54 @@ class RedactionVerifier:
         # For now, strict match.
         return None
 
+    def _coverage(self, text_box: Tuple[int, int, int, int], zone_box: Tuple[int, int, int, int]) -> float:
+        """
+        Fraction of the text_box's area that zone_box covers (0.0 - 1.0).
+
+        The two boxes deliberately speak different conventions, and the
+        conversion happens here and nowhere else on the read side:
+        text_box is OCR box space (x, y, w, h); zone_box is a config
+        `redaction_zones` entry in zone space (y1, y2, x1, x2) -- the
+        order every consumer that touches pixels reads
+        (`apply_redaction_to_array`, both redact paths, the export
+        worker). Reading the zone as (x, y, w, h) here made the
+        classifier disagree with redaction about what every zone covers,
+        so covered text classified as a leak and uncovered text as
+        covered (#258, #264).
+        """
+        tx, ty, tw, th = text_box
+        zy1, zy2, zx1, zx2 = zone_box
+
+        # Calculate Intersection
+        x_left = max(tx, zx1)
+        y_top = max(ty, zy1)
+        x_right = min(tx + tw, zx2)
+        y_bottom = min(ty + th, zy2)
+
+        if x_right <= x_left or y_bottom <= y_top:
+            return 0.0
+
+        text_area = tw * th
+        if text_area <= 0:
+            return 0.0
+
+        intersection_area = (x_right - x_left) * (y_bottom - y_top)
+        return intersection_area / text_area
+
     def is_covered(self, text_box: Tuple[int, int, int, int], zone_box: Tuple[int, int, int, int], threshold=0.50) -> bool:
         """
         Checks if the text_box is significantly covered by the zone_box.
 
         Args:
-            text_box: (x, y, w, h)
-            zone_box: (x, y, w, h)
+            text_box: OCR box space (x, y, w, h).
+            zone_box: zone space (y1, y2, x1, x2), as `redaction_zones`
+                entries are stored and as redaction applies them (#264).
             threshold: Fraction of text area that must be covered (0.0 - 1.0).
 
         Returns:
             bool: True if covered.
         """
-        tx, ty, tw, th = text_box
-        zx, zy, zw, zh = zone_box
-
-        # Calculate Intersection
-        x_left = max(tx, zx)
-        y_top = max(ty, zy)
-        x_right = min(tx + tw, zx + zw)
-        y_bottom = min(ty + th, zy + zh)
-
-        if x_right < x_left or y_bottom < y_top:
-            return False
-
-        intersection_area = (x_right - x_left) * (y_bottom - y_top)
-        text_area = tw * th
-
-        if text_area == 0:
-            return False
-
-        coverage = intersection_area / text_area
-        return coverage >= threshold
+        return self._coverage(text_box, zone_box) >= threshold
 
     def verify_instance(self, instance: Instance, equipment: Any = None) -> List[PhiFinding]:
         """
@@ -96,30 +112,16 @@ class RedactionVerifier:
             best_coverage = 0.0
             best_zone = None
 
-            # Check against all zones to find BEST coverage
+            # Check against all zones to find BEST coverage. The zone
+            # convention ((y1, y2, x1, x2), unlike region.box's
+            # (x, y, w, h)) lives in _coverage; this loop used to inline
+            # the math with its own -- wrong -- unpacking (#264).
             for zone in zones:
                 if len(zone) >= 4:
-                    z_box = (zone[0], zone[1], zone[2], zone[3])
-
-                    # Calculate logic manually here or reuse is_covered logic but return float?
-                    # Let's inline the area math or split helper.
-
-                    tx, ty, tw, th = region.box
-                    zx, zy, zw, zh = z_box
-
-                    x_left = max(tx, zx)
-                    y_top = max(ty, zy)
-                    x_right = min(tx + tw, zx + zw)
-                    y_bottom = min(ty + th, zy + zh)
-
-                    if x_right > x_left and y_bottom > y_top:
-                        intersection_area = (x_right - x_left) * (y_bottom - y_top)
-                        text_area = tw * th
-                        if text_area > 0:
-                            cov = intersection_area / text_area
-                            if cov > best_coverage:
-                                best_coverage = cov
-                                best_zone = zone
+                    cov = self._coverage(region.box, tuple(zone[:4]))
+                    if cov > best_coverage:
+                        best_coverage = cov
+                        best_zone = zone
 
             # Decision Logic
             threshold_safe = 0.80  # Configurable?
