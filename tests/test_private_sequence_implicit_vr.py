@@ -248,11 +248,21 @@ def sessions(tmp_path):
 
     yield _open
 
+    # Every session is closed, and then the first failure is raised.
+    # Not swallowed: this fixture exists because a leaked `Session`
+    # leaks worker subprocesses into the rest of the suite, and a
+    # teardown that answers "close() raised" with `pass` cannot notice
+    # the one thing it is here to guarantee. Closing the whole list
+    # first matters -- returning early on the first exception would
+    # leak the sessions behind it, which is the failure again.
+    failures = []
     for sess in opened:
         try:
             sess.close()
-        except Exception:            # pragma: no cover - teardown only
-            pass
+        except Exception as exc:     # pylint: disable=broad-except
+            failures.append(exc)
+    if failures:
+        raise failures[0]
 
 
 def _instance(session):
