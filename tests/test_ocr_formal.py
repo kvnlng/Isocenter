@@ -18,10 +18,11 @@ class TestOCRFormal(unittest.TestCase):
         self.instance.sop_instance_uid = "1.2.3"
         self.instance.equipment = Equipment("TestMan", "TestModel", "SN-001")
 
-        # Define a rule that covers [0,0,100,100]
+        # Zone space (y1, y2, x1, x2): rows 0..100, cols 0..100.
+        # Re-derived from the old (x, y, w, h) fixture (#264).
         self.rules = [{
             "serial_number": "SN-001",
-            "redaction_zones": [[0, 0, 100, 100]]
+            "redaction_zones": [[0, 100, 0, 100]]
         }]
 
         self.verifier = RedactionVerifier(self.rules)
@@ -29,7 +30,8 @@ class TestOCRFormal(unittest.TestCase):
     @patch('isocenter.verification.analyze_pixels')
     def test_full_safety(self, mock_ocr):
         """Test that fully covered text generates NO finding."""
-        # Text in 10,10,50,50 (Inside 0,0,100,100)
+        # Text box (10, 10, 50, 50): rows 10..60, cols 10..60 -- inside
+        # the zone's rows 0..100, cols 0..100.
         mock_ocr.return_value = [
             TextRegion("SafeText", (10, 10, 50, 50), 90.0)
         ]
@@ -54,9 +56,9 @@ class TestOCRFormal(unittest.TestCase):
     @patch('isocenter.verification.analyze_pixels')
     def test_partial_leak(self, mock_ocr):
         """Test that text PARTIALLY covered generates PARTIAL_LEAK."""
-        # Zone is 0,0,100,100
-        # Text is at 50,0,100,100 (Right half out)
-        # Intersect: 50,0,50,100 (Area 5000)
+        # Zone covers rows 0..100, cols 0..100.
+        # Text box (50, 0, 100, 100): rows 0..100, cols 50..150 (right half out)
+        # Intersect: rows 0..100, cols 50..100 (Area 5000)
         # Text Area: 100*100 = 10000
         # Coverage: 0.5
 
@@ -69,7 +71,7 @@ class TestOCRFormal(unittest.TestCase):
         f = findings[0]
         self.assertEqual(f.metadata.get("leak_type"), "PARTIAL_LEAK")
         self.assertAlmostEqual(f.metadata.get("coverage_score"), 0.5)
-        self.assertEqual(f.metadata.get("best_zone"), [0, 0, 100, 100])
+        self.assertEqual(f.metadata.get("best_zone"), [0, 100, 0, 100])
 
 if __name__ == '__main__':
     unittest.main()
