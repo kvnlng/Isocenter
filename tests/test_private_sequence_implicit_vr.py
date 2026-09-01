@@ -99,6 +99,16 @@ BINARY_CHILD_BYTES = _item(
     + _elem(0x0009, 0x1002, b"\x01\x02\x03\x04")
     + _elem(0x0010, 0x0010, SECRET_NAME.encode()))
 
+#: A private sequence *inside* a private sequence, implicit at both
+#: levels. The inner element is `UN` bytes within the outer item, so the
+#: recursion has to run the gate again on the way down -- the shape the
+#: nested tests below cover with a *standard* outer sequence never does
+#: that, because a standard SQ is parsed by pydicom itself.
+PRIVATE_IN_PRIVATE_BYTES = _item(
+    _elem(0x0009, 0x0010, b"ACME_HEADER ")
+    + _elem(0x0009, 0x1003, _item(
+        _elem(0x0010, 0x0010, SECRET_NAME.encode()))))
+
 #: Values that begin with the item tag and are *not* a sequence. Each
 #: name says which of the gate's four rules refuses it; three of the
 #: four get past `read_sequence` without raising and without leaving
@@ -638,3 +648,81 @@ def test_an_unscanned_candidate_one_level_down_is_still_reported(
     assert PRIVATE_SQ in content, (
         "an unscanned value inside a standard sequence was not reported")
     assert "REVIEW_REQUIRED" in content
+
+
+# --------------------------------------------------------------------------
+# A private sequence inside a private sequence
+# --------------------------------------------------------------------------
+
+def test_a_private_sequence_inside_a_private_sequence_is_parsed(
+        tmp_path, sessions):
+    """The gate has to run again on the way down, not only at the top.
+
+    A private SQ nested under a *standard* SQ -- the case above -- never
+    exercises that: pydicom parses the standard container itself, and
+    the inner private value reaches `populate_attrs` as an ordinary
+    element of an ordinary item. Here the outer container is itself
+    recovered from `UN` bytes, so the inner one is `UN` bytes *inside a
+    dataset the gate just produced*, and the recursion is the only thing
+    that opens it.
+    """
+    sess = sessions(remove_private=False)
+    sess.ingest(implicit_file(tmp_path / "src",
+                              value=PRIVATE_IN_PRIVATE_BYTES))
+
+    inst = _instance(sess)
+    outer = inst.sequences[PRIVATE_SQ].items[0]
+    assert PRIVATE_SQ in outer.sequences, (
+        "the inner private sequence stayed an opaque UN blob")
+    assert PRIVATE_SQ not in outer.attributes
+
+    names = _nested(sess.audit().findings, NAME_TAG)
+    assert [f.value for f in names] == [SECRET_NAME]
+    assert names[0].entity_path == ((PRIVATE_SQ, 0), (PRIVATE_SQ, 0)), (
+        "the path has to reach the item two private levels down")
+
+    sess.anonymize()
+    out = str(tmp_path / "out")
+    sess.export(out, use_compression=False)
+    data, ds = _exported(out)
+
+    assert SECRET_NAME.encode() not in data
+    assert Tag(0x0009, 0x1003) in ds, (
+        "the caller asked to keep private tags; the block must survive")
+
+
+def test_a_nested_private_sequence_is_removed_before_its_container(
+        tmp_path, sessions):
+    """Depth-first, for the reason the removals come last at all.
+
+    `iter_item_tree` yields a container before what is inside it, so the
+    walk's own order proposes the outer sequence for removal first.
+    Remediating in that order deletes the outer sequence from the
+    instance and then deletes the inner one from a dict nothing can
+    reach any more -- and files a `REMEDIATION_REMOVE` row saying so.
+    The export is clean either way, which is exactly why only the
+    ordering can be asserted here: sort the list the other way and this
+    is the test that notices.
+    """
+    sess = sessions(remove_private=True)
+    sess.ingest(implicit_file(tmp_path / "src",
+                              value=PRIVATE_IN_PRIVATE_BYTES))
+
+    uid = _instance(sess).sop_instance_uid
+    findings = [f for f in sess.audit().findings if f.entity_uid == uid]
+    removals = [(i, f) for i, f in enumerate(findings)
+                if f.field_name.startswith("Private Sequence")]
+
+    assert [f.entity_path for _i, f in removals] == [
+        ((PRIVATE_SQ, 0),), ()], (
+        "the nested sequence must be proposed for removal before the "
+        "container that holds it")
+
+    sess.anonymize()
+    out = str(tmp_path / "out")
+    sess.export(out, use_compression=False)
+    data, ds = _exported(out)
+
+    assert SECRET_NAME.encode() not in data
+    leftover = [str(elem.tag) for elem in ds if elem.tag.group % 2]
+    assert leftover == [], f"private elements survived the sweep: {leftover}"

@@ -428,6 +428,21 @@ class PhiInspector:
                             action_type="REMOVE_TAG",
                             target_attr=seq_tag)))
 
+            # Deepest first, for the same reason the whole block is
+            # appended last: a private sequence can hold another one,
+            # and `iter_item_tree` yields the container before the thing
+            # inside it. In that order remediation deletes the outer
+            # sequence, and the inner finding -- whose `entity` was
+            # resolved before either ran -- then deletes from a dict
+            # that is no longer reachable from the instance and files a
+            # `REMEDIATION_REMOVE` row for it. The export is right
+            # either way; the audit trail is not, and "every row
+            # describes an item that was still in the graph" is the
+            # claim this ordering exists to keep. Stable, so sequences
+            # at equal depth keep the walk's order (#167).
+            seq_removals.sort(key=lambda f: len(f.entity_path),
+                              reverse=True)
+
         # 2. Configured PHI Tags
         if not self.phi_tags:
             return findings + seq_removals
