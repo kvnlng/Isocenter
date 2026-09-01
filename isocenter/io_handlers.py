@@ -2756,6 +2756,25 @@ class DicomExporter:
                     if encoded is None:
                         raise ValueError(
                             f"no VR fits a {type(v).__name__} value")
+                    # The one silent shape change left in the fallback:
+                    # a multi-valued element with an over-long value
+                    # collapses to a single `UT` join -- #165's trade,
+                    # and still the right one, because the values are
+                    # all present and recoverable, so a DATA_LOSS row
+                    # would overstate it. But VM n -> 1 must not be
+                    # discovered by reading the file (#190), so it is
+                    # said here, where the tag is still a tag. The
+                    # backslash-bearing case never reaches this: the
+                    # encoder returns None for it before the collapse.
+                    if (encoded[0] == 'UT'
+                            and isinstance(v, (list, tuple, MultiValue))
+                            and len(v) > 1):
+                        get_logger().warning(
+                            "Tag %s written as a single UT value: one of "
+                            "its %d values exceeds LO's 64-character cap, "
+                            "so the multiplicity collapses from %d to 1. "
+                            "The values are backslash-joined and "
+                            "recoverable by splitting.", t, len(v), len(v))
                     vr, v = encoded
                 ds.add_new(Tag(g, e), vr, v)
             except Exception as exc:
@@ -2821,7 +2840,10 @@ class DicomExporter:
         of 1, where `LO` is 1-n. A backslash-delimited value past 64
         characters therefore round-trips as one string containing literal
         backslashes rather than a list. Widening `LO` to cover it would
-        be worse -- an over-long `LO` is non-conformant.
+        be worse -- an over-long `LO` is non-conformant. The same VM-1
+        property is why `UT` also takes any string containing `\`,
+        whatever its length: under `LO` the backslash reads as the value
+        delimiter and the value comes back split (#195).
 
         That paragraph used to end "and nothing downstream reads these as
         lists anyway, because they arrive from `value_text` already
@@ -2847,8 +2869,16 @@ class DicomExporter:
         if isinstance(value, (int, float)):
             return 'LO', str(value)
         if isinstance(value, str):
-            vr = 'LO' if len(value) <= DicomExporter._LO_MAX else 'UT'
-            return vr, value
+            # `\` is the value delimiter of every 1-n VR (PS3.5 6.2).
+            # Under `LO`, pydicom writes it as a separator and re-splits
+            # on it at read time, so a value that legitimately contains
+            # one -- a source `LT`/`ST`/`UT` element, where backslash is
+            # ordinary text -- came back as two values, silently, from
+            # conformant input (#195). `UT` is VM 1: no separating in
+            # either direction, and the value round-trips byte-faithfully.
+            fits_lo = (len(value) <= DicomExporter._LO_MAX
+                       and '\\' not in value)
+            return ('LO' if fits_lo else 'UT'), value
         # Last, because `str`, `bytes` and `bytearray` are sequences too
         # and each has its own answer above.
         if isinstance(value, (list, tuple, MultiValue)):
@@ -2919,6 +2949,22 @@ class DicomExporter:
 
         if not atoms:
             return 'LO', []
+
+        # An atom containing `\` cannot be a value of any 1-n VR: the
+        # backslash *is* the multiplicity on the wire (PS3.5 6.2), so a
+        # reader cannot tell the atom's content from the element's
+        # arity -- `LO` re-splits it and the VM inflates, silently
+        # (#190, #195). Joining to `UT` is ambiguous in the same way,
+        # so the whole element is reported as data loss instead: a loud
+        # loss beats a silently wrong element, the same call the #165
+        # entry makes for a partial one. This check must run BEFORE the
+        # over-long collapse below -- once collapsed to `UT`, the join
+        # and the atom's own backslash are indistinguishable and the
+        # value is unrecoverable, so the combination of an over-long
+        # sibling and a backslash-bearing atom takes this arm, not the
+        # join (#190).
+        if any('\\' in atom for atom in atoms):
+            return None
 
         # A new list every time, never the input: `_merge` rebinds the
         # value it is handed, and the mapping it read belongs to the live
