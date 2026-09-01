@@ -432,10 +432,14 @@ class Instance(DicomItem):
             4. Fallback to `isocenter.imagecodecs_handler` if pydicom fails.
 
         Returns:
-            Optional[np.ndarray]: The pixel data as a numpy array, or None if missing/load failed.
+            Optional[np.ndarray]: The pixel data as a numpy array, or None
+            when the instance genuinely carries no pixel element. "Could
+            not decode" is *not* None -- it raises (#226).
 
         Raises:
-            RuntimeError: If loading fails due to transfer syntax issues or missing codecs.
+            RuntimeError: If loading fails due to transfer syntax issues,
+                missing codecs, or a pixel element the reader could not
+                decode.
             FileNotFoundError: If the file path does not exist.
         """
         if self.pixel_array is not None:
@@ -475,7 +479,50 @@ class Instance(DicomItem):
                     self.pixel_array = ds.pixel_array
                     return self.pixel_array
                 except (AttributeError, TypeError):
-                    # No pixel data element
+                    # "No pixel data element" was the intent and is still
+                    # right -- but `.pixel_array` raises AttributeError for
+                    # a whole family of reasons that are not that, and this
+                    # arm called every one of them "this instance has no
+                    # pixels". Measured: a Parametric Map declaring
+                    # SamplesPerPixel 3 with no Planar Configuration raises
+                    # `AttributeError: Missing required element: (0028,0006)
+                    # 'Planar Configuration'`, and the export wrote a 4x4
+                    # 32-bit image with no pixel element of any kind -- a
+                    # missing Type 1 -- and graded PASS (#226).
+                    #
+                    # Ask the dataset, not the message. If the file holds
+                    # one of the three pixel elements and the decode still
+                    # failed, this is "pixels this library cannot decode",
+                    # which is a different outcome from "no pixels" and one
+                    # the caller is entitled to hear about (#191, #209).
+                    # Matching on the message instead would be a fourth
+                    # spelling of "is there pixel data" in this file.
+                    #
+                    # A bare `raise`, deliberately: the outer `except
+                    # Exception` below ends in `RuntimeError(f"Lazy load
+                    # failed for {self.file_path}: {e}")`, which
+                    # interpolates pydicom's own words into the message.
+                    # That is what survives -- `ExportOutcome.error` crosses
+                    # a process boundary (`session.export()` is always
+                    # processes, #185) and `__cause__` does not survive
+                    # pickling, while the message does. A second
+                    # RuntimeError raised here would either duplicate that
+                    # message or bypass the codec fallback.
+                    #
+                    # `ds is not None` keeps `dcmread`'s own AttributeError
+                    # /TypeError on the old path deliberately: that is a
+                    # different failure and narrowing this arm is not the
+                    # place to change it.
+                    #
+                    # The disable is about `ds`'s inferred type, not about
+                    # the membership test: pylint sees the `ds = None`
+                    # initialiser above the inner `try` and cannot narrow it
+                    # past the `is not None` guard. `Dataset` implements
+                    # `__contains__`.
+                    if ds is not None and any(
+                            t in ds  # pylint: disable=unsupported-membership-test
+                            for t in (0x7FE00010, 0x7FE00008, 0x7FE00009)):
+                        raise
                     return None
                 except Exception as e:
                     if "no pixel data" in str(e).lower():
