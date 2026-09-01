@@ -2198,8 +2198,21 @@ class DicomExporter:
         logger = get_logger()
         count = 0
         for r in results:
+            # A worker can append a loss and *then* fail, so a loss does
+            # not imply a file. The observation is still true -- the
+            # element was dropped from the in-memory copy -- and
+            # suppressing it would make the compliance record quietly
+            # incomplete, so the row is kept and the statement corrected
+            # instead: without the annotation, "was not exported" reads
+            # as one element missing from a written file, next to the
+            # `ERROR` row saying the file does not exist (#240).
+            failed = not getattr(r, "ok", False)
             for scope, loss in getattr(r, "losses", ()):  # Exceptions have none
                 uid = r.sop_instance_uid or r.output_path
+                if failed:
+                    loss = (f"{loss} The file itself was not written: this "
+                            "instance's export failed after the element was "
+                            "dropped.")
                 logger.warning(f"{uid}: {loss}")
                 count += 1
                 if store_backend is not None:

@@ -22,8 +22,9 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter import io_handlers
-from isocenter.io_handlers import (DicomExporter, LOSS_SCOPE_PRIVATE,
-                                   LOSS_SCOPE_STANDARD)
+from isocenter.entities import Instance, Patient, Series, Study
+from isocenter.io_handlers import (DicomExporter, ExportOutcome,
+                                   LOSS_SCOPE_PRIVATE, LOSS_SCOPE_STANDARD)
 from isocenter.session import DicomSession, _ExportOptions
 
 # `_fallback_encoding` returns None for this: not bytes, not a number, not
@@ -283,3 +284,123 @@ def test_a_lost_element_does_not_make_the_export_report_zero_successes(
 
     assert summary.written == len(tasks), "a loss is not a failed write"
     assert summary.failures == [], "a loss is not a failed write"
+
+
+# --------------------------------------------------------------------------
+# A loss on an instance whose write then failed (#240)
+# --------------------------------------------------------------------------
+
+CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
+
+#: The correction a loss row on a failed outcome must carry. Asserted as
+#: a substring so the tests pin the statement, not the sentence around it.
+NOT_WRITTEN = "file itself was not written"
+
+
+class _RecordingStore:
+    """The audit-writing half of a store backend, and nothing else."""
+
+    def __init__(self):
+        self.rows = []
+
+    def log_audit(self, action_type, entity_uid, details, loss_scope=None,
+                  element_tag=None):
+        self.rows.append((action_type, entity_uid, details, loss_scope))
+
+
+def test_a_loss_on_a_failed_outcome_says_the_file_was_not_written():
+    """The parent-side contract of #240, pinned where the row is written.
+
+    A worker can append a loss and *then* fail -- the element was
+    genuinely dropped from the in-memory copy, and the file was never
+    written. `_report_export_losses` filed the row without asking
+    `r.ok`, so section 3 of the compliance report said an element "was
+    not exported" from a file that does not exist, beside the `ERROR`
+    row for the same instance.
+
+    The row is kept, not suppressed: the observation is true, and a
+    compliance record that drops an observation is its own small lie
+    (#181). What changes is the statement -- a loss belonging to a
+    failed outcome must say the file itself was not written, and a loss
+    on a successful outcome must read exactly as the worker wrote it.
+    """
+    store = _RecordingStore()
+    results = [
+        ExportOutcome(ok=True, output_path="/out/a.dcm",
+                      sop_instance_uid="A",
+                      losses=[(LOSS_SCOPE_STANDARD, "loss on a success.")]),
+        ExportOutcome(ok=False, output_path="/out/b.dcm",
+                      sop_instance_uid="B",
+                      losses=[(LOSS_SCOPE_PRIVATE, "loss on a failure.")],
+                      error=ValueError("Validation Errors: ['...']")),
+    ]
+
+    count = DicomExporter._report_export_losses(results, store)
+
+    assert count == 2, "the failed outcome's loss must still be reported"
+    by_uid = {uid: (details, scope)
+              for _action, uid, details, scope in store.rows}
+    assert by_uid["A"] == ("loss on a success.", LOSS_SCOPE_STANDARD), (
+        "a loss on a written file must read exactly as the worker wrote it")
+    details, scope = by_uid["B"]
+    assert details.startswith("loss on a failure."), details
+    assert NOT_WRITTEN in details, details
+    assert scope == LOSS_SCOPE_PRIVATE, "the annotation must not touch the scope"
+
+
+def test_a_float16_loss_on_a_failed_write_names_the_missing_file(tmp_path):
+    """#240's shape, end to end through `session.export()`.
+
+    A graph-built SR-modality instance with a float16 array: the
+    float16 arm appends its loss row (SR is not an image modality, so
+    it does not raise), and `_finalize_dataset`'s IOD validation then
+    fails the write. The SOP class is CT Image Storage rather than the
+    issue's Secondary Capture because `IODValidator` only carries rules
+    for CT -- an SC dataset validates trivially here, and the modality
+    attribute, not the SOP class, is what routes the float16 arm. Zero
+    files reach disk. The `DATA_LOSS` row must not read as a statement
+    about a written file, and the `ERROR` row must still be there --
+    the two rows are two true statements about one instance, not a
+    contradiction.
+    """
+    session = DicomSession(str(tmp_path / "failloss.db"))
+    uid = "1.2.826.0.1.240"
+    out = tmp_path / "out"
+    out.mkdir()
+
+    patient = Patient("PAT1", "Test^Patient")
+    study = Study("ST_1", "20230101")
+    series = Series("SE_1", "SR", 1)
+    inst = Instance(uid, CT_STORAGE, 1)
+    inst.file_path = None
+    inst.set_attr("0008,0060", "SR")
+    inst.set_pixel_data(np.zeros((8, 8), dtype=np.float16))
+    series.instances.append(inst)
+    study.series.append(series)
+    patient.studies.append(study)
+    session.store.patients.append(patient)
+
+    try:
+        session.save()
+        session.export(str(out), format="dicom", show_progress=False)
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    files = sorted(p.name for p in out.rglob("*.dcm"))
+    assert files == [], "the premise: this write must fail"
+
+    with sqlite3.connect(db_path) as conn:
+        error_uids = [u for (u,) in conn.execute(
+            "SELECT entity_uid FROM audit_log WHERE action_type='ERROR'")]
+    assert error_uids == [uid], "the failure row is #181's and must stay"
+
+    rows = _data_loss_rows(db_path)
+    assert len(rows) == 1, rows
+    entity_uid, details, scope = rows[0]
+    assert entity_uid == uid
+    assert "float16" in details, details
+    assert scope == LOSS_SCOPE_STANDARD, rows
+    assert NOT_WRITTEN in details, (
+        "the row claims an element was dropped from a file that was "
+        "never written", details)
