@@ -1623,8 +1623,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                     "to export; the written file will describe a waveform it "
                     "does not contain."))
 
-        if "_ISOCENTER_REDACTION_HASH" in ds:
-            del ds["_ISOCENTER_REDACTION_HASH"]
+        # No underscore-key cleanup here, deliberately. `_merge` drops
+        # every `_`-prefixed bookkeeping key (`_ISOCENTER_REDACTION_HASH`,
+        # `_ISOCENTER_SOURCE_SOP_UID`) before `ds` ever sees it, so there
+        # is nothing to delete -- and asking a pydicom Dataset about a
+        # string that is neither a tag nor a keyword emits a UserWarning
+        # on the *caller's* stream, once per exported instance, because
+        # this package installs no global filter (#144). A defensive
+        # `if key in ds: del` reintroduces that noise and guards nothing;
+        # measured in `test_export_redaction_hash_warning.py` (#248).
 
         # Validate & Save
         ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
