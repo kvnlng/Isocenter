@@ -139,6 +139,11 @@ candidate that fails verification keeps its bytes exactly as today and
 files a `SCAN_GAP` audit row, which takes the compliance grade to
 `REVIEW_REQUIRED`.
 
+> **Corrected in review (PR #249).** "Keeps its bytes exactly as today"
+> is true of the object graph and false of the export under the shipped
+> default, and the unconditional `REVIEW_REQUIRED` is wrong for the same
+> reason. See the block under §3.6.
+
 ### 2.1 Verification: byte-exact re-encode
 
 The parse is accepted only when all four hold:
@@ -662,6 +667,54 @@ exported data and the PHI scan could not open them:"* and a
 `| Timestamp | Instance | Element |` table, one row per gap; and when it
 is empty, the prose `*No unscanned content was recorded.*`.
 
+> **Corrected in review (PR #249).** That header, that row text and the
+> unconditional grade are all wrong under the shipped default, and the
+> PR-artifact review graded them a required fix. Reproduced on
+> `e67ea77` with `remove_private_tags=True` and one 16-byte adversarial
+> blob (`repro249.py`): section 2 carries `REMEDIATION_REMOVE`, the
+> exported file has no `(0009,1003)` and none of the payload bytes, and
+> section 3.2 renders *"Elements below were retained in the exported
+> data…"* over a row saying *"It was retained verbatim and exported"*,
+> under `REVIEW_REQUIRED`. Two sections of one report contradicting each
+> other about the same element.
+>
+> The row is written by `DicomImporter` at ingest, before
+> `remove_private_tags` has been applied and before any export, so it
+> cannot make an export claim. Three shapes were on the table: reword
+> to ingest knowledge only; resolve at render time against what shipped;
+> annotate at export. The second was chosen and the other two measured
+> against it:
+>
+> - Rewording alone leaves the reader to work out from section 2 whether
+>   the bytes shipped, and leaves the grade asymmetric.
+> - Annotating at export needs the gap set attached to the instance,
+>   which is the stored second index #84 removed.
+> - Resolving at render is a *presence* test against the object graph,
+>   never a second run of the gate. It is sound because
+>   `remove_private_tags` has exactly one consumer, `PhiInspector`, and
+>   the exporter applies no private filtering of its own (measured: the
+>   only production consumers of the flag are `privacy.py:353` and the
+>   two `session.py` call sites that build the inspector).
+>
+> So: the header claims only *"The PHI scan could not open the elements
+> below"*, the row states ingest knowledge, and a fourth **Disposition**
+> column carries `removed before export` / `retained for export` /
+> `unresolved`. The wording is tenseless because the documented call
+> order puts `generate_report` before `export()`; what the graph settles
+> is whether the element is still there to be written.
+>
+> The grade follows the disposition. Measured on `e67ea77`, same
+> `remove_private_tags=True`, both elements absent from the exported
+> file: a *parseable* private sequence graded `PASS` and the unparseable
+> blob `REVIEW_REQUIRED` (`asym249.py`). That asymmetry had no argument
+> behind it -- both are attestations about the export -- and is gone.
+> `retained for export` and `unresolved` still grade `REVIEW_REQUIRED`.
+>
+> `audit_log` gains an `element_tag` column, on `loss_scope`'s precedent
+> (#146): only the emitter still holds the tag, and reading it back out
+> of `details` is the coupling that column exists to avoid. A row from a
+> store written before it reads `unresolved`.
+
 Two constraints, both load-bearing:
 
 - **The empty 3.2 case must render as prose, never as an empty table.**
@@ -670,6 +723,13 @@ Two constraints, both load-bearing:
   every `|`-leading line in it, taking the first as the header row. An
   always-rendered 3.2 header row would land in that slice and shift
   every existing assertion.
+
+  > **Corrected in review.** `_loss_table` is now bounded by `### 3.1`
+  > to `### 3.2`, so an unconditional 3.2 header lands *outside* the
+  > slice and this hazard no longer exists. The prose empty case stays,
+  > for symmetry with 3.1 and nothing else -- the comment in
+  > `reporting.py` says so rather than keeping a rationale whose
+  > mechanism has been removed.
 - **The literal string `Data Loss` must still appear ahead of any table
   row in the section.** `_loss_table` splits on its *first* occurrence,
   so the retitled `## 3. Data Loss & Unscanned Content` satisfies it —
@@ -897,6 +957,28 @@ its own.
 T9 and T10 land with commit 2 by construction — commit 1 alone fails
 them, because it *is* the regression. Do not add them in commit 1 and
 mark them xfail.
+
+> **Corrected in review.** This is not the split that shipped. §3.4-§3.6
+> moved into commit 1 so that T8 — which asserts on the rendered report
+> — could pass there, leaving:
+>
+> 1. `io_handlers.py` (§3.1) + report plumbing (§3.4-§3.6) + T1-T8,
+>    T11, T12 (`172331c`).
+> 2. `privacy.py`, `remediation.py` (§3.2-§3.3) + T9, T10 (`afb1ee8`).
+>
+> The prose above says commit 1 alone fails T9 and T10, which is two
+> tests. Measured by checking out `172331c` and running the file: **four
+> red** — T9[implicit], T9[explicit], T10, and
+> `test_remove_private_tags_reaches_a_nested_private_sequence`. **Five**
+> once `3d862a0`'s
+> `test_a_nested_private_sequence_is_removed_before_its_container` is
+> applied on top — measured by running the test file as of `3d862a0`
+> against `isocenter/` as of `172331c` (`split_probe.sh`): T9[implicit],
+> T9[explicit], T10, the nested-sweep test and the ordering test, `5
+> failed, 16 passed`. The four is what the coder's tree produced at the
+> time it was measured. Either way the
+> conclusion holds and hardens: commit 1 is the default-config
+> regression and must not ship alone.
 
 ---
 
