@@ -103,3 +103,30 @@ def test_incremental_delete(store):
 def test_persistence_resiliency(store):
     """Ensure partial saves don't corrupt DB (transaction test implicitly via sqlite)"""
     pass
+
+def test_replaced_pixels_read_back_after_save(store):
+    """set_pixel_data -> save_all -> unload -> get_pixel_data returns the new bytes.
+
+    Pins #212: `_persist_pixels` built the replacement SidecarPixelLoader
+    *before* updating `inst._pixel_hash`, and the loader's
+    `pixel_hash or getattr(instance, "_pixel_hash", None)` fallback then
+    captured the previous frame's digest. The new frame was written to the
+    sidecar correctly; only the loader's expectation of it was stale, so
+    the next read after an unload raised an Integrity Error instead of
+    returning correctly-saved pixels.
+    """
+    p = create_mock_patient("P_PIX", count=1)
+    inst = p.studies[0].series[0].instances[0]
+
+    inst.set_pixel_data(np.arange(64, dtype=np.uint16).reshape(8, 8))
+    store.save_all([p])
+
+    replacement = np.full((8, 8), 9, dtype=np.uint16)
+    inst.set_pixel_data(replacement)
+    store.save_all([p])
+
+    # The loader must expect the frame it points at, not the one it replaced.
+    assert inst._pixel_loader.pixel_hash == inst._pixel_hash
+
+    assert inst.unload_pixel_data() is True
+    np.testing.assert_array_equal(inst.get_pixel_data(), replacement)

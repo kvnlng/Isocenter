@@ -2100,8 +2100,15 @@ class SqliteStore:
         tally.pixel_frames += 1
 
         # Re-point the loader so the array can be unloaded safely later.
+        # `pixel_hash=digest` is passed explicitly, the way
+        # `persist_pixel_data` does: left to default, the loader falls
+        # back to `inst._pixel_hash`, which at this point is still the
+        # digest of the frame these bytes just replaced -- so the next
+        # read after an unload raised an integrity mismatch against
+        # correctly-saved data (#212). Passing it removes the ordering
+        # dependency between this call and the assignment below.
         inst._pixel_loader = self._create_pixel_loader(
-            offset, length, _PIXEL_COMPRESSION, inst)
+            offset, length, _PIXEL_COMPRESSION, inst, pixel_hash=digest)
         inst._pixel_hash = digest
         return _StoredFrame(offset, length, _PIXEL_COMPRESSION, digest)
 
