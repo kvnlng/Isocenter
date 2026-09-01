@@ -2504,6 +2504,19 @@ class DicomSession:
             subset (Union[str, list, pd.DataFrame]): Filter the export
                 using a query string, a list of UIDs, or a DataFrame.
         """
+        # Cleared before anything can return early or raise. These are
+        # session-scoped, and assigning them only on success let an
+        # export with an empty plan -- or one whose batch died at the
+        # pool -- leave a *previous* export's numbers standing: the
+        # report read "3 of 3 requested" under a PASS beside an empty
+        # folder (#196). None makes the report omit the row, and an
+        # absent row says "not answered here" -- which is the truth
+        # about an export that never completed, where a zero would say
+        # "nothing was written" and a stale pair answers for the wrong
+        # export.
+        self._last_export_written = None
+        self._last_export_requested = None
+
         target_ids = (patient_ids if patient_ids is not None
                       else [p.patient_id for p in self.store.patients])
 
@@ -2536,6 +2549,8 @@ class DicomSession:
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
         summary = self._run_export_batch(tasks, show_progress,
                                          self.store_backend)
+
+        self._report_export_collisions(tasks, summary.written_uids)
 
         # After the batch, not before it. The disclosure is a statement
         # about files a recipient holds, so it has to be made from what
@@ -2619,7 +2634,14 @@ class DicomSession:
         delivered |= {task.instance.sop_instance_uid for task in tasks
                       if task.instance.sop_instance_uid not in delivered
                       and os.path.exists(task.output_path)}
-        affected = [
+        # A set, like `delivered`: the numerator and the denominator
+        # must be counted over the same collection. Counting `affected`
+        # over the tasks while `delivered` collapsed a duplicate SOP
+        # Instance UID rendered "2 of 1 exported instances" -- arithmetic
+        # that cannot be true under any reading, in the row whose job is
+        # telling a recipient how many re-identifiable files they hold
+        # (#197). One UID is one file, whatever wrote it.
+        affected = {
             task.instance.sop_instance_uid
             for task in tasks
             if (task.instance.sop_instance_uid in delivered
@@ -2627,7 +2649,7 @@ class DicomSession:
                     ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ) is not None
                 and task.instance.sequences[
                     ReversibilityService.TAG_ENCRYPTED_ATTRS_SEQ].items)
-        ]
+        }
         if not affected:
             return 0
 
@@ -2644,9 +2666,72 @@ class DicomSession:
         if getattr(self, "store_backend", None) is not None:
             self.store_backend.log_audit(
                 action_type="REVERSIBLE_EXPORT",
-                entity_uid=affected[0] if len(affected) == 1 else "MULTIPLE",
+                entity_uid=(next(iter(affected)) if len(affected) == 1
+                            else "MULTIPLE"),
                 details=detail)
         return len(affected)
+
+    def _report_export_collisions(self, tasks, written_uids) -> int:
+        """Audit every output path that more than one instance was written to.
+
+        Filenames are the SOP Instance UID, so two instances sharing one
+        map to the same path and each successful write silently replaces
+        the one before it. The folder then holds one file where the plan
+        held several -- and until #197 the counters described that
+        overwrite as several delivered files.
+
+        `ERROR`, not `DATA_LOSS`, and not a new vocabulary: the end
+        state is an instance that was requested and is not in the
+        folder, which is exactly what `_report_export_failures` files
+        `ERROR` for (#181) -- so the row lands in `get_audit_errors()`,
+        the report's Exceptions section names it, and the run grades
+        `REVIEW_REQUIRED` the same as any other undelivered instance.
+        A `DATA_LOSS` row would be graded by `loss_scope`, and
+        `STANDARD` leaves the run at `PASS` -- a silent overwrite is
+        precisely the thing a reviewer has to look at, because nothing
+        can say here whether the colliding instances were identical
+        copies or two different images wrongly sharing a UID.
+
+        Grouped by output path, not by UID: the same UID under two
+        different series lands in two different directories and
+        collides with nothing.
+
+        Keyed on the outcome, like the disclosure above (#187): a path
+        every write to failed has no file and no overwrite, and its
+        failures already carry their own `ERROR` rows.
+
+        Returns:
+            int: How many colliding paths were reported.
+        """
+        by_path = {}
+        for task in tasks:
+            by_path.setdefault(task.output_path, []).append(task)
+
+        written = set(written_uids)
+        collisions = 0
+        for path, group in by_path.items():
+            if len(group) < 2:
+                continue
+            uid = group[0].instance.sop_instance_uid
+            if uid not in written and not os.path.exists(path):
+                continue
+            # Flattened and pipe-escaped for the same reason as
+            # `_report_export_failures`: the detail is rendered straight
+            # into a markdown table row.
+            detail = " ".join(
+                f"{len(group)} exported instances share SOP Instance UID "
+                f"{uid} and were written to the same path ({path}): each "
+                f"successful write overwrote the previous one, and the "
+                f"folder holds one file for all {len(group)} of "
+                f"them.".split()).replace("|", "\\|")
+            get_logger().error("%s: %s", uid, detail)
+            collisions += 1
+            if getattr(self, "store_backend", None) is not None:
+                # `log_audit`, not `log_audit_batch` -- see the note in
+                # `_report_export_losses`.
+                self.store_backend.log_audit(
+                    action_type="ERROR", entity_uid=uid, details=detail)
+        return collisions
 
     def _scan_before_export(self) -> Set[str]:
         """Scans for PHI and reports what it found, before anything is written.

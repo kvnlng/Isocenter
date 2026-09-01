@@ -1048,8 +1048,15 @@ class ExportSummary:
 
     @property
     def written(self) -> int:
-        """How many instances reached disk."""
-        return len(self.written_uids)
+        """How many files reached disk.
+
+        Counted over the de-duplicated UIDs, not the outcomes: the UID
+        names the output file, so two instances sharing one are two
+        successful write operations and *one* file -- the second
+        overwrote the first. `len(self.written_uids)` here made the
+        report describe that overwrite as two delivered files (#197).
+        """
+        return len(set(self.written_uids))
 
     @property
     def failed(self) -> int:
