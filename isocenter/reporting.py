@@ -8,10 +8,11 @@ from typing import Dict, Optional, Protocol
 #: the row cannot say this and `generate_report` resolves it against the
 #: object graph instead (#167).
 #:
-#: Worded tenselessly on purpose. The documented call order puts
-#: `generate_report` before `export()`, so "was exported" would be a
-#: claim about something that has not happened; what the graph actually
-#: settles is whether the element is still there to be written, and
+#: Worded tenselessly on purpose. A report can be generated before any
+#: export -- it then carries the boundary note (#153) but still renders
+#: this section -- so "was exported" would be a claim about something
+#: that may not have happened; what the graph actually settles is
+#: whether the element is still there to be written, and
 #: `remove_private_tags` is the only thing that removes it -- the
 #: exporter applies no private filtering of its own.
 GAP_REMOVED = "removed before export"
@@ -64,6 +65,10 @@ class ComplianceReport:
             object graph -- the audit row is written at ingest and
             cannot know it. The opposite claim from `data_losses`, which
             is why it is not more of them (#167).
+        export_recorded (bool): Whether the audit log held an EXPORT
+            row when the report was assembled. False renders the
+            boundary note in the Executive Summary; it never moves the
+            grade (#153).
         validation_status (str): Overall status -- `PENDING` until a
             report is generated, then `PASS` or `REVIEW_REQUIRED`.
             Nothing emits `FAIL`: this report describes a run, and a run
@@ -125,6 +130,18 @@ class ComplianceReport:
     # rather than more `data_losses` -- see get_audit_scan_gaps (#167).
     scan_gaps: list = field(default_factory=list)
 
+    # Export Boundary (#153)
+    #
+    # True when the audit log held at least one EXPORT row as this
+    # report was assembled. Keyed on the log rather than on a session
+    # flag because the log survives a session reopened on an existing
+    # store, and a per-process flag does not. False does not move the
+    # grade -- a session that only audits is not wrong -- it makes the
+    # renderer state the boundary: losses recorded during a later
+    # export cannot appear here, and the same absent-row logic as
+    # `instances_written` applies -- "not answered here", not "clean".
+    export_recorded: bool = False
+
     # Validation
     # PENDING until graded; then PASS or REVIEW_REQUIRED. No FAIL --
     # see the class docstring.
@@ -171,6 +188,23 @@ class MarkdownRenderer:
                 f"| Instances Written | {report.instances_written} of "
                 f"{report.instances_requested} requested |\n")
 
+        # The boundary note sits under the grade, not in section 3,
+        # because the grade is the part people quote: a pre-export PASS
+        # with the caveat three sections away is how #153 read in the
+        # first place. Absence-of-row logic, same as `written_row`
+        # above -- no EXPORT row says "not answered here", and the note
+        # is that statement made out loud rather than a penalty (a
+        # session that only audits keeps its grade).
+        boundary_note = ""
+        if not report.export_recorded:
+            boundary_note = (
+                "\n> [!NOTE]\n"
+                "> **Report boundary:** generated before any export -- "
+                "the audit trail records no EXPORT action. Losses "
+                "recorded at export time cannot appear in this report "
+                "or its Validation Status; if this session exports, "
+                "regenerate the report afterwards.\n")
+
         md_content = f"""# Compliance Report
 
 **Generated At:** {report.generated_at.strftime('%Y-%m-%d %H:%M:%S')}
@@ -186,7 +220,7 @@ class MarkdownRenderer:
 | Total Instances | {report.total_instances} |
 {written_row}| Privacy Profile | {report.privacy_profile} |
 | De-ID Method | {report.deid_method} |
-
+{boundary_note}
 ## 2. Processing Audit
 
 The following actions were recorded in the secure audit trail:
