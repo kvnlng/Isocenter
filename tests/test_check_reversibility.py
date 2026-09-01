@@ -39,8 +39,11 @@ DROPPED_TAG = "0028,0030"
 
 #: Overlay Rows, VR `US`. A string here encodes fine into the object
 #: graph and raises inside `save_as`, at group `6000` -- which is past
-#: (0400,0500), so the file exists, is readable, and carries the
-#: encrypted originals when the write gives up (#198).
+#: (0400,0500), so the token is already serialized when the write gives
+#: up. Before #199 that left a readable partial carrying the encrypted
+#: originals under the real name (#198); the worker now writes to a
+#: temp name and renames only on success, so this arm must deliver
+#: nothing at all.
 LATE_FAILURE_TAG = "6000,0010"
 
 
@@ -228,22 +231,23 @@ def test_a_partial_export_discloses_the_instances_that_were_written(
     assert any("2 of 2" in m for m in _warnings(caplog)), _warnings(caplog)
 
 
-def test_a_truncated_file_still_carrying_its_token_is_disclosed(tmp_path):
-    """`ok=False` is not "nothing reached disk" (#198).
+def test_a_write_that_fails_late_delivers_nothing_to_disclose(tmp_path):
+    """A failure past (0400,0500) used to release the token anyway (#198).
 
     `save_as` creates the file and streams elements in ascending tag
-    order. (0400,0500) is group `0400`, so a write that gives up after
-    it -- an `ENOSPC` part-way through Pixel Data, (7FE0,0010), being
-    the ordinary way -- leaves a short file that `dcmread` accepts and
-    that carries the encrypted originals in full.
+    order, so a write that gave up after group `0400` -- an `ENOSPC`
+    part-way through Pixel Data, (7FE0,0010), being the ordinary way --
+    left a short file that `dcmread` accepted and that carried the
+    encrypted originals in full, while the disclosure keyed on the
+    worker's verdict counted two of the three files on disk.
 
-    Keying the disclosure on the worker's verdict counted two of those
-    three files. That is an under-claim, and an under-claim is the
-    direction that gets a re-identifiable file treated as safe: the
-    row this makes wrong is the one a recipient acts on.
+    #199 closed that at the source: the worker writes to a temporary
+    name and renames only on success, so `ok=False` now does mean
+    nothing reached disk under the real name, and the disclosure counts
+    the two files that exist. This arm pins that the late-failure
+    origin -- the one that used to leak the token -- and the disclosure
+    now agree.
     """
-    import pydicom
-
     session = _session_with_locked_identity(tmp_path, instances=3,
                                             truncate_instances=(1,))
     out = tmp_path / "out"
@@ -254,16 +258,10 @@ def test_a_truncated_file_still_carrying_its_token_is_disclosed(tmp_path):
     finally:
         session.close()
 
-    on_disk = sorted(out.rglob("*.dcm"))
-    assert [p.stem for p in on_disk] == ["SOP_0", "SOP_1", "SOP_2"], on_disk
+    on_disk = sorted(p.name for p in out.rglob("*") if p.is_file())
+    assert on_disk == ["SOP_0.dcm", "SOP_2.dcm"], on_disk
     assert errors == 1, "the arm did not fail a write"
-
-    truncated = [p for p in on_disk if p.stem == "SOP_1"][0]
-    assert truncated.stat().st_size < on_disk[0].stat().st_size, (
-        "the arm did not truncate the file it was supposed to")
-    assert 0x04000500 in pydicom.dcmread(truncated, force=True), (
-        "the fixture no longer reproduces the case it exists for")
 
     rows = _disclosures(db_path)
     assert len(rows) == 1, rows
-    assert "3 of 3 exported instances" in rows[0], rows[0]
+    assert "2 of 2 exported instances" in rows[0], rows[0]

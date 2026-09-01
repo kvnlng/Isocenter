@@ -304,6 +304,7 @@ class _ExportOptions(NamedTuple):
     identifying_uids: Optional[Set[str]]
     allowed_uids: Optional[Set[str]]
     use_compression: bool
+    verify_readback: bool = False
 
 
 def _excluded(options, patient, study, series, instance) -> bool:
@@ -2479,7 +2480,7 @@ class DicomSession:
     def _export_dicom(self, folder: str, use_compression=True,
                       check_burned_in=False, check_reversibility=True,
                       patient_ids: List[str] = None, show_progress=True,
-                      subset=None):
+                      subset=None, verify_readback=False):
         """
         Exports the current session to a directory, structured by Patient/Study/Series.
 
@@ -2503,6 +2504,16 @@ class DicomSession:
             show_progress (bool): If True, shows progress bar.
             subset (Union[str, list, pd.DataFrame]): Filter the export
                 using a query string, a list of UIDs, or a DataFrame.
+            verify_readback (bool): If True, each worker re-reads the file
+                it just wrote and compares Rows, Columns, SamplesPerPixel,
+                NumberOfFrames and BitsAllocated against the dataset it
+                serialized, before the file is published under its real
+                name. An unreadable file or a mismatch fails that
+                instance's export: it is counted out of "Instances
+                Written", files an `ERROR` audit row and takes the
+                compliance grade to `REVIEW_REQUIRED` (#209, following
+                #181). Off by default because it costs a second parse per
+                instance; the cost parallelizes across the export workers.
         """
         # Cleared before anything can return early or raise. These are
         # session-scoped, and assigning them only on success let an
@@ -2539,7 +2550,7 @@ class DicomSession:
 
         tasks, patient_count = self._build_export_plan(
             _ExportOptions(folder, identifying_uids, allowed_uids,
-                           use_compression),
+                           use_compression, verify_readback),
             target_ids)
 
         if not tasks:
@@ -2592,25 +2603,27 @@ class DicomSession:
         three re-identifiable files had been released when none existed.
 
         **Delivered means a file is there, not that a worker said so**
-        (#198). `ok=False` reports that the write did not complete, and
-        a write that does not complete has usually still created
-        something: `save_as` streams elements in ascending tag order,
-        and the Encrypted Attributes Sequence is group `0400`, so any
-        failure past it -- an `ENOSPC` inside Pixel Data, (7FE0,0010),
-        being the ordinary one -- leaves a short file that `dcmread`
-        accepts and that carries the encrypted originals in full.
-        Keying on the worker's verdict counted two such files out of
-        three and disclosed "2 of 2", which is an under-claim, and an
-        under-claim is what gets a re-identifiable file treated as safe.
-        The over-claim it replaced costs a site a disclosure process for
-        an export that did not happen; this one costs the recipient.
+        (#198). When this union was added, `ok=False` routinely left a
+        readable partial behind: `save_as` streams elements in
+        ascending tag order, so a failure past group `0400` left a
+        short file carrying the encrypted originals in full, and keying
+        on the worker's verdict disclosed "2 of 2" beside three files
+        on disk. #199 closed that source -- the worker now writes to a
+        temporary name and renames only on success -- but the union is
+        deliberately *not* reverted with it, because it still covers
+        the directions the rename cannot: a worker that renamed its
+        file and then died before answering (`run_parallel` hands back
+        an exception, not an outcome, #232), and a re-identifiable file
+        left by an earlier export into the folder being released. Both
+        are under-claims, and an under-claim is what gets a
+        re-identifiable file treated as safe: the over-claim it
+        replaced costs a site a disclosure process for an export that
+        did not happen; the under-claim costs the recipient.
 
         So a planned path that exists on disk is delivered whatever the
         worker concluded, and the union runs the safe way in both
         directions: an instance the worker wrote is delivered even if
-        the file has since been removed. That a file left by an earlier
-        export into the same folder counts too is not a defect -- it is
-        in the folder being released, and it is re-identifiable.
+        the file has since been removed.
 
         Only the instances *not* already known to be written are
         stat-ed, so a clean export does no filesystem work here and a
@@ -2845,7 +2858,8 @@ class DicomSession:
                             series_attributes=series_attrs,
                             compression=('j2k' if options.use_compression
                                          else None),
-                            redaction_zones=zones))
+                            redaction_zones=zones,
+                            verify_readback=options.verify_readback))
 
         return tasks, patient_count
 
