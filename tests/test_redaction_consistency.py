@@ -2,7 +2,7 @@
 import os
 import pytest
 from isocenter.session import DicomSession
-from isocenter.services import RedactionService
+from isocenter.services import RedactionOutcome, RedactionService
 from isocenter.entities import Instance, Patient, Study, Series
 
 def test_redaction_result_application_logic():
@@ -38,16 +38,24 @@ def test_redaction_result_application_logic():
             "pixel_loader": None
         }
 
-        # Simulate Main Process Result Logic (from session.py)
-        sop = mutation.get('original_sop_uid') or mutation.get('sop_uid')
-        updated = False
+        # Call the production applier, do not re-implement it here. This
+        # test used to carry its own copy of session.py's matching line --
+        # `mutation.get('original_sop_uid') or mutation.get('sop_uid')` --
+        # and assert against the copy. #239 deleted that `or` fallback from
+        # `_apply_redaction_outcomes` (the map is keyed on **pre**-redaction
+        # UIDs, so the post-redaction `sop_uid` could never match anything,
+        # and once #228 made `sop_uid` the instance's new identity, one name
+        # meaning both was the bug). The replica survived, so the test went
+        # on green while pinning logic the package no longer runs -- the
+        # #234 drift class. Whatever the applier does is now what is under
+        # test.
+        applied, failures = DicomSession._apply_redaction_outcomes(
+            [RedactionOutcome(ok=True, sop_instance_uid="1.2.3.OLD_UID",
+                              mutation=mutation)],
+            instance_map)
 
-        if sop in instance_map:
-            target = instance_map[sop]
-            target.attributes.update(mutation['attributes'])
-            updated = True
-
-        assert updated is True, "Main process failed to match worker result to instance using original_sop_uid"
+        assert failures == [], failures
+        assert applied == 1, "Main process failed to match worker result to instance using original_sop_uid"
         assert inst.attributes["0010,0010"] == "REDACTED", "Attributes were not applied to the instance"
 
     finally:
