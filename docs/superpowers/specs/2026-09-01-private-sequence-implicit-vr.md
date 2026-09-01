@@ -187,7 +187,7 @@ destroyed. With rule 4 it falls back untouched.
 > **Corrected in review.** Two of the rule attributions above do not
 > reproduce on pydicom 3.0.2, and the shipped tests use a different set
 > because of it. Re-measured element by element
-> (`scratchpad/probe/gate.py`, `pydicom 3.0.2`):
+> (`gate_reprobe.py`, 3.12.13, pydicom 3.0.2):
 >
 > ```
 > real sequence                      ACCEPTED (1 item(s))
@@ -968,8 +968,8 @@ mark them xfail.
    `session.export()` pickles the instance on *every* interpreter and
    the mutation lands on a copy. `DicomExporter.write_tree()` passes no
    executor, so `run_parallel` chooses for itself, and on a
-   free-threaded build it chooses threads. Measured on 3.14.7t with a
-   hand-built graph carrying one standard `(0008,1140)` item:
+   free-threaded build it chooses threads. Measured (`writetree_probe.py`)
+   with a hand-built graph carrying one standard `(0008,1140)` item:
    `before: 1` / `after: 1` on 3.12.13, `before: 1` / `after: 2` on
    3.14.7t. The caller's graph is mutated by the serializer.
 
