@@ -14,7 +14,7 @@ session.generate_report("compliance_report.md")
 The report includes:
 
 1. **Validation Status**: Uses Isocenter's internal audit logic to grade the session (PASS / REVIEW_REQUIRED).
-2. **Audit Trail**: Aggregated counts of actions taken (e.g., number of patients anonymized, pixels redacted).
+2. **Audit Trail**: Aggregated counts of actions taken (e.g., number of patients anonymized, pixels redacted, export runs completed).
 3. **Data Loss & Unscanned Content**: 3.1 lists every element that was
    present in the source and is not in the exported data, named with its
    VR. 3.2 lists content the PHI scan could not open -- a private value
@@ -55,10 +55,15 @@ The report includes:
     it. Losses recorded at ingest are already in it; losses recorded on
     the way *out* -- an element that could not be encoded, a waveform
     with no samples -- are written during `export()`. Call
-    `generate_report()` **after** `export()`, as the README's pipeline
-    does, or those losses cannot reach the Validation Status no matter
-    what group they are in. Which order the pipeline should document is
-    [#153](https://github.com/kvnlng/Isocenter/issues/153).
+    `generate_report()` **after** `export()`, or those losses cannot
+    reach the Validation Status no matter what group they are in.
+
+    A report generated before any export says so itself
+    ([#153](https://github.com/kvnlng/Isocenter/issues/153)): when the
+    audit trail holds no `EXPORT` row, the Executive Summary carries a
+    boundary note under the grade and a warning is logged. The note
+    states the boundary without moving the grade -- a session that only
+    audits and never exports is not penalized for it.
 
 !!! tip "Format Options"
     Currently, Isocenter supports Markdown (`.md`) reports. PDF support is planned for future releases via Pandoc integration.

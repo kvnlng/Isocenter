@@ -363,6 +363,16 @@ class WfdbExporter(Exporter):
                             written.append(path)
 
         logger.info(f"WFDB export complete. {len(written)} records written.")
+        # Every export run writes one EXPORT row (#166), whatever the
+        # format: `generate_report` keys its export boundary on the
+        # row's absence (#153), so a format that skipped it would tell
+        # its users their finished export never happened.
+        if store_backend is not None:
+            store_backend.log_audit(
+                action_type="EXPORT",
+                entity_uid=folder,
+                details=(f"WFDB export to {folder}: wrote {len(written)} "
+                         f"records."))
         return written
 
     @staticmethod

@@ -1602,6 +1602,22 @@ class DicomSession:
                  "were dropped; this report under-counts the actions "
                  "actually taken"))
 
+        # Export-side DATA_LOSS rows are written during `export()`, so
+        # a report generated first cannot contain them and used to
+        # grade PASS on a run that then dropped a private element --
+        # same session, same loss, PASS or REVIEW_REQUIRED depending
+        # only on call order (#153). The audit log is the arbiter, not
+        # a session flag: an EXPORT row (#166) survives a session
+        # reopened on this store. A log line only, never an audit row
+        # -- a WARNING row would flip the grade this note deliberately
+        # leaves alone.
+        export_recorded = "EXPORT" in audit_summary
+        if not export_recorded:
+            get_logger().warning(
+                "Report generated before any export was recorded: "
+                "export-time data losses cannot appear in it. If this "
+                "session exports, regenerate the report afterwards.")
+
         # 3. Determine Context
         #
         # Describe what was configured, never what standard it might
@@ -1691,6 +1707,7 @@ class DicomSession:
             exceptions=exceptions,
             data_losses=data_losses,
             scan_gaps=scan_gaps,
+            export_recorded=export_recorded,
             validation_status=("PASS"
                                if audit_summary and not exceptions
                                and not graded_losses and not open_gaps
@@ -2555,6 +2572,15 @@ class DicomSession:
 
         if not tasks:
             get_logger().warning("No instances found to export.")
+            # Still an export run, so it still writes its row (#166): a
+            # subset that matched nothing is a fact about this run the
+            # audit trail has to carry, and the report's export boundary
+            # keys on the row's existence, not on files (#153).
+            self.store_backend.log_audit(
+                action_type="EXPORT",
+                entity_uid=folder,
+                details=(f"DICOM export to {folder}: wrote 0 of 0 planned "
+                         f"instances; nothing matched the export plan."))
             return
 
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
@@ -2574,6 +2600,22 @@ class DicomSession:
         # still reported "Total Instances | 3" under a PASS (#181).
         self._last_export_written = summary.written
         self._last_export_requested = len(tasks)
+
+        # The run itself is an audited action, not only its failures.
+        # 'EXPORT' had been `log_audit`'s first documented example since
+        # the docstring was written, and nothing ever wrote it: the
+        # report's Audit Trail counted Anonymize and Redact and never an
+        # Export (#166). One row per run rather than per instance -- the
+        # per-instance record is the output tree itself; this row says
+        # how much of the plan reached it, and its existence is what
+        # `generate_report` keys the export boundary on (#153), durably
+        # across a session reopened on this store.
+        self.store_backend.log_audit(
+            action_type="EXPORT",
+            entity_uid=folder,
+            details=(f"DICOM export to {folder}: wrote {summary.written} "
+                     f"of {len(tasks)} planned instances from "
+                     f"{patient_count} patients."))
         print("Done.")
 
     def _report_recoverable_identities(self, tasks, written_uids) -> int:

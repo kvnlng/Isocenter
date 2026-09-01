@@ -47,7 +47,7 @@ Optional extras degrade gracefully and must keep doing so: `ocr` (pytesseract �
 
 ### The pipeline
 
-`Session` (`isocenter/session.py`, aliased from `DicomSession`) is the only public entry point and the facade over everything else. The intended call order is ingest → examine → create_config/load_config → audit → (enable_reversible_anonymization + lock_identities) → anonymize → redact → verify → generate_report → export. Anonymize and redact operate purely in memory; nothing reaches disk until `export()`.
+`Session` (`isocenter/session.py`, aliased from `DicomSession`) is the only public entry point and the facade over everything else. The intended call order is ingest → examine → create_config/load_config → audit → (enable_reversible_anonymization + lock_identities) → anonymize → redact → verify → export → generate_report. The report comes *last* because export-time `DATA_LOSS` rows are written during `export()`; this file used to document the reverse order, in which those losses missed the report and the grade read PASS (#153). A report generated before any export carries a boundary note saying so. Anonymize and redact operate purely in memory; nothing reaches disk until `export()`.
 
 `Session` supports `with`; `close()` releases a `ProcessPoolExecutor` plus two threads holding sqlite handles, and leaks worker subprocesses if skipped.
 
