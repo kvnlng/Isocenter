@@ -812,6 +812,36 @@ class SqliteStore:
         except sqlite3.OperationalError:
             return []
 
+    def get_audit_scan_gaps(self) -> List[tuple]:
+        """Every `SCAN_GAP` entry: content retained but not scanned.
+
+        Separate from `get_audit_losses` because it is a different
+        claim. A loss says an element is not in the output; this says an
+        element *is* in the output and the PHI scan could not read it
+        (#167). Both take the grade to REVIEW_REQUIRED, and folding them
+        together would file one under a section header that denies it.
+
+        No `loss_scope` column: these are private by construction --
+        only an odd-group tag reaches the parse gate -- so the column
+        would hold one value and grade nothing.
+
+        Returns:
+            List[tuple]: (timestamp, entity_uid, details)
+        """
+        self.flush_audit_queue()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT timestamp, entity_uid, details
+                    FROM audit_log
+                    WHERE action_type = 'SCAN_GAP'
+                    ORDER BY timestamp ASC
+                """)
+                return cursor.fetchall()
+        except sqlite3.OperationalError:
+            return []
+
     def check_unsafe_attributes(self) -> List[tuple]:
         """
         Scans for instances with potentially unsafe attributes (e.g., BurnedInAnnotation="YES").

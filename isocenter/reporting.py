@@ -35,6 +35,10 @@ class ComplianceReport:
         exceptions (list): List of error tuples (timestamp, action, details).
         data_losses (list): Elements present in the source and not in the
             output, as (timestamp, entity_uid, details, loss_scope).
+        scan_gaps (list): Elements that reached the exported file and
+            that the PHI scan could not open, as (timestamp, entity_uid,
+            details). The opposite claim from `data_losses`, which is
+            why it is not more of them (#167).
         validation_status (str): Overall status -- `PENDING` until a
             report is generated, then `PASS` or `REVIEW_REQUIRED`.
             Nothing emits `FAIL`: this report describes a run, and a run
@@ -90,6 +94,11 @@ class ComplianceReport:
     # answered per row, on `loss_scope`, which is what lets the report
     # say *which* losses were graded rather than grading them alike.
     data_losses: list = field(default_factory=list)
+
+    # Content that reached the exported file and that the PHI scan
+    # could not open: (timestamp, entity_uid, details). Its own field
+    # rather than more `data_losses` -- see get_audit_scan_gaps (#167).
+    scan_gaps: list = field(default_factory=list)
 
     # Validation
     # PENDING until graded; then PASS or REVIEW_REQUIRED. No FAIL --
@@ -175,8 +184,17 @@ The following actions were recorded in the secure audit trail:
         # Each row names the element and its VR -- "a tag was dropped" is
         # not actionable; the VR is what says whether it was a four-byte
         # serial number or a megabyte of vendor telemetry (#146).
+        #
+        # The section carries two claims under one number, and they are
+        # opposites: 3.1 is content that is *not* in the export, 3.2 is
+        # content that *is* and was never read. The retitle keeps 4 and
+        # 5 at their numbers, which `tests/test_reporting.py`,
+        # `tests/test_export_failure_audit.py` and
+        # `tests/test_float_pixel_data_export.py` assert verbatim
+        # (#167).
+        md_content += "\n## 3. Data Loss & Unscanned Content\n"
         if report.data_losses:
-            md_content += "\n## 3. Data Loss\n\n> [!WARNING]\n> Elements below were present in the source and are **not** in the exported data:\n\n"
+            md_content += "\n### 3.1 Data Loss\n\n> [!WARNING]\n> Elements below were present in the source and are **not** in the exported data:\n\n"
             md_content += "| Timestamp | Instance | Element | Scope |\n| :--- | :--- | :--- | :--- |\n"
             for loss in report.data_losses:
                 # (timestamp, entity_uid, details, loss_scope)
@@ -190,7 +208,23 @@ The following actions were recorded in the secure audit trail:
                 scope = loss[3] or "unrecorded"
                 md_content += f"| {loss[0]} | {loss[1]} | {loss[2]} | {scope} |\n"
         else:
-            md_content += "\n## 3. Data Loss\n\n*No data loss was recorded.*\n"
+            md_content += "\n### 3.1 Data Loss\n\n*No data loss was recorded.*\n"
+
+        # The empty case is prose, never an empty table, and that is
+        # load-bearing rather than a style choice.
+        # `tests/test_data_loss_reporting.py::_loss_table` slices this
+        # whole section and reads every `|`-leading line in it, taking
+        # the first as 3.1's header row. A 3.2 header rendered
+        # unconditionally would land in that slice with a different
+        # column count and shift every assertion in that file (#167).
+        if report.scan_gaps:
+            md_content += "\n### 3.2 Unscanned Content\n\n> [!WARNING]\n> Elements below were retained in the exported data and the PHI scan could not open them:\n\n"
+            md_content += "| Timestamp | Instance | Element |\n| :--- | :--- | :--- |\n"
+            for gap in report.scan_gaps:
+                # (timestamp, entity_uid, details)
+                md_content += f"| {gap[0]} | {gap[1]} | {gap[2]} |\n"
+        else:
+            md_content += "\n### 3.2 Unscanned Content\n\n*No unscanned content was recorded.*\n"
 
         # Exceptions Section
         if report.exceptions:

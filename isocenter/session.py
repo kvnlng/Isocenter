@@ -1498,6 +1498,7 @@ class DicomSession:
         audit_summary = self.store_backend.get_audit_summary()
         exceptions = self.store_backend.get_audit_errors()
         data_losses = self.store_backend.get_audit_losses()
+        scan_gaps = self.store_backend.get_audit_scan_gaps()
 
         # Check for unsafe attributes (BurnedInAnnotation)
         unsafe_items = self.store_backend.check_unsafe_attributes()
@@ -1566,6 +1567,12 @@ class DicomSession:
         graded_losses = [row for row in data_losses
                          if row[3] == LOSS_SCOPE_PRIVATE]
 
+        # Every scan gap is graded, with no scope test: the row only
+        # exists for a private element, and it says the de-identification
+        # scan could not read content that is in the output. A run that
+        # cannot vouch for what it exported does not get to call itself
+        # PASS (#167).
+
         # 5. Build Report DTO
         report = ComplianceReport(
             isocenter_version=ver,
@@ -1581,9 +1588,10 @@ class DicomSession:
             audit_summary=audit_summary,
             exceptions=exceptions,
             data_losses=data_losses,
+            scan_gaps=scan_gaps,
             validation_status=("PASS"
                                if audit_summary and not exceptions
-                               and not graded_losses
+                               and not graded_losses and not scan_gaps
                                else "REVIEW_REQUIRED")
         )
 
