@@ -35,6 +35,49 @@ def _gc_off():
     gc.disable()
 
 
+class _ExceptionAsResult:
+    """Runs one task; the task's exception becomes its return value.
+
+    This is the worker-side half of `yield_exceptions=True`. A class at
+    module scope rather than a closure because it has to pickle into a
+    process-pool worker alongside the `func` it wraps -- the same
+    constraint that keeps `scan_worker` and friends at module scope.
+
+    `except Exception` is the contract, not sloppiness: whatever one
+    task raises must cost that task alone, never the pass. What it
+    deliberately does not catch is `BaseException` -- a `KeyboardInterrupt`
+    or a dying interpreter should still tear the run down.
+    """
+
+    def __init__(self, func):
+        self.func = func
+
+    def __call__(self, item):
+        try:
+            return self.func(item)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            return exc
+
+
+def _trailing_exception(iterator):
+    """Yields from `iterator`; a raise becomes the final yielded value.
+
+    The pool-side half of `yield_exceptions=True`. `_ExceptionAsResult`
+    already turns an ordinary task exception into a value inside the
+    worker, so anything that still raises *here* is the machinery itself
+    failing: a worker killed outright (`BrokenProcessPool`), a result
+    that would not unpickle. The tasks queued behind that failure are
+    gone and cannot be named -- the pool does not say which they were --
+    so the one fact that survives is yielded as the last value, and the
+    results already produced are kept rather than discarded with the
+    raise (#232).
+    """
+    try:
+        yield from iterator
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        yield exc
+
+
 @dataclass(frozen=True)
 class _Strategy:
     """How one `run_parallel` call will actually be executed.
@@ -247,7 +290,8 @@ def run_parallel(
     maxtasksperchild: int = None,
     progress: bool = None,  # Alias for show_progress
     disable_gc: bool = False,  # Disable GC in worker processes
-    return_generator: bool = False  # Implement streaming
+    return_generator: bool = False,  # Implement streaming
+    yield_exceptions: bool = False  # Exceptions come back as values
 ) -> Any:  # Union[List[R], Iterator[R]]
     """
     Executes `func(item)` in parallel using multiple processes or threads.
@@ -270,6 +314,20 @@ def run_parallel(
         progress (bool, optional): Alias for show_progress.
         disable_gc (bool, optional): If True, disables GC in worker processes for speed.
         return_generator (bool): If True, returns a generator (streaming) instead of a list.
+        yield_exceptions (bool): If True, a task whose `func` raises yields
+            its exception as that task's result value instead of raising at
+            the point of iteration, and a failure of the pool itself -- a
+            worker killed outright, a result that will not unpickle -- is
+            yielded once, as the final value, after which the results the
+            pool can no longer deliver are over. Only for callers that
+            branch on `isinstance(result, Exception)`; by default a raise
+            is a raise, because a caller with no such arm must never
+            receive an exception as data (#232). One promise the recycling
+            pool cannot keep: `multiprocessing.Pool` answers a *killed*
+            worker by respawning it and waiting forever for the lost task,
+            so under `maxtasksperchild` that case hangs rather than
+            yielding -- ordinary task exceptions still come back as values
+            there.
 
     Returns:
         Union[List[R], Iterator[R]]: The results of the parallel execution.
@@ -281,12 +339,18 @@ def run_parallel(
         max_workers, chunksize, maxtasksperchild, disable_gc, force_threads,
         show_progress, desc, total)
 
+    if yield_exceptions:
+        func = _ExceptionAsResult(func)
+
     if executor is not None:
         results = _run_on_shared_executor(executor, func, items, strategy)
     elif strategy.maxtasksperchild is not None:
         results = _run_on_recycling_pool(func, items, strategy)
     else:
         results = _run_on_new_executor(func, items, strategy)
+
+    if yield_exceptions:
+        results = _trailing_exception(results)
 
     # Each path is a generator, so nothing has run yet. Streaming callers
     # get it untouched; everyone else gets the work done here.
