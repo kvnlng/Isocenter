@@ -2124,6 +2124,18 @@ class DicomSession:
         # would be dropped by a run that reported no error.
         instances = {t['instance'].sop_instance_uid: t['instance'] for t in tasks}
 
+        # Audit accounting per rule-pass (#247). `targeted` is countable
+        # here; `applied` is tallied by `_apply_redaction_outcomes` from
+        # each mutation's own `machine_sn`, because outcomes carry no
+        # order and a UID join back to tasks has the two-rules-one-
+        # instance ambiguity `execute_redaction_task` documents.
+        passes = {}
+        for t in tasks:
+            acct = passes.setdefault(
+                t['machine_sn'], {'zones': len(t['rois']),
+                                  'targeted': 0, 'applied': 0})
+            acct['targeted'] += 1
+
         # Pixel I/O and NumPy ops release the GIL. The generator is consumed
         # incrementally so each worker's image is applied and released rather
         # than held until the end.
@@ -2137,7 +2149,18 @@ class DicomSession:
             progress=show_progress)
 
         applied, failures = self._apply_redaction_outcomes(
-            mutations, instances, self.store_backend)
+            mutations, instances, self.store_backend, passes)
+
+        # The audit row for every pass that targeted anything, written in
+        # the parent (#126) and before the failure raise below, exactly
+        # as the serial path orders it: a caller that catches
+        # `RedactionError` still holds a report whose section 2 accounts
+        # for this run (#247). Before `scan_burned_in_annotations` too,
+        # so a crash in the risk scan cannot cost the run its redaction
+        # accounting.
+        for machine_sn, acct in passes.items():
+            service.record_redaction_pass(
+                machine_sn, acct['zones'], acct['targeted'], acct['applied'])
 
         if applied < len(tasks):
             get_logger().warning(
@@ -2163,7 +2186,8 @@ class DicomSession:
         return applied
 
     @staticmethod
-    def _apply_redaction_outcomes(outcomes, instances, store_backend=None):
+    def _apply_redaction_outcomes(outcomes, instances, store_backend=None,
+                                  passes=None):
         """Copies each worker's result back onto the in-memory instance.
 
         `instances` maps pre-redaction SOP UID to the instance in this
@@ -2315,6 +2339,14 @@ class DicomSession:
 
             instance.mark_modified()
             applied += 1
+            # Attributed by the mutation's own `machine_sn` rather than
+            # by joining the UID back to a task: two rules matching one
+            # instance produce two mutations under one pre-redaction UID,
+            # and each belongs to its own pass's row (#247).
+            if passes is not None:
+                acct = passes.get(mutation.get('machine_sn'))
+                if acct is not None:
+                    acct['applied'] += 1
 
         return applied, _report_redaction_failures(failures, store_backend)
 

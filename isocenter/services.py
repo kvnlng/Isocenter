@@ -235,6 +235,40 @@ class RedactionService:
         elif count > 0:
             self.logger.info(f"Verified {count} Burned In Annotations were remediated.")
 
+    def record_redaction_pass(self, machine_sn: str, zone_count: int,
+                              targeted: int, applied: int):
+        """One `REDACTION` audit row per rule-pass, spelled once for both paths.
+
+        This is the row `generate_report`'s section 2 counts and the
+        grade's `audit_summary` arm sees, so its unit and its wording are
+        the published shape (#247), decided here rather than inherited:
+
+        - **Per rule-pass**, keyed on the serial spelling the rule was
+          configured with (`"*"` included) -- bounded like the serial
+          path's old per-machine row, where per-instance rows would put
+          10k lines in a 10k-instance session's report.
+        - **Outcome, not intent.** The row is written after the pass, and
+          `applied`/`targeted` say what happened. The serial path used to
+          write "Redacting N images..." before its loop, which attested a
+          pass whose every instance was then skipped or failed.
+        - **In the parent, always** (#126): a worker's audit thread is
+          torn down at pool shutdown without `stop()`, so a row queued
+          there can be lost -- and for a `:memory:` database the child
+          writes nowhere at all.
+
+        Both `redact_machine_instances` and `Session._apply_redaction_rules`
+        call this and nothing else writes `REDACTION` rows;
+        `tests/test_redaction_audit_accounting.py` pins the two paths to
+        byte-identical accounting for identical work.
+        """
+        if not self.store_backend:
+            return
+        self.store_backend.log_audit(
+            action_type="REDACTION",
+            entity_uid=machine_sn,
+            details=(f"Applied {applied} of {targeted} candidate images "
+                     f"with {zone_count} zones"))
+
     def prepare_redaction_tasks(self, machine_rules: dict, verbose: bool = False,
                                 force: bool = False) -> List[dict]:
         """
@@ -432,6 +466,14 @@ class RedactionService:
             # Prepare Mutated State to return (for Process Isolation)
             mutation = {
                 "original_sop_uid": original_uid,  # KEY FIX: Mapped to Main Process
+                # The rule-pass this application belongs to, for the
+                # parent's REDACTION audit row (#247). Carried on the
+                # mutation rather than joined back through a UID map in
+                # the parent, because one instance matched by two rules
+                # produces two mutations under one pre-redaction UID --
+                # a map keyed on the UID would attribute both to
+                # whichever rule built it first.
+                "machine_sn": task["machine_sn"],
                 # The post-redaction UID, and the parent **assigns** it
                 # (`_apply_redaction_outcomes`, #228). Reaching this line
                 # means `regenerate_uid()` ran a few lines above, so this
@@ -643,13 +685,6 @@ class RedactionService:
 
         self.logger.info(f"Redacting {len(targets)} images for {machine_sn} ({len(rois)} zones)...")
 
-        if self.store_backend and targets:
-            self.store_backend.log_audit(
-                action_type="REDACTION",
-                entity_uid=machine_sn,
-                details=f"Redacting {len(targets)} images with {len(rois)} zones"
-            )
-
         # 1. Compute Hash for this Config
         # We assume rois list fully captures the intent (zones)
         #
@@ -673,6 +708,7 @@ class RedactionService:
         config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
 
         failures = []
+        applied = 0
 
         for inst in tqdm(
                 targets,
@@ -728,6 +764,7 @@ class RedactionService:
                     inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
                     # Force Dirty to persist metadata update
                     inst.mark_modified()
+                    applied += 1
                     self.logger.debug(f"  Modified {inst.sop_instance_uid}")
 
             except Exception as e:
@@ -769,7 +806,16 @@ class RedactionService:
 
                 inst.unload_pixel_data()
 
-        # After the pass, so every instance that could be redacted was.
+        # After the pass and before the raise, for the same reason the
+        # ERROR rows are: a caller that catches `RedactionError` still
+        # holds a report whose section 2 accounts for this pass (#213,
+        # #247). This row used to be written *before* the pass, as intent
+        # -- "Redacting N images..." -- which attested passes whose every
+        # instance was subsequently skipped or failed.
+        if targets:
+            self.record_redaction_pass(
+                machine_sn, len(rois), len(targets), applied)
+
         if failures:
             raise RedactionError(
                 _report_redaction_failures(failures, self.store_backend),
