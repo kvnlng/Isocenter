@@ -318,6 +318,14 @@ class PhiInspector:
         """
         findings = []
 
+        # Appended last, and that is the point: these delete a whole
+        # sequence, and a configured-tag finding raised *inside* one
+        # holds a live reference to an item within it. Remediating the
+        # contents before removing the container means every audit row
+        # describes an item that was still in the graph when it was
+        # written.
+        seq_removals = []
+
         # 0. Determine Scan Targets
         # Walked from the instance itself, not read off a prebuilt index.
         # It was read off `Instance.text_index` until 0.8.0, and that
@@ -389,9 +397,40 @@ class PhiInspector:
                 except ValueError:
                     pass  # Malformed tag?
 
+            # A private *sequence* is a private tag. `scan_targets` is
+            # built from `attributes` alone, so before #167 a private SQ
+            # was swept only when it arrived as an opaque `UN` blob --
+            # i.e. only under Implicit VR, and only because the scan
+            # could not see it was a sequence. Restoring the structure
+            # (#167) removes that accident, so the sweep has to ask the
+            # question directly, at every depth, or the default
+            # configuration starts exporting private sequences.
+            for owner, path in iter_item_tree(instance):
+                for seq_tag in list(owner.sequences.keys()):
+                    try:
+                        if int(seq_tag.split(',')[0], 16) % 2 == 0:
+                            continue
+                    except ValueError:
+                        continue
+                    if seq_tag in WHITELIST_TAGS:
+                        continue
+                    seq_removals.append(PhiFinding(
+                        entity_uid=instance.sop_instance_uid,
+                        entity_type="Instance",
+                        field_name=f"Private Sequence {seq_tag}",
+                        value="<PRIVATE>",
+                        reason="Private Tag Removal Requested",
+                        tag=seq_tag,
+                        patient_id=patient_id,
+                        entity=owner,
+                        entity_path=path,
+                        remediation_proposal=PhiRemediation(
+                            action_type="REMOVE_TAG",
+                            target_attr=seq_tag)))
+
         # 2. Configured PHI Tags
         if not self.phi_tags:
-            return findings
+            return findings + seq_removals
 
         for item, tag, path in scan_targets:
             # Parse config
@@ -469,7 +508,7 @@ class PhiInspector:
                     entity_path=path,
                     remediation_proposal=proposal
                 ))
-        return findings
+        return findings + seq_removals
 
     def _scan_study(self, study: Study, patient_id: str = None) -> List[PhiFinding]:
         """

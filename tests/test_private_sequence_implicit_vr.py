@@ -189,14 +189,14 @@ def explicit_file(folder, uid_suffix="2"):
     return folder
 
 
-def nested_file(folder, uid_suffix="3"):
-    """A private `UN` sequence one level inside a *standard* sequence."""
+def nested_file(folder, value=PRIVATE_SEQUENCE_BYTES, uid_suffix="3"):
+    """A private `UN` value one level inside a *standard* sequence."""
     folder = str(folder)
     os.makedirs(folder, exist_ok=True)
     ds = _base(uid_suffix)
     item = Dataset()
     item.add_new(Tag(0x0009, 0x0010), "LO", "ACME_HEADER")
-    item.add_new(Tag(0x0009, 0x1003), "OB", PRIVATE_SEQUENCE_BYTES)
+    item.add_new(Tag(0x0009, 0x1003), "OB", value)
     ds.ReferencedImageSequence = Sequence([item])
     _save(ds, os.path.join(folder, "nested.dcm"), ImplicitVRLittleEndian)
     return folder
@@ -519,4 +519,122 @@ def test_a_binary_child_of_a_parsed_sequence_is_reported_as_lost(
 
     assert "0009,1002" in content, (
         "the binary child vanished with nothing saying so -- #137 again")
+    assert "REVIEW_REQUIRED" in content
+
+
+# --------------------------------------------------------------------------
+# T9 -- the default configuration has to remove a private *sequence*
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("writer", [implicit_file, explicit_file],
+                         ids=["implicit", "explicit"])
+def test_remove_private_tags_removes_a_private_sequence(
+        tmp_path, sessions, writer):
+    """`remove_private_tags=True` is the default, and it missed sequences.
+
+    The sweep built its targets from `attributes` alone, so a private
+    `SQ` was never a target and `REMOVE_TAG` never looked in
+    `sequences`. Under Explicit VR that has always exported an orphaned
+    private sequence whose creator was stripped -- red before this fix.
+    Under Implicit VR it was masked, because the blob was an *attribute*
+    and the attribute sweep caught it; restoring the structure (#167)
+    removes that accident, which is why the two halves ship together.
+    """
+    sess = sessions(remove_private=True)
+    sess.ingest(writer(tmp_path / "src"))
+    sess.audit()
+    sess.anonymize()
+    out = str(tmp_path / "out")
+    sess.export(out, use_compression=False)
+
+    _data, ds = _exported(out)
+
+    leftover = [str(elem.tag) for elem in ds if elem.tag.group % 2]
+    assert leftover == [], f"private elements survived the sweep: {leftover}"
+
+
+# --------------------------------------------------------------------------
+# T10 -- remove the container after remediating what is inside it
+# --------------------------------------------------------------------------
+
+def test_the_sequence_removal_is_proposed_after_its_contents(
+        tmp_path, sessions):
+    """Order decides whether the audit trail describes live objects.
+
+    A configured-tag finding raised inside the sequence holds a live
+    reference to an item within it. Remediating the contents first means
+    every audit row describes an item that was still in the graph when
+    the row was written; removing the container first leaves the nested
+    remediations writing into a detached item and filing rows for it.
+    """
+    sess = sessions(remove_private=True)
+    sess.ingest(implicit_file(tmp_path / "src"))
+
+    uid = _instance(sess).sop_instance_uid
+    findings = [f for f in sess.audit().findings if f.entity_uid == uid]
+
+    removal = [i for i, f in enumerate(findings)
+               if f.tag == PRIVATE_SQ and f.value == "<PRIVATE>"]
+    nested = [i for i, f in enumerate(findings) if f.entity_path]
+    assert [f.tag for f in findings if f.tag == PRIVATE_CREATOR], (
+        "the attribute sweep stopped seeing the private creator; the "
+        "sequence arm is an addition to it, not a replacement")
+    assert removal, "the private sequence was never proposed for removal"
+    assert nested, "the identifiers inside it were never found"
+    assert min(removal) > max(nested), (
+        "the container is removed before its contents are remediated")
+
+
+def test_remove_private_tags_reaches_a_nested_private_sequence(
+        tmp_path, sessions):
+    """"At every depth" is a claim, so it needs a test that holds it.
+
+    The sweep walks `iter_item_tree`, not `instance.sequences`. Replace
+    the walk with the instance's own sequences and the test above still
+    passes -- this is the one that goes red, and a private block one
+    level inside a standard sequence is the ordinary shape for a vendor
+    that hangs its data off Referenced Image Sequence.
+    """
+    sess = sessions(remove_private=True)
+    sess.ingest(nested_file(tmp_path / "src"))
+    sess.audit()
+    sess.anonymize()
+    out = str(tmp_path / "out")
+    sess.export(out, use_compression=False)
+
+    data, ds = _exported(out)
+
+    assert SECRET_NAME.encode() not in data
+    leftover = [str(elem.tag)
+                for item in ds.get((0x0008, 0x1140)).value
+                for elem in item if elem.tag.group % 2]
+    assert leftover == [], (
+        f"private elements survived one level down: {leftover}")
+
+
+def test_an_unscanned_candidate_one_level_down_is_still_reported(
+        tmp_path, sessions):
+    """The row has to survive the recursion, not just the top level.
+
+    `process_sequence` forwards `unscanned` into every nested
+    `populate_attrs`, and the standard-sequence call site forwards it
+    in. Drop it at either point and an unverifiable private value inside
+    a standard sequence goes back to being exported with nothing saying
+    so -- silent again, one level down, which is the failure this fix
+    exists to close.
+    """
+    sess = sessions(remove_private=False)
+    sess.ingest(nested_file(tmp_path / "src",
+                            value=ADVERSARIAL["coincidental vendor blob"]))
+    sess.audit()
+    sess.anonymize()
+    sess.export(str(tmp_path / "out"), use_compression=False)
+    report = str(tmp_path / "report.md")
+    sess.generate_report(report)
+
+    with open(report) as handle:
+        content = handle.read()
+
+    assert PRIVATE_SQ in content, (
+        "an unscanned value inside a standard sequence was not reported")
     assert "REVIEW_REQUIRED" in content

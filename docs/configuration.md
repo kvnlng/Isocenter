@@ -100,6 +100,14 @@ remove_private_tags: true
 * `true`: Removes **ALL** private tags. (Recommended for safety).
 * `false`: Retains them (Use only if you are sure they are safe or strictly needed for analysis).
 
+"All" includes private *sequences*, at every depth, and that is newer
+than it sounds: until
+[#167](https://github.com/kvnlng/Isocenter/issues/167) the sweep read an
+instance's attributes only, so a private `SQ` was never a candidate and
+survived into the exported file with its private creator stripped off
+it. A private sequence nested inside another sequence is swept on the
+same rule.
+
 The flag governs the private tags Isocenter *holds*, which is not every
 private tag in your source files. Where the line falls:
 
@@ -115,6 +123,19 @@ kept and exported with no `DATA_LOSS` entry. The first row is therefore not
 the small-strings case it looks like; under implicit VR it is all of your
 private data, blobs included. See below
 ([#151](https://github.com/kvnlng/Isocenter/issues/151)).
+
+**One `UN` value is resolved rather than kept opaque.** If a private
+`UN` value begins with the item tag `(FFFE,E000)` and re-encodes byte
+for byte as an implicit-VR sequence, it is ingested as a sequence -- the
+same graph the explicit-VR reading of the same file produces -- so the
+PHI scan walks inside it, remediation reaches the values there, and
+`remove_private_tags: true` removes it
+([#167](https://github.com/kvnlng/Isocenter/issues/167)). Its items then
+follow the ordinary rules, binary-VR children included, so a vendor `OB`
+inside such a sequence is dropped at ingest and reported like any other.
+A candidate that does *not* re-encode exactly keeps its bytes untouched
+and files a `SCAN_GAP` entry, which appears in section 3.2 of the
+compliance report and grades the session `REVIEW_REQUIRED`.
 
 !!! warning "`false` cannot retain private tags with a binary VR"
 
@@ -160,7 +181,8 @@ private data, blobs included. See below
     naming the tag *and its VR* -- the VR is the part that says whether
     you lost a four-byte serial number or a megabyte of vendor
     telemetry. It reaches you in three places: the session log, section
-    3 (*Data Loss*) of the compliance report written by
+    3.1 (*Data Loss*, under *Data Loss & Unscanned Content*) of the
+    compliance report written by
     `session.generate_report(path)`, and
     `session.store_backend.get_audit_losses()` if you want the rows
     directly. Read that section before concluding a vendor block came
