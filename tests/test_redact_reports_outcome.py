@@ -40,9 +40,15 @@ def session(tmp_path):
     patient.studies.append(study)
     sess.store.patients.append(patient)
 
+    # (y1, y2, x1, x2), selecting a real 20x20 block. The zone here was
+    # `[0, 0, 20, 20]` until #244 -- rows 0:0, zero pixels -- written in
+    # the x,y,w,h box convention the automation half of the codebase
+    # speaks (#258), and every count this file asserts was earned by
+    # empty-slice "applications" that touched nothing. Re-derived: the
+    # counts are unchanged with a landing zone, and now mean it.
     sess.configuration.rules = [{
         "serial_number": "SERIAL_1",
-        "redaction_zones": [[0, 0, 20, 20]],
+        "redaction_zones": [[0, 20, 0, 20]],
     }]
 
     yield sess

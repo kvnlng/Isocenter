@@ -834,6 +834,29 @@ class RedactionService:
             try:
                 r1, r2, c1, c2 = [int(v) for v in roi]
 
+                # A zone whose *shape* is empty is a configuration error
+                # on any image: `arr[r1:r2, c1:c2]` with `r2 <= r1` or
+                # `c2 <= c1` selects zero pixels, the assignment below
+                # would still set `modified = True`, and the instance
+                # would be counted, renamed, and fully attested --
+                # `BurnedInAnnotation = NO` on pixels nothing touched
+                # (#244). Judged before the off-image `continue` below,
+                # which is #235's boundary for a *real* zone that landed
+                # elsewhere and stays a legitimate skip. The raise takes
+                # the #213 failure path in every caller: ERROR rows and
+                # `RedactionError` on both redact paths, a failed
+                # outcome and no file in the export worker. One common
+                # source of this shape is a box in x,y,w,h order --
+                # `discovery.py` converts to (y1, y2, x1, x2) and
+                # `automation.py` does not (#258).
+                if r2 <= r1 or c2 <= c1:
+                    raise ValueError(
+                        f"redaction zone {tuple(roi)} selects no pixels: "
+                        "zones are (y1, y2, x1, x2) and this one has "
+                        "y2 <= y1 or x2 <= x1, so it cannot redact "
+                        "anything on any image -- it used to earn a full "
+                        "attestation anyway (#244)")
+
                 # A zone starting past the edge describes nothing to redact.
                 if r1 >= rows or c1 >= cols:
                     continue
