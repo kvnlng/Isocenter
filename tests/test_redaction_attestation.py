@@ -45,7 +45,7 @@ import numpy as np
 import pydicom
 import pytest
 
-from isocenter.services import RedactionService
+from isocenter.services import RedactionError, RedactionService
 
 #: Both spellings, always: `redact()` picks its executor from these, and
 #: the defect being fixed lived in the parallel path only.
@@ -717,44 +717,74 @@ def test_force_is_off_by_default(
 # --- the documented boundary ------------------------------------------------
 
 @pytest.mark.parametrize("lever", LEVERS)
-def test_a_zone_that_selects_no_pixels_still_earns_the_attestation(
+def test_a_zone_that_selects_no_pixels_is_rejected_loudly(
         reloaded_redaction_session, monkeypatch, lever):
-    """The gate is "a zone was applied", not "the bytes changed".
+    """An empty-shape zone is a configuration error, not a redaction.
 
-    **Selectivity guard** -- green on `84113ab` and green after. It pins
-    a boundary this change deliberately does **not** move, so that the
-    next reader tidying #235 into "only count instances whose pixels
-    differ" finds a test standing in the way with the reason attached.
+    Re-derived from what stood here as
+    `test_a_zone_that_selects_no_pixels_still_earns_the_attestation`,
+    which pinned the pre-#244 behaviour: `[0, 0, 20, 20]` is
+    `(y1, y2, x1, x2)` with `y2 <= y1`, selects `arr[0:0, 20:20]` --
+    empty on any image -- and still earned the count, the new identity,
+    `BurnedInAnnotation = NO` and the attestation hash, so the export
+    carried a first-class claim that identifiers were removed from an
+    image nothing touched.
 
-    `[0, 0, 20, 20]` is in bounds and selects `arr[0:0, 20:20]`, which is
-    empty. `apply_redaction_to_array` sets `modified = True` after the
-    assignment without comparing, so this instance is counted, renamed
-    and fully attested with no pixel touched.
-
-    Redefining `modified` as "the bytes changed" is the fix that would
-    close it, and it is rejected: a correct re-run of an already-redacted
-    instance changes nothing either, so it would never re-earn the
-    attestation, and the `current_hash == config_hash` skip -- the thing
-    that keeps a second `redact()` off every pixel in a 100GB store --
-    would stop working. `tests/test_redact_reports_outcome.py`'s own
-    fixture uses exactly this zone, which is how the shape stayed
-    invisible.
+    The fix is at zone validation, not at the #235 gate: redefining
+    `modified` as "the bytes changed" would cost the attestation-hash
+    skip and turn an idempotent re-redaction into "not applied" (that
+    argument stands unchanged in `apply_redaction_to_array`). A zone
+    whose *shape* is empty can be judged with no image at all, so it
+    raises, and the raise takes the #213 failure path: ERROR row per
+    instance, `RedactionError` after the pass, nothing attested,
+    nothing renamed. `tests/test_redact_reports_outcome.py`'s fixture
+    used exactly this zone believing it meant something -- see #244 for
+    why that belief was reasonable (the automation half of the codebase
+    speaks x,y,w,h).
     """
     monkeypatch.setenv(lever, "1")
     session, inst = reloaded_redaction_session(
         [ZERO_AREA_ZONE], name=f"zeroarea_{lever}")
     source_uid = inst.sop_instance_uid
 
-    assert session.redact(show_progress=False) == 1, (
-        "an in-bounds zone selecting no pixels stopped being counted; "
-        "that is a behaviour change this test exists to make deliberate")
+    with pytest.raises(RedactionError):
+        session.redact(show_progress=False)
 
-    assert inst.attributes.get("0028,0301") == "NO"
-    assert inst.attributes.get("0008,0008") == ["DERIVED", "SECONDARY"]
-    assert inst.attributes.get("_ISOCENTER_REDACTION_HASH")
-    assert inst.sop_instance_uid != source_uid
+    for key in ATTESTATION_KEYS:
+        assert key not in inst.attributes, (
+            f"{key} was written by a pass whose only zone can never "
+            "select a pixel; that is the false attestation #244 closes")
+    assert inst.sop_instance_uid == source_uid, (
+        "a failed instance is left exactly as it was found (#213); an "
+        "empty-shape zone renamed it anyway")
 
     inst.unload_pixel_data()
-    assert int(inst.get_pixel_data().sum()) == PRISTINE_TOTAL, (
-        "a zone selecting no pixels changed some; the boundary this test "
-        "documents is not the one being exercised")
+    assert int(inst.get_pixel_data().sum()) == PRISTINE_TOTAL
+
+    db_path = session.persistence_file
+    session.close()
+    errors = _audit(db_path, "ERROR")
+    assert any("selects no pixels" in details for _uid, details in errors), (
+        f"the rejection is not in the audit log: {errors}")
+
+
+def test_the_serial_path_rejects_an_empty_zone_the_same_way(
+        reloaded_redaction_session):
+    """Both public spellings answer the empty-shape zone identically.
+
+    Same property as every other serial-alongside-parallel assertion in
+    this file: two paths, one behaviour, or they drift apart the way
+    #235 measured.
+    """
+    session, inst = reloaded_redaction_session(
+        [IN_IMAGE_ZONE], name="zeroarea_serial")
+    source_uid = inst.sop_instance_uid
+    service = RedactionService(session.store, session.store_backend)
+
+    with pytest.raises(RedactionError):
+        service.redact_machine_instances(
+            "SN_RELOAD", [tuple(ZERO_AREA_ZONE)], show_progress=False)
+
+    for key in ATTESTATION_KEYS:
+        assert key not in inst.attributes
+    assert inst.sop_instance_uid == source_uid
