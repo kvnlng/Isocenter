@@ -206,6 +206,28 @@ class RemediationService:
                     entity.mark_modified()
                     details = f"Removed Tag {proposal.target_attr} from {finding.entity_uid}"
                     action_type = "REMEDIATION_REMOVE"
+                elif proposal.target_attr in getattr(entity, "sequences", {}):
+                    # A private sequence is a private tag, and the sweep
+                    # asks for it by name since #167. Without this arm
+                    # the finding is filed, the report says the block
+                    # was removed, and the exporter writes it anyway.
+                    #
+                    # Same `mark_modified()` reasoning as the attribute
+                    # arm above: `del` on the dict bumps no revision, so
+                    # without it the next save skips an instance whose
+                    # private sequence was just stripped and the store
+                    # keeps it.
+                    #
+                    # `action_type` stays `REMEDIATION_REMOVE`:
+                    # `audit_summary` counts action types, and a second
+                    # spelling would split one behaviour across two rows
+                    # of the report's section 2. The `details` text
+                    # carries the distinction.
+                    del entity.sequences[proposal.target_attr]
+                    entity.mark_modified()
+                    details = (f"Removed Sequence {proposal.target_attr} "
+                               f"from {finding.entity_uid}")
+                    action_type = "REMEDIATION_REMOVE"
             # 2. Python Object Attribute
             elif hasattr(entity, proposal.target_attr):
                 setattr(entity, proposal.target_attr, None)
@@ -224,11 +246,12 @@ class RemediationService:
             self.logger.info(details)
             if self.store_backend:
                 if audit_buffer is not None:
-                    # Four elements, including the `loss_scope` slot no
-                    # remediation ever fills: `log_audit_batch` takes one
-                    # shape, not one-or-the-other (#146).
+                    # Five elements, including the `loss_scope` (#146)
+                    # and `element_tag` (#167) slots no remediation ever
+                    # fills: `log_audit_batch` takes one shape, not one
+                    # of several.
                     audit_buffer.append(
-                        (action_type, finding.entity_uid, details, None))
+                        (action_type, finding.entity_uid, details, None, None))
                 else:
                     self.store_backend.log_audit(action_type, finding.entity_uid, details)
 

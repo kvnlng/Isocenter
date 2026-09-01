@@ -29,6 +29,7 @@ import warnings
 
 import numpy as np
 import pytest
+from pydicom.tag import Tag
 
 from isocenter.entities import (Instance, DicomSequence, DicomItem)
 from isocenter.io_handlers import (DicomExporter, ExportContext,
@@ -145,3 +146,62 @@ def test_importing_isocenter_uses_no_pydicom_api_removed_in_v4():
     assert not offenders, (
         "importing isocenter announced a pydicom removal:\n  "
         + "\n  ".join(offenders))
+
+
+def test_the_un_sequence_gate_uses_no_pydicom_api_removed_in_v4():
+    """`_sequence_from_un_bytes` sets two `DicomIO` flags 4.0 may remove.
+
+    Both are required: without them `read_sequence` raises
+    `AttributeError: 'DicomBytesIO' object has no attribute
+    '_tag_packer'`. They are also two of the four names `REMOVED_IN_V4`
+    watches, which makes this the one call shape in the codebase where a
+    pydicom bump could turn a working parse into a silent refusal --
+    the gate returns None for every failure, so #167 would come back
+    reported as "this vendor block is unparseable" when the truth is
+    that our parser broke.
+
+    Runs the gate on a sequence it must accept, so a refusal fails here
+    rather than only in the audit (#167).
+    """
+    import struct
+
+    from isocenter.io_handlers import _sequence_from_un_bytes
+
+    def elem(group, element, value):
+        return struct.pack("<HHI", group, element, len(value)) + value
+
+    payload = elem(0x0010, 0x0010, b"SECRET^PHI")
+    raw = struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        parsed = _sequence_from_un_bytes(raw, Tag(0x0009, 0x1003), "iso8859")
+
+    assert parsed is not None and len(parsed) == 1, (
+        "the gate refused a sequence it re-encodes byte for byte; "
+        "a pydicom change, not a malformed vendor block")
+
+    offenders = _removals(recorded)
+    assert not offenders, (
+        "the UN-sequence gate used a pydicom API that 4.0 removes:\n  "
+        + "\n  ".join(offenders))
+
+
+def test_the_gate_can_still_read_a_datasets_character_set():
+    """`populate_attrs` reads `Dataset._character_set` to decode text.
+
+    A private name, so pydicom may rename it without announcing a
+    removal -- and the `getattr` default would then hide the rename by
+    silently falling back to `iso8859` for every dataset, including one
+    that declared a Specific Character Set. Both return shapes are valid
+    `encoding` arguments; what this pins is that the attribute exists
+    and is non-empty.
+    """
+    from pydicom.dataset import Dataset
+
+    bare = getattr(Dataset(), "_character_set", None)
+    assert bare, "Dataset._character_set is gone or empty"
+
+    declared = Dataset()
+    declared.SpecificCharacterSet = "ISO_IR 100"
+    assert declared._character_set, "a declared character set reads as empty"

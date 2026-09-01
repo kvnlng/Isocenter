@@ -21,7 +21,8 @@ from .services import (RedactionService, RedactionOutcome, RedactionError,
 from .config_manager import ConfigLoader
 from .privacy import PhiInspector, PhiFinding, PhiReport
 from .logger import configure_logger, get_logger
-from .reporting import ComplianceReport, get_renderer
+from .reporting import (ComplianceReport, get_renderer, GAP_REMOVED,
+                        GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, generate_manifest_file
 from .persistence import SqliteStore
 from .crypto import KeyManager
@@ -29,7 +30,8 @@ from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import run_parallel, _env_int
 from .configuration import IsocenterConfiguration, FlowList
-from .entities import PhiStatus, clone_sequences, resolve_item_path
+from .entities import (PhiStatus, clone_sequences, resolve_item_path,
+                       iter_item_tree)
 from .profiles import PRIVACY_PROFILES
 from . import pixel_analysis
 from .automation import ConfigAutomator
@@ -1471,6 +1473,66 @@ class DicomSession:
 
         return pd.DataFrame(rows)
 
+    def _resolve_scan_gaps(self, rows: list) -> list:
+        """Says, per `SCAN_GAP` row, whether the element is still held.
+
+        The row is written by `DicomImporter` at ingest, where nothing
+        knows what the export will carry: `remove_private_tags` is
+        applied later, by the sweep in `PhiInspector`, and it deletes
+        the element from the object graph. So the row states ingest
+        knowledge and this resolves the rest of it (#167).
+
+        The graph is a sound oracle for the question. `remove_private_
+        tags` has exactly one consumer -- `PhiInspector` -- and the
+        exporter applies no private filtering of its own, so an element
+        still in the graph is one the next `export()` writes.
+
+        This is a presence test, not a second classification. It never
+        re-runs `_sequence_from_un_bytes`: which elements the gate
+        refused was settled once, at ingest, and is read back off the
+        row rather than decided again (#84).
+
+        Args:
+            rows (list): `(timestamp, entity_uid, details, element_tag)`
+                from `SqliteStore.get_audit_scan_gaps`.
+
+        Returns:
+            list: The same rows with `element_tag` replaced by a
+            disposition -- `GAP_REMOVED`, `GAP_RETAINED` or
+            `GAP_UNRESOLVED`.
+        """
+        # Only the instances a gap row names are walked. The rows are
+        # few and the graph is not; walking every instance to answer a
+        # question about three of them is how a report starts costing
+        # what an export costs.
+        wanted = {row[1] for row in rows}
+        held = {}
+        if wanted:
+            for patient in self.store.patients:
+                for study in patient.studies:
+                    for series in study.series:
+                        for inst in series.instances:
+                            if inst.sop_instance_uid not in wanted:
+                                continue
+                            # Every depth: the gate runs on the way down
+                            # through sequences too, so a gap can name an
+                            # element that only exists inside an item.
+                            held[inst.sop_instance_uid] = {
+                                tag
+                                for item, _path in iter_item_tree(inst)
+                                for tag in item.attributes}
+
+        resolved = []
+        for timestamp, uid, details, tag in rows:
+            if not tag or uid not in held:
+                disposition = GAP_UNRESOLVED
+            elif tag in held[uid]:
+                disposition = GAP_RETAINED
+            else:
+                disposition = GAP_REMOVED
+            resolved.append((timestamp, uid, details, disposition))
+        return resolved
+
     def generate_report(self, output_path: str, format: str = "markdown") -> None:
         """
         Generates a formal Compliance Report for the current session.
@@ -1498,6 +1560,8 @@ class DicomSession:
         audit_summary = self.store_backend.get_audit_summary()
         exceptions = self.store_backend.get_audit_errors()
         data_losses = self.store_backend.get_audit_losses()
+        scan_gaps = self._resolve_scan_gaps(
+            self.store_backend.get_audit_scan_gaps())
 
         # Check for unsafe attributes (BurnedInAnnotation)
         unsafe_items = self.store_backend.check_unsafe_attributes()
@@ -1566,6 +1630,21 @@ class DicomSession:
         graded_losses = [row for row in data_losses
                          if row[3] == LOSS_SCOPE_PRIVATE]
 
+        # A scan gap is graded on its disposition, not on its existence.
+        # The row says the scan could not read an element; that only
+        # costs the run its PASS if the element is still there to be
+        # written. A gap the sweep removed is content the export does
+        # not carry, which is the same test #146 applies to DATA_LOSS --
+        # and grading it REVIEW_REQUIRED made the report disagree with
+        # itself, because a *parseable* private sequence swept by the
+        # same default configuration graded PASS. Measured on both:
+        # same config, both absent from the export, PASS and
+        # REVIEW_REQUIRED. That asymmetry had no argument behind it.
+        #
+        # `GAP_UNRESOLVED` grades like a retained one. A disposition
+        # nothing could establish is not a clean one (#167).
+        open_gaps = [row for row in scan_gaps if row[3] != GAP_REMOVED]
+
         # 5. Build Report DTO
         report = ComplianceReport(
             isocenter_version=ver,
@@ -1581,9 +1660,10 @@ class DicomSession:
             audit_summary=audit_summary,
             exceptions=exceptions,
             data_losses=data_losses,
+            scan_gaps=scan_gaps,
             validation_status=("PASS"
                                if audit_summary and not exceptions
-                               and not graded_losses
+                               and not graded_losses and not open_gaps
                                else "REVIEW_REQUIRED")
         )
 

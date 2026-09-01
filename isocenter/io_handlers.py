@@ -34,6 +34,11 @@ except ImportError:
 from pydicom.multival import MultiValue
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
+from pydicom.charset import default_encoding
+from pydicom.dataelem import DataElement
+from pydicom.filebase import DicomBytesIO
+from pydicom.filereader import read_sequence
+from pydicom.filewriter import write_sequence
 
 from .entities import Patient, Study, Series, Instance, Equipment, DicomItem
 from .logger import get_logger
@@ -65,6 +70,15 @@ _ROUTED_BINARY_TAGS = frozenset({
     Tag(0x7fe0, 0x0010),   # Pixel Data
     Tag(0x5400, 0x1010),   # Waveform Data
 })
+
+#: The Item tag (FFFE,E000) as it appears on the wire, little endian.
+#: A private element that pydicom resolved to `UN` and whose value
+#: starts with these four bytes is a sequence whose VR the transfer
+#: syntax did not carry (#167). Four bytes is a weak signal on its own
+#: -- any vendor blob may begin with them by chance -- so it only
+#: selects candidates for `_sequence_from_un_bytes`, which proves or
+#: refuses each one.
+_ITEM_TAG_LE = b"\xfe\xff\x00\xe0"
 
 #: Tags whose routing depends on where in the instance they sit, and the
 #: depth at which they are routed. `ingest_worker` finds Pixel Data with
@@ -207,8 +221,93 @@ def loss_scope_for_tag(tag: str) -> str:
     return LOSS_SCOPE_PRIVATE if group % 2 else LOSS_SCOPE_STANDARD
 
 
+def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
+    """Re-parse `UN` bytes as an implicit-VR sequence, or return None.
+
+    Under Implicit VR Little Endian a private sequence has no VR on the
+    wire and no dictionary entry, so pydicom resolves it to `UN` and
+    hands back bytes. The structure is still in those bytes; nothing
+    downstream can see it, because the PHI scan walks `sequences` and
+    there is no entry there to walk (#167).
+
+    Returns the parsed `Sequence` only when re-encoding it reproduces
+    `raw` byte for byte. That is the whole safety argument: the caller
+    replaces an attribute with a structure, and the equality proves the
+    two are the same bytes, so nothing is lost by the substitution and
+    nothing is guessed. Three adversarial inputs get past
+    `read_sequence` without raising and without leaving bytes unread --
+    a garbage item length, an undefined-length item with no delimiter,
+    and an empty item followed by vendor payload that happens to sit
+    behind the item tag -- and all three re-encode to something else.
+    The last one is the reason this is not "parse and hope": it decodes
+    to one empty item, and accepting it would delete the payload.
+
+    Those three are the *shape* of what rule 4 refuses, not the set the
+    tests use. `tests/test_private_sequence_implicit_vr.py` parametrizes
+    a different four, chosen so each names the rule that refuses it and
+    so every one can be written into a DICOM file -- an
+    undefined-length item with no delimiter is a description, not a
+    fixture. Kept separate on purpose: this paragraph is the refusal
+    space, the test set is what is pinned (#167).
+
+    Returns None for every failure, and the caller keeps the bytes. An
+    ingest must not raise on a malformed private element: the file is
+    still readable, and the value is still exportable.
+
+    Args:
+        raw (bytes): The element's value, exactly as pydicom handed it
+            over.
+        tag: The element's `Tag`. Used only to build the `DataElement`
+            the re-encode needs; `write_sequence` writes the items, not
+            the element header, so the tag never reaches the comparison.
+        encoding: The enclosing dataset's character set, so text decodes
+            the way it would have if pydicom had parsed the sequence
+            itself.
+
+    Returns:
+        Optional[Sequence]: The parsed sequence, or None if any of the
+        four rules refuses it.
+    """
+    if not raw.startswith(_ITEM_TAG_LE):
+        return None
+
+    fp = DicomBytesIO(raw)
+    # Required, not decoration: without them `read_sequence` raises
+    # `AttributeError: 'DicomBytesIO' object has no attribute
+    # '_tag_packer'`. They are the public setters and emit no
+    # deprecation warning under pydicom 3.0.2 --
+    # `tests/test_pydicom_deprecations.py` is what notices if that
+    # changes, because a deprecated-to-removed setter would make this
+    # function return None for *every* sequence and #167 would come
+    # back reported as "unparseable".
+    fp.is_little_endian = True
+    fp.is_implicit_VR = True
+    try:
+        parsed = read_sequence(fp, True, True, len(raw), encoding)
+    except Exception:      # pylint: disable=broad-except
+        # Deliberately broad. A malformed private element must not fail
+        # an ingest -- the file is still readable and the bytes are
+        # still exportable, so the caller keeps them and files a row.
+        return None
+    if fp.tell() != len(raw):
+        return None
+
+    # Before anything iterates the parsed datasets. `read_sequence`
+    # returns raw elements and `write_sequence` writes their bytes back;
+    # converting first would compare a re-encoding of converted values,
+    # which is a different question and a weaker one.
+    out = DicomBytesIO()
+    out.is_little_endian = True
+    out.is_implicit_VR = True
+    try:
+        write_sequence(out, DataElement(tag, "SQ", parsed), encoding)
+    except Exception:      # pylint: disable=broad-except
+        return None
+    return parsed if out.getvalue() == raw else None
+
+
 def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
-                   is_root: bool = True):
+                   is_root: bool = True, unscanned: list = None):
     """
     Standalone function to populate attributes for pickle-compatibility in workers.
 
@@ -263,6 +362,12 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             bare sequence item -- the waveform and Murmur tests -- keep
             the behaviour they had; they pass no `dropped`, so the flag
             cannot reach anything for them anyway.
+        unscanned (list, optional): Collects `(tag, byte_length)` for
+            every private `UN` value that begins with the item tag and
+            did not verify as a sequence, so the caller can report a
+            value the PHI scan could not open (#167). Distinct from
+            `dropped`: nothing was lost -- the bytes stay in
+            `attributes` and are exported.
     """
 
     # Binary VRs to explicitly skip (Metadata Refactor)
@@ -273,6 +378,21 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # whether this instance also carries Pixel Data, and `in` on a
     # Dataset is a lookup rather than a scan.
     has_pixel_data = is_root and "PixelData" in ds
+
+    # The enclosing dataset's character set, so text inside a re-parsed
+    # sequence decodes the way it would have if pydicom had parsed the
+    # sequence itself. The gate compares raw bytes, so this cannot
+    # change whether a value parses -- only how its text reads.
+    #
+    # Keep the `getattr` default. The direct callers that hand this a
+    # bare sequence item do pass `Dataset`s, which carry
+    # `_character_set`, but the default is what makes the line true for
+    # any `ds` this function is ever handed, and `ds._character_set`
+    # would not be. Both shapes the attribute returns are valid
+    # `encoding` arguments -- a bare `Dataset` gives `'iso8859'`, one
+    # with a Specific Character Set gives `['latin_1']` -- so no
+    # normalization is needed; do not add any.
+    encoding = getattr(ds, "_character_set", default_encoding)
 
     for elem in ds:
         if elem.tag.group == 0x7fe0:
@@ -319,8 +439,45 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
 
         tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
 
+        # A private sequence under Implicit VR arrives here as `UN`
+        # bytes, because the transfer syntax carries no VR and the
+        # standard dictionary has no entry (#167). Restore the
+        # structure so the PHI scan can walk it -- and only when the
+        # parse is proven byte-exact; see `_sequence_from_un_bytes`.
+        #
+        # The tag then lives in `sequences` and *not* in `attributes`,
+        # which is what the Explicit VR ingest of the same file
+        # produces. Keeping both would put the same tag through
+        # `_merge` and `_merge_sequences`, whose order would decide
+        # whether the export carried the remediated sequence or the
+        # original bytes.
+        #
+        # Odd group only. A standard tag resolves its VR from the
+        # dictionary with no dataset present, so an even-group element
+        # does not reach `UN` by this route; an even-group `UN` means a
+        # writer chose it explicitly, which is a different population.
+        #
+        # The `startswith` here is not a duplicate of the one inside
+        # `_sequence_from_un_bytes`, and folding the two together
+        # silently widens the report: this one separates "not a
+        # candidate" -- every ordinary vendor blob, which falls through
+        # exactly as before -- from "candidate that failed
+        # verification", which is the only thing that earns a row.
+        if (elem.VR == 'UN' and elem.tag.group % 2 == 1
+                and isinstance(elem.value, (bytes, bytearray, memoryview))):
+            raw = bytes(elem.value)
+            if raw.startswith(_ITEM_TAG_LE):
+                parsed = _sequence_from_un_bytes(raw, elem.tag, encoding)
+                if parsed is not None:
+                    process_sequence(tag, parsed, item, dropped, unscanned)
+                    continue
+                if unscanned is not None:
+                    unscanned.append((tag, len(raw)))
+                # Falls through: the bytes stay in `attributes` and are
+                # exported exactly as before.
+
         if elem.VR == 'SQ':
-            process_sequence(tag, elem, item, dropped)
+            process_sequence(tag, elem, item, dropped, unscanned)
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
             item.set_attr(tag, str(elem.value))
@@ -328,17 +485,25 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             item.set_attr(tag, elem.value)
 
 
-def process_sequence(tag, elem, parent_item, dropped: list = None):
+def process_sequence(tag, elem, parent_item, dropped: list = None,
+                     unscanned: list = None):
     """Recursively parses Sequence (SQ) items.
 
     Everything below the instance is `is_root=False`, at every depth: an
     element inside a sequence item is inside a sequence item whether it
     is one level down or four. Only the top-level element of a
     depth-sensitive tag is routed (#169).
+
+    `dropped` and `unscanned` are both forwarded, including for a
+    sequence recovered from `UN` bytes: its items go through the
+    ordinary rules, so a binary-VR child inside one is reported like any
+    other, and an unverifiable candidate one level further down still
+    earns its row (#167).
     """
     for ds_item in elem:
         seq_item = DicomItem()
-        populate_attrs(ds_item, seq_item, dropped, is_root=False)
+        populate_attrs(ds_item, seq_item, dropped, is_root=False,
+                       unscanned=unscanned)
         parent_item.add_sequence_item(tag, seq_item)
 
 
@@ -398,8 +563,13 @@ def ingest_worker(fp: str) -> Tuple:
         # travels and the parent records it (#125, and #126 for the
         # export side of the same constraint).
         dropped = []
-        populate_attrs(ds, inst, dropped)
+        unscanned = []
+        populate_attrs(ds, inst, dropped, unscanned=unscanned)
         meta['dropped_private_binary'] = dropped
+        # Rides `meta` for the same reason as `dropped_private_binary`
+        # above: this worker may be in a subprocess with no store
+        # handle, and the return arity is unpacked at every call site.
+        meta['unscanned_private_sequences'] = unscanned
 
         # Isocenter internally manages pixels as standard contiguous arrays (Interleaved)
         # So we MUST ensure PlanarConfiguration=0 in metadata to match our converted data
@@ -640,6 +810,42 @@ class DicomImporter:
                                 entity_uid=inst.sop_instance_uid,
                                 details=detail,
                                 loss_scope=scope)
+
+                    # Retained, not lost -- and that is exactly why this
+                    # is not a DATA_LOSS row. The bytes are whole in the
+                    # object graph; what is missing is any assurance
+                    # about what is inside them. Section 3.1 of the
+                    # compliance report is headed "present in the source
+                    # and not in the exported data", so filing this
+                    # there would make that header false (#167).
+                    #
+                    # This row says what ingest knows and stops there.
+                    # It used to end "was retained verbatim and
+                    # exported", which ingest cannot know: the default
+                    # `remove_private_tags=True` deletes the element
+                    # during `anonymize()`, and the report then carried
+                    # a REMEDIATION_REMOVE row in section 2 and the
+                    # claim that the same bytes shipped in section 3.2.
+                    # `generate_report` resolves that against the graph;
+                    # `element_tag` is what it resolves (#167).
+                    #
+                    # No `loss_scope`: the column grades losses, and
+                    # this is not one.
+                    for tag, nbytes in meta.get(
+                            'unscanned_private_sequences', ()):
+                        detail = (f"Private tag {tag} holds {nbytes} bytes "
+                                  f"that begin with the item tag "
+                                  f"(FFFE,E000) but do not parse as an "
+                                  f"implicit-VR sequence. It was ingested "
+                                  f"verbatim; the PHI scan could not open "
+                                  f"it.")
+                        logger.warning(f"{inst.sop_instance_uid}: {detail}")
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="SCAN_GAP",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail,
+                                element_tag=tag)
 
                     # Persist Waveform Samples to Sidecar
                     if w_bytes and sidecar_manager:
