@@ -2149,6 +2149,12 @@ class DicomSession:
         # Pixel I/O and NumPy ops release the GIL. The generator is consumed
         # incrementally so each worker's image is applied and released rather
         # than held until the end.
+        # `yield_exceptions=True` is what makes `_apply_redaction_outcomes`'
+        # Exception arm reachable. Without it every strategy re-raises a
+        # lost worker at the point of iteration, so the `for` below
+        # terminated mid-pass: every mutation still queued was discarded
+        # unapplied, no ERROR row was written for anything, and the caller
+        # got a bare `BrokenProcessPool` instead of `RedactionError` (#232).
         mutations = run_parallel(
             service.execute_redaction_task,
             tasks,
@@ -2156,6 +2162,7 @@ class DicomSession:
             max_workers=max_workers,
             return_generator=True,
             chunksize=1,
+            yield_exceptions=True,
             progress=show_progress)
 
         applied, failures = self._apply_redaction_outcomes(
@@ -2261,9 +2268,11 @@ class DicomSession:
                     # shortfall is summarised by the caller.
                     continue
             elif isinstance(outcome, Exception):
-                # `run_parallel` handing back a worker that died. There is
-                # no outcome to name the instance with, and the row still
-                # has to exist.
+                # `run_parallel` handing back a worker that died -- a shape
+                # that only exists because the dispatch above asks for it
+                # with `yield_exceptions=True` (#232). There is no outcome
+                # to name the instance with, and the row still has to
+                # exist.
                 failures.append(
                     ("UNKNOWN", f"Redaction worker failed: {outcome}"))
                 continue

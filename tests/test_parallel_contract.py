@@ -18,6 +18,22 @@ def identity(value):
     return value
 
 
+def double_or_raise(value):
+    """Module scope: it has to pickle into a process-pool worker."""
+    if value < 0:
+        raise ValueError(f"no negatives here: {value}")
+    return value * 2
+
+
+def double_or_die(value):
+    """Module scope for the same reason. A negative kills the worker
+    outright -- `os._exit` skips every handler and `finally`, which is
+    the closest a test can get to the OOM-kill this path exists for."""
+    if value < 0:
+        os._exit(13)
+    return value * 2
+
+
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     """No test should inherit another's tuning variables."""
@@ -191,3 +207,119 @@ def test_the_shared_session_executor_pins_spawn(tmp_path, monkeypatch):
             "an explicit spawn context it forks on Linux 3.12 and the "
             "worker inherits the parent's open SQLite handles (#220, "
             "#250)")
+
+
+# --- #232: exceptions as values ---------------------------------------------
+#
+# Two consumers -- `Session._apply_redaction_outcomes` and the export
+# reporters in `io_handlers` -- branch on a result *being* an Exception,
+# under comments describing "`run_parallel` handing back a worker that
+# died". No strategy ever did that: all three are a plain `yield from`
+# over a mapper, and a mapper re-raises a worker's exception at the point
+# of iteration, so the arms were unreachable and the raise discarded
+# every result still queued behind it (#232). `yield_exceptions=True` is
+# the mode that makes the comments true; the default stays a raise,
+# because a caller with no Exception arm must not receive one as data.
+
+
+def test_without_the_flag_a_worker_exception_still_propagates(monkeypatch):
+    """The default contract is unchanged: a raise is a raise.
+
+    Scan, verify and ingest have no `isinstance(result, Exception)` arm;
+    handing them an exception as a value would let it flow into the graph
+    as if it were a result.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+
+    with pytest.raises(ValueError):
+        parallel.run_parallel(double_or_raise, [1, -2, 3],
+                              show_progress=False)
+
+
+@pytest.mark.parametrize("lever", ["ISOCENTER_FORCE_THREADS",
+                                   "ISOCENTER_FORCE_PROCESSES"])
+def test_a_raising_task_is_yielded_as_a_value_when_asked(monkeypatch, lever):
+    """One bad item costs that item, not the pass.
+
+    Both per-call executors, because they are the two paths the redaction
+    and export consumers actually take (3.14t defaults to threads, 3.12
+    to processes) and the two `finally`-shaped halves of this module have
+    diverged before (#213).
+    """
+    monkeypatch.setenv(lever, "1")
+
+    results = parallel.run_parallel(
+        double_or_raise, [1, -2, 3], show_progress=False, max_workers=2,
+        yield_exceptions=True)
+
+    assert results[0] == 2
+    assert results[2] == 6, (
+        "the item queued behind the failure was discarded with it")
+    assert isinstance(results[1], ValueError), (
+        f"the worker's exception was not handed back as a value: "
+        f"{results[1]!r}")
+    assert "-2" in str(results[1])
+
+
+def test_a_raising_task_is_yielded_as_a_value_on_the_recycling_pool():
+    """`maxtasksperchild` selects `multiprocessing.Pool`, the third path.
+
+    `imap_unordered`, so the contract here is membership, not order.
+    """
+    results = parallel.run_parallel(
+        double_or_raise, [1, -2, 3], show_progress=False, max_workers=2,
+        maxtasksperchild=1, yield_exceptions=True)
+
+    exceptions = [r for r in results if isinstance(r, Exception)]
+    assert sorted(r for r in results if not isinstance(r, Exception)) == [2, 6]
+    assert len(exceptions) == 1 and isinstance(exceptions[0], ValueError)
+
+
+def test_a_raising_task_is_yielded_as_a_value_on_a_shared_executor():
+    """The fourth dispatch: an executor the caller owns.
+
+    This is `write_tree` under `Session.export()`, which passes the
+    session's own pool.
+    """
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        results = parallel.run_parallel(
+            double_or_raise, [1, -2, 3], show_progress=False,
+            executor=executor, yield_exceptions=True)
+
+    assert results[0] == 2 and results[2] == 6
+    assert isinstance(results[1], ValueError)
+
+
+def test_a_dead_worker_surfaces_as_a_trailing_value_not_a_raise(monkeypatch):
+    """The loss the consumers' arms were written for, reproduced.
+
+    A killed worker cannot be caught per-task -- there is no interpreter
+    left in it to catch anything -- so the pool's own `BrokenProcessPool`
+    is caught at the iteration and yielded as the final value: the
+    results already produced survive, and the caller's Exception arm gets
+    the one fact that remains. Without the fix this call raises
+    `BrokenProcessPool` and the completed result is discarded with it,
+    which is exactly the unreported loss of #232.
+
+    Processes only, deliberately: a thread cannot die this way without
+    taking the interpreter with it, and `multiprocessing.Pool` answers a
+    dead worker by hanging on the lost task rather than raising, so the
+    recycling path cannot make this promise (noted in `run_parallel`'s
+    docstring).
+    """
+    from concurrent.futures.process import BrokenProcessPool
+
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+
+    results = parallel.run_parallel(
+        double_or_die, [1, -2, 3], show_progress=False, max_workers=1,
+        yield_exceptions=True)
+
+    assert results[0] == 2, (
+        "the result completed before the death did not survive it")
+    assert isinstance(results[-1], BrokenProcessPool), results
+    assert not any(r == 6 for r in results), (
+        "the item queued behind the dead worker cannot have run; if it "
+        "did, this fixture is no longer killing anything")

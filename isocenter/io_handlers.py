@@ -1003,10 +1003,10 @@ class ExportOutcome:
 
     `error` lives here rather than being returned bare so the worker has
     one return shape. Call sites still have to filter for `Exception`,
-    because `run_parallel` can return one of its own when a worker dies
-    -- but a site that forgets no longer gets an `AttributeError` on the
-    failure path, which is the path that only runs when something has
-    already gone wrong.
+    because both export dispatches pass `yield_exceptions=True` and so
+    receive a lost worker as a value (#232) -- but a site that forgets no
+    longer gets an `AttributeError` on the failure path, which is the
+    path that only runs when something has already gone wrong.
     """
     ok: bool
     output_path: str
@@ -2339,10 +2339,14 @@ class DicomExporter:
             desc="Exporting",
             chunksize=10,
             show_progress=show_progress,
-            executor=executor)
+            executor=executor,
+            yield_exceptions=True)
 
         # An ExportOutcome per task -- or an Exception, if `run_parallel`
-        # itself lost a worker. Both shapes have to survive this.
+        # itself lost a worker. Both shapes have to survive this, and the
+        # second only exists because `yield_exceptions=True` above asks
+        # for it: without the flag a lost worker raises out of the
+        # iteration and discards every result queued behind it (#232).
         #
         # Materialized because what follows walks it twice, and
         # `run_parallel` returns a generator when asked to. Neither export
@@ -2414,7 +2418,11 @@ class DicomExporter:
             total=total,
             executor=executor,
             maxtasksperchild=maxtasksperchild,
-            disable_gc=disable_gc)
+            disable_gc=disable_gc,
+            # Same reason as `write_tree`: `_report_export_failures`'
+            # Exception arm is unreachable without it, and a lost worker
+            # would take the whole batch's accounting with it (#232).
+            yield_exceptions=True)
 
         # Two passes -- see the note in `write_tree`.
         results = list(results)
