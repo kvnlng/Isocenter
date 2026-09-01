@@ -2043,6 +2043,18 @@ class DicomSession:
         process. Workers operate on copies, so a mutation that is never
         applied here is a redaction that did not happen.
 
+        **The new identity is applied here too, and must be.**
+        `execute_redaction_task` calls `regenerate_uid()` in the worker.
+        Under threads the worker *is* the parent's object and the new UID
+        lands by itself; under processes it lands on a copy and used to
+        be dropped, so the same input produced a different SOP Instance
+        UID -- and a different exported filename, since files are named
+        by it -- depending only on which executor ran (#228). The gate is
+        `sop_uid != original_sop_uid`, not the presence of a mutation:
+        the mutation dict is built unconditionally, so it comes back for
+        an instance whose zones all missed and which must keep its
+        identity.
+
         Three result shapes have to survive this, mirroring
         `_report_export_failures`: a `RedactionOutcome`, an `Exception` from
         a worker that died before it could answer, and anything else --
@@ -2092,7 +2104,14 @@ class DicomSession:
                                 f"result: {outcome!r}"))
                 continue
 
-            sop = mutation.get('original_sop_uid') or mutation.get('sop_uid')
+            # `original_sop_uid` only. `instances` is keyed on
+            # **pre**-redaction UIDs (see `_apply_redaction_rules`), and
+            # `sop_uid` is the **post**-redaction one, so the old
+            # `or mutation.get('sop_uid')` fallback could never find
+            # anything -- and now that `sop_uid` is assigned below, one
+            # name meaning both the lookup key and the new identity is
+            # how #228 reads wrong (#228).
+            sop = mutation.get('original_sop_uid')
             instance = instances.get(sop)
             if instance is None:
                 get_logger().error(
@@ -2114,6 +2133,28 @@ class DicomSession:
 
             if mutation.get('pixel_hash'):
                 instance._pixel_hash = mutation['pixel_hash']
+
+            new_uid = mutation.get('sop_uid')
+            if new_uid and new_uid != sop:
+                # The worker regenerated. It does that only inside
+                # `if modified:`, which makes "the UID differs" the
+                # parent's only honest signal that pixels actually
+                # changed -- the mutation dict itself is built
+                # unconditionally and comes back for an instance nothing
+                # was applied to (#228, and see the note in
+                # `execute_redaction_task`). Do not widen this to
+                # `if new_uid:` or `if mutation:`.
+                #
+                # Assign all three or none. Under processes the child
+                # mutated a copy, so without this the parent kept the
+                # source's identity while carrying `DERIVED` and a
+                # Derivation Code Sequence -- and the blob the worker
+                # persisted under the regenerated UID was stranded.
+                instance.sop_instance_uid = new_uid
+                instance.attributes["0008,0018"] = new_uid
+                # `regenerate_uid()` ends the same way, deliberately: the
+                # instance no longer matches the file it was read from.
+                instance.file_path = None
 
             instance.mark_modified()
             applied += 1
