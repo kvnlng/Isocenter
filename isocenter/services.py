@@ -347,6 +347,17 @@ class RedactionService:
         for inst in targets:
             tasks.append({
                 "instance": inst,
+                # Captured here -- parent-side, before any worker runs --
+                # and the worker reads *this*, never the live attribute.
+                # Under threads every task's worker shares `inst`, and two
+                # rules can target one instance (`load_config` de-dups
+                # nothing): a capture taken inside the worker can follow a
+                # sibling's `regenerate_uid()`, keying the mutation on a
+                # post-redaction UID the parent's pre-redaction map cannot
+                # match, so the redaction is silently discarded (#257).
+                # Same pattern as `config_hash` and `force`: per-task
+                # state the worker must not re-derive.
+                "original_sop_uid": inst.sop_instance_uid,
                 "rois": valid_rois,
                 "config_hash": config_hash,
                 "machine_sn": serial,
@@ -393,7 +404,12 @@ class RedactionService:
         applied before the raise" true rather than aspirational (#213).
         """
         inst = task["instance"]
-        original_uid = inst.sop_instance_uid  # Capture before mutation
+        # From the task, never `inst.sop_instance_uid`. Under threads the
+        # sibling task's worker shares this very object, and its
+        # `regenerate_uid()` may already have moved the live attribute by
+        # the time this worker starts -- a re-read here keys the mutation
+        # on a post-redaction UID the parent's map discards (#257).
+        original_uid = task["original_sop_uid"]
         rois = task["rois"]
         config_hash = task["config_hash"]
         force = task.get("force", False)
@@ -516,7 +532,10 @@ class RedactionService:
             # inspection to tell the two apart (#217).
             failed = True
             traceback.print_exc()
-            self.logger.error(f"  Failed {inst.sop_instance_uid}: {e}")
+            # `original_uid`, not the live attribute: this line names the
+            # identity the parent's failure row carries, and a sibling
+            # worker may have moved `inst.sop_instance_uid` by now (#257).
+            self.logger.error(f"  Failed {original_uid}: {e}")
             return RedactionOutcome(ok=False, sop_instance_uid=original_uid,
                                     error=f"{type(e).__name__}: {e}")
         finally:
