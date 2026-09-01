@@ -990,6 +990,11 @@ class ExportContext:
     pixel_length: Optional[int] = None
     pixel_alg: Optional[str] = None
     redaction_zones: List[Tuple] = field(default_factory=list)
+    #: Re-read the written file and compare its descriptors before
+    #: delivering it (#209). Off by default: it costs a second parse
+    #: per instance. Carried here because the check runs in the worker
+    #: -- the file is local to it and the cost parallelizes.
+    verify_readback: bool = False
 
 
 @dataclass
@@ -1163,6 +1168,55 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
 
     if planar_configuration_default(attributes, geom.samples):
         ds.PlanarConfiguration = 0
+
+
+#: The descriptors the readback compares, by pydicom keyword. The four
+#: geometry descriptors are the ones #186/#205 showed can describe a
+#: different image than the pixels beside them; BitsAllocated is the
+#: width #170/#216 showed being silently rewritten from the tag side.
+_READBACK_DESCRIPTORS = ("Rows", "Columns", "SamplesPerPixel",
+                         "NumberOfFrames", "BitsAllocated")
+
+
+def _verify_readback(path: str, ds) -> None:
+    """Re-read a just-written file and hold it against what was meant.
+
+    "The write did not raise" is a weaker claim than "a file exists
+    that decodes to what we meant", and the compliance report presents
+    the stronger one (#209). This is the opt-in check behind
+    `export(verify_readback=True)`.
+
+    Compared against the dataset the worker serialized, deliberately
+    *not* against `inst.attributes`: the worker corrects stale declared
+    descriptors on the way out (`_write_pixel_geometry` writes the
+    resolved geometry, the integer branch derives `BitsAllocated` from
+    `itemsize` -- #186, #216), so the raw attributes are the one
+    baseline guaranteed to disagree with a correctly written file. The
+    claim being verified is "the file says what the export meant",
+    which is the claim `ok=True` makes to the report.
+
+    Raises on an unreadable file or any descriptor mismatch. The raise
+    is the whole mechanism: it becomes `ExportOutcome(ok=False)`, an
+    `ERROR` audit row and a `REVIEW_REQUIRED` grade through the same
+    channel a write that raised takes (#181) -- and because it fires
+    against the temporary file, before the rename that publishes it
+    (#199), a file that fails here is never delivered at all.
+    """
+    try:
+        readback = pydicom.dcmread(path)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Readback verification failed: the written file could not be "
+            f"read back ({exc})") from exc
+
+    mismatches = [
+        f"{kw} reads back as {getattr(readback, kw, None)!r} where "
+        f"{getattr(ds, kw, None)!r} was written"
+        for kw in _READBACK_DESCRIPTORS
+        if getattr(readback, kw, None) != getattr(ds, kw, None)]
+    if mismatches:
+        raise RuntimeError(
+            "Readback verification failed: " + "; ".join(mismatches))
 
 
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
@@ -1646,7 +1700,40 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
 
-        ds.save_as(ctx.output_path, enforce_file_format=True)
+        # Write under a temporary name and rename into place only once
+        # the write has finished. `save_as` creates the file first and
+        # streams elements into it in ascending tag order, so a raise
+        # part-way used to leave a *readable* partial under the real
+        # name: `dcmread` accepts a dataset that simply stops, and
+        # Pixel Data (7FE0,0010) is written last, so the element most
+        # often missing was the largest and the least visible (#199).
+        # The temp lives in the destination directory because that is
+        # what keeps the rename atomic -- same filesystem, one
+        # directory-entry swap.
+        #
+        # The cleanup is here, in the worker, because this is the only
+        # frame that knows a write started and did not finish -- and the
+        # worker is always a subprocess (`_run_export_batch` recycles
+        # them every 25 tasks), so it cannot lean on parent state. The
+        # pid suffix keeps recycled and concurrent workers off each
+        # other's temp files. A worker killed outright can still orphan
+        # one `.tmp`; that residue is what atomicity costs, and what can
+        # no longer exist is a partial under a name a recipient trusts.
+        tmp_path = f"{ctx.output_path}.{os.getpid()}.tmp"
+        try:
+            ds.save_as(tmp_path, enforce_file_format=True)
+            # Before the rename, so a file that fails verification is
+            # never published under its real name -- see
+            # `_verify_readback` (#209).
+            if ctx.verify_readback:
+                _verify_readback(tmp_path, ds)
+            os.replace(tmp_path, ctx.output_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass  # save_as raised before creating it
+            raise
         return ExportOutcome(ok=True, output_path=ctx.output_path,
                              sop_instance_uid=uid, losses=losses)
     except Exception as e:
