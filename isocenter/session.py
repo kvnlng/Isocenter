@@ -3,6 +3,7 @@ import os
 import re
 import json
 import datetime
+import multiprocessing
 import concurrent.futures
 from collections import Counter
 from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
@@ -571,9 +572,18 @@ class DicomSession:
         if os.path.exists("isocenter.key"):
             self.enable_reversible_anonymization("isocenter.key")
 
-        # Shared Global Executor for Process Consistency
+        # Shared Global Executor for Process Consistency.
+        #
+        # Spawn, not fork -- the same pin, for the same reason, as both
+        # pools in parallel.py: a forked worker inherits the parent's
+        # open SQLite handles and its sidecar file position, and this
+        # session's threads (persistence drain, audit writer) can be
+        # mid-write at any fork. Linux 3.12 defaults to fork; macOS to
+        # spawn, which is why nothing local ever saw the difference
+        # (#220, #250).
         self._executor = concurrent.futures.ProcessPoolExecutor(
-            max_workers=None)  # Default: CPU * 1.5
+            max_workers=None,  # Default: CPU * 1.5
+            mp_context=multiprocessing.get_context("spawn"))
 
         if db_exists:
             print(f"Loaded session from {self.persistence_file}")
@@ -671,8 +681,11 @@ class DicomSession:
                 # crash.
                 get_logger().debug("Could not shut down prior executor: %s", exc)
 
-        # Re-init
-        self._executor = concurrent.futures.ProcessPoolExecutor(max_workers=max_workers)
+        # Re-init, with the same spawn pin as construction: an OOM
+        # recovery must not quietly downgrade the pool to fork (#220).
+        self._executor = concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers,
+            mp_context=multiprocessing.get_context("spawn"))
 
     def release_memory(self):
         """

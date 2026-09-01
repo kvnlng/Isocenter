@@ -39,9 +39,16 @@ def test_export_command_set_error(tmp_path):
     from unittest.mock import patch
     import concurrent.futures
     # We must patch ProcessPoolExecutor to ThreadPoolExecutor because 'spawn'ed processes
-    # (default on macOS/Py3.14) do NOT see the mocked IODValidator.
+    # (now pinned everywhere, #220) do NOT see the mocked IODValidator.
+    # The shim has to swallow process-pool-only kwargs: the production
+    # call passes mp_context (the spawn pin), which
+    # ThreadPoolExecutor.__init__ rejects -- under fork-default Linux
+    # this shim predated the pin and took no kwargs it had to drop.
+    def _threads_instead(*args, mp_context=None, **kwargs):
+        return concurrent.futures.ThreadPoolExecutor(*args, **kwargs)
+
     with patch("isocenter.validation.IODValidator.validate", return_value=[]), \
-         patch("concurrent.futures.ProcessPoolExecutor", side_effect=concurrent.futures.ThreadPoolExecutor):
+         patch("concurrent.futures.ProcessPoolExecutor", side_effect=_threads_instead):
         DicomExporter.write_tree(p, str(out_dir))
 
     # Verify file exists (recursive search)

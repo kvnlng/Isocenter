@@ -213,6 +213,18 @@ def _run_on_new_executor(func, items, strategy):
                       else concurrent.futures.ProcessPoolExecutor)
 
     kwargs = {'max_workers': strategy.max_workers}
+    if not strategy.use_threads:
+        # Spawn, not fork, for the recycling pool's reason: a forked
+        # worker inherits the parent's open SQLite handles and its
+        # sidecar file position. This is the pool that pickles the
+        # store (#220), and it took the platform default -- fork on
+        # Linux 3.12 -- which is the exact population where CI stalled
+        # 900 seconds in a forked worker's `persist_pixel_data` and
+        # failed with `database is locked`, while no spawn platform
+        # ever reproduced it (#250). macOS spawns by default, so
+        # nothing local ever showed the divergence;
+        # `test_parallel_contract.py` pins the argument itself.
+        kwargs['mp_context'] = multiprocessing.get_context("spawn")
     initializer = strategy.worker_initializer
     if initializer:
         kwargs['initializer'] = initializer

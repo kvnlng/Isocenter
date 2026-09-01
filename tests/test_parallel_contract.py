@@ -114,3 +114,80 @@ def test_the_progress_bar_is_told_how_many_items_to_expect(monkeypatch):
     parallel.run_parallel(identity, [1, 2, 3, 4], show_progress=True)
 
     assert seen.get("total") == 4
+
+
+def test_the_per_call_process_pool_pins_spawn(monkeypatch):
+    """Every process pool here starts workers by spawn, never by fork.
+
+    `_run_on_recycling_pool` has pinned spawn since it existed, with the
+    reason in place: a forked worker inherits the parent's open SQLite
+    handles and its sidecar file position. `_run_on_new_executor` -- the
+    pool the redaction path actually uses, and the one that pickles the
+    store (#220) -- took the platform default, which is fork on Linux
+    3.12: exactly the population where CI intermittently stalled 900
+    seconds in a forked worker's `persist_pixel_data` and died with
+    `sqlite3.OperationalError: database is locked`, while spawn
+    platforms never once reproduced it (#250). macOS defaults to spawn,
+    which is why this divergence was invisible to every local run --
+    and why this test asserts the constructor argument rather than the
+    platform-dependent effect.
+    """
+    import concurrent.futures
+
+    captured = {}
+    real = concurrent.futures.ProcessPoolExecutor
+
+    class Recording(real):
+        def __init__(self, *args, **kwargs):
+            captured.update(kwargs)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", Recording)
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+
+    result = list(parallel.run_parallel(
+        identity, [1, 2], show_progress=False, max_workers=2))
+
+    assert sorted(result) == [1, 2]
+    ctx = captured.get("mp_context")
+    assert ctx is not None and ctx.get_start_method() == "spawn", (
+        f"the per-call process pool was built with mp_context={ctx!r}; "
+        "without an explicit spawn context it forks on Linux 3.12 and "
+        "the worker inherits the parent's open SQLite handles (#220, "
+        "#250)")
+
+
+def test_the_shared_session_executor_pins_spawn(tmp_path, monkeypatch):
+    """`Session._executor` makes the same promise, including after restart.
+
+    Asserted on the constructor argument, not on the executor's
+    resulting context: macOS resolves the default to spawn anyway, so an
+    effect-shaped assertion is green there with or without the pin --
+    vacuous on every machine this suite runs on locally, and red only
+    on the Linux runner it exists to protect.
+    """
+    import concurrent.futures
+
+    from isocenter.session import DicomSession
+
+    calls = []
+    real = concurrent.futures.ProcessPoolExecutor
+
+    class Recording(real):
+        def __init__(self, *args, **kwargs):
+            calls.append(kwargs)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", Recording)
+
+    with DicomSession(str(tmp_path / "spawn_pin.db")) as session:
+        session._restart_executor(max_workers=1)
+
+    assert len(calls) >= 2, "expected the init pool and the restart pool"
+    for kwargs in calls:
+        ctx = kwargs.get("mp_context")
+        assert ctx is not None and ctx.get_start_method() == "spawn", (
+            f"a Session pool was built with mp_context={ctx!r}; without "
+            "an explicit spawn context it forks on Linux 3.12 and the "
+            "worker inherits the parent's open SQLite handles (#220, "
+            "#250)")

@@ -34,7 +34,9 @@ class TestParallelConfig(unittest.TestCase):
 
         parallel.run_parallel(identity, [1, 2, 3], show_progress=False)
 
-        mock_executor.assert_called_with(max_workers=42)
+        # The subject is the worker count; asserting the whole signature
+        # made this fail for the unrelated spawn pin (#220).
+        assert mock_executor.call_args.kwargs["max_workers"] == 42
 
     @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
     def test_run_parallel_chunksize_env(self, mock_executor):
