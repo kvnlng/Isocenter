@@ -25,7 +25,7 @@ import sqlite3
 
 import pytest
 
-from isocenter.services import RedactionService
+from isocenter.services import RedactionError, RedactionService
 
 LEVERS = ["ISOCENTER_FORCE_THREADS", "ISOCENTER_FORCE_PROCESSES"]
 
@@ -74,8 +74,10 @@ def test_a_successful_parallel_redaction_writes_a_redaction_row(
     assert entity_uid == "SN_RELOAD", (
         f"the row is keyed on {entity_uid!r}, not on the serial the rule "
         "was configured with")
-    assert "1 of 1" in details and "1 zone" in details, (
-        f"the row does not account for the pass it attests: {details!r}")
+    assert details == "Applied 1 of 1 candidate images with 1 zones", (
+        f"the row does not account for the pass it attests: {details!r}; "
+        "the details text is a published shape (section 2 renders it), "
+        "so this pins the exact spelling rather than substrings of it")
 
 
 @pytest.mark.parametrize("lever", LEVERS)
@@ -106,6 +108,117 @@ def test_a_wholly_skipped_pass_still_accounts_for_itself(
     details = [d for _uid, d in rows]
     assert any("0 of 1" in d for d in details), (
         f"the skipped pass does not say it applied nothing: {details}")
+
+
+def test_two_rules_sharing_a_serial_write_two_rows(
+        reloaded_redaction_session, monkeypatch):
+    """The unit is the rule-pass, not the serial spelling.
+
+    `load_config` takes rules verbatim from user YAML with no serial
+    de-duplication, so two rules carrying one serial is an ordinary
+    config. Keying the accounting on the serial collapses them into one
+    row that keeps the first rule's zone count and double-counts the
+    instance as two candidates -- while the serial path, called once per
+    rule, writes two correct rows. Found by review of the first cut of
+    this change, which did exactly that.
+
+    Processes lever only, deliberately. Both rules' tasks are pickled
+    at dispatch, so each worker redacts its own pre-redaction copy and
+    both mutations come home -- deterministic. Under threads the two
+    workers share the live instance, and whichever reads
+    `sop_instance_uid` after the other's `regenerate_uid()` builds a
+    mutation the parent cannot match and discards; that pre-existing
+    race (#228 territory) makes the same input intermittently apply
+    once or twice, and it is filed on its own rather than absorbed here
+    as flakiness.
+    """
+    lever = "ISOCENTER_FORCE_PROCESSES"
+    monkeypatch.setenv(lever, "1")
+    session, _inst = reloaded_redaction_session(
+        [IN_IMAGE_ZONE], name=f"dup_{lever}")
+    db_path = session.persistence_file
+    session.configuration.rules.append(
+        {"serial_number": "SN_RELOAD",
+         "redaction_zones": [[0, 4, 0, 4], [8, 12, 8, 12]]})
+
+    applied = session.redact(show_progress=False)
+    assert applied == 2, (
+        "both rules' zones land and the second rule's config hash "
+        "differs from the first's, so both passes must apply")
+    session.close()
+
+    rows = _redaction_rows(db_path)
+    assert rows == [
+        ("SN_RELOAD", "Applied 1 of 1 candidate images with 1 zones"),
+        ("SN_RELOAD", "Applied 1 of 1 candidate images with 2 zones"),
+    ], (
+        f"two rule-passes over one serial wrote {rows}; each pass "
+        "accounts for itself with its own zone count, in rule order")
+
+
+@pytest.mark.parametrize("lever", LEVERS)
+def test_a_wildcard_rule_writes_one_row_under_its_own_spelling(
+        reloaded_redaction_session, monkeypatch, lever):
+    """`"*"` is a rule-pass like any other, keyed as configured.
+
+    The row answers "which configured pass ran"; per-instance
+    attribution lives on the instances themselves (the attestation
+    hash), so the wildcard's row carries the wildcard spelling rather
+    than fanning out per matched machine.
+    """
+    monkeypatch.setenv(lever, "1")
+    session, _inst = reloaded_redaction_session(
+        [IN_IMAGE_ZONE], name=f"wild_{lever}")
+    db_path = session.persistence_file
+    session.configuration.rules = [
+        {"serial_number": "*", "redaction_zones": [IN_IMAGE_ZONE]}]
+
+    assert session.redact(show_progress=False) == 1
+    session.close()
+
+    assert _redaction_rows(db_path) == [
+        ("*", "Applied 1 of 1 candidate images with 1 zones")]
+
+
+def test_the_rows_are_written_before_the_failure_raise(
+        reloaded_redaction_session, monkeypatch):
+    """A caller that catches `RedactionError` still holds the accounting.
+
+    The ordering is asserted in two comments, the CHANGELOG, and the PR
+    that landed it -- and, measured during review, nothing else: moving
+    the emitter after the raise on both paths left the whole suite
+    green. This is the test that goes red when that happens.
+
+    Threads lever only: the failing worker is a monkeypatched class
+    attribute, and a spawned child re-imports the class unpatched, so
+    under processes the patch never runs. The ordering under test is
+    parent-side and executor-independent.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    session, _inst = reloaded_redaction_session(
+        [IN_IMAGE_ZONE], name="fail_ordering")
+    db_path = session.persistence_file
+
+    from isocenter.services import RedactionOutcome
+
+    def always_fails(task):
+        uid = task["instance"].sop_instance_uid
+        return RedactionOutcome(ok=False, sop_instance_uid=uid,
+                                error="synthetic failure for the pin")
+
+    monkeypatch.setattr(
+        RedactionService, "execute_redaction_task",
+        staticmethod(always_fails))
+
+    with pytest.raises(RedactionError):
+        session.redact(show_progress=False)
+    session.close()
+
+    assert _redaction_rows(db_path) == [
+        ("SN_RELOAD", "Applied 0 of 1 candidate images with 1 zones")], (
+        "the pass's row must reach the audit log before the raise; a "
+        "caller that catches RedactionError otherwise holds a report "
+        "with no accounting for the pass that just failed")
 
 
 def test_the_serial_and_parallel_paths_spell_one_outcome(

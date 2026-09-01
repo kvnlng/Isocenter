@@ -472,8 +472,13 @@ class RedactionService:
                 # the parent, because one instance matched by two rules
                 # produces two mutations under one pre-redaction UID --
                 # a map keyed on the UID would attribute both to
-                # whichever rule built it first.
-                "machine_sn": task["machine_sn"],
+                # whichever rule built it first. The key is the rule's
+                # index (set by `_apply_redaction_rules`), not the
+                # serial: two rules can share one serial spelling, and
+                # each pass accounts for itself. `.get` because tests
+                # drive this worker on bare `prepare_redaction_tasks`
+                # output, which does not carry the key.
+                "pass_key": task.get("pass_key"),
                 # The post-redaction UID, and the parent **assigns** it
                 # (`_apply_redaction_outcomes`, #228). Reaching this line
                 # means `regenerate_uid()` ran a few lines above, so this

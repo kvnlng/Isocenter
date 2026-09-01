@@ -2100,8 +2100,17 @@ class DicomSession:
         """
         tasks = []
         get_logger().info("Analyzing workload...")
-        for rule in self.configuration.rules:
-            tasks.extend(service.prepare_redaction_tasks(rule, force=force))
+        for pass_key, rule in enumerate(self.configuration.rules):
+            rule_tasks = service.prepare_redaction_tasks(rule, force=force)
+            # The audit accounting's unit is the rule-pass, and the rule
+            # index is the only thing that can key it: `load_config`
+            # takes rules verbatim from user YAML with no serial
+            # de-duplication, so two rules can share one serial spelling
+            # -- keyed on the serial they collapse into one row carrying
+            # the first rule's zone count (#247).
+            for task in rule_tasks:
+                task['pass_key'] = pass_key
+            tasks.extend(rule_tasks)
 
         if not tasks:
             get_logger().warning("No matching images found for any loaded rules.")
@@ -2126,14 +2135,15 @@ class DicomSession:
 
         # Audit accounting per rule-pass (#247). `targeted` is countable
         # here; `applied` is tallied by `_apply_redaction_outcomes` from
-        # each mutation's own `machine_sn`, because outcomes carry no
+        # each mutation's own `pass_key`, because outcomes carry no
         # order and a UID join back to tasks has the two-rules-one-
         # instance ambiguity `execute_redaction_task` documents.
         passes = {}
         for t in tasks:
             acct = passes.setdefault(
-                t['machine_sn'], {'zones': len(t['rois']),
-                                  'targeted': 0, 'applied': 0})
+                t['pass_key'], {'machine_sn': t['machine_sn'],
+                                'zones': len(t['rois']),
+                                'targeted': 0, 'applied': 0})
             acct['targeted'] += 1
 
         # Pixel I/O and NumPy ops release the GIL. The generator is consumed
@@ -2158,9 +2168,10 @@ class DicomSession:
         # for this run (#247). Before `scan_burned_in_annotations` too,
         # so a crash in the risk scan cannot cost the run its redaction
         # accounting.
-        for machine_sn, acct in passes.items():
+        for acct in passes.values():
             service.record_redaction_pass(
-                machine_sn, acct['zones'], acct['targeted'], acct['applied'])
+                acct['machine_sn'], acct['zones'],
+                acct['targeted'], acct['applied'])
 
         if applied < len(tasks):
             get_logger().warning(
@@ -2339,12 +2350,12 @@ class DicomSession:
 
             instance.mark_modified()
             applied += 1
-            # Attributed by the mutation's own `machine_sn` rather than
+            # Attributed by the mutation's own `pass_key` rather than
             # by joining the UID back to a task: two rules matching one
             # instance produce two mutations under one pre-redaction UID,
             # and each belongs to its own pass's row (#247).
             if passes is not None:
-                acct = passes.get(mutation.get('machine_sn'))
+                acct = passes.get(mutation.get('pass_key'))
                 if acct is not None:
                     acct['applied'] += 1
 
