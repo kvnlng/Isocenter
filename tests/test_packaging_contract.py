@@ -595,3 +595,77 @@ def test_the_gate_workflow_cannot_cancel_its_own_release_matrix():
     assert re.search(r"cancel-in-progress:\s*\$\{\{", block), (
         "cancel-in-progress is unconditional; a release's matrix must not "
         "be cancellable, whatever the PR gate wants")
+
+
+def test_the_job_cap_cannot_fire_before_a_steps_own_timeout():
+    """A job-level timeout that undercuts a step's strips the diagnostics.
+
+    When the job cap fires first, the run dies as 'cancelled' with no
+    failing step: #102 raised the Run Tests step to 20 minutes precisely
+    so a slow-but-healthy run stops dying as an unexplained failure, and
+    the pre-existing job cap of 15 made that allowance unreachable from
+    the day it landed (#243; three hangs in #250 each killed at 15m16s
+    with the log naming nothing).
+
+    The invariant that keeps this fixed: every step carries its own
+    timeout, and the job cap exceeds their sum -- so whatever hangs, the
+    timeout that fires belongs to the step that hung, and the job cap is
+    only a backstop against what no step timeout covers.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(GATE_WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["test"]
+    steps = job["steps"]
+
+    uncapped = [step.get("name") or step.get("uses") or "<unnamed>"
+                for step in steps if "timeout-minutes" not in step]
+    assert not uncapped, (
+        f"steps without their own timeout-minutes: {uncapped}; an "
+        "uncapped step makes the job cap the only thing that can stop a "
+        "hang there, and a job cap reports no failing step")
+
+    step_total = sum(step["timeout-minutes"] for step in steps)
+    job_cap = job.get("timeout-minutes")
+    assert job_cap is not None, (
+        "the test job has no timeout-minutes; the default is 360, which "
+        "lets a hang burn a runner for six hours")
+    assert job_cap > step_total, (
+        f"jobs.test.timeout-minutes ({job_cap}) does not exceed the sum "
+        f"of the step allowances ({step_total}); some step's timeout is "
+        "unreachable and a hang there dies as 'cancelled' with no "
+        "failing step in the log -- the exact shape of #243/#250")
+
+
+def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():
+    """A hang must diagnose itself; a timeout only bounds the damage.
+
+    Each of #250's three CI hangs left ~12 minutes of silence and a log
+    whose last line was the previous test passing -- a data point, not a
+    diagnosis. pytest's built-in faulthandler can dump every thread's
+    traceback after a test exceeds a threshold, turning the next
+    occurrence into a stack trace of where it stuck.
+
+    The dump only happens if the threshold elapses while the process is
+    still alive, so it must sit well under the Run Tests step timeout
+    that kills the run.
+    """
+    import configparser
+    import yaml
+
+    ini = configparser.ConfigParser()
+    ini.read(REPO / "pytest.ini")
+    assert ini.has_option("pytest", "faulthandler_timeout"), (
+        "pytest.ini sets no faulthandler_timeout; the next CI hang will "
+        "be another silent gap in the log instead of a traceback (#250)")
+    threshold = float(ini.get("pytest", "faulthandler_timeout"))
+
+    workflow = yaml.safe_load(GATE_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+    run_tests = next(s for s in steps if s.get("id") == "suite")
+    step_seconds = run_tests["timeout-minutes"] * 60
+
+    assert threshold < step_seconds / 2, (
+        f"faulthandler_timeout={threshold:g}s leaves no room to fire "
+        f"before the Run Tests step timeout ({step_seconds}s) kills the "
+        "process; the dump has to land while the run is still alive")
