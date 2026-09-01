@@ -82,7 +82,14 @@ jobs:
         # publish.yml after 30 runs of the four-way matrix produced zero
         # divergences that were not step timeouts.
         python-version: ${{ fromJSON(inputs.python-versions || '["3.12", "3.14t"]') }}
-    timeout-minutes: 15
+    # Backstop only, against what no step timeout covers -- it must exceed
+    # the SUM of the step allowances below, or some step's own timeout
+    # becomes unreachable and a hang there dies as 'cancelled' with no
+    # failing step in the log. That was #243: this cap sat at 15 while the
+    # Run Tests step said 20, so #102's headroom was inert from the day it
+    # landed and #250's three hangs each produced a log naming nothing.
+    # test_packaging_contract.py pins the inequality.
+    timeout-minutes: 35
 
     steps:
     - uses: actions/checkout@v7
@@ -158,6 +165,7 @@ jobs:
       # the publish run's summary a compatibility table rather than a list
       # of whatever happened to pass.
       if: always()
+      timeout-minutes: 1
       run: |
         outcome="${{ steps.suite.outcome }}"
         [ "$outcome" = "success" ] && mark="pass" || mark="**$outcome**"
