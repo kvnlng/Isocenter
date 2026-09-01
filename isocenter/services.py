@@ -235,7 +235,8 @@ class RedactionService:
         elif count > 0:
             self.logger.info(f"Verified {count} Burned In Annotations were remediated.")
 
-    def prepare_redaction_tasks(self, machine_rules: dict, verbose: bool = False) -> List[dict]:
+    def prepare_redaction_tasks(self, machine_rules: dict, verbose: bool = False,
+                                force: bool = False) -> List[dict]:
         """
         Generates a list of fine-grained tasks (dicts) from a single machine rule.
 
@@ -245,6 +246,11 @@ class RedactionService:
         Args:
             machine_rules (dict): Configuration rule containing "serial_number" and "redaction_zones".
             verbose (bool): If True, logs skips and warnings.
+            force (bool): Carried into every task as `task["force"]` and read
+                only by `execute_redaction_task`'s attestation skip. See
+                `Session.redact()`, which is where a caller chooses it, and
+                `redact_machine_instances`, which takes the same flag as a
+                keyword so the two paths stay symmetrical (#237).
 
         Returns:
             List[dict]: A list of task dictionaries ready for `execute_redaction_task`.
@@ -294,7 +300,10 @@ class RedactionService:
         if not valid_rois:
             return []
 
-        # Compute Hash
+        # Compute Hash. `sorted` for the reason `redact_machine_instances`
+        # gives at length: zeroing is commutative, so zone order cannot
+        # change the pixels, and the sort is therefore correct rather than
+        # a collision. Do not change this input (#237).
         rois_stable = sorted(valid_rois)
         config_str = json.dumps({"serial": serial, "rois": rois_stable}, sort_keys=True)
         config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
@@ -306,7 +315,8 @@ class RedactionService:
                 "instance": inst,
                 "rois": valid_rois,
                 "config_hash": config_hash,
-                "machine_sn": serial
+                "machine_sn": serial,
+                "force": force
             })
 
         return tasks
@@ -324,9 +334,21 @@ class RedactionService:
         Returns:
             RedactionOutcome: `ok=True` with a mutation dict when zones were
                 applied, `ok=True` with `mutation=None` for a legitimate
-                skip (already redacted under this configuration, or no pixel
-                data), and `ok=False` with an `error` string when a zone
-                could not be applied.
+                skip (already redacted under this configuration, no pixel
+                data, or **no configured zone landed inside the image**),
+                and `ok=False` with an `error` string when a zone could not
+                be applied.
+
+        **The mutation dict exists only when a zone landed**, which is
+        what makes its presence the parent's honest signal. It used to be
+        built unconditionally, so an instance whose every zone started
+        past the edge of the image came back carrying
+        `{"0028,0301": None, "0008,0008": None, ...}` -- read from the
+        worker's own instance, where `_apply_redaction_flags` had never
+        run -- and the parent wrote those nulls onto the graph and counted
+        the instance as updated. `redact_machine_instances` never had that
+        shape, and this is the change that stopped the two paths
+        disagreeing (#235).
 
         **The worker never raises.** `_apply_redaction_rules` consumes
         `run_parallel(..., return_generator=True)` incrementally, and an
@@ -340,13 +362,27 @@ class RedactionService:
         original_uid = inst.sop_instance_uid  # Capture before mutation
         rois = task["rois"]
         config_hash = task["config_hash"]
+        force = task.get("force", False)
         failed = False
+        # Bound before the `try`, not inside it. Two early returns and the
+        # exception path all reach the `finally`, which reads this; an
+        # `UnboundLocalError` raised *in* a `finally` replaces the return
+        # value, so an unbound name here would turn every legitimate skip
+        # into a worker failure.
+        modified = False
 
         try:
-            # Optimized: Skip if already redacted with same config
+            # Optimized: Skip if already redacted with same config.
+            #
+            # `force` suppresses this and nothing else. The attestation is
+            # over the configuration, not over the pixels, so a store whose
+            # pixels a defective release left wrong carries a hash
+            # byte-identical to the one this code would write -- and the
+            # skip then declines to look at it forever. That is #237, and
+            # `force=True` is the lever out of it.
             current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
 
-            if current_hash == config_hash:
+            if not force and current_hash == config_hash:
                 return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
             # Triggers Lazy Load from disk
@@ -361,33 +397,49 @@ class RedactionService:
             # and only the last zone survived.
             modified = self._redact_instance_pixels(inst, arr, rois)
 
-            if modified:
-                self._apply_redaction_flags(inst)
-                inst.regenerate_uid()
-                # Mark as redacted with this hash
-                inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
-                inst.mark_modified()
+            if not modified:
+                # No configured zone landed inside this image. That is a
+                # legitimate skip of exactly the kind the two early
+                # returns above describe, and it says so in the same
+                # vocabulary: no mutation, nothing for the parent to
+                # copy, nothing counted. Building the dict here anyway is
+                # what wrote null `(0028,0301)`/`(0008,0008)`/
+                # `(0008,2111)` elements onto an untouched instance and
+                # reported it as updated (#235).
+                return RedactionOutcome(ok=True, sop_instance_uid=original_uid)
 
-                # CRITICAL: Persist modified pixel data to sidecar (generate new Loader)
-                if self.store_backend and hasattr(self.store_backend, 'persist_pixel_data'):
-                    self.store_backend.persist_pixel_data(inst)
-                else:
-                    # Fallback or Warning? If we don't persist, pixel data is memory-only and won't export correctly?
-                    # Actually, export might handle in-memory data if it's dirty?
-                    # But we need SidecarPixelLoader for process isolation return.
-                    pass
+            self._apply_redaction_flags(inst)
+            inst.regenerate_uid()
+            # Mark as redacted with this hash
+            inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
+            inst.mark_modified()
+
+            # CRITICAL: Persist modified pixel data to sidecar (generate new Loader).
+            #
+            # This call cannot move into the `finally` alongside the other
+            # one, however redundant the pair looks: the mutation dict
+            # below reads `inst._pixel_loader`, and it is *this* call that
+            # re-points it at the redacted frame. Drop it and the parent
+            # is handed a loader for the pre-redaction pixels.
+            if self.store_backend and hasattr(self.store_backend, 'persist_pixel_data'):
+                self.store_backend.persist_pixel_data(inst)
+            else:
+                # Fallback or Warning? If we don't persist, pixel data is memory-only and won't export correctly?
+                # Actually, export might handle in-memory data if it's dirty?
+                # But we need SidecarPixelLoader for process isolation return.
+                pass
 
             # Prepare Mutated State to return (for Process Isolation)
             mutation = {
                 "original_sop_uid": original_uid,  # KEY FIX: Mapped to Main Process
                 # The post-redaction UID, and the parent **assigns** it
-                # (`_apply_redaction_outcomes`, #228). It equals
-                # `original_sop_uid` whenever nothing was modified,
-                # because `regenerate_uid()` above is called only inside
-                # `if modified:` -- and that inequality is the parent's
-                # gate. Move the `regenerate_uid()` call out of that
-                # branch and every skipped instance silently takes a new
-                # identity.
+                # (`_apply_redaction_outcomes`, #228). Reaching this line
+                # means `regenerate_uid()` ran a few lines above, so this
+                # is always a new identity and never the original --
+                # which is why the parent gates on the mutation existing
+                # rather than on the two UIDs differing. Move the
+                # `regenerate_uid()` call above out of this block and
+                # every instance takes a new identity for nothing.
                 "sop_uid": inst.sop_instance_uid,
                 "pixel_loader": inst._pixel_loader,
                 "pixel_hash": getattr(inst, "_pixel_hash", None),
@@ -445,7 +497,16 @@ class RedactionService:
             # carries no hash, so the next run retries it. Do not "fix" it
             # with a pre-image copy of every array -- that is exactly the
             # resident-memory cost the lazy-pixel design exists to avoid.
-            if (not failed and self.store_backend
+            #
+            # `modified` narrows #213's condition; it does not replace it.
+            # `persist_pixel_data` has no deduplication -- it hashes,
+            # writes a frame and re-points the loader every time it is
+            # called with a resident array -- so persisting a swap that
+            # never happened appended a frame nothing referenced, and only
+            # `compact()` ever noticed. That is the same "attested without
+            # being earned" defect as the null attributes, in the sidecar
+            # instead of in the graph (#235).
+            if (modified and not failed and self.store_backend
                     and hasattr(self.store_backend, 'persist_pixel_data')):
                 try:
                     self.store_backend.persist_pixel_data(inst)
@@ -540,7 +601,8 @@ class RedactionService:
             rois: List[tuple],
             targets: List[Instance] = None,
             show_progress: bool = True,
-            verbose: bool = False):
+            verbose: bool = False,
+            force: bool = False):
         """
         Applies a LIST of ROIs to all images from the specified machine.
 
@@ -551,6 +613,15 @@ class RedactionService:
             rois (List[tuple]): List of (y1, y2, x1, x2) ROIs.
             targets (List[Instance], optional): Pre-filtered list of instances.
             show_progress (bool): If True, shows progress bar.
+            force (bool): If True, re-redact an instance whose
+                `_ISOCENTER_REDACTION_HASH` already matches this
+                configuration. Suppresses that skip and nothing else. It
+                is **last in the signature and defaulted** deliberately:
+                `test_redaction_optimization.py`, `test_redaction_rgb.py`,
+                `test_services.py` and `test_pixel_geometry_pipeline.py`
+                all call this method positionally with two arguments.
+                `Session.redact(force=True)` is the same lever on the
+                parallel path (#237).
 
         Raises:
             RedactionError: If any instance's zone could not be applied.
@@ -581,7 +652,22 @@ class RedactionService:
 
         # 1. Compute Hash for this Config
         # We assume rois list fully captures the intent (zones)
-        # Sort to ensure stability if zones are re-ordered
+        #
+        # Sort to ensure stability if zones are re-ordered -- and the sort
+        # is *correct*, not merely stable. Redaction zeroes, and zeroing
+        # is commutative and idempotent, so two orderings of one zone list
+        # cannot produce different pixels. Measured on `84113ab`, disjoint
+        # (`[[0,8,0,8],[100,200,100,200]]`) and overlapping
+        # (`[[0,8,0,8],[4,12,4,12]]`), identical totals both ways. #237
+        # read the pre-#229 order dependence as a hash collision; it was
+        # the per-zone-copy bug, and it is gone.
+        #
+        # **Do not change this input.** Every store whose config order
+        # differs from its sorted order would find its attestation moved,
+        # re-redact, and take a new SOP Instance UID and a new exported
+        # filename on the next ordinary call -- and every other store
+        # would not. That is an unannounced partial migration delivered to
+        # an arbitrary subset. `force=` is the announced lever.
         rois_stable = sorted(rois)
         config_str = json.dumps({"serial": machine_sn, "rois": rois_stable}, sort_keys=True)
         config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
@@ -595,15 +681,21 @@ class RedactionService:
                 disable=not show_progress):
             original_uid = inst.sop_instance_uid  # Capture before mutation
             failed = False
+            # Bound before the `try`: every `continue` below and the
+            # exception path reach the `finally`, which reads it.
+            modified = False
             try:
-                # Optimized: Skip if already redacted with same config
+                # Optimized: Skip if already redacted with same config.
+                # `force` suppresses this and nothing else -- see
+                # `execute_redaction_task`, which carries the same flag
+                # through its task dict (#237).
                 current_hash = inst.attributes.get("_ISOCENTER_REDACTION_HASH")
 
                 # DEBUG: Log hashes
                 # if verbose and current_hash:
                 #    self.logger.debug(f"DEBUG: {inst.sop_instance_uid} Current: {current_hash} vs New: {config_hash}")
 
-                if current_hash == config_hash:
+                if not force and current_hash == config_hash:
                     # Log at DEBUG level (requires logging configuration to show)
                     self.logger.debug(
                         f"  Skipping {
@@ -657,7 +749,14 @@ class RedactionService:
                 # already zeroed, and persisting them makes a partial
                 # redaction durable. See `execute_redaction_task`'s `finally`
                 # for the whole argument (#213).
-                if (not failed and self.store_backend
+                #
+                # Not when nothing was modified either, and this path had
+                # the defect just as the parallel one did: measured on
+                # `84113ab`, an off-image rule grew the sidecar 17 -> 34
+                # bytes and left `instance_blobs` pointing at the second
+                # copy, orphaning the first. `persist_pixel_data` does not
+                # deduplicate (#235).
+                if (modified and not failed and self.store_backend
                         and hasattr(self.store_backend, 'persist_pixel_data')):
                     # We only strictly NEED to persist if we hold dirty pixels in memory.
                     # But persist_pixel_data handles checks (returns if no pixels).

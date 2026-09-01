@@ -47,8 +47,9 @@ LEVERS = ["ISOCENTER_FORCE_THREADS", "ISOCENTER_FORCE_PROCESSES"]
 ZONE = [0, 8, 0, 8]
 
 #: Entirely past the edge of a 32x32 image. Every zone is skipped,
-#: `modified` stays False, `regenerate_uid()` is never called -- and a
-#: mutation still comes back, which is what makes this a real gate.
+#: `modified` stays False, `regenerate_uid()` is never called -- and
+#: since #235 no mutation comes back either, which is the shape the
+#: serial path always had.
 OFF_EDGE_ZONE = [100, 108, 100, 108]
 
 
@@ -174,29 +175,45 @@ def test_the_exported_filename_is_the_new_uid_under_either_executor(
 @pytest.mark.parametrize("lever", LEVERS)
 def test_an_instance_nothing_was_applied_to_keeps_its_identity(
         reloaded_redaction_session, tmp_path, monkeypatch, lever):
-    """The gate is UID inequality, not "a mutation came back".
+    """An instance nothing was applied to keeps its identity and its file.
 
-    `execute_redaction_task` builds its mutation dict **outside** the
-    `if modified:` block, so an instance whose every zone starts past the
-    edge of the image returns a mutation and has attributes written onto
-    it, having had nothing applied to its pixels. Handing that instance a
-    new identity would be a false attestation -- an unmodified image
-    claiming to be a new, derived SOP Instance.
+    Handing such an instance a new identity would be a false attestation
+    -- an unmodified image claiming to be a new, derived SOP Instance --
+    and clearing its `file_path` would detach it from a source it still
+    byte-for-byte matches, which is #238's mechanism reaching a run that
+    changed nothing.
 
-    Because `regenerate_uid()` is called only inside `if modified:`,
-    `sop_uid != original_sop_uid` is true exactly when the pixels
-    changed, and that is the gate `_apply_redaction_outcomes` uses.
+    **The gate this used to name is gone.** Until #235 the docstring here
+    read "the gate is `sop_uid != original_sop_uid`, not the presence of
+    a mutation", because `execute_redaction_task` built its mutation dict
+    outside `if modified:` and a mutation therefore came back for an
+    instance whose zones all missed. It now builds the dict inside the
+    gate, so the mutation's existence *is* the claim that pixels changed,
+    and `_apply_redaction_outcomes` reads `if new_uid:` -- a `None`-safety
+    guard on a `dict.get`, not a second gate.
 
     **Selectivity guard with respect to #228** -- green on `dddb659` on
-    both legs and both interpreters, so it is not evidence the
-    divergence is fixed. It is detection with respect to the gate: it
-    goes red the moment that condition is written `if new_uid:` or
-    `if mutation:`.
+    both legs and both interpreters, so it is not evidence that
+    divergence is fixed.
 
-    The `applied` count and the null-valued attributes this run writes
-    are a separate defect, deliberately deferred so that its fix and this
-    gate can be decided as one gate (#235). Nothing here asserts on
-    either, so this test does not pin them.
+    **It is still detection with respect to the gate, and measured to
+    be.** Re-widening the mutation construction back outside
+    `if modified:` while leaving `if new_uid:` in place was applied to
+    this tree and the suite re-run: this test goes **red on both legs**,
+    on `assert inst.file_path == str(stale)`, with `file_path is None`.
+    The two UID assertions above it stay green, because the re-widened
+    mutation carries `sop_uid == original_sop_uid` and the two
+    assignments are no-ops -- but the third statement in that block,
+    `instance.file_path = None`, is not. So `file_path` is the assertion
+    that discriminates, `stale` is not decoration, and the selectivity
+    #228's comment worried about losing is broader than the #235 spec
+    predicted (it expected this test to stay green and the property to be
+    carried entirely by `tests/test_redaction_attestation.py`; that file
+    does carry it, and this one has not stopped).
+
+    The `applied` count and the null-valued attributes that run used to
+    write are `tests/test_redaction_attestation.py`'s subject. Nothing
+    here asserts on either.
     """
     monkeypatch.setenv(lever, "1")
     session, inst = reloaded_redaction_session(
@@ -207,9 +224,9 @@ def test_an_instance_nothing_was_applied_to_keeps_its_identity(
     _write_stale_source(stale, source_uid)
     inst.file_path = str(stale)
 
-    # Non-vacuity, asked without depending on #235's count: the rule does
-    # target this instance, so a worker really did run and really did
-    # return a mutation for it.
+    # Non-vacuity, asked without depending on the `redact()` count, which
+    # #235 changed: the rule does target this instance, so a worker
+    # really did run against it.
     service = RedactionService(session.store, session.store_backend)
     tasks = service.prepare_redaction_tasks(session.configuration.rules[0])
     assert len(tasks) == 1, (

@@ -317,9 +317,16 @@ def test_a_rule_that_applied_nothing_returns_False_and_attests_nothing(
     A zone starting past the edge describes nothing to redact and
     `apply_redaction_to_array` skips it without raising, so this is the
     reachable shape of "nothing applied". The *reporting* of that run --
-    `applied: 1` and `(0028,0301)` written as `None` -- is #235 and is
-    deliberately not asserted here; only the return value and the absence
-    of the attestation are, both of which #235's fix leaves alone.
+    `applied: 1` and `(0028,0301)` written as `None` on the parallel path
+    -- was #235 and was deliberately not asserted here. #235 has landed;
+    `tests/test_redaction_attestation.py` is where those artifacts are
+    asserted, for both paths. This test is unchanged by it: it drives the
+    serial path, which never had the divergence, and asserts only the
+    return value and the absence of the attestation.
+
+    Note the hash assertion below is `assert not ... .get(...)`, which
+    passes on `None` as readily as on absent, so it does **not** pin
+    absence. `test_redaction_attestation.py` uses `not in` for that.
     """
     zones = [[100, 200, 100, 200], [200, 300, 200, 300]]
     rois = [tuple(z) for z in zones]
