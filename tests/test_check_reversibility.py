@@ -28,6 +28,7 @@ import numpy as np
 import pytest
 
 from isocenter.entities import Instance, Patient, Series, Study
+from isocenter.io_handlers import ExportContext
 from isocenter.session import DicomSession
 
 #: Pixel Spacing, Type 1 for a CT image. An instance without it fails
@@ -265,3 +266,129 @@ def test_a_write_that_fails_late_delivers_nothing_to_disclose(tmp_path):
     rows = _disclosures(db_path)
     assert len(rows) == 1, rows
     assert "2 of 2 exported instances" in rows[0], rows[0]
+
+
+def _spy_on_exists(monkeypatch):
+    """Record every parent-process `os.path.exists` call, still answering it.
+
+    Parent-process only, which is the right scope: the short-circuit
+    under test is parent code in `_report_recoverable_identities`, and
+    the workers' own filesystem traffic is not what the docstring's
+    "no filesystem work" sentence is about.
+    """
+    calls = []
+    real_exists = os.path.exists
+
+    def spy(p):
+        calls.append(str(p))
+        return real_exists(p)
+
+    monkeypatch.setattr(os.path, "exists", spy)
+    return calls
+
+
+def test_an_instance_the_worker_wrote_is_disclosed_even_if_its_file_is_gone(
+        tmp_path):
+    """The `written_uids` half of the #198 union, pinned (#203).
+
+    The docstring commits to "an instance the worker wrote is delivered
+    even if the file has since been removed", and nothing asserted it:
+    `delivered = set(written_uids)` mutated to `set()` left the four
+    named test files green. The half matters because #199 removed the
+    partial file a late failure used to leave behind -- the filesystem
+    half no longer covers the worker's own answer, so deleting the
+    wrong half of the union is one plausible "simplification" away.
+    Kills: `delivered = set(written_uids)` -> `delivered = set()`.
+    """
+    session = _session_with_locked_identity(tmp_path, instances=2)
+    try:
+        instances = (session.store.patients[0].studies[0]
+                     .series[0].instances)
+        gone = tmp_path / "never_created"
+        assert not gone.exists()
+        tasks = [ExportContext(instance=inst,
+                               output_path=str(
+                                   gone / f"{inst.sop_instance_uid}.dcm"),
+                               patient_attributes={},
+                               study_attributes={},
+                               series_attributes={})
+                 for inst in instances]
+
+        affected = session._report_recoverable_identities(
+            tasks, [inst.sop_instance_uid for inst in instances])
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    assert affected == 2, affected
+    rows = _disclosures(db_path)
+    assert len(rows) == 1, rows
+    assert "2 of 2 exported instances carry" in rows[0], rows[0]
+
+
+def test_a_clean_export_does_no_filesystem_work_for_the_disclosure(
+        tmp_path, monkeypatch):
+    """"Only the instances not already known to be written are stat-ed."
+
+    The claim lives in the commit message, the CHANGELOG and the
+    docstring, and nothing enforced it: dropping the
+    `not in delivered` short-circuit changes zero behaviour and turns a
+    100k-instance clean export into 100k stats on whatever filesystem
+    the cohort is leaving through. Zero recorded calls is the classic
+    vacuous pass, so the tail of this test proves the spy was live
+    during the zero, and the exactly-one count in the failure twin
+    below is the backstop against a wrong path filter.
+    Kills: dropping `task.instance.sop_instance_uid not in delivered and`.
+    """
+    session = _session_with_locked_identity(tmp_path, instances=3)
+    out = tmp_path / "out"
+    calls = _spy_on_exists(monkeypatch)
+    try:
+        session.export(str(out), show_progress=False)
+        during_export = list(calls)
+    finally:
+        session.close()
+
+    written = sorted(out.rglob("*.dcm"))
+    assert [p.stem for p in written] == ["SOP_0", "SOP_1", "SOP_2"], written
+    planned = {str(p) for p in written}
+    assert [c for c in during_export if c in planned] == [], (
+        "a clean export stat-ed a planned output path")
+
+    # Anti-vacuity: the patched spy must have been the `os.path.exists`
+    # the export saw, or the zero above measured nothing.
+    probe = str(written[0])
+    assert os.path.exists(probe) is True
+    assert calls[-1] == probe, "the spy was not wired into os.path.exists"
+
+
+def test_a_failed_write_costs_exactly_one_existence_check(
+        tmp_path, monkeypatch):
+    """A failed write is stat-ed once -- and is the only thing stat-ed.
+
+    The exact count on a named path is what a wrong path filter cannot
+    fake: its clean twin above could read zero through a filter that
+    matches nothing, but this arm must find precisely one call and
+    name the failed instance's planned path. The `(6000,0010)`
+    late-failure arm delivers no file post-#199, so the union's
+    filesystem half has exactly one question to ask.
+    Kills: dropping `task.instance.sop_instance_uid not in delivered and`
+    (three calls here, not one).
+    """
+    session = _session_with_locked_identity(tmp_path, instances=3,
+                                            truncate_instances=(1,))
+    out = tmp_path / "out"
+    calls = _spy_on_exists(monkeypatch)
+    try:
+        session.export(str(out), show_progress=False)
+        during_export = list(calls)
+    finally:
+        session.close()
+
+    on_disk = sorted(p.name for p in out.rglob("*") if p.is_file())
+    assert on_disk == ["SOP_0.dcm", "SOP_2.dcm"], on_disk
+
+    series_dir = next(out.rglob("SOP_0.dcm")).parent
+    failed_path = str(series_dir / "SOP_1.dcm")
+    dcm_calls = [c for c in during_export if c.endswith(".dcm")]
+    assert dcm_calls == [failed_path], dcm_calls

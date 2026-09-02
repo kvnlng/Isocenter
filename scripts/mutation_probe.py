@@ -14,7 +14,7 @@ is not an inconvenience but a leak nobody is watching for:
     python -m scripts.mutation_probe 30 isocenter/session.py tests/test_session.py
 
 The default run costs about an hour, and most of it is `io_handlers.py`:
-its test list is 55 files and a *surviving* mutant pays the whole list
+its test list is 56 files and a *surviving* mutant pays the whole list
 (~165s) where a kill exits at the first red test (~45s). The positional
 budget is the override for every module at once; nothing in CI runs this
 script.
@@ -112,6 +112,7 @@ TARGETS = {
     "isocenter/io_handlers.py": (["tests/test_api_coherence.py",
                                   "tests/test_audit_read_barrier.py",
                                   "tests/test_binary_retention_threshold.py",
+                                  "tests/test_check_reversibility.py",
                                   "tests/test_codecs_strict.py",
                                   "tests/test_compress_handlers.py",
                                   "tests/test_compress_j2k_coverage.py",
