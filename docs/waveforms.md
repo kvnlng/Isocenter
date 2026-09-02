@@ -338,6 +338,23 @@ belonging to a signal that is not in the record, until
 resolution described earlier therefore applies to marks on the ingested
 group; there are no others in the file.
 
+Since [#177](https://github.com/kvnlng/Isocenter/issues/177) the same
+filtering happens on the object graph itself, at the point
+[#160](https://github.com/kvnlng/Isocenter/issues/160) drops the
+discarded groups' sequence items -- so a **DICOM** export no longer
+carries a Waveform Annotation Sequence `(0040,B020)` item whose
+reference names an item that is not in the file, which is exactly the
+kind of dangling ordinal a strict downstream reader rejects. The
+filter works on `(group, channel)` pairs before it drops items: an
+annotation naming all of group 1 plus a channel of group 3 keeps its
+surviving pairs, and an item goes only when every pair it named is
+gone. Surviving ordinals are **never renumbered** -- the ordinal is
+positional, so renumbering after a discard would make the file
+internally consistent and wrong relative to the source, with no way to
+tell afterwards. An annotation with no `(0040,A0B0)` at all is
+untouched: the attribute is Type 1C, and its absence means the mark
+applies to the whole waveform.
+
 That drop is announced the same way the group discard is: a warning, and
 one `DATA_LOSS` entry per instance naming how many annotations were
 dropped and which groups they referenced -- one row, not one per mark,
@@ -348,6 +365,10 @@ report's Data Loss section with forty near-identical lines. It is scoped
 is a mark *about* the signal, the acquired-samples loss it described
 already moves Validation Status via the ingest-side row, and grading
 the bookkeeping too would double-charge one loss under two entries. A
-record with two `DATA_LOSS` rows -- one from ingest for the groups, one
-from export for the marks that referenced them -- is the expected shape,
-not a double count: they report different losses.
+record with two `DATA_LOSS` rows -- one for the groups the ingest
+discarded, one for the marks that referenced them -- is the expected
+shape, not a double count: they report different losses. Both rows are
+written at ingest since
+[#177](https://github.com/kvnlng/Isocenter/issues/177); the WFDB
+bridge keeps its own drop-and-report as the guard for a graph that
+never passed through ingest.

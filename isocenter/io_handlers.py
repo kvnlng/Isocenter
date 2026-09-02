@@ -51,6 +51,7 @@ from .pixel_geometry import (
 from .parallel import run_parallel
 from .validation import IODValidator
 from .sidecar import SidecarManager
+from .waveform import filter_dangling_annotation_refs
 
 
 from .store import DicomStore
@@ -667,6 +668,25 @@ def ingest_worker(fp: str) -> Tuple:
         if wf_seq is not None and len(wf_seq.items) > 1:
             del wf_seq.items[1:]
 
+            # And the references to what the del removed (#177).
+            # Waveform Annotation Sequence (0040,B020) sits at instance
+            # level and names a multiplex group by the ordinal of its
+            # Waveform Sequence item (PS3.3 C.10.10.1.1), so the del
+            # above turns any annotation on groups 1..n into a
+            # reference to an item the exported file does not carry.
+            # Filtered on (group, channel) pairs, never renumbered --
+            # the ordinal is positional, and renumbering would make the
+            # file internally consistent and wrong about the source.
+            # Counts ride `meta` like `waveform_groups` above: this
+            # worker may be in a subprocess, so `import_files` files
+            # the loss on the far side.
+            ann_dropped, ann_rewritten, ann_groups = \
+                filter_dangling_annotation_refs(
+                    inst, kept_items=len(wf_seq.items))
+            meta['dropped_annotations'] = ann_dropped
+            meta['rewritten_annotations'] = ann_rewritten
+            meta['dropped_annotation_groups'] = ann_groups
+
         return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
         return (None, None, None, None, None, None, None, str(e))
@@ -846,6 +866,62 @@ class DicomImporter:
                                 entity_uid=inst.sop_instance_uid,
                                 details=detail,
                                 loss_scope=LOSS_SCOPE_SIGNAL)
+
+                    # Annotations whose references the group discard
+                    # left dangling (#177). Dropping them without a row
+                    # would re-create the silent truncation #36 closed,
+                    # one element over; the WFDB bridge already reports
+                    # its equivalent drop (#159), and the two paths must
+                    # not differ in whether the user is told.
+                    #
+                    # Scoped STANDARD, not SIGNAL: an annotation is a
+                    # mark *about* the signal, and the acquired-samples
+                    # loss it described already costs the run its PASS
+                    # via the SIGNAL row above. Grading this row too
+                    # would double-charge one loss under two entries.
+                    ann_dropped = meta.get('dropped_annotations', 0)
+                    ann_rewritten = meta.get('rewritten_annotations', 0)
+                    if ann_dropped or ann_rewritten:
+                        # One row per instance, not one per mark: a cart
+                        # that marks forty beats on a discarded group
+                        # must not fill section 3 of the report with
+                        # forty near-identical lines. The count is of
+                        # annotations and the list is of distinct
+                        # groups, because they answer different
+                        # questions. No pipes in the prose -- the report
+                        # renders this into one markdown table cell.
+                        ordinals = meta.get('dropped_annotation_groups', [])
+                        group_ref = (
+                            f"multiplex "
+                            f"{'group' if len(ordinals) == 1 else 'groups'} "
+                            f"{', '.join(str(g) for g in ordinals)}")
+                        parts = []
+                        if ann_dropped:
+                            parts.append(
+                                f"Dropped {ann_dropped} waveform "
+                                f"{'annotation' if ann_dropped == 1 else 'annotations'}"
+                                f" whose only references named discarded "
+                                f"{group_ref}")
+                        if ann_rewritten:
+                            parts.append(
+                                f"removed references to discarded "
+                                f"{group_ref} from {ann_rewritten} "
+                                f"{'annotation' if ann_rewritten == 1 else 'annotations'}"
+                                f" that also name the kept group")
+                        detail = (
+                            f"{'; '.join(parts)}. Only Waveform Sequence "
+                            f"item 0 is kept (#36); a reference to a "
+                            f"discarded item would name an item the "
+                            f"exported file does not carry, and ordinals "
+                            f"are positional so the survivors are never "
+                            f"renumbered (#177).")
+                        logger.warning(f"{inst.sop_instance_uid}: {detail}")
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="DATA_LOSS",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail,
+                                loss_scope=LOSS_SCOPE_STANDARD)
 
                     # Private binary elements never reached the graph, so
                     # `remove_private_tags=False` could not have kept
