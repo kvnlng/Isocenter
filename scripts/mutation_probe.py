@@ -9,9 +9,15 @@ behaviour the suite cannot see.
 Run it against the de-identification core, where a test that cannot fail
 is not an inconvenience but a leak nobody is watching for:
 
-    python -m scripts.mutation_probe                 # default targets, 30 samples each
-    python -m scripts.mutation_probe 60              # a wider sample
+    python -m scripts.mutation_probe                 # default targets, each at its own budget
+    python -m scripts.mutation_probe 10              # one budget for every module: the cheap pass
     python -m scripts.mutation_probe 30 isocenter/session.py tests/test_session.py
+
+The default run costs about an hour, and most of it is `io_handlers.py`:
+its test list is 55 files and a *surviving* mutant pays the whole list
+(~165s) where a kill exits at the first red test (~45s). The positional
+budget is the override for every module at once; nothing in CI runs this
+script.
 
 **Sampled, not exhaustive.** It walks mutation sites at a fixed stride,
 so the output is "of N representative mutations, M survived" -- evidence
@@ -62,37 +68,102 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 PYTEST = [str(REPO / ".venv/bin/python"), "-m", "pytest", "-x", "-q", "--no-header", "-p", "no:randomly"]
 
-# The tests to run for each target. Complete-ness matters more than it
-# looks: a mutant that a test in this repo would kill, but which is not
-# in this list, is reported as SURVIVED -- a phantom gap in the
-# de-identification core that costs a human a real investigation.
+# The `(tests, budget)` to use for each target. Complete-ness of the
+# test list matters more than it looks: a mutant that a test in this
+# repo would kill, but which is not in that list, is reported as
+# SURVIVED -- a phantom gap in the de-identification core that costs a
+# human a real investigation.
 # `tests/test_mutation_probe_targets.py` fails if a test file imports a
-# target module and is not listed here. Extra entries are allowed and
-# deliberate: `test_remediation_actions.py` exercises `remediation.py`
-# without importing it, which no import scan can see.
+# target module and is not listed here. Extra entries are allowed but
+# must have earned their runtime with a measured kill: every listed file
+# runs for every sampled mutant. `test_remediation_actions.py` exercises
+# `remediation.py` without importing it, which no import scan can see;
+# `test_redaction_export.py` and `test_reversibility.py` do the same for
+# `io_handlers.py` (the `apply_redaction_to_array` call and the
+# `(0400,0510)` write, both verified kills).
+# The budget is per module because the knob does two jobs at once
+# globally: `io_handlers.py` has ~5x the sites of any other target, so
+# raising its sampling density with one shared number forces the
+# already-measured modules to re-pay at stride 1. The positional CLI
+# budget overrides every module for one run.
 TARGETS = {
-    "isocenter/crypto.py": ["tests/test_crypto.py", "tests/test_reversibility.py"],
-    "isocenter/privacy.py": ["tests/test_analysis.py", "tests/test_analysis_persistence.py",
-                             "tests/test_audit_suppression.py", "tests/test_automation.py",
-                             "tests/test_config_tags_shapes.py", "tests/test_multiprocessing.py",
-                             "tests/test_mutation_gaps.py", "tests/test_ocr_formal.py",
-                             "tests/test_persistence.py", "tests/test_privacy.py",
-                             "tests/test_private_sequence_implicit_vr.py",
-                             "tests/test_profile_end_to_end.py", "tests/test_remediation.py",
-                             "tests/test_remediation_actions.py",
-                             "tests/test_remediation_invariants.py",
-                             "tests/test_scaffold_features.py",
-                             "tests/test_sr_anonymization.py"],
-    "isocenter/remediation.py": ["tests/test_audit_suppression.py", "tests/test_deid_tags.py",
-                                 "tests/test_mutation_gaps.py", "tests/test_persistence.py",
-                                 "tests/test_private_sequence_implicit_vr.py",
-                                 "tests/test_remediation.py",
-                                 "tests/test_remediation_accounting.py",
-                                 "tests/test_remediation_actions.py",
-                                 "tests/test_remediation_dates.py",
-                                 "tests/test_remediation_invariants.py",
-                                 "tests/test_phi_retention.py",
-                                 "tests/test_scaffold_features.py"],
+    "isocenter/crypto.py": (["tests/test_crypto.py", "tests/test_reversibility.py"], 30),
+    "isocenter/privacy.py": (["tests/test_analysis.py", "tests/test_analysis_persistence.py",
+                              "tests/test_audit_suppression.py", "tests/test_automation.py",
+                              "tests/test_config_tags_shapes.py", "tests/test_multiprocessing.py",
+                              "tests/test_mutation_gaps.py", "tests/test_ocr_formal.py",
+                              "tests/test_persistence.py", "tests/test_privacy.py",
+                              "tests/test_private_sequence_implicit_vr.py",
+                              "tests/test_profile_end_to_end.py", "tests/test_remediation.py",
+                              "tests/test_remediation_actions.py",
+                              "tests/test_remediation_invariants.py",
+                              "tests/test_scaffold_features.py",
+                              "tests/test_sr_anonymization.py"], 30),
+    "isocenter/remediation.py": (["tests/test_audit_suppression.py", "tests/test_deid_tags.py",
+                                  "tests/test_mutation_gaps.py", "tests/test_persistence.py",
+                                  "tests/test_private_sequence_implicit_vr.py",
+                                  "tests/test_remediation.py",
+                                  "tests/test_remediation_accounting.py",
+                                  "tests/test_remediation_actions.py",
+                                  "tests/test_remediation_dates.py",
+                                  "tests/test_remediation_invariants.py",
+                                  "tests/test_phi_retention.py",
+                                  "tests/test_scaffold_features.py"], 30),
+    "isocenter/io_handlers.py": (["tests/test_api_coherence.py",
+                                  "tests/test_audit_read_barrier.py",
+                                  "tests/test_binary_retention_threshold.py",
+                                  "tests/test_codecs_strict.py",
+                                  "tests/test_compress_handlers.py",
+                                  "tests/test_compress_j2k_coverage.py",
+                                  "tests/test_data_loss_reporting.py",
+                                  "tests/test_export_atomic_write.py",
+                                  "tests/test_export_contract.py",
+                                  "tests/test_export_date_error.py",
+                                  "tests/test_export_delivery_counters.py",
+                                  "tests/test_export_error.py",
+                                  "tests/test_export_failure_audit.py",
+                                  "tests/test_export_loss_audit.py",
+                                  "tests/test_export_merge_shape.py",
+                                  "tests/test_export_pixels.py",
+                                  "tests/test_export_readback.py",
+                                  "tests/test_export_redaction_hash_warning.py",
+                                  "tests/test_export_worker_graph_purity.py",
+                                  "tests/test_float_pixel_data_export.py",
+                                  "tests/test_ingest_failure_audit.py",
+                                  "tests/test_io.py",
+                                  "tests/test_legacy_waveform_hydration.py",
+                                  "tests/test_logging.py",
+                                  "tests/test_metadata_refactor_full.py",
+                                  "tests/test_missing_study_date.py",
+                                  "tests/test_multiprocessing.py",
+                                  "tests/test_murmur_annotations.py",
+                                  "tests/test_naming_structure.py",
+                                  "tests/test_nested_phi_audit.py",
+                                  "tests/test_pixel_geometry_pipeline.py",
+                                  "tests/test_private_binary_ingest.py",
+                                  "tests/test_private_tag_export.py",
+                                  "tests/test_pydicom_deprecations.py",
+                                  "tests/test_recursive_import.py",
+                                  "tests/test_redaction_export.py",
+                                  "tests/test_redaction_optimization.py",
+                                  "tests/test_redaction_rgb.py",
+                                  "tests/test_redaction_robustness.py",
+                                  "tests/test_redaction_wildcard.py",
+                                  "tests/test_remediation_accounting.py",
+                                  "tests/test_reporting_features.py",
+                                  "tests/test_reversibility.py",
+                                  "tests/test_safe_export.py",
+                                  "tests/test_services.py",
+                                  "tests/test_session.py",
+                                  "tests/test_shared_executor_lifecycle.py",
+                                  "tests/test_sr_anonymization.py",
+                                  "tests/test_structured_export.py",
+                                  "tests/test_waveform_dicom_roundtrip.py",
+                                  "tests/test_waveform_ingest.py",
+                                  "tests/test_waveform_model.py",
+                                  "tests/test_wfdb_conformance.py",
+                                  "tests/test_wfdb_writer.py",
+                                  "tests/test_worker_loss_is_reported.py"], 30),
 }
 
 class Mut(ast.NodeTransformer):
@@ -320,11 +391,16 @@ def run(tests):
 
 def main():
     argv = sys.argv[1:]
-    budget = int(argv[0]) if argv and argv[0].isdigit() else 30
+    override = int(argv[0]) if argv and argv[0].isdigit() else None
     rest = argv[1:] if argv and argv[0].isdigit() else argv
-    targets = {rest[0]: list(rest[1:])} if len(rest) >= 2 else TARGETS
+    if len(rest) >= 2:
+        targets = {rest[0]: (list(rest[1:]), override if override is not None else 30)}
+    else:
+        targets = TARGETS
 
-    for mod, tests in targets.items():
+    for mod, (tests, budget) in targets.items():
+        if override is not None:
+            budget = override
         path = REPO / mod
         original = path.read_text()
         total = count_ops(original)

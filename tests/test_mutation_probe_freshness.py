@@ -312,7 +312,7 @@ def test_main_guards_the_bytes_of_every_run_including_the_control(tmp_path, monk
     sentinel = pathlib.Path("/sentinel/victim.faketag-000.pyc")
 
     monkeypatch.setattr(mutation_probe, "REPO", tmp_path)
-    monkeypatch.setattr(mutation_probe, "TARGETS", {"victim.py": ["t.py"]})
+    monkeypatch.setattr(mutation_probe, "TARGETS", {"victim.py": (["t.py"], 30)})
     monkeypatch.setattr(mutation_probe, "subprocess_cache_path",
                         lambda p: sentinel)
     monkeypatch.setattr(mutation_probe, "assert_fresh",
