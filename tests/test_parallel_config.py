@@ -80,9 +80,22 @@ class TestParallelConfig(unittest.TestCase):
         call_kwargs = mock_ctx.Pool.call_args[1]
         self.assertEqual(call_kwargs.get('maxtasksperchild'), 10)
 
-    @patch('isocenter.parallel._gc_off')
+    def _assert_disables_gc(self, initializer):
+        """The initializer is the resolved `_worker_init` with GC off.
+
+        Asserted on the partial's own contents rather than by calling
+        it: calling would disable this process's collector. The partial
+        shape is itself part of the contract -- settings must travel as
+        pickled arguments, because a spawned child re-imports the module
+        fresh and an argument-driven `disable_gc=True` (no env var set
+        in the child-visible sense) would otherwise be lost.
+        """
+        self.assertIsNotNone(initializer)
+        self.assertIs(initializer.func, parallel._worker_init)
+        self.assertTrue(initializer.keywords.get('disable_gc'))
+
     @patch('multiprocessing.get_context')
-    def test_run_parallel_disable_gc_maxtasks(self, mock_get_context, mock_gc_off):
+    def test_run_parallel_disable_gc_maxtasks(self, mock_get_context):
         """Test ISOCENTER_DISABLE_GC with maxtasksperchild path."""
         os.environ["ISOCENTER_MAX_TASKS_PER_CHILD"] = "5"
         os.environ["ISOCENTER_DISABLE_GC"] = "1"
@@ -106,11 +119,10 @@ class TestParallelConfig(unittest.TestCase):
 
         mock_ctx.Pool.assert_called()
         call_kwargs = mock_ctx.Pool.call_args[1]
-        self.assertEqual(call_kwargs.get('initializer'), mock_gc_off)
+        self._assert_disables_gc(call_kwargs.get('initializer'))
 
     @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
-    @patch('isocenter.parallel._gc_off')
-    def test_run_parallel_disable_gc_executor(self, mock_gc_off, mock_executor):
+    def test_run_parallel_disable_gc_executor(self, mock_executor):
         """Test ISOCENTER_DISABLE_GC with standard ProcessPoolExecutor."""
         os.environ["ISOCENTER_DISABLE_GC"] = "1"
         # Ensure we don't trigger maxtasks path
@@ -125,7 +137,7 @@ class TestParallelConfig(unittest.TestCase):
 
         mock_executor.assert_called()
         call_kwargs = mock_executor.call_args[1]
-        self.assertEqual(call_kwargs.get('initializer'), mock_gc_off)
+        self._assert_disables_gc(call_kwargs.get('initializer'))
 
     @patch('isocenter.parallel.concurrent.futures.ProcessPoolExecutor')
     @patch('isocenter.parallel.tqdm')

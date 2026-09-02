@@ -669,3 +669,91 @@ def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():
         f"faulthandler_timeout={threshold:g}s leaves no room to fire "
         f"before the Run Tests step timeout ({step_seconds}s) kills the "
         "process; the dump has to land while the run is still alive")
+
+
+def _faulthandler_threshold_and_step_seconds():
+    """The two outer bounds of the timeout-inequality family.
+
+    pytest's faulthandler threshold (the diagnosis window) and the Run
+    Tests step cap (the kill). Everything that can stall must resolve
+    inside the first, which must sit inside the second.
+    """
+    import configparser
+    import yaml
+
+    ini = configparser.ConfigParser()
+    ini.read(REPO / "pytest.ini")
+    threshold = float(ini.get("pytest", "faulthandler_timeout"))
+
+    workflow = yaml.safe_load(GATE_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+    run_tests = next(s for s in steps if s.get("id") == "suite")
+    return threshold, run_tests["timeout-minutes"] * 60, run_tests
+
+
+def test_a_locked_database_errors_inside_one_faulthandler_window():
+    """A lock that will not clear must surface as an error, not a stall.
+
+    Every file connection used to be opened with `timeout=900.0` -- a
+    bare literal. #250's occurrence four proved what that buys: a
+    forked child that could not get the write lock was not going to get
+    it at second 890 either, and the 900s busy timeout turned a
+    diagnosable `sqlite3.OperationalError: database is locked` into a
+    15-minute stall that three CI runs died inside without naming a
+    test. The invariant: the busy timeout resolves inside one
+    faulthandler window (so the dump shows a thread still *waiting*,
+    with a stack), and the error -- not the job cap -- is what ends the
+    test.
+    """
+    import inspect
+
+    from isocenter import persistence
+
+    threshold, _step_seconds, _ = _faulthandler_threshold_and_step_seconds()
+
+    assert persistence._SQLITE_BUSY_TIMEOUT_S < threshold, (
+        f"_SQLITE_BUSY_TIMEOUT_S={persistence._SQLITE_BUSY_TIMEOUT_S:g}s "
+        f"outlasts the faulthandler window ({threshold:g}s): a stuck "
+        "writer stalls past the diagnosis instead of erroring inside it "
+        "(#250)")
+
+    source = inspect.getsource(persistence.SqliteStore._get_connection)
+    assert "_SQLITE_BUSY_TIMEOUT_S" in source, (
+        "_get_connection no longer reads _SQLITE_BUSY_TIMEOUT_S; a "
+        "re-inlined literal is exactly how 900.0 went unquestioned for "
+        "so long (#250)")
+
+
+def test_the_worker_watchdog_fires_inside_the_parents_window():
+    """A stalled child must dump its own stack before anything kills it.
+
+    pytest's `faulthandler_timeout` sees only the parent's threads:
+    #250's occurrence-four dump showed every parent thread idle and
+    nothing inside a sqlite write, because the 900-second lock holder
+    was a pool child faulthandler cannot see into. The child-side
+    watchdog (`parallel._worker_init`) is the other half of that
+    picture, and it must fire *before* the parent's window closes so
+    the two dumps land in the same log -- and before anything kills the
+    run. It is armed by `ISOCENTER_WORKER_FAULTHANDLER`, which only
+    tests.yml sets: production users never pay for instrumentation.
+    """
+    from isocenter import parallel
+
+    threshold, step_seconds, run_tests = (
+        _faulthandler_threshold_and_step_seconds())
+
+    assert parallel._WORKER_FAULTHANDLER_TIMEOUT_S < threshold, (
+        f"_WORKER_FAULTHANDLER_TIMEOUT_S="
+        f"{parallel._WORKER_FAULTHANDLER_TIMEOUT_S:g}s does not fire "
+        f"inside the parent's faulthandler window ({threshold:g}s); the "
+        "child's dump must land while the parent's diagnosis is still "
+        "assembling the same picture (#250)")
+    assert threshold < step_seconds, (
+        "the parent window itself no longer fits the Run Tests step; "
+        "see test_a_hang_dumps_tracebacks_before_any_timeout_kills_it")
+
+    env = run_tests.get("env") or {}
+    assert str(env.get("ISOCENTER_WORKER_FAULTHANDLER")) == "1", (
+        "tests.yml's Run Tests step does not set "
+        "ISOCENTER_WORKER_FAULTHANDLER=1, so the next child-side stall "
+        "in CI is again a dump with the child's half missing (#250)")

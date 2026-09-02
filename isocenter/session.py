@@ -2,6 +2,7 @@ import gc
 import os
 import re
 import json
+import contextlib
 import datetime
 import multiprocessing
 import concurrent.futures
@@ -29,7 +30,7 @@ from .persistence import SqliteStore
 from .crypto import KeyManager
 from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
-from .parallel import run_parallel, _env_int
+from .parallel import run_parallel, _env_int, resolve_worker_initializer
 from .configuration import IsocenterConfiguration, FlowList
 from .entities import (PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree)
@@ -607,7 +608,12 @@ class DicomSession:
         # (#220, #250).
         self._executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=None,  # Default: CPU * 1.5
-            mp_context=multiprocessing.get_context("spawn"))
+            mp_context=multiprocessing.get_context("spawn"),
+            # The same env-gated worker setup as run_parallel's pools
+            # (GC off, child-side faulthandler watchdog); resolved by
+            # the one resolver so the session's own pool cannot drift
+            # from the per-call ones (#250).
+            initializer=resolve_worker_initializer())
 
         if db_exists:
             print(f"Loaded session from {self.persistence_file}")
@@ -706,10 +712,12 @@ class DicomSession:
                 get_logger().debug("Could not shut down prior executor: %s", exc)
 
         # Re-init, with the same spawn pin as construction: an OOM
-        # recovery must not quietly downgrade the pool to fork (#220).
+        # recovery must not quietly downgrade the pool to fork (#220),
+        # nor drop the worker setup construction resolved (#250).
         self._executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=max_workers,
-            mp_context=multiprocessing.get_context("spawn"))
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=resolve_worker_initializer())
 
     def release_memory(self):
         """
@@ -2280,6 +2288,16 @@ class DicomSession:
             print("No configuration loaded. Use .load_config() first.")
             return 0
 
+        # A redaction pass must not run concurrently with a background
+        # save that is serializing the very pixels it is about to
+        # replace: `save()` without `sync=True` returns with `save_all`
+        # still running on the persistence manager's thread, against
+        # these same instances (#274). The store's `_pixel_swap_lock` is
+        # what protects direct `RedactionService` users; the pipeline
+        # can simply refuse to open the window at all.
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
+
         service = RedactionService(self.store, self.store_backend)
         try:
             return self._apply_redaction_rules(service, show_progress, force)
@@ -2515,14 +2533,29 @@ class DicomSession:
                 instance.sequences.update(mutation['sequences'])
 
             loader = mutation.get('pixel_loader')
-            if loader:
-                # The loader is our handle on the sidecar copy, but it points
-                # at the worker's instance. Re-point it at this process's.
-                loader.instance = instance
-                instance._pixel_loader = loader
-
-            if mutation.get('pixel_hash'):
-                instance._pixel_hash = mutation['pixel_hash']
+            if loader or mutation.get('pixel_hash'):
+                # Under the store's pixel-swap lock: this rebind is the
+                # process-executor arm of the same straddle
+                # `persist_pixel_data` closes -- a background save
+                # (`_persist_pixels`) that read this instance's resident
+                # array before the worker redacted its copy must not
+                # publish its loader *after* this one lands, or the
+                # instance reads back unredacted pixels under a full
+                # redaction attestation (#274). A store-less call (unit
+                # tests drive this method directly) has no second writer
+                # to race, so it also needs no lock.
+                lock = (store_backend._pixel_swap_lock
+                        if store_backend is not None
+                        else contextlib.nullcontext())
+                with lock:
+                    if loader:
+                        # The loader is our handle on the sidecar copy,
+                        # but it points at the worker's instance.
+                        # Re-point it at this process's.
+                        loader.instance = instance
+                        instance._pixel_loader = loader
+                    if mutation.get('pixel_hash'):
+                        instance._pixel_hash = mutation['pixel_hash']
 
             new_uid = mutation.get('sop_uid')
             if new_uid:

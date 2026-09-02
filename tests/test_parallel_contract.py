@@ -40,7 +40,7 @@ def clean_env(monkeypatch):
     for name in ("ISOCENTER_MAX_WORKERS", "ISOCENTER_CHUNKSIZE",
                  "ISOCENTER_MAX_TASKS_PER_CHILD", "ISOCENTER_DISABLE_GC",
                  "ISOCENTER_FORCE_THREADS", "ISOCENTER_FORCE_PROCESSES",
-                 "ISOCENTER_SHOW_PROGRESS"):
+                 "ISOCENTER_SHOW_PROGRESS", "ISOCENTER_WORKER_FAULTHANDLER"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -323,3 +323,101 @@ def test_a_dead_worker_surfaces_as_a_trailing_value_not_a_raise(monkeypatch):
     assert not any(r == 6 for r in results), (
         "the item queued behind the dead worker cannot have run; if it "
         "did, this fixture is no longer killing anything")
+
+
+# --- #250: the child-side watchdog ------------------------------------------
+#
+# pytest's faulthandler_timeout dumps the *parent's* threads; #250's
+# occurrence-four dump showed all of them idle, because the 900-second
+# lock holder was a pool child no parent-side instrumentation can see
+# into. `ISOCENTER_WORKER_FAULTHANDLER=1` (set only in tests.yml) arms
+# `faulthandler.dump_traceback_later(..., exit=False)` inside each
+# worker process, so the next child-side stall of any mechanism delivers
+# the child's own stack.
+
+
+def sleep_past_the_watchdog(value):
+    """Module scope: it has to pickle into a process-pool worker."""
+    import time
+    time.sleep(1.5)
+    return value * 2
+
+
+def test_the_watchdog_env_var_arms_a_picklable_initializer(monkeypatch):
+    """The strategy resolves an initializer, and it must cross a spawn.
+
+    Picklability is the load-bearing half: an initializer that cannot
+    pickle kills every worker at startup, which is why the worker
+    functions all live at module scope. Resolved in the parent so the
+    settings travel as arguments rather than relying on the child
+    re-reading anything.
+    """
+    import pickle
+
+    from isocenter.parallel import _resolve_strategy
+
+    monkeypatch.setenv("ISOCENTER_WORKER_FAULTHANDLER", "1")
+    # Processes selected structurally: a free-threaded build defaults to
+    # threads, whose (correct) no-initializer rule would otherwise decide
+    # this test before the resolver is ever consulted.
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+
+    strategy = _resolve_strategy(2, 1, None, False, False, False, "t", None)
+    initializer = strategy.worker_initializer
+    assert initializer is not None, (
+        "ISOCENTER_WORKER_FAULTHANDLER=1 resolved no worker initializer; "
+        "no child ever arms its watchdog (#250)")
+    pickle.dumps(initializer)
+
+    # Threads share the parent's interpreter: arming a process-lifetime
+    # watchdog there would dump the whole program's threads mid-run.
+    threaded = _resolve_strategy(2, 1, None, False, True, False, "t", None)
+    assert threaded.worker_initializer is None
+
+
+def test_without_the_env_var_no_initializer_is_forced_on_workers(monkeypatch):
+    """Production never pays for CI's instrumentation."""
+    monkeypatch.delenv("ISOCENTER_WORKER_FAULTHANDLER", raising=False)
+    # Processes, structurally, for the same reason as the arming test:
+    # on threads the answer is None regardless of the resolver.
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+
+    from isocenter.parallel import _resolve_strategy
+
+    strategy = _resolve_strategy(2, 1, None, False, False, False, "t", None)
+    assert strategy.worker_initializer is None
+
+
+def test_a_stalled_worker_dumps_its_own_stack_and_still_finishes(
+        monkeypatch, capfd):
+    """The integration: a spawned child actually arms the watchdog.
+
+    The threshold is monkeypatched in the *parent* and must reach the
+    child through the initializer's own arguments -- a spawned child
+    re-imports the module fresh, so a patched constant proves the
+    resolution happens parent-side. Two assertions, both load-bearing:
+    the dump text arrives (the watchdog fired), and the results are
+    still correct (`exit=False` -- the watchdog is diagnosis, and a
+    slow-but-healthy worker must finish its task, not be killed by its
+    own instrumentation; "simplifying" to exit=True turns every slow
+    worker into a lost task). The sleep budget is generous on purpose:
+    this test must not be able to become a #250 itself.
+    """
+    from isocenter import parallel
+
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+    monkeypatch.setenv("ISOCENTER_WORKER_FAULTHANDLER", "1")
+    monkeypatch.setattr(parallel, "_WORKER_FAULTHANDLER_TIMEOUT_S", 0.2)
+
+    results = parallel.run_parallel(
+        sleep_past_the_watchdog, [1, 2], show_progress=False, max_workers=1)
+
+    assert results == [2, 4], (
+        "the watchdog changed the run's outcome; it must only ever dump "
+        "(exit=False), never kill the worker (#250)")
+
+    stderr = capfd.readouterr().err
+    assert "Timeout" in stderr and "Thread" in stderr, (
+        "no traceback dump reached stderr: the spawned child never armed "
+        "its watchdog, so the next CI stall is again missing the child's "
+        f"half of the picture (#250). stderr was: {stderr!r}")

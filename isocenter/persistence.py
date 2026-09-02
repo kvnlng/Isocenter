@@ -140,6 +140,31 @@ def _delete_patient_subtrees(cur, patient_pks) -> None:
     cur.execute(f"DELETE FROM patients WHERE id IN ({clause})", patient_pks)
 
 
+#: SQLite busy timeout for every file-backed connection, in seconds.
+#: This number was 900.0, inline and unexplained, and #250 measured what
+#: that buys: a writer that cannot get the lock in two minutes is not
+#: going to get it at second 890 -- the stuck forked child errored at
+#: exactly 900s every time -- and each hit became a ~15-minute stall
+#: that CI's job cap killed as 'cancelled' with no failing test named.
+#: The invariant (pinned by test_packaging_contract.py, with pytest's
+#: faulthandler_timeout=300 and the Run Tests step cap): a lock that
+#: will not clear surfaces as `sqlite3.OperationalError: database is
+#: locked` *inside* one faulthandler window, where the dump shows a
+#: thread still waiting with a stack -- never as a stall for an outer
+#: timeout to kill. The floor is measured, not guessed: the longest
+#: single transaction window observed across the full stress-test
+#: pipeline (4,000 instances, ~2GB of pixels; `save_all` compressing
+#: dirty frames into the sidecar inside its connection window) was
+#: 1.6s, so 120 is ~75x that -- room for a save holding an order of
+#: magnitude more resident dirty pixel data than the benchmark's.
+#: Raising it back above the faulthandler window recreates the silent
+#: 15-minute stalls; the real fix for a save that legitimately needs
+#: minutes is moving sidecar writes outside the transaction window.
+#: No environment variable on purpose (one spelling per behaviour);
+#: tests monkeypatch the constant.
+_SQLITE_BUSY_TIMEOUT_S = 120.0
+
+
 @dataclass
 class _SaveTally:
     """What one `save_all` call wrote, for the summary log line."""
@@ -455,6 +480,19 @@ class SqliteStore:
         # `remediation.py` calls holding nothing.
         self._audit_drop_lock = threading.Lock()
         self._audit_rows_dropped = 0
+        # At most one writer may traverse "read this instance's pixel
+        # bytes -> publish a loader for them" at a time. Two writers
+        # exist -- the background save (`_persist_pixels`) and the
+        # redaction swap (`persist_pixel_data`) -- and without mutual
+        # exclusion the save can capture pre-redaction bytes and rebind
+        # `_pixel_loader`/`_pixel_hash` *after* the redacted frame was
+        # bound: the instance then reads back unredacted pixels under a
+        # full redaction attestation, self-consistently, because the
+        # stale hash matches the stale frame (#274). Lock order:
+        # `_pixel_swap_lock` before `sidecar._lock`, never reversed; and
+        # never held across a sqlite write, whose busy timeout can be
+        # waited out while holding it.
+        self._pixel_swap_lock = threading.Lock()
         self._audit_thread = threading.Thread(
             target=self._audit_worker, daemon=True, name="AuditWorker")
         self._audit_thread.start()
@@ -473,6 +511,7 @@ class SqliteStore:
             '_audit_write_lock',
             '_audit_wakeup',
             '_audit_drop_lock',
+            '_pixel_swap_lock',
             '_audit_thread']
         for k in keys_to_remove:
             state.pop(k, None)
@@ -496,6 +535,7 @@ class SqliteStore:
         self._audit_write_lock = threading.Lock()
         self._audit_wakeup = threading.Event()
         self._audit_drop_lock = threading.Lock()
+        self._pixel_swap_lock = threading.Lock()
         self._audit_thread = threading.Thread(
             target=self._audit_worker, daemon=True, name="AuditWorker")
         self._audit_thread.start()
@@ -523,7 +563,7 @@ class SqliteStore:
                     raise e
         else:
             # File-based DB: create fresh connection per transaction
-            conn = sqlite3.connect(self.db_path, timeout=900.0)
+            conn = sqlite3.connect(self.db_path, timeout=_SQLITE_BUSY_TIMEOUT_S)
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.commit()
             conn.row_factory = sqlite3.Row
@@ -1940,34 +1980,45 @@ class SqliteStore:
             return
 
         try:
-            # 1. Write to Sidecar
-            # Pass array directly to avoid .tobytes() Memory spike (Zero-Copy 500MB save)
-            b_data = instance.pixel_array
+            # The read -> sidecar write -> loader/hash rebind must be one
+            # critical section against `_persist_pixels`: a background
+            # save that reads the bytes before this redaction swap zeroes
+            # them, and rebinds after it, leaves the instance reading
+            # back its pre-redaction pixels under a redaction attestation
+            # (#274). Released before `record_blob_ref` below -- never
+            # hold a thread lock across a sqlite write that can wait out
+            # the busy timeout.
+            with self._pixel_swap_lock:
+                # 1. Write to Sidecar
+                # Pass array directly to avoid .tobytes() Memory spike
+                # (Zero-Copy 500MB save)
+                b_data = instance.pixel_array
 
-            # Hash Update (CRITICAL for Integrity Checks)
-            # Calculate Hash BEFORE writing/compression to ensure we capture the state
-            # exactly as it goes into the pipe.
-            import hashlib
-            # Ensure we are hashing the contiguous bytes
-            if hasattr(b_data, 'tobytes'):
-                p_hash = hashlib.sha256(b_data.tobytes()).hexdigest()
-            else:
-                p_hash = hashlib.sha256(b_data).hexdigest()
+                # Hash Update (CRITICAL for Integrity Checks)
+                # Calculate Hash BEFORE writing/compression to ensure we
+                # capture the state exactly as it goes into the pipe.
+                import hashlib
+                # Ensure we are hashing the contiguous bytes
+                if hasattr(b_data, 'tobytes'):
+                    p_hash = hashlib.sha256(b_data.tobytes()).hexdigest()
+                else:
+                    p_hash = hashlib.sha256(b_data).hexdigest()
 
-            instance._pixel_hash = p_hash
+                instance._pixel_hash = p_hash
 
-            # Determine suitable compression? Defaulting to zlib for swap.
-            # Ideally we respect original or config, but for swap zlib is safe/fast enough.
-            c_alg = 'zlib'
+                # Determine suitable compression? Defaulting to zlib for
+                # swap. Ideally we respect original or config, but for
+                # swap zlib is safe/fast enough.
+                c_alg = 'zlib'
 
-            offset, length = self.sidecar.write_frame(b_data, c_alg)
+                offset, length = self.sidecar.write_frame(b_data, c_alg)
 
-            # 2. Update Instance Loader
-            # This allows instance.unload_pixel_data() to work safely
-            # Note: instance attributes ARE populated here (it's a live object), so
-            # passing instance=instance works.
-            instance._pixel_loader = self._create_pixel_loader(
-                offset, length, c_alg, instance, pixel_hash=p_hash)
+                # 2. Update Instance Loader
+                # This allows instance.unload_pixel_data() to work safely
+                # Note: instance attributes ARE populated here (it's a
+                # live object), so passing instance=instance works.
+                instance._pixel_loader = self._create_pixel_loader(
+                    offset, length, c_alg, instance, pixel_hash=p_hash)
 
             # 3. Optional: Persist the linkage to DB immediately?
             # It's safer if we do, so if we crash, we know where the pixels are.
@@ -2280,7 +2331,7 @@ class SqliteStore:
             return []
 
         rows, blob_rows, vertical_rows = self._build_instance_writes(
-            [inst for inst, _revision in unsaved], series_pk, tally)
+            unsaved, series_pk, tally)
 
         cur.executemany(_UPSERT_INSTANCE_SQL, rows)
 
@@ -2299,12 +2350,17 @@ class SqliteStore:
         tally.instances += len(unsaved)
         return unsaved
 
-    def _build_instance_writes(self, instances, series_pk, tally):
-        """Turns instances into the rows three tables need.
+    def _build_instance_writes(self, unsaved, series_pk, tally):
+        """Turns (instance, revision) pairs into the rows three tables need.
 
         Pixel data is written to the sidecar here, because the offset it
         lands at is part of the row. Nothing else touches the database:
         the caller decides when, and in what order, these go in.
+
+        `unsaved` carries the revision the caller captured before the
+        write started -- the same capture `mark_persisted` will be given
+        -- so `_persist_pixels` can tell whether the bytes it read still
+        describe the instance by the time it would publish them (#274).
 
         Returns:
             Tuple of (instance rows, instance_blobs rows, (uid, private
@@ -2312,7 +2368,7 @@ class SqliteStore:
         """
         rows, blob_rows, vertical_rows = [], [], []
 
-        for inst in instances:
+        for inst, revision in unsaved:
             core, private = _split_core_and_private(self._serialize_item(inst))
             # Appended even when `private` is empty. An instance whose
             # private tags were all stripped still has to reach
@@ -2320,7 +2376,7 @@ class SqliteStore:
             # and the next reload puts them back on the graph (#158).
             vertical_rows.append((inst.sop_instance_uid, private))
 
-            frame = self._persist_pixels(inst, tally)
+            frame = self._persist_pixels(inst, tally, revision=revision)
             rows.append((
                 series_pk, inst.sop_instance_uid, inst.sop_class_uid,
                 # Positional, and nothing checks this tuple against
@@ -2349,12 +2405,29 @@ class SqliteStore:
 
         return rows, blob_rows, vertical_rows
 
-    def _persist_pixels(self, inst, tally) -> '_StoredFrame':
+    def _persist_pixels(self, inst, tally, revision=None) -> '_StoredFrame':
         """Writes this instance's pixels to the sidecar if they are new.
 
         Three cases: pixels resident in memory (hash them, and write only
         if the bytes actually changed), pixels already swapped out to the
         sidecar (keep the reference the loader holds), or no pixels at all.
+
+        `revision` is the caller's capture from before the save started.
+        This runs on the persistence manager's thread against live
+        objects a redaction pass may be mutating, so publishing what was
+        read here needs two protections (#274):
+
+        - The lock makes read -> write -> rebind atomic against
+          `persist_pixel_data`, so this save's rebind can never land
+          *after* a redaction's and rewire the instance to the stale
+          frame.
+        - The revision guard, checked at assignment time inside the lock
+          (outside it, the check would be decorative), skips the rebind
+          and the row when the instance changed after the capture: the
+          same capture-before-write discipline as `mark_persisted`. The
+          all-None frame means "leave the stored reference alone" via
+          the upsert's COALESCE, the instance stays dirty, and the next
+          save writes the truth.
         """
         if inst.pixel_array is None:
             loader = inst._pixel_loader
@@ -2363,33 +2436,49 @@ class SqliteStore:
                                     getattr(inst, '_pixel_hash', None))
             return _StoredFrame(None, None, None, None)
 
-        raw = inst.pixel_array.tobytes()
-        digest = hashlib.sha256(raw).hexdigest()
-        loader = inst._pixel_loader
+        # Lock order: `_pixel_swap_lock` before `sidecar._lock` (inside
+        # `write_frame`), never reversed. No sqlite work happens in here;
+        # the caller writes the rows later, off this lock.
+        with self._pixel_swap_lock:
+            raw = inst.pixel_array.tobytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            loader = inst._pixel_loader
 
-        # Deduplication: identical bytes already in the sidecar. Appending
-        # them again would grow the file by a full frame per save.
-        if (getattr(inst, '_pixel_hash', None) == digest
-                and isinstance(loader, SidecarPixelLoader)):
+            # Deduplication: identical bytes already in the sidecar.
+            # Appending them again would grow the file by a full frame
+            # per save.
+            if (getattr(inst, '_pixel_hash', None) == digest
+                    and isinstance(loader, SidecarPixelLoader)):
+                inst._pixel_hash = digest
+                return _StoredFrame(loader.offset, loader.length,
+                                    loader.alg, digest)
+
+            offset, length = self.sidecar.write_frame(raw, _PIXEL_COMPRESSION)
+            tally.pixel_bytes += length
+            tally.pixel_frames += 1
+
+            if revision is not None and inst._revision != revision:
+                # The bytes read above no longer describe the instance:
+                # a mutation (a redaction, most importantly) landed after
+                # the caller's capture. Publishing them would write a row
+                # and a loader for state the graph has already left --
+                # exactly #274's poisoning. The frame already appended is
+                # a harmless orphan; the instance is still dirty against
+                # the captured revision, so the next save corrects the row.
+                return _StoredFrame(None, None, None, None)
+
+            # Re-point the loader so the array can be unloaded safely
+            # later. `pixel_hash=digest` is passed explicitly, the way
+            # `persist_pixel_data` does: left to default, the loader falls
+            # back to `inst._pixel_hash`, which at this point is still the
+            # digest of the frame these bytes just replaced -- so the next
+            # read after an unload raised an integrity mismatch against
+            # correctly-saved data (#212). Passing it removes the ordering
+            # dependency between this call and the assignment below.
+            inst._pixel_loader = self._create_pixel_loader(
+                offset, length, _PIXEL_COMPRESSION, inst, pixel_hash=digest)
             inst._pixel_hash = digest
-            return _StoredFrame(loader.offset, loader.length, loader.alg, digest)
-
-        offset, length = self.sidecar.write_frame(raw, _PIXEL_COMPRESSION)
-        tally.pixel_bytes += length
-        tally.pixel_frames += 1
-
-        # Re-point the loader so the array can be unloaded safely later.
-        # `pixel_hash=digest` is passed explicitly, the way
-        # `persist_pixel_data` does: left to default, the loader falls
-        # back to `inst._pixel_hash`, which at this point is still the
-        # digest of the frame these bytes just replaced -- so the next
-        # read after an unload raised an integrity mismatch against
-        # correctly-saved data (#212). Passing it removes the ordering
-        # dependency between this call and the assignment below.
-        inst._pixel_loader = self._create_pixel_loader(
-            offset, length, _PIXEL_COMPRESSION, inst, pixel_hash=digest)
-        inst._pixel_hash = digest
-        return _StoredFrame(offset, length, _PIXEL_COMPRESSION, digest)
+            return _StoredFrame(offset, length, _PIXEL_COMPRESSION, digest)
 
     def _log_save_summary(self, tally) -> None:
         """One line describing what the save actually wrote."""
