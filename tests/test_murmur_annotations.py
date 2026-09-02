@@ -671,13 +671,11 @@ def _data_loss_rows(db_path):
 def test_a_dropped_annotation_is_warned_and_audited(tmp_path, caplog):
     """Warn-plus-audit, the shape #36 established for the group discard.
 
-    The audit row is scoped STANDARD because Waveform Annotation Sequence
-    (0040,B020) is an even group -- the scope states what the element
-    *was*, not how bad the loss felt, exactly as `io_handlers`' multiplex
-    emitter insists. Whether a multiplex-group loss should move
-    `validation_status` is open on #150; classifying this one by anything
-    other than parity would decide that question here, on the wrong
-    ticket.
+    The audit row is scoped STANDARD even though #150 grades the group
+    discard itself as SIGNAL: an annotation is a mark *about* the
+    signal, and the acquired-samples loss it described already costs the
+    run its PASS via the ingest-side multiplex row. Grading this row too
+    would double-charge one loss under two entries.
     """
     import logging
     from isocenter.io_handlers import LOSS_SCOPE_STANDARD
@@ -705,10 +703,13 @@ def test_a_dropped_annotation_is_warned_and_audited(tmp_path, caplog):
     assert len(annotation_rows) == 1, rows
     assert annotation_rows[0][1] == LOSS_SCOPE_STANDARD, annotation_rows
 
-    # Two rows from two emitters, and that is the expected shape rather
-    # than a double count: ingest reports the groups it discarded, export
-    # reports the marks that referenced them. `docs/waveforms.md` says so,
-    # so it is asserted here rather than left as prose.
+    # Two rows, and that is the expected shape rather than a double
+    # count: one for the groups the ingest discarded, one for the marks
+    # that referenced them. Since #177 both are written at ingest --
+    # dangling annotations are filtered from the graph beside #160's
+    # `del`, so the WFDB bridge's own drop fires only for a graph that
+    # never passed through ingest. `docs/waveforms.md` says so, so it is
+    # asserted here rather than left as prose.
     assert len(rows) == 2, rows
 
 
@@ -785,9 +786,10 @@ def test_the_dropped_annotation_row_renders_as_one_report_table_cell(tmp_path):
     session = DicomSession(persistence_file=str(tmp_path / "report.db"))
     try:
         session.ingest(str(src))
-        # generate_report grades the audit log as it stands when called,
-        # and this emitter writes during export() -- see #153 on the two
-        # documented call orders. Export first, or the row is not there.
+        # The annotation row is written at ingest since #177, but the
+        # export is kept: this test renders the report a real WFDB run
+        # produces, and a report generated before an export carries the
+        # boundary note (#153) beside the same table.
         session.export(str(tmp_path / "out"), format="wfdb")
         session.store_backend.flush_audit_queue()
         session.generate_report(str(report))

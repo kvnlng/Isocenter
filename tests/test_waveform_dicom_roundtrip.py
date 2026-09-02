@@ -195,3 +195,118 @@ def test_no_exported_multiplex_group_declares_samples_it_does_not_carry(tmp_path
     assert not hollow, (
         f"exported WaveformSequence items {hollow} declare a multiplex "
         f"group with no Waveform Data")
+
+
+# --- Annotations referencing a discarded group (#177) -----------------
+#
+# Waveform Annotation Sequence (0040,B020) lives at instance level, not
+# inside the multiplex group it refers to; Referenced Waveform Channels
+# (0040,A0B0) names a group by ordinal -- PS3.3 C.10.10.1.1, "the
+# ordinal of the Item of Waveform Sequence (5400,0100)", 1-based. #160
+# removed the sequence items whose samples ingest discarded, so an
+# annotation naming one of them referenced an item no longer in the
+# exported file. These tests pin the filter that goes with the del.
+
+
+def _annotated_two_group_file(path, channels_per_annotation):
+    """A two-group ECG with one annotation per entry.
+
+    Each entry of `channels_per_annotation` is either None -- an
+    annotation with no Referenced Waveform Channels at all (Type 1C:
+    it applies to the whole waveform) -- or a flat list of
+    (group, channel) pairs written verbatim into (0040,A0B0).
+    """
+    from scripts.generate_waveform_test_data import add_annotation
+
+    ds = build_ecg_dataset(num_samples=200)
+    second = copy.deepcopy(ds.WaveformSequence[0])
+    second.SamplingFrequency = 25.0
+    ds.WaveformSequence.append(second)
+
+    for refs in channels_per_annotation:
+        add_annotation(ds, start_sample=10)
+        ann = ds.WaveformAnnotationSequence[-1]
+        if refs is None:
+            del ann.ReferencedWaveformChannels
+        else:
+            ann.ReferencedWaveformChannels = list(refs)
+
+    pydicom.dcmwrite(str(path), ds, enforce_file_format=True)
+    return str(path)
+
+
+def test_an_annotation_on_a_discarded_group_does_not_reach_the_export(tmp_path):
+    """The annotation survived #160; its referent did not.
+
+    A strict downstream reader is entitled to reject a file whose
+    annotation names a Waveform Sequence item the file does not carry
+    (#177).
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _annotated_two_group_file(src / "ann.dcm",
+                              [[1, 1], [2, 1]])
+
+    out = _export_roundtrip(tmp_path, str(src / "ann.dcm"), db_name="ann.db")
+
+    assert len(out.WaveformSequence) == 1
+    anns = list(getattr(out, "WaveformAnnotationSequence", []))
+    assert len(anns) == 1, anns
+    assert list(anns[0].ReferencedWaveformChannels) == [1, 1]
+
+
+def test_surviving_pairs_are_kept_when_only_some_references_dangle(tmp_path):
+    """It is a filter on (group, channel) pairs before it is a drop.
+
+    An annotation may name several pairs -- all of group 1 plus a
+    channel of group 2 -- and dropping the whole item because one pair
+    dangles would lose a mark that still has a placeable home (#177).
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _annotated_two_group_file(src / "ann.dcm",
+                              [[1, 2, 2, 3]])
+
+    out = _export_roundtrip(tmp_path, str(src / "ann.dcm"), db_name="pairs.db")
+
+    anns = list(getattr(out, "WaveformAnnotationSequence", []))
+    assert len(anns) == 1, anns
+    assert list(anns[0].ReferencedWaveformChannels) == [1, 2]
+
+
+def test_a_channelless_annotation_is_not_touched(tmp_path):
+    """(0040,A0B0) is Type 1C; absent means the whole waveform.
+
+    An annotation with no channel reference cannot dangle, and dropping
+    it would silently empty the sequence for a conformant common case.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _annotated_two_group_file(src / "ann.dcm", [None, [2, 1]])
+
+    out = _export_roundtrip(tmp_path, str(src / "ann.dcm"), db_name="nochan.db")
+
+    anns = list(getattr(out, "WaveformAnnotationSequence", []))
+    assert len(anns) == 1, anns
+    assert "ReferencedWaveformChannels" not in anns[0]
+
+
+def test_a_single_group_record_keeps_its_annotations_verbatim(tmp_path):
+    """No groups discarded, nothing to filter -- including ordinal 0.
+
+    A 0-counting source (Isocenter's own fixtures wrote 0 until #159)
+    reads as the first group, not as a dangling reference.
+    """
+    from scripts.generate_waveform_test_data import add_annotation
+
+    src = tmp_path / "src"
+    src.mkdir()
+    ds = build_ecg_dataset(num_samples=200)
+    add_annotation(ds, start_sample=10, group=1, channel=2)
+    pydicom.dcmwrite(str(src / "one.dcm"), ds, enforce_file_format=True)
+
+    out = _export_roundtrip(tmp_path, str(src / "one.dcm"), db_name="one.db")
+
+    anns = list(getattr(out, "WaveformAnnotationSequence", []))
+    assert len(anns) == 1, anns
+    assert list(anns[0].ReferencedWaveformChannels) == [1, 2]

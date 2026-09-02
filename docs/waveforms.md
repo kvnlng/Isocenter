@@ -301,19 +301,32 @@ single-group record
 
 That holds for records ingested by 0.9.0 or later. The drop happens in
 `ingest_worker`, which does not run again on a session opened from an
-existing index, so a database populated by an earlier version still holds
-the extra items and still exports the hollow one; re-ingesting the source
-files into a fresh index is the remedy
-([#168](https://github.com/kvnlng/Isocenter/issues/168)). The same applies
-to a graph built by hand and written with `DicomExporter.write_tree()`,
-which is the serializer alone and never passes through ingest.
+existing index -- so a database populated by an earlier version still
+holds the extra items. Since
+[#168](https://github.com/kvnlng/Isocenter/issues/168) hydration heals
+that shape on load: opening such a store prunes the sample-less items
+(and, with them, any annotations referencing the pruned groups, exactly
+as ingest would, [#177](https://github.com/kvnlng/Isocenter/issues/177))
+and logs a warning naming the instance and why, so the export is a
+conformant single-group record instead of one declaring Waveform Data
+it does not carry. The heal is in-memory: the store itself is unchanged
+until the session saves, and the warning repeats on every open until it
+does. The discarded samples are not recoverable from the store -- the
+original discard happened in the session that ingested, and its
+`DATA_LOSS` entry is in the same store's audit log -- so re-ingesting
+the source files into a fresh index remains the only way to get them
+back. A graph built by hand and written with
+`DicomExporter.write_tree()` is deliberately untouched: the serializer
+applies no gates and never passes through ingest or hydration.
 
-That entry is scoped `STANDARD` -- a multiplex group lives under Waveform
-Sequence `(5400,0100)`, an even group -- so it is reported in the
-compliance report's Data Loss section but does **not** move Validation
-Status, which only a private-group loss does. Whether a discarded
-multiplex group should be an exception to that is open on
-[#150](https://github.com/kvnlng/Isocenter/issues/150).
+That entry is scoped `SIGNAL`, and it **does** move Validation Status:
+a session that discarded a multiplex group grades `REVIEW_REQUIRED`,
+not `PASS` ([#150](https://github.com/kvnlng/Isocenter/issues/150)).
+The tag is standard -- Waveform Sequence `(5400,0100)` is an even group
+-- but what was discarded is acquired signal that was in the source and
+is not in the export, which is not routine the way a dropped overlay
+is. Routine standard-group losses keep the `STANDARD` scope and keep
+grading `PASS`.
 
 **Annotations naming a discarded group are dropped, not re-pointed.**
 Referenced Waveform Channels `(0040,A0B0)` identifies a mark by a
@@ -336,15 +349,37 @@ belonging to a signal that is not in the record, until
 resolution described earlier therefore applies to marks on the ingested
 group; there are no others in the file.
 
+Since [#177](https://github.com/kvnlng/Isocenter/issues/177) the same
+filtering happens on the object graph itself, at the point
+[#160](https://github.com/kvnlng/Isocenter/issues/160) drops the
+discarded groups' sequence items -- so a **DICOM** export no longer
+carries a Waveform Annotation Sequence `(0040,B020)` item whose
+reference names an item that is not in the file, which is exactly the
+kind of dangling ordinal a strict downstream reader rejects. The
+filter works on `(group, channel)` pairs before it drops items: an
+annotation naming all of group 1 plus a channel of group 3 keeps its
+surviving pairs, and an item goes only when every pair it named is
+gone. Surviving ordinals are **never renumbered** -- the ordinal is
+positional, so renumbering after a discard would make the file
+internally consistent and wrong relative to the source, with no way to
+tell afterwards. An annotation with no `(0040,A0B0)` at all is
+untouched: the attribute is Type 1C, and its absence means the mark
+applies to the whole waveform.
+
 That drop is announced the same way the group discard is: a warning, and
 one `DATA_LOSS` entry per instance naming how many annotations were
 dropped and which groups they referenced -- one row, not one per mark,
 so a cart that marks forty beats on a discarded group does not fill the
 report's Data Loss section with forty near-identical lines. It is scoped
-`STANDARD` for the same reason as the entry above, and on the same open
-question ([#150](https://github.com/kvnlng/Isocenter/issues/150)):
-Waveform Annotation Sequence `(0040,B020)` is an even group, and the
-scope states what the element was, not how serious the loss felt. A
-record with two `DATA_LOSS` rows -- one from ingest for the groups, one
-from export for the marks that referenced them -- is the expected shape,
-not a double count: they report different losses.
+`STANDARD` even though the group discard itself is scoped `SIGNAL`
+([#150](https://github.com/kvnlng/Isocenter/issues/150)): an annotation
+is a mark *about* the signal, the acquired-samples loss it described
+already moves Validation Status via the ingest-side row, and grading
+the bookkeeping too would double-charge one loss under two entries. A
+record with two `DATA_LOSS` rows -- one for the groups the ingest
+discarded, one for the marks that referenced them -- is the expected
+shape, not a double count: they report different losses. Both rows are
+written at ingest since
+[#177](https://github.com/kvnlng/Isocenter/issues/177); the WFDB
+bridge keeps its own drop-and-report as the guard for a graph that
+never passed through ingest.

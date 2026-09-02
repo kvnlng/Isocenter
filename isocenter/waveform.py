@@ -4,6 +4,7 @@ Models the Waveform Sequence (5400,0100) and its Channel Definition
 Sequence (003A,0200), and decodes Waveform Data (5400,1010) into a
 NumPy array. Parsing only — no I/O.
 """
+from collections.abc import Sequence as _SequenceABC
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
@@ -135,6 +136,154 @@ def _as_float(value, default=0.0):
 
 def _as_int(value, default=0):
     return int(_as_float(value, default))
+
+
+# Waveform Annotation Module tags. Defined here rather than in murmur.py
+# because two consumers read the same pairs and must read them the same
+# way: the Murmur bridge resolves annotations against the kept group,
+# and the graph-side filter below drops references to discarded ones. A
+# second parser of (0040,A0B0) is a second answer to "which group does
+# this mark name", which is how #159 happened.
+TAG_ANNOTATION_SEQ = "0040,b020"
+TAG_REFERENCED_CHANNELS = "0040,a0b0"
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    # pydicom yields a MultiValue (a MutableSequence, not a list/tuple
+    # subclass) for multi-valued attributes such as Referenced Sample
+    # Positions or Referenced Waveform Channels. Treat any non-string
+    # Sequence as iterable so those values are not mistaken for a single
+    # scalar element.
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if isinstance(value, _SequenceABC) and not isinstance(value, (str, bytes)):
+        return list(value)
+    return [value]
+
+
+def _item_index(group_ordinal: int) -> int:
+    """Convert a multiplex group ordinal to a Waveform Sequence item index.
+
+    DICOM numbers multiplex groups from 1. PS3.3 C.10.10.1.1
+    ("Referenced Channels", Waveform Annotation Module) defines the
+    Attribute as pairs (M,C) where M is "the ordinal of the Item of
+    Waveform Sequence (5400,0100)", and its own worked example is
+    explicit about the base: an annotation covering the entire FIRST
+    multiplex group plus channels 2 and 3 of the THIRD is written
+    `0001 0000 0003 0002 0003 0003`. Ordinal 1 is therefore item 0 --
+    the group Isocenter keeps.
+
+    A group ordinal of 0 is not a valid 1-based ordinal, and `max` reads
+    it as the first group rather than discarding it. That is the only
+    sane reading: 0 cannot be confused with a group that survived,
+    because there is no other group it could name, whereas rejecting it
+    would drop every annotation a 0-counting source carries. Isocenter's
+    own fixture generator wrote 0 until #159, which is exactly how long
+    the value went unread. Do not "simplify" the `max` away.
+    """
+    return max(0, int(group_ordinal) - 1)
+
+
+def _channel_pairs(referenced_channels):
+    """Yield (group ordinal, channel number) pairs, both as DICOM wrote them.
+
+    Referenced Waveform Channels (0040,A0B0) is VM 2-2n -- one annotation
+    may name several (multiplex group, channel) pairs, e.g. all of group
+    1 plus channels 2 and 3 of group 3. An odd trailing value cannot be
+    paired and is ignored.
+    """
+    values = _as_list(referenced_channels)
+    for i in range(0, len(values) - 1, 2):
+        try:
+            yield int(values[i]), int(values[i + 1])
+        except (TypeError, ValueError):
+            continue
+
+
+def filter_dangling_annotation_refs(entity, kept_items: int):
+    """Drop annotation references to Waveform Sequence items not kept.
+
+    Runs wherever multiplex groups beyond `kept_items` have just been
+    removed from the graph (#160's `del` at ingest, and the hydration
+    heal for stores written before it). Waveform Annotation Sequence
+    (0040,B020) lives at instance level, not inside the group it refers
+    to, so removing an item leaves any annotation naming its ordinal
+    pointing at nothing in the exported file -- exactly the kind of
+    reference a strict downstream reader rejects (#177).
+
+    It is a filter on (group, channel) PAIRS before it is a drop of
+    items: an annotation may name all of group 1 plus a channel of
+    group 3, and the surviving pairs keep their placeable home. An item
+    goes only when every pair it named is gone.
+
+    The ordinals of surviving references are NEVER renumbered. The
+    ordinal is positional -- "the ordinal of the Item of Waveform
+    Sequence" -- so after a discard, renumbering would make the file
+    internally consistent and *wrong* relative to the source, with no
+    way to tell afterwards. Kept references name kept items, whose
+    positions did not move (only items past `kept_items` are removed),
+    so the values that remain are already correct.
+
+    Two shapes are deliberately left alone: an annotation with no
+    (0040,A0B0) at all (Type 1C -- it applies to the whole waveform and
+    cannot dangle), and one whose value yields no parseable pair (there
+    is no reference to know is dangling, and deleting on a guess would
+    drop a mark the source considered placeable). An untouched item's
+    value is not rewritten either, so a compliant file round-trips
+    byte-identically.
+
+    Args:
+        entity: A graph item (Instance or DicomItem) whose `sequences`
+            may hold (0040,B020).
+        kept_items (int): How many Waveform Sequence items survive.
+            References resolving to item indexes below this are kept.
+
+    Returns:
+        Tuple[int, int, List[int]]: (annotation items dropped,
+        annotation items whose reference list was rewritten to its
+        surviving pairs, sorted distinct group ordinals the removed
+        references named -- so the caller's loss report can say *which*
+        groups, the way the WFDB bridge's does).
+    """
+    ann_seq = entity.sequences.get(TAG_ANNOTATION_SEQ)
+    if ann_seq is None:
+        return (0, 0, [])
+
+    dropped = 0
+    rewritten = 0
+    removed_ordinals = set()
+    surviving_items = []
+    for item in ann_seq.items:
+        refs = item.attributes.get(TAG_REFERENCED_CHANNELS)
+        pairs = list(_channel_pairs(refs)) if refs is not None else []
+        if refs is None or not pairs:
+            surviving_items.append(item)
+            continue
+
+        kept_pairs = [(g, c) for g, c in pairs
+                      if _item_index(g) < kept_items]
+        removed_ordinals.update(g for g, _c in pairs
+                                if _item_index(g) >= kept_items)
+        if not kept_pairs:
+            dropped += 1
+            continue
+        if len(kept_pairs) < len(pairs):
+            item.attributes[TAG_REFERENCED_CHANNELS] = [
+                v for pair in kept_pairs for v in pair]
+            rewritten += 1
+        surviving_items.append(item)
+
+    if dropped:
+        if surviving_items:
+            ann_seq.items[:] = surviving_items
+        else:
+            # Waveform Annotation Sequence is Type 1 in its module:
+            # present means at least one item. An empty shell would
+            # trade one conformance violation for another.
+            del entity.sequences[TAG_ANNOTATION_SEQ]
+    return (dropped, rewritten, sorted(removed_ordinals))
 
 
 def decode_samples(data: bytes,

@@ -11,16 +11,19 @@ originating cart said.
 """
 import json
 import os
-from collections.abc import Sequence as _SequenceABC
 from typing import Any, Dict, List, Optional
 
 from .exporters.wfdb import _sanitize_description
-from .waveform import _is_known_coding_scheme
+# The (0040,A0B0) reading -- list coercion, 1-based ordinal, pair
+# iteration -- lives in waveform.py since #177, because the graph-side
+# dangling-reference filter must read the pairs exactly as this bridge
+# does. Import, never copy: a second parser is a second answer to
+# "which group does this mark name", which is how #159 happened.
+from .waveform import (TAG_ANNOTATION_SEQ, TAG_REFERENCED_CHANNELS,
+                       _as_list, _channel_pairs, _is_known_coding_scheme,
+                       _item_index)
 
 SCHEMA_VERSION = 1
-
-TAG_ANNOTATION_SEQ = "0040,b020"
-TAG_REFERENCED_CHANNELS = "0040,a0b0"
 TAG_TEMPORAL_RANGE_TYPE = "0040,a130"
 TAG_REFERENCED_SAMPLE_POSITIONS = "0040,a132"
 TAG_REFERENCED_TIME_OFFSETS = "0040,a138"
@@ -56,21 +59,6 @@ _REF_KEPT = "kept"
 _REF_OTHER = "other"
 
 
-def _as_list(value):
-    if value is None:
-        return []
-    # pydicom yields a MultiValue (a MutableSequence, not a list/tuple
-    # subclass) for multi-valued attributes such as Referenced Sample
-    # Positions or Referenced Waveform Channels. Treat any non-string
-    # Sequence as iterable so those values are not mistaken for a single
-    # scalar element.
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    if isinstance(value, _SequenceABC) and not isinstance(value, (str, bytes)):
-        return list(value)
-    return [value]
-
-
 def _first_int(values) -> Optional[int]:
     for v in values:
         try:
@@ -78,45 +66,6 @@ def _first_int(values) -> Optional[int]:
         except (TypeError, ValueError):
             continue
     return None
-
-
-def _item_index(group_ordinal: int) -> int:
-    """Convert a multiplex group ordinal to a Waveform Sequence item index.
-
-    DICOM numbers multiplex groups from 1. PS3.3 C.10.10.1.1
-    ("Referenced Channels", Waveform Annotation Module) defines the
-    Attribute as pairs (M,C) where M is "the ordinal of the Item of
-    Waveform Sequence (5400,0100)", and its own worked example is
-    explicit about the base: an annotation covering the entire FIRST
-    multiplex group plus channels 2 and 3 of the THIRD is written
-    `0001 0000 0003 0002 0003 0003`. Ordinal 1 is therefore item 0 --
-    the group Isocenter keeps.
-
-    A group ordinal of 0 is not a valid 1-based ordinal, and `max` reads
-    it as the first group rather than discarding it. That is the only
-    sane reading: 0 cannot be confused with a group that survived,
-    because there is no other group it could name, whereas rejecting it
-    would drop every annotation a 0-counting source carries. Isocenter's
-    own fixture generator wrote 0 until #159, which is exactly how long
-    the value went unread. Do not "simplify" the `max` away.
-    """
-    return max(0, int(group_ordinal) - 1)
-
-
-def _channel_pairs(referenced_channels):
-    """Yield (group ordinal, channel number) pairs, both as DICOM wrote them.
-
-    Referenced Waveform Channels (0040,A0B0) is VM 2-2n -- one annotation
-    may name several (multiplex group, channel) pairs, e.g. all of group
-    1 plus channels 2 and 3 of group 3. An odd trailing value cannot be
-    paired and is ignored.
-    """
-    values = _as_list(referenced_channels)
-    for i in range(0, len(values) - 1, 2):
-        try:
-            yield int(values[i]), int(values[i + 1])
-        except (TypeError, ValueError):
-            continue
 
 
 def _referenced_channel(referenced_channels):

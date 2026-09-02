@@ -15,7 +15,7 @@ from tqdm import tqdm
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
-                          LOSS_SCOPE_PRIVATE)
+                          GRADED_LOSS_SCOPES)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        _report_redaction_failures)
@@ -555,6 +555,16 @@ class DicomSession:
 
         self.store.patients = self.store_backend.load_all()
 
+        # Detect descriptor damage a pre-fix release persisted (#186,
+        # #214) at the moment the store opens, so a session holding it
+        # cannot run to a clean-looking export first. Detection only, on
+        # purpose -- the sidecar's bytes are shape-free, so any repair
+        # would be a best-effort guess; the remedy is in the message and
+        # the same result reaches `generate_report`, where it costs the
+        # run its PASS through the COMPLIANCE_CHECK channel.
+        for uid, _path, details in self.store_backend.check_pixel_geometry():
+            get_logger().warning(f"{uid}: {details}")
+
         # Initialize Configuration Object
         self.configuration = IsocenterConfiguration()
 
@@ -820,6 +830,94 @@ class DicomSession:
 
         else:
             print("Persistence backend does not support compaction.")
+
+    def reconcile_private_tags(self) -> int:
+        """Drop stored private-tag rows for a store de-identified before 0.9.1.
+
+        **Opt-in repair for one specific history; read before calling.**
+        Before #158, private (odd-group) tags written to the
+        `instance_attributes` tier were never read back, and the writer
+        did not mirror deletions -- so a session that ran
+        `remove_private_tags: true`, anonymized and saved deleted the
+        vendor block from the graph and left every row of it in the
+        store, inert. #158 wired the tier into hydration (the fix that
+        makes `remove_private_tags: false` survive a reload), and the
+        first open of such a store after upgrading puts the stripped
+        rows back on the graph; an export taken from that session
+        carries them (#172).
+
+        The library cannot decide which rows are stale: a stale row and
+        a legitimate one are byte-identical, and the tier holds values,
+        not tombstones. What the store does record is what every
+        pre-#158 session actually saw -- the core `attributes_json`,
+        which WAS the whole graph while nothing read the tier. This call
+        opts into reading it that way: it deletes every tier row whose
+        tag is absent from its instance's core stored attributes,
+        removes the same tags from the live in-memory graph (undoing the
+        resurrection this session's open performed), and writes one
+        `RECONCILE_PRIVATE` audit row per affected instance so the
+        repair is in the compliance trail. The graph edit is direct --
+        no `set_attr`, no revision bump -- because the store and graph
+        change together and agree afterwards; nothing reads as unsaved
+        and stored PHI statuses survive, exactly as hydration's own
+        writes do.
+
+        **The cost, stated plainly (same grain as `redact(force=True)`:
+        the repair exists in the API, nothing changes silently, and the
+        caller chooses).** For a store that legitimately keeps its
+        vendor block -- `remove_private_tags: false`, saved by 0.9.1 or
+        later -- the tier IS the private data, held out of the core by
+        design, and this call deletes all of it. Call this only for a
+        store you KNOW was de-identified before upgrading. A site unsure
+        of its history should re-run the privacy pipeline instead:
+        since #158 the writer mirrors deletions, so anonymize + save
+        heals the tier without trusting the core.
+
+        There is deliberately no schema-version stamp deciding this
+        automatically: which answer a store needs depends on what the
+        site ran, which the site knows and no stamp records -- and the
+        version-stamped attestation is already filed to be decided once
+        for #168, #172 and #237 together (see #237's CHANGELOG entry).
+
+        Returns:
+            int: `instance_attributes` rows deleted -- rows, not tags
+            (a VM=3 value is three rows). 0 means the tier already
+            agreed with the core and nothing changed.
+        """
+        rows_deleted, dropped = self.store_backend.reconcile_private_tags()
+        if not dropped:
+            get_logger().info(
+                "reconcile_private_tags: nothing to reconcile; every "
+                "stored private row matches the core attributes.")
+            return 0
+
+        by_uid = {
+            inst.sop_instance_uid: inst
+            for p in self.store.patients
+            for st in p.studies for se in st.series for inst in se.instances}
+        for uid, tags in dropped.items():
+            inst = by_uid.get(uid)
+            if inst is not None:
+                for tag in tags:
+                    inst.attributes.pop(tag, None)
+            self.store_backend.log_audit(
+                action_type="RECONCILE_PRIVATE",
+                entity_uid=uid,
+                details=(
+                    f"Dropped stored private tag(s) {', '.join(tags)}: "
+                    f"absent from the instance's core attributes, so a "
+                    f"pre-0.9.1 session never saw or exported them. "
+                    f"Explicitly requested via "
+                    f"reconcile_private_tags() (#172)."))
+
+        get_logger().warning(
+            f"reconcile_private_tags: dropped {rows_deleted} stored "
+            f"private-tag row(s) across {len(dropped)} instance(s). "
+            f"This is the opt-in repair for a store de-identified "
+            f"before the 0.9.1 upgrade; if this store was meant to "
+            f"keep its vendor block, restore from backup and do not "
+            f"call this again.")
+        return rows_deleted
 
     def examine(self):
         """Prints a summary of the session contents and equipment."""
@@ -1586,6 +1684,19 @@ class DicomSession:
                      "COMPLIANCE_CHECK",
                      f"{msg} - {uid}"))
 
+        # Descriptor damage a pre-fix release persisted (#186, #214).
+        # Same channel as the BurnedInAnnotation hit above because it is
+        # the same claim one attribute over: the store holds an instance
+        # whose export cannot be trusted, and a report over such a store
+        # must not say PASS. Re-derived from the store on every report
+        # rather than remembered from open, so a report generated by any
+        # session over this store carries it.
+        for uid, _path, msg in self.store_backend.check_pixel_geometry():
+            exceptions.append(
+                (datetime.datetime.now().isoformat(),
+                 "COMPLIANCE_CHECK",
+                 f"{msg} - {uid}"))
+
         # Audit rows a failed batch write dropped (#219). Filed as an
         # exception -- not merely rendered -- because everything above
         # was read from a table those rows never reached: any count,
@@ -1663,18 +1774,19 @@ class DicomSession:
         # A dropped *private* element fails the grade; a dropped
         # standard one does not. The asymmetry is deliberate rather than
         # a rule half-applied, and is argued once -- CHANGELOG.md, #146.
+        # The one loss parity sat badly on -- the discarded waveform
+        # multiplex group, standard-group and not remotely routine -- is
+        # scoped SIGNAL by its emitter since #150 and grades here too.
         #
-        # The one loss this rule sits badly on is the discarded waveform
-        # multiplex group: standard-group, so PASS, and not obviously
-        # routine. That is known and open on #150. Do not resolve it by
-        # widening this test -- the scope is set by the emitter, so
-        # widening here would take every overlay with it.
+        # Membership in GRADED_LOSS_SCOPES, never a wider test: the
+        # scope is set by the emitter, and grading STANDARD here would
+        # take every overlay with it.
         #
         # `row[3]` is `loss_scope`. NULL for rows written before the
         # column existed, which read as ungraded rather than as
         # standard, because nothing here can know which they were.
         graded_losses = [row for row in data_losses
-                         if row[3] == LOSS_SCOPE_PRIVATE]
+                         if row[3] in GRADED_LOSS_SCOPES]
 
         # A scan gap is graded on its disposition, not on its existence.
         # The row says the scan could not read an element; that only

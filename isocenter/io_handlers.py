@@ -51,6 +51,7 @@ from .pixel_geometry import (
 from .parallel import run_parallel
 from .validation import IODValidator
 from .sidecar import SidecarManager
+from .waveform import filter_dangling_annotation_refs
 
 
 from .store import DicomStore
@@ -189,12 +190,30 @@ def _is_routed(tag, is_root: bool, has_pixel_data: bool = False) -> bool:
 _IMAGE_MODALITIES = frozenset({"CT", "MR", "US", "DX", "CR",
                                "MG", "NM", "PT", "XA", "RF", "SC", "OT"})
 
-#: How a `DATA_LOSS` audit entry is graded: PRIVATE takes
+#: How a `DATA_LOSS` audit entry is graded: PRIVATE and SIGNAL take
 #: `validation_status` to REVIEW_REQUIRED, STANDARD does not. Written by
 #: the emitter and stored on the audit row rather than re-derived, and
-#: why the two differ, are both argued once -- CHANGELOG.md, #146.
+#: why they differ, are argued once each -- CHANGELOG.md, #146 and #150.
+#:
+#: SIGNAL exists because group parity turned out to be a proxy for "how
+#: much should the reader care", and one emitter broke the proxy: a
+#: discarded waveform multiplex group lives under a standard tag, and it
+#: is acquired signal that was in the source and is not in the export --
+#: not an annotation layer with a defined home elsewhere, which is what
+#: makes an overlay routine (#150). The discriminator is what the loss
+#: *was*, not how bad it felt: STANDARD stays the scope for routine
+#: standard-group drops, and widening the report's grading test to
+#: STANDARD would take every overlay with it.
 LOSS_SCOPE_PRIVATE = "PRIVATE"
 LOSS_SCOPE_STANDARD = "STANDARD"
+LOSS_SCOPE_SIGNAL = "SIGNAL"
+
+#: The scopes that cost a run its PASS. `generate_report` tests
+#: membership here rather than naming scopes itself, so the
+#: classification stays emitter-side: adding a scope means deciding, at
+#: the emitter, whether it grades -- never teaching the report to
+#: re-derive the answer from prose (#146, #150).
+GRADED_LOSS_SCOPES = frozenset({LOSS_SCOPE_PRIVATE, LOSS_SCOPE_SIGNAL})
 
 
 def loss_scope_for_tag(tag: str) -> str:
@@ -649,6 +668,25 @@ def ingest_worker(fp: str) -> Tuple:
         if wf_seq is not None and len(wf_seq.items) > 1:
             del wf_seq.items[1:]
 
+            # And the references to what the del removed (#177).
+            # Waveform Annotation Sequence (0040,B020) sits at instance
+            # level and names a multiplex group by the ordinal of its
+            # Waveform Sequence item (PS3.3 C.10.10.1.1), so the del
+            # above turns any annotation on groups 1..n into a
+            # reference to an item the exported file does not carry.
+            # Filtered on (group, channel) pairs, never renumbered --
+            # the ordinal is positional, and renumbering would make the
+            # file internally consistent and wrong about the source.
+            # Counts ride `meta` like `waveform_groups` above: this
+            # worker may be in a subprocess, so `import_files` files
+            # the loss on the far side.
+            ann_dropped, ann_rewritten, ann_groups = \
+                filter_dangling_annotation_refs(
+                    inst, kept_items=len(wf_seq.items))
+            meta['dropped_annotations'] = ann_dropped
+            meta['rewritten_annotations'] = ann_rewritten
+            meta['dropped_annotation_groups'] = ann_groups
+
         return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
         return (None, None, None, None, None, None, None, str(e))
@@ -813,16 +851,71 @@ class DicomImporter:
                         # goes to a file the user may never open. The audit
                         # entry is what puts this in the record.
                         #
-                        # Scoped STANDARD, so it is reported and not
-                        # graded: what was discarded lives under Waveform
-                        # Sequence (5400,0100), an even group. This is
-                        # the one loss where that rule is uncomfortable
-                        # -- a discarded multiplex group is not routine
-                        # the way an overlay is -- and it is open on
-                        # #150, deliberately, rather than special-cased
-                        # here. Do not "fix" it to PRIVATE: the scope
-                        # states what the element was, not how bad the
-                        # loss felt.
+                        # Scoped SIGNAL, so it is reported AND graded:
+                        # the run does not PASS (#150). The tag is
+                        # standard -- Waveform Sequence (5400,0100), an
+                        # even group -- but what was discarded is
+                        # acquired signal, and a 12-lead ECG that came
+                        # out holding group 0 under a PASS grade is the
+                        # case parity was wrong for. Still not PRIVATE:
+                        # the scope states what the element was, and
+                        # this one was neither private nor routine.
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="DATA_LOSS",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail,
+                                loss_scope=LOSS_SCOPE_SIGNAL)
+
+                    # Annotations whose references the group discard
+                    # left dangling (#177). Dropping them without a row
+                    # would re-create the silent truncation #36 closed,
+                    # one element over; the WFDB bridge already reports
+                    # its equivalent drop (#159), and the two paths must
+                    # not differ in whether the user is told.
+                    #
+                    # Scoped STANDARD, not SIGNAL: an annotation is a
+                    # mark *about* the signal, and the acquired-samples
+                    # loss it described already costs the run its PASS
+                    # via the SIGNAL row above. Grading this row too
+                    # would double-charge one loss under two entries.
+                    ann_dropped = meta.get('dropped_annotations', 0)
+                    ann_rewritten = meta.get('rewritten_annotations', 0)
+                    if ann_dropped or ann_rewritten:
+                        # One row per instance, not one per mark: a cart
+                        # that marks forty beats on a discarded group
+                        # must not fill section 3 of the report with
+                        # forty near-identical lines. The count is of
+                        # annotations and the list is of distinct
+                        # groups, because they answer different
+                        # questions. No pipes in the prose -- the report
+                        # renders this into one markdown table cell.
+                        ordinals = meta.get('dropped_annotation_groups', [])
+                        group_ref = (
+                            f"multiplex "
+                            f"{'group' if len(ordinals) == 1 else 'groups'} "
+                            f"{', '.join(str(g) for g in ordinals)}")
+                        parts = []
+                        if ann_dropped:
+                            parts.append(
+                                f"Dropped {ann_dropped} waveform "
+                                f"{'annotation' if ann_dropped == 1 else 'annotations'}"
+                                f" whose only references named discarded "
+                                f"{group_ref}")
+                        if ann_rewritten:
+                            parts.append(
+                                f"removed references to discarded "
+                                f"{group_ref} from {ann_rewritten} "
+                                f"{'annotation' if ann_rewritten == 1 else 'annotations'}"
+                                f" that also name the kept group")
+                        detail = (
+                            f"{'; '.join(parts)}. Only Waveform Sequence "
+                            f"item 0 is kept (#36); a reference to a "
+                            f"discarded item would name an item the "
+                            f"exported file does not carry, and ordinals "
+                            f"are positional so the survivors are never "
+                            f"renumbered (#177).")
+                        logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
                             store_backend.log_audit(
                                 action_type="DATA_LOSS",
@@ -1392,7 +1485,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                         f"that can carry it.")
                 # Scoped STANDARD: group 7fe0 is even, the same parity
                 # rule every other loss row uses (#146). Not graded
-                # harder -- that is open on #150.
+                # harder: #150 carved out SIGNAL for the multiplex
+                # discard only, and widening it to this branch is its
+                # own call, not a ride-along.
                 losses.append((
                     LOSS_SCOPE_STANDARD,
                     f"Pixel data is {arr.dtype} and was not written: no "
@@ -1675,9 +1770,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # reported at ingest and is not re-reported here.
                 #
                 # Scoped STANDARD: what is missing is Waveform Data
-                # (5400,1010), an even group. It is reported and not
-                # graded, on the same rule as the ingest-side multiplex
-                # loss and with the same reservation filed as #150.
+                # (5400,1010), an even group, and unlike the ingest-side
+                # multiplex loss -- scoped SIGNAL since #150 -- nothing
+                # was discarded by this pipeline. This branch is
+                # reachable only from a source that never carried
+                # samples, so the export is not smaller than the
+                # acquisition; it is the acquisition, said out loud.
                 losses.append((
                     LOSS_SCOPE_STANDARD,
                     "Waveform Sequence present but no samples are available "

@@ -643,12 +643,20 @@ class SqliteStore:
         Shared by `load_all` and `load_patient`, which hydrate the same rows
         through two separate loops.
 
+        Also heals a legacy multiplex shape on the way past -- see
+        `_prune_hollow_multiplex_items`.
+
         Args:
             instance (Instance): The hydrated instance; its attributes and
                 sequences must already be restored, because the loader reads
                 its geometry out of the Waveform Sequence.
             wref: A row from `instance_blobs` (kind 'waveform'), or None.
         """
+        # Before the `wref is None` return: the damaged shape can exist
+        # with no waveform blob at all (a source whose group 0 carried
+        # no samples), and its export is exactly as hollow.
+        self._prune_hollow_multiplex_items(instance)
+
         if wref is None:
             return
 
@@ -667,6 +675,74 @@ class SqliteStore:
             self.logger.warning(
                 f"Waveform blob for {instance.sop_instance_uid} has no "
                 "Waveform Sequence; skipping loader.")
+
+    def _prune_hollow_multiplex_items(self, instance):
+        """Heal a pre-#160 store: drop multiplex items that have no samples.
+
+        A store indexed before the #160 fix holds one Waveform Sequence
+        (5400,0100) item per multiplex group while the sidecar holds
+        group 0's samples alone -- ingest discarded groups 1..n (#36)
+        and `populate_attrs` kept their metadata anyway. `ingest_worker`
+        never runs again on an existing index, so without this the
+        export writes every item back and declares a multiplex group
+        with no Waveform Data (5400,1010), a Type 1 element (#168).
+
+        Pruned at hydration rather than at export, for #160's own
+        reason: the graph is what every consumer reads -- the DICOM
+        writer, the WFDB record, the annotation bridge, the PHI scan --
+        and a writer that quietly drops items is a second answer to
+        "which multiplex groups does this record have". This edits a
+        graph the user did not ask to have edited, so it is a logged
+        warning naming the instance and the remedy; it is NOT an audit
+        row, because the loss it describes was already audited by the
+        session that ingested (0.8.2 onward writes the DATA_LOSS entry
+        into this same store's audit_log), and this heals the graph to
+        agree with what that log already says.
+
+        The annotations referencing the pruned items go with them,
+        through the same filter ingest uses (#177) -- pruning the item
+        alone would unmask exactly the dangling ordinal that filter
+        exists to prevent. `DicomExporter.write_tree()` on a hand-built
+        graph is deliberately NOT covered: the serializer applies no
+        gates by design, and there is no store -- and no earlier
+        session's audit trail -- anywhere in that picture.
+
+        The prune must not look like an edit: items and references are
+        removed with direct container mutation, never `set_attr`, so
+        `_revision` stays put, the stored `phi_status` survives, and the
+        graph still reads as clean (`_apply_vertical_attributes`
+        documents the same invariant). The store itself is untouched
+        until the user saves, so the warning repeats on every open of an
+        unhealed store -- which is the correct amount of loud for a
+        graph being changed under its owner.
+        """
+        seq = instance.sequences.get("5400,0100")
+        if seq is None or len(seq.items) <= 1:
+            return
+
+        pruned = len(seq.items) - 1
+        del seq.items[1:]
+
+        from .waveform import filter_dangling_annotation_refs
+        ann_dropped, ann_rewritten, _groups = filter_dangling_annotation_refs(
+            instance, kept_items=len(seq.items))
+
+        ann_note = ""
+        if ann_dropped or ann_rewritten:
+            ann_note = (
+                f" {ann_dropped} waveform annotation(s) referencing the "
+                f"pruned groups were dropped and {ann_rewritten} trimmed "
+                f"to their surviving references (#177).")
+        self.logger.warning(
+            f"{instance.sop_instance_uid}: Waveform Sequence held "
+            f"{pruned + 1} multiplex groups but this store carries "
+            f"samples for group 0 only -- it was indexed before the "
+            f"#160 fix, which discarded the samples and kept the "
+            f"metadata. Pruned {pruned} sample-less item(s) so the "
+            f"export does not declare Waveform Data it cannot carry "
+            f"(Type 1, PS3.3 C.10.9).{ann_note} The discarded samples "
+            f"are not recoverable from this store; to get them back, "
+            f"re-ingest the original files into a fresh index.")
 
     def _drain_and_write(self):
         """Move every currently queued audit row into the database.
@@ -774,8 +850,8 @@ class SqliteStore:
             entity_uid (str): The instance (or path) the action concerns.
             details (str): Prose for the human reading the report.
             loss_scope (str, optional): For `DATA_LOSS` only:
-                `io_handlers.LOSS_SCOPE_PRIVATE` or
-                `LOSS_SCOPE_STANDARD`. This is what `generate_report`
+                `io_handlers.LOSS_SCOPE_PRIVATE`, `LOSS_SCOPE_STANDARD`
+                or `LOSS_SCOPE_SIGNAL`. This is what `generate_report`
                 grades on, and it is passed in rather than derived from
                 `details` because only the caller still holds the tag
                 (#146).
@@ -849,8 +925,9 @@ class SqliteStore:
 
         Still separate from `get_audit_errors`, and the reason is no
         longer that the grade is untouched -- it is not. A loss scoped
-        `PRIVATE` now takes `validation_status` to `REVIEW_REQUIRED`;
-        one scoped `STANDARD` leaves it at `PASS` (CHANGELOG.md, #146).
+        `PRIVATE` or `SIGNAL` takes `validation_status` to
+        `REVIEW_REQUIRED`; one scoped `STANDARD` leaves it at `PASS`
+        (CHANGELOG.md, #146 and #150).
         Folding these rows into `get_audit_errors` would grade all of
         them alike *and* file a routine drop under "Exceptions &
         Errors", where nothing failed.
@@ -956,6 +1033,102 @@ class SqliteStore:
         except sqlite3.OperationalError:
             pass
         return unsafe
+
+    def check_pixel_geometry(self) -> List[tuple]:
+        """Instances whose stored descriptors cannot describe their frame.
+
+        The detector for stores #186 already damaged before its fix
+        landed: the defect persisted a guessed geometry (RGB, 3 samples,
+        swapped axes) for multi-frame grayscale instances, and a store
+        carrying it exports garbage while grading PASS -- every step
+        downstream behaves correctly on descriptors that are already
+        wrong (#214). Repair is deliberately not attempted: the
+        sidecar's bytes are shape-free, so a migration would be
+        best-effort, and a best-effort repair that silently half-works
+        is worse than a detector. The remedy is the caller's -- re-ingest
+        from source, or `export(verify_readback=True)` (#209) -- and
+        rides the warning `DicomSession.__init__` logs from this result.
+
+        The check is arithmetic and exact: Rows x Columns x
+        SamplesPerPixel x NumberOfFrames x bytes-per-sample must equal
+        the stored frame length. Bytes-per-sample mirrors
+        `SidecarPixelLoader`'s dtype bucketing (`uint16 if bits > 8 else
+        uint8`) rather than BitsAllocated/8, because the sidecar holds
+        `pixel_array.tobytes()` -- a 1-bit Segmentation is stored
+        expanded to uint8, and dividing its declared width by 8 would
+        flag every healthy one.
+
+        **Scope: frames stored uncompressed only.** A zlib frame's
+        stored length is post-compression, so the equality holds for no
+        store, damaged or healthy, and deciding it by decompressing
+        every frame would read the whole sidecar on every open -- the
+        memory-scaling promise says no. A frame whose `compress_alg` is
+        NULL is skipped too: its encoding is unrecorded and nothing here
+        guesses. Damage hiding behind a compressed frame is caught where
+        the bytes are actually decoded, by `verify_readback` at export.
+
+        Returns:
+            List[tuple]: (sop_instance_uid, file_path, details), the
+            same shape as `check_unsafe_attributes` so `generate_report`
+            files both through one channel.
+        """
+        flagged = []
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT sop_instance_uid, file_path, pixel_length,
+                           attributes_json
+                    FROM instances
+                    WHERE pixel_offset IS NOT NULL
+                      AND pixel_length IS NOT NULL
+                      AND compress_alg = 'raw'
+                """).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+        for r in rows:
+            try:
+                attrs = json.loads(r['attributes_json'] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            def _as_dim(tag, default=None, attrs=attrs):
+                value = attrs.get(tag, default)
+                if isinstance(value, list):
+                    value = value[0] if value else default
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+
+            pixel_rows = _as_dim("0028,0010")
+            pixel_cols = _as_dim("0028,0011")
+            samples = _as_dim("0028,0002", 1)
+            frames = _as_dim("0028,0008", 1)
+            bits = _as_dim("0028,0100", 8)
+            if not pixel_rows or not pixel_cols or not samples or not bits:
+                # Descriptors this incomplete cannot be graded either
+                # way; the loader will fail loudly on its own terms.
+                continue
+            frames = max(frames or 1, 1)
+
+            bytes_per_sample = 2 if bits > 8 else 1
+            expected = (pixel_rows * pixel_cols * samples * frames
+                        * bytes_per_sample)
+            if expected != r['pixel_length']:
+                flagged.append((
+                    r['sop_instance_uid'], r['file_path'],
+                    f"Stored pixel geometry cannot describe the stored "
+                    f"frame: Rows={pixel_rows} Columns={pixel_cols} "
+                    f"SamplesPerPixel={samples} NumberOfFrames={frames} "
+                    f"BitsAllocated={bits} implies {expected} bytes, "
+                    f"but the sidecar frame holds {r['pixel_length']}. "
+                    f"The descriptors were likely rewritten by a "
+                    f"pre-fix release (#186); an export of this "
+                    f"instance is not trustworthy. Re-ingest the "
+                    f"source file, or run export(verify_readback=True) "
+                    f"to fail it at delivery (#209)."))
+        return flagged
 
     def log_audit_batch(self, entries: List[tuple]):
         """
@@ -1428,6 +1601,66 @@ class SqliteStore:
             Dict[Tuple[str, str], Any]: Dictionary mapping (group, element) tuples to values.
         """
         return self.load_vertical_attributes_bulk([instance_uid]).get(instance_uid, {})
+
+    def reconcile_private_tags(self) -> Tuple[int, Dict[str, List[str]]]:
+        """Drop `instance_attributes` rows absent from the core attributes.
+
+        The database half of `DicomSession.reconcile_private_tags()`
+        (#172), which carries the public contract and the warnings; use
+        that. This method decides nothing -- it applies the one rule the
+        caller opted into: the core `attributes_json` is read as the
+        complete answer to "which tags does this instance have", and
+        every tier row whose tag is not there is deleted.
+
+        Why the core can be the answer for the store this exists for: a
+        store written before #158 was read core-only -- nothing consulted
+        the tier -- so the core IS what every pre-upgrade session saw,
+        scanned and exported. For any other store the tier holds the
+        instance's private text values *by design* and this deletes
+        them, which is why nothing calls this automatically.
+
+        A tier row whose instance is not in `instances` at all is
+        dropped too: it can reach no graph from this store, and keeping
+        it preserves exactly the kind of unreadable residue this call
+        exists to clear.
+
+        Returns:
+            Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not
+            tags -- a VM=3 value is three rows), and per-instance
+            `{sop_instance_uid: [tags]}` so the caller can heal the live
+            graph and write the audit trail.
+        """
+        dropped: Dict[str, List[str]] = {}
+        rows_deleted = 0
+        with self._get_connection() as conn:
+            core: Dict[str, set] = {}
+            for row in conn.execute(
+                    "SELECT sop_instance_uid, attributes_json FROM instances"):
+                try:
+                    attrs = json.loads(row['attributes_json'] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    attrs = {}
+                core[row['sop_instance_uid']] = set(attrs.keys())
+
+            stale = [
+                (row['instance_uid'], row['group_id'], row['element_id'])
+                for row in conn.execute(
+                    "SELECT DISTINCT instance_uid, group_id, element_id"
+                    " FROM instance_attributes")
+                if (f"{row['group_id']},{row['element_id']}"
+                    not in core.get(row['instance_uid'], set()))
+            ]
+
+            cur = conn.cursor()
+            for uid, grp, elem in stale:
+                cur.execute(
+                    "DELETE FROM instance_attributes WHERE instance_uid=?"
+                    " AND group_id=? AND element_id=?", (uid, grp, elem))
+                rows_deleted += cur.rowcount
+                dropped.setdefault(uid, []).append(f"{grp},{elem}")
+            conn.commit()
+
+        return rows_deleted, dropped
 
     def load_vertical_attributes_bulk(
             self,
