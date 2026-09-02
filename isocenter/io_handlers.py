@@ -1221,39 +1221,17 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
     # YBR_ICT and MONOCHROME1 survive a round trip.
     photometric = resolve_photometric_interpretation(attributes, geom.samples)
 
-    if float_element and photometric == "RGB":
-        # `RGB` is right on the integer path and wrong on this one, and
-        # the resolver is shared, so the difference has to be made here
-        # rather than in it (#222).
-        #
-        # C.7.6.24 and C.7.6.25 both enumerate `MONOCHROME2` and nothing
-        # else for Photometric Interpretation, so there is no value the
-        # resolver could correct a float declaration *to* that either
-        # module permits -- `RGB` least of all. On the integer path the
-        # correction is the neutral reading of three interleaved samples
-        # and it stays; here it replaces one nonconformance with another
-        # and throws away the only word the source file ever said about
-        # its own pixels.
-        #
-        # The resolver returns `"RGB"` from exactly two arms: nothing was
-        # declared, or a monochrome value was declared beside three or
-        # more samples. Asking it again at `samples = 1` -- the count
-        # C.7.6.3.1.2 permits `MONOCHROME2` at, and therefore the count
-        # both float modules imply -- separates them: it returns None
-        # only for a declared monochrome value. That is also why the test
-        # is a second call rather than a `in MONOCHROME_PHOTOMETRIC`
-        # membership check here: the declared value needs stripping and
-        # upper-casing before it can be compared, and `pixel_geometry`
-        # already does that. A second copy of that normalisation is a
-        # second answer to "what did the instance declare".
-        #
-        # Only the declared-monochrome row moves. An instance declaring
-        # nothing still exports `RGB`, which is #222's own assessment of
-        # this fix: it is the narrowest of the three shapes that issue
-        # offers, not a complete answer to it.
-        if resolve_photometric_interpretation(attributes, 1) is None:
-            photometric = None
-
+    # No float-only branch here any more, and that absence is
+    # load-bearing. A `float_element` call arrives only from the worker
+    # arm that just refused `geom.samples > 1` (#222), so on the float
+    # path the resolver runs at `samples == 1` and can only answer None
+    # or MONOCHROME2 -- both conformant under C.7.6.24/C.7.6.25. The
+    # RGB pass-through guard that stood here (#224's narrow fix) is
+    # unreachable in that world and came out with the refusal; do not
+    # reintroduce a float correction here without re-reading #222's
+    # closing decision, and note that a third call site passing
+    # `float_element=True` without the worker's refusal upstream would
+    # be back to writing `RGB` onto a float element.
     if photometric is None:
         photometric = attributes.get("0028,0004")
     if photometric:
@@ -1470,6 +1448,41 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # file, because the outcome is the same file. Only a caller
             # handing `set_pixel_data` a float16 array can reach it; no
             # DICOM element decodes to one.
+            #
+            # Before either float element is written: a multi-sample
+            # float instance has no conformant file to become, so it is
+            # refused the way a GUESSED geometry is above -- the raise
+            # becomes ExportOutcome(ok=False), an ERROR audit row and a
+            # REVIEW_REQUIRED grade (#181, #215). The condition names
+            # the two arms that write an element; the float16 arm below
+            # writes none, so its samples>1 shape keeps taking the
+            # DATA_LOSS route it always took rather than acquiring a
+            # second failure mode as a ride-along (#222).
+            #
+            # Keyed on the sample count, never on the declared
+            # Photometric Interpretation: every declared value is barred
+            # identically here. C.7.6.24 and C.7.6.25 enumerate
+            # MONOCHROME2 and nothing else, C.7.6.3.1.2 permits
+            # MONOCHROME2 only at SamplesPerPixel = 1, and Planar
+            # Configuration is in neither module's attribute table --
+            # so passing a declared value through (#224's narrow fix,
+            # which this supersedes) still wrote a file both modules
+            # bar, it merely stopped inventing the value.
+            if arr.itemsize in (4, 8) and geom.samples > 1:
+                raise RuntimeError(
+                    f"Refusing to write {ctx.output_path}: the pixels "
+                    f"are {arr.dtype} and the geometry resolves to "
+                    f"{geom.samples} samples per pixel, and there is no "
+                    f"conformant way to write a multi-sample float pixel "
+                    f"element. The Floating Point and Double Floating "
+                    f"Point Image Pixel Modules (PS3.3 C.7.6.24, "
+                    f"C.7.6.25) permit only "
+                    f"PhotometricInterpretation = MONOCHROME2, which "
+                    f"C.7.6.3.1.2 restricts to SamplesPerPixel "
+                    f"(0028,0002) = 1. Correct SamplesPerPixel if the "
+                    f"declaration is wrong, or export each sample plane "
+                    f"as its own single-sample instance.")
+
             if arr.itemsize == 4:
                 ds.FloatPixelData = arr.tobytes()
                 ds.BitsAllocated = 32
