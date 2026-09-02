@@ -156,6 +156,38 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
     Tag(0x7fe0, 0x0003),   # Encapsulated Pixel Data Value Total Length
 })
 
+#: The retention boundary for unrouted binary values, in bytes: a value
+#: at or below it is held in the object graph whatever its wire VR
+#: (`OB`/`OW`/`OF`/`OD`/`OL` and `UN` alike); a value above it is
+#: dropped with a `DATA_LOSS` row, whatever its wire VR (#151).
+#:
+#: One rule for both populations, because VR was never the property
+#: anyone meant. The old gate skipped `BINARY_VRS` and kept `UN` ("for
+#: safety, usually small private tags"), and under Implicit VR every
+#: private element *is* `UN` -- so the identical bytes were dropped
+#: from an explicit-VR source and silently retained, megabyte blobs
+#: included, from an implicit-VR one. De-identification outcome and
+#: memory footprint both tracked the wire format rather than the data.
+#:
+#: 65534 is not a round number pulled from the air; it is PS3.5's own
+#: boundary. It is the largest value length a 16-bit explicit-VR length
+#: field can carry (§7.1.2), and §6.2.2 Note 4 obliges every conformant
+#: explicit-VR encoder to relabel anything longer as `UN` -- so at and
+#: below this size the wire itself can still say what an element is in
+#: either syntax, and a retention rule keyed here cannot be told two
+#: stories about one value. (A leaf value's raw length is
+#: syntax-independent; sequence lengths are not, which is one reason
+#: recovered sequences are exempt from this rule -- see the `UN`
+#: handling in `populate_attrs`.) It also bounds what retention can
+#: cost: at most 64 KiB per element resident (about 87 KiB as base64 in
+#: `attributes_json`, where `_split_core_and_private` keeps every
+#: `bytes` value), which keeps "usually small" true by construction
+#: while the megabyte vendor blobs -- the population the memory
+#: guarantee on 100GB+ datasets is about -- stay out of the graph and
+#: in the loss report. Pixel and waveform bytes are unaffected either
+#: way: they are routed to the sidecar before this rule is consulted.
+BINARY_RETENTION_MAX_BYTES = 65534
+
 
 def _is_routed(tag, is_root: bool, has_pixel_data: bool = False) -> bool:
     """Does something else in the pipeline carry this element's bytes?
@@ -334,12 +366,17 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     Isocenter DicomItem. Handles Sequences recursively. Skips large binary blobs
     to keep the object graph lightweight.
 
-    Skipping is not the same as routing. `PixelData` and `WaveformData`
-    are extracted and written to the sidecar by `ingest_worker`, so
-    skipping them here loses nothing. Everything else with a binary VR
-    -- private vendor blocks, Overlay Data, the palette LUTs -- is
-    skipped and routed nowhere, which means it is dropped. Those are
-    collected in `dropped` so the caller can report them (#125, #137).
+    Skipping is not the same as routing, and since #151 neither is the
+    same as a VR. `PixelData` and `WaveformData` are extracted and
+    written to the sidecar by `ingest_worker`, so skipping them here
+    loses nothing. Every other bulk value -- private vendor blocks,
+    Overlay Data, the palette LUTs, and the `UN` spelling all of them
+    take under Implicit VR -- is decided by size against
+    `BINARY_RETENTION_MAX_BYTES`: retained on the graph at or below it,
+    dropped above it and collected in `dropped` so the caller can
+    report the loss (#125, #137, #151). One rule for every wire VR,
+    because keying on VR made the outcome depend on the source's
+    transfer syntax.
 
     Group `7fe0` used to be taken out above that gate, by a `continue`
     whose comment read "Skip pixels" -- so nothing in the group could
@@ -368,11 +405,12 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     Args:
         ds: The pydicom Dataset or Sequence Item.
         item (DicomItem): The Isocenter item to populate.
-        dropped (list, optional): Collects `(tag, vr)` for every element
-            skipped for its VR that is not routed to the sidecar, so the
-            caller can report them (#125, #137). See `_is_routed` and
-            `_DERIVED_PIXEL_INDEX_TAGS` for the exclusions and why each
-            one exists.
+        dropped (list, optional): Collects `(tag, vr)` for every
+            unrouted element that is dropped -- a bulk value over
+            `BINARY_RETENTION_MAX_BYTES` (#151), or an unrouted member
+            of group 7fe0 -- so the caller can report them (#125,
+            #137). See `_is_routed` and `_DERIVED_PIXEL_INDEX_TAGS` for
+            the exclusions and why each one exists.
         is_root (bool): True when `ds` is the instance itself, False when
             it is a sequence item. Only the exemptions read this, and
             only (7fe0,0010) needs it: the same tag is routed to the
@@ -389,8 +427,18 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             `attributes` and are exported.
     """
 
-    # Binary VRs to explicitly skip (Metadata Refactor)
-    # UN left out for safety, usually small private tags
+    # The wire VRs whose values are bulk bytes. Since #151 membership
+    # routes an element to the size gate below rather than deciding its
+    # fate: an unrouted value at or below BINARY_RETENTION_MAX_BYTES is
+    # retained whatever its VR, and one above it is dropped with a
+    # DATA_LOSS row whatever its VR. `UN` is deliberately not a member
+    # -- a `UN` value may be a disguised implicit-VR sequence (#167)
+    # and must get the recovery attempt first; its blob fallback takes
+    # the same size gate further down. (The old comment here read "UN
+    # left out for safety, usually small private tags", and "usually
+    # small" was the unmeasured assumption #151 is about: under
+    # Implicit VR every private element is UN, megabyte blobs
+    # included.)
     BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
 
     # Read once, not per element: the float pair's exemption depends on
@@ -429,32 +477,43 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
             continue
         if elem.VR in BINARY_VRS:
-            # These bytes do not reach the object graph at all, so
-            # `remove_private_tags=False` cannot keep them -- there is
-            # nothing left to keep by the time the flag is consulted.
-            #
-            # The gate is "binary VR and routed nowhere", not "binary VR"
-            # and not "odd group" (#137). One standard element hits this
-            # rule and is *not* lost: (5400,1010), pulled out and written
-            # to the sidecar by `ingest_worker` before this runs.
-            # Group 7fe0 never gets here -- the group check above takes
-            # it, and answers the same questions there. Reporting either
-            # would put a DATA_LOSS entry in the record of every image
-            # and every waveform ever ingested, which is how a compliance
-            # trail becomes noise. #194 is what that looks like when it
-            # happens: two spurious rows per encapsulated instance.
-            #
-            # Everything else genuinely vanishes, whatever its group.
-            # Overlay Data and the palette LUTs are `OW`, standard, and
-            # routed nowhere; the odd-group gate this replaces left them
-            # unreported because it read "standard" as "safe". Whether
-            # any of these bytes should be *kept* is the open half of
-            # #125; that they vanished in silence is what this closes.
-            if dropped is not None and not _is_routed(
-                    elem.tag, is_root, has_pixel_data):
+            # Routed first: (5400,1010) is pulled out and written to the
+            # sidecar by `ingest_worker` before this runs, so it is
+            # neither lost nor retainable here -- holding it in
+            # `attributes` as well would put the samples in two places
+            # with two answers. Group 7fe0 never gets here at all; the
+            # group check above takes it. Reporting either would put a
+            # DATA_LOSS entry in the record of every image and every
+            # waveform ever ingested, which is how a compliance trail
+            # becomes noise -- #194 is what that looks like.
+            if _is_routed(elem.tag, is_root, has_pixel_data):
+                continue
+
+            # Unrouted binary keys on SIZE, not on VR (#151): at or
+            # below the threshold the value is retained on the graph --
+            # so `remove_private_tags=False` can finally keep a small
+            # explicit-VR vendor blob, and the outcome stops depending
+            # on the transfer syntax, because the implicit-VR spelling
+            # of the same element (`UN`, gated below) takes the same
+            # rule. Above it, the existing DATA_LOSS treatment: Overlay
+            # Data and the palette LUTs (`OW`, standard, routed
+            # nowhere) and the megabyte private blocks all vanish
+            # loudly, whatever their group (#125, #137).
+            value = elem.value
+            if value is None:
+                # A zero-length element. Nothing to lose and nothing to
+                # weigh; retained as empty bytes so it round-trips.
+                value = b""
+            if isinstance(value, (bytes, bytearray, memoryview)) \
+                    and len(value) <= BINARY_RETENTION_MAX_BYTES:
+                item.set_attr(
+                    f"{elem.tag.group:04x},{elem.tag.element:04x}",
+                    bytes(value))
+                continue
+            if dropped is not None:
                 dropped.append(
                     (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
-            continue  # Skip binary blobs
+            continue  # Skip binary blobs over the retention threshold
 
         tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
 
@@ -490,10 +549,35 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 if parsed is not None:
                     process_sequence(tag, parsed, item, dropped, unscanned)
                     continue
-                if unscanned is not None:
+                if (unscanned is not None
+                        and len(raw) <= BINARY_RETENTION_MAX_BYTES):
+                    # Only when the bytes will actually be retained: the
+                    # SCAN_GAP row says "ingested verbatim; the PHI scan
+                    # could not open it", and a candidate the size gate
+                    # below is about to drop gets a DATA_LOSS row
+                    # instead -- one row per element, each telling the
+                    # truth (#151).
                     unscanned.append((tag, len(raw)))
                 # Falls through: the bytes stay in `attributes` and are
                 # exported exactly as before.
+
+        # The `UN` half of the size rule (#151). A proven sequence was
+        # taken structurally above and is exempt -- structure is
+        # resolved, not weighed, and a sequence's encoded length is the
+        # one place the two transfer syntaxes genuinely differ. What
+        # reaches here as `UN` bytes is a blob, and it takes exactly the
+        # gate the `BINARY_VRS` arm applies: retained at or below
+        # `BINARY_RETENTION_MAX_BYTES`, dropped with a DATA_LOSS row
+        # above it. Before this, `UN` was retained unconditionally
+        # ("usually small"), so the implicit-VR spelling of a megabyte
+        # private blob sat resident in the graph while its explicit-VR
+        # twin was dropped and reported.
+        if (elem.VR == 'UN'
+                and isinstance(elem.value, (bytes, bytearray, memoryview))
+                and len(elem.value) > BINARY_RETENTION_MAX_BYTES):
+            if dropped is not None:
+                dropped.append((tag, 'UN'))
+            continue
 
         if elem.VR == 'SQ':
             process_sequence(tag, elem, item, dropped, unscanned)
@@ -619,7 +703,9 @@ def ingest_worker(fp: str) -> Tuple:
                 p_hash = hashlib.sha256(p_bytes).hexdigest()
 
         # Extract Waveform Data
-        # populate_attrs skips all OB/OW VRs, so (5400,1010) never reaches the
+        # populate_attrs treats (5400,1010) as routed (#151 changed the
+        # binary rule to a size gate, but routed elements stay out of the
+        # graph regardless), so it never reaches the
         # object graph on its own. Pull it out explicitly, exactly as PixelData
         # is handled above, and offload the bytes to the sidecar.
         # Only the first Waveform Sequence item is handled; multi-item
@@ -1008,16 +1094,31 @@ class DicomImporter:
                     # distrust whichever half they check second.
                     for tag, vr in meta.get('dropped_private_binary', ()):
                         scope = loss_scope_for_tag(tag)
+                        # Two reason clauses, because two rules drop
+                        # (#151): group 7fe0 is excluded wholesale
+                        # (unrouted pixel elements -- an icon's nested
+                        # Pixel Data, a float element beside real Pixel
+                        # Data), while everything else is dropped only
+                        # for exceeding the retention threshold. One
+                        # sentence covering both would be false for one
+                        # of them, which is how #194's wrong-reason row
+                        # happened.
+                        if tag.startswith("7fe0"):
+                            reason = ("unrouted pixel elements are not "
+                                      "held in the object graph")
+                        else:
+                            reason = (f"its value exceeds the "
+                                      f"{BINARY_RETENTION_MAX_BYTES}-byte "
+                                      f"retention threshold, so it is not "
+                                      f"held in the object graph")
                         if scope == LOSS_SCOPE_PRIVATE:
                             detail = (f"Private tag {tag} ({vr}) was not "
-                                      f"ingested; binary-VR elements are not "
-                                      f"held in the object graph, so it "
-                                      f"cannot be exported even with "
+                                      f"ingested; {reason}, and it cannot "
+                                      f"be exported even with "
                                       f"remove_private_tags=False.")
                         else:
                             detail = (f"Standard tag {tag} ({vr}) was not "
-                                      f"ingested; binary-VR elements are not "
-                                      f"held in the object graph, so it is "
+                                      f"ingested; {reason}, so it is "
                                       f"not in the exported file.")
                         logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
@@ -1847,8 +1948,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             ds.HighBit = inst.attributes.get("0028,0102", default_bits - 1)
             ds.PixelRepresentation = inst.attributes.get("0028,0103", 0)
 
-        # Waveform samples never reach `attributes` -- populate_attrs skips
-        # OB/OW -- so the rebuilt dataset carries a complete Waveform
+        # Waveform samples never reach `attributes` -- populate_attrs
+        # routes (5400,1010) to the sidecar at every depth, whatever
+        # its size (#151) -- so the rebuilt dataset carries a complete Waveform
         # Sequence (channel definitions, sampling frequency, sample count)
         # with no signal in it unless they are put back here (#34).
         #

@@ -5,22 +5,20 @@
 extracted and written to the sidecar before this runs, and holding them
 in `attributes` would undo the memory scaling the design depends on.
 
-For everything else with a binary VR there is nothing behind the skip.
-A private vendor block routinely carries `OB` elements, and they are
-gone before `remove_private_tags=False` is ever consulted -- so the flag
-cannot keep what it promises to keep (#125). Overlay Data and the
-palette color LUTs are `OW`, standard, and equally unrouted; the
-exported file keeps their `US` descriptors and so declares a plane it
-does not carry (#137).
+For everything else with a binary VR, #151 decided the open half of
+#125: retention keys on *size*, not VR. A value at or below
+`BINARY_RETENTION_MAX_BYTES` is retained on the graph (pinned in
+`tests/test_binary_retention_threshold.py`); a value above it is
+dropped, and the dropping is what this file is about. A dropped value
+must never be silent: #36 settled the pattern -- warn, and write a
+`DATA_LOSS` audit entry, because the log line alone is not a
+compliance trail. Every fixture here therefore carries an
+over-threshold payload; a small one would be retained and the test
+would go vacuous rather than fail.
 
-Whether those bytes should be *kept* is a real design question and is
-still open. That they are dropped in silence is not; #36 settled the
-pattern for exactly this shape -- warn, and write a `DATA_LOSS` audit
-entry, because the log line alone is not a compliance trail.
-
-The boundary that needs pinning is therefore "binary VR and routed
-nowhere", not "binary VR" and not "odd group": widening it naively puts
-a DATA_LOSS entry in the record of every image and every waveform ever
+The boundary that needs pinning is "unrouted and over the threshold",
+not "binary VR" and not "odd group": widening it naively puts a
+DATA_LOSS entry in the record of every image and every waveform ever
 ingested.
 """
 import os
@@ -31,11 +29,18 @@ import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from isocenter.io_handlers import LOSS_SCOPE_PRIVATE, LOSS_SCOPE_STANDARD
+from isocenter.io_handlers import (BINARY_RETENTION_MAX_BYTES,
+                                   LOSS_SCOPE_PRIVATE, LOSS_SCOPE_STANDARD)
 from isocenter.session import DicomSession
 
 PRIVATE_BINARY = "0009,1002"
 PRIVATE_TEXT = "0009,1001"
+
+#: Over the retention threshold, so it is dropped and reported; a
+#: smaller payload would be retained (#151) and every assertion about
+#: the loss row would pass over no rows at all. Even length, because
+#: pydicom pads odd-length OB/OW on write.
+BIG = b"\x01\x02\x03\x04" * ((BINARY_RETENTION_MAX_BYTES // 4) + 1)
 
 
 def _write_src(folder, with_private_binary=True):
@@ -55,7 +60,7 @@ def _write_src(folder, with_private_binary=True):
     ds.add_new(0x00090010, 'LO', 'ACME_HEADER')      # Private Creator
     ds.add_new(0x00091001, 'LO', 'acquisition-v7')   # survives ingest
     if with_private_binary:
-        ds.add_new(0x00091002, 'OB', b'\x01\x02\x03\x04')
+        ds.add_new(0x00091002, 'OB', BIG)
 
     # A standard binary blob, which is *not* lost -- it goes to the
     # sidecar -- and so must not be reported.
@@ -121,12 +126,14 @@ def test_the_report_names_the_vr_so_the_loss_can_be_acted_on(tmp_path):
     assert "OB" in rows[0][1], rows[0][1]
 
 
-def test_the_tag_is_still_dropped(tmp_path):
-    """This reports the loss; it does not change it.
+def test_an_over_threshold_tag_is_still_dropped(tmp_path):
+    """The size rule's upper half: reported AND really gone.
 
-    Keeping the bytes is the open half of #125 and a genuine design
-    decision -- an arbitrary private `OB` can be megabytes, which is what
-    `BINARY_VRS` exists to keep out of resident memory.
+    #151 decided #125's open half -- small values are retained now --
+    but an arbitrary private `OB` can be megabytes, and keeping those
+    out of resident memory is what the threshold exists for. The text
+    sibling staying put is the control: the drop is per element, not
+    per block.
     """
     _uid, attrs, _rows = _ingest(tmp_path)
     assert PRIVATE_BINARY not in attrs
@@ -162,7 +169,7 @@ def test_a_private_binary_tag_inside_a_sequence_is_reported_too(tmp_path):
     ds = pydicom.dcmread(path)
     item = Dataset()
     item.add_new(0x00090010, 'LO', 'ACME_HEADER')
-    item.add_new(0x00091003, 'OB', b'\xaa\xbb')
+    item.add_new(0x00091003, 'OB', BIG)
     ds.AnatomicRegionSequence = Sequence([item])
     ds.save_as(path, enforce_file_format=True)
 
@@ -220,7 +227,7 @@ def test_overlay_data_is_reported(tmp_path):
     """
     def add_overlay(ds):
         ds.add_new(0x60000010, 'US', 4)                    # OverlayRows
-        ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')  # OverlayData
+        ds.add_new(0x60003000, 'OW', BIG)  # OverlayData
 
     attrs, rows = _ingest_with(tmp_path, "ovl", add_overlay)
 
@@ -241,7 +248,7 @@ def test_overlay_data_is_recorded_as_standard_scope(tmp_path):
     """
     def add_overlay(ds):
         ds.add_new(0x60000010, 'US', 4)
-        ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')
+        ds.add_new(0x60003000, 'OW', BIG)
 
     _attrs, rows = _ingest_with(tmp_path, "ovlscope", add_overlay)
 
@@ -257,7 +264,7 @@ def test_a_standard_loss_is_not_described_as_a_private_one(tmp_path):
     invited the reader to distrust whichever half they checked second.
     """
     def add_overlay(ds):
-        ds.add_new(0x60003000, 'OW', b'\x01\x02\x03\x04')
+        ds.add_new(0x60003000, 'OW', BIG)
 
     _attrs, rows = _ingest_with(tmp_path, "ovlprose", add_overlay)
 
@@ -269,7 +276,7 @@ def test_palette_lut_data_is_reported(tmp_path):
     even group that is not an overlay, so it pins the rule rather than
     the one tag it was found through."""
     def add_lut(ds):
-        ds.add_new(0x00281201, 'OW', b'\xbb' * 16)
+        ds.add_new(0x00281201, 'OW', BIG)
 
     _attrs, rows = _ingest_with(tmp_path, "lut", add_lut)
 
@@ -482,7 +489,7 @@ def test_nothing_reported_from_this_group_misstates_its_own_reason(tmp_path):
         ds.add_new(0x7FE00002, 'OV', b'\x10' * 8)
         ds.add_new(0x7FE00003, 'UV', 4096)
         ds.add_new(0x00090010, 'LO', 'ACME_HEADER')
-        ds.add_new(0x00091002, 'OB', b'\x01\x02\x03\x04')
+        ds.add_new(0x00091002, 'OB', BIG)
 
     _attrs, rows = _ingest_with(tmp_path, "prose", add_everything)
 

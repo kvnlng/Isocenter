@@ -94,9 +94,15 @@ UNDEFINED_ITEM_BYTES = (
 #: for the creator beside it. Binary VRs never reach the object graph,
 #: so restoring the structure turns a child nobody could see into a
 #: reported DATA_LOSS (#137).
+#: The binary child is 65536 bytes -- over
+#: `BINARY_RETENTION_MAX_BYTES` -- so it is still a DATA_LOSS under
+#: #151's size rule. A small child would be *retained* now, which is
+#: that fix's point and is pinned in
+#: `tests/test_binary_retention_threshold.py`; these tests are about
+#: the reporting of a child that really is dropped.
 BINARY_CHILD_BYTES = _item(
     _elem(0x0009, 0x0010, b"BrainLAB_Conversion ")
-    + _elem(0x0009, 0x1002, b"\x01\x02\x03\x04")
+    + _elem(0x0009, 0x1002, b"\x01\x02\x03\x04" * 16384)
     + _elem(0x0010, 0x0010, SECRET_NAME.encode()))
 
 #: A private sequence *inside* a private sequence, implicit at both
@@ -601,8 +607,9 @@ def test_a_binary_child_of_a_parsed_sequence_is_reported_as_lost(
 
     Before the parse this instance held one opaque `UN` attribute and
     graded PASS. After it, the item's `OB` child goes through the
-    ordinary rules -- binary VRs do not reach the object graph -- so it
-    is a DATA_LOSS, it is private, and the run grades REVIEW_REQUIRED.
+    ordinary rules -- and at 65536 bytes it is over
+    `BINARY_RETENTION_MAX_BYTES` (#151) -- so it is a DATA_LOSS, it is
+    private, and the run grades REVIEW_REQUIRED.
     That is a behaviour change, and it is the correct one: the loss was
     always happening, in the sense that those bytes were never going to
     be exported as an element.
