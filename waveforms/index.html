@@ -1658,18 +1658,31 @@ single-group record
 (<a href="https://github.com/kvnlng/Isocenter/issues/160">#160</a>).</p>
 <p>That holds for records ingested by 0.9.0 or later. The drop happens in
 <code>ingest_worker</code>, which does not run again on a session opened from an
-existing index, so a database populated by an earlier version still holds
-the extra items and still exports the hollow one; re-ingesting the source
-files into a fresh index is the remedy
-(<a href="https://github.com/kvnlng/Isocenter/issues/168">#168</a>). The same applies
-to a graph built by hand and written with <code>DicomExporter.write_tree()</code>,
-which is the serializer alone and never passes through ingest.</p>
-<p>That entry is scoped <code>STANDARD</code> -- a multiplex group lives under Waveform
-Sequence <code>(5400,0100)</code>, an even group -- so it is reported in the
-compliance report's Data Loss section but does <strong>not</strong> move Validation
-Status, which only a private-group loss does. Whether a discarded
-multiplex group should be an exception to that is open on
-<a href="https://github.com/kvnlng/Isocenter/issues/150">#150</a>.</p>
+existing index -- so a database populated by an earlier version still
+holds the extra items. Since
+<a href="https://github.com/kvnlng/Isocenter/issues/168">#168</a> hydration heals
+that shape on load: opening such a store prunes the sample-less items
+(and, with them, any annotations referencing the pruned groups, exactly
+as ingest would, <a href="https://github.com/kvnlng/Isocenter/issues/177">#177</a>)
+and logs a warning naming the instance and why, so the export is a
+conformant single-group record instead of one declaring Waveform Data
+it does not carry. The heal is in-memory: the store itself is unchanged
+until the session saves, and the warning repeats on every open until it
+does. The discarded samples are not recoverable from the store -- the
+original discard happened in the session that ingested, and its
+<code>DATA_LOSS</code> entry is in the same store's audit log -- so re-ingesting
+the source files into a fresh index remains the only way to get them
+back. A graph built by hand and written with
+<code>DicomExporter.write_tree()</code> is deliberately untouched: the serializer
+applies no gates and never passes through ingest or hydration.</p>
+<p>That entry is scoped <code>SIGNAL</code>, and it <strong>does</strong> move Validation Status:
+a session that discarded a multiplex group grades <code>REVIEW_REQUIRED</code>,
+not <code>PASS</code> (<a href="https://github.com/kvnlng/Isocenter/issues/150">#150</a>).
+The tag is standard -- Waveform Sequence <code>(5400,0100)</code> is an even group
+-- but what was discarded is acquired signal that was in the source and
+is not in the export, which is not routine the way a dropped overlay
+is. Routine standard-group losses keep the <code>STANDARD</code> scope and keep
+grading <code>PASS</code>.</p>
 <p><strong>Annotations naming a discarded group are dropped, not re-pointed.</strong>
 Referenced Waveform Channels <code>(0040,A0B0)</code> identifies a mark by a
 <code>(multiplex group, channel)</code> pair, and DICOM numbers both from 1. PS3.3
@@ -1690,18 +1703,39 @@ belonging to a signal that is not in the record, until
 <a href="https://github.com/kvnlng/Isocenter/issues/159">#159</a>. The <code>lead</code>
 resolution described earlier therefore applies to marks on the ingested
 group; there are no others in the file.</p>
+<p>Since <a href="https://github.com/kvnlng/Isocenter/issues/177">#177</a> the same
+filtering happens on the object graph itself, at the point
+<a href="https://github.com/kvnlng/Isocenter/issues/160">#160</a> drops the
+discarded groups' sequence items -- so a <strong>DICOM</strong> export no longer
+carries a Waveform Annotation Sequence <code>(0040,B020)</code> item whose
+reference names an item that is not in the file, which is exactly the
+kind of dangling ordinal a strict downstream reader rejects. The
+filter works on <code>(group, channel)</code> pairs before it drops items: an
+annotation naming all of group 1 plus a channel of group 3 keeps its
+surviving pairs, and an item goes only when every pair it named is
+gone. Surviving ordinals are <strong>never renumbered</strong> -- the ordinal is
+positional, so renumbering after a discard would make the file
+internally consistent and wrong relative to the source, with no way to
+tell afterwards. An annotation with no <code>(0040,A0B0)</code> at all is
+untouched: the attribute is Type 1C, and its absence means the mark
+applies to the whole waveform.</p>
 <p>That drop is announced the same way the group discard is: a warning, and
 one <code>DATA_LOSS</code> entry per instance naming how many annotations were
 dropped and which groups they referenced -- one row, not one per mark,
 so a cart that marks forty beats on a discarded group does not fill the
 report's Data Loss section with forty near-identical lines. It is scoped
-<code>STANDARD</code> for the same reason as the entry above, and on the same open
-question (<a href="https://github.com/kvnlng/Isocenter/issues/150">#150</a>):
-Waveform Annotation Sequence <code>(0040,B020)</code> is an even group, and the
-scope states what the element was, not how serious the loss felt. A
-record with two <code>DATA_LOSS</code> rows -- one from ingest for the groups, one
-from export for the marks that referenced them -- is the expected shape,
-not a double count: they report different losses.</p>
+<code>STANDARD</code> even though the group discard itself is scoped <code>SIGNAL</code>
+(<a href="https://github.com/kvnlng/Isocenter/issues/150">#150</a>): an annotation
+is a mark <em>about</em> the signal, the acquired-samples loss it described
+already moves Validation Status via the ingest-side row, and grading
+the bookkeeping too would double-charge one loss under two entries. A
+record with two <code>DATA_LOSS</code> rows -- one for the groups the ingest
+discarded, one for the marks that referenced them -- is the expected
+shape, not a double count: they report different losses. Both rows are
+written at ingest since
+<a href="https://github.com/kvnlng/Isocenter/issues/177">#177</a>; the WFDB
+bridge keeps its own drop-and-report as the guard for a graph that
+never passed through ingest.</p>
 
 
 

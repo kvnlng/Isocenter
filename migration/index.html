@@ -775,13 +775,41 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#clinical-trial-processor-ctp" class="md-nav__link">
+  <a href="#upgrading-an-existing-store" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Clinical Trial Processor (CTP)
+        Upgrading an existing store
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Upgrading an existing store">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#corrupted-pixel-geometry-186-214" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Corrupted pixel geometry (#186, #214)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hollow-waveform-multiplex-items-160-168" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hollow waveform multiplex items (#160, #168)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1202,13 +1230,41 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#clinical-trial-processor-ctp" class="md-nav__link">
+  <a href="#upgrading-an-existing-store" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Clinical Trial Processor (CTP)
+        Upgrading an existing store
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Upgrading an existing store">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#corrupted-pixel-geometry-186-214" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Corrupted pixel geometry (#186, #214)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hollow-waveform-multiplex-items-160-168" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hollow waveform multiplex items (#160, #168)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1281,10 +1337,79 @@
 
 
 <h1 id="migration-tools">Migration Tools</h1>
+<h2 id="upgrading-an-existing-store">Upgrading an existing store</h2>
+<p>The code in a new release is fixed; the data an old release wrote is
+not. Three shapes of legacy damage are known, and each is handled the
+way its information allows -- healed where the store itself proves what
+is wrong, detected where it cannot be repaired, and left to an explicit
+opt-in where only the site knows the answer.</p>
+<h3 id="corrupted-pixel-geometry-186-214">Corrupted pixel geometry (#186, #214)</h3>
+<p>Releases before the #186 fix could persist a guessed geometry --
+<code>SamplesPerPixel=3</code>, <code>PhotometricInterpretation=RGB</code>, swapped axes --
+for a multi-frame grayscale instance whose Columns was 3 or 4. A store
+carrying those descriptors exports garbage while grading <code>PASS</code>: every
+step downstream behaves correctly on descriptors that are already
+wrong.</p>
+<p>Opening a session over such a store now runs an arithmetic check --
+does Rows x Columns x SamplesPerPixel x NumberOfFrames x
+bytes-per-sample equal the stored sidecar frame length? -- and logs a
+warning naming each instance it flags. The same result reaches the
+compliance report as a <code>COMPLIANCE_CHECK</code> exception, so a session
+holding detected damage grades <code>REVIEW_REQUIRED</code> rather than <code>PASS</code>.
+The check is exact for frames stored uncompressed; a zlib-stored
+frame's length is post-compression, so damage behind one is caught
+where the bytes are decoded instead: <code>export(verify_readback=True)</code>
+(#209) re-reads every written file and fails the mismatch at delivery.</p>
+<p>There is deliberately no automatic repair. The sidecar's bytes are
+shape-free, so a migration would be a best-effort guess, and a
+best-effort repair that silently half-works is worse than a detector.
+The remedy is to re-ingest the affected instances from their source
+files.</p>
+<h3 id="hollow-waveform-multiplex-items-160-168">Hollow waveform multiplex items (#160, #168)</h3>
+<p>A store that ingested a multi-group waveform between 0.8.2 and the</p>
+<h1 id="160-fix-holds-one-waveform-sequence-item-per-multiplex-group-with">160 fix holds one Waveform Sequence item per multiplex group with</h1>
+<p>samples behind item 0 only, and exported a file declaring Waveform
+Data it did not carry. Hydration now heals that shape on load -- see
+<a href="../waveforms/">Waveforms</a> for the full story.</p>
+<h3 id="resurrected-private-tags-158-172">Resurrected private tags (#158, #172)</h3>
+<p>Before #158, private (odd-group) tags written to the store's
+<code>instance_attributes</code> tier were never read back, and the writer did not
+mirror deletions: a session that ran <code>remove_private_tags: true</code>,
+anonymized, and saved deleted the vendor block from the graph but left
+every row of it in the store. Those rows were inert -- nothing read
+them -- until #158 wired the tier into hydration, which is the fix that
+makes <code>remove_private_tags: false</code> survive a reload. The first open of
+a pre-#158 store after upgrading therefore puts the stripped rows back
+on the graph, and an export taken from that session carries them.</p>
+<p>The library cannot decide this for you: a stale row and a legitimate
+one are byte-identical, and nothing in the database records which
+private tags were deleted from the graph. What the store does record is
+what every pre-#158 session actually saw -- the core <code>attributes_json</code>,
+which was the whole graph before the tier was readable. So the repair
+is explicit and opt-in:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">with</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"store.db"</span><span class="p">)</span> <span class="k">as</span> <span class="n">s</span><span class="p">:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">dropped</span> <span class="o">=</span> <span class="n">s</span><span class="o">.</span><span class="n">reconcile_private_tags</span><span class="p">()</span>
+</code></pre></div>
+<p><code>reconcile_private_tags()</code> drops every <code>instance_attributes</code> row whose
+tag is absent from the instance's core stored attributes, removes the
+same tags from the live graph (undoing the resurrection this session's
+open performed), and writes one <code>RECONCILE_PRIVATE</code> audit row per
+affected instance so the repair is in the compliance trail. It returns
+the number of rows dropped.</p>
+<p><strong>Call it only if you know your store was de-identified before the
+upgrade.</strong> For that store the core attributes are the complete answer,
+and everything the call drops is a row a pre-upgrade export never
+carried. For a store that legitimately keeps its vendor block
+(<code>remove_private_tags: false</code>), the tier <em>is</em> the private data and this
+call deletes it -- the same grain as <code>redact(force=True)</code>: the repair
+exists in the API, nothing changes silently, and the caller is choosing
+its cost. A site that does not know its history should re-run the
+privacy pipeline over the store instead, which re-strips the graph and
+(since #158) mirrors the deletions into the tier on save.</p>
 <h2 id="clinical-trial-processor-ctp">Clinical Trial Processor (CTP)</h2>
 <p>Isocenter includes a utility to convert legacy CTP <code>DicomPixelAnonymizer.script</code> files into Isocenter's YAML configuration format.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Convert CTP script to Isocenter YAML</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>-m<span class="w"> </span>isocenter.utils.ctp_parser<span class="w"> </span>/path/to/anonymizer.script<span class="w"> </span>output_rules.yaml
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Convert CTP script to Isocenter YAML</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>isocenter.utils.ctp_parser<span class="w"> </span>/path/to/anonymizer.script<span class="w"> </span>output_rules.yaml
 </code></pre></div>
 <p>This parser extracts:</p>
 <ul>
