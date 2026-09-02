@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-02
+
+Thirty-seven issues under one heading, which is the milestone's own name:
+the session reported success while wrong. A verification pass attested
+pixel coverage the zones did not have; the compliance report counted an
+export that failed, or missed one that succeeded, or described the
+previous run; audit rows were dropped, raced, or filed against files that
+were never written; the grade asked whether the audit log had heard
+*anything* rather than what this session had actually done; and exports
+parsed cleanly while carrying the wrong multiplicity, an illegal date, a
+nonconformant float element, or one twelfth of a waveform.
+
+Almost nothing here is a new capability. The work is making every
+sentence the library writes about its own output true -- and where a
+true sentence cannot be written, refusing loudly instead of succeeding
+quietly. Stores damaged by earlier releases are detected at open
+(`check_pixel_geometry`), repairable on request (`redact(force=True)`,
+`reconcile_private_tags()`), or healed at hydration (hollow multiplex
+items); the write path stopped leaving readable partial files; and the
+report finally comes last in the documented order, where it can see what
+the export did.
+
 ### Breaking
 
 - **A multi-sample float pixel export is refused: an instance whose pixels are float32/float64 and whose geometry resolves to `SamplesPerPixel > 1` now fails with `RuntimeError: Refusing to write <path>: ... there is no conformant way to write a multi-sample float pixel element` instead of writing a file (#222).** The refusal takes exactly the treatment a GUESSED geometry gets (#215): `ExportOutcome(ok=False)`, an `ERROR` audit row naming the instance and the reason, a `REVIEW_REQUIRED` grade -- and on `write_tree()`, the raised `RuntimeError` that path has always used for a failed instance. The newly-failing export is the one that used to succeed: `ingest -> export` of a Parametric Map declaring three samples (any declared Photometric Interpretation, or none) wrote `(7fe0,0008)` with descriptors no conformant reader is required to accept. PS3.3 C.7.6.24 and C.7.6.25 both fix Photometric Interpretation at `MONOCHROME2` (Type 1, enumerated), C.7.6.3.1.2 permits `MONOCHROME2` only at `SamplesPerPixel = 1`, and Planar Configuration appears in neither module's attribute table -- so every value the exporter could write was barred, and the old behaviour picked between nonconformances (`RGB` plus a `PlanarConfiguration` the IOD does not define, or a relabelled declaration) while the run graded `PASS`. The narrow #224 guard -- pass a declared monochrome value through on the float path -- is superseded and removed: it stopped the exporter inventing a value but still shipped a file both modules bar. The shared resolvers (`resolve_photometric_interpretation`, `planar_configuration_default`) are untouched: on the integer path `RGB` and `PlanarConfiguration = 0` are exactly right, and a conformant single-sample float instance exports byte-identically to before. The float16 arm is deliberately outside the refusal -- it writes no pixel element, so its multi-sample shape keeps its existing `DATA_LOSS` route.
