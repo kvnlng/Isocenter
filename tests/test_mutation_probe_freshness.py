@@ -54,10 +54,135 @@ def _recorded_mtime(src):
     return struct.unpack("<I", cache.read_bytes()[8:12])[0]
 
 
+def _parent_cache(src):
+    """This process's own cache path for `src` -- the tests below that pass
+    it are deliberately fabricating the parent interpreter's entry, and
+    saying so at the call site is the point of the explicit parameter."""
+    return pathlib.Path(importlib.util.cache_from_source(str(src)))
+
+
+def _stub_interpreter(tmp_path, body):
+    """An executable that stands in for `PYTEST[0]`."""
+    stub = tmp_path / "fake-python"
+    stub.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+    stub.chmod(0o755)
+    return stub
+
+
+def test_the_cache_path_is_asked_of_the_interpreter_that_runs_the_tests(
+        tmp_path, monkeypatch):
+    """`cache_from_source` in this process is a guess about another one.
+
+    The parent's `sys.implementation.cache_tag` names a file the pytest
+    subprocess never touches whenever the two interpreters differ --
+    pyenv shim beside `.venv` is the routine case, not the exotic one
+    (#201). So the path has to come out of `PYTEST[0]`'s own mouth: this
+    stub answers something no local `cache_from_source` call could ever
+    produce, and only asking the subprocess can return it.
+    """
+    log = tmp_path / "calls.log"
+    stub = _stub_interpreter(
+        tmp_path,
+        f'echo "$3" >> "{log}"\necho "/sentinel$3.faketag-000.pyc"\n')
+    monkeypatch.setattr(mutation_probe, "PYTEST",
+                        [str(stub)] + mutation_probe.PYTEST[1:])
+    mutation_probe._SUBPROCESS_CACHE_PATHS.clear()
+
+    a = tmp_path / "victim_a.py"
+    b = tmp_path / "victim_b.py"
+    a.write_text("A = 1\n", encoding="utf-8")
+    b.write_text("B = 1\n", encoding="utf-8")
+
+    got_a = mutation_probe.subprocess_cache_path(a)
+    got_b = mutation_probe.subprocess_cache_path(b)
+
+    assert got_a == pathlib.Path(f"/sentinel{a.resolve()}.faketag-000.pyc")
+    assert got_b == pathlib.Path(f"/sentinel{b.resolve()}.faketag-000.pyc")
+    assert got_a != got_b, "memoization must be per source path, not global"
+
+    # Memoized per path: a second ask for the same file must not spawn.
+    assert mutation_probe.subprocess_cache_path(a) == got_a
+    spawned = log.read_text(encoding="utf-8").splitlines()
+    assert spawned.count(str(a.resolve())) == 1, spawned
+
+
+def test_assert_fresh_inspects_the_cache_the_test_interpreter_would_read(
+        tmp_path):
+    """The guard must open the file it was told about, not the parent's.
+
+    Deterministic #174 collision (same bytes, mtime frozen to the
+    recorded second) built under the parent's tag, then relocated to a
+    fabricated tag standing in for the subprocess's. Old behaviour
+    derived the parent-tag path locally, found nothing there, and
+    returned -- a silent no-op in exactly the stale case it exists for.
+    """
+    src = _compiled(tmp_path, "A = 1\n")
+    parent = _parent_cache(src)
+    fabricated = parent.with_name("victim.faketag-000.pyc")
+    fabricated.write_bytes(parent.read_bytes())
+    parent.unlink()
+    src.write_text("A = 2\n", encoding="utf-8")  # same size
+    recorded = struct.unpack("<I", fabricated.read_bytes()[8:12])[0]
+    os.utime(src, (recorded, recorded))
+
+    with pytest.raises(SystemExit) as exc:
+        mutation_probe.assert_fresh(src, cache=fabricated)
+    assert "stale" in str(exc.value).lower()
+
+    # And the converse: a colliding parent-tag entry back on disk must
+    # not fire the guard when the subprocess's own path holds nothing --
+    # the parent's file is not the one pytest would reuse.
+    parent.write_bytes(fabricated.read_bytes())
+    fabricated.unlink()
+    mutation_probe.assert_fresh(src, cache=fabricated)
+
+
+def test_a_missing_test_interpreter_aborts_before_any_verdict(
+        tmp_path, monkeypatch):
+    """A probe that cannot ask its interpreter must refuse, by name.
+
+    Today that failure is a raw FileNotFoundError out of the first
+    subprocess call; a worktree without a `.venv` hits it every time.
+    The probe prefers aborting over reporting, so the refusal is a
+    SystemExit that says which interpreter is missing.
+    """
+    missing = str(tmp_path / "no-such-venv" / "bin" / "python")
+    monkeypatch.setattr(mutation_probe, "PYTEST",
+                        [missing] + mutation_probe.PYTEST[1:])
+    mutation_probe._SUBPROCESS_CACHE_PATHS.clear()
+    src = tmp_path / "victim.py"
+    src.write_text("A = 1\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        mutation_probe.subprocess_cache_path(src)
+    assert missing in str(exc.value)
+
+
+def test_a_failing_cache_query_aborts_rather_than_guessing(
+        tmp_path, monkeypatch):
+    """Non-zero exit or empty output is an abort, not a `Path("")`.
+
+    An interpreter that exists but cannot answer -- wrong binary, broken
+    venv -- must not degrade into a guard pointed at an empty path,
+    which would be #201's silent no-op wearing a different hat.
+    """
+    for body in ("exit 3\n", "exit 0\n"):
+        stub = _stub_interpreter(tmp_path, body)
+        monkeypatch.setattr(mutation_probe, "PYTEST",
+                        [str(stub)] + mutation_probe.PYTEST[1:])
+        mutation_probe._SUBPROCESS_CACHE_PATHS.clear()
+        src = tmp_path / "victim.py"
+        src.write_text("A = 1\n", encoding="utf-8")
+
+        with pytest.raises(SystemExit) as exc:
+            mutation_probe.subprocess_cache_path(src)
+        assert str(stub) in str(exc.value)
+
+
 def test_assert_fresh_allows_a_write_the_cache_cannot_match(tmp_path):
     src = _compiled(tmp_path, "A = 1\n")
     src.write_text("A = 22222222\n", encoding="utf-8")  # size differs
-    mutation_probe.assert_fresh(src)
+    mutation_probe.assert_fresh(src, cache=_parent_cache(src))
 
 
 def test_assert_fresh_aborts_when_a_stale_pyc_would_validate(tmp_path):
@@ -68,7 +193,7 @@ def test_assert_fresh_aborts_when_a_stale_pyc_would_validate(tmp_path):
     os.utime(src, (recorded, recorded))
 
     with pytest.raises(SystemExit) as exc:
-        mutation_probe.assert_fresh(src)
+        mutation_probe.assert_fresh(src, cache=_parent_cache(src))
     assert "stale" in str(exc.value).lower()
 
 
@@ -104,7 +229,7 @@ def test_assert_fresh_allows_a_same_second_write_of_a_different_size(tmp_path):
     recorded = _recorded_mtime(src)
     os.utime(src, (recorded, recorded))
 
-    mutation_probe.assert_fresh(src)
+    mutation_probe.assert_fresh(src, cache=_parent_cache(src))
 
 
 def test_assert_fresh_allows_a_pycache_left_behind_by_an_earlier_run(tmp_path):
@@ -122,7 +247,7 @@ def test_assert_fresh_allows_a_pycache_left_behind_by_an_earlier_run(tmp_path):
     recorded = _recorded_mtime(src)
     os.utime(src, (recorded + 5, recorded + 5))
 
-    mutation_probe.assert_fresh(src)
+    mutation_probe.assert_fresh(src, cache=_parent_cache(src))
 
 
 def test_assert_fresh_truncates_the_second_rather_than_rounding_it(tmp_path):
@@ -141,7 +266,7 @@ def test_assert_fresh_truncates_the_second_rather_than_rounding_it(tmp_path):
     assert int(src.stat().st_mtime) == recorded != round(src.stat().st_mtime)
 
     with pytest.raises(SystemExit):
-        mutation_probe.assert_fresh(src)
+        mutation_probe.assert_fresh(src, cache=_parent_cache(src))
 
 
 def test_assert_fresh_aborts_on_an_unchecked_hash_pyc(tmp_path):
@@ -160,14 +285,14 @@ def test_assert_fresh_aborts_on_an_unchecked_hash_pyc(tmp_path):
     src.write_text("A = 2\n", encoding="utf-8")
 
     with pytest.raises(SystemExit):
-        mutation_probe.assert_fresh(src)
+        mutation_probe.assert_fresh(src, cache=_parent_cache(src))
 
     src.write_text("A = 1\n", encoding="utf-8")
     py_compile.compile(
         str(src), doraise=True,
         invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)
     src.write_text("A = 2\n", encoding="utf-8")
-    mutation_probe.assert_fresh(src)
+    mutation_probe.assert_fresh(src, cache=_parent_cache(src))
 
 
 def test_main_guards_the_bytes_of_every_run_including_the_control(tmp_path, monkeypatch):
@@ -175,24 +300,31 @@ def test_main_guards_the_bytes_of_every_run_including_the_control(tmp_path, monk
 
     `assert_fresh()` is only worth having if it runs immediately before
     every `run()` -- the control included, since a control scored against
-    stale bytecode invalidates the samples under it too -- and if what it
-    inspected is the file the tests were then shown.
+    stale bytecode invalidates the samples under it too -- if what it
+    inspected is the file the tests were then shown, and if the cache it
+    was pointed at came from `subprocess_cache_path` rather than a local
+    derivation: a helper `main()` never calls is #201 still open (the
+    wrong-tag path, just with better tooling beside it).
     """
     (tmp_path / "victim.py").write_text(
         "def f(x):\n    return x == 1 and not x\n", encoding="utf-8")
     calls = []
+    sentinel = pathlib.Path("/sentinel/victim.faketag-000.pyc")
 
     monkeypatch.setattr(mutation_probe, "REPO", tmp_path)
     monkeypatch.setattr(mutation_probe, "TARGETS", {"victim.py": ["t.py"]})
+    monkeypatch.setattr(mutation_probe, "subprocess_cache_path",
+                        lambda p: sentinel)
     monkeypatch.setattr(mutation_probe, "assert_fresh",
-                        lambda p: calls.append(("guard", p.read_text())))
+                        lambda p, c: calls.append(("guard", p.read_text(), c)))
     monkeypatch.setattr(mutation_probe, "run",
-                        lambda t: calls.append(("run", (tmp_path / "victim.py").read_text())) or True)
+                        lambda t: calls.append(("run", (tmp_path / "victim.py").read_text(), None)) or True)
     monkeypatch.setattr(sys, "argv", ["mutation_probe"])
 
     mutation_probe.main()
 
     assert len(calls) >= 4, calls          # control + at least one sample, guarded
-    assert [k for k, _ in calls] == ["guard", "run"] * (len(calls) // 2), calls
-    for (_, guarded), (_, scored) in zip(calls[::2], calls[1::2]):
+    assert [k for k, _, _ in calls] == ["guard", "run"] * (len(calls) // 2), calls
+    for (_, guarded, cache), (_, scored, _) in zip(calls[::2], calls[1::2]):
         assert guarded == scored
+        assert cache == sentinel, "the guard was not handed the subprocess's cache path"

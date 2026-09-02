@@ -50,7 +50,10 @@ on a clean tree so `git checkout isocenter/` is always a way out.
 Runs carry `PYTHONDONTWRITEBYTECODE=1` and every write is checked against
 CPython's own `.pyc` validation rule before the tests see it, because a
 stale bytecode cache made this tool report mutations that were never in
-the code it tested. `assert_fresh` has the mechanism (#174).
+the code it tested. `assert_fresh` has the mechanism (#174). The cache it
+inspects is the one `PYTEST[0]` itself names, because the entry that
+matters belongs to the interpreter that runs the tests, not the one that
+launched the probe (#201).
 """
 
 import ast, importlib.util, os, struct, subprocess, sys, time
@@ -167,7 +170,65 @@ def count_ops(src):
         if m.n <= n: return n
         n += 1
 
-def assert_fresh(path):
+#: Answers from `subprocess_cache_path`, keyed on (interpreter, source
+#: path). Per *path*, not per cache tag: the subprocess honours
+#: `PYTHONPYCACHEPREFIX`/`sys.pycache_prefix`, so two sources under one
+#: tag can cache into different directories and a tag-keyed memo would
+#: hand one module the other's answer.
+_SUBPROCESS_CACHE_PATHS = {}
+
+def subprocess_cache_path(path):
+    """The `__pycache__` entry `PYTEST[0]` would read for `path`.
+
+    Asked of that interpreter, never derived here: a local
+    `cache_from_source` names the file from the *parent's*
+    `sys.implementation.cache_tag`, and the parent is routinely not the
+    interpreter that runs the tests -- a pyenv shim beside the hardcoded
+    `.venv` is the ordinary case, not the exotic one. Inspecting the
+    parent-tag file degrades one direction only, never a false abort and
+    always a false pass, so nothing about running the probe would ever
+    say the guard had gone quiet (#201).
+
+    The full path is requested rather than just the tag because the
+    subprocess honours `PYTHONPYCACHEPREFIX`: a hand-assembled
+    `<dir>/__pycache__/<stem>.<tag>.pyc` looks in the wrong directory
+    under a cache prefix. One queried path covers every execution lever
+    the run has -- `PYTEST[0]` is the process that imports the mutant,
+    threads share it, and process workers spawn from the same
+    `sys.executable` (so the same tag, with `PYTHONDONTWRITEBYTECODE`
+    inherited either way).
+
+    An interpreter that is missing or cannot answer is a `SystemExit`
+    naming it, not a guess: the probe prefers aborting over reporting,
+    and the raw FileNotFoundError this replaces was how a worktree
+    without a `.venv` used to die mid-run.
+    """
+    resolved = Path(path).resolve()
+    key = (PYTEST[0], str(resolved))
+    if key not in _SUBPROCESS_CACHE_PATHS:
+        query = ("import importlib.util, sys; "
+                 "print(importlib.util.cache_from_source(sys.argv[1]))")
+        try:
+            r = subprocess.run([PYTEST[0], "-c", query, str(resolved)],
+                               capture_output=True, text=True, timeout=60)
+        except FileNotFoundError:
+            raise SystemExit(
+                f"ABORT: the test interpreter {PYTEST[0]} does not exist, so "
+                f"no verdict it produced could be vouched for. Create the "
+                f".venv (pip install -e '.[dev]') or point PYTEST at the "
+                f"interpreter that should run the tests.") from None
+        answer = r.stdout.strip()
+        if r.returncode != 0 or not answer:
+            raise SystemExit(
+                f"ABORT: the test interpreter {PYTEST[0]} could not name its "
+                f"bytecode cache for {resolved} (exit {r.returncode}: "
+                f"{r.stderr.strip() or 'no output'}). A guard pointed at a "
+                f"guessed path is #201's silent no-op again, so the probe "
+                f"stops instead.")
+        _SUBPROCESS_CACHE_PATHS[key] = Path(answer)
+    return _SUBPROCESS_CACHE_PATHS[key]
+
+def assert_fresh(path, cache):
     """Stop the run if a cached `.pyc` would be reused for what was just written.
 
     CPython validates a timestamp-based `.pyc` against the source's
@@ -204,19 +265,17 @@ def assert_fresh(path):
     notice" from "the suite was never shown" is exactly the silent
     failure it exists to hunt for.
 
-    **One known hole, #201, and it is in the documented invocation.**
-    `cache_from_source` names the file from the *parent* interpreter's
-    cache tag, while `PYTEST` hardcodes `.venv/bin/python`. Run
-    `python -m scripts.mutation_probe` -- the command CLAUDE.md gives --
-    under anything but the venv's interpreter and this inspects a `.pyc`
-    the subprocess never reads, finds nothing, and returns. It degrades
-    to a no-op silently and in one direction only: never a false abort,
-    always a false pass, so running the probe would not reveal that the
-    check had been off. The fix itself is unaffected either way, since
-    `PYTHONDONTWRITEBYTECODE` is inherited whichever interpreter
-    launched the probe -- only the guard goes quiet.
+    `cache` is required, with no default, on purpose. The cache that
+    matters belongs to the interpreter that RUNS the tests -- callers
+    pass `subprocess_cache_path(path)` -- and this function must never
+    derive one itself: a `cache_from_source` fallback resurrects the
+    parent interpreter's tag, and a pyenv shim launching the probe
+    beside the hardcoded `.venv` is the routine case, not the edge. A
+    guard built that way inspects a `.pyc` the subprocess never reads,
+    finds nothing, and returns -- never a false abort, always a false
+    pass, so no run would ever reveal the check had been off (#201).
     """
-    cache = Path(importlib.util.cache_from_source(str(path)))
+    cache = Path(cache)
     if not cache.exists():
         return
     head = cache.read_bytes()[:16]
@@ -274,7 +333,7 @@ def main():
         # result below is an artefact of the harness rather than a finding.
         path.write_text(ast.unparse(ast.parse(original)))
         try:
-            assert_fresh(path)
+            assert_fresh(path, subprocess_cache_path(path))
             ok = run(tests)
         finally:
             path.write_text(original)
@@ -300,7 +359,8 @@ def main():
                 path.write_text(ast.unparse(ast.fix_missing_locations(tree)))
                 # Not caught by the `except Exception` below on purpose: a
                 # stale cache invalidates the whole run, not one sample.
-                assert_fresh(path)
+                # (`subprocess_cache_path`'s aborts ride the same exit.)
+                assert_fresh(path, subprocess_cache_path(path))
                 t0 = time.time()
                 if run(tests):
                     survived.append(m.desc)
