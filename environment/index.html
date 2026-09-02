@@ -1264,6 +1264,11 @@
 <td style="text-align: left;"><code>1</code></td>
 <td style="text-align: left;">Set to <code>0</code> to globally disable all progress bars (tqdm). Useful for cleaner logs in CI/CD environments.</td>
 </tr>
+<tr>
+<td style="text-align: left;"><strong><code>ISOCENTER_WORKER_FAULTHANDLER</code></strong></td>
+<td style="text-align: left;"><code>0</code></td>
+<td style="text-align: left;">Diagnostic. Set to <code>1</code> to have every worker <em>process</em> arm <code>faulthandler.dump_traceback_later(240, exit=False)</code> at start: a worker still alive after 240 seconds dumps every one of its threads' tracebacks to stderr and keeps running. This is how a stall <em>inside</em> a pool child becomes a stack trace instead of a silent hang — the parent's faulthandler cannot see into children. Isocenter's own CI sets it; production runs should leave it off.</td>
+</tr>
 </tbody>
 </table>
 
