@@ -19,4 +19,5 @@
         - auto_remediate_config
         - examine
         - compact
+        - reconcile_private_tags
         - release_memory

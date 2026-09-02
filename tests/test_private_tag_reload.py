@@ -331,7 +331,10 @@ def _hand_built_patient(pid="P1", n_instances=1, private=None):
         inst.sop_class_uid = "1.2.840.10008.5.1.4.1.1.2"
         inst.instance_number = i + 1
         inst.set_attr("0010,0020", pid)
-        for tag, val in (private or {"0009,1001": "vendor"}).items():
+        # `None` means the default block; `{}` means genuinely none --
+        # the reconcile tests below need a de-identified-shaped graph.
+        for tag, val in (private if private is not None
+                         else {"0009,1001": "vendor"}).items():
             inst.set_attr(tag, val)
         series.instances.append(inst)
     study.series.append(series)
@@ -470,7 +473,7 @@ def test_bytes_private_values_are_not_loaded_twice(tmp_path):
 
 
 def test_a_row_left_behind_by_an_older_version_is_loaded_onto_the_graph(tmp_path):
-    """The upgrade case, pinned rather than decided.
+    """The undecidable half of the upgrade case, pinned as behaviour.
 
     Before this fix the write path deleted only the keys it was about to
     re-insert and skipped the call entirely for an instance whose private
@@ -481,13 +484,15 @@ def test_a_row_left_behind_by_an_older_version_is_loaded_onto_the_graph(tmp_path
     store is opened after upgrading, and an export taken from that
     session carries them.
 
-    This is not fixable from inside the library. A stale row and a
-    legitimate one are byte-identical: nothing in the database records
-    which private tags were deleted from the graph, so a migration would
-    either drop every site's vendor block -- undoing the fix -- or keep
-    every stripped one. Which it is depends on what the site ran, which
-    only the site knows. Filed as #172; this test states what happens
-    today so the decision is visible instead of latent.
+    The resurrection itself is not fixable from inside the library, and
+    #172 decided it stays: a stale row and a legitimate one are
+    byte-identical, nothing in the database records which private tags
+    were deleted from the graph, and a migration at open would either
+    drop every site's vendor block -- undoing the fix -- or keep every
+    stripped one. Which a store needs depends on what the site ran,
+    which only the site knows. The lever the site pulls is
+    `session.reconcile_private_tags()`, tested below; this test pins
+    that nothing pulls it automatically.
     """
     db = str(tmp_path / "legacy.db")
     SqliteStore(db).save_all([_hand_built_patient()])
@@ -558,3 +563,184 @@ def test_applying_a_loaded_private_tag_is_not_an_edit():
     assert inst.phi_status == PhiStatus.CLEARED, (
         "the stored status was invalidated by loading the row it was "
         "stored with")
+
+
+# --------------------------------------------------------------------
+# The opt-in repair for stores de-identified before this fix (#172)
+# --------------------------------------------------------------------
+#
+# The resurrection pinned above cannot be decided from inside the
+# library: a stale row and a legitimate one are byte-identical, and the
+# tier holds values, not tombstones. What the store does record is what
+# every pre-#158 session actually saw -- the core `attributes_json`,
+# which WAS the whole graph while nothing read the tier. So the lever is
+# an explicit call that treats the core as the complete answer, for a
+# site that KNOWS its store was de-identified before upgrading. Same
+# grain as `redact(force=True)`: the repair exists in the API, nothing
+# changes silently.
+
+
+def _stale_row(db, uid="P1.INST.0", tag=("0009", "1009")):
+    """What the old writer left behind: a row for a tag the graph lacks."""
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO instance_attributes (instance_uid, group_id,"
+            " element_id, atom_index, value_rep, value_text)"
+            " VALUES (?, ?, ?, 0, 'UN', 'stale-vendor')",
+            (uid, tag[0], tag[1]))
+
+
+def test_reconcile_drops_the_stale_row_from_the_store_and_the_graph(tmp_path):
+    db = str(tmp_path / "legacy.db")
+    patient = _hand_built_patient(private={})
+    # A de-identified store: no private tags on the graph, one stale row.
+    SqliteStore(db).save_all([patient])
+    _stale_row(db)
+
+    session = DicomSession(persistence_file=db)
+    try:
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        # Precondition: this session's open resurrected the stale row
+        # (the pinned behaviour above; #172 keeps it).
+        assert inst.attributes.get("0009,1009") == "stale-vendor"
+
+        dropped = session.reconcile_private_tags()
+
+        assert dropped == 1
+        # The live graph is healed too, not only the next session's.
+        assert "0009,1009" not in inst.attributes
+        # And healing is not an edit: the store now agrees with the
+        # graph, so nothing should read as unsaved.
+        assert not inst.has_unsaved_changes
+    finally:
+        session.close()
+
+    reloaded = SqliteStore(db).load_all()[0].studies[0].series[0].instances[0]
+    assert "0009,1009" not in reloaded.attributes
+
+
+def test_reconcile_writes_the_repair_into_the_audit_trail(tmp_path):
+    """Deleting rows from a compliance store must be in the record.
+
+    `RECONCILE_PRIVATE` lands in the report's Processing Audit table via
+    `get_audit_summary`, and deliberately does not move the grade: it is
+    neither an ERROR/WARNING nor a DATA_LOSS -- nothing was lost that a
+    pre-upgrade export ever carried.
+    """
+    db = str(tmp_path / "legacy.db")
+    SqliteStore(db).save_all([_hand_built_patient(private={})])
+    _stale_row(db)
+
+    session = DicomSession(persistence_file=db)
+    try:
+        session.reconcile_private_tags()
+        session.store_backend.flush_audit_queue()
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT entity_uid, details FROM audit_log"
+            " WHERE action_type='RECONCILE_PRIVATE'").fetchall()
+
+    assert len(rows) == 1, rows
+    assert rows[0][0] == "P1.INST.0"
+    assert "0009,1009" in rows[0][1]
+
+
+def test_reconcile_on_a_clean_store_is_a_noop(tmp_path):
+    db = str(tmp_path / "clean.db")
+    SqliteStore(db).save_all([_hand_built_patient(private={})])
+
+    session = DicomSession(persistence_file=db)
+    try:
+        assert session.reconcile_private_tags() == 0
+        session.store_backend.flush_audit_queue()
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT 1 FROM audit_log WHERE action_type='RECONCILE_PRIVATE'"
+        ).fetchall()
+    assert rows == []
+
+
+def test_reconcile_drops_a_legitimate_tier_row_too_and_that_is_the_deal(
+        tmp_path):
+    """The documented sharp edge, pinned so it stays visible.
+
+    A store that legitimately keeps its vendor block holds its private
+    text values on the tier and NOT in the core JSON -- that is what
+    `_split_core_and_private` does -- so reconcile, which reads the core
+    as the complete answer, deletes them. That is why the call is
+    opt-in, documented, and never run automatically: only the site knows
+    whether its store was de-identified. A site that wants its vendor
+    block must not call this.
+    """
+    db = str(tmp_path / "vendor.db")
+    SqliteStore(db).save_all([_hand_built_patient(
+        private={"0009,1001": "legitimate-vendor"})])
+
+    session = DicomSession(persistence_file=db)
+    try:
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        assert inst.attributes.get("0009,1001") == "legitimate-vendor"
+
+        assert session.reconcile_private_tags() == 1
+        assert "0009,1001" not in inst.attributes
+    finally:
+        session.close()
+
+
+def test_reconcile_leaves_bytes_valued_private_tags_alone(tmp_path):
+    """A bytes value lives inline in the core JSON, not on the tier.
+
+    It is therefore both absent from `instance_attributes` (nothing to
+    drop) and present in the core (the answer reconcile trusts) -- and a
+    genuinely de-identified store cannot hold one anyway, because
+    `anonymize()` removed it from the core like any other attribute.
+    """
+    db = str(tmp_path / "bytes.db")
+    SqliteStore(db).save_all([_hand_built_patient(
+        private={"0009,1004": b"\x01\x02\x03"})])
+    _stale_row(db)
+
+    session = DicomSession(persistence_file=db)
+    try:
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        assert session.reconcile_private_tags() == 1  # the stale row only
+        assert inst.attributes.get("0009,1004") == b"\x01\x02\x03"
+    finally:
+        session.close()
+
+    reloaded = SqliteStore(db).load_all()[0].studies[0].series[0].instances[0]
+    assert reloaded.attributes.get("0009,1004") == b"\x01\x02\x03"
+
+
+def test_reconcile_handles_multi_valued_and_multi_instance_stores(tmp_path):
+    """Row count is rows, not tags: a VM=3 value is three rows."""
+    db = str(tmp_path / "multi.db")
+    SqliteStore(db).save_all([_hand_built_patient(n_instances=2, private={})])
+    with sqlite3.connect(db) as conn:
+        for atom, value in enumerate(("a", "b", "c")):
+            conn.execute(
+                "INSERT INTO instance_attributes (instance_uid, group_id,"
+                " element_id, atom_index, value_rep, value_text)"
+                " VALUES ('P1.INST.0', '0009', '1002', ?, 'UN', ?)",
+                (atom, value))
+        conn.execute(
+            "INSERT INTO instance_attributes (instance_uid, group_id,"
+            " element_id, atom_index, value_rep, value_text)"
+            " VALUES ('P1.INST.1', '0011', '1001', 0, 'UN', 'x')")
+
+    session = DicomSession(persistence_file=db)
+    try:
+        assert session.reconcile_private_tags() == 4
+        instances = session.store.patients[0].studies[0].series[0].instances
+        assert all("0009,1002" not in i.attributes
+                   and "0011,1001" not in i.attributes for i in instances)
+    finally:
+        session.close()

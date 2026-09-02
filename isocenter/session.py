@@ -831,6 +831,94 @@ class DicomSession:
         else:
             print("Persistence backend does not support compaction.")
 
+    def reconcile_private_tags(self) -> int:
+        """Drop stored private-tag rows for a store de-identified before 0.9.1.
+
+        **Opt-in repair for one specific history; read before calling.**
+        Before #158, private (odd-group) tags written to the
+        `instance_attributes` tier were never read back, and the writer
+        did not mirror deletions -- so a session that ran
+        `remove_private_tags: true`, anonymized and saved deleted the
+        vendor block from the graph and left every row of it in the
+        store, inert. #158 wired the tier into hydration (the fix that
+        makes `remove_private_tags: false` survive a reload), and the
+        first open of such a store after upgrading puts the stripped
+        rows back on the graph; an export taken from that session
+        carries them (#172).
+
+        The library cannot decide which rows are stale: a stale row and
+        a legitimate one are byte-identical, and the tier holds values,
+        not tombstones. What the store does record is what every
+        pre-#158 session actually saw -- the core `attributes_json`,
+        which WAS the whole graph while nothing read the tier. This call
+        opts into reading it that way: it deletes every tier row whose
+        tag is absent from its instance's core stored attributes,
+        removes the same tags from the live in-memory graph (undoing the
+        resurrection this session's open performed), and writes one
+        `RECONCILE_PRIVATE` audit row per affected instance so the
+        repair is in the compliance trail. The graph edit is direct --
+        no `set_attr`, no revision bump -- because the store and graph
+        change together and agree afterwards; nothing reads as unsaved
+        and stored PHI statuses survive, exactly as hydration's own
+        writes do.
+
+        **The cost, stated plainly (same grain as `redact(force=True)`:
+        the repair exists in the API, nothing changes silently, and the
+        caller chooses).** For a store that legitimately keeps its
+        vendor block -- `remove_private_tags: false`, saved by 0.9.1 or
+        later -- the tier IS the private data, held out of the core by
+        design, and this call deletes all of it. Call this only for a
+        store you KNOW was de-identified before upgrading. A site unsure
+        of its history should re-run the privacy pipeline instead:
+        since #158 the writer mirrors deletions, so anonymize + save
+        heals the tier without trusting the core.
+
+        There is deliberately no schema-version stamp deciding this
+        automatically: which answer a store needs depends on what the
+        site ran, which the site knows and no stamp records -- and the
+        version-stamped attestation is already filed to be decided once
+        for #168, #172 and #237 together (see #237's CHANGELOG entry).
+
+        Returns:
+            int: `instance_attributes` rows deleted -- rows, not tags
+            (a VM=3 value is three rows). 0 means the tier already
+            agreed with the core and nothing changed.
+        """
+        rows_deleted, dropped = self.store_backend.reconcile_private_tags()
+        if not dropped:
+            get_logger().info(
+                "reconcile_private_tags: nothing to reconcile; every "
+                "stored private row matches the core attributes.")
+            return 0
+
+        by_uid = {
+            inst.sop_instance_uid: inst
+            for p in self.store.patients
+            for st in p.studies for se in st.series for inst in se.instances}
+        for uid, tags in dropped.items():
+            inst = by_uid.get(uid)
+            if inst is not None:
+                for tag in tags:
+                    inst.attributes.pop(tag, None)
+            self.store_backend.log_audit(
+                action_type="RECONCILE_PRIVATE",
+                entity_uid=uid,
+                details=(
+                    f"Dropped stored private tag(s) {', '.join(tags)}: "
+                    f"absent from the instance's core attributes, so a "
+                    f"pre-0.9.1 session never saw or exported them. "
+                    f"Explicitly requested via "
+                    f"reconcile_private_tags() (#172)."))
+
+        get_logger().warning(
+            f"reconcile_private_tags: dropped {rows_deleted} stored "
+            f"private-tag row(s) across {len(dropped)} instance(s). "
+            f"This is the opt-in repair for a store de-identified "
+            f"before the 0.9.1 upgrade; if this store was meant to "
+            f"keep its vendor block, restore from backup and do not "
+            f"call this again.")
+        return rows_deleted
+
     def examine(self):
         """Prints a summary of the session contents and equipment."""
         get_logger().info("Generating inventory report.")

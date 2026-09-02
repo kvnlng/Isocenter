@@ -1602,6 +1602,66 @@ class SqliteStore:
         """
         return self.load_vertical_attributes_bulk([instance_uid]).get(instance_uid, {})
 
+    def reconcile_private_tags(self) -> Tuple[int, Dict[str, List[str]]]:
+        """Drop `instance_attributes` rows absent from the core attributes.
+
+        The database half of `DicomSession.reconcile_private_tags()`
+        (#172), which carries the public contract and the warnings; use
+        that. This method decides nothing -- it applies the one rule the
+        caller opted into: the core `attributes_json` is read as the
+        complete answer to "which tags does this instance have", and
+        every tier row whose tag is not there is deleted.
+
+        Why the core can be the answer for the store this exists for: a
+        store written before #158 was read core-only -- nothing consulted
+        the tier -- so the core IS what every pre-upgrade session saw,
+        scanned and exported. For any other store the tier holds the
+        instance's private text values *by design* and this deletes
+        them, which is why nothing calls this automatically.
+
+        A tier row whose instance is not in `instances` at all is
+        dropped too: it can reach no graph from this store, and keeping
+        it preserves exactly the kind of unreadable residue this call
+        exists to clear.
+
+        Returns:
+            Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not
+            tags -- a VM=3 value is three rows), and per-instance
+            `{sop_instance_uid: [tags]}` so the caller can heal the live
+            graph and write the audit trail.
+        """
+        dropped: Dict[str, List[str]] = {}
+        rows_deleted = 0
+        with self._get_connection() as conn:
+            core: Dict[str, set] = {}
+            for row in conn.execute(
+                    "SELECT sop_instance_uid, attributes_json FROM instances"):
+                try:
+                    attrs = json.loads(row['attributes_json'] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    attrs = {}
+                core[row['sop_instance_uid']] = set(attrs.keys())
+
+            stale = [
+                (row['instance_uid'], row['group_id'], row['element_id'])
+                for row in conn.execute(
+                    "SELECT DISTINCT instance_uid, group_id, element_id"
+                    " FROM instance_attributes")
+                if (f"{row['group_id']},{row['element_id']}"
+                    not in core.get(row['instance_uid'], set()))
+            ]
+
+            cur = conn.cursor()
+            for uid, grp, elem in stale:
+                cur.execute(
+                    "DELETE FROM instance_attributes WHERE instance_uid=?"
+                    " AND group_id=? AND element_id=?", (uid, grp, elem))
+                rows_deleted += cur.rowcount
+                dropped.setdefault(uid, []).append(f"{grp},{elem}")
+            conn.commit()
+
+        return rows_deleted, dropped
+
     def load_vertical_attributes_bulk(
             self,
             instance_uids: Optional[List[str]] = None,
