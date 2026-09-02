@@ -107,11 +107,13 @@ def test_every_level_is_still_merged(sr_context, monkeypatch):
     Without this, `test_no_attribute_source_is_merged_twice` is satisfied
     by a worker that merges nothing at all.
 
-    Identity again rather than contents, and here for a second reason:
-    the worker's `populate_attrs(ds, inst)` call reads the assembled
-    dataset back onto the instance, so by the time this returns,
-    `inst.attributes` holds the patient/study/series tags too and a
-    by-value comparison would no longer find what was passed in.
+    Identity rather than contents here too, now only for symmetry with
+    the test above. (A second reason used to apply: the worker's
+    `populate_attrs(ds, inst)` writeback copied the patient/study/series
+    tags onto `inst.attributes` before this returned, defeating a
+    by-value comparison. #184 deleted that writeback -- the worker no
+    longer mutates the graph -- but identity is still the sharper
+    assertion of "what was passed in is what was merged".)
     """
     merged = []
     real_merge = DicomExporter._merge

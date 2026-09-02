@@ -979,12 +979,26 @@ class DicomSession:
         Files are parsed and organized into the Patient -> Study -> Series -> Instance hierarchy.
         This operation automatically saves the session state upon completion.
 
+        A file that cannot be ingested does not raise: it is counted in
+        the returned summary and gets an `ERROR` audit row naming the
+        path and the reason, which the compliance report surfaces and
+        which bars the `PASS` grade -- the same treatment a failed
+        export write gets (#181, #211). Check the return value: a run
+        that rejected files completes normally.
+
         Args:
             directory (str): The path to the directory containing DICOM files.
+
+        Returns:
+            IngestSummary: how many files reached the store, and
+                `(path, reason)` for each one that did not. Returned
+                nothing until #211, which left a caller no programmatic
+                way to learn that a directory ingest silently rejected
+                some of its files.
         """
         print(f"Ingesting from '{directory}'...")
         # Pass Sidecar Manager for eager pixel writing
-        DicomImporter.import_files(
+        summary = DicomImporter.import_files(
             [directory],
             self.store,
             executor=self._executor,
@@ -1006,6 +1020,14 @@ class DicomSession:
         print(f"  - {n_st} Studies")
         print(f"  - {n_se} Series")
         print(f"  - {n_i} Instances")
+        if summary.failed:
+            print(f"  - {summary.failed} file(s) REJECTED -- ingested "
+                  f"{summary.ingested} of "
+                  f"{summary.ingested + summary.failed} new files; see the "
+                  f"returned IngestSummary.failures and the ERROR audit "
+                  f"rows for the paths and reasons.")
+
+        return summary
 
     # =========================================================================
     # CONFIGURATION

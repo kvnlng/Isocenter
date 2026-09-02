@@ -156,6 +156,38 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
     Tag(0x7fe0, 0x0003),   # Encapsulated Pixel Data Value Total Length
 })
 
+#: The retention boundary for unrouted binary values, in bytes: a value
+#: at or below it is held in the object graph whatever its wire VR
+#: (`OB`/`OW`/`OF`/`OD`/`OL` and `UN` alike); a value above it is
+#: dropped with a `DATA_LOSS` row, whatever its wire VR (#151).
+#:
+#: One rule for both populations, because VR was never the property
+#: anyone meant. The old gate skipped `BINARY_VRS` and kept `UN` ("for
+#: safety, usually small private tags"), and under Implicit VR every
+#: private element *is* `UN` -- so the identical bytes were dropped
+#: from an explicit-VR source and silently retained, megabyte blobs
+#: included, from an implicit-VR one. De-identification outcome and
+#: memory footprint both tracked the wire format rather than the data.
+#:
+#: 65534 is not a round number pulled from the air; it is PS3.5's own
+#: boundary. It is the largest value length a 16-bit explicit-VR length
+#: field can carry (§7.1.2), and §6.2.2 Note 4 obliges every conformant
+#: explicit-VR encoder to relabel anything longer as `UN` -- so at and
+#: below this size the wire itself can still say what an element is in
+#: either syntax, and a retention rule keyed here cannot be told two
+#: stories about one value. (A leaf value's raw length is
+#: syntax-independent; sequence lengths are not, which is one reason
+#: recovered sequences are exempt from this rule -- see the `UN`
+#: handling in `populate_attrs`.) It also bounds what retention can
+#: cost: at most 64 KiB per element resident (about 87 KiB as base64 in
+#: `attributes_json`, where `_split_core_and_private` keeps every
+#: `bytes` value), which keeps "usually small" true by construction
+#: while the megabyte vendor blobs -- the population the memory
+#: guarantee on 100GB+ datasets is about -- stay out of the graph and
+#: in the loss report. Pixel and waveform bytes are unaffected either
+#: way: they are routed to the sidecar before this rule is consulted.
+BINARY_RETENTION_MAX_BYTES = 65534
+
 
 def _is_routed(tag, is_root: bool, has_pixel_data: bool = False) -> bool:
     """Does something else in the pipeline carry this element's bytes?
@@ -334,12 +366,17 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     Isocenter DicomItem. Handles Sequences recursively. Skips large binary blobs
     to keep the object graph lightweight.
 
-    Skipping is not the same as routing. `PixelData` and `WaveformData`
-    are extracted and written to the sidecar by `ingest_worker`, so
-    skipping them here loses nothing. Everything else with a binary VR
-    -- private vendor blocks, Overlay Data, the palette LUTs -- is
-    skipped and routed nowhere, which means it is dropped. Those are
-    collected in `dropped` so the caller can report them (#125, #137).
+    Skipping is not the same as routing, and since #151 neither is the
+    same as a VR. `PixelData` and `WaveformData` are extracted and
+    written to the sidecar by `ingest_worker`, so skipping them here
+    loses nothing. Every other bulk value -- private vendor blocks,
+    Overlay Data, the palette LUTs, and the `UN` spelling all of them
+    take under Implicit VR -- is decided by size against
+    `BINARY_RETENTION_MAX_BYTES`: retained on the graph at or below it,
+    dropped above it and collected in `dropped` so the caller can
+    report the loss (#125, #137, #151). One rule for every wire VR,
+    because keying on VR made the outcome depend on the source's
+    transfer syntax.
 
     Group `7fe0` used to be taken out above that gate, by a `continue`
     whose comment read "Skip pixels" -- so nothing in the group could
@@ -368,11 +405,12 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     Args:
         ds: The pydicom Dataset or Sequence Item.
         item (DicomItem): The Isocenter item to populate.
-        dropped (list, optional): Collects `(tag, vr)` for every element
-            skipped for its VR that is not routed to the sidecar, so the
-            caller can report them (#125, #137). See `_is_routed` and
-            `_DERIVED_PIXEL_INDEX_TAGS` for the exclusions and why each
-            one exists.
+        dropped (list, optional): Collects `(tag, vr)` for every
+            unrouted element that is dropped -- a bulk value over
+            `BINARY_RETENTION_MAX_BYTES` (#151), or an unrouted member
+            of group 7fe0 -- so the caller can report them (#125,
+            #137). See `_is_routed` and `_DERIVED_PIXEL_INDEX_TAGS` for
+            the exclusions and why each one exists.
         is_root (bool): True when `ds` is the instance itself, False when
             it is a sequence item. Only the exemptions read this, and
             only (7fe0,0010) needs it: the same tag is routed to the
@@ -389,8 +427,18 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             `attributes` and are exported.
     """
 
-    # Binary VRs to explicitly skip (Metadata Refactor)
-    # UN left out for safety, usually small private tags
+    # The wire VRs whose values are bulk bytes. Since #151 membership
+    # routes an element to the size gate below rather than deciding its
+    # fate: an unrouted value at or below BINARY_RETENTION_MAX_BYTES is
+    # retained whatever its VR, and one above it is dropped with a
+    # DATA_LOSS row whatever its VR. `UN` is deliberately not a member
+    # -- a `UN` value may be a disguised implicit-VR sequence (#167)
+    # and must get the recovery attempt first; its blob fallback takes
+    # the same size gate further down. (The old comment here read "UN
+    # left out for safety, usually small private tags", and "usually
+    # small" was the unmeasured assumption #151 is about: under
+    # Implicit VR every private element is UN, megabyte blobs
+    # included.)
     BINARY_VRS = {'OB', 'OW', 'OF', 'OD', 'OL'}
 
     # Read once, not per element: the float pair's exemption depends on
@@ -429,32 +477,43 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
             continue
         if elem.VR in BINARY_VRS:
-            # These bytes do not reach the object graph at all, so
-            # `remove_private_tags=False` cannot keep them -- there is
-            # nothing left to keep by the time the flag is consulted.
-            #
-            # The gate is "binary VR and routed nowhere", not "binary VR"
-            # and not "odd group" (#137). One standard element hits this
-            # rule and is *not* lost: (5400,1010), pulled out and written
-            # to the sidecar by `ingest_worker` before this runs.
-            # Group 7fe0 never gets here -- the group check above takes
-            # it, and answers the same questions there. Reporting either
-            # would put a DATA_LOSS entry in the record of every image
-            # and every waveform ever ingested, which is how a compliance
-            # trail becomes noise. #194 is what that looks like when it
-            # happens: two spurious rows per encapsulated instance.
-            #
-            # Everything else genuinely vanishes, whatever its group.
-            # Overlay Data and the palette LUTs are `OW`, standard, and
-            # routed nowhere; the odd-group gate this replaces left them
-            # unreported because it read "standard" as "safe". Whether
-            # any of these bytes should be *kept* is the open half of
-            # #125; that they vanished in silence is what this closes.
-            if dropped is not None and not _is_routed(
-                    elem.tag, is_root, has_pixel_data):
+            # Routed first: (5400,1010) is pulled out and written to the
+            # sidecar by `ingest_worker` before this runs, so it is
+            # neither lost nor retainable here -- holding it in
+            # `attributes` as well would put the samples in two places
+            # with two answers. Group 7fe0 never gets here at all; the
+            # group check above takes it. Reporting either would put a
+            # DATA_LOSS entry in the record of every image and every
+            # waveform ever ingested, which is how a compliance trail
+            # becomes noise -- #194 is what that looks like.
+            if _is_routed(elem.tag, is_root, has_pixel_data):
+                continue
+
+            # Unrouted binary keys on SIZE, not on VR (#151): at or
+            # below the threshold the value is retained on the graph --
+            # so `remove_private_tags=False` can finally keep a small
+            # explicit-VR vendor blob, and the outcome stops depending
+            # on the transfer syntax, because the implicit-VR spelling
+            # of the same element (`UN`, gated below) takes the same
+            # rule. Above it, the existing DATA_LOSS treatment: Overlay
+            # Data and the palette LUTs (`OW`, standard, routed
+            # nowhere) and the megabyte private blocks all vanish
+            # loudly, whatever their group (#125, #137).
+            value = elem.value
+            if value is None:
+                # A zero-length element. Nothing to lose and nothing to
+                # weigh; retained as empty bytes so it round-trips.
+                value = b""
+            if isinstance(value, (bytes, bytearray, memoryview)) \
+                    and len(value) <= BINARY_RETENTION_MAX_BYTES:
+                item.set_attr(
+                    f"{elem.tag.group:04x},{elem.tag.element:04x}",
+                    bytes(value))
+                continue
+            if dropped is not None:
                 dropped.append(
                     (f"{elem.tag.group:04x},{elem.tag.element:04x}", elem.VR))
-            continue  # Skip binary blobs
+            continue  # Skip binary blobs over the retention threshold
 
         tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
 
@@ -490,10 +549,35 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 if parsed is not None:
                     process_sequence(tag, parsed, item, dropped, unscanned)
                     continue
-                if unscanned is not None:
+                if (unscanned is not None
+                        and len(raw) <= BINARY_RETENTION_MAX_BYTES):
+                    # Only when the bytes will actually be retained: the
+                    # SCAN_GAP row says "ingested verbatim; the PHI scan
+                    # could not open it", and a candidate the size gate
+                    # below is about to drop gets a DATA_LOSS row
+                    # instead -- one row per element, each telling the
+                    # truth (#151).
                     unscanned.append((tag, len(raw)))
                 # Falls through: the bytes stay in `attributes` and are
                 # exported exactly as before.
+
+        # The `UN` half of the size rule (#151). A proven sequence was
+        # taken structurally above and is exempt -- structure is
+        # resolved, not weighed, and a sequence's encoded length is the
+        # one place the two transfer syntaxes genuinely differ. What
+        # reaches here as `UN` bytes is a blob, and it takes exactly the
+        # gate the `BINARY_VRS` arm applies: retained at or below
+        # `BINARY_RETENTION_MAX_BYTES`, dropped with a DATA_LOSS row
+        # above it. Before this, `UN` was retained unconditionally
+        # ("usually small"), so the implicit-VR spelling of a megabyte
+        # private blob sat resident in the graph while its explicit-VR
+        # twin was dropped and reported.
+        if (elem.VR == 'UN'
+                and isinstance(elem.value, (bytes, bytearray, memoryview))
+                and len(elem.value) > BINARY_RETENTION_MAX_BYTES):
+            if dropped is not None:
+                dropped.append((tag, 'UN'))
+            continue
 
         if elem.VR == 'SQ':
             process_sequence(tag, elem, item, dropped, unscanned)
@@ -609,8 +693,9 @@ def ingest_worker(fp: str) -> Tuple:
                 p_alg = 'zlib'  # Always compress the raw bytes
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
-                # Could log warning, but for now raise or return error.
-                return (None, None, None, None, None, None, None,
+                # The path rides the meta slot, as in the blanket except
+                # below, so the parent's ERROR row can name the file (#211).
+                return ({'path': fp}, None, None, None, None, None, None,
                         f"Decompression Failed: {e}")
 
             if p_bytes:
@@ -618,7 +703,9 @@ def ingest_worker(fp: str) -> Tuple:
                 p_hash = hashlib.sha256(p_bytes).hexdigest()
 
         # Extract Waveform Data
-        # populate_attrs skips all OB/OW VRs, so (5400,1010) never reaches the
+        # populate_attrs treats (5400,1010) as routed (#151 changed the
+        # binary rule to a size gate, but routed elements stay out of the
+        # graph regardless), so it never reaches the
         # object graph on its own. Pull it out explicitly, exactly as PixelData
         # is handled above, and offload the bytes to the sidecar.
         # Only the first Waveform Sequence item is handled; multi-item
@@ -689,7 +776,43 @@ def ingest_worker(fp: str) -> Tuple:
 
         return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
-        return (None, None, None, None, None, None, None, str(e))
+        # `{'path': fp}` rather than None in the meta slot, so the
+        # parent can name the file in its ERROR row without parsing the
+        # prose. The reason travels as the error string it always was;
+        # the arity -- unpacked at every call site -- does not change
+        # (#211).
+        return ({'path': fp}, None, None, None, None, None, None, str(e))
+
+
+@dataclass
+class IngestSummary:
+    """What one ingest run did, for the caller that has to know (#211).
+
+    `import_files` used to return nothing: a run that rejected 40 of
+    500 files reported exactly like a clean one, modulo console lines
+    captured nowhere, and the caller's first hint was an empty query
+    result. The mirror of `ExportSummary`, which #181 introduced for
+    the same hole on the export side.
+
+    A file takes exactly one of four routes, and they are four fields
+    because they answer different questions: `ingested` reached the
+    graph; `failures` were rejected with a reason (and each has an
+    `ERROR` audit row); `declined` were refused as the un-redacted
+    originals of instances the session already holds (#238, audited as
+    `WARNING`); `skipped` were already in the store and were not read
+    again.
+    """
+    ingested: int = 0
+    #: `(path, reason)` per rejected file -- the same pair the `ERROR`
+    #: audit row carries, so the summary and the trail cannot disagree.
+    failures: List[Tuple[str, str]] = field(default_factory=list)
+    declined: int = 0
+    skipped: int = 0
+
+    @property
+    def failed(self) -> int:
+        """How many files were rejected."""
+        return len(self.failures)
 
 
 class DicomImporter:
@@ -715,6 +838,12 @@ class DicomImporter:
             store_backend (optional): SqliteStore used to register sidecar
                 blob references. Waveform blobs are invisible to compaction
                 unless recorded here.
+
+        Returns:
+            IngestSummary: what reached the graph and what did not.
+                Returned nothing until #211 -- a per-file failure was a
+                console line, so a run that rejected 8% of its files
+                was indistinguishable from a clean one by any caller.
         """
         all_files = []
         for path in file_paths:
@@ -737,7 +866,7 @@ class DicomImporter:
             logger.info(f"Skipping {skipped_count} already imported files.")
 
         if not new_files:
-            return
+            return IngestSummary(skipped=skipped_count)
 
         logger.info(f"Importing {len(new_files)} files (Parallel Eager Ingest)...")
 
@@ -776,11 +905,39 @@ class DicomImporter:
         superseded = store.get_superseded_uids()
         declined = 0
         count = 0
+        failures: List[Tuple[str, str]] = []
+
+        def _record_failure(path, reason):
+            """One rejected file: the log line, the summary, the trail.
+
+            `ERROR`, not `DATA_LOSS`, and that is the scoping decision
+            (#211): loss rows describe elements missing from data that
+            *was* ingested, and this file never entered the store --
+            nothing it holds is smaller than it claims. Same vocabulary
+            #181 gave the export side's failures, and the same reader:
+            `get_audit_errors()` feeds the report's Exceptions section
+            and bars the PASS grade, so a cohort that lost files does
+            not grade as though it did not. The path stands in the
+            entity column because a file that failed to parse has no
+            SOP Instance UID to be named by -- the fallback
+            `_report_export_failures` already uses. Flattened and
+            pipe-escaped for the same reason as there: the detail is
+            rendered straight into a markdown table row.
+            """
+            detail = " ".join(
+                f"Ingest failed for {path}: {reason}".split()
+            ).replace("|", "\\|")
+            logger.error(detail)
+            failures.append((path, str(reason)))
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="ERROR", entity_uid=path, details=detail)
+
         for meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, err in results:
             # Clear result components from scope as soon as possible after use to help GC
             # But the loop variable holds them. Next iteration clears them.
             if err:
-                logger.error(f"Import Failed: {err}")
+                _record_failure((meta or {}).get('path', '<unknown>'), err)
                 continue
             if inst:
                 try:
@@ -937,16 +1094,31 @@ class DicomImporter:
                     # distrust whichever half they check second.
                     for tag, vr in meta.get('dropped_private_binary', ()):
                         scope = loss_scope_for_tag(tag)
+                        # Two reason clauses, because two rules drop
+                        # (#151): group 7fe0 is excluded wholesale
+                        # (unrouted pixel elements -- an icon's nested
+                        # Pixel Data, a float element beside real Pixel
+                        # Data), while everything else is dropped only
+                        # for exceeding the retention threshold. One
+                        # sentence covering both would be false for one
+                        # of them, which is how #194's wrong-reason row
+                        # happened.
+                        if tag.startswith("7fe0"):
+                            reason = ("unrouted pixel elements are not "
+                                      "held in the object graph")
+                        else:
+                            reason = (f"its value exceeds the "
+                                      f"{BINARY_RETENTION_MAX_BYTES}-byte "
+                                      f"retention threshold, so it is not "
+                                      f"held in the object graph")
                         if scope == LOSS_SCOPE_PRIVATE:
                             detail = (f"Private tag {tag} ({vr}) was not "
-                                      f"ingested; binary-VR elements are not "
-                                      f"held in the object graph, so it "
-                                      f"cannot be exported even with "
+                                      f"ingested; {reason}, and it cannot "
+                                      f"be exported even with "
                                       f"remove_private_tags=False.")
                         else:
                             detail = (f"Standard tag {tag} ({vr}) was not "
-                                      f"ingested; binary-VR elements are not "
-                                      f"held in the object graph, so it is "
+                                      f"ingested; {reason}, so it is "
                                       f"not in the exported file.")
                         logger.warning(f"{inst.sop_instance_uid}: {detail}")
                         if store_backend is not None:
@@ -1058,14 +1230,25 @@ class DicomImporter:
                     series.instances.append(inst)
                     count += 1
                 except Exception as e:
-                    logger.error(f"Linkage Failed: {e}")
+                    # A parent-side failure is the same failure to the
+                    # caller as a worker-side one: the file is not in the
+                    # store. It takes the same route (#211).
+                    _record_failure(inst.file_path or '<unknown>',
+                                    f"Linkage Failed: {e}")
 
         logger.info(f"Successfully ingested {count} instances.")
+        if failures:
+            logger.warning(
+                f"Rejected {len(failures)} file(s) at ingest; each has an "
+                "ERROR audit row naming the file and the reason.")
         if declined:
             logger.warning(
                 f"Declined {declined} file(s) whose SOP Instance UID is the "
                 "pre-redaction identity of an instance already in this "
                 "session; see the compliance report.")
+
+        return IngestSummary(ingested=count, failures=failures,
+                             declined=declined, skipped=skipped_count)
 
 
 @dataclass
@@ -1221,39 +1404,17 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
     # YBR_ICT and MONOCHROME1 survive a round trip.
     photometric = resolve_photometric_interpretation(attributes, geom.samples)
 
-    if float_element and photometric == "RGB":
-        # `RGB` is right on the integer path and wrong on this one, and
-        # the resolver is shared, so the difference has to be made here
-        # rather than in it (#222).
-        #
-        # C.7.6.24 and C.7.6.25 both enumerate `MONOCHROME2` and nothing
-        # else for Photometric Interpretation, so there is no value the
-        # resolver could correct a float declaration *to* that either
-        # module permits -- `RGB` least of all. On the integer path the
-        # correction is the neutral reading of three interleaved samples
-        # and it stays; here it replaces one nonconformance with another
-        # and throws away the only word the source file ever said about
-        # its own pixels.
-        #
-        # The resolver returns `"RGB"` from exactly two arms: nothing was
-        # declared, or a monochrome value was declared beside three or
-        # more samples. Asking it again at `samples = 1` -- the count
-        # C.7.6.3.1.2 permits `MONOCHROME2` at, and therefore the count
-        # both float modules imply -- separates them: it returns None
-        # only for a declared monochrome value. That is also why the test
-        # is a second call rather than a `in MONOCHROME_PHOTOMETRIC`
-        # membership check here: the declared value needs stripping and
-        # upper-casing before it can be compared, and `pixel_geometry`
-        # already does that. A second copy of that normalisation is a
-        # second answer to "what did the instance declare".
-        #
-        # Only the declared-monochrome row moves. An instance declaring
-        # nothing still exports `RGB`, which is #222's own assessment of
-        # this fix: it is the narrowest of the three shapes that issue
-        # offers, not a complete answer to it.
-        if resolve_photometric_interpretation(attributes, 1) is None:
-            photometric = None
-
+    # No float-only branch here any more, and that absence is
+    # load-bearing. A `float_element` call arrives only from the worker
+    # arm that just refused `geom.samples > 1` (#222), so on the float
+    # path the resolver runs at `samples == 1` and can only answer None
+    # or MONOCHROME2 -- both conformant under C.7.6.24/C.7.6.25. The
+    # RGB pass-through guard that stood here (#224's narrow fix) is
+    # unreachable in that world and came out with the refusal; do not
+    # reintroduce a float correction here without re-reading #222's
+    # closing decision, and note that a third call site passing
+    # `float_element=True` without the worker's refusal upstream would
+    # be back to writing `RGB` onto a float element.
     if photometric is None:
         photometric = attributes.get("0028,0004")
     if photometric:
@@ -1346,8 +1507,25 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # 3. Series Level
         DicomExporter._merge(ds, ctx.series_attributes, losses)
 
-        # 4. Instance defaults helper
-        populate_attrs(ds, inst)
+        # There is deliberately no `populate_attrs(ds, inst)` here, and
+        # there must never be again (#184). It was the ingest reader
+        # pointed at the dataset this worker just built, writing the
+        # merged result back onto the live instance: `add_sequence_item`
+        # appends, so every sequence item duplicated per export
+        # (1 -> 2 -> 3), every patient/study/series tag landed in
+        # `inst.attributes`, and both writes bump `_revision`, so the
+        # next save() persisted the damage. Harmless-looking under
+        # `session.export()` only because `maxtasksperchild=25` pins
+        # these workers to subprocesses (#185); real through the public
+        # `export_batch()`/`write_tree()` under threads, which is the
+        # path a free-threaded build takes by default. Measured before
+        # deletion: the exported file is byte-identical without the
+        # call, across hand-built and ingested instances, pixel and
+        # waveform alike -- it contributed nothing to `ds`, because it
+        # only ever wrote in the wrong direction. Its one side effect
+        # that mattered -- the modality checks below seeing the
+        # *merged* value -- is now had by asking `ds` directly, which
+        # is where the merged view already lives.
 
         # Handle Pixel Data
         # If we have modified pixels in memory (redaction), we MUST use them.
@@ -1361,7 +1539,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # Check Modality to decide if we should fail or proceed
                 # Image implementations MUST have pixels.
                 # Non-image (SR, PR, KO, DOC) can proceed without.
-                mod = inst.attributes.get("0008,0060", "OT")
+                #
+                # From `ds`, not `inst.attributes`: the modality may
+                # live only at series level (hand-built graphs,
+                # write_tree()), and `ds` holds the merged view. The
+                # instance's own dict only appeared to hold it because
+                # the deleted writeback above copied it there (#184).
+                mod = str(ds.get("Modality", "OT"))
 
                 # If it claims to be an image but has no pixels, fail hard (Safety)
                 if mod in _IMAGE_MODALITIES:
@@ -1470,6 +1654,41 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # file, because the outcome is the same file. Only a caller
             # handing `set_pixel_data` a float16 array can reach it; no
             # DICOM element decodes to one.
+            #
+            # Before either float element is written: a multi-sample
+            # float instance has no conformant file to become, so it is
+            # refused the way a GUESSED geometry is above -- the raise
+            # becomes ExportOutcome(ok=False), an ERROR audit row and a
+            # REVIEW_REQUIRED grade (#181, #215). The condition names
+            # the two arms that write an element; the float16 arm below
+            # writes none, so its samples>1 shape keeps taking the
+            # DATA_LOSS route it always took rather than acquiring a
+            # second failure mode as a ride-along (#222).
+            #
+            # Keyed on the sample count, never on the declared
+            # Photometric Interpretation: every declared value is barred
+            # identically here. C.7.6.24 and C.7.6.25 enumerate
+            # MONOCHROME2 and nothing else, C.7.6.3.1.2 permits
+            # MONOCHROME2 only at SamplesPerPixel = 1, and Planar
+            # Configuration is in neither module's attribute table --
+            # so passing a declared value through (#224's narrow fix,
+            # which this supersedes) still wrote a file both modules
+            # bar, it merely stopped inventing the value.
+            if arr.itemsize in (4, 8) and geom.samples > 1:
+                raise RuntimeError(
+                    f"Refusing to write {ctx.output_path}: the pixels "
+                    f"are {arr.dtype} and the geometry resolves to "
+                    f"{geom.samples} samples per pixel, and there is no "
+                    f"conformant way to write a multi-sample float pixel "
+                    f"element. The Floating Point and Double Floating "
+                    f"Point Image Pixel Modules (PS3.3 C.7.6.24, "
+                    f"C.7.6.25) permit only "
+                    f"PhotometricInterpretation = MONOCHROME2, which "
+                    f"C.7.6.3.1.2 restricts to SamplesPerPixel "
+                    f"(0028,0002) = 1. Correct SamplesPerPixel if the "
+                    f"declaration is wrong, or export each sample plane "
+                    f"as its own single-sample instance.")
+
             if arr.itemsize == 4:
                 ds.FloatPixelData = arr.tobytes()
                 ds.BitsAllocated = 32
@@ -1477,7 +1696,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 ds.DoubleFloatPixelData = arr.tobytes()
                 ds.BitsAllocated = 64
             else:
-                mod = inst.attributes.get("0008,0060", "OT")
+                # `ds`, not `inst.attributes` -- same reason as the
+                # missing-pixels check above (#184).
+                mod = str(ds.get("Modality", "OT"))
                 if mod in _IMAGE_MODALITIES:
                     raise RuntimeError(
                         f"Pixels missing for Image Modality {mod}: a "
@@ -1727,8 +1948,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             ds.HighBit = inst.attributes.get("0028,0102", default_bits - 1)
             ds.PixelRepresentation = inst.attributes.get("0028,0103", 0)
 
-        # Waveform samples never reach `attributes` -- populate_attrs skips
-        # OB/OW -- so the rebuilt dataset carries a complete Waveform
+        # Waveform samples never reach `attributes` -- populate_attrs
+        # routes (5400,1010) to the sidecar at every depth, whatever
+        # its size (#151) -- so the rebuilt dataset carries a complete Waveform
         # Sequence (channel definitions, sampling frequency, sample count)
         # with no signal in it unless they are put back here (#34).
         #

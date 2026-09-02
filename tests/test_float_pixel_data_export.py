@@ -109,15 +109,12 @@ def _write_float_src(folder, tag=0x7FE00008, vr='OF', dtype=np.float32,
         #
         # It stays because exactly one test needs a *decodable* three-
         # sample source to reach its subject:
-        # `test_a_declared_monochrome_survives_a_float_export_with_three
-        # _samples`, the #222 case. Without it that test's two
-        # PhotometricInterpretation assertions do pass for the wrong
-        # reason -- `_merge` copied the declared value rather than the
-        # geometry block writing it -- but the test does *not* pass:
-        # measured with these two lines removed, it fails one assertion
-        # later at `assert (0x7FE0, 0x0008) in exported`, catching the
-        # hollow file. "The test passes" was the old comment's claim here
-        # and it was overstated; the vacuity is local to two assertions.
+        # `test_a_multi_sample_float_export_is_refused_through_the_
+        # pipeline`, the #222 case. Without these two lines pydicom's
+        # decoder raises inside `get_pixel_data()`, the worker sees no
+        # array at all, and the refusal under test is never reached --
+        # the export writes a hollow file instead, so the test still
+        # fails, but on the wrong assertion and about the wrong defect.
         #
         # Before #226 omitting this element also produced a silently
         # hollow *exported file*, which is why asserting on the file was
@@ -881,77 +878,112 @@ def test_a_guessed_float_geometry_stops_write_tree_too(tmp_path):
 # nonconformance with another.
 
 
-def test_a_declared_monochrome_survives_a_float_export_with_three_samples(
+def test_a_multi_sample_float_export_is_refused_through_the_pipeline(
         tmp_path):
-    """#222, through plain ingest -> export. Nothing is hand-built here.
+    """#222, decided: `samples > 1` on the float path is refused.
 
-    This test is at the pipeline level rather than the worker level
-    because the reachability is the fact that changed the decision. #222
-    was filed rather than fixed on the reasoning that the affected
-    instances were "reachable only from a hand-built graph or a
-    `set_attr` call, since `populate_attrs` skips group `7fe0`". Group
-    `7fe0` is indeed skipped -- and it is irrelevant. The float array
-    reaches the worker from `get_pixel_data()` re-reading the source file
-    with pydicom, which is the entire #170 mechanism, while
-    `SamplesPerPixel` (0028,0002) and `PhotometricInterpretation`
-    (0028,0004) are ordinary group-0028 elements that pass straight
-    through ingest. So a source declaring three samples beside
-    MONOCHROME2 needs no API call at all.
-
-    Measured on this exact fixture: `258331c` exported `MONOCHROME2`, and
-    the first four commits of this branch exported **`RGB`** -- a
-    regression this PR introduced and now removes.
-
-    The instance is self-contradictory whichever half is wrong
-    (C.7.6.3.1.2 permits MONOCHROME2 only at `SamplesPerPixel = 1`), and
-    that is not the point. The point is that the exporter's job is to
-    stop inventing and mis-stating what it was told, not to arbitrate
-    which of the source's two statements to discard -- and of the two
-    available answers, only the source's own is a value the module
-    enumerates.
-
-    **Not asserted here: `PlanarConfiguration`.** It appears in neither
-    float module's attribute table, so pinning what the exporter writes
-    for it would cement an element the IOD does not define. That is
-    #222's option 2 and is deliberately still open.
-
-    **Also not asserted: the residual.** An instance declaring *no*
-    Photometric Interpretation beside three samples still exports `RGB`.
-    That is #222's own assessment of the fix applied here -- the
-    narrowest of the three shapes it offers -- and pinning it would
-    cement a behaviour the remaining options may change.
+    At the pipeline level rather than the worker level because the
+    reachability is the fact that moved this issue twice. It was filed
+    "hand-built graphs only", disproved by measurement -- the float
+    array reaches the worker from `get_pixel_data()` re-reading the
+    source file (the #170 mechanism), while `SamplesPerPixel` and
+    `PhotometricInterpretation` are ordinary group-0028 elements that
+    pass straight through ingest -- and #224 then passed a declared
+    monochrome value through, which kept the exporter from *inventing*
+    a value but still wrote a file both float modules bar: PS3.3
+    C.7.6.24 and C.7.6.25 enumerate `MONOCHROME2` and nothing else for
+    Photometric Interpretation, C.7.6.3.1.2 permits `MONOCHROME2` only
+    at `SamplesPerPixel = 1`, and neither module's attribute table
+    carries Planar Configuration at all. There is no conformant
+    multi-sample float file to write, so the export now refuses --
+    the same treatment a GUESSED geometry gets (#215/#216): an
+    `ExportOutcome(ok=False)`, an `ERROR` audit row, no file, and a
+    report that does not read PASS over it.
     """
-    exported, rows = _run(tmp_path, name="m222", samples=3,
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_float_src(str(src), samples=3, photometric="MONOCHROME2")
+    out = tmp_path / "out"
+
+    report_path = tmp_path / "report.md"
+    session = DicomSession(persistence_file=str(tmp_path / "m222.db"))
+    try:
+        session.ingest(str(src))
+        # Anonymize first so `audit_summary` is non-empty and the
+        # baseline grade is PASS: without it an empty summary grades
+        # REVIEW_REQUIRED on its own and the grade assertion below would
+        # pass with the refusal deleted.
+        session.anonymize()
+        session.export(str(out), format="dicom", use_compression=False)
+        session.generate_report(str(report_path))
+        db_path = session.store_backend.db_path
+    finally:
+        session.close()
+
+    written = [f for _r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    assert written == [], written
+
+    with sqlite3.connect(db_path) as conn:
+        errors = conn.execute(
+            "SELECT details FROM audit_log "
+            "WHERE action_type='ERROR'").fetchall()
+    assert len(errors) == 1, errors
+    assert "C.7.6.24" in errors[0][0]
+
+    content = report_path.read_text(encoding="utf-8")
+    assert "| **Validation Status** | **REVIEW_REQUIRED** |" in content
+
+
+@pytest.mark.parametrize("declared", [
+    None, "MONOCHROME1", "MONOCHROME2", "PALETTE COLOR", "YBR_FULL", "RGB"])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_every_multi_sample_float_is_refused_whatever_it_declares(
+        tmp_path, declared, dtype):
+    """The refusal keys on the sample count, never on the declared value.
+
+    Both float modules bar every one of these identically: a declared
+    monochrome value cannot be true beside three samples (C.7.6.3.1.2),
+    and a declared colour value is one neither module enumerates. A
+    guard written against the declared string -- the shape the #224 fix
+    had -- would let some rows through, so the whole set is pinned,
+    across both float widths. The message has to name the modules and
+    the remedy: a refusal a recipient cannot act on is only half a
+    refusal.
+    """
+    arr = np.zeros((4, 4, 3), dtype=dtype)
+    attrs = dict(_BARE, **{"0028,0010": 4, "0028,0011": 4, "0028,0002": 3})
+    if declared is not None:
+        attrs["0028,0004"] = declared
+    _inst, outcome, out = _export_raw(
+        tmp_path, arr, attrs,
+        f"refuse_{np.dtype(dtype).name}_{(declared or 'none').replace(' ', '_')}.dcm")
+
+    assert outcome.ok is False
+    assert isinstance(outcome.error, RuntimeError)
+    assert not os.path.exists(out)
+    msg = str(outcome.error)
+    assert "C.7.6.24" in msg and "C.7.6.25" in msg
+    assert "SamplesPerPixel" in msg
+
+
+def test_a_single_sample_float_still_exports_conformantly(tmp_path):
+    """The control: the refusal must not touch the conformant shape.
+
+    `samples = 1` beside `MONOCHROME2` is the one configuration the two
+    float modules describe, and it has to leave exactly as it always
+    did -- (7fe0,0008) present, `MONOCHROME2` preserved, no
+    `PlanarConfiguration` (neither module defines the element), and no
+    audit row of any kind.
+    """
+    exported, rows = _run(tmp_path, name="ok222", samples=1,
                           photometric="MONOCHROME2")
 
-    assert exported.SamplesPerPixel == 3
+    assert exported.SamplesPerPixel == 1
     assert exported.PhotometricInterpretation == "MONOCHROME2"
     assert (0x7FE0, 0x0008) in exported
+    assert "PlanarConfiguration" not in exported
     assert rows == [], rows
-
-
-@pytest.mark.parametrize("declared", ["MONOCHROME1", "PALETTE COLOR"])
-def test_every_monochrome_interpretation_survives_the_float_path(
-        tmp_path, declared):
-    """MONOCHROME2 is not a special case, and a guard could make it one.
-
-    `resolve_photometric_interpretation`'s RGB arm tests membership of
-    `MONOCHROME_PHOTOMETRIC`, which is `{MONOCHROME1, MONOCHROME2,
-    PALETTE COLOR}` -- `PALETTE COLOR` included, because it is a single
-    sample indexing a lookup table rather than three interleaved ones.
-    A guard written as `== "MONOCHROME2"` would satisfy the test above
-    and still relabel the other two, so the fix is pinned across the
-    whole set it is defined over.
-    """
-    arr = np.zeros((4, 4, 3), dtype=np.float32)
-    _inst, outcome, out = _export_raw(
-        tmp_path, arr,
-        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4, "0028,0002": 3,
-                       "0028,0004": declared}),
-        f"mono_{declared.replace(' ', '_')}.dcm")
-    assert outcome.ok, outcome.error
-
-    assert pydicom.dcmread(out).PhotometricInterpretation == declared
 
 
 def test_the_integer_path_still_corrects_monochrome_beside_three_samples(
@@ -982,27 +1014,23 @@ def test_the_integer_path_still_corrects_monochrome_beside_three_samples(
     assert exported.PhotometricInterpretation == "RGB"
 
 
-def test_a_declared_colour_interpretation_still_survives_the_float_path(
-        tmp_path):
-    """The guard must not become "never write Photometric Interpretation".
+def test_a_two_sample_float_is_refused_too(tmp_path):
+    """`samples > 1`, not `samples >= 3`: two is just as barred as three.
 
-    A float instance declaring `YBR_FULL` beside three samples is
-    coherent by C.7.6.3.1.2 even though neither float module permits it,
-    so `resolve_photometric_interpretation` returns None and the declared
-    value is what `_merge` already wrote. That arm never reaches the
-    guard, and this pins that widening the guard to swallow it would be
-    caught -- it is the same round-trip property #186 restored for every
-    YBR instance on the integer path.
+    `MONOCHROME2` is permitted only at one sample (C.7.6.3.1.2), so a
+    two-sample float element is exactly as unwritable as a three-sample
+    one -- a refusal written `>= 3` to mirror the resolver's RGB arm
+    would leave this shape exporting a file neither module describes.
     """
-    arr = np.zeros((4, 4, 3), dtype=np.float32)
+    arr = np.zeros((4, 4, 2), dtype=np.float32)
     _inst, outcome, out = _export_raw(
         tmp_path, arr,
-        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4, "0028,0002": 3,
-                       "0028,0004": "YBR_FULL"}),
-        "ybr_float.dcm")
-    assert outcome.ok, outcome.error
+        dict(_BARE, **{"0028,0010": 4, "0028,0011": 4, "0028,0002": 2}),
+        "two_sample.dcm")
 
-    assert pydicom.dcmread(out).PhotometricInterpretation == "YBR_FULL"
+    assert outcome.ok is False
+    assert not os.path.exists(out)
+    assert "C.7.6.24" in str(outcome.error)
 
 
 # --- PS3.5 Section 8.2's *other* two sentences (#223) ---------------

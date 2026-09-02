@@ -92,11 +92,18 @@ class TestMetadataRefactorFull(unittest.TestCase):
             self.assertIsNotNone(v_row)
             self.assertEqual(v_row['value_text'], "PrivateValue")
 
-            # 4. Check Binary Dropped
-            # 0099,1002 (OB) should NOT be in Vertical OR Core
-            self.assertNotIn("0099,1002", core_attrs)
+            # 4. Check the small binary value's tier (#151).
+            # A private OB at or below BINARY_RETENTION_MAX_BYTES is
+            # retained now (it used to be dropped outright), and bytes
+            # stay in the core JSON: `_split_core_and_private` keeps
+            # every `bytes` value inline because the vertical table's
+            # TEXT column cannot hold them.
+            self.assertIn("0099,1002", core_attrs)
+            self.assertEqual(core_attrs["0099,1002"],
+                             {"__type__": "bytes", "data": "AQIDAA=="})
             v_bin = conn.execute("SELECT * FROM instance_attributes WHERE instance_uid='1.2.3.4.5' AND group_id='0099' AND element_id='1002'").fetchone()
-            self.assertIsNone(v_bin, "Binary tag should be dropped")
+            self.assertIsNone(v_bin, "bytes belong to the core JSON tier, "
+                                     "not the vertical table")
 
         # 5. Check Sidecar & Integrity
         inst = self.session.store.patients[0].studies[0].series[0].instances[0]
