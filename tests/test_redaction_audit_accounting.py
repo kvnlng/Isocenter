@@ -110,8 +110,9 @@ def test_a_wholly_skipped_pass_still_accounts_for_itself(
         f"the skipped pass does not say it applied nothing: {details}")
 
 
+@pytest.mark.parametrize("lever", LEVERS)
 def test_two_rules_sharing_a_serial_write_two_rows(
-        reloaded_redaction_session, monkeypatch):
+        reloaded_redaction_session, monkeypatch, lever):
     """The unit is the rule-pass, not the serial spelling.
 
     `load_config` takes rules verbatim from user YAML with no serial
@@ -122,17 +123,16 @@ def test_two_rules_sharing_a_serial_write_two_rows(
     rule, writes two correct rows. Found by review of the first cut of
     this change, which did exactly that.
 
-    Processes lever only, deliberately. Both rules' tasks are pickled
-    at dispatch, so each worker redacts its own pre-redaction copy and
-    both mutations come home -- deterministic. Under threads the two
-    workers share the live instance, and whichever reads
-    `sop_instance_uid` after the other's `regenerate_uid()` builds a
-    mutation the parent cannot match and discards; that pre-existing
-    race (#228 territory) makes the same input intermittently apply
-    once or twice, and it is filed on its own rather than absorbed here
-    as flakiness.
+    This ran under the processes lever only until #257: under threads
+    the two workers shared the live instance, and whichever read
+    `sop_instance_uid` after the other's `regenerate_uid()` built a
+    mutation the parent could not match and discarded -- the same input
+    intermittently applied once or twice. The worker now keys its
+    mutation on the UID the parent captured at task-preparation time,
+    so both levers are deterministic; the race's certain form is pinned
+    in `test_redaction_uid_capture.py` (a single threads run only hits
+    it ~1 in 8, so this parametrization is coverage, not the pin).
     """
-    lever = "ISOCENTER_FORCE_PROCESSES"
     monkeypatch.setenv(lever, "1")
     session, _inst = reloaded_redaction_session(
         [IN_IMAGE_ZONE], name=f"dup_{lever}")

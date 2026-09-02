@@ -2277,7 +2277,15 @@ class DicomSession:
         # A map built after dispatch would be keyed on the post-redaction
         # UIDs and match none of the results coming back, so every image
         # would be dropped by a run that reported no error.
-        instances = {t['instance'].sop_instance_uid: t['instance'] for t in tasks}
+        #
+        # Keyed on the *task's* capture, not on a fresh read of the live
+        # attribute: `prepare_redaction_tasks` recorded each instance's
+        # pre-dispatch UID on its task, the worker keys its mutation on
+        # that same value (#257), and one authority for "what was this
+        # instance called before redaction" is what keeps the two sides
+        # of the round-trip agreeing. Two rules on one instance put the
+        # same key here twice; the map deduplicates to the one object.
+        instances = {t['original_sop_uid']: t['instance'] for t in tasks}
 
         # Audit accounting per rule-pass (#247). `targeted` is countable
         # here; `applied` is tallied by `_apply_redaction_outcomes` from
