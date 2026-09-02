@@ -1034,6 +1034,102 @@ class SqliteStore:
             pass
         return unsafe
 
+    def check_pixel_geometry(self) -> List[tuple]:
+        """Instances whose stored descriptors cannot describe their frame.
+
+        The detector for stores #186 already damaged before its fix
+        landed: the defect persisted a guessed geometry (RGB, 3 samples,
+        swapped axes) for multi-frame grayscale instances, and a store
+        carrying it exports garbage while grading PASS -- every step
+        downstream behaves correctly on descriptors that are already
+        wrong (#214). Repair is deliberately not attempted: the
+        sidecar's bytes are shape-free, so a migration would be
+        best-effort, and a best-effort repair that silently half-works
+        is worse than a detector. The remedy is the caller's -- re-ingest
+        from source, or `export(verify_readback=True)` (#209) -- and
+        rides the warning `DicomSession.__init__` logs from this result.
+
+        The check is arithmetic and exact: Rows x Columns x
+        SamplesPerPixel x NumberOfFrames x bytes-per-sample must equal
+        the stored frame length. Bytes-per-sample mirrors
+        `SidecarPixelLoader`'s dtype bucketing (`uint16 if bits > 8 else
+        uint8`) rather than BitsAllocated/8, because the sidecar holds
+        `pixel_array.tobytes()` -- a 1-bit Segmentation is stored
+        expanded to uint8, and dividing its declared width by 8 would
+        flag every healthy one.
+
+        **Scope: frames stored uncompressed only.** A zlib frame's
+        stored length is post-compression, so the equality holds for no
+        store, damaged or healthy, and deciding it by decompressing
+        every frame would read the whole sidecar on every open -- the
+        memory-scaling promise says no. A frame whose `compress_alg` is
+        NULL is skipped too: its encoding is unrecorded and nothing here
+        guesses. Damage hiding behind a compressed frame is caught where
+        the bytes are actually decoded, by `verify_readback` at export.
+
+        Returns:
+            List[tuple]: (sop_instance_uid, file_path, details), the
+            same shape as `check_unsafe_attributes` so `generate_report`
+            files both through one channel.
+        """
+        flagged = []
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT sop_instance_uid, file_path, pixel_length,
+                           attributes_json
+                    FROM instances
+                    WHERE pixel_offset IS NOT NULL
+                      AND pixel_length IS NOT NULL
+                      AND compress_alg = 'raw'
+                """).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+        for r in rows:
+            try:
+                attrs = json.loads(r['attributes_json'] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            def _as_dim(tag, default=None, attrs=attrs):
+                value = attrs.get(tag, default)
+                if isinstance(value, list):
+                    value = value[0] if value else default
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+
+            pixel_rows = _as_dim("0028,0010")
+            pixel_cols = _as_dim("0028,0011")
+            samples = _as_dim("0028,0002", 1)
+            frames = _as_dim("0028,0008", 1)
+            bits = _as_dim("0028,0100", 8)
+            if not pixel_rows or not pixel_cols or not samples or not bits:
+                # Descriptors this incomplete cannot be graded either
+                # way; the loader will fail loudly on its own terms.
+                continue
+            frames = max(frames or 1, 1)
+
+            bytes_per_sample = 2 if bits > 8 else 1
+            expected = (pixel_rows * pixel_cols * samples * frames
+                        * bytes_per_sample)
+            if expected != r['pixel_length']:
+                flagged.append((
+                    r['sop_instance_uid'], r['file_path'],
+                    f"Stored pixel geometry cannot describe the stored "
+                    f"frame: Rows={pixel_rows} Columns={pixel_cols} "
+                    f"SamplesPerPixel={samples} NumberOfFrames={frames} "
+                    f"BitsAllocated={bits} implies {expected} bytes, "
+                    f"but the sidecar frame holds {r['pixel_length']}. "
+                    f"The descriptors were likely rewritten by a "
+                    f"pre-fix release (#186); an export of this "
+                    f"instance is not trustworthy. Re-ingest the "
+                    f"source file, or run export(verify_readback=True) "
+                    f"to fail it at delivery (#209)."))
+        return flagged
+
     def log_audit_batch(self, entries: List[tuple]):
         """
         Batch inserts audit logs.
