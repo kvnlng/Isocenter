@@ -64,6 +64,11 @@ def _write_src(folder, private=None):
     # Each value inside LO's 64-character cap, their join well past it.
     ds.add_new(0x00091015, 'LO', ['q' * 50, 'r' * 50])
 
+    # A conformant VM-1 text element whose value contains DICOM's value
+    # delimiter (#195). `LT` is VM 1, so the backslash is ordinary text
+    # in the source file -- no API call is needed to produce this shape.
+    ds.add_new(0x00091016, 'LT', 'se\\rial')
+
     ds.Rows = ds.Columns = 4
     ds.BitsAllocated = ds.BitsStored = 8
     ds.HighBit = 7
@@ -397,3 +402,100 @@ def test_a_multi_valued_AT_stringifies_exactly_as_a_single_one_does():
 
     assert single == ('LO', '(0010,0010)')
     assert multi == ('LO', ['(0010,0010)', '(0010,0020)'])
+
+
+# --------------------------------------------------------------------
+# A value containing the value delimiter (#195, #190)
+#
+# `\` is DICOM's value separator (PS3.5 6.2). Under any 1-n VR, pydicom
+# writes it as a separator and a reader splits on it, so a value that
+# legitimately contains one comes back with the wrong multiplicity --
+# silently, from conformant input, on the documented ingest -> export
+# path. The two arities take deliberately different answers, and this
+# is the one place they are allowed to differ:
+#
+#   VM = 1: `UT` is VM 1, the backslash is ordinary text there, and the
+#           value round-trips byte-faithfully -- lossless, so encode it.
+#   VM > 1: no text VR carries both the content and the arity (`LO` is
+#           1-n and splits, a `UT` join is ambiguous in the same way),
+#           so the element is a loud loss, not a silently wrong one.
+# --------------------------------------------------------------------
+
+def test_a_conformant_backslash_value_round_trips_as_one_value(tmp_path):
+    """#195 end to end: a source `LT 'se\\rial'` must come back as the
+    one string it was, not as `LO ['se', 'rial']`.
+
+    The value survives ingest intact; it was the export's coercion to
+    `LO` that turned one value into two, with no `DATA_LOSS` row.
+    """
+    value = _private(_roundtrip(tmp_path)).get("0009,1016")
+    assert value == 'se\\rial', value
+
+
+def test_a_single_value_with_a_backslash_is_encoded_as_UT():
+    """The VM = 1 arm, at the encoder. `LO` would split it; `UT` is VM 1
+    and round-trips the backslash as text, so this arm is lossless."""
+    assert DicomExporter._fallback_encoding('se\\rial') == ('UT', 'se\\rial')
+    # The boundary it moves: length is no longer the only reason to
+    # leave `LO`, but a short, delimiter-free value still goes there.
+    assert DicomExporter._fallback_encoding('serial') == ('LO', 'serial')
+
+
+def test_a_backslash_bearing_atom_makes_the_whole_element_a_loss():
+    """The VM > 1 arm: `None` is the existing "nothing fits" signal and
+    routes to the `DATA_LOSS` / `PRIVATE` / `REVIEW_REQUIRED` channel.
+
+    Writing `LO` here inflates the multiplicity (#190's VM 2 -> 3
+    measurement); joining to `UT` makes the join's separators and the
+    atom's backslash indistinguishable. A loud loss beats either.
+    """
+    assert DicomExporter._fallback_encoding(['se\\rial', 'ok']) is None
+    assert DicomExporter._fallback_encoding(
+        MultiValue(str, ['se\\rial', 'ok'])) is None
+
+
+def test_the_backslash_check_runs_before_the_overlong_collapse():
+    """#190's compounding case. An over-long sibling would collapse the
+    element to one `UT` join, and once joined, a backslash-bearing atom
+    is unrecoverable -- the join and the content read identically. The
+    combination must take the loud path, not the join."""
+    assert DicomExporter._fallback_encoding(['x' * 80, 'a\\b']) is None
+
+
+def test_the_overlong_collapse_names_the_tag_and_the_arity_change(caplog):
+    """The #165 collapse stays -- the values are recoverable, so a
+    `DATA_LOSS` row would overstate it -- but it stops being silent.
+
+    #146/#148 built the loss channel so a reviewer does not discover a
+    shape change by reading the file; an element whose VM silently
+    differs between source and copy is the same class of surprise. The
+    warning is logged in `_merge`, where the tag is still in hand.
+    """
+    ds = pydicom.Dataset()
+    with caplog.at_level(logging.WARNING):
+        DicomExporter._merge(ds, {"0009,1007": ['x' * 80, 'y']})
+
+    # The element is still written, exactly as before.
+    assert (ds[0x00091007].VR, ds[0x00091007].value) == (
+        'UT', 'x' * 80 + '\\' + 'y')
+
+    msgs = [r.getMessage() for r in caplog.records
+            if r.levelno >= logging.WARNING]
+    assert any("0009,1007" in m for m in msgs), msgs
+    assert any("2" in m and "1" in m for m in msgs), (
+        "the arity change (2 -> 1) must be stated", msgs)
+    # It is a shape change, not a loss: the loss wording is reserved for
+    # elements that are absent from the file.
+    assert not any("not exported" in m.lower() for m in msgs), msgs
+
+
+def test_a_multi_valued_element_within_LO_collapses_nothing_and_warns_nothing(
+        caplog):
+    """The control for the warning: the ordinary `LO` list path is the
+    documented, faithful encoding and must stay quiet."""
+    ds = pydicom.Dataset()
+    with caplog.at_level(logging.WARNING):
+        DicomExporter._merge(ds, {"0009,1008": ['alpha', 'beta']})
+
+    assert list(ds[0x00091008].value) == ['alpha', 'beta']
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
