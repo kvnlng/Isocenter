@@ -609,8 +609,9 @@ def ingest_worker(fp: str) -> Tuple:
                 p_alg = 'zlib'  # Always compress the raw bytes
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
-                # Could log warning, but for now raise or return error.
-                return (None, None, None, None, None, None, None,
+                # The path rides the meta slot, as in the blanket except
+                # below, so the parent's ERROR row can name the file (#211).
+                return ({'path': fp}, None, None, None, None, None, None,
                         f"Decompression Failed: {e}")
 
             if p_bytes:
@@ -689,7 +690,43 @@ def ingest_worker(fp: str) -> Tuple:
 
         return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
-        return (None, None, None, None, None, None, None, str(e))
+        # `{'path': fp}` rather than None in the meta slot, so the
+        # parent can name the file in its ERROR row without parsing the
+        # prose. The reason travels as the error string it always was;
+        # the arity -- unpacked at every call site -- does not change
+        # (#211).
+        return ({'path': fp}, None, None, None, None, None, None, str(e))
+
+
+@dataclass
+class IngestSummary:
+    """What one ingest run did, for the caller that has to know (#211).
+
+    `import_files` used to return nothing: a run that rejected 40 of
+    500 files reported exactly like a clean one, modulo console lines
+    captured nowhere, and the caller's first hint was an empty query
+    result. The mirror of `ExportSummary`, which #181 introduced for
+    the same hole on the export side.
+
+    A file takes exactly one of four routes, and they are four fields
+    because they answer different questions: `ingested` reached the
+    graph; `failures` were rejected with a reason (and each has an
+    `ERROR` audit row); `declined` were refused as the un-redacted
+    originals of instances the session already holds (#238, audited as
+    `WARNING`); `skipped` were already in the store and were not read
+    again.
+    """
+    ingested: int = 0
+    #: `(path, reason)` per rejected file -- the same pair the `ERROR`
+    #: audit row carries, so the summary and the trail cannot disagree.
+    failures: List[Tuple[str, str]] = field(default_factory=list)
+    declined: int = 0
+    skipped: int = 0
+
+    @property
+    def failed(self) -> int:
+        """How many files were rejected."""
+        return len(self.failures)
 
 
 class DicomImporter:
@@ -715,6 +752,12 @@ class DicomImporter:
             store_backend (optional): SqliteStore used to register sidecar
                 blob references. Waveform blobs are invisible to compaction
                 unless recorded here.
+
+        Returns:
+            IngestSummary: what reached the graph and what did not.
+                Returned nothing until #211 -- a per-file failure was a
+                console line, so a run that rejected 8% of its files
+                was indistinguishable from a clean one by any caller.
         """
         all_files = []
         for path in file_paths:
@@ -737,7 +780,7 @@ class DicomImporter:
             logger.info(f"Skipping {skipped_count} already imported files.")
 
         if not new_files:
-            return
+            return IngestSummary(skipped=skipped_count)
 
         logger.info(f"Importing {len(new_files)} files (Parallel Eager Ingest)...")
 
@@ -776,11 +819,39 @@ class DicomImporter:
         superseded = store.get_superseded_uids()
         declined = 0
         count = 0
+        failures: List[Tuple[str, str]] = []
+
+        def _record_failure(path, reason):
+            """One rejected file: the log line, the summary, the trail.
+
+            `ERROR`, not `DATA_LOSS`, and that is the scoping decision
+            (#211): loss rows describe elements missing from data that
+            *was* ingested, and this file never entered the store --
+            nothing it holds is smaller than it claims. Same vocabulary
+            #181 gave the export side's failures, and the same reader:
+            `get_audit_errors()` feeds the report's Exceptions section
+            and bars the PASS grade, so a cohort that lost files does
+            not grade as though it did not. The path stands in the
+            entity column because a file that failed to parse has no
+            SOP Instance UID to be named by -- the fallback
+            `_report_export_failures` already uses. Flattened and
+            pipe-escaped for the same reason as there: the detail is
+            rendered straight into a markdown table row.
+            """
+            detail = " ".join(
+                f"Ingest failed for {path}: {reason}".split()
+            ).replace("|", "\\|")
+            logger.error(detail)
+            failures.append((path, str(reason)))
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="ERROR", entity_uid=path, details=detail)
+
         for meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, err in results:
             # Clear result components from scope as soon as possible after use to help GC
             # But the loop variable holds them. Next iteration clears them.
             if err:
-                logger.error(f"Import Failed: {err}")
+                _record_failure((meta or {}).get('path', '<unknown>'), err)
                 continue
             if inst:
                 try:
@@ -1058,14 +1129,25 @@ class DicomImporter:
                     series.instances.append(inst)
                     count += 1
                 except Exception as e:
-                    logger.error(f"Linkage Failed: {e}")
+                    # A parent-side failure is the same failure to the
+                    # caller as a worker-side one: the file is not in the
+                    # store. It takes the same route (#211).
+                    _record_failure(inst.file_path or '<unknown>',
+                                    f"Linkage Failed: {e}")
 
         logger.info(f"Successfully ingested {count} instances.")
+        if failures:
+            logger.warning(
+                f"Rejected {len(failures)} file(s) at ingest; each has an "
+                "ERROR audit row naming the file and the reason.")
         if declined:
             logger.warning(
                 f"Declined {declined} file(s) whose SOP Instance UID is the "
                 "pre-redaction identity of an instance already in this "
                 "session; see the compliance report.")
+
+        return IngestSummary(ingested=count, failures=failures,
+                             declined=declined, skipped=skipped_count)
 
 
 @dataclass
