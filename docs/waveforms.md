@@ -301,12 +301,23 @@ single-group record
 
 That holds for records ingested by 0.9.0 or later. The drop happens in
 `ingest_worker`, which does not run again on a session opened from an
-existing index, so a database populated by an earlier version still holds
-the extra items and still exports the hollow one; re-ingesting the source
-files into a fresh index is the remedy
-([#168](https://github.com/kvnlng/Isocenter/issues/168)). The same applies
-to a graph built by hand and written with `DicomExporter.write_tree()`,
-which is the serializer alone and never passes through ingest.
+existing index -- so a database populated by an earlier version still
+holds the extra items. Since
+[#168](https://github.com/kvnlng/Isocenter/issues/168) hydration heals
+that shape on load: opening such a store prunes the sample-less items
+(and, with them, any annotations referencing the pruned groups, exactly
+as ingest would, [#177](https://github.com/kvnlng/Isocenter/issues/177))
+and logs a warning naming the instance and why, so the export is a
+conformant single-group record instead of one declaring Waveform Data
+it does not carry. The heal is in-memory: the store itself is unchanged
+until the session saves, and the warning repeats on every open until it
+does. The discarded samples are not recoverable from the store -- the
+original discard happened in the session that ingested, and its
+`DATA_LOSS` entry is in the same store's audit log -- so re-ingesting
+the source files into a fresh index remains the only way to get them
+back. A graph built by hand and written with
+`DicomExporter.write_tree()` is deliberately untouched: the serializer
+applies no gates and never passes through ingest or hydration.
 
 That entry is scoped `SIGNAL`, and it **does** move Validation Status:
 a session that discarded a multiplex group grades `REVIEW_REQUIRED`,

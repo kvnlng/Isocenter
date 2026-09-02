@@ -643,12 +643,20 @@ class SqliteStore:
         Shared by `load_all` and `load_patient`, which hydrate the same rows
         through two separate loops.
 
+        Also heals a legacy multiplex shape on the way past -- see
+        `_prune_hollow_multiplex_items`.
+
         Args:
             instance (Instance): The hydrated instance; its attributes and
                 sequences must already be restored, because the loader reads
                 its geometry out of the Waveform Sequence.
             wref: A row from `instance_blobs` (kind 'waveform'), or None.
         """
+        # Before the `wref is None` return: the damaged shape can exist
+        # with no waveform blob at all (a source whose group 0 carried
+        # no samples), and its export is exactly as hollow.
+        self._prune_hollow_multiplex_items(instance)
+
         if wref is None:
             return
 
@@ -667,6 +675,74 @@ class SqliteStore:
             self.logger.warning(
                 f"Waveform blob for {instance.sop_instance_uid} has no "
                 "Waveform Sequence; skipping loader.")
+
+    def _prune_hollow_multiplex_items(self, instance):
+        """Heal a pre-#160 store: drop multiplex items that have no samples.
+
+        A store indexed before the #160 fix holds one Waveform Sequence
+        (5400,0100) item per multiplex group while the sidecar holds
+        group 0's samples alone -- ingest discarded groups 1..n (#36)
+        and `populate_attrs` kept their metadata anyway. `ingest_worker`
+        never runs again on an existing index, so without this the
+        export writes every item back and declares a multiplex group
+        with no Waveform Data (5400,1010), a Type 1 element (#168).
+
+        Pruned at hydration rather than at export, for #160's own
+        reason: the graph is what every consumer reads -- the DICOM
+        writer, the WFDB record, the annotation bridge, the PHI scan --
+        and a writer that quietly drops items is a second answer to
+        "which multiplex groups does this record have". This edits a
+        graph the user did not ask to have edited, so it is a logged
+        warning naming the instance and the remedy; it is NOT an audit
+        row, because the loss it describes was already audited by the
+        session that ingested (0.8.2 onward writes the DATA_LOSS entry
+        into this same store's audit_log), and this heals the graph to
+        agree with what that log already says.
+
+        The annotations referencing the pruned items go with them,
+        through the same filter ingest uses (#177) -- pruning the item
+        alone would unmask exactly the dangling ordinal that filter
+        exists to prevent. `DicomExporter.write_tree()` on a hand-built
+        graph is deliberately NOT covered: the serializer applies no
+        gates by design, and there is no store -- and no earlier
+        session's audit trail -- anywhere in that picture.
+
+        The prune must not look like an edit: items and references are
+        removed with direct container mutation, never `set_attr`, so
+        `_revision` stays put, the stored `phi_status` survives, and the
+        graph still reads as clean (`_apply_vertical_attributes`
+        documents the same invariant). The store itself is untouched
+        until the user saves, so the warning repeats on every open of an
+        unhealed store -- which is the correct amount of loud for a
+        graph being changed under its owner.
+        """
+        seq = instance.sequences.get("5400,0100")
+        if seq is None or len(seq.items) <= 1:
+            return
+
+        pruned = len(seq.items) - 1
+        del seq.items[1:]
+
+        from .waveform import filter_dangling_annotation_refs
+        ann_dropped, ann_rewritten, _groups = filter_dangling_annotation_refs(
+            instance, kept_items=len(seq.items))
+
+        ann_note = ""
+        if ann_dropped or ann_rewritten:
+            ann_note = (
+                f" {ann_dropped} waveform annotation(s) referencing the "
+                f"pruned groups were dropped and {ann_rewritten} trimmed "
+                f"to their surviving references (#177).")
+        self.logger.warning(
+            f"{instance.sop_instance_uid}: Waveform Sequence held "
+            f"{pruned + 1} multiplex groups but this store carries "
+            f"samples for group 0 only -- it was indexed before the "
+            f"#160 fix, which discarded the samples and kept the "
+            f"metadata. Pruned {pruned} sample-less item(s) so the "
+            f"export does not declare Waveform Data it cannot carry "
+            f"(Type 1, PS3.3 C.10.9).{ann_note} The discarded samples "
+            f"are not recoverable from this store; to get them back, "
+            f"re-ingest the original files into a fresh index.")
 
     def _drain_and_write(self):
         """Move every currently queued audit row into the database.
