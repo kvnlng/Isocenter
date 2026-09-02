@@ -1406,8 +1406,25 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # 3. Series Level
         DicomExporter._merge(ds, ctx.series_attributes, losses)
 
-        # 4. Instance defaults helper
-        populate_attrs(ds, inst)
+        # There is deliberately no `populate_attrs(ds, inst)` here, and
+        # there must never be again (#184). It was the ingest reader
+        # pointed at the dataset this worker just built, writing the
+        # merged result back onto the live instance: `add_sequence_item`
+        # appends, so every sequence item duplicated per export
+        # (1 -> 2 -> 3), every patient/study/series tag landed in
+        # `inst.attributes`, and both writes bump `_revision`, so the
+        # next save() persisted the damage. Harmless-looking under
+        # `session.export()` only because `maxtasksperchild=25` pins
+        # these workers to subprocesses (#185); real through the public
+        # `export_batch()`/`write_tree()` under threads, which is the
+        # path a free-threaded build takes by default. Measured before
+        # deletion: the exported file is byte-identical without the
+        # call, across hand-built and ingested instances, pixel and
+        # waveform alike -- it contributed nothing to `ds`, because it
+        # only ever wrote in the wrong direction. Its one side effect
+        # that mattered -- the modality checks below seeing the
+        # *merged* value -- is now had by asking `ds` directly, which
+        # is where the merged view already lives.
 
         # Handle Pixel Data
         # If we have modified pixels in memory (redaction), we MUST use them.
@@ -1421,7 +1438,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 # Check Modality to decide if we should fail or proceed
                 # Image implementations MUST have pixels.
                 # Non-image (SR, PR, KO, DOC) can proceed without.
-                mod = inst.attributes.get("0008,0060", "OT")
+                #
+                # From `ds`, not `inst.attributes`: the modality may
+                # live only at series level (hand-built graphs,
+                # write_tree()), and `ds` holds the merged view. The
+                # instance's own dict only appeared to hold it because
+                # the deleted writeback above copied it there (#184).
+                mod = str(ds.get("Modality", "OT"))
 
                 # If it claims to be an image but has no pixels, fail hard (Safety)
                 if mod in _IMAGE_MODALITIES:
@@ -1572,7 +1595,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 ds.DoubleFloatPixelData = arr.tobytes()
                 ds.BitsAllocated = 64
             else:
-                mod = inst.attributes.get("0008,0060", "OT")
+                # `ds`, not `inst.attributes` -- same reason as the
+                # missing-pixels check above (#184).
+                mod = str(ds.get("Modality", "OT"))
                 if mod in _IMAGE_MODALITIES:
                     raise RuntimeError(
                         f"Pixels missing for Image Modality {mod}: a "
