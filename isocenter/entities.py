@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -911,6 +912,35 @@ class Study(TrackedEntity):
     series: List[Series] = field(default_factory=list)
     date_shifted: bool = False
     study_time: Optional[str] = None
+
+    def __setattr__(self, name, value):
+        # The boundary for #188, and it is one spelling on purpose: the
+        # dataclass __init__ assigns through here too, so the
+        # constructor and a later `study.study_date = ...` refuse
+        # identically, and nothing needs a second check downstream.
+        # `isinstance` alone would not do -- `datetime` *is* a `date` --
+        # which is also why every legitimate value still passes.
+        #
+        # Refused rather than truncated to `.date()`: a silently
+        # discarded time-of-day is the same quiet lossy normalisation
+        # #60 forbids for unreadable dates, and the half being discarded
+        # has a home of its own. A `datetime` that got in round-tripped
+        # through the store as the ISO string `isoformat()` writes --
+        # `date.fromisoformat` rejects the 'T' -- and exported as a
+        # ten-plus-character (0008,0020), which PS3.5 Table 6.2-1 fixes
+        # at eight digits.
+        if name == "study_date" and isinstance(value, datetime):
+            raise TypeError(
+                "Study.study_date holds a date, not a datetime: call "
+                ".date() on it, and put the time of day in Study Time "
+                "(0008,0030) -- Study.study_time -- instead. A datetime "
+                "here comes back from the store as an ISO string and "
+                "exports as an illegal DA value (#188).")
+        # `object.__setattr__`, not zero-argument `super()`:
+        # `@dataclass(slots=True)` builds a *new* class, so the closure
+        # cell zero-arg super() reads still names the discarded one and
+        # every assignment raises "obj must be an instance or subtype".
+        object.__setattr__(self, name, value)
 
     def mark_subtree_persisted(self):
         """Marks this study and every series beneath it as stored."""

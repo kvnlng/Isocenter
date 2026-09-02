@@ -40,7 +40,7 @@ import pytest
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from isocenter.entities import Instance
+from isocenter.entities import Instance, Study
 from isocenter.persistence import _as_loaded_date, _as_stored_date
 from isocenter.exporters.wfdb import WfdbExporter
 from isocenter.session import DicomSession
@@ -228,18 +228,38 @@ def test_the_stored_and_loaded_date_helpers_are_inverses(value, stored, loaded):
     assert type(_as_loaded_date(stored)) is type(loaded)
 
 
-def test_a_datetime_study_date_does_not_survive_the_round_trip():
-    """The one input the inverse does not restore, pinned as known.
+def test_a_datetime_study_date_is_refused_at_the_boundary():
+    """The one input the inverse could not restore is now never stored.
 
-    `_as_stored_date` renders a `datetime` as `'2024-01-15T10:30:00'`,
-    which `date.fromisoformat` rejects, so it comes back a string and
-    still exports as an illegal DA. Nothing in the library produces a
-    `datetime` here -- `io_handlers` parses (0008,0020) with `.date()` --
-    so this is reachable only by hand-setting the field, and it is not a
-    regression: the pre-fix store returned a string for every value.
-    Pinned rather than fixed so that closing it is a visible change.
+    This flips the pin that used to stand here (#188). A `datetime` in
+    `study_date` round-tripped as the ISO string
+    `'2024-01-15T10:30:00'` -- `_as_stored_date` calls `isoformat()`,
+    `date.fromisoformat` rejects the result -- and from there it was
+    #171's original defect again: exported unconverted into (0008,0020),
+    a VR PS3.5 Table 6.2-1 fixes at eight digits.
+
+    Rejection, not truncation, was the decision: silently dropping a
+    time-of-day the caller supplied is the same quiet lossy
+    normalisation #60 forbids in the other direction, and Study Time
+    (0008,0030) is where that half belongs. Nothing in the library
+    produces a `datetime` here -- ingest parses (0008,0020) with
+    `.date()` -- so the only writes this refuses are hand-set ones,
+    which were exactly the ones that broke.
     """
-    stored = _as_stored_date(datetime(2024, 1, 15, 10, 30))
-    assert stored == "2024-01-15T10:30:00"
-    assert _as_loaded_date(stored) == "2024-01-15T10:30:00"
-    assert isinstance(_as_loaded_date(stored), str)
+    # The boundary is the field, so the constructor and a later
+    # assignment refuse identically -- the dataclass __init__ assigns
+    # through the same __setattr__.
+    with pytest.raises(TypeError, match=r"\.date\(\)"):
+        Study("1.2.9.1", datetime(2024, 1, 15, 10, 30))
+
+    study = Study("1.2.9.1", date(2024, 1, 15))
+    with pytest.raises(TypeError, match=r"0008,0030"):
+        study.study_date = datetime(2024, 1, 15, 10, 30)
+
+    # A refused write leaves the field as it was, and the values the
+    # library itself produces still assign: a date, and None (#60).
+    assert study.study_date == date(2024, 1, 15)
+    study.study_date = date(2024, 2, 1)
+    assert study.study_date == date(2024, 2, 1)
+    study.study_date = None
+    assert study.study_date is None
