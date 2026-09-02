@@ -2,6 +2,7 @@ import gc
 import os
 import re
 import json
+import contextlib
 import datetime
 import multiprocessing
 import concurrent.futures
@@ -2280,6 +2281,16 @@ class DicomSession:
             print("No configuration loaded. Use .load_config() first.")
             return 0
 
+        # A redaction pass must not run concurrently with a background
+        # save that is serializing the very pixels it is about to
+        # replace: `save()` without `sync=True` returns with `save_all`
+        # still running on the persistence manager's thread, against
+        # these same instances (#274). The store's `_pixel_swap_lock` is
+        # what protects direct `RedactionService` users; the pipeline
+        # can simply refuse to open the window at all.
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
+
         service = RedactionService(self.store, self.store_backend)
         try:
             return self._apply_redaction_rules(service, show_progress, force)
@@ -2515,14 +2526,29 @@ class DicomSession:
                 instance.sequences.update(mutation['sequences'])
 
             loader = mutation.get('pixel_loader')
-            if loader:
-                # The loader is our handle on the sidecar copy, but it points
-                # at the worker's instance. Re-point it at this process's.
-                loader.instance = instance
-                instance._pixel_loader = loader
-
-            if mutation.get('pixel_hash'):
-                instance._pixel_hash = mutation['pixel_hash']
+            if loader or mutation.get('pixel_hash'):
+                # Under the store's pixel-swap lock: this rebind is the
+                # process-executor arm of the same straddle
+                # `persist_pixel_data` closes -- a background save
+                # (`_persist_pixels`) that read this instance's resident
+                # array before the worker redacted its copy must not
+                # publish its loader *after* this one lands, or the
+                # instance reads back unredacted pixels under a full
+                # redaction attestation (#274). A store-less call (unit
+                # tests drive this method directly) has no second writer
+                # to race, so it also needs no lock.
+                lock = (store_backend._pixel_swap_lock
+                        if store_backend is not None
+                        else contextlib.nullcontext())
+                with lock:
+                    if loader:
+                        # The loader is our handle on the sidecar copy,
+                        # but it points at the worker's instance.
+                        # Re-point it at this process's.
+                        loader.instance = instance
+                        instance._pixel_loader = loader
+                    if mutation.get('pixel_hash'):
+                        instance._pixel_hash = mutation['pixel_hash']
 
             new_uid = mutation.get('sop_uid')
             if new_uid:
