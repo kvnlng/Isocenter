@@ -30,7 +30,7 @@ from .persistence import SqliteStore
 from .crypto import KeyManager
 from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
-from .parallel import run_parallel, _env_int
+from .parallel import run_parallel, _env_int, resolve_worker_initializer
 from .configuration import IsocenterConfiguration, FlowList
 from .entities import (PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree)
@@ -608,7 +608,12 @@ class DicomSession:
         # (#220, #250).
         self._executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=None,  # Default: CPU * 1.5
-            mp_context=multiprocessing.get_context("spawn"))
+            mp_context=multiprocessing.get_context("spawn"),
+            # The same env-gated worker setup as run_parallel's pools
+            # (GC off, child-side faulthandler watchdog); resolved by
+            # the one resolver so the session's own pool cannot drift
+            # from the per-call ones (#250).
+            initializer=resolve_worker_initializer())
 
         if db_exists:
             print(f"Loaded session from {self.persistence_file}")
@@ -707,10 +712,12 @@ class DicomSession:
                 get_logger().debug("Could not shut down prior executor: %s", exc)
 
         # Re-init, with the same spawn pin as construction: an OOM
-        # recovery must not quietly downgrade the pool to fork (#220).
+        # recovery must not quietly downgrade the pool to fork (#220),
+        # nor drop the worker setup construction resolved (#250).
         self._executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=max_workers,
-            mp_context=multiprocessing.get_context("spawn"))
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=resolve_worker_initializer())
 
     def release_memory(self):
         """

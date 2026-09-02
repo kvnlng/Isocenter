@@ -6,6 +6,7 @@ execution strategies and adapts to a set of `ISOCENTER_*` environment
 variables, so that tuning a cohort run never means editing code.
 """
 import concurrent.futures
+import functools
 import os
 import sys
 import multiprocessing
@@ -22,17 +23,63 @@ R = TypeVar('R')
 _TRUTHY = ("1", "true", "on", "yes")
 _FALSEY = ("0", "false", "off", "no")
 
+#: How long a worker process may live before it dumps every one of its
+#: threads' tracebacks to stderr (diagnostic, never fatal). Sits below
+#: pytest's faulthandler_timeout (300s) so a stalled child's dump lands
+#: inside the same log window as the parent's -- occurrence four of #250
+#: dumped every parent thread idle and could not see into the child that
+#: actually held the 900-second story. test_packaging_contract.py pins
+#: the inequality. Only consulted when `ISOCENTER_WORKER_FAULTHANDLER`
+#: is set, which only tests.yml does.
+_WORKER_FAULTHANDLER_TIMEOUT_S = 240
 
-def _gc_off():
-    """Worker-process initializer: turn the cyclic collector off.
 
-    Imported here rather than at module scope because this runs in a
-    freshly spawned child, and keeping the import with the only code that
-    uses it makes clear the collector being disabled is the worker's, not
-    the parent's.
+def _worker_init(disable_gc=False, faulthandler_timeout=None):
+    """Runs once inside each freshly spawned or recycled worker process.
+
+    Module scope because it must pickle into the child; imports live
+    inside because they execute there, and keeping them with the only
+    code that uses them makes clear whose collector and whose
+    faulthandler are being touched -- the worker's, not the parent's.
+
+    `exit=False` is load-bearing: the dump is diagnosis, and a
+    slow-but-healthy worker must go on to finish its task rather than be
+    killed by its own instrumentation -- `exit=True` would turn every
+    long task into a lost one, which under the recycling pool is a hang
+    (`run_parallel`'s docstring). Each child arms its own timer, so
+    worker recycling re-arms it with the fresh process.
     """
-    import gc  # pylint: disable=import-outside-toplevel
-    gc.disable()
+    # pylint: disable=import-outside-toplevel
+    if disable_gc:
+        import gc
+        gc.disable()
+    if faulthandler_timeout is not None:
+        import faulthandler
+        faulthandler.dump_traceback_later(faulthandler_timeout, exit=False)
+
+
+def resolve_worker_initializer(disable_gc: bool = False):
+    """The one initializer worker processes run, or None if none is needed.
+
+    Resolved in the *parent*, at pool-construction time: the returned
+    `functools.partial` carries its settings as pickled arguments, so
+    the child obeys what the parent decided rather than re-reading
+    environment or module state after a spawn -- which is also what
+    makes `_WORKER_FAULTHANDLER_TIMEOUT_S` patchable in tests.
+
+    `Session._executor` uses this directly; `run_parallel`'s strategies
+    reach it through `_Strategy.worker_initializer`, which adds the
+    threads-get-nothing rule. One resolver, so the two kinds of pool
+    cannot drift apart on what a worker's first act is.
+    """
+    disable_gc = disable_gc or _env_is("ISOCENTER_DISABLE_GC", ("1",))
+    faulthandler_timeout = (
+        _WORKER_FAULTHANDLER_TIMEOUT_S
+        if _env_is("ISOCENTER_WORKER_FAULTHANDLER", ("1",)) else None)
+    if not disable_gc and faulthandler_timeout is None:
+        return None
+    return functools.partial(_worker_init, disable_gc=disable_gc,
+                             faulthandler_timeout=faulthandler_timeout)
 
 
 class _ExceptionAsResult:
@@ -98,11 +145,13 @@ class _Strategy:
     def worker_initializer(self):
         """The initializer new worker *processes* should run, if any.
 
-        Threads share the parent's interpreter, so disabling GC in a
-        thread would disable it for the whole program rather than for a
-        worker.
+        Threads share the parent's interpreter, so disabling GC or
+        arming a process-lifetime faulthandler watchdog in a thread
+        would apply to the whole program rather than to a worker.
         """
-        return _gc_off if self.disable_gc and not self.use_threads else None
+        if self.use_threads:
+            return None
+        return resolve_worker_initializer(self.disable_gc)
 
 
 def _env_int(name: str) -> Optional[int]:

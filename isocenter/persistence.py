@@ -140,6 +140,31 @@ def _delete_patient_subtrees(cur, patient_pks) -> None:
     cur.execute(f"DELETE FROM patients WHERE id IN ({clause})", patient_pks)
 
 
+#: SQLite busy timeout for every file-backed connection, in seconds.
+#: This number was 900.0, inline and unexplained, and #250 measured what
+#: that buys: a writer that cannot get the lock in two minutes is not
+#: going to get it at second 890 -- the stuck forked child errored at
+#: exactly 900s every time -- and each hit became a ~15-minute stall
+#: that CI's job cap killed as 'cancelled' with no failing test named.
+#: The invariant (pinned by test_packaging_contract.py, with pytest's
+#: faulthandler_timeout=300 and the Run Tests step cap): a lock that
+#: will not clear surfaces as `sqlite3.OperationalError: database is
+#: locked` *inside* one faulthandler window, where the dump shows a
+#: thread still waiting with a stack -- never as a stall for an outer
+#: timeout to kill. The floor is measured, not guessed: the longest
+#: single transaction window observed across the full stress-test
+#: pipeline (4,000 instances, ~2GB of pixels; `save_all` compressing
+#: dirty frames into the sidecar inside its connection window) was
+#: 1.6s, so 120 is ~75x that -- room for a save holding an order of
+#: magnitude more resident dirty pixel data than the benchmark's.
+#: Raising it back above the faulthandler window recreates the silent
+#: 15-minute stalls; the real fix for a save that legitimately needs
+#: minutes is moving sidecar writes outside the transaction window.
+#: No environment variable on purpose (one spelling per behaviour);
+#: tests monkeypatch the constant.
+_SQLITE_BUSY_TIMEOUT_S = 120.0
+
+
 @dataclass
 class _SaveTally:
     """What one `save_all` call wrote, for the summary log line."""
@@ -538,7 +563,7 @@ class SqliteStore:
                     raise e
         else:
             # File-based DB: create fresh connection per transaction
-            conn = sqlite3.connect(self.db_path, timeout=900.0)
+            conn = sqlite3.connect(self.db_path, timeout=_SQLITE_BUSY_TIMEOUT_S)
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.commit()
             conn.row_factory = sqlite3.Row

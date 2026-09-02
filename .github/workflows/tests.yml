@@ -159,6 +159,15 @@ jobs:
         # silently run a free-threaded build with the GIL back on -- which
         # would pass while testing none of what it was added for.
         PYTHON_GIL: ${{ endsWith(matrix.python-version, 't') && '0' || '1' }}
+        # Child-side stall diagnostics: each pool worker arms
+        # faulthandler.dump_traceback_later(240, exit=False) at start.
+        # pytest's faulthandler_timeout can only dump the parent's
+        # threads -- #250's occurrence-four dump showed all of them
+        # idle, because the stalled lock holder was a child it cannot
+        # see into. CI-only on purpose: production users never pay for
+        # instrumentation (test_packaging_contract.py pins both this
+        # line and the 240 < 300 inequality).
+        ISOCENTER_WORKER_FAULTHANDLER: "1"
 
     - name: Record the result for the release matrix
       # `if: always()` so a red version still reports. This is what makes
