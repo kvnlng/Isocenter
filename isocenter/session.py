@@ -580,6 +580,19 @@ class DicomSession:
         self._last_export_written = None
         self._last_export_requested = None
 
+        # The verbs this session actually performed ("REDACTION",
+        # "ANONYMIZE"), so `generate_report` can demand action-specific
+        # evidence: a redacting run whose REDACTION rows were lost to a
+        # second defect must not grade PASS on the strength of unrelated
+        # rows (#254). Transient, in-memory and session-scoped on
+        # purpose -- persisted, this would be a second durable answer to
+        # "what happened" that can disagree with the audit log, the
+        # shape this codebase keeps deleting (the retired `text_index`,
+        # #84). A verb is recorded only where the run would have emitted
+        # its audit rows, so a call that performed no work demands no
+        # evidence; see the two recording sites.
+        self._actions_performed: Set[str] = set()
+
         if os.path.exists("isocenter.key"):
             self.enable_reversible_anonymization("isocenter.key")
 
@@ -1803,6 +1816,23 @@ class DicomSession:
         # nothing could establish is not a clean one (#167).
         open_gaps = [row for row in scan_gaps if row[3] != GAP_REMOVED]
 
+        # Action-specific evidence (#254). The `audit_summary` arm below
+        # asks whether the audit log heard about *anything*; this asks
+        # whether it heard about what this session did. Without it, a
+        # session that redacted and whose REDACTION rows were lost to a
+        # second defect (a dropped batch of the #219 shape) graded PASS
+        # on the strength of its other rows -- #247's second reading,
+        # one defect further away. `_actions_performed` is the session's
+        # transient memory of its own verbs; see `__init__` for why it
+        # is deliberately not persisted.
+        from .remediation import REMEDIATION_ACTION_TYPES
+        expected_evidence = {
+            "REDACTION": frozenset({"REDACTION"}),
+            "ANONYMIZE": REMEDIATION_ACTION_TYPES,
+        }
+        unattested = [verb for verb in sorted(self._actions_performed)
+                      if not expected_evidence[verb] & audit_summary.keys()]
+
         # 5. Build Report DTO
         report = ComplianceReport(
             isocenter_version=ver,
@@ -1823,6 +1853,7 @@ class DicomSession:
             validation_status=("PASS"
                                if audit_summary and not exceptions
                                and not graded_losses and not open_gaps
+                               and not unattested
                                else "REVIEW_REQUIRED")
         )
 
@@ -2333,6 +2364,11 @@ class DicomSession:
             service.record_redaction_pass(
                 acct['machine_sn'], acct['zones'],
                 acct['targeted'], acct['applied'])
+        # Recorded beside the emitter, not at the top of `redact()`: the
+        # grade demands REDACTION evidence only from a session that
+        # would have emitted it, and a call with no rules loaded or no
+        # matching images returned before this point (#254).
+        self._actions_performed.add("REDACTION")
 
         if applied < len(tasks):
             get_logger().warning(
@@ -2583,6 +2619,14 @@ class DicomSession:
             # Use audit() which uses self.configuration internally now
             current_findings = self.audit()
             count = remediator.apply_remediation(current_findings)
+
+        if count:
+            # A nonzero count is the session claiming remediations were
+            # applied, and an applied remediation queues its audit row
+            # -- so this is where "performed" and "would have emitted"
+            # coincide (#254). A call that applied nothing records
+            # nothing and owes the summary no evidence.
+            self._actions_performed.add("ANONYMIZE")
 
         get_logger().info(f"Anonymized {count} entities.")
         print(f"Anonymized/Remediated {count} tags according to policy.")
