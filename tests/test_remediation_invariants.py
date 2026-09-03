@@ -11,7 +11,7 @@ rather than guessing from the assertion.
 """
 import pytest
 
-from isocenter.entities import DicomItem, Instance, Patient
+from isocenter.entities import DicomItem, Instance, Patient, PhiStatus, Study
 from isocenter.privacy import PhiFinding, PhiRemediation
 from isocenter.remediation import RemediationService
 
@@ -229,3 +229,144 @@ def test_clearing_a_patient_attribute_leaves_it_needing_a_save():
 
     assert patient.patient_name is None
     assert patient.has_unsaved_changes
+
+
+# --------------------------------------------------------------------
+# The five `mark_modified()` calls, one test each (#173, #132)
+# --------------------------------------------------------------------
+#
+# On a *first* remediation each of these calls is redundant:
+# `record_phi_status(REMEDIATED)` on the shared success path also
+# advances the revision, so deleting the bump alone stays green -- that
+# is what the tests above say, honestly, in their docstrings. After a
+# reload it is the only thing left. A hydrated entity already reads
+# REMEDIATED, so `record_phi_status(REMEDIATED)` short-circuits (the
+# guard reads the `phi_status` property, which still returns REMEDIATED
+# because nothing moved the revision) and no bump happens. The PHI is
+# stripped from memory, the entity reports nothing to save, the next
+# save skips it, and the identifier stays in the database (#173).
+#
+# Each test below drives exactly one of the five arms and names it, so a
+# deletion anywhere in the cluster turns exactly one test red.
+
+
+def _as_reloaded(entity):
+    """Puts an entity in the state a load from the store leaves it in.
+
+    Two lines, because that is what hydration is: `load_all` records the
+    stored conclusion and then marks the subtree persisted (see the
+    `stored_statuses` loop in persistence.py). Reached directly rather
+    than by remediating through another arm first -- routing the setup
+    through a second `mark_modified()` site would make each test kill
+    two lines and pin neither.
+    """
+    entity.record_phi_status(PhiStatus.REMEDIATED)
+    entity.mark_persisted()
+    assert entity.phi_status is PhiStatus.REMEDIATED, \
+        "setup: a hydrated entity carries the conclusion the store held"
+    assert not entity.has_unsaved_changes, "setup: starts saved"
+    return entity
+
+
+def test_replacing_a_second_patient_attribute_after_a_reload_still_needs_a_save():
+    """Pins `entity.mark_modified()` at remediation.py line 148.
+
+    That is the `REPLACE_TAG` Python-attribute arm -- the one a
+    `Patient` takes, having no `set_attr`.
+    """
+    patient = _as_reloaded(Patient(patient_name="DOE^JOHN", patient_id="PAT-7"))
+
+    RemediationService().apply_remediation(
+        [_finding(patient, "REPLACE_TAG", "patient_name",
+                  new_value="ANONYMIZED", original="DOE^JOHN")])
+
+    assert patient.patient_name == "ANONYMIZED"
+    assert patient.has_unsaved_changes, (
+        "the entity reports no unsaved changes after its PHI was "
+        "stripped, so the next save skips it and the value stays in "
+        "the database")
+
+
+def test_shifting_a_study_date_after_a_reload_still_needs_a_save():
+    """Pins `entity.mark_modified()` at remediation.py line 181.
+
+    That is the `SHIFT_DATE` `setattr` arm, and it is not a corner: the
+    inspector's study scan raises `SHIFT_DATE` against `study_date` on a
+    `Study`, which has no `set_attr`, so every flagged study date goes
+    through this line.
+
+    The setup arrives at REMEDIATED for *something else* rather than by
+    shifting the same date twice: the study scan returns early once
+    `date_shifted` is set, so a study cannot be re-flagged for its own
+    date. A hydrated study already remediated for any reason is the
+    reachable state.
+    """
+    study = _as_reloaded(Study("S1", "20230101"))
+
+    RemediationService().apply_remediation(
+        [_finding(study, "SHIFT_DATE", "study_date",
+                  original="20230101", metadata={"patient_id": "PAT-7"})])
+
+    assert study.study_date != "20230101"
+    assert study.has_unsaved_changes, (
+        "the entity reports no unsaved changes after its PHI was "
+        "stripped, so the next save skips it and the value stays in "
+        "the database")
+
+
+def test_removing_a_second_tag_after_a_reload_still_needs_a_save():
+    """Pins `entity.mark_modified()` at remediation.py line 218.
+
+    That is the `REMOVE_TAG` arm that `del`s from `attributes` -- a
+    plain dict, so the deletion bumps no revision by itself.
+    """
+    inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.set_attr("0008,0080", "MERCY GENERAL")
+    _as_reloaded(inst)
+
+    RemediationService().apply_remediation(
+        [_finding(inst, "REMOVE_TAG", "0008,0080", original="MERCY GENERAL")])
+
+    assert "0008,0080" not in inst.attributes
+    assert inst.has_unsaved_changes, (
+        "the entity reports no unsaved changes after its PHI was "
+        "stripped, so the next save skips it and the value stays in "
+        "the database")
+
+
+def test_removing_a_private_sequence_after_a_reload_still_needs_a_save():
+    """Pins `entity.mark_modified()` at remediation.py line 239.
+
+    That is the private-sequence arm added by #167, which `del`s from
+    `sequences`.
+    """
+    inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.add_sequence_item("0009,1010", DicomItem())
+    _as_reloaded(inst)
+
+    RemediationService().apply_remediation(
+        [_finding(inst, "REMOVE_TAG", "0009,1010")])
+
+    assert "0009,1010" not in inst.sequences
+    assert inst.has_unsaved_changes, (
+        "the entity reports no unsaved changes after its PHI was "
+        "stripped, so the next save skips it and the value stays in "
+        "the database")
+
+
+def test_clearing_a_patient_attribute_after_a_reload_still_needs_a_save():
+    """Pins `entity.mark_modified()` at remediation.py line 247.
+
+    That is the `REMOVE_TAG` Python-attribute arm, which sets the
+    attribute to None.
+    """
+    patient = _as_reloaded(Patient(patient_name="DOE^JOHN", patient_id="PAT-7"))
+
+    RemediationService().apply_remediation(
+        [_finding(patient, "REMOVE_TAG", "patient_id", original="PAT-7")])
+
+    assert patient.patient_id is None
+    assert patient.has_unsaved_changes, (
+        "the entity reports no unsaved changes after its PHI was "
+        "stripped, so the next save skips it and the value stays in "
+        "the database")

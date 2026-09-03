@@ -109,3 +109,61 @@ def test_remediation_audit(store):
     assert row is not None
     assert row[3] == "PID_123"
     assert "ANONYMIZED" in row[4]
+
+
+def test_an_instance_reloaded_after_remediation_still_needs_a_save_for_the_next_tag(store):
+    """A second remediation after a real save/load round trip (#173).
+
+    #173's scope note established by *reading* that a hydrated entity
+    sits at REMEDIATED with nothing to save, and that from there the
+    `mark_modified()` calls in remediation.py are the only thing left
+    advancing the revision. Nobody had run it. This does: the
+    precondition below is produced by `save_all` and `load_all` rather
+    than by `mark_persisted()` standing in for them, so a change to how
+    hydration records a stored status shows up here.
+
+    It also kills the same mutant as
+    `test_removing_a_second_tag_after_a_reload_still_needs_a_save` in
+    tests/test_remediation_invariants.py -- the `mark_modified()` in the
+    `REMOVE_TAG` attributes arm. That test names the line; this one
+    checks that the state the line matters in is the state a reload
+    actually leaves behind.
+    """
+    from isocenter.entities import PhiStatus
+    from isocenter.privacy import PhiFinding, PhiRemediation
+    from isocenter.remediation import RemediationService
+
+    def remove(entity, tag):
+        return PhiFinding(
+            entity_uid=entity.sop_instance_uid, entity_type="Instance",
+            field_name=tag, value=entity.attributes.get(tag), reason="test",
+            tag=tag, entity=entity,
+            remediation_proposal=PhiRemediation(
+                action_type="REMOVE_TAG", target_attr=tag))
+
+    patient = Patient("P1", "Patient One")
+    study = Study("S1", "20230101")
+    series = Series("SE1", "CT", 1)
+    inst = Instance("I1", "1.2.3", 1, file_path="/tmp/test.dcm")
+    inst.set_attr("0010,0010", "DOE^JOHN")
+    inst.set_attr("0008,0080", "MERCY GENERAL")
+    patient.studies.append(study)
+    study.series.append(series)
+    series.instances.append(inst)
+
+    RemediationService().apply_remediation([remove(inst, "0010,0010")])
+    store.save_all([patient])
+
+    hydrated = store.load_all()[0].studies[0].series[0].instances[0]
+    assert hydrated.phi_status is PhiStatus.REMEDIATED, \
+        "the store did not carry the first remediation's conclusion back"
+    assert not hydrated.has_unsaved_changes, \
+        "a freshly loaded instance has nothing the store has not got"
+
+    RemediationService().apply_remediation([remove(hydrated, "0008,0080")])
+
+    assert "0008,0080" not in hydrated.attributes
+    assert hydrated.has_unsaved_changes, (
+        "the reloaded instance reports no unsaved changes after its PHI "
+        "was stripped, so the next save skips it and the value stays in "
+        "the database")

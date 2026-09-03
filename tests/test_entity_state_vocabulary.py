@@ -179,14 +179,24 @@ def test_recording_a_new_phi_status_leaves_the_entity_needing_a_save(name):
     docstring makes that check demand this file be added to `TARGETS`.)
 
     What it does is convert an ASSUMED coupling into a checked one.
-    Four `entity.mark_modified()` calls in `remediation.py` survive
-    deletion, and the reason they survive is that `record_phi_status()`
-    on the same paths also advances `_revision` -- so the bump is
-    redundant, not missing. That reasoning is documented in CLAUDE.md
-    and nothing tested it. If the coupling ever silently went away,
-    those four calls would become load-bearing and every one of them
-    would still survive deletion in isolation, with nothing anywhere
-    noticing. Now something does.
+    Five `entity.mark_modified()` calls in `remediation.py` survive
+    deletion *on a first remediation*, and the reason they survive is
+    that `record_phi_status()` on the same paths also advances
+    `_revision` -- so the bump is redundant there, not missing. That
+    reasoning is documented in CLAUDE.md and nothing tested it. If the
+    coupling ever silently went away, those five calls would become
+    load-bearing on every path and every one of them would still
+    survive deletion in isolation, with nothing anywhere noticing. Now
+    something does.
+
+    The redundancy holds only until the graph is reloaded. A hydrated
+    entity already carries REMEDIATED, so the status recorded after a
+    second remediation is the one it has and the short-circuit below
+    keeps the revision still -- which makes each of the five
+    load-bearing after a reload. Those five are killed one line each by
+    `test_*_after_a_reload_still_needs_a_save` in
+    tests/test_remediation_invariants.py, a file the probe does run for
+    that module (#173).
     """
     entity = make_entities()[name]
     entity.mark_persisted()
@@ -208,6 +218,19 @@ def test_recording_the_status_an_entity_already_carries_changes_nothing(name):
     force a rewrite of the whole graph. Pinning only the bump would let
     someone make it unconditional and stay green while every re-scan
     dirtied everything it touched.
+
+    #173 weighed removing the short-circuit -- it would make the five
+    `mark_modified()` calls in remediation.py honestly redundant on
+    every path -- and decided to KEEP it. The short-circuit is the
+    original design, landed with `record_phi_status` itself for the
+    reason its docstring still gives. Measured on a 206-entity graph, a
+    second identical audit leaves 0 entities dirty with it and all 206
+    without, on a library whose memory claims are made about 100GB+
+    datasets and whose audit touches the whole graph by construction.
+    It would also widen the window #297 closes, from instances whose
+    status changed to every instance scanned. This test is what makes
+    that a decision rather than an accident; do not re-open it without
+    reading #173.
     """
     entity = make_entities()[name]
     entity.record_phi_status(PhiStatus.IDENTIFIED)
