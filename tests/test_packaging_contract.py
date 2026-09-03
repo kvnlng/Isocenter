@@ -315,15 +315,76 @@ def test_classifiers_do_not_advertise_unsupported_python_versions():
 #
 # So these build the real artefacts and read what is inside them.
 
+def _tracked_paths_in_package():
+    """Paths under isocenter/ that git considers source, or None.
+
+    None means "git could not answer", not "nothing is tracked". An
+    empty tracked set is never a valid answer for a package that must
+    ship four JSON resources, so an empty result is treated the same as
+    a failed call: the caller falls back to the bare walk rather than
+    computing an intersection against nothing and passing while checking
+    nothing. A guard that goes green because git is missing is the exact
+    defect this file's newer tests exist to catch.
+
+    `cwd` is pinned to the repository root rather than inherited,
+    because pytest can be invoked from anywhere.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "isocenter"],
+            cwd=REPO, capture_output=True, text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    tracked = {line for line in proc.stdout.splitlines() if line}
+    return tracked or None
+
+
 def _data_files_in_package():
-    """Non-Python files under isocenter/ that the code reads at runtime."""
-    return {
+    """Non-Python files under isocenter/ that the code reads at runtime.
+
+    The walk asks git which of them are source. Without that, any
+    untracked artefact sitting in the tree -- a macOS `.DS_Store`, an
+    editor swapfile, a stray download -- reads as a data file the
+    package needs, and both consumers of this set fail telling the
+    reader to declare it in `setup.py`'s `package_data`. Following that
+    advice ships a Finder artefact in the wheel forever, which is worse
+    than the failure it silences (#234).
+
+    The trade, written down because a future reader will otherwise
+    "fix" it back to a bare `rglob`: **a brand-new resource file that
+    has not been `git add`ed yet is invisible to this test.** That is
+    correct semantics rather than a gap -- an untracked file is not in
+    the sdist and cannot reach a user -- but it does mean adding a
+    resource and running only this test proves nothing until the file
+    is staged.
+
+    `pathspec` would let us read `.gitignore` in-process and was
+    rejected: a new test dependency for a dotfile filter, where one
+    `git ls-files` subprocess answers the question exactly. Asking
+    `git check-ignore` per file would be one subprocess per file.
+    """
+    walked = {
         path.relative_to(PACKAGE).as_posix()
         for path in PACKAGE.rglob("*")
         if path.is_file()
         and path.suffix != ".py"
         and "__pycache__" not in path.parts
     }
+    tracked = _tracked_paths_in_package()
+    if tracked is None:
+        # No git: an unpacked sdist, or git not installed. Fall back to
+        # the walk minus dotfiles, which is the crude version of the
+        # same filter, rather than erroring or -- worse -- passing.
+        return {
+            name for name in walked
+            if not any(part.startswith(".") for part in name.split("/"))
+        }
+    tracked_relative = {
+        name[len("isocenter/"):] for name in tracked
+        if name.startswith("isocenter/")}
+    return walked & tracked_relative
 
 
 @pytest.fixture(scope="module")
@@ -394,7 +455,10 @@ def test_the_wheel_ships_every_resource_the_package_reads(built):
     assert not missing, (
         "read from isocenter/ at runtime but absent from the wheel, so a "
         "pip-installed Isocenter degrades silently instead of failing: "
-        f"{missing}. Declare them in setup.py's package_data.")
+        f"{missing}. Every name here is a git-tracked source file, so "
+        "the fix is to declare it in setup.py's package_data -- not to "
+        "delete it. (Before #234 this advice was given for untracked "
+        "artefacts too, and following it shipped them.)")
 
 
 def test_the_sdist_ships_every_resource_the_package_reads(built):
@@ -406,7 +470,9 @@ def test_the_sdist_ships_every_resource_the_package_reads(built):
     missing = sorted(_data_files_in_package() - shipped)
     assert not missing, (
         f"absent from the sdist: {missing}. A wheel built from this sdist "
-        "would inherit the omission.")
+        "would inherit the omission. Every name here is a git-tracked "
+        "source file, so declaring it in setup.py's package_data is the "
+        "fix (#234).")
 
 
 def test_the_wheel_installs_nothing_but_the_library(built):
