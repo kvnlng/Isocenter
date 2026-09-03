@@ -14,41 +14,72 @@ somebody who can act on it. Where a return value, an audit row, a report
 section or a raised exception carries the same fact, the log line is a
 rendering of that fact for convenience, and the suite does not pin it.
 
-This is the rule the suite already follows almost everywhere, which is
-what keeps a mixed answer from being taste. Measured: 139 `caplog`/`capsys` occurrences
-across 25 test files, no `caplog.set_level` anywhere, and 24 of the 27
-level gates set `logging.WARNING`. `tests/test_export_loss_audit.py`
-asserts a WARNING-level line precisely because `write_tree` can never
-supply a store handle, so no audit row exists to carry it;
-`tests/test_legacy_waveform_hydration.py` names the redundant half of
-its pair and asserts only the half nothing else records; and
-`tests/test_redact_error.py` asserts the exception first and keeps the
-log assertion as residue of #48, where asserting the log INSTEAD of the
-exception was the defect. The three level gates that are not WARNING all
-assert a line nothing else carries -- `release_memory` returns nothing
-and writes no audit row, and a zone that fails to apply raises but does
-not say which zone on what array.
+This is the rule the suite follows in the large, which is what keeps a
+mixed answer from being taste. Measured: 139 `caplog`/`capsys`
+occurrences across 25 test files, no `caplog.set_level` anywhere, and 30
+level gates of which 27 set `logging.WARNING`.
+`tests/test_export_loss_audit.py` asserts a WARNING-level line precisely
+because `write_tree` can never supply a store handle, so no audit row
+exists to carry it; `tests/test_legacy_waveform_hydration.py` names the
+redundant half of its pair and asserts only the half nothing else
+records; and `tests/test_redact_error.py` asserts the exception first
+and keeps the log assertion as residue of #48, where asserting the log
+INSTEAD of the exception was the defect.
 
-**Almost everywhere, not everywhere, and the exception is named here
-rather than left for a reader to find.** `services.py`'s equivalent
-throttle writes an audit row too, so this rule makes it best-effort as
-well -- yet `tests/test_redaction_robustness.py` pins both its call
-count and its exact suppression string, through a `MagicMock` logger,
-which is why a `caplog` census does not see it. That test is left
-alone: rewriting a passing test to match a ruling written after it is
-how a rule stops being evidence and starts being enforcement.
+**In the large, not everywhere. Three tests in this repository pin a log
+line the rule calls a rendering, and they are named here rather than
+left for a reader to find** -- along with why a first census missed each,
+because the method is the more useful half:
+
+- `tests/test_redaction_robustness.py` pins `services.py`'s throttle,
+  both its call count and its exact suppression string. It asserts
+  through a `MagicMock` logger, so a `caplog` census cannot see it.
+- `tests/test_redact_reports_outcome.py` pins the WARNING string
+  "1 of 3" under the assertion message "a partial redaction was not
+  reported anywhere" -- and it IS reported elsewhere: the same numbers
+  go into a `REDACTION` audit row from `services.record_redaction_pass`,
+  surfaced in report section 2 and pinned byte for byte in
+  `tests/test_redaction_audit_accounting.py`. So the assertion message
+  states the opposite of the truth. It was missed because its gate is
+  written `at_level("WARNING")`, the string form, which a census
+  matching `logging.[A-Z]` walks straight past.
+- `tests/test_redaction_attestation.py` is half an exception, on the
+  same string-form gate: its "0 of 1" assertion is redundant with that
+  same `REDACTION` row, but its second assertion -- that the warning
+  names the reason, "no configured zone that landed inside the image" --
+  is genuinely single-channel and correct under the rule.
+
+All three are left alone. Rewriting a passing test to match a ruling
+written after it is how a rule stops being evidence and starts being
+enforcement, and pinning anything below *because* of them would be the
+same move in reverse. The three level gates that are not WARNING are
+fine under the rule: `release_memory` returns nothing and writes no
+audit row, a zone that fails to apply raises but does not say which zone
+on what array, and `remediation.py`'s failure arm only logs.
 
 Five operator-facing lines in this module are therefore best-effort, and
-each one has another channel that a test already pins:
+each one has another channel that a test already pins. **That is what
+guards this paragraph, and it is the answer to the question the
+milestone asks of it.** These justifications are prose, and no test
+reads prose -- but every alternate channel named below is itself carried
+by an assertion, so deleting one turns a test red rather than quietly
+evaporating the reason a log line here was left unpinned. The
+justification cannot rot without something going red first:
 
 - the "Skipping N already imported files" line in `DicomImporter` --
-  `IngestSummary.skipped`, set from the same count
-  (`tests/test_ingest_failure_audit.py`).
+  `IngestSummary.skipped`, set from the same count on both of the paths
+  that return it, and asserted on both in
+  `tests/test_ingest_failure_audit.py`. The second assertion is newer
+  than the rest: until #284 only the early-return path was pinned, while
+  the log line fires on both, so this justification held on the branch
+  where no work happens and nowhere else.
 - the per-file superseded-source warning and its "suppressing further"
   throttle -- a per-file WARNING audit row written unconditionally
   outside the throttle (the comment there calls it the compliance
-  trail), plus `IngestSummary.declined` and section 4 of the report
-  (`tests/test_reingest_after_redact.py`).
+  trail) and section 4 of the report -- both pinned in
+  `tests/test_reingest_after_redact.py`. `IngestSummary.declined` also
+  carries the count but is asserted nowhere, so it does no work in this
+  justification and is not counted as one of the pinned channels.
 - the per-instance scan-gap warning -- the `SCAN_GAP` audit row written
   two lines below it, surfaced through `get_audit_scan_gaps`,
   `ComplianceReport.scan_gaps` and report section 3.2 with the tag named
@@ -67,12 +98,27 @@ each one has another channel that a test already pins:
   lines below carrying a byte-identical detail string
   (`tests/test_export_failure_audit.py`).
 
-**All five will report SURVIVED on every future mutation-probe run of
-this module, and that is the correct result.** A survivor is a question,
-not a verdict; this paragraph is the answer, and the reason not to
-re-file #284. Deleting or silencing any of these lines would still be
-wrong -- they are what an operator watching a terminal sees -- but a
-test that pinned their wording would pin a rendering, not a fact.
+**Whenever the probe samples one of these five, `SURVIVED` is the
+correct result.** A survivor is a question, not a verdict; this
+paragraph is the answer, and the reason not to re-file #284.
+
+The wording is conditional because the probe's sample is not stable, and
+this is worth knowing before reading any of its reports. It picks
+mutation sites by INDEX -- `scripts/mutation_probe.py:430` computes
+`step = max(1, total // budget)` and `:432` walks
+`range(0, total, step)` -- so removing a site anywhere in this file
+renumbers every site after it and silently changes which lines get
+sampled. Measured on this very change: at `b223f6a` the module had 380
+sites and the sample selected all five of the lines above, which is why
+#284 was filed against all five; replacing one `and` with an `isinstance`
+call in the same PR took it to 378, and the sample now reaches only the
+first two. Nothing about the other three changed. A line that stops
+appearing in a probe report has not been fixed, and a line that starts
+appearing has not regressed.
+
+Deleting or silencing any of these lines would still be wrong -- they
+are what an operator watching a terminal sees -- but a test that pinned
+their wording would pin a rendering, not a fact.
 """
 
 import os
