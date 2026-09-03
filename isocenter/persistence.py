@@ -2499,12 +2499,17 @@ class SqliteStore:
         while `_delete_removed_instances` deletes its old row as
         orphaned, losing the instance from the index entirely.
 
-        `id()` rather than the instance itself as a dict key, and this is
-        forced rather than chosen: `Instance` is a dataclass with the
-        default `eq=True`, so Python sets `__hash__ = None` and the
-        object is unhashable. Worse, its generated `__eq__` compares by
-        VALUE, so if it were hashable a dict would conflate two distinct
-        instances carrying equal fields. `id()` is safe here for the
+        `id()` rather than the instance itself as a dict key. This used
+        to be forced -- `Instance` carried the dataclass default
+        `eq=True`, making it unhashable and value-comparing -- but since
+        #299 the entity classes are `eq=False`, so they hash and compare
+        by identity and `prepared[inst]` WOULD now work. It is kept
+        anyway: only the third of the three arguments above was ever
+        about hashability, and the other two (position is unknowable
+        before the transaction, and the SOP Instance UID is mutated in
+        place) stand on their own, so re-spelling this map is a separate
+        change to a load-bearing data-loss fix rather than a cleanup that
+        #299 licenses. Filed as #300. `id()` is safe here for the
         usual reason it usually is not: `patients` holds the entire graph
         alive for the whole of `save_all`, and this map does not outlive
         that call, so no id can be recycled underneath it.

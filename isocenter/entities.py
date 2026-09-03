@@ -81,7 +81,31 @@ class PhiStatus(Enum):
     CLEARED = "cleared"
 
 
-@dataclass(slots=True)
+# `eq=False` on this base and on every graph entity below it is
+# load-bearing (#299). The trap is that `eq=True` is the dataclass
+# DEFAULT, so "a dataclass that defines no `__eq__`" is not what it
+# reads as: the decorator generates a field-by-field `__eq__` and sets
+# `__hash__ = None`, leaving graph entities unhashable and comparing two
+# distinct records as equal whenever their fields happen to match --
+# which is the ordinary case here, since fixture builders and
+# `_make_lightweight_copy` produce field-equal siblings by design.
+#
+# It must be spelled on the BASES, not just the leaves. A subclass
+# carrying `eq=False` inherits the base's value `__eq__` *and* its
+# `__hash__ = None` through the MRO, so it stays unhashable *and* starts
+# comparing on the base's fields ONLY -- the leaf's own identifiers drop
+# out of the comparison entirely. Measured on the four-leaf form:
+# `Series("S1", "CT", 1) == Series("S2", "MR", 9)` is True, because
+# `TrackedEntity` holds nothing but revision counters. (`Instance`
+# happens to escape that particular collapse only because its
+# `__post_init__` mirrors the UID into `attributes`, which *is* a base
+# field -- an accident, not a defence.) Spelling `eq=False` on the four
+# leaves alone is therefore strictly worse than leaving the default.
+#
+# `Equipment` is deliberately excluded: it is `frozen=True` precisely so
+# that value-hashing works, which is how unique equipment sets are built
+# (`tests/test_verification_logic.py`).
+@dataclass(slots=True, eq=False)
 class TrackedEntity:
     """Tracks whether an entity holds changes the session store does not have.
 
@@ -183,7 +207,7 @@ class TrackedEntity:
         self._persisted_revision = self._revision
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class DicomItem(TrackedEntity):
     """
     Base class for any entity that holds DICOM attributes and sequences.
@@ -330,7 +354,7 @@ def clone_sequences(item: 'DicomItem') -> dict:
     return clones
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class Instance(DicomItem):
     """
     Represents a single DICOM image (SOP Instance).
@@ -868,7 +892,7 @@ class Instance(DicomItem):
         self.mark_modified()
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class Series(TrackedEntity):
     """
     Groups Instances by Series Instance UID.
@@ -894,7 +918,7 @@ class Series(TrackedEntity):
             instance.mark_subtree_persisted()
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class Study(TrackedEntity):
     """
     Groups Series by Study Instance UID.
@@ -949,7 +973,7 @@ class Study(TrackedEntity):
             series.mark_subtree_persisted()
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class Patient(TrackedEntity):
     """
     Root of the object hierarchy. Groups Studies by Patient ID.

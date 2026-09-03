@@ -13,7 +13,7 @@ happened to it but cannot be told what it is.
 """
 import pytest
 
-from isocenter.entities import Patient, Study, Series, Instance
+from isocenter.entities import Patient, Study, Series, Instance, DicomItem
 
 
 def make_entities():
@@ -23,6 +23,11 @@ def make_entities():
         "Study": Study("S1", "20230101"),
         "Series": Series("SE1", "CT", 1),
         "Instance": Instance("I1", "/tmp/x.dcm"),
+        # Sequence items are bare `DicomItem`s, not `Instance`s. They are
+        # deep-copied into worker clones by `_make_lightweight_copy` and
+        # carry nested findings back, so the identity tests below cover
+        # them directly rather than only through `Instance`.
+        "DicomItem": DicomItem(),
     }
 
 
@@ -101,3 +106,49 @@ def test_an_instance_records_which_revision_was_persisted():
     instance.mark_persisted(in_flight)
 
     assert instance.has_unsaved_changes is True
+
+
+# --- Identity, not field values (#299) ----------------------------------
+#
+# Two entities holding equal fields are the ORDINARY case in this
+# codebase, not a curiosity: the fixture builders in `scripts/` construct
+# graphs by hand, and `_make_lightweight_copy` rebuilds entities
+# field-by-field for the worker processes. So the question "are these the
+# same record?" must be answered by identity, and an entity must be
+# usable as a dict key.
+#
+# The near-miss that makes this worth pinning is PR #296: a review
+# prescribed `prepared[inst]` reasoning that entities "hash by identity".
+# Under the dataclass default they did not -- the first lookup would have
+# raised `TypeError` (unhashable), and had it been hashable by value, two
+# distinct instances with matching fields would have been silently
+# conflated into one entry.
+
+
+@pytest.mark.parametrize(
+    "name", ["Patient", "Study", "Series", "Instance", "DicomItem"]
+)
+def test_two_entities_with_equal_fields_are_not_equal(name):
+    """Equal fields do not make two records the same record."""
+    a = make_entities()[name]
+    b = make_entities()[name]
+
+    assert a == a
+    assert a != b
+
+
+@pytest.mark.parametrize(
+    "name", ["Patient", "Study", "Series", "Instance", "DicomItem"]
+)
+def test_entities_are_hashable_and_distinct_in_a_set(name):
+    """An entity is usable as a dict key and does not collide with a twin.
+
+    Five parameters defend six classes: `__hash__ = None` propagates down
+    the MRO, so dropping `eq=False` from either base makes every leaf
+    unhashable and turns all of these red.
+    """
+    a = make_entities()[name]
+    b = make_entities()[name]
+
+    assert len({a, b}) == 2
+    assert {a: 1}[a] == 1
