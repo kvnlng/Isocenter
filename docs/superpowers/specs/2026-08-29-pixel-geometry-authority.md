@@ -7,6 +7,15 @@ the original §3.11 was wrong and dropped redacted pixels; §7 never asked
 for a test on the line §4.3 calls "the single most important"; and §4.3
 left `BitsAllocated` read from `attributes`, contradicting §3.10 and
 shipping a silently wrong image.
+**Superseded in part:** #217. §9's compatibility table promises
+`RedactionService.apply_redaction_to_array` a "new keyword argument,
+defaulted; old behaviour when omitted". #217 deleted that default:
+`services.py` now reads
+`def apply_redaction_to_array(arr, rois, geometry: PixelGeometry) -> bool`
+— a required positional. A third-party caller that omits it raises
+`TypeError`, not the old behaviour. The clause is marked in place at §6;
+this line is here because the clause is nine hundred lines below the
+point a reader enters the document.
 **Tracking:** #186, #205 (same defect, two entry points). Folds in the same
 expression at `services.py:489` and `pixel_analysis.py:209`.
 **Base:** `main` at `692218c`
@@ -927,7 +936,7 @@ test call sites across 27 files.
 | `tests/test_float_pixel_data_export.py` `_export_one` | rank 2 float | Unchanged; its "apply attrs after set_pixel_data" comment stays accurate. |
 | `DicomExporter.write_tree` (fixture generators, no session) | — | Only newly raises on GUESSED or contradiction, neither of which the three generators produce. |
 | `DicomExporter.export_batch` / `session.export()` | — | Newly audits a failure instead of writing a wrong file. `ExportSummary.failed` can now be non-zero where it was zero. |
-| `RedactionService.apply_redaction_to_array` third-party callers | — | New keyword argument, defaulted; old behaviour when omitted. |
+| `RedactionService.apply_redaction_to_array` third-party callers | — | ~~New keyword argument, defaulted; old behaviour when omitted.~~ **Falsified by #217**, which made `geometry` a required positional: omitting it raises `TypeError`. Left struck rather than rewritten — see the front matter. |
 
 **Costs to accept, stated rather than discovered:**
 
