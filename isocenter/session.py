@@ -1084,7 +1084,7 @@ class DicomSession:
                     self.configuration.date_jitter['min_days']} to {
                     self.configuration.date_jitter['max_days']} days")
             print(f" - Remove Private Tags: {self.configuration.remove_private_tags}")
-            print("Tip: Run .audit() to check PHI, or .redact_pixels() to apply redaction.")
+            print("Tip: Run .audit() to check PHI, or .redact() to apply redaction.")
         except Exception as e:
             import traceback
             get_logger().error(f"Load failed: {e}")
@@ -1503,9 +1503,17 @@ class DicomSession:
 
         if count > 0:
             print(f"Applied {count} updates to in-memory configuration.")
-            print("Tip: Run .scan_pixel_content() again to verify fix, then .configuration.save_config() to persist.")
-
-        return count
+            # `.save()` writes to `configuration.config_path` and returns
+            # silently when that is unset -- and only `load_config()` sets
+            # it, so a session configured by `create_config()` reaches
+            # here with nothing to save to. The tip says so rather than
+            # naming the attribute and hoping: swapping a loud
+            # AttributeError for a quiet no-op would be a worse tip than
+            # the wrong one it replaces (#234).
+            print("Tip: Run .scan_pixel_content() again to verify fix, "
+                  "then .configuration.save() to persist (set "
+                  ".configuration.config_path first if no config file was "
+                  "loaded -- save() returns silently without one).")
 
         return count
 

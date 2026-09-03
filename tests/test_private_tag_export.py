@@ -160,7 +160,7 @@ def test_keeping_private_tags_keeps_them_through_anonymization(tmp_path):
 
 
 def test_a_binary_private_value_is_written_as_UN(tmp_path):
-    """PS3.5 A.1: an unknown private value of raw bytes is `UN`.
+    """PS3.5 §6.2.2: an unknown private value of raw bytes is `UN`.
 
     `UN` cannot hold a `str` -- pydicom raises at write time, not at
     `add_new` -- so this is the only branch it is right for.

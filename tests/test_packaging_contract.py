@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import tomllib
+import warnings
 import zipfile
 
 import pytest
@@ -314,15 +315,76 @@ def test_classifiers_do_not_advertise_unsupported_python_versions():
 #
 # So these build the real artefacts and read what is inside them.
 
+def _tracked_paths_in_package():
+    """Paths under isocenter/ that git considers source, or None.
+
+    None means "git could not answer", not "nothing is tracked". An
+    empty tracked set is never a valid answer for a package that must
+    ship four JSON resources, so an empty result is treated the same as
+    a failed call: the caller falls back to the bare walk rather than
+    computing an intersection against nothing and passing while checking
+    nothing. A guard that goes green because git is missing is the exact
+    defect this file's newer tests exist to catch.
+
+    `cwd` is pinned to the repository root rather than inherited,
+    because pytest can be invoked from anywhere.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "isocenter"],
+            cwd=REPO, capture_output=True, text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    tracked = {line for line in proc.stdout.splitlines() if line}
+    return tracked or None
+
+
 def _data_files_in_package():
-    """Non-Python files under isocenter/ that the code reads at runtime."""
-    return {
+    """Non-Python files under isocenter/ that the code reads at runtime.
+
+    The walk asks git which of them are source. Without that, any
+    untracked artefact sitting in the tree -- a macOS `.DS_Store`, an
+    editor swapfile, a stray download -- reads as a data file the
+    package needs, and both consumers of this set fail telling the
+    reader to declare it in `setup.py`'s `package_data`. Following that
+    advice ships a Finder artefact in the wheel forever, which is worse
+    than the failure it silences (#234).
+
+    The trade, written down because a future reader will otherwise
+    "fix" it back to a bare `rglob`: **a brand-new resource file that
+    has not been `git add`ed yet is invisible to this test.** That is
+    correct semantics rather than a gap -- an untracked file is not in
+    the sdist and cannot reach a user -- but it does mean adding a
+    resource and running only this test proves nothing until the file
+    is staged.
+
+    `pathspec` would let us read `.gitignore` in-process and was
+    rejected: a new test dependency for a dotfile filter, where one
+    `git ls-files` subprocess answers the question exactly. Asking
+    `git check-ignore` per file would be one subprocess per file.
+    """
+    walked = {
         path.relative_to(PACKAGE).as_posix()
         for path in PACKAGE.rglob("*")
         if path.is_file()
         and path.suffix != ".py"
         and "__pycache__" not in path.parts
     }
+    tracked = _tracked_paths_in_package()
+    if tracked is None:
+        # No git: an unpacked sdist, or git not installed. Fall back to
+        # the walk minus dotfiles, which is the crude version of the
+        # same filter, rather than erroring or -- worse -- passing.
+        return {
+            name for name in walked
+            if not any(part.startswith(".") for part in name.split("/"))
+        }
+    tracked_relative = {
+        name[len("isocenter/"):] for name in tracked
+        if name.startswith("isocenter/")}
+    return walked & tracked_relative
 
 
 @pytest.fixture(scope="module")
@@ -393,7 +455,10 @@ def test_the_wheel_ships_every_resource_the_package_reads(built):
     assert not missing, (
         "read from isocenter/ at runtime but absent from the wheel, so a "
         "pip-installed Isocenter degrades silently instead of failing: "
-        f"{missing}. Declare them in setup.py's package_data.")
+        f"{missing}. Every name here is a git-tracked source file, so "
+        "the fix is to declare it in setup.py's package_data -- not to "
+        "delete it. (Before #234 this advice was given for untracked "
+        "artefacts too, and following it shipped them.)")
 
 
 def test_the_sdist_ships_every_resource_the_package_reads(built):
@@ -405,7 +470,9 @@ def test_the_sdist_ships_every_resource_the_package_reads(built):
     missing = sorted(_data_files_in_package() - shipped)
     assert not missing, (
         f"absent from the sdist: {missing}. A wheel built from this sdist "
-        "would inherit the omission.")
+        "would inherit the omission. Every name here is a git-tracked "
+        "source file, so declaring it in setup.py's package_data is the "
+        "fix (#234).")
 
 
 def test_the_wheel_installs_nothing_but_the_library(built):
@@ -757,3 +824,102 @@ def test_the_worker_watchdog_fires_inside_the_parents_window():
         "tests.yml's Run Tests step does not set "
         "ISOCENTER_WORKER_FAULTHANDLER=1, so the next child-side stall "
         "in CI is again a dump with the child's half missing (#250)")
+
+
+# ---------------------------------------------------------------------------
+# Invalid escape sequences (#292)
+# ---------------------------------------------------------------------------
+
+# Roots swept for invalid escape sequences. `isocenter/` is the one that
+# matters for a user -- an invalid escape there becomes an `import
+# isocenter` failure the day CPython escalates -- but `scripts/` and
+# `tests/` are swept too, because #292's goal is that a new one cannot
+# land anywhere, and compiling all 224 files costs about 0.2s.
+_ESCAPE_SWEEP_ROOTS = ("isocenter", "scripts", "tests")
+
+
+def _python_files_under(root: pathlib.Path):
+    """Every `.py` file under `root`, skipping bytecode caches."""
+    return sorted(
+        path for path in root.rglob("*.py")
+        if "__pycache__" not in path.parts)
+
+
+def test_no_shipped_module_carries_an_invalid_escape_sequence():
+    """An invalid escape sequence is a warning today and a failure later.
+
+    CPython's own account of it: 3.6 made an unrecognised `\\x` escape in
+    a non-raw string a `DeprecationWarning`, 3.12 promoted it to a
+    `SyntaxWarning`, and the documentation says "In a future Python
+    version they will raise a SyntaxError". No release is named, so the
+    only safe reading is that it happens. This project's floor is 3.12 --
+    exactly where the `SyntaxWarning` begins -- so this guard behaves
+    identically across the whole support matrix.
+
+    The shape of the check is load-bearing, and the obvious alternative
+    is worse in a way that hides defects:
+
+    - `simplefilter("error", SyntaxWarning)` and catching `SyntaxError`
+      also detects the problem, but the escalated warning aborts the
+      compile at the *first* site in a file. A second invalid escape in
+      the same module is invisible until the first is fixed. Recording
+      instead of raising reports every site in every file in one run.
+    - `simplefilter("always")` is not decoration. Warnings are deduped
+      per location by default, and the default filters can drop a repeat
+      entirely; without `always` a second occurrence can go unrecorded.
+
+    Both traps produce a guard that passes while the defect is present,
+    which is the failure mode this milestone is named for. Note also
+    that under the escalating filter the problem surfaces as
+    `SyntaxError`, not `SyntaxWarning` -- so a guard written as
+    `pytest.warns(SyntaxWarning)` around an escalated compile passes
+    vacuously. This one records.
+    """
+    offenders = []
+    compiled = 0
+    for root_name in _ESCAPE_SWEEP_ROOTS:
+        root = REPO / root_name
+        assert root.is_dir(), (
+            f"{root_name}/ does not exist, so this guard would sweep "
+            "nothing and pass vacuously; update _ESCAPE_SWEEP_ROOTS if "
+            "the layout moved")
+        for path in _python_files_under(root):
+            compiled += 1
+            with warnings.catch_warnings(record=True) as recorded:
+                warnings.simplefilter("always")
+                compile(path.read_bytes(), str(path), "exec")
+            for entry in recorded:
+                if issubclass(entry.category, SyntaxWarning):
+                    offenders.append((
+                        path.relative_to(REPO).as_posix(),
+                        entry.lineno,
+                        str(entry.message)))
+
+    # A green result is only meaningful if the sweep actually ran.
+    # Same precedent as #299's `len(subclasses) >= 5` guard.
+    assert compiled > 200, (
+        f"only {compiled} files compiled; the sweep is broken and this "
+        "test would otherwise pass vacuously")
+
+    shipped = [o for o in offenders if o[0].startswith("isocenter/")]
+    unshipped = [o for o in offenders if not o[0].startswith("isocenter/")]
+
+    def _render(rows):
+        return "\n".join(f"    {name}:{line}: {message}"
+                         for name, line, message in rows)
+
+    detail = []
+    if shipped:
+        detail.append(
+            "in the shipped package -- these become `import isocenter` "
+            "failures when CPython escalates:\n" + _render(shipped))
+    if unshipped:
+        detail.append(
+            "outside the shipped package -- these break the tooling "
+            "rather than the install, and are still defects:\n"
+            + _render(unshipped))
+
+    assert not offenders, (
+        "invalid escape sequences found; CPython warns about them today "
+        "and the documentation says a future version will raise "
+        "`SyntaxError` (#292).\n" + "\n".join(detail))

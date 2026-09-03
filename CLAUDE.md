@@ -10,7 +10,7 @@ Isocenter is a Python library for indexing, de-identifying, and exporting DICOM 
 
 ```bash
 pip install -e ".[dev]"          # contributor environment: tests + pylint (there is deliberately no requirements.txt)
-pytest                           # full suite, ~600 tests
+pytest                           # full suite
 pytest tests/test_session.py     # one file
 pytest tests/test_session.py::test_name -x   # one test
 pylint isocenter                    # lint (target >8.5/10; NOT enforced by CI)
@@ -108,7 +108,7 @@ There are two public ways to write DICOM, and the split is deliberate. `session.
 
 Commits are conventional-commit style (`fix:`, `feat:`, `refactor:`, `ci:`, `docs:`, `test:`) with a trailing issue/PR number.
 
-Design specs and implementation plans live in `docs/superpowers/{specs,plans}/` (dated filenames) and are excluded from the mkdocs site via `exclude_docs`. Operational runbooks are in `.agent/workflows/` (release process, GCP benchmark).
+Design specs and implementation plans live in `docs/superpowers/{specs,plans}/` (dated filenames) and are excluded from the mkdocs site via `exclude_docs`. **They are historical records, not documentation**, and are never silently rewritten after their date — the value of a dated spec is that it says what was decided then, and a spec quietly edited to match today's code cannot be told apart from one that was right all along. When a later change falsifies a clause, add a `**Superseded in part:**` line to the front matter naming the issue and the clause, and mark the clause itself in place, striking the original rather than erasing it (`2026-08-29-pixel-geometry-authority.md` is the worked example: #217 deleted a default the spec promises). The front-matter line is not optional — a marker nine hundred lines down is invisible to a reader who entered at the top. This is a different thing from the `§11 Amendments` logs some specs carry, which record corrections made *during* implementation, before the spec was finished; keep the two separate. Nothing checks any of this: a test grepping for the corrected text would pin the current wording rather than its truth, and would pass just as happily if the correction were wrong. Operational runbooks are in `.agent/workflows/` (release process, GCP benchmark).
 
 Planning lives in GitHub Issues/milestones, not `ROADMAP.md`.
 
