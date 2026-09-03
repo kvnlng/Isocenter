@@ -122,3 +122,54 @@ def test_flush_recover_from_crash(pm):
     assert len(pm.store_backend.saved_patients) == 1
     assert pm.store_backend.saved_patients[0].patient_id == "P_CRASH"
 
+
+
+def test_a_save_after_running_went_false_reuses_the_live_worker(pm):
+    """A live worker is never joined by a second one (#250).
+
+    `_worker` is a `while True`. Setting `running = False` does not end
+    it -- only the sentinel does -- so a live worker with `running is
+    False` is an ordinary state, not a crashed one. While `_start_worker`
+    guarded on the flag, every such toggle started an ADDITIONAL consumer
+    on the same queue and rebound `self.thread`. `test_persistence_chaos`
+    toggles it nine times; the run ended with nine live workers, and
+    since `shutdown()` posts exactly one sentinel and joins only
+    `self.thread`, whichever of the nine ate the sentinel was usually not
+    that one and the `join(timeout=30)` ran to the full 30 seconds --
+    once at teardown and again from `atexit` after pytest's summary line.
+
+    Structural, not timed: the assertion is thread identity.
+    """
+    before = pm.thread
+    assert before.is_alive()
+
+    pm.running = False
+    pm.save_async([Patient("P_REUSE", "Reuse^Test")])
+
+    assert pm.thread is before, (
+        "save_async started a second worker on the same queue while the "
+        "first was still alive; both then compete for one sentinel and "
+        "shutdown() joins whichever thread it happens to hold (#250)")
+    assert pm.running, (
+        "the flag was left False under a live worker, so the next save "
+        "would spawn yet another consumer")
+
+
+def test_shutdown_after_running_went_false_actually_stops_the_worker(pm):
+    """One sentinel is enough because there is only one consumer (#250).
+
+    The other half of the guard: having reused the live worker rather
+    than spawning a second, `shutdown()`'s single sentinel reaches the
+    thread it then joins. A leaked second consumer is what used to eat
+    the sentinel and leave `self.thread` alive for the full 30-second
+    join.
+    """
+    pm.running = False
+    pm.save_async([Patient("P_STOP", "Stop^Test")])
+    pm.flush()
+
+    pm.shutdown()
+
+    assert not pm.thread.is_alive(), (
+        "shutdown() returned with its worker still running: the sentinel "
+        "was consumed by a thread other than the one being joined (#250)")

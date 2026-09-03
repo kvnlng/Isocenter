@@ -53,11 +53,32 @@ class PersistenceManager:
         get_logger().info("PersistenceManager initialized.")
 
     def _start_worker(self):
-        if not self.running:
+        # **The guard is thread liveness, not `self.running`.** `_worker`
+        # is a `while True`; setting `running = False` does not end it, and
+        # nothing else does either -- only the sentinel `shutdown()` posts
+        # does. So *a live worker with `running is False`* is a normal
+        # state (it is the whole window between `shutdown()` setting the
+        # flag and the worker draining down to the sentinel), and guarding
+        # on the flag started a SECOND consumer on the same queue every
+        # time. Measured before this changed: `test_persistence_chaos`
+        # toggles it nine times and ended with nine live workers, after
+        # which `shutdown()` posts one sentinel, any of the nine may eat
+        # it, and the `join(timeout=30)` on `self.thread` burned the full
+        # 30s -- twice, the second time from `atexit` after pytest's
+        # summary line, where nothing is watching (#250).
+        #
+        # Restoring the flag under a live worker is what keeps
+        # `test_stale_sentinel` composing: a pending sentinel left by an
+        # earlier shutdown is read as stale exactly because `running` is
+        # True again, so it is counted off and the worker continues.
+        if self.thread is not None and self.thread.is_alive():
             self.running = True
-            self.thread = threading.Thread(target=self._worker, daemon=True)
-            self.thread.start()
-            get_logger().info("PersistenceManager worker thread started.")
+            return
+
+        self.running = True
+        self.thread = threading.Thread(target=self._worker, daemon=True)
+        self.thread.start()
+        get_logger().info("PersistenceManager worker thread started.")
 
     def flush(self):
         """
