@@ -10,7 +10,7 @@ Isocenter is a Python library for indexing, de-identifying, and exporting DICOM 
 
 ```bash
 pip install -e ".[dev]"          # contributor environment: tests + pylint (there is deliberately no requirements.txt)
-pytest                           # full suite, ~600 tests
+pytest                           # full suite
 pytest tests/test_session.py     # one file
 pytest tests/test_session.py::test_name -x   # one test
 pylint isocenter                    # lint (target >8.5/10; NOT enforced by CI)
