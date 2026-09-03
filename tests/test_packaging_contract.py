@@ -876,11 +876,15 @@ def test_no_shipped_module_carries_an_invalid_escape_sequence():
     vacuously. This one records.
     """
     offenders = []
+    compiled = 0
     for root_name in _ESCAPE_SWEEP_ROOTS:
         root = REPO / root_name
-        if not root.is_dir():
-            continue
+        assert root.is_dir(), (
+            f"{root_name}/ does not exist, so this guard would sweep "
+            "nothing and pass vacuously; update _ESCAPE_SWEEP_ROOTS if "
+            "the layout moved")
         for path in _python_files_under(root):
+            compiled += 1
             with warnings.catch_warnings(record=True) as recorded:
                 warnings.simplefilter("always")
                 compile(path.read_bytes(), str(path), "exec")
@@ -890,6 +894,12 @@ def test_no_shipped_module_carries_an_invalid_escape_sequence():
                         path.relative_to(REPO).as_posix(),
                         entry.lineno,
                         str(entry.message)))
+
+    # A green result is only meaningful if the sweep actually ran.
+    # Same precedent as #299's `len(subclasses) >= 5` guard.
+    assert compiled > 200, (
+        f"only {compiled} files compiled; the sweep is broken and this "
+        "test would otherwise pass vacuously")
 
     shipped = [o for o in offenders if o[0].startswith("isocenter/")]
     unshipped = [o for o in offenders if not o[0].startswith("isocenter/")]

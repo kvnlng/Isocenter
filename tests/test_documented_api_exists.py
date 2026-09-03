@@ -27,6 +27,7 @@ for.
 import ast
 import pathlib
 import re
+import textwrap
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = REPO / "isocenter"
@@ -43,8 +44,14 @@ _PYTHON_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)
 # the name is not an Isocenter method and never should be looked for as
 # one -- adding to this set to silence a failure is how the defect class
 # this file exists for gets back in.
+# Note that `_defined_names()` also picks up every name the package
+# imports at module scope, so a third-party name imported anywhere is
+# already resolvable and never reaches this set -- `date` below is in
+# fact redundant for that reason (`from datetime import date` appears in
+# two modules). Test A is therefore looser than "the package defines
+# it"; that looseness is priced in on the test itself.
 NOT_OURS = frozenset({
-    "date",       # datetime.datetime.date()
+    "date",       # datetime.datetime.date() -- redundant, see above
     "wrheader",   # wfdb.Record.wrheader()
     "lower",      # str.lower()
     "upper",      # str.upper()
@@ -60,14 +67,22 @@ NOT_OURS = frozenset({
 # maintained, which is the same defect in a new place. Restricting to
 # these roots needs no allowlist at all.
 #
-# The deliberate blind spot: a documented call on any other receiver is
-# unchecked, including `discovery.to_dataframe()` and
-# `result.get_density_matrix()`, which return values of ours. Those two
-# were hand-checked against `isocenter/discovery.py` and
-# `isocenter/privacy.py` and do exist. Do not widen `ROOTS` to catch
-# them without reading the allowlist cost above.
-ROOTS = frozenset({"session", "sess", "config", "isocenter", "store",
-                   "exporter"})
+# This is a NAME list, not a type check. A session bound to any other
+# name escapes it -- `docs/migration.md` writes
+# `with Session("store.db") as s:`, which is why `s` is here. A new
+# short alias in a future fence goes unchecked until someone adds it.
+#
+# The deliberate blind spot, stated in full because understating it
+# would be the same defect this file exists for: seven documented calls
+# sit on receivers outside this set and are values of ours --
+# `result.*` (six, in `docs/ocr.md`) and `filtered.to_zones()`. All
+# seven were hand-resolved against `isocenter/discovery.py` and
+# `isocenter/privacy.py` and all exist. The rest (`plt`, `df`, `re`,
+# and calls on unnamed receivers) are third-party or chained
+# expressions and are none of our business. Do not widen `ROOTS` to a
+# bare "every attribute call" without reading the allowlist cost above.
+ROOTS = frozenset({"session", "sess", "s", "config", "isocenter",
+                   "store", "exporter"})
 
 # Fences under this prefix are dated design records, not documentation.
 # They describe the API as it stood on their date and are deliberately
@@ -123,8 +138,15 @@ def test_every_method_named_in_a_package_string_exists():
     without pricing that in.
     """
     defined = _defined_names()
+    sources = _package_sources()
+    # The walk must find something, or this passes while checking
+    # nothing -- a package rename or a move under `src/` would empty it
+    # silently. Same precedent as #299's `len(subclasses) >= 5`.
+    assert len(sources) > 30, (
+        f"only {len(sources)} source files found under {PACKAGE}; the "
+        "walk is broken and this test would otherwise pass vacuously")
     offenders = []
-    for path in _package_sources():
+    for path in sources:
         tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Constant):
@@ -174,13 +196,26 @@ def test_every_isocenter_call_in_the_docs_resolves():
     this guard red for being prose.
     """
     defined = _defined_names()
+    files = _documentation_files()
+    # As above (#299's precedent): an empty file list is a broken walk,
+    # not a clean bill of health.
+    assert len(files) > 10, (
+        f"only {len(files)} documentation files found; the walk is "
+        "broken and this test would otherwise pass vacuously")
     offenders = []
-    for path in _documentation_files():
+    for path in files:
         text = path.read_text(encoding="utf-8")
         for match in _PYTHON_FENCE.finditer(text):
             fence_line = text.count("\n", 0, match.start()) + 1
             try:
-                tree = ast.parse(match.group(1))
+                # `dedent` first: a fence nested inside a list item is
+                # indented, and `ast.parse` raises IndentationError on it.
+                # `docs/quickstart.md`'s repair snippet is exactly that,
+                # and without this it was silently skipped -- the escape
+                # hatch below firing on a real fence with real calls in
+                # it rather than on the hypothetical pseudo-code one it
+                # was written for (#234).
+                tree = ast.parse(textwrap.dedent(match.group(1)))
             except SyntaxError:
                 continue
             for node in ast.walk(tree):

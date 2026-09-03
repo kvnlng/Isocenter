@@ -7,7 +7,7 @@ the original §3.11 was wrong and dropped redacted pixels; §7 never asked
 for a test on the line §4.3 calls "the single most important"; and §4.3
 left `BitsAllocated` read from `attributes`, contradicting §3.10 and
 shipping a silently wrong image.
-**Superseded in part:** #217. §9's compatibility table promises
+**Superseded in part:** #217. §6's compatibility table promises
 `RedactionService.apply_redaction_to_array` a "new keyword argument,
 defaulted; old behaviour when omitted". #217 deleted that default:
 `services.py` now reads

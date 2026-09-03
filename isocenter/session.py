@@ -1517,8 +1517,6 @@ class DicomSession:
 
         return count
 
-        return count
-
     def discover_redaction_zones(self, serial_number: str, sample_size: int = 50, min_confidence: float = 80.0):
         """
         Scans a random sample of instances from a specific machine to discover
