@@ -784,6 +784,14 @@ class DicomSession:
         Manually triggers Sidecar Compaction to reclaim disk space.
         Rewrites the _pixels.bin file, removing orphaned data from deleted or redacted instances.
         WARNING: This is an expensive I/O operation.
+
+        PRECONDITION, single-threaded: nothing else may be writing pixel
+        state while this runs. The offset rewiring below rebinds every
+        instance's loader OUTSIDE `SqliteStore._pixel_swap_lock`, so it is
+        safe only because it leads with `save(sync=True)` and is not
+        called concurrently with `redact()` or a background save. That is
+        a convention, not an enforced invariant; bringing the rewiring
+        under the lock is filed separately.
         """
         if hasattr(self, 'store_backend'):
             print("Beginning Sidecar Compaction (this may take a while)...")

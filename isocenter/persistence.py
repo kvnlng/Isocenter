@@ -151,15 +151,22 @@ def _delete_patient_subtrees(cur, patient_pks) -> None:
 #: will not clear surfaces as `sqlite3.OperationalError: database is
 #: locked` *inside* one faulthandler window, where the dump shows a
 #: thread still waiting with a stack -- never as a stall for an outer
-#: timeout to kill. The floor is measured, not guessed: the longest
-#: single transaction window observed across the full stress-test
-#: pipeline (4,000 instances, ~2GB of pixels; `save_all` compressing
-#: dirty frames into the sidecar inside its connection window) was
-#: 1.6s, so 120 is ~75x that -- room for a save holding an order of
-#: magnitude more resident dirty pixel data than the benchmark's.
-#: Raising it back above the faulthandler window recreates the silent
-#: 15-minute stalls; the real fix for a save that legitimately needs
-#: minutes is moving sidecar writes outside the transaction window.
+#: timeout to kill. The VALUE has not moved, but its justification has
+#: (#287). It used to rest on a measurement -- the longest single
+#: transaction window across the stress pipeline (4,000 instances, ~2GB
+#: of pixels; `save_all` compressing dirty frames into the sidecar
+#: inside its connection window) was 1.6s, and 120 was ~75x that. Since
+#: #287 hoisted the sidecar writes into a prepass, the window contains
+#: no bulk I/O at all: row upserts only, bounded by row count rather
+#: than by pixel bytes or storage throughput. That is a stronger
+#: justification, not a reason to shrink the number -- and NOT a reason
+#: to inline or delete the constant. The timeout is a diagnostic for a
+#: STUCK writer (another process, a stale WAL), which is still possible;
+#: `test_packaging_contract.py` asserts both that the value is under the
+#: faulthandler window and, by `inspect.getsource`, that
+#: `_get_connection` still READS this name, because a re-inlined literal
+#: is exactly how 900.0 survived unquestioned. Raising it back above the
+#: faulthandler window recreates the silent 15-minute stalls.
 #: No environment variable on purpose (one spelling per behaviour);
 #: tests monkeypatch the constant.
 _SQLITE_BUSY_TIMEOUT_S = 120.0
@@ -1976,9 +1983,6 @@ class SqliteStore:
         Args:
             instance (Instance): The instance containing the pixel data to persist.
         """
-        if instance.pixel_array is None:
-            return
-
         try:
             # The read -> sidecar write -> loader/hash rebind must be one
             # critical section against `_persist_pixels`: a background
@@ -1992,7 +1996,18 @@ class SqliteStore:
                 # 1. Write to Sidecar
                 # Pass array directly to avoid .tobytes() Memory spike
                 # (Zero-Copy 500MB save)
+                # One read, inside the lock, and every branch below asks
+                # this local. The None check used to sit above the `try`,
+                # outside the lock, while the read that feeds the hash sat
+                # here -- so an `unload_pixel_data()` landing between them
+                # left `b_data` None, `hasattr(None, 'tobytes')` False, and
+                # `hashlib.sha256(None)` raising `TypeError: object
+                # supporting the buffer API required` into the redaction
+                # swap (#288). Returning here skips `record_blob_ref` and
+                # `mark_modified` exactly as the old early return did.
                 b_data = instance.pixel_array
+                if b_data is None:
+                    return
 
                 # Hash Update (CRITICAL for Integrity Checks)
                 # Calculate Hash BEFORE writing/compression to ensure we
@@ -2075,6 +2090,16 @@ class SqliteStore:
         # are already resident, so holding them costs a pointer each.
         saved_instances = []
 
+        # Every sidecar frame this save will need is appended HERE, before
+        # any connection exists. It used to happen inside the walk below,
+        # which meant the SQLite write lock was held for as long as the
+        # save's whole dirty resident pixel payload took to compress and
+        # write -- so a slow-storage save could outlast
+        # `_SQLITE_BUSY_TIMEOUT_S` and surface in a healthy concurrent
+        # writer as `database is locked` (#287). The transaction below now
+        # contains row upserts and nothing else.
+        prepared = self._prepare_pixel_frames(patients, tally)
+
         try:
             with self._get_connection() as conn:
                 cur = conn.cursor()
@@ -2082,7 +2107,7 @@ class SqliteStore:
                 for patient in patients:
                     saved_instances.extend(
                         self._save_patient(conn, cur, patient, tally,
-                                           pending_deletions))
+                                           pending_deletions, prepared))
 
                 # Every upsert in the whole save has now run, so a child
                 # that moved to a different parent already points at it and
@@ -2112,7 +2137,7 @@ class SqliteStore:
         self._log_save_summary(tally)
 
     def _save_patient(self, conn, cur, patient, tally,
-                      pending_deletions) -> List[Tuple[Instance, int]]:
+                      pending_deletions, prepared) -> List[Tuple[Instance, int]]:
         """Persists one patient's subtree. Returns the instances written.
 
         Deletions are appended to `pending_deletions` rather than run
@@ -2147,7 +2172,7 @@ class SqliteStore:
                     (self._delete_removed_instances, series, series_pk))
                 saved.extend(
                     self._save_unsaved_instances(
-                        conn, cur, series, series_pk, tally))
+                        conn, cur, series, series_pk, tally, prepared))
 
             pending_deletions.append(
                 (self._delete_removed_series, study, study_pk))
@@ -2317,21 +2342,42 @@ class SqliteStore:
         return len(removed)
 
     def _save_unsaved_instances(self, conn, cur, series, series_pk,
-                              tally) -> List[Tuple[Instance, int]]:
+                              tally, prepared) -> List[Tuple[Instance, int]]:
         """Upserts the instances of one series that have unsaved changes.
 
         Returns the (instance, revision) pairs written, for the caller to
         mark persisted once the transaction has actually committed. The
         revision is captured *before* the write, so a concurrent edit
         arriving mid-save is not mistaken for the state that was stored.
+
+        Neither the dirty set nor the revision is computed here any more:
+        both were fixed by `_prepare_pixel_frames` before the transaction
+        opened (#287), and this method selects the instances that prepass
+        claimed. The set is therefore FROZEN at prepass time -- an
+        instance dirtied afterwards is simply not saved this round and
+        stays dirty for the next, which is the same direction of error
+        `mark_persisted`'s capture-before-write discipline already takes.
+
+        The selection is by `id(inst)`, never by SOP Instance UID. A UID
+        can change in place between the prepass and here (redaction does
+        exactly that), and a UID-keyed miss does not merely skip the
+        write: `_delete_removed_instances` below then sees the instance's
+        OLD row as orphaned and deletes it, so the instance vanishes from
+        the index with nothing to put it back.
+
+        The row tuple and `vertical_rows` deliberately read the LIVE
+        `inst.sop_instance_uid` rather than anything the prepass
+        captured, so a renamed instance is inserted under its new name
+        and its old row is correctly reaped as removed.
         """
-        unsaved = [(inst, inst._revision)
-                   for inst in series.instances if inst.has_unsaved_changes]
+        unsaved = [(inst, prepared[id(inst)][0])
+                   for inst in series.instances
+                   if id(inst) in prepared]
         if not unsaved:
             return []
 
         rows, blob_rows, vertical_rows = self._build_instance_writes(
-            unsaved, series_pk, tally)
+            unsaved, series_pk, tally, prepared)
 
         cur.executemany(_UPSERT_INSTANCE_SQL, rows)
 
@@ -2350,17 +2396,22 @@ class SqliteStore:
         tally.instances += len(unsaved)
         return unsaved
 
-    def _build_instance_writes(self, unsaved, series_pk, tally):
+    def _build_instance_writes(self, unsaved, series_pk, tally, prepared):
         """Turns (instance, revision) pairs into the rows three tables need.
 
-        Pixel data is written to the sidecar here, because the offset it
-        lands at is part of the row. Nothing else touches the database:
-        the caller decides when, and in what order, these go in.
+        This method does **no I/O of any kind**. Its predecessor wrote
+        each instance's pixel frame to the sidecar from right here, which
+        put bulk I/O inside `save_all`'s open transaction; the frames now
+        arrive already written, in `prepared`, from the prepass that runs
+        before the connection opens (#287). Nothing here touches the
+        database either: the caller decides when, and in what order,
+        these rows go in.
 
-        `unsaved` carries the revision the caller captured before the
-        write started -- the same capture `mark_persisted` will be given
-        -- so `_persist_pixels` can tell whether the bytes it read still
-        describe the instance by the time it would publish them (#274).
+        `unsaved` carries the revision the prepass captured before the
+        sidecar write started -- the same capture `mark_persisted` will
+        be given -- so the #274 guard can be re-evaluated at the last
+        moment, below, against a window that is now as long as all of the
+        save's pixel I/O.
 
         Returns:
             Tuple of (instance rows, instance_blobs rows, (uid, private
@@ -2376,7 +2427,25 @@ class SqliteStore:
             # and the next reload puts them back on the graph (#158).
             vertical_rows.append((inst.sop_instance_uid, private))
 
-            frame = self._persist_pixels(inst, tally, revision=revision)
+            # The #274 guard, re-checked at the latest possible moment.
+            # `_persist_pixels` applied it when it appended the frame, but
+            # the prepass now runs before the transaction opens, so the
+            # capture -> commit window spans every sidecar write in the
+            # save. A redaction landing inside it rebinds the loader to
+            # the redacted frame while `prepared` still holds the pristine
+            # one; committing that row would leave `instance_blobs`
+            # lagging `instances`, and the next compaction would copy the
+            # stale frame forward and discard the redacted one -- the
+            # resurrection the comment below warns about. Same semantics
+            # as `_persist_pixels`'s own guard, later checkpoint: the
+            # all-None frame, so the upsert's COALESCE leaves the stored
+            # reference alone and the instance stays dirty against the
+            # stale capture. The instance's row is still written -- NOT
+            # dropped -- because that is what a raced instance got before
+            # this restructure, and #287 is a restructure.
+            frame = prepared[id(inst)][1]
+            if inst._revision != revision:
+                frame = _StoredFrame(None, None, None, None)
             rows.append((
                 series_pk, inst.sop_instance_uid, inst.sop_class_uid,
                 # Positional, and nothing checks this tuple against
@@ -2405,6 +2474,77 @@ class SqliteStore:
 
         return rows, blob_rows, vertical_rows
 
+    def _prepare_pixel_frames(
+            self, patients, tally) -> Dict[int, Tuple[int, '_StoredFrame']]:
+        """Appends every dirty instance's pixel frame, before any transaction.
+
+        Runs the whole Patient -> Study -> Series -> Instance walk once,
+        ahead of `save_all`'s connection, and for each instance with
+        unsaved changes captures its revision and calls `_persist_pixels`.
+        The transaction that follows therefore does row upserts and
+        nothing else -- no compression, no sidecar append, no `flock`
+        wait -- so the SQLite write lock is no longer held for the length
+        of the save's pixel payload (#287).
+
+        Keyed by **object identity** (`id(inst)`), which is the only key
+        that survives everything that can happen between this walk and
+        the transaction's. Position cannot: `series_pk` is unknowable
+        before the transaction and a series can be re-parented in
+        between -- `_reparent_series` exists precisely because that
+        happens. The SOP Instance UID cannot either, and that is the
+        sharper trap, because it looks like the natural key: redaction
+        mutates `sop_instance_uid` **in place** (`regenerate_uid()`,
+        `Session._apply_redaction_outcomes`), so a UID-keyed lookup
+        misses a renamed instance -- which then gets skipped by the walk
+        while `_delete_removed_instances` deletes its old row as
+        orphaned, losing the instance from the index entirely.
+
+        `id()` rather than the instance itself as a dict key, and this is
+        forced rather than chosen: `Instance` is a dataclass with the
+        default `eq=True`, so Python sets `__hash__ = None` and the
+        object is unhashable. Worse, its generated `__eq__` compares by
+        VALUE, so if it were hashable a dict would conflate two distinct
+        instances carrying equal fields. `id()` is safe here for the
+        usual reason it usually is not: `patients` holds the entire graph
+        alive for the whole of `save_all`, and this map does not outlive
+        that call, so no id can be recycled underneath it.
+
+        Two consequences, both stated rather than hidden:
+
+        - The dirty SET is frozen here. An instance dirtied after this
+          walk is not saved this round; it stays dirty for the next.
+        - The revision capture moves EARLIER, so the capture -> commit
+          window grows by the length of the whole sidecar write. That is
+          the safe direction: `mark_persisted` receives an older
+          revision, so anything changing in the window leaves the
+          instance dirty rather than falsely clean.
+
+        A frame appended here whose transaction then rolls back is
+        referenced by nothing. The sidecar is append-only and
+        `compact_sidecar` rewrites only frames `instance_blobs` names, so
+        the orphan is reclaimable dead space -- bounded by one save's
+        dirty resident pixel bytes. Bounded and reclaimable ON DEMAND, not
+        self-healing: `session.compact()` is manual and nothing reclaims
+        automatically. Same artifact class the #274 revision guard
+        already produces.
+
+        Returns:
+            Dict[int, Tuple[int, _StoredFrame]]: id(instance) ->
+            (revision captured before the write, the frame written).
+        """
+        prepared: Dict[int, Tuple[int, '_StoredFrame']] = {}
+        for patient in patients:
+            for study in patient.studies:
+                for series in study.series:
+                    for inst in series.instances:
+                        if not inst.has_unsaved_changes:
+                            continue
+                        revision = inst._revision
+                        frame = self._persist_pixels(
+                            inst, tally, revision=revision)
+                        prepared[id(inst)] = (revision, frame)
+        return prepared
+
     def _persist_pixels(self, inst, tally, revision=None) -> '_StoredFrame':
         """Writes this instance's pixels to the sidecar if they are new.
 
@@ -2429,20 +2569,48 @@ class SqliteStore:
           the upsert's COALESCE, the instance stays dirty, and the next
           save writes the truth.
         """
-        if inst.pixel_array is None:
-            loader = inst._pixel_loader
-            if isinstance(loader, SidecarPixelLoader):
-                return _StoredFrame(loader.offset, loader.length, loader.alg,
-                                    getattr(inst, '_pixel_hash', None))
-            return _StoredFrame(None, None, None, None)
-
         # Lock order: `_pixel_swap_lock` before `sidecar._lock` (inside
         # `write_frame`), never reversed. No sqlite work happens in here;
         # the caller writes the rows later, off this lock.
+        #
+        # The lock must open *before* the first read of `pixel_array`,
+        # not after it. `Instance.unload_pixel_data()` nulls that field
+        # under no lock at all -- from `release_memory()` sweeps and from
+        # redaction paths' `finally` -- so asking "is it None?" outside
+        # and re-reading it inside is a TOCTOU window: the null landed
+        # between the two and `.tobytes()` raised `AttributeError:
+        # 'NoneType' object has no attribute 'tobytes'` inside
+        # `save_all`'s open transaction, rolling the entire save back
+        # (#288). One read, one local, every branch below asks the local.
+        # The local is also what makes the write correct rather than
+        # merely non-crashing: unload drops only the instance's
+        # reference, numpy keeps the buffer alive for ours, and unload
+        # never mutates contents -- so bytes written from `arr` are still
+        # the instance's true pixels. Every instance now takes this lock,
+        # including non-resident ones that used to return before it; a
+        # few hundred nanoseconds each, uncontended.
         with self._pixel_swap_lock:
-            raw = inst.pixel_array.tobytes()
-            digest = hashlib.sha256(raw).hexdigest()
+            arr = inst.pixel_array
             loader = inst._pixel_loader
+
+            if arr is None:
+                # NOT in scope here: the case where the resident array had
+                # *diverged* from the loader's frame (a `set_pixel_data`
+                # after a save) before the unload nulled it. This arm then
+                # records the old frame and the save marks the instance
+                # persisted, dropping the new pixels. That is
+                # `unload_pixel_data()`'s precondition being wrong -- its
+                # docstring promises the data "can be restored", which is
+                # false once the resident array has diverged -- not this
+                # TOCTOU. Filed separately.
+                if isinstance(loader, SidecarPixelLoader):
+                    return _StoredFrame(loader.offset, loader.length,
+                                        loader.alg,
+                                        getattr(inst, '_pixel_hash', None))
+                return _StoredFrame(None, None, None, None)
+
+            raw = arr.tobytes()
+            digest = hashlib.sha256(raw).hexdigest()
 
             # Deduplication: identical bytes already in the sidecar.
             # Appending them again would grow the file by a full frame

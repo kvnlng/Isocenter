@@ -11,6 +11,7 @@ standing between an in-memory de-identified graph and the disk. A save
 that fails while claiming to have succeeded is indistinguishable from
 one that worked, until the data is gone.
 """
+import contextlib
 import os
 import sqlite3
 
@@ -206,3 +207,272 @@ def test_instances_removed_from_memory_are_deleted_from_the_database(store):
 
     assert removed.sop_instance_uid not in remaining
     assert len(remaining) == 2
+
+
+def test_no_sidecar_frame_is_written_while_the_database_transaction_is_open(
+        store, monkeypatch):
+    """Bulk pixel I/O must not run under the SQLite write lock.
+
+    `save_all` opened its transaction and then, deep inside the walk,
+    appended every dirty instance's pixel frame to the sidecar -- so the
+    write lock was held for as long as it took to compress and write the
+    save's whole resident pixel payload. On slow storage, or with a large
+    enough dirty set, that window can outlast `_SQLITE_BUSY_TIMEOUT_S`
+    and turn a perfectly healthy writer in another thread or process into
+    a spurious `sqlite3.OperationalError: database is locked` -- the #250
+    shape, arriving from a save that was merely slow.
+
+    This is structural, not a timing test. Two seams are instrumented:
+    `_get_connection` carries a DEPTH counter (a counter, not a flag --
+    `record_blob_ref` and `save_vertical_attributes` are handed the open
+    connection, and `_init_db` opened one at construction), and
+    `sidecar.write_frame` records the depth it sees. Every recorded depth
+    must be 0. Before the restructure the list read `[1, 1, 1, 1]`.
+
+    Two patients of two instances each, and the count is asserted
+    EXACTLY: a partial restructure that hoisted only the first series
+    would otherwise be caught only by the depths it left behind, and if
+    the fixture's frames ever started deduplicating, a partial hoist
+    could write its remaining frames at depth 0 by accident and pass. The
+    exact count is also what stops a fixture regression making the depth
+    assertion vacuously true.
+    """
+    depth = {"n": 0}
+    depths_at_write = []
+
+    original_get_connection = store._get_connection
+
+    @contextlib.contextmanager
+    def counting_connection(*args, **kwargs):
+        depth["n"] += 1
+        try:
+            with original_get_connection(*args, **kwargs) as conn:
+                yield conn
+        finally:
+            depth["n"] -= 1
+
+    monkeypatch.setattr(store, "_get_connection", counting_connection)
+
+    original_write_frame = store.sidecar.write_frame
+
+    def recording_write_frame(*args, **kwargs):
+        depths_at_write.append(depth["n"])
+        return original_write_frame(*args, **kwargs)
+
+    monkeypatch.setattr(store.sidecar, "write_frame", recording_write_frame)
+
+    store.save_all([make_patient("PA", n_instances=2, with_pixels=True),
+                    make_patient("PB", n_instances=2, with_pixels=True)])
+
+    assert len(depths_at_write) == 4, (
+        f"expected one frame per instance across both patients, got "
+        f"{len(depths_at_write)}. Either the fixture stopped carrying "
+        "distinct pixels (making the depth assertion vacuous) or only "
+        "some of the walk was hoisted into the prepass.")
+    assert all(d == 0 for d in depths_at_write), (
+        f"sidecar frames were appended with {max(depths_at_write)} database "
+        f"transaction(s) open (depths {depths_at_write}). The SQLite write "
+        "lock is then held for as long as the save's dirty resident pixel "
+        "bytes take to compress and write, so a slow-storage save can "
+        "exceed _SQLITE_BUSY_TIMEOUT_S and surface in another writer as a "
+        "spurious 'database is locked' (#287).")
+
+
+def test_an_instance_changed_after_the_prepass_keeps_its_stored_frame(
+        store, monkeypatch):
+    """The #274 guard, re-checked at the last moment before the row is emitted.
+
+    #287 moved the sidecar appends into a prepass that runs before the
+    transaction opens, which stretched the capture -> commit window to
+    the length of all of the save's pixel I/O. A redaction landing inside
+    that window rebinds `_pixel_loader` to the redacted frame while the
+    prepared map still holds the pristine one. Emitting the prepared
+    frame would leave `instance_blobs` naming a frame `instances` no
+    longer describes, and the next `compact_sidecar` -- which reads
+    `instance_blobs` -- would copy the stale frame forward and discard
+    the current one: pre-redaction pixels resurrected, silently.
+
+    So `_build_instance_writes` re-evaluates `inst._revision !=
+    revision` immediately before emitting, and on a trip substitutes
+    `_StoredFrame(None, None, None, None)` and skips the `instance_blobs`
+    entry. The seam used here is `_serialize_item`, which runs at the top
+    of the same loop iteration -- inside the transaction, after the
+    prepass -- so moving `_revision` from it lands exactly in the window.
+
+    Four assertions, one per half of the claim, because "no exception"
+    would pass with the re-check deleted:
+
+    1. The instance's row is still written, NOT dropped -- asserted via
+       a core attribute edited before this save and read back out of
+       `attributes_json`. Asserting merely that the row EXISTS would be
+       vacuous: it already exists from the first save, so its presence
+       cannot distinguish "written with an all-None frame" from "not
+       written at all". Dropping the row instead of substituting the
+       frame passes the whole rest of the suite; this assertion is the
+       only thing that catches it. That distinction matters because
+       writing the row is what a raced instance got before the
+       restructure, and #287 is a restructure.
+    2. `instances.pixel_offset` is unchanged -- the all-None frame plus
+       the upsert's COALESCE.
+    3. `instance_blobs` is unchanged -- the skipped `blob_rows` entry.
+       This is the half compaction reads.
+    4. The instance is still dirty, because `mark_persisted` got the
+       stale capture, so the next save writes the truth.
+
+    The "a new frame really was appended" assertion is the guard against
+    a vacuous pass: without it, a prepass that quietly stopped writing
+    frames would satisfy 2 and 3 for the wrong reason.
+    """
+    patient = make_patient(n_instances=1, with_pixels=True)
+    inst = patient.studies[0].series[0].instances[0]
+    store.save_all([patient])
+
+    def stored_attributes():
+        with sqlite3.connect(store.db_path) as conn:
+            row = conn.execute(
+                "SELECT attributes_json FROM instances "
+                "WHERE sop_instance_uid=?", (inst.sop_instance_uid,)
+            ).fetchone()
+        return None if row is None else row[0]
+
+    def stored_frame():
+        with sqlite3.connect(store.db_path) as conn:
+            row = conn.execute(
+                "SELECT pixel_offset, pixel_length FROM instances "
+                "WHERE sop_instance_uid=?", (inst.sop_instance_uid,)
+            ).fetchone()
+            blob = conn.execute(
+                "SELECT offset, length FROM instance_blobs "
+                "WHERE instance_uid=? AND kind='pixels'",
+                (inst.sop_instance_uid,)).fetchone()
+        return row, blob
+
+    before = stored_frame()
+    assert before[0][0] is not None and before[1] is not None
+
+    sidecar_size_before = os.path.getsize(store.sidecar.filepath)
+
+    # Different bytes, so the prepass must append a genuinely new frame
+    # rather than take the dedup branch.
+    inst.set_pixel_data(np.full((8, 8), 200, dtype=np.uint8))
+
+    # A core attribute edit, so "the row was written" is an assertion
+    # with teeth rather than a restatement of "the row exists".
+    inst.set_attr("0008,103e", "edited before the losing save")
+    assert "edited before the losing save" not in (stored_attributes() or "")
+
+    real_serialize = store._serialize_item
+    raced = []
+
+    def race_the_instance(item):
+        serialized = real_serialize(item)
+        if item is inst and not raced:
+            raced.append(True)
+            # A mutation landing between the prepass's capture and this
+            # row being built -- what a concurrent redaction does.
+            item.mark_modified()
+        return serialized
+
+    monkeypatch.setattr(store, "_serialize_item", race_the_instance)
+
+    store.save_all([patient])
+
+    assert raced, "the race was never forced; _serialize_item was not reached"
+    assert os.path.getsize(store.sidecar.filepath) > sidecar_size_before, (
+        "the prepass appended no new frame, so this test would pass even "
+        "with the re-check deleted")
+
+    after = stored_frame()
+    assert "edited before the losing save" in (stored_attributes() or ""), (
+        "the raced instance's row was not written. The guard must "
+        "substitute an all-None FRAME, not drop the row -- writing the "
+        "row with the stored frame reference left alone is exactly what a "
+        "raced instance got before the restructure, and dropping it is a "
+        "semantic change beyond #287's remit")
+    assert after[0] == before[0], (
+        "instances.pixel_offset moved to the frame the prepass wrote, "
+        "which the instance had already left by commit time (#274/#287)")
+    assert after[1] == before[1], (
+        "instance_blobs moved to the prepared frame. Compaction reads "
+        "this table, so it would copy the stale frame forward and "
+        "discard the current one")
+    assert inst.has_unsaved_changes, (
+        "the raced instance was marked clean, so the next save would "
+        "never correct the row this one deliberately did not write")
+
+
+def test_an_instance_renamed_after_the_prepass_is_still_written(
+        store, monkeypatch):
+    """A UID that moves mid-save must not cost the instance its row.
+
+    Redaction mutates `sop_instance_uid` **in place** --
+    `Instance.regenerate_uid()` and `Session._apply_redaction_outcomes`
+    both do -- so the UID an instance had when the prepass looked at it
+    is not necessarily the UID it has when the transaction walks it.
+
+    Keying the prepared map by UID made that a data-loss bug rather than
+    a missed optimisation, because the two halves of the save then
+    disagree about which name is real. `_save_unsaved_instances` filtered
+    on `sop_instance_uid in prepared`, so a renamed instance was skipped
+    and never inserted -- while `_delete_removed_instances`, which
+    computes `stored - {i.sop_instance_uid for i in series.instances}`,
+    saw the OLD row orphaned and deleted it, cascading `instance_blobs`.
+    The row was gone and no row replaced it.
+
+    Not self-healing. The instance stays dirty, but nothing reconciles
+    that: `Session.close()` shuts the persistence manager down without
+    enqueuing a save, so a session closing after the losing save leaves
+    the index permanently missing an instance whose source file is
+    untouched -- index loss, not file loss -- with the prepass's frame
+    orphaned and `_log_save_summary` still reporting the instance saved.
+
+    Before the prepass existed the filter was `has_unsaved_changes`, so
+    the entity itself was selected, inserted under its NEW UID, and the
+    delete found nothing orphaned. That is the behaviour this pins, and
+    keying the prepared map by object identity is what restores it:
+    identity survives both a rename and a re-parenting, which is why it
+    is the right key and the UID never was.
+
+    The seam is `_get_connection` -- it opens after the prepass has
+    finished and before the walk begins, which is exactly the window.
+    """
+    patient = make_patient(n_instances=1, with_pixels=True)
+    inst = patient.studies[0].series[0].instances[0]
+    original_uid = inst.sop_instance_uid
+    store.save_all([patient])
+
+    inst.set_attr("0008,103e", "dirtied before the losing save")
+
+    original_get_connection = store._get_connection
+    renamed = []
+
+    @contextlib.contextmanager
+    def rename_then_connect(*args, **kwargs):
+        if not renamed:
+            renamed.append(True)
+            # In place, the way `regenerate_uid()` does it. Plain
+            # attribute assignment, so `_revision` does not move and the
+            # late #274 re-check is not what is under test here.
+            inst.sop_instance_uid = "RENAMED.MID.SAVE"
+        with original_get_connection(*args, **kwargs) as conn:
+            yield conn
+
+    monkeypatch.setattr(store, "_get_connection", rename_then_connect)
+
+    store.save_all([patient])
+
+    assert renamed, "the rename never fired, so no window was forced"
+
+    with sqlite3.connect(store.db_path) as conn:
+        rows = {r[0] for r in conn.execute(
+            "SELECT sop_instance_uid FROM instances").fetchall()}
+
+    assert rows == {"RENAMED.MID.SAVE"}, (
+        f"expected the renamed instance's row and nothing else, got {rows}. "
+        f"An empty set means the old row ({original_uid}) was deleted as "
+        "orphaned while the renamed instance was skipped by the prepared "
+        "map -- the instance is then absent from the index entirely, and "
+        "nothing will put it back")
+    assert not inst.has_unsaved_changes, (
+        "the renamed instance was never written, so it stays dirty -- and "
+        "close() does not enqueue a save, so that dirt is never resolved")
