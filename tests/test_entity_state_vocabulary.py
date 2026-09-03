@@ -13,7 +13,8 @@ happened to it but cannot be told what it is.
 """
 import pytest
 
-from isocenter.entities import Patient, Study, Series, Instance, DicomItem, PhiStatus
+from isocenter.entities import (Patient, Study, Series, Instance, DicomItem,
+                                PhiStatus, TrackedEntity)
 
 
 def make_entities():
@@ -216,3 +217,40 @@ def test_recording_the_status_an_entity_already_carries_changes_nothing(name):
     entity.record_phi_status(PhiStatus.IDENTIFIED)
 
     assert entity.has_unsaved_changes is False
+
+
+def test_every_tracked_entity_subclass_hashes_by_identity():
+    """A future entity class cannot quietly reintroduce the #299 bug.
+
+    The parametrized tests above enumerate class names by hand, so a new
+    `TrackedEntity` subclass added later with the dataclass default
+    `eq=True` would be unhashable and value-comparing, and nothing would
+    say so -- the very shape of gap this milestone exists to find. This
+    walks the module instead of a list, so the check arrives with the
+    class rather than having to be remembered.
+
+    `__hash__ is None` is the precise symptom: `eq=True` sets it, and it
+    propagates down the MRO, so this catches a missing `eq=False` on a
+    new leaf AND on a new intermediate base.
+
+    `Equipment` is deliberately not a `TrackedEntity`, so it is out of
+    scope here by construction rather than by exclusion -- it is frozen
+    precisely so that value-hashing works.
+    """
+    import inspect
+
+    from isocenter import entities as entities_module
+
+    subclasses = [
+        obj for _, obj in inspect.getmembers(entities_module, inspect.isclass)
+        if issubclass(obj, TrackedEntity)
+    ]
+    assert len(subclasses) >= 5, (
+        "the walk found almost nothing, so it would pass vacuously; "
+        f"found {[c.__name__ for c in subclasses]}")
+
+    unhashable = [c.__name__ for c in subclasses if c.__hash__ is None]
+    assert not unhashable, (
+        f"{unhashable} carry the dataclass default `eq=True`, so they are "
+        "unhashable and compare by field values; entities must compare by "
+        "identity (#299) and `eq=False` is needed on the class AND its bases")

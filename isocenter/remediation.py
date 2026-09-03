@@ -400,16 +400,23 @@ class RemediationService:
                     # 3. Re-attach the rest?
                     # That preserves time exactly, which is what 'SHIFT_DATE' usually intends (days delta).
                     # Let's limit this special handling to when we know it's a date+time string
-                    # The `and` here is NOT load-bearing, and that was
-                    # measured rather than guessed (#132): `or` is an
-                    # equivalent mutant, killable by no test. Any
-                    # `parts[0]` failing either half -- wrong length or
-                    # non-digit -- raises ValueError inside
-                    # `strptime(base_date, "%Y%m%d")` below, which the
-                    # `except ValueError: pass` catches, falling through
-                    # to the same `return None` that skipping the branch
-                    # produces. Written down so the next reader does not
-                    # re-derive the analysis or file the survivor again.
+                    # BOTH halves are load-bearing, and the length check
+                    # is the one that looks redundant and is not (#132).
+                    # `strptime` with `%Y%m%d` is NOT length-strict:
+                    # `"2023051"` parses as 2023-05-01 and `"230515"` as
+                    # 2305-01-05, raising nothing. So an all-digit
+                    # `parts[0]` of the wrong length reaches `strptime`
+                    # happily, and without `len(...) == 8` this branch
+                    # would shift a date the caller never wrote and
+                    # re-attach `date_str[8:]`, which is misaligned for
+                    # any length but 8. Measured with `or` substituted:
+                    # `"2023051.104822.1234567"` returns
+                    # `"20230511104822.1234567"` -- a fabricated value
+                    # that still looks like a DT -- where the real code
+                    # returns None and the caller declines to remediate.
+                    # Pinned by `test_remediation_dates.py::
+                    # test_a_malformed_date_part_is_declined_rather_than
+                    # _shifted_into_a_fabricated_one`.
                     if len(parts[0]) == 8 and parts[0].isdigit():
                         base_date = parts[0]
                         rest = date_str[8:]  # everything after YYYYMMDD

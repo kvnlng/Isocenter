@@ -61,6 +61,35 @@ class TestDateShifting:
         assert service._shift_date_string(
             "20230515.104822.1234567", 10) == "20230525.104822.1234567"
 
+    def test_a_malformed_date_part_is_declined_rather_than_shifted_into_a_fabricated_one(
+            self, service):
+        """The dotted-DT fallback's length check is not redundant.
+
+        `strptime` with `%Y%m%d` is NOT length-strict -- `"2023051"`
+        parses as 2023-05-01 and `"230515"` as 2305-01-05, raising
+        nothing. So `parts[0].isdigit()` alone lets a wrong-length date
+        part through to `strptime`, and the branch then shifts a date
+        nobody wrote and re-attaches `date_str[8:]`, which is misaligned
+        for any length but eight.
+
+        That makes `and -> or` at the guard a DISTINGUISHABLE mutant,
+        and the first pass of #132 got this wrong: it was classified as
+        equivalent on the reasoning that any bad `parts[0]` would raise
+        ValueError and fall through to the same `return None`. Measured
+        with `or` substituted, it does not:
+
+            "2023051.104822.1234567" -> "20230511104822.1234567"
+            "230515.104822.1234567"  -> "2305011504822.1234567"
+
+        Both are fabricated values that still look like a DT, produced
+        from input the real code declines. The failure is a shape worse
+        than the one at line 392: not a real date left unshifted, but a
+        plausible-looking date invented and written into the graph as
+        though the shift had succeeded.
+        """
+        assert service._shift_date_string("2023051.104822.1234567", 10) is None
+        assert service._shift_date_string("230515.104822.1234567", 10) is None
+
     def test_shift_date_handling_variable_formats(self, service):
         cases = [
             ("20230515.104822.677000", 10, "20230525.104822.677000"), # Full micro
