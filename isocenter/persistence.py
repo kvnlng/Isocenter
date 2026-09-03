@@ -2357,10 +2357,22 @@ class SqliteStore:
         instance dirtied afterwards is simply not saved this round and
         stays dirty for the next, which is the same direction of error
         `mark_persisted`'s capture-before-write discipline already takes.
+
+        The selection is by `id(inst)`, never by SOP Instance UID. A UID
+        can change in place between the prepass and here (redaction does
+        exactly that), and a UID-keyed miss does not merely skip the
+        write: `_delete_removed_instances` below then sees the instance's
+        OLD row as orphaned and deletes it, so the instance vanishes from
+        the index with nothing to put it back.
+
+        The row tuple and `vertical_rows` deliberately read the LIVE
+        `inst.sop_instance_uid` rather than anything the prepass
+        captured, so a renamed instance is inserted under its new name
+        and its old row is correctly reaped as removed.
         """
-        unsaved = [(inst, prepared[inst.sop_instance_uid][0])
+        unsaved = [(inst, prepared[id(inst)][0])
                    for inst in series.instances
-                   if inst.sop_instance_uid in prepared]
+                   if id(inst) in prepared]
         if not unsaved:
             return []
 
@@ -2431,7 +2443,7 @@ class SqliteStore:
             # stale capture. The instance's row is still written -- NOT
             # dropped -- because that is what a raced instance got before
             # this restructure, and #287 is a restructure.
-            frame = prepared[inst.sop_instance_uid][1]
+            frame = prepared[id(inst)][1]
             if inst._revision != revision:
                 frame = _StoredFrame(None, None, None, None)
             rows.append((
@@ -2463,7 +2475,7 @@ class SqliteStore:
         return rows, blob_rows, vertical_rows
 
     def _prepare_pixel_frames(
-            self, patients, tally) -> Dict[str, Tuple[int, '_StoredFrame']]:
+            self, patients, tally) -> Dict[int, Tuple[int, '_StoredFrame']]:
         """Appends every dirty instance's pixel frame, before any transaction.
 
         Runs the whole Patient -> Study -> Series -> Instance walk once,
@@ -2474,10 +2486,28 @@ class SqliteStore:
         wait -- so the SQLite write lock is no longer held for the length
         of the save's pixel payload (#287).
 
-        Keyed by SOP Instance UID rather than by position or object
-        identity: `series_pk` is not knowable before the transaction, and
-        a series can be re-parented between this walk and that one --
-        `_reparent_series` exists precisely because it happens.
+        Keyed by **object identity** (`id(inst)`), which is the only key
+        that survives everything that can happen between this walk and
+        the transaction's. Position cannot: `series_pk` is unknowable
+        before the transaction and a series can be re-parented in
+        between -- `_reparent_series` exists precisely because that
+        happens. The SOP Instance UID cannot either, and that is the
+        sharper trap, because it looks like the natural key: redaction
+        mutates `sop_instance_uid` **in place** (`regenerate_uid()`,
+        `Session._apply_redaction_outcomes`), so a UID-keyed lookup
+        misses a renamed instance -- which then gets skipped by the walk
+        while `_delete_removed_instances` deletes its old row as
+        orphaned, losing the instance from the index entirely.
+
+        `id()` rather than the instance itself as a dict key, and this is
+        forced rather than chosen: `Instance` is a dataclass with the
+        default `eq=True`, so Python sets `__hash__ = None` and the
+        object is unhashable. Worse, its generated `__eq__` compares by
+        VALUE, so if it were hashable a dict would conflate two distinct
+        instances carrying equal fields. `id()` is safe here for the
+        usual reason it usually is not: `patients` holds the entire graph
+        alive for the whole of `save_all`, and this map does not outlive
+        that call, so no id can be recycled underneath it.
 
         Two consequences, both stated rather than hidden:
 
@@ -2499,10 +2529,10 @@ class SqliteStore:
         already produces.
 
         Returns:
-            Dict[str, Tuple[int, _StoredFrame]]: SOP Instance UID ->
+            Dict[int, Tuple[int, _StoredFrame]]: id(instance) ->
             (revision captured before the write, the frame written).
         """
-        prepared: Dict[str, Tuple[int, '_StoredFrame']] = {}
+        prepared: Dict[int, Tuple[int, '_StoredFrame']] = {}
         for patient in patients:
             for study in patient.studies:
                 for series in study.series:
@@ -2512,7 +2542,7 @@ class SqliteStore:
                         revision = inst._revision
                         frame = self._persist_pixels(
                             inst, tally, revision=revision)
-                        prepared[inst.sop_instance_uid] = (revision, frame)
+                        prepared[id(inst)] = (revision, frame)
         return prepared
 
     def _persist_pixels(self, inst, tally, revision=None) -> '_StoredFrame':
