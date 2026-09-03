@@ -224,9 +224,10 @@ def test_recording_the_status_an_entity_already_carries_changes_nothing(name):
     every path -- and decided to KEEP it. The short-circuit is the
     original design, landed with `record_phi_status` itself for the
     reason its docstring still gives. Measured on a 206-entity graph, a
-    second identical audit leaves 0 entities dirty with it and all 206
-    without, on a library whose memory claims are made about 100GB+
-    datasets and whose audit touches the whole graph by construction.
+    second identical audit leaves 0 entities dirty with it and all 198
+    it touches dirty without it, on a library whose memory claims are
+    made about 100GB+ datasets and whose audit walks the whole graph by
+    construction.
     It would also widen the window #297 closes, from instances whose
     status changed to every instance scanned. This test is what makes
     that a decision rather than an accident; do not re-open it without
