@@ -192,7 +192,19 @@ def test_the_report_does_not_grade_pass_over_a_partial_ingest(partial_ingest):
 
 
 def test_a_clean_ingest_returns_a_clean_summary(tmp_path):
-    """The control, and the re-ingest arm: skipped is not failed."""
+    """The control, and the re-ingest arm: skipped is not failed.
+
+    The third ingest is the one that costs a line and is worth it.
+    `IngestSummary.skipped` is set in TWO places -- the early return at
+    `io_handlers.py:961` when every file is already known, and the
+    general path at `:1343` when only some are -- and until #284 only
+    the first was asserted anywhere. That mattered because #284's ruling
+    treats the "Skipping N already imported files" log line as
+    best-effort *on the grounds that* `skipped` carries the same number;
+    a justification pinned on only one of the two branches, while the
+    log line fires on both, is half a justification. Ingesting a folder
+    that gained a file exercises the other branch.
+    """
     src = tmp_path / "src"
     src.mkdir()
     _write_good(str(src))
@@ -201,6 +213,8 @@ def test_a_clean_ingest_returns_a_clean_summary(tmp_path):
     try:
         first = session.ingest(str(src))
         again = session.ingest(str(src))
+        _write_good(str(src), name="second.dcm")
+        mixed = session.ingest(str(src))
         db_path = session.store_backend.db_path
     finally:
         session.close()
@@ -214,5 +228,14 @@ def test_a_clean_ingest_returns_a_clean_summary(tmp_path):
     assert again.ingested == 0
     assert again.failed == 0
     assert again.skipped == 1
+
+    # The general path, where there is real work to do as well: the
+    # known file is still counted as skipped rather than disappearing
+    # because the ingest did not return early.
+    assert mixed.ingested == 1, mixed
+    assert mixed.failed == 0
+    assert mixed.skipped == 1, (
+        "a folder that gained one file reported the already-known file "
+        "as neither ingested nor skipped")
 
     assert _error_rows(db_path) == []

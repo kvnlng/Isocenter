@@ -47,6 +47,48 @@ def _removals(recorded):
                    and any(m in str(w.message) for m in REMOVED_IN_V4)})
 
 
+def _un_sequence_fixture():
+    """The one-item implicit-VR sequence the gate must accept."""
+    import struct
+
+    def elem(group, element, value):
+        return struct.pack("<HHI", group, element, len(value)) + value
+
+    payload = elem(0x0010, 0x0010, b"SECRET^PHI")
+    return struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
+
+
+#: A payload length whose little-endian first two bytes are `41 5A` --
+#: "AZ", both inside the ASCII range pydicom's VR sniffer treats as
+#: proof of explicit VR. `filereader.py:376-379` says in its own comment
+#: that the sniffer only fails to recover once the first element exceeds
+#: about 0x4141 bytes; this is that case, deliberately.
+_VR_AMBIGUOUS_LENGTH = 0x5A41
+
+
+def _vr_sensitive_sequence_fixture():
+    """A sequence whose parse DEPENDS on the implicitness argument.
+
+    The control for the read-stream test. On the ordinary fixture above,
+    `read_sequence` returns the same dataset whether it is told implicit
+    or explicit -- not because the flag is ignored, but because the
+    sniffer at `filereader.py:371-379` re-derives the truth from the
+    bytes and silently corrects the caller. A test that flipped the
+    stream attribute on THAT fixture would stay green even if pydicom
+    started honouring the attribute, because nothing about the fixture
+    can tell the two answers apart.
+
+    Here the first element's length field is chosen so the sniffer's
+    recovery cannot fire, which makes the implicitness argument
+    load-bearing and gives the test something to discriminate against.
+    """
+    import struct
+
+    payload = (struct.pack("<HHI", 0x0009, 0x1001, _VR_AMBIGUOUS_LENGTH)
+               + b"V" * _VR_AMBIGUOUS_LENGTH)
+    return struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
+
+
 def _instance():
     inst = Instance("1.2.3.3", "1.2.840.10008.5.1.4.1.1.2", 1)
     inst.attributes = {
@@ -151,27 +193,28 @@ def test_importing_isocenter_uses_no_pydicom_api_removed_in_v4():
 def test_the_un_sequence_gate_uses_no_pydicom_api_removed_in_v4():
     """`_sequence_from_un_bytes` sets two `DicomIO` flags 4.0 may remove.
 
-    Both are required: without them `read_sequence` raises
+    They are two of the four names `REMOVED_IN_V4` watches, which makes
+    this the one call shape in the codebase where a pydicom bump could
+    turn a working parse into a silent refusal -- the gate returns None
+    for every failure, so #167 would come back reported as "this vendor
+    block is unparseable" when the truth is that our parser broke.
+
+    **What this docstring said until #285 was half false**, and the
+    correction is worth carrying: `read_sequence` does NOT raise
     `AttributeError: 'DicomBytesIO' object has no attribute
-    '_tag_packer'`. They are also two of the four names `REMOVED_IN_V4`
-    watches, which makes this the one call shape in the codebase where a
-    pydicom bump could turn a working parse into a silent refusal --
-    the gate returns None for every failure, so #167 would come back
-    reported as "this vendor block is unparseable" when the truth is
-    that our parser broke.
+    '_tag_packer'` when the READ stream's flags are unset. It consults
+    neither attribute -- it takes both as positional arguments. That
+    error belongs to the WRITE stream and to `is_little_endian`, whose
+    setter is what builds the packers. The two tests below measure both
+    halves; keeping both names in `REMOVED_IN_V4` is still right,
+    because the write stream needs them.
 
     Runs the gate on a sequence it must accept, so a refusal fails here
     rather than only in the audit (#167).
     """
-    import struct
-
     from isocenter.io_handlers import _sequence_from_un_bytes
 
-    def elem(group, element, value):
-        return struct.pack("<HHI", group, element, len(value)) + value
-
-    payload = elem(0x0010, 0x0010, b"SECRET^PHI")
-    raw = struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
+    raw = _un_sequence_fixture()
 
     with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always")
@@ -205,3 +248,136 @@ def test_the_gate_can_still_read_a_datasets_character_set():
     declared = Dataset()
     declared.SpecificCharacterSet = "ISO_IR 100"
     assert declared._character_set, "a declared character set reads as empty"
+
+
+def test_the_gates_write_stream_is_the_one_whose_vr_mode_changes_the_bytes():
+    """The gate's WRITE stream, not its read stream, is what #167 needs.
+
+    **Green on HEAD by construction, and that is the point.** This is a
+    characterization test of pydicom, not a red-first test of ours: its
+    value is going red on a pydicom bump that would otherwise break the
+    UN-sequence gate silently.
+
+    The gate accepts a vendor block only when it re-encodes byte for
+    byte. That comparison is made against the WRITE stream's VR mode. A
+    wrong value there is not an error -- it is a different, valid
+    encoding, so `write_sequence` succeeds, the bytes differ, the gate
+    returns `None`, and #167 comes back reported to users as "this
+    vendor block is unparseable" with no exception anywhere.
+
+    Note what is deliberately NOT asserted: that leaving the write
+    stream's VR mode unset raises. It does not, for the gate's own
+    datasets -- `write_dataset` falls back to a dataset's
+    `original_encoding`, and datasets that came out of `read_sequence`
+    carry `(True, True)`. The third assertion pins that fallback,
+    because it is the reason "unset happens to work" is true today.
+    """
+    from pydicom.dataelem import DataElement
+    from pydicom.filebase import DicomBytesIO
+    from pydicom.filereader import read_sequence
+    from pydicom.filewriter import write_sequence
+
+    raw = _un_sequence_fixture()
+    tag = Tag(0x0009, 0x1003)
+
+    src = DicomBytesIO(raw)
+    src.is_little_endian = True
+    src.is_implicit_VR = True
+    parsed = read_sequence(src, True, True, len(raw), "iso8859")
+
+    assert parsed[0].original_encoding == (True, True), (
+        "a dataset from `read_sequence` no longer records its own "
+        "encoding; the write stream's flags stop having a fallback")
+
+    def encoded(implicit):
+        out = DicomBytesIO()
+        out.is_little_endian = True
+        out.is_implicit_VR = implicit
+        write_sequence(out, DataElement(tag, "SQ", parsed), "iso8859")
+        return out.getvalue()
+
+    assert encoded(True) == raw, (
+        "the write stream in implicit VR no longer round-trips an "
+        "implicit-VR sequence; the gate would refuse every one of them")
+    assert encoded(False) != raw, (
+        "explicit VR on the write stream now produces the same bytes as "
+        "implicit -- the byte-equality gate has stopped distinguishing "
+        "the two, so a wrong flag would no longer be caught here")
+
+
+def test_the_gates_read_stream_does_not_consult_the_streams_vr_mode():
+    """The gate's READ stream sets a VR mode nothing reads.
+
+    `read_sequence` takes implicitness as a positional argument and
+    threads it down to the element generator; the attribute never
+    appears on a stream anywhere in `filereader.py`. So the READ stream's
+    VR mode is not read, and setting it wrong changes nothing.
+
+    **The control is the whole test, and the first version of it had
+    none.** On the ordinary gate fixture, `read_sequence` returns the
+    same dataset whether it is *told* implicit or explicit -- so
+    "flipping the stream attribute changed nothing" was uninformative,
+    and this test would have stayed green even if pydicom had started
+    honouring the attribute. Worse, the reason was not the
+    `filereader.py:368-369` short-circuit named in the earlier
+    docstring: that needs `implicit_vr_is_assumed=True` to fire, and
+    with `False` control falls through to the byte sniffer below it,
+    which re-derives implicitness and corrects the caller.
+
+    So this asks two questions in order. First, on a fixture built to
+    defeat that sniffer, does the implicitness *argument* change the
+    parse? It must -- otherwise the second question is unanswerable.
+    Then, holding that argument fixed, does the stream *attribute*
+    change it? It must not.
+
+    That is what goes red if a pydicom release starts consulting
+    `fp.is_implicit_VR` on the read path -- the only event that would
+    make deleting the read stream's assignment in
+    `_sequence_from_un_bytes` unsafe.
+    """
+    from pydicom.filebase import DicomBytesIO
+    from pydicom.filereader import read_sequence
+
+    from isocenter.io_handlers import _sequence_from_un_bytes
+
+    def parse(raw, told_implicit, stream_vr_mode):
+        fp = DicomBytesIO(raw)
+        fp.is_little_endian = True
+        if stream_vr_mode is not None:
+            fp.is_implicit_VR = stream_vr_mode
+        parsed = read_sequence(fp, told_implicit, True, len(raw), "iso8859")
+        return [sorted(str(tag) for tag in ds.keys()) for ds in parsed]
+
+    # -- the control: on this fixture, implicitness is load-bearing ----
+    # Argument and attribute AGREE in both control runs, so the control
+    # stays valid whichever of the two pydicom reads. If they disagreed
+    # here, the simulated "pydicom now honours the attribute" event
+    # would break the control instead of the assertion below it, and
+    # this test would go red for the wrong reason.
+    sensitive = _vr_sensitive_sequence_fixture()
+    as_implicit = parse(sensitive, True, True)
+    as_explicit = parse(sensitive, False, False)
+
+    assert as_implicit == [["(0009,1001)"]], as_implicit
+    assert as_explicit != as_implicit, (
+        "the control has stopped controlling: pydicom now parses this "
+        "fixture identically whether told implicit or explicit, so the "
+        "assertions below can no longer tell an ignored stream attribute "
+        "from a consulted one. Rebuild the fixture -- see "
+        "`_vr_sensitive_sequence_fixture` -- before trusting this test")
+
+    # -- the question: the stream attribute is not the channel ---------
+    for stream_vr_mode in (True, False, None):
+        assert parse(sensitive, True, stream_vr_mode) == as_implicit, (
+            f"with the stream's VR mode set to {stream_vr_mode!r}, "
+            "`read_sequence` parsed differently from the run that only "
+            "passed the argument -- the read stream's attribute has "
+            "become load-bearing and the gate's assignment to it can no "
+            "longer be called symmetry")
+
+    # -- and the gate's own fixture still goes through the gate --------
+    raw = _un_sequence_fixture()
+    through_the_gate = _sequence_from_un_bytes(raw, Tag(0x0009, 0x1003),
+                                               "iso8859")
+    assert through_the_gate is not None and len(through_the_gate) == 1
+    assert through_the_gate[0].PatientName == "SECRET^PHI"

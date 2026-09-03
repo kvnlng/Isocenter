@@ -7,6 +7,118 @@ This module provides classes for:
 - DicomExporter: Writing DICOM files to disk.
 - SidecarPixelLoader: Lazy loading of pixel data.
 - SidecarWaveformLoader: Lazy loading of waveform samples.
+
+**Which log lines in this module are contract (#284).** A log line is
+contract exactly when it is the only channel that carries its fact to
+somebody who can act on it. Where a return value, an audit row, a report
+section or a raised exception carries the same fact, the log line is a
+rendering of that fact for convenience, and the suite does not pin it.
+
+This is the rule the suite follows in the large, which is what keeps a
+mixed answer from being taste. Measured: 139 `caplog`/`capsys`
+occurrences across 25 test files, no `caplog.set_level` anywhere, and 30
+level gates of which 27 set `logging.WARNING`.
+`tests/test_export_loss_audit.py` asserts a WARNING-level line precisely
+because `write_tree` can never supply a store handle, so no audit row
+exists to carry it; `tests/test_legacy_waveform_hydration.py` names the
+redundant half of its pair and asserts only the half nothing else
+records; and `tests/test_redact_error.py` asserts the exception first
+and keeps the log assertion as residue of #48, where asserting the log
+INSTEAD of the exception was the defect.
+
+**In the large, not everywhere. Three tests in this repository pin a log
+line the rule calls a rendering, and they are named here rather than
+left for a reader to find** -- along with why a first census missed each,
+because the method is the more useful half:
+
+- `tests/test_redaction_robustness.py` pins `services.py`'s throttle,
+  both its call count and its exact suppression string. It asserts
+  through a `MagicMock` logger, so a `caplog` census cannot see it.
+- `tests/test_redact_reports_outcome.py` pins the WARNING string
+  "1 of 3" under the assertion message "a partial redaction was not
+  reported anywhere" -- and it IS reported elsewhere: the same numbers
+  go into a `REDACTION` audit row from `services.record_redaction_pass`,
+  surfaced in report section 2 and pinned byte for byte in
+  `tests/test_redaction_audit_accounting.py`. So the assertion message
+  states the opposite of the truth. It was missed because its gate is
+  written `at_level("WARNING")`, the string form, which a census
+  matching `logging.[A-Z]` walks straight past.
+- `tests/test_redaction_attestation.py` is half an exception, on the
+  same string-form gate: its "0 of 1" assertion is redundant with that
+  same `REDACTION` row, but its second assertion -- that the warning
+  names the reason, "no configured zone that landed inside the image" --
+  is genuinely single-channel and correct under the rule.
+
+All three are left alone. Rewriting a passing test to match a ruling
+written after it is how a rule stops being evidence and starts being
+enforcement, and pinning anything below *because* of them would be the
+same move in reverse. The three level gates that are not WARNING are
+fine under the rule: `release_memory` returns nothing and writes no
+audit row, a zone that fails to apply raises but does not say which zone
+on what array, and `remediation.py`'s failure arm only logs.
+
+Five operator-facing lines in this module are therefore best-effort, and
+each one has another channel that a test already pins. **That is what
+guards this paragraph, and it is the answer to the question the
+milestone asks of it.** These justifications are prose, and no test
+reads prose -- but every alternate channel named below is itself carried
+by an assertion, so deleting one turns a test red rather than quietly
+evaporating the reason a log line here was left unpinned. The
+justification cannot rot without something going red first:
+
+- the "Skipping N already imported files" line in `DicomImporter` --
+  `IngestSummary.skipped`, set from the same count on both of the paths
+  that return it, and asserted on both in
+  `tests/test_ingest_failure_audit.py`. The second assertion is newer
+  than the rest: until #284 only the early-return path was pinned, while
+  the log line fires on both, so this justification held on the branch
+  where no work happens and nowhere else.
+- the per-file superseded-source warning and its "suppressing further"
+  throttle -- a per-file WARNING audit row written unconditionally
+  outside the throttle (the comment there calls it the compliance
+  trail) and section 4 of the report -- both pinned in
+  `tests/test_reingest_after_redact.py`. `IngestSummary.declined` also
+  carries the count but is asserted nowhere, so it does no work in this
+  justification and is not counted as one of the pinned channels.
+- the per-instance scan-gap warning -- the `SCAN_GAP` audit row written
+  two lines below it, surfaced through `get_audit_scan_gaps`,
+  `ComplianceReport.scan_gaps` and report section 3.2 with the tag named
+  (`tests/test_data_loss_reporting.py`,
+  `tests/test_private_sequence_implicit_vr.py`).
+- the worker's "ERROR: Export failed" line on stderr -- the
+  `ExportOutcome` returned on the very next line, which becomes
+  `ExportSummary.failures`, an ERROR audit row, and a `RuntimeError` on
+  the `write_tree` path (`tests/test_export_failure_audit.py`,
+  `tests/test_worker_loss_is_reported.py`). That line predates both
+  `ExportOutcome` and `ExportSummary`; it is a fossil from when the
+  worker had no return channel, and its own comment describes the
+  mechanism that replaced it.
+- the ERROR-level line in `_report_export_failures` -- the `failures`
+  list the same loop builds and returns, plus an ERROR audit row three
+  lines below carrying a byte-identical detail string
+  (`tests/test_export_failure_audit.py`).
+
+**Whenever the probe samples one of these five, `SURVIVED` is the
+correct result.** A survivor is a question, not a verdict; this
+paragraph is the answer, and the reason not to re-file #284.
+
+The wording is conditional because the probe's sample is not stable, and
+this is worth knowing before reading any of its reports. It picks
+mutation sites by INDEX -- `scripts/mutation_probe.py:430` computes
+`step = max(1, total // budget)` and `:432` walks
+`range(0, total, step)` -- so removing a site anywhere in this file
+renumbers every site after it and silently changes which lines get
+sampled. Measured on this very change: at `b223f6a` the module had 380
+sites and the sample selected all five of the lines above, which is why
+#284 was filed against all five; replacing one `and` with an `isinstance`
+call in the same PR took it to 378, and the sample now reaches only the
+first two. Nothing about the other three changed. A line that stops
+appearing in a probe report has not been fixed, and a line that starts
+appearing has not regressed.
+
+Deleting or silencing any of these lines would still be wrong -- they
+are what an operator watching a terminal sees -- but a test that pinned
+their wording would pin a rendering, not a fact.
 """
 
 import os
@@ -189,7 +301,7 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 BINARY_RETENTION_MAX_BYTES = 65534
 
 
-def _is_routed(tag, is_root: bool, has_pixel_data: bool = False) -> bool:
+def _is_routed(tag, is_root: bool, has_pixel_data: bool) -> bool:
     """Does something else in the pipeline carry this element's bytes?
 
     Args:
@@ -323,14 +435,24 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
         return None
 
     fp = DicomBytesIO(raw)
-    # Required, not decoration: without them `read_sequence` raises
-    # `AttributeError: 'DicomBytesIO' object has no attribute
-    # '_tag_packer'`. They are the public setters and emit no
-    # deprecation warning under pydicom 3.0.2 --
-    # `tests/test_pydicom_deprecations.py` is what notices if that
-    # changes, because a deprecated-to-removed setter would make this
-    # function return None for *every* sequence and #167 would come
-    # back reported as "unparseable".
+    # Symmetry and insurance, not requirement -- and 0.9.0 said the
+    # opposite here, so read this before deleting either line.
+    # `read_sequence` takes implicitness and endianness as positional
+    # arguments and threads them down itself; it consults NEITHER
+    # attribute on the stream. The one place implicitness could be
+    # re-derived, `_is_implicit_vr` (pydicom `filereader.py:336`),
+    # short-circuits at `:368-369` on `is_sequence` before reading a
+    # byte, and `read_sequence` always passes `is_sequence=True` from
+    # here. Set them wrong, or not at all, and this parse is identical;
+    # `tests/test_pydicom_deprecations.py` pins that, so a pydicom
+    # release that STARTS reading them turns red here instead of
+    # silently refusing every vendor block.
+    #
+    # The `_tag_packer` AttributeError the old comment cited is real,
+    # but it belongs to the WRITE stream below and to
+    # `is_little_endian`, whose setter builds the packers
+    # (`filebase.py:121-133`); the `is_implicit_VR` setter only
+    # type-checks and stores (`filebase.py:147-152`).
     fp.is_little_endian = True
     fp.is_implicit_VR = True
     try:
@@ -348,6 +470,22 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
     # converting first would compare a re-encoding of converted values,
     # which is a different question and a weaker one.
     out = DicomBytesIO()
+    # THIS is the load-bearing pair, and `is_implicit_VR` is
+    # load-bearing in the way that is easiest to miss. It is not
+    # required -- omit it and pydicom falls back to the datasets'
+    # `original_encoding`, which the ones `read_sequence` just produced
+    # happen to carry. It matters because a WRONG value is not an
+    # error: explicit VR is a valid encoding, `write_sequence` succeeds,
+    # the bytes differ from `raw`, the equality gate below returns None
+    # for every sequence, and #167 comes back reported to users as
+    # "unparseable" with no exception raised anywhere. `is_little_endian`
+    # is the flag that raises outright, because `write_tag` needs the
+    # `_tag_packer` its setter builds.
+    #
+    # Both names are public setters that emit no deprecation warning
+    # under pydicom 3.0.2 and both are watched by `REMOVED_IN_V4` in
+    # `tests/test_pydicom_deprecations.py`, because a
+    # deprecated-to-removed setter here fails the same silent way.
     out.is_little_endian = True
     out.is_implicit_VR = True
     try:
@@ -2570,10 +2708,23 @@ class DicomExporter:
                     # Extract Sidecar Info if available (Zero-Copy)
                     sc_path, sc_offset, sc_length, sc_alg = None, None, None, None
                     if hasattr(inst, '_pixel_loader') and inst._pixel_loader:
-                        # Check if it's a SidecarPixelLoader
-                        # We duck-type check for attributes
+                        # A type test, not the duck test this used to
+                        # be: the block reads four attributes and the
+                        # `hasattr` pair checked two, so it never
+                        # actually guarded `.length` or `.alg` and was
+                        # not the guard it looked like. Every
+                        # `_pixel_loader` the package assigns is a
+                        # `SidecarPixelLoader`; the only other values
+                        # that reach here are two test doubles
+                        # (`tests/test_redaction_optimization.py`'s bare
+                        # lambda and `tests/test_redaction_parallel.py`'s
+                        # `ConstantPixelLoader`), and neither carries any
+                        # of the four. Behaviour-identical, and it also
+                        # removes a boolean operator the mutation probe
+                        # had to keep re-reporting as an equivalent
+                        # mutant (#285).
                         pl = inst._pixel_loader
-                        if hasattr(pl, 'sidecar_path') and hasattr(pl, 'offset'):
+                        if isinstance(pl, SidecarPixelLoader):
                             sc_path = pl.sidecar_path
                             sc_offset = pl.offset
                             sc_length = pl.length
