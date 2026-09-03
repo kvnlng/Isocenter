@@ -129,3 +129,62 @@ def test_a_series_with_a_manufacturer_and_no_model_still_gets_its_equipment(
     assert series.equipment is not None
     assert series.equipment.manufacturer == (man or "")
     assert series.equipment.model_name == (model or "")
+
+
+def _write_without_preamble(path):
+    """The same identifying set, written with no preamble and no file meta.
+
+    A plain `Dataset` rather than a `FileDataset`: that is what makes the
+    file preamble-less and `DICM`-less, which is the shape `force=True`
+    exists to accept (raw exports, some vendor dumps).
+
+    Two traps. `SOPClassUID` is set on the dataset on purpose --
+    `ingest_worker` only consults `ds.file_meta` when `sop_class` is
+    empty, and with `force=True` on a header-less file `ds.file_meta` is
+    an EMPTY `FileMetaDataset`; a truthy `sop_class` short-circuits that
+    lookup and keeps this test about the preamble alone. And no
+    PixelData: the file carries no transfer syntax of its own, so there
+    would be nothing to decode the pixels against.
+    """
+    ds = pydicom.Dataset()
+    ds.PatientID, ds.PatientName = "PAT1", "DOE^JOHN"
+    ds.StudyInstanceUID, ds.SeriesInstanceUID = generate_uid(), generate_uid()
+    ds.SOPInstanceUID = generate_uid()
+    ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.7"
+    ds.Modality, ds.SeriesNumber = "OT", 1
+    ds.StudyDate = "20230101"
+
+    pydicom.dcmwrite(str(path), ds, implicit_vr=True, little_endian=True,
+                     enforce_file_format=False)
+    return ds.SOPInstanceUID
+
+
+def test_a_file_with_no_preamble_is_accepted_by_the_eager_ingest(tmp_path):
+    """`force=True` on the one ingest read is behaviour, not decoration (#281).
+
+    There is exactly one ingest path -- `Session.ingest()` ->
+    `DicomImporter.import_files()` -> `run_parallel(ingest_worker, ...)`
+    -> `pydicom.dcmread(fp, stop_before_pixels=False, force=True)` --
+    so calling `import_files` is calling the eager arm. (The other
+    `dcmread` on a source file, in `Instance.get_pixel_data()`, is the
+    lazy PIXEL load, not a second ingest.)
+    """
+    path = tmp_path / "raw.dcm"
+    sop = _write_without_preamble(path)
+
+    # Honest-fixture guard, and load-bearing: without it, a fixture that
+    # quietly regained its preamble would make everything below pass
+    # under the mutant and this test would pin nothing.
+    with pytest.raises(pydicom.errors.InvalidDicomError):
+        pydicom.dcmread(str(path))
+
+    store = DicomStore()
+    summary = DicomImporter.import_files([str(path)], store)
+
+    # `IngestSummary` (#211) rather than a bare graph check: under the
+    # mutant the reason is named here instead of surfacing as an empty
+    # store with no explanation.
+    assert summary.failures == []
+    assert summary.ingested == 1
+    assert (store.patients[0].studies[0].series[0]
+            .instances[0].sop_instance_uid) == sop
