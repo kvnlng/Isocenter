@@ -323,14 +323,24 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
         return None
 
     fp = DicomBytesIO(raw)
-    # Required, not decoration: without them `read_sequence` raises
-    # `AttributeError: 'DicomBytesIO' object has no attribute
-    # '_tag_packer'`. They are the public setters and emit no
-    # deprecation warning under pydicom 3.0.2 --
-    # `tests/test_pydicom_deprecations.py` is what notices if that
-    # changes, because a deprecated-to-removed setter would make this
-    # function return None for *every* sequence and #167 would come
-    # back reported as "unparseable".
+    # Symmetry and insurance, not requirement -- and 0.9.0 said the
+    # opposite here, so read this before deleting either line.
+    # `read_sequence` takes implicitness and endianness as positional
+    # arguments and threads them down itself; it consults NEITHER
+    # attribute on the stream. The one place implicitness could be
+    # re-derived, `_is_implicit_vr` (pydicom `filereader.py:336`),
+    # short-circuits at `:368-369` on `is_sequence` before reading a
+    # byte, and `read_sequence` always passes `is_sequence=True` from
+    # here. Set them wrong, or not at all, and this parse is identical;
+    # `tests/test_pydicom_deprecations.py` pins that, so a pydicom
+    # release that STARTS reading them turns red here instead of
+    # silently refusing every vendor block.
+    #
+    # The `_tag_packer` AttributeError the old comment cited is real,
+    # but it belongs to the WRITE stream below and to
+    # `is_little_endian`, whose setter builds the packers
+    # (`filebase.py:121-133`); the `is_implicit_VR` setter only
+    # type-checks and stores (`filebase.py:147-152`).
     fp.is_little_endian = True
     fp.is_implicit_VR = True
     try:
@@ -348,6 +358,22 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
     # converting first would compare a re-encoding of converted values,
     # which is a different question and a weaker one.
     out = DicomBytesIO()
+    # THIS is the load-bearing pair, and `is_implicit_VR` is
+    # load-bearing in the way that is easiest to miss. It is not
+    # required -- omit it and pydicom falls back to the datasets'
+    # `original_encoding`, which the ones `read_sequence` just produced
+    # happen to carry. It matters because a WRONG value is not an
+    # error: explicit VR is a valid encoding, `write_sequence` succeeds,
+    # the bytes differ from `raw`, the equality gate below returns None
+    # for every sequence, and #167 comes back reported to users as
+    # "unparseable" with no exception raised anywhere. `is_little_endian`
+    # is the flag that raises outright, because `write_tag` needs the
+    # `_tag_packer` its setter builds.
+    #
+    # Both names are public setters that emit no deprecation warning
+    # under pydicom 3.0.2 and both are watched by `REMOVED_IN_V4` in
+    # `tests/test_pydicom_deprecations.py`, because a
+    # deprecated-to-removed setter here fails the same silent way.
     out.is_little_endian = True
     out.is_implicit_VR = True
     try:

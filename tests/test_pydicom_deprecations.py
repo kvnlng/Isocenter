@@ -151,14 +151,21 @@ def test_importing_isocenter_uses_no_pydicom_api_removed_in_v4():
 def test_the_un_sequence_gate_uses_no_pydicom_api_removed_in_v4():
     """`_sequence_from_un_bytes` sets two `DicomIO` flags 4.0 may remove.
 
-    Both are required: without them `read_sequence` raises
+    They are two of the four names `REMOVED_IN_V4` watches, which makes
+    this the one call shape in the codebase where a pydicom bump could
+    turn a working parse into a silent refusal -- the gate returns None
+    for every failure, so #167 would come back reported as "this vendor
+    block is unparseable" when the truth is that our parser broke.
+
+    **What this docstring said until #285 was half false**, and the
+    correction is worth carrying: `read_sequence` does NOT raise
     `AttributeError: 'DicomBytesIO' object has no attribute
-    '_tag_packer'`. They are also two of the four names `REMOVED_IN_V4`
-    watches, which makes this the one call shape in the codebase where a
-    pydicom bump could turn a working parse into a silent refusal --
-    the gate returns None for every failure, so #167 would come back
-    reported as "this vendor block is unparseable" when the truth is
-    that our parser broke.
+    '_tag_packer'` when the READ stream's flags are unset. It consults
+    neither attribute -- it takes both as positional arguments. That
+    error belongs to the WRITE stream and to `is_little_endian`, whose
+    setter is what builds the packers. The two tests below measure both
+    halves; keeping both names in `REMOVED_IN_V4` is still right,
+    because the write stream needs them.
 
     Runs the gate on a sequence it must accept, so a refusal fails here
     rather than only in the audit (#167).
