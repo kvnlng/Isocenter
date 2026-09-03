@@ -3049,11 +3049,18 @@ class DicomExporter:
         whole export, thousands of instances later, with a `TypeError`
         from `filewriter`.
 
-        PS3.5 A.1 makes `UN` the VR for an unknown value, and for raw
-        bytes that is right. It is wrong for everything else: `UN` is an
-        OB-family VR and rejects `str` at write time. Text needs a text
-        VR, and `LO` caps at 64 characters, so longer values go to `UT`,
-        which is unbounded. Numbers are stringified, which is what the
+        PS3.5 §6.2.2 ("Unknown (UN) Value Representation") makes `UN`
+        the VR for an unknown value -- not A.1, which is the Implicit VR
+        Little Endian Transfer Syntax and says nothing about it -- and
+        for raw bytes that is right. It is wrong for everything else:
+        `UN` is an OB-family VR and rejects `str` at write time. Text
+        needs a text VR, and `LO` caps at 64 characters, so longer
+        values go to `UT`, which is unbounded. The same section's
+        second clause -- a known VR whose value exceeds what a 16-bit
+        length field can carry is relabelled `UN` -- is the rule behind
+        `BINARY_RETENTION_MAX_BYTES` (#151), so this escape hatch and
+        that threshold rest on one paragraph of the standard rather
+        than two unrelated ones. Numbers are stringified, which is what the
         EAV table (`instance_attributes.value_text`) would have done to
         them anyway -- without it, whether a private tag exported would
         depend on whether a save had happened yet.
