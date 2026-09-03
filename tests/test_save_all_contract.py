@@ -12,14 +12,19 @@ that fails while claiming to have succeeded is indistinguishable from
 one that worked, until the data is gone.
 """
 import contextlib
+import datetime
 import os
 import sqlite3
+from threading import Event
 
 import numpy as np
 import pytest
 
-from isocenter.entities import Patient, Study, Series, Instance, Equipment
+from isocenter.builders import DicomBuilder
+from isocenter.entities import (Patient, Study, Series, Instance, Equipment,
+                                TrackedEntity)
 from isocenter.persistence import SqliteStore
+from isocenter.session import DicomSession
 
 
 @pytest.fixture
@@ -476,3 +481,98 @@ def test_an_instance_renamed_after_the_prepass_is_still_written(
     assert not inst.has_unsaved_changes, (
         "the renamed instance was never written, so it stays dirty -- and "
         "close() does not enqueue a save, so that dirt is never resolved")
+
+
+# --------------------------------------------------------------------
+# The capture window, from the other side: audit() (#297)
+# --------------------------------------------------------------------
+
+def test_audit_drains_a_running_save_before_it_records_what_it_found(
+        tmp_path, monkeypatch):
+    """No status is stamped while a background save is mid-capture (#297).
+
+    A scan ends by advancing `_revision` on every entity it touched --
+    `_record_scan_results` calls `record_phi_status`, and a new status
+    is a change the store should hold. `save()` without `sync=True`
+    returns with `save_all` still running on the persistence manager's
+    thread, and since #287 that window is as long as all of the save's
+    pixel I/O. An instance dirtied inside that window is not in the
+    dirty set the save froze, so the save neither writes it nor marks
+    it persisted: it is simply left dirty, and nothing saves it
+    afterwards, because `close()` shuts the manager down without
+    enqueuing a save. The direction is safe -- the status is lost, not
+    a false clean claim -- but it is lost silently.
+
+    This is reachable on the *documented* order: README and
+    `docs/quickstart.md` both show `session.save()` before
+    `report = session.audit()`.
+
+    Deterministic rather than timed. The save is parked inside
+    `save_all` until something releases it, and the only thing that
+    releases it is `audit()`'s own flush -- so a run that reaches
+    `_record_scan_results` with the save still parked is a run where
+    the flush is missing, not a run that lost a race. Both waits are
+    bounded so a wedge fails instead of hanging.
+    """
+    # Speed and quiet, not correctness: the whole mechanism -- the parked
+    # `save_all`, the flush that releases it, `_record_scan_results` --
+    # lives in the parent process, so the scan's workers cannot change
+    # the outcome. Verified: the test is green as committed and red with
+    # the flush deleted, with this line removed.
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+
+    session = DicomSession(str(tmp_path / "session"))
+    patient = (DicomBuilder.start_patient("P123", "John Doe")
+               .add_study("S1", datetime.date(2023, 1, 1))
+               .add_series("SE1", "CT", 1)
+               .add_instance("I1", "1.2.3", 1)
+               .end_instance().end_series().end_study().build())
+    session.store.patients.append(patient)
+
+    started, release, finished = Event(), Event(), Event()
+
+    real_save_all = session.store_backend.save_all
+
+    def parked_save_all(*args, **kwargs):
+        started.set()
+        release.wait(10)
+        try:
+            return real_save_all(*args, **kwargs)
+        finally:
+            finished.set()
+
+    real_flush = session.persistence_manager.flush
+
+    def releasing_flush():
+        release.set()
+        return real_flush()
+
+    observations = []
+    real_record = TrackedEntity.record_phi_status
+
+    def watched_record(self, status):
+        observations.append(started.is_set() and not finished.is_set())
+        return real_record(self, status)
+
+    monkeypatch.setattr(session.store_backend, "save_all", parked_save_all)
+    monkeypatch.setattr(session.persistence_manager, "flush", releasing_flush)
+    monkeypatch.setattr(TrackedEntity, "record_phi_status", watched_record)
+
+    try:
+        session.save()
+        assert started.wait(5), (
+            "the background save never entered save_all, so the window "
+            "this test measures never opened")
+
+        session.audit()
+
+        assert observations, (
+            "no status was recorded, so the assertion below is vacuous")
+        assert not any(observations), (
+            "a PHI status was stamped while save_all was mid-capture: the "
+            "instance is dropped from the frozen dirty set, left dirty and "
+            "never saved, its prepared frame discarded under COALESCE, and "
+            "close() says nothing")
+    finally:
+        release.set()
+        session.close()
