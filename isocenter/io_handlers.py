@@ -189,7 +189,7 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 BINARY_RETENTION_MAX_BYTES = 65534
 
 
-def _is_routed(tag, is_root: bool, has_pixel_data: bool = False) -> bool:
+def _is_routed(tag, is_root: bool, has_pixel_data: bool) -> bool:
     """Does something else in the pipeline carry this element's bytes?
 
     Args:
