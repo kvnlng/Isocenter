@@ -205,7 +205,11 @@ if count > 0:
     assert len(report_v2) == 0
     
     # 4. Save Config
-    session.configuration.save_config("updated_priv_config.yaml")
+    # `save()` takes no path -- it writes to `config_path`, which
+    # `load_config()` sets and which is None otherwise. Set it before
+    # calling, or `save()` returns silently having written nothing.
+    session.configuration.config_path = "updated_priv_config.yaml"
+    session.configuration.save()
 ```
 
 ## Configuration Reference

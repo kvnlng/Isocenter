@@ -34,6 +34,10 @@ PACKAGE = REPO / "isocenter"
 # `.name(` inside a string literal or a doc fence.
 _CALL_IN_TEXT = re.compile(r"\.([A-Za-z_]\w*)\(")
 
+# ```python fences, captured with their offset so a failure can name a
+# line rather than a fence ordinal.
+_PYTHON_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)
+
 # Methods named correctly in prose that belong to the standard library
 # or a third-party package, not to Isocenter. Each entry is a CLAIM that
 # the name is not an Isocenter method and never should be looked for as
@@ -47,6 +51,28 @@ NOT_OURS = frozenset({
     "get",        # queue.Queue.get()
     "tobytes",    # numpy.ndarray.tobytes()
 })
+
+
+# Receiver roots whose attribute calls are this project's claims. A
+# documented `df.head()` or `plt.show()` is pandas' or matplotlib's
+# promise, not ours, and checking those needs a thirteen-entry allowlist
+# of third-party method names -- an allowlist that would then have to be
+# maintained, which is the same defect in a new place. Restricting to
+# these roots needs no allowlist at all.
+#
+# The deliberate blind spot: a documented call on any other receiver is
+# unchecked, including `discovery.to_dataframe()` and
+# `result.get_density_matrix()`, which return values of ours. Those two
+# were hand-checked against `isocenter/discovery.py` and
+# `isocenter/privacy.py` and do exist. Do not widen `ROOTS` to catch
+# them without reading the allowlist cost above.
+ROOTS = frozenset({"session", "sess", "config", "isocenter", "store",
+                   "exporter"})
+
+# Fences under this prefix are dated design records, not documentation.
+# They describe the API as it stood on their date and are deliberately
+# not rewritten when it moves -- see CLAUDE.md's Conventions section.
+_EXCLUDED_DOCS = "docs/superpowers/"
 
 
 def _package_sources():
@@ -118,3 +144,62 @@ def test_every_method_named_in_a_package_string_exists():
         + "\n".join(
             f"    {where}:{line}: .{name}() in {text!r}"
             for where, line, name, text in offenders))
+
+
+def _documentation_files():
+    files = [REPO / "README.md"]
+    for path in sorted((REPO / "docs").rglob("*.md")):
+        if _EXCLUDED_DOCS in path.relative_to(REPO).as_posix():
+            continue
+        files.append(path)
+    return [path for path in files if path.is_file()]
+
+
+def _receiver_root(node):
+    """The `ast.Name` at the base of an attribute chain, or None."""
+    while isinstance(node, ast.Attribute):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
+def test_every_isocenter_call_in_the_docs_resolves():
+    """Every documented call on one of our own objects must exist.
+
+    `README.md` and `docs/` are the first thing a user runs. A fence
+    that raises `AttributeError` on line three is worse than no fence,
+    and there is nothing in the build that reads them.
+
+    Fences that do not parse are skipped rather than failed -- every
+    fence parses today, but a future pseudo-code fence should not turn
+    this guard red for being prose.
+    """
+    defined = _defined_names()
+    offenders = []
+    for path in _documentation_files():
+        text = path.read_text(encoding="utf-8")
+        for match in _PYTHON_FENCE.finditer(text):
+            fence_line = text.count("\n", 0, match.start()) + 1
+            try:
+                tree = ast.parse(match.group(1))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if not isinstance(node.func, ast.Attribute):
+                    continue
+                if _receiver_root(node.func) not in ROOTS:
+                    continue
+                if node.func.attr in defined:
+                    continue
+                offenders.append((
+                    path.relative_to(REPO).as_posix(),
+                    fence_line + node.lineno,
+                    node.func.attr))
+
+    assert not offenders, (
+        "these documented calls name a method the package does not "
+        "define, so the example raises AttributeError for anyone who "
+        "runs it (#234):\n"
+        + "\n".join(f"    {where}:~{line}: .{name}()"
+                    for where, line, name in offenders))
