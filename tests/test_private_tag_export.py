@@ -536,11 +536,16 @@ def test_a_bool_private_value_round_trips_as_True_not_1(tmp_path):
     `(0009,0010)` is already written by `_write_src`, so `0009,1017` is
     a well-formed private tag in that block.
 
-    The VR is deliberately NOT asserted here. The export writes
-    ImplicitVRLittleEndian file meta and only becomes explicit VR on the
-    J2K branch, which depends on the fixture carrying pixels AND on
-    codec availability -- so a VR assertion at this end would be pinned
-    to the environment. The test above is where the VR is deterministic.
+    The VR is deliberately NOT asserted here, and not because it would
+    be flaky -- it would not. `_write_src` carries pixels and
+    `_export_dicom` defaults to `use_compression=True`, so this path
+    always takes the J2K branch and the element reads back
+    `VR='LO'` deterministically. The reason is that a VR assertion adds
+    no kill power against the mutation this test exists for, and would
+    couple the test to the `use_compression` default -- a change to that
+    default should not fail a test about a bool's value. The test above
+    is where the VR is pinned, at the element, with no export defaults
+    in the way.
     """
     def _set_bool(session):
         inst = session.store.patients[0].studies[0].series[0].instances[0]
