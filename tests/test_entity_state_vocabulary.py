@@ -3,8 +3,8 @@
 A session tracks two unrelated things about an item: whether it has
 changes not yet written to the store, and whether it still carries
 identifiers. Both were called "dirty". These tests pin the first one --
-persistence state -- to a single vocabulary that all four entity types
-share, so the second can be given its own without either being mistaken
+persistence state -- to a single vocabulary that every entity type
+shares, so the second can be given its own without either being mistaken
 for the other.
 
 `has_unsaved_changes` is deliberately read-only. State moves through
@@ -133,6 +133,11 @@ def test_two_entities_with_equal_fields_are_not_equal(name):
     a = make_entities()[name]
     b = make_entities()[name]
 
+    # pylint: disable=comparison-with-itself
+    # Comparing an entity to itself IS the assertion here: identity
+    # semantics mean `a == a` and `a != b` are the two halves of one
+    # contract, and dropping the reflexive half would leave a trivially
+    # broken `__eq__` (one that returns False for everything) green.
     assert a == a
     assert a != b
 
