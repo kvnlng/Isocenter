@@ -7,6 +7,58 @@ This module provides classes for:
 - DicomExporter: Writing DICOM files to disk.
 - SidecarPixelLoader: Lazy loading of pixel data.
 - SidecarWaveformLoader: Lazy loading of waveform samples.
+
+**Which log lines in this module are contract (#284).** A log line is
+contract exactly when it is the only channel that carries its fact to
+somebody who can act on it. Where a return value, an audit row, a report
+section or a raised exception carries the same fact, the log line is a
+rendering of that fact for convenience, and the suite does not pin it.
+
+This is the rule the suite already follows, which is what keeps a mixed
+answer from being taste. `tests/test_export_loss_audit.py` asserts a
+WARNING-level line precisely because `write_tree` can never supply a
+store handle, so no audit row exists to carry it;
+`tests/test_legacy_waveform_hydration.py` names the redundant half of
+its pair and asserts only the half nothing else records; and
+`tests/test_redact_error.py` asserts the exception first and keeps the
+log assertion as residue of #48, where asserting the log INSTEAD of the
+exception was the defect.
+
+Five operator-facing lines in this module are therefore best-effort, and
+each one has another channel that a test already pins:
+
+- the "Skipping N already imported files" line in `DicomImporter` --
+  `IngestSummary.skipped`, set from the same count
+  (`tests/test_ingest_failure_audit.py`).
+- the per-file superseded-source warning and its "suppressing further"
+  throttle -- a per-file WARNING audit row written unconditionally
+  outside the throttle (the comment there calls it the compliance
+  trail), plus `IngestSummary.declined` and section 4 of the report
+  (`tests/test_reingest_after_redact.py`).
+- the per-instance scan-gap warning -- the `SCAN_GAP` audit row written
+  two lines below it, surfaced through `get_audit_scan_gaps`,
+  `ComplianceReport.scan_gaps` and report section 3.2 with the tag named
+  (`tests/test_data_loss_reporting.py`,
+  `tests/test_private_sequence_implicit_vr.py`).
+- the worker's "ERROR: Export failed" line on stderr -- the
+  `ExportOutcome` returned on the very next line, which becomes
+  `ExportSummary.failures`, an ERROR audit row, and a `RuntimeError` on
+  the `write_tree` path (`tests/test_export_failure_audit.py`,
+  `tests/test_worker_loss_is_reported.py`). That line predates both
+  `ExportOutcome` and `ExportSummary`; it is a fossil from when the
+  worker had no return channel, and its own comment describes the
+  mechanism that replaced it.
+- the ERROR-level line in `_report_export_failures` -- the `failures`
+  list the same loop builds and returns, plus an ERROR audit row three
+  lines below carrying a byte-identical detail string
+  (`tests/test_export_failure_audit.py`).
+
+**All five will report SURVIVED on every future mutation-probe run of
+this module, and that is the correct result.** A survivor is a question,
+not a verdict; this paragraph is the answer, and the reason not to
+re-file #284. Deleting or silencing any of these lines would still be
+wrong -- they are what an operator watching a terminal sees -- but a
+test that pinned their wording would pin a rendering, not a fact.
 """
 
 import os
