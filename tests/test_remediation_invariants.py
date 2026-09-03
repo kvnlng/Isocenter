@@ -153,6 +153,42 @@ def test_remediating_an_instance_leaves_it_needing_a_save(action, new_value):
         "next save skips it and the identifier survives on disk")
 
 
+def test_removing_a_private_sequence_leaves_the_instance_needing_a_save():
+    """The same invariant, on the arm the parametrization never reaches.
+
+    `test_remediating_an_instance_leaves_it_needing_a_save` drives
+    REMOVE_TAG and REPLACE_TAG at `0010,0010`, which lives in
+    `attributes`, so it stops at the first branch. The private-sequence
+    arm (added by #167) is a separate `elif` that `del`s from
+    `entity.sequences` -- and nothing exercised it, so the invariant it
+    is supposed to hold was prose there.
+
+    **This kills no surviving mutant from the #132 run, and the honest
+    reading matters.** Deleting this arm's `entity.mark_modified()`
+    alone stays green, exactly as it does on the attribute arm, because
+    `record_phi_status()` on the shared success path also advances the
+    revision. Red is demonstrated the same joint way the sibling test's
+    docstring describes: delete BOTH the `mark_modified()` in this arm
+    and the `record_phi_status()` below it, and this fails. What it adds
+    is a third parametrization of an invariant over an arm nothing was
+    running at all -- not a survivor-killer.
+    """
+    inst = _saved_instance()
+    inst.add_sequence_item("0009,1001", DicomItem())
+    inst.mark_persisted()
+    assert not inst.has_unsaved_changes, "setup: starts saved"
+
+    RemediationService().apply_remediation(
+        [_finding(inst, "REMOVE_TAG", "0009,1001")])
+
+    assert "0009,1001" not in inst.sequences, (
+        "the private sequence survived a REMOVE_TAG that the report "
+        "records as having removed it")
+    assert inst.has_unsaved_changes, (
+        "the sequence was stripped in memory but the instance looks "
+        "saved; the next save skips it and the store keeps the block")
+
+
 def _saved_patient():
     """`Patient`/`Study`/`Series` are `TrackedEntity` but not `DicomItem`.
 

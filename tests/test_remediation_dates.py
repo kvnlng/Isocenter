@@ -25,16 +25,41 @@ class TestDateShifting:
         result = service._shift_date_string("20230515.104822", days=10)
         assert result == "20230525.104822"
 
-    def test_shift_date_dt_millis(self, service):
-        """Test DT format with milliseconds (YYYYMMDD.HHMMSS.ffffff)"""
-        # Note: input has 3 digit millis (677), which standard python %f expects 6 digits usually or might fail if not careful.
-        # However, strptime %f expects microseconds (6 digits).
-        # If input is .677, it might assume .677000.
-        # Actually DICOM DT allows variable precision.
-        # Let's see if simple %f works or if we need custom handling.
-        # Python's %f works with 6 digits. For partial, it might be tricky.
-        # Let's test what we expect. Explicitly handling 3 digits might be needed if standard %f fails.
-        pass
+    def test_a_fractional_second_the_format_list_cannot_parse_still_shifts_its_date(
+            self, service):
+        """A DT whose fraction `%f` rejects must still be jittered.
+
+        This replaces a stub that asserted nothing (its body was
+        comments ending in `pass`) and is the question that stub was
+        reaching for. DICOM DT allows a fraction of any precision;
+        `strptime`'s `%f` accepts one to six digits and nothing more, so
+        a seven-digit fraction misses every entry in the `formats` loop
+        and reaches the dotted-DT fallback below it, which shifts the
+        first eight characters and re-attaches the remainder verbatim.
+
+        Without the `len(parts) >= 3` guard holding, that input returns
+        None; `_apply_single_remediation` then takes its `else` arm,
+        logs "Invalid date format", and returns having shifted nothing
+        -- so the real date survives in the graph, is exported, and no
+        exception and no audit row says it happened.
+
+        The PAIR is the point, and specifically the DIFFERING fractions.
+        The first input IS parsed by the `formats` loop, which normalises
+        its fraction to six digits; the second comes back with all seven
+        preserved, which is only possible via the fallback. That is what
+        proves the second input genuinely reached the code under test
+        rather than passing vacuously -- and it means a future addition
+        to `formats` that swallowed the second input would flip its
+        expected value and fail loudly instead of going quiet.
+        """
+        # Parsed by the formats loop: fraction normalised to six digits.
+        assert service._shift_date_string(
+            "20230515.104822.677", 10) == "20230525.104822.677000"
+
+        # Seven digits: rejected by %f, so this one reaches the fallback
+        # and keeps its fraction exactly as written.
+        assert service._shift_date_string(
+            "20230515.104822.1234567", 10) == "20230525.104822.1234567"
 
     def test_shift_date_handling_variable_formats(self, service):
         cases = [

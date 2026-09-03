@@ -13,7 +13,7 @@ happened to it but cannot be told what it is.
 """
 import pytest
 
-from isocenter.entities import Patient, Study, Series, Instance, DicomItem
+from isocenter.entities import Patient, Study, Series, Instance, DicomItem, PhiStatus
 
 
 def make_entities():
@@ -152,3 +152,62 @@ def test_entities_are_hashable_and_distinct_in_a_set(name):
 
     assert len({a, b}) == 2
     assert {a: 1}[a] == 1
+
+
+# --- The coupling behind remediation's redundant bumps (#132) ------------
+
+
+@pytest.mark.parametrize(
+    "name", ["Patient", "Study", "Series", "Instance", "DicomItem"]
+)
+def test_recording_a_new_phi_status_leaves_the_entity_needing_a_save(name):
+    """A new PHI status is itself a change the store has not got.
+
+    This test kills NONE of the twelve `remediation.py` mutation
+    survivors, and saying so is the point of writing it here. It lives
+    in a file that never imports the remediation module, so the probe
+    does not run it for that module. (The module is named without its
+    package prefix on purpose: `test_mutation_probe_targets.py` scans
+    whole test files for the text `isocenter.<module>`, not their
+    import statements, so writing the dotted name even inside a
+    docstring makes that check demand this file be added to `TARGETS`.)
+
+    What it does is convert an ASSUMED coupling into a checked one.
+    Four `entity.mark_modified()` calls in `remediation.py` survive
+    deletion, and the reason they survive is that `record_phi_status()`
+    on the same paths also advances `_revision` -- so the bump is
+    redundant, not missing. That reasoning is documented in CLAUDE.md
+    and nothing tested it. If the coupling ever silently went away,
+    those four calls would become load-bearing and every one of them
+    would still survive deletion in isolation, with nothing anywhere
+    noticing. Now something does.
+    """
+    entity = make_entities()[name]
+    entity.mark_persisted()
+    assert entity.has_unsaved_changes is False
+
+    entity.record_phi_status(PhiStatus.IDENTIFIED)
+
+    assert entity.has_unsaved_changes is True
+
+
+@pytest.mark.parametrize(
+    "name", ["Patient", "Study", "Series", "Instance", "DicomItem"]
+)
+def test_recording_the_status_an_entity_already_carries_changes_nothing(name):
+    """The other half of the contract, so neither half can drift alone.
+
+    The bump is conditional: `record_phi_status` short-circuits when the
+    status is unchanged, so repeated scans of unchanged data do not
+    force a rewrite of the whole graph. Pinning only the bump would let
+    someone make it unconditional and stay green while every re-scan
+    dirtied everything it touched.
+    """
+    entity = make_entities()[name]
+    entity.record_phi_status(PhiStatus.IDENTIFIED)
+    entity.mark_persisted()
+    assert entity.has_unsaved_changes is False
+
+    entity.record_phi_status(PhiStatus.IDENTIFIED)
+
+    assert entity.has_unsaved_changes is False

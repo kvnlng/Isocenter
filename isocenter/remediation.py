@@ -400,6 +400,16 @@ class RemediationService:
                     # 3. Re-attach the rest?
                     # That preserves time exactly, which is what 'SHIFT_DATE' usually intends (days delta).
                     # Let's limit this special handling to when we know it's a date+time string
+                    # The `and` here is NOT load-bearing, and that was
+                    # measured rather than guessed (#132): `or` is an
+                    # equivalent mutant, killable by no test. Any
+                    # `parts[0]` failing either half -- wrong length or
+                    # non-digit -- raises ValueError inside
+                    # `strptime(base_date, "%Y%m%d")` below, which the
+                    # `except ValueError: pass` catches, falling through
+                    # to the same `return None` that skipping the branch
+                    # produces. Written down so the next reader does not
+                    # re-derive the analysis or file the survivor again.
                     if len(parts[0]) == 8 and parts[0].isdigit():
                         base_date = parts[0]
                         rest = date_str[8:]  # everything after YYYYMMDD
