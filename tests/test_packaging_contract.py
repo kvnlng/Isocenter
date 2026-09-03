@@ -826,6 +826,52 @@ def test_the_worker_watchdog_fires_inside_the_parents_window():
         "in CI is again a dump with the child's half missing (#250)")
 
 
+def test_the_stall_watchdog_fires_inside_the_run_tests_step():
+    """A stall outside any test item must still dump before the kill (#250).
+
+    pytest's `faulthandler_timeout` is armed inside
+    `pytest_runtest_protocol` and cancelled in its `finally`, so it covers
+    setup, call and teardown of one item and nothing else -- not
+    collection, not the gap between items, not `pytest_sessionfinish`, and
+    not the `atexit` phase that runs after the summary line. A hang in any
+    of those is #250's exact signature: killed by an outer cap with no
+    failing test named. `tests/conftest.py`'s watchdog covers those gaps,
+    and like every other member of this timeout family it is only worth
+    anything if it fires while the process is still alive.
+
+    Its threshold must also exceed the longest legitimate gap in a healthy
+    run, or it cries wolf; that end is set by measurement, not by an
+    assertion here, and recorded beside `_STALL_S`.
+
+    The value is read out of the conftest source rather than by importing
+    it: `tests/` is not a package and nothing else in the suite imports
+    across test modules.
+    """
+    _threshold, step_seconds, _ = _faulthandler_threshold_and_step_seconds()
+
+    source = (REPO / "tests" / "conftest.py").read_text(encoding="utf-8")
+    match = re.search(r"^_STALL_S = ([0-9.]+)$", source, re.MULTILINE)
+    assert match, (
+        "tests/conftest.py no longer defines _STALL_S at module scope; the "
+        "stall watchdog is how a hang outside a test item names itself "
+        "(#250)")
+    stall_s = float(match.group(1))
+
+    assert stall_s < step_seconds, (
+        f"_STALL_S={stall_s:g}s does not fire before the Run Tests step "
+        f"timeout ({step_seconds}s) kills the process; the dump has to "
+        "land while the run is still alive (#250)")
+
+    assert "faulthandler.dump_traceback" in source, (
+        "the watchdog no longer dumps thread tracebacks, so a stall "
+        "outside a test item is again a silent gap in the log (#250)")
+    assert "os.dup(2)" in source and "def pytest_configure" in source, (
+        "the watchdog no longer owns an fd duplicated inside "
+        "pytest_configure, where global capture is suspended; measured, a "
+        "dup taken at conftest import time lands on the capture temp file "
+        "and the dump reaches nobody (#250)")
+
+
 # ---------------------------------------------------------------------------
 # Invalid escape sequences (#292)
 # ---------------------------------------------------------------------------
