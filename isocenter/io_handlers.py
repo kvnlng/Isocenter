@@ -15,9 +15,11 @@ section or a raised exception carries the same fact, the log line is a
 rendering of that fact for convenience, and the suite does not pin it.
 
 This is the rule the suite already follows, which is what keeps a mixed
-answer from being taste. `tests/test_export_loss_audit.py` asserts a
-WARNING-level line precisely because `write_tree` can never supply a
-store handle, so no audit row exists to carry it;
+answer from being taste. Measured: 139 `caplog`/`capsys` occurrences
+across 25 test files, no `caplog.set_level` anywhere, and 24 of the 27
+level gates set `logging.WARNING`. `tests/test_export_loss_audit.py`
+asserts a WARNING-level line precisely because `write_tree` can never
+supply a store handle, so no audit row exists to carry it;
 `tests/test_legacy_waveform_hydration.py` names the redundant half of
 its pair and asserts only the half nothing else records; and
 `tests/test_redact_error.py` asserts the exception first and keeps the

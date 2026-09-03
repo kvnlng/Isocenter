@@ -47,6 +47,17 @@ def _removals(recorded):
                    and any(m in str(w.message) for m in REMOVED_IN_V4)})
 
 
+def _un_sequence_fixture():
+    """The one-item implicit-VR sequence the gate must accept."""
+    import struct
+
+    def elem(group, element, value):
+        return struct.pack("<HHI", group, element, len(value)) + value
+
+    payload = elem(0x0010, 0x0010, b"SECRET^PHI")
+    return struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
+
+
 def _instance():
     inst = Instance("1.2.3.3", "1.2.840.10008.5.1.4.1.1.2", 1)
     inst.attributes = {
@@ -170,15 +181,9 @@ def test_the_un_sequence_gate_uses_no_pydicom_api_removed_in_v4():
     Runs the gate on a sequence it must accept, so a refusal fails here
     rather than only in the audit (#167).
     """
-    import struct
-
     from isocenter.io_handlers import _sequence_from_un_bytes
 
-    def elem(group, element, value):
-        return struct.pack("<HHI", group, element, len(value)) + value
-
-    payload = elem(0x0010, 0x0010, b"SECRET^PHI")
-    raw = struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
+    raw = _un_sequence_fixture()
 
     with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always")
@@ -212,17 +217,6 @@ def test_the_gate_can_still_read_a_datasets_character_set():
     declared = Dataset()
     declared.SpecificCharacterSet = "ISO_IR 100"
     assert declared._character_set, "a declared character set reads as empty"
-
-
-def _un_sequence_fixture():
-    """The one-item implicit-VR sequence the gate must accept."""
-    import struct
-
-    def elem(group, element, value):
-        return struct.pack("<HHI", group, element, len(value)) + value
-
-    payload = elem(0x0010, 0x0010, b"SECRET^PHI")
-    return struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
 
 
 def test_the_gates_write_stream_is_the_one_whose_vr_mode_changes_the_bytes():
