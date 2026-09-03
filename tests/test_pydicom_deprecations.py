@@ -205,3 +205,110 @@ def test_the_gate_can_still_read_a_datasets_character_set():
     declared = Dataset()
     declared.SpecificCharacterSet = "ISO_IR 100"
     assert declared._character_set, "a declared character set reads as empty"
+
+
+def _un_sequence_fixture():
+    """The one-item implicit-VR sequence the gate must accept."""
+    import struct
+
+    def elem(group, element, value):
+        return struct.pack("<HHI", group, element, len(value)) + value
+
+    payload = elem(0x0010, 0x0010, b"SECRET^PHI")
+    return struct.pack("<HHI", 0xFFFE, 0xE000, len(payload)) + payload
+
+
+def test_the_gates_write_stream_is_the_one_whose_vr_mode_changes_the_bytes():
+    """The gate's WRITE stream, not its read stream, is what #167 needs.
+
+    **Green on HEAD by construction, and that is the point.** This is a
+    characterization test of pydicom, not a red-first test of ours: its
+    value is going red on a pydicom bump that would otherwise break the
+    UN-sequence gate silently.
+
+    The gate accepts a vendor block only when it re-encodes byte for
+    byte. That comparison is made against the WRITE stream's VR mode. A
+    wrong value there is not an error -- it is a different, valid
+    encoding, so `write_sequence` succeeds, the bytes differ, the gate
+    returns `None`, and #167 comes back reported to users as "this
+    vendor block is unparseable" with no exception anywhere.
+
+    Note what is deliberately NOT asserted: that leaving the write
+    stream's VR mode unset raises. It does not, for the gate's own
+    datasets -- `write_dataset` falls back to a dataset's
+    `original_encoding`, and datasets that came out of `read_sequence`
+    carry `(True, True)`. The third assertion pins that fallback,
+    because it is the reason "unset happens to work" is true today.
+    """
+    from pydicom.dataelem import DataElement
+    from pydicom.filebase import DicomBytesIO
+    from pydicom.filereader import read_sequence
+    from pydicom.filewriter import write_sequence
+
+    raw = _un_sequence_fixture()
+    tag = Tag(0x0009, 0x1003)
+
+    src = DicomBytesIO(raw)
+    src.is_little_endian = True
+    src.is_implicit_VR = True
+    parsed = read_sequence(src, True, True, len(raw), "iso8859")
+
+    assert parsed[0].original_encoding == (True, True), (
+        "a dataset from `read_sequence` no longer records its own "
+        "encoding; the write stream's flags stop having a fallback")
+
+    def encoded(implicit):
+        out = DicomBytesIO()
+        out.is_little_endian = True
+        out.is_implicit_VR = implicit
+        write_sequence(out, DataElement(tag, "SQ", parsed), "iso8859")
+        return out.getvalue()
+
+    assert encoded(True) == raw, (
+        "the write stream in implicit VR no longer round-trips an "
+        "implicit-VR sequence; the gate would refuse every one of them")
+    assert encoded(False) != raw, (
+        "explicit VR on the write stream now produces the same bytes as "
+        "implicit -- the byte-equality gate has stopped distinguishing "
+        "the two, so a wrong flag would no longer be caught here")
+
+
+def test_the_gates_read_stream_does_not_consult_the_streams_vr_mode():
+    """The gate's READ stream sets a VR mode nothing reads.
+
+    `read_sequence` takes implicitness as a positional argument and
+    threads it down to the element generator; the one place it could be
+    re-derived, `_is_implicit_vr`, short-circuits on `is_sequence` before
+    reading a byte (`filereader.py:368-369`). The attribute never appears
+    on a stream in `filereader.py`. So the READ stream's VR mode is not
+    read at all, and setting it wrong -- or not at all -- changes nothing.
+
+    This goes red the moment a pydicom release starts consulting
+    `fp.is_implicit_VR` on the read path, which is the only event that
+    would make deleting the read stream's assignment in
+    `_sequence_from_un_bytes` unsafe.
+    """
+    from pydicom.filebase import DicomBytesIO
+    from pydicom.filereader import read_sequence
+
+    from isocenter.io_handlers import _sequence_from_un_bytes
+
+    raw = _un_sequence_fixture()
+
+    through_the_gate = _sequence_from_un_bytes(raw, Tag(0x0009, 0x1003),
+                                               "iso8859")
+    assert through_the_gate is not None and len(through_the_gate) == 1
+
+    contrary = DicomBytesIO(raw)
+    contrary.is_little_endian = True
+    contrary.is_implicit_VR = False      # the opposite of what the gate sets
+    parsed = read_sequence(contrary, True, True, len(raw), "iso8859")
+
+    assert contrary.tell() == len(raw), (
+        "the read stream's VR mode now changes how far `read_sequence` "
+        "consumes; the gate's read-stream flag has become load-bearing")
+    assert len(parsed) == len(through_the_gate) == 1
+    assert (parsed[0].PatientName
+            == through_the_gate[0].PatientName == "SECRET^PHI"), (
+        "the read stream's VR mode now changes what `read_sequence` "
+        "decodes; the gate's read-stream flag has become load-bearing")
