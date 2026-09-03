@@ -14,8 +14,8 @@ somebody who can act on it. Where a return value, an audit row, a report
 section or a raised exception carries the same fact, the log line is a
 rendering of that fact for convenience, and the suite does not pin it.
 
-This is the rule the suite already follows, which is what keeps a mixed
-answer from being taste. Measured: 139 `caplog`/`capsys` occurrences
+This is the rule the suite already follows almost everywhere, which is
+what keeps a mixed answer from being taste. Measured: 139 `caplog`/`capsys` occurrences
 across 25 test files, no `caplog.set_level` anywhere, and 24 of the 27
 level gates set `logging.WARNING`. `tests/test_export_loss_audit.py`
 asserts a WARNING-level line precisely because `write_tree` can never
@@ -24,7 +24,19 @@ supply a store handle, so no audit row exists to carry it;
 its pair and asserts only the half nothing else records; and
 `tests/test_redact_error.py` asserts the exception first and keeps the
 log assertion as residue of #48, where asserting the log INSTEAD of the
-exception was the defect.
+exception was the defect. The three level gates that are not WARNING all
+assert a line nothing else carries -- `release_memory` returns nothing
+and writes no audit row, and a zone that fails to apply raises but does
+not say which zone on what array.
+
+**Almost everywhere, not everywhere, and the exception is named here
+rather than left for a reader to find.** `services.py`'s equivalent
+throttle writes an audit row too, so this rule makes it best-effort as
+well -- yet `tests/test_redaction_robustness.py` pins both its call
+count and its exact suppression string, through a `MagicMock` logger,
+which is why a `caplog` census does not see it. That test is left
+alone: rewriting a passing test to match a ruling written after it is
+how a rule stops being evidence and starts being enforcement.
 
 Five operator-facing lines in this module are therefore best-effort, and
 each one has another channel that a test already pins:
