@@ -68,6 +68,7 @@ def test_persistence_priority(tmp_path):
     # 4. Assert
     assert ds.StudyDate == "20230101", "Export should prioritize Study object field over attributes dict"
 
+
 def _write_minimal(path, **overrides):
     """A single ordinary DICOM file: identifiers only, no pixels.
 
