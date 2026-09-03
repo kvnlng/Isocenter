@@ -2596,10 +2596,23 @@ class DicomExporter:
                     # Extract Sidecar Info if available (Zero-Copy)
                     sc_path, sc_offset, sc_length, sc_alg = None, None, None, None
                     if hasattr(inst, '_pixel_loader') and inst._pixel_loader:
-                        # Check if it's a SidecarPixelLoader
-                        # We duck-type check for attributes
+                        # A type test, not the duck test this used to
+                        # be: the block reads four attributes and the
+                        # `hasattr` pair checked two, so it never
+                        # actually guarded `.length` or `.alg` and was
+                        # not the guard it looked like. Every
+                        # `_pixel_loader` the package assigns is a
+                        # `SidecarPixelLoader`; the only other values
+                        # that reach here are two test doubles
+                        # (`tests/test_redaction_optimization.py`'s bare
+                        # lambda and `tests/test_redaction_parallel.py`'s
+                        # `ConstantPixelLoader`), and neither carries any
+                        # of the four. Behaviour-identical, and it also
+                        # removes a boolean operator the mutation probe
+                        # had to keep re-reporting as an equivalent
+                        # mutant (#285).
                         pl = inst._pixel_loader
-                        if hasattr(pl, 'sidecar_path') and hasattr(pl, 'offset'):
+                        if isinstance(pl, SidecarPixelLoader):
                             sc_path = pl.sidecar_path
                             sc_offset = pl.offset
                             sc_length = pl.length
