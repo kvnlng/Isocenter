@@ -20,9 +20,24 @@ has completed, so on unfixed code the save's rebind always lands last.
 They key on the seam -- `write_frame` reached from the persistence
 manager's thread -- not on any lock's existence, so a fix that repairs
 the loader but lets the stale hash through still fails the hash half.
+
+The same file also holds #288, a narrower interleaving between the same
+two writers. Both pixel writers asked `pixel_array is None` *outside*
+`_pixel_swap_lock` and then re-read `pixel_array` *inside* it. Nothing
+holds that lock while nulling the field -- `Instance.unload_pixel_data()`
+assigns None with no lock at all, from `release_memory()` sweeps and from
+redaction paths' `finally` -- so an unload landing between the check and
+the re-read turned a healthy save into `AttributeError: 'NoneType'
+object has no attribute 'tobytes'` inside `_build_instance_writes`,
+rolling back the entire transaction, and turned a redaction swap into
+`TypeError: object supporting the buffer API required` out of
+`hashlib.sha256(None)`. Those two tests force the window with a lock
+proxy rather than a thread: the interleaving is three events on one
+thread, so they are interpreter-independent.
 """
 import hashlib
 import pickle
+import sqlite3
 import threading
 
 import numpy as np
@@ -245,5 +260,166 @@ def test_the_store_still_pickles_with_its_pixel_swap_lock(tmp_path):
                 pass
         finally:
             clone.stop()
+    finally:
+        store.stop()
+
+
+# --------------------------------------------------------------------
+# #288: an unload between the None check and the read of `pixel_array`
+# --------------------------------------------------------------------
+
+class _UnloadOnFirstAcquire:
+    """A `_pixel_swap_lock` stand-in that unloads once, on first acquire.
+
+    The window #288 describes is a few bytecodes wide, and the only
+    stable seam inside it is the acquisition of `_pixel_swap_lock`
+    itself: the buggy code asks `pixel_array is None` before taking the
+    lock and re-reads `pixel_array` after. Firing `unload_pixel_data()`
+    from `__enter__`, before delegating to the real lock, pins the
+    interleaving as three forced events on ONE thread -- check, unload,
+    re-read -- with no thread, no sleep and no scheduler involved. That
+    is why these two tests behave identically on 3.12, 3.14 and 3.14t:
+    there is nothing for a different interpreter to schedule.
+
+    The null is produced by calling `unload_pixel_data()`, never by
+    assigning None, because that method is the writer the issue names
+    and it self-enforces its own precondition -- so the test cannot
+    construct a state the real code could not reach.
+    """
+
+    def __init__(self, real_lock, instance):
+        self._real = real_lock
+        self._instance = instance
+        self.fired = False
+
+    def __enter__(self):
+        if not self.fired:
+            self.fired = True
+            # Load-bearing: `unload_pixel_data` refuses when there is
+            # neither a file path nor a loader to restore from, and the
+            # fixture instance has no file path. If this ever returns
+            # False the array is never nulled and both tests below pass
+            # against unfixed code.
+            assert self._instance.unload_pixel_data() is True, (
+                "the fixture never bound a pixel loader, so the unload "
+                "declined and the race was never actually forced")
+        return self._real.__enter__()
+
+    def __exit__(self, *exc_info):
+        return self._real.__exit__(*exc_info)
+
+
+def _store_with_one_saved_instance(tmp_path, name):
+    """A store holding one instance whose resident array matches its frame.
+
+    Saved once -- which writes the frame and binds `_pixel_loader` -- and
+    then dirtied with a plain attribute edit, so the instance is unsaved
+    again while its pixels are unchanged. That is precisely the state a
+    `release_memory()` sweep operates on, and it is the state in which
+    the loader arm and the dedup branch must agree.
+    """
+    store = SqliteStore(str(tmp_path / name))
+    patient = Patient("P_288", "Race^Test")
+    study = Study("S_288", "20230101")
+    series = Series("SE_288", "CT", 1, Equipment("GE", "Revolution", "SN-1"))
+    inst = Instance("I_288", "1.2.840.10008.5.1.4.1.1.2", 1)
+    original = np.arange(64, dtype=np.uint8).reshape((8, 8))
+    inst.set_pixel_data(original.copy())
+    series.instances.append(inst)
+    study.series.append(series)
+    patient.studies.append(study)
+
+    store.save_all([patient])
+    return store, patient, inst, original
+
+
+def _stored_frame_row(store):
+    """The frame reference as both tables record it."""
+    with sqlite3.connect(store.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        inst_row = conn.execute(
+            "SELECT pixel_offset, pixel_length, pixel_hash, compress_alg "
+            "FROM instances WHERE sop_instance_uid='I_288'").fetchone()
+        blob_row = conn.execute(
+            "SELECT offset, length, hash, compress_alg FROM instance_blobs "
+            "WHERE instance_uid='I_288' AND kind='pixels'").fetchone()
+    return tuple(inst_row), tuple(blob_row)
+
+
+def test_a_save_survives_an_unload_landing_between_the_none_check_and_the_read(
+        tmp_path):
+    """`save_all` must not die because pixels were freed mid-write.
+
+    Unfixed, `_persist_pixels` answers `inst.pixel_array is None` with
+    False outside the lock, then takes the lock and evaluates
+    `inst.pixel_array.tobytes()` -- and the unload in between makes that
+    `AttributeError: 'NoneType' object has no attribute 'tobytes'`,
+    raised inside `_build_instance_writes` inside `save_all`'s open
+    transaction, so the whole save rolls back and nothing is marked
+    clean.
+
+    Fixed, the snapshot is taken once inside the lock, so the unload has
+    already happened when the None question is asked: the loader arm
+    runs and returns the reference the loader already holds, which is
+    byte-identical to what the dedup branch would have returned had
+    nothing raced. That equality is the second assertion, and it is what
+    makes the snapshot fix *sufficient* here rather than merely
+    non-crashing.
+    """
+    store, patient, inst, original = _store_with_one_saved_instance(
+        tmp_path, "save_race.db")
+    try:
+        before = _stored_frame_row(store)
+
+        inst.set_attr("0008,103e", "dirtied after the first save")
+        store._pixel_swap_lock = _UnloadOnFirstAcquire(
+            store._pixel_swap_lock, inst)
+
+        store.save_all([patient])
+
+        assert store._pixel_swap_lock.fired, (
+            "the lock proxy was never entered, so no race was forced")
+        assert _stored_frame_row(store) == before, (
+            "the raced save rewrote the frame reference; the loader arm "
+            "must reproduce exactly what the un-raced dedup branch stored")
+        assert np.array_equal(inst.get_pixel_data(), original), (
+            "the instance no longer reads back its own pixels")
+    finally:
+        store.stop()
+
+
+def test_a_redaction_swap_survives_an_unload_landing_between_the_none_check_and_the_read(
+        tmp_path):
+    """The same split, in `persist_pixel_data`, with a different corpse.
+
+    There the re-read lands in a local, so the crash is one frame later:
+    `hasattr(None, 'tobytes')` is False, the else branch runs
+    `hashlib.sha256(None)`, and the caller sees `TypeError: object
+    supporting the buffer API required` -- logged by the method's own
+    `except Exception` and re-raised into the redaction swap.
+
+    Fixed, the None is seen inside the lock and the method returns
+    before touching the loader, the hash or `record_blob_ref`, exactly
+    as its existing early return does. Nothing about the instance's
+    pixel linkage may move.
+    """
+    store, _patient, inst, original = _store_with_one_saved_instance(
+        tmp_path, "swap_race.db")
+    try:
+        loader_before = inst._pixel_loader
+        hash_before = inst._pixel_hash
+
+        store._pixel_swap_lock = _UnloadOnFirstAcquire(
+            store._pixel_swap_lock, inst)
+
+        store.persist_pixel_data(inst)
+
+        assert store._pixel_swap_lock.fired, (
+            "the lock proxy was never entered, so no race was forced")
+        assert inst._pixel_loader is loader_before, (
+            "the swap rebound the loader after losing the array it was "
+            "supposed to write")
+        assert inst._pixel_hash == hash_before
+        assert np.array_equal(inst.get_pixel_data(), original)
     finally:
         store.stop()

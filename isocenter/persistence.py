@@ -1976,9 +1976,6 @@ class SqliteStore:
         Args:
             instance (Instance): The instance containing the pixel data to persist.
         """
-        if instance.pixel_array is None:
-            return
-
         try:
             # The read -> sidecar write -> loader/hash rebind must be one
             # critical section against `_persist_pixels`: a background
@@ -1992,7 +1989,18 @@ class SqliteStore:
                 # 1. Write to Sidecar
                 # Pass array directly to avoid .tobytes() Memory spike
                 # (Zero-Copy 500MB save)
+                # One read, inside the lock, and every branch below asks
+                # this local. The None check used to sit above the `try`,
+                # outside the lock, while the read that feeds the hash sat
+                # here -- so an `unload_pixel_data()` landing between them
+                # left `b_data` None, `hasattr(None, 'tobytes')` False, and
+                # `hashlib.sha256(None)` raising `TypeError: object
+                # supporting the buffer API required` into the redaction
+                # swap (#288). Returning here skips `record_blob_ref` and
+                # `mark_modified` exactly as the old early return did.
                 b_data = instance.pixel_array
+                if b_data is None:
+                    return
 
                 # Hash Update (CRITICAL for Integrity Checks)
                 # Calculate Hash BEFORE writing/compression to ensure we
@@ -2429,20 +2437,48 @@ class SqliteStore:
           the upsert's COALESCE, the instance stays dirty, and the next
           save writes the truth.
         """
-        if inst.pixel_array is None:
-            loader = inst._pixel_loader
-            if isinstance(loader, SidecarPixelLoader):
-                return _StoredFrame(loader.offset, loader.length, loader.alg,
-                                    getattr(inst, '_pixel_hash', None))
-            return _StoredFrame(None, None, None, None)
-
         # Lock order: `_pixel_swap_lock` before `sidecar._lock` (inside
         # `write_frame`), never reversed. No sqlite work happens in here;
         # the caller writes the rows later, off this lock.
+        #
+        # The lock must open *before* the first read of `pixel_array`,
+        # not after it. `Instance.unload_pixel_data()` nulls that field
+        # under no lock at all -- from `release_memory()` sweeps and from
+        # redaction paths' `finally` -- so asking "is it None?" outside
+        # and re-reading it inside is a TOCTOU window: the null landed
+        # between the two and `.tobytes()` raised `AttributeError:
+        # 'NoneType' object has no attribute 'tobytes'` inside
+        # `save_all`'s open transaction, rolling the entire save back
+        # (#288). One read, one local, every branch below asks the local.
+        # The local is also what makes the write correct rather than
+        # merely non-crashing: unload drops only the instance's
+        # reference, numpy keeps the buffer alive for ours, and unload
+        # never mutates contents -- so bytes written from `arr` are still
+        # the instance's true pixels. Every instance now takes this lock,
+        # including non-resident ones that used to return before it; a
+        # few hundred nanoseconds each, uncontended.
         with self._pixel_swap_lock:
-            raw = inst.pixel_array.tobytes()
-            digest = hashlib.sha256(raw).hexdigest()
+            arr = inst.pixel_array
             loader = inst._pixel_loader
+
+            if arr is None:
+                # NOT in scope here: the case where the resident array had
+                # *diverged* from the loader's frame (a `set_pixel_data`
+                # after a save) before the unload nulled it. This arm then
+                # records the old frame and the save marks the instance
+                # persisted, dropping the new pixels. That is
+                # `unload_pixel_data()`'s precondition being wrong -- its
+                # docstring promises the data "can be restored", which is
+                # false once the resident array has diverged -- not this
+                # TOCTOU. Filed separately.
+                if isinstance(loader, SidecarPixelLoader):
+                    return _StoredFrame(loader.offset, loader.length,
+                                        loader.alg,
+                                        getattr(inst, '_pixel_hash', None))
+                return _StoredFrame(None, None, None, None)
+
+            raw = arr.tobytes()
+            digest = hashlib.sha256(raw).hexdigest()
 
             # Deduplication: identical bytes already in the sidecar.
             # Appending them again would grow the file by a full frame
