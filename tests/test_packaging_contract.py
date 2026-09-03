@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import tomllib
+import warnings
 import zipfile
 
 import pytest
@@ -757,3 +758,92 @@ def test_the_worker_watchdog_fires_inside_the_parents_window():
         "tests.yml's Run Tests step does not set "
         "ISOCENTER_WORKER_FAULTHANDLER=1, so the next child-side stall "
         "in CI is again a dump with the child's half missing (#250)")
+
+
+# ---------------------------------------------------------------------------
+# Invalid escape sequences (#292)
+# ---------------------------------------------------------------------------
+
+# Roots swept for invalid escape sequences. `isocenter/` is the one that
+# matters for a user -- an invalid escape there becomes an `import
+# isocenter` failure the day CPython escalates -- but `scripts/` and
+# `tests/` are swept too, because #292's goal is that a new one cannot
+# land anywhere, and compiling all 224 files costs about 0.2s.
+_ESCAPE_SWEEP_ROOTS = ("isocenter", "scripts", "tests")
+
+
+def _python_files_under(root: pathlib.Path):
+    """Every `.py` file under `root`, skipping bytecode caches."""
+    return sorted(
+        path for path in root.rglob("*.py")
+        if "__pycache__" not in path.parts)
+
+
+def test_no_shipped_module_carries_an_invalid_escape_sequence():
+    """An invalid escape sequence is a warning today and a failure later.
+
+    CPython's own account of it: 3.6 made an unrecognised `\\x` escape in
+    a non-raw string a `DeprecationWarning`, 3.12 promoted it to a
+    `SyntaxWarning`, and the documentation says "In a future Python
+    version they will raise a SyntaxError". No release is named, so the
+    only safe reading is that it happens. This project's floor is 3.12 --
+    exactly where the `SyntaxWarning` begins -- so this guard behaves
+    identically across the whole support matrix.
+
+    The shape of the check is load-bearing, and the obvious alternative
+    is worse in a way that hides defects:
+
+    - `simplefilter("error", SyntaxWarning)` and catching `SyntaxError`
+      also detects the problem, but the escalated warning aborts the
+      compile at the *first* site in a file. A second invalid escape in
+      the same module is invisible until the first is fixed. Recording
+      instead of raising reports every site in every file in one run.
+    - `simplefilter("always")` is not decoration. Warnings are deduped
+      per location by default, and the default filters can drop a repeat
+      entirely; without `always` a second occurrence can go unrecorded.
+
+    Both traps produce a guard that passes while the defect is present,
+    which is the failure mode this milestone is named for. Note also
+    that under the escalating filter the problem surfaces as
+    `SyntaxError`, not `SyntaxWarning` -- so a guard written as
+    `pytest.warns(SyntaxWarning)` around an escalated compile passes
+    vacuously. This one records.
+    """
+    offenders = []
+    for root_name in _ESCAPE_SWEEP_ROOTS:
+        root = REPO / root_name
+        if not root.is_dir():
+            continue
+        for path in _python_files_under(root):
+            with warnings.catch_warnings(record=True) as recorded:
+                warnings.simplefilter("always")
+                compile(path.read_bytes(), str(path), "exec")
+            for entry in recorded:
+                if issubclass(entry.category, SyntaxWarning):
+                    offenders.append((
+                        path.relative_to(REPO).as_posix(),
+                        entry.lineno,
+                        str(entry.message)))
+
+    shipped = [o for o in offenders if o[0].startswith("isocenter/")]
+    unshipped = [o for o in offenders if not o[0].startswith("isocenter/")]
+
+    def _render(rows):
+        return "\n".join(f"    {name}:{line}: {message}"
+                         for name, line, message in rows)
+
+    detail = []
+    if shipped:
+        detail.append(
+            "in the shipped package -- these become `import isocenter` "
+            "failures when CPython escalates:\n" + _render(shipped))
+    if unshipped:
+        detail.append(
+            "outside the shipped package -- these break the tooling "
+            "rather than the install, and are still defects:\n"
+            + _render(unshipped))
+
+    assert not offenders, (
+        "invalid escape sequences found; CPython warns about them today "
+        "and the documentation says a future version will raise "
+        "`SyntaxError` (#292).\n" + "\n".join(detail))

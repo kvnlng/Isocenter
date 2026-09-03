@@ -3063,7 +3063,7 @@ class DicomExporter:
         characters therefore round-trips as one string containing literal
         backslashes rather than a list. Widening `LO` to cover it would
         be worse -- an over-long `LO` is non-conformant. The same VM-1
-        property is why `UT` also takes any string containing `\`,
+        property is why `UT` also takes any string containing `\\`,
         whatever its length: under `LO` the backslash reads as the value
         delimiter and the value comes back split (#195).
 
