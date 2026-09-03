@@ -1297,6 +1297,22 @@ class DicomSession:
             PhiReport: An object containing valid PHI findings, iterable and exportable.
         """
 
+        # A scan ENDS by advancing `_revision` on every entity it
+        # touched (`_record_scan_results` -> `record_phi_status`), and
+        # `save()` without `sync=True` returns with `save_all` still
+        # running on the persistence manager's thread. Since #287 that
+        # window is as long as all of the save's pixel I/O. An instance
+        # dirtied inside it is dropped from the frozen dirty set, left
+        # dirty, and never saved -- `close()` shuts the manager down and
+        # does not enqueue a save, so nothing says so. The documented
+        # order in README and the quickstart is `save()` then `audit()`,
+        # which is exactly this window (#297).
+        #
+        # Entry is the right place ONLY because nothing inside `audit()`
+        # enqueues a save. If that ever changes, this moves to
+        # immediately before `_record_scan_results`.
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
 
         # Default to current config
         tags_to_use = self.configuration.phi_tags
