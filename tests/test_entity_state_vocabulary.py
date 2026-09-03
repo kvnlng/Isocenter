@@ -190,10 +190,10 @@ def test_recording_a_new_phi_status_leaves_the_entity_needing_a_save(name):
     something does.
 
     The redundancy holds only until the graph is reloaded. A hydrated
-    entity already carries REMEDIATED, so the status recorded after a
-    second remediation is the one it has and the short-circuit below
-    keeps the revision still -- which makes each of the five
-    load-bearing after a reload. Those five are killed one line each by
+    entity reloaded after a first remediation comes back carrying
+    REMEDIATED, so the status recorded after a second remediation is the
+    one it already has and the short-circuit below keeps the revision
+    still -- which makes each of the five load-bearing on that path. Those five are killed one line each by
     `test_*_after_a_reload_still_needs_a_save` in
     tests/test_remediation_invariants.py, a file the probe does run for
     that module (#173).
@@ -223,11 +223,13 @@ def test_recording_the_status_an_entity_already_carries_changes_nothing(name):
     `mark_modified()` calls in remediation.py honestly redundant on
     every path -- and decided to KEEP it. The short-circuit is the
     original design, landed with `record_phi_status` itself for the
-    reason its docstring still gives. Measured on a 206-entity graph, a
-    second identical audit leaves 0 entities dirty with it and all 198
-    it touches dirty without it, on a library whose memory claims are
-    made about 100GB+ datasets and whose audit walks the whole graph by
-    construction.
+    reason its docstring still gives. Measured on a 206-entity graph
+    with a real save in the middle: a second identical audit adds 0
+    dirty entities with it and dirties all 192 instances without it.
+    (14 patients, studies and series read dirty either way, because
+    `save_all` marks only instances persisted -- #307.) That is on a
+    library whose memory claims are made about 100GB+ datasets and
+    whose audit walks the whole graph by construction.
     It would also widen the window #297 closes, from instances whose
     status changed to every instance scanned. This test is what makes
     that a decision rather than an accident; do not re-open it without

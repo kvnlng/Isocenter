@@ -192,9 +192,12 @@ class TrackedEntity:
 
         That rule has a scope worth stating, because it reads as
         harmless and is not. Being ignored means a change that does not
-        itself move the revision is invisible to the status: on a graph
-        loaded from the store, every entity already carries REMEDIATED,
-        so a second remediation records nothing and advances nothing.
+        itself move the revision is invisible to the status. A graph
+        loaded from the store carries whatever conclusion was stored for
+        each entity, so an entity already remediated once comes back at
+        REMEDIATED -- and a second remediation then records the status it
+        already has, which is to say records nothing and advances
+        nothing.
         The `mark_modified()` calls in `remediation.py` are what keep it
         saveable -- they look redundant because on a first remediation
         this method's bump would have covered them, and after a reload

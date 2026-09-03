@@ -239,10 +239,13 @@ def test_clearing_a_patient_attribute_leaves_it_needing_a_save():
 # `record_phi_status(REMEDIATED)` on the shared success path also
 # advances the revision, so deleting the bump alone stays green -- that
 # is what the tests above say, honestly, in their docstrings. After a
-# reload it is the only thing left. A hydrated entity already reads
-# REMEDIATED, so `record_phi_status(REMEDIATED)` short-circuits (the
-# guard reads the `phi_status` property, which still returns REMEDIATED
-# because nothing moved the revision) and no bump happens. The PHI is
+# reload it is the only thing left. A graph loaded from the store
+# carries whatever status was stored for each entity, so one already
+# remediated once comes back at REMEDIATED and the
+# `record_phi_status(REMEDIATED)` ending a second remediation
+# short-circuits (the guard reads the `phi_status` property, which
+# still returns REMEDIATED because nothing moved the revision) and no
+# bump happens. The PHI is
 # stripped from memory, the entity reports nothing to save, the next
 # save skips it, and the identifier stays in the database (#173).
 #

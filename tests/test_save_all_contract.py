@@ -514,6 +514,11 @@ def test_audit_drains_a_running_save_before_it_records_what_it_found(
     the flush is missing, not a run that lost a race. Both waits are
     bounded so a wedge fails instead of hanging.
     """
+    # Speed and quiet, not correctness: the whole mechanism -- the parked
+    # `save_all`, the flush that releases it, `_record_scan_results` --
+    # lives in the parent process, so the scan's workers cannot change
+    # the outcome. Verified: the test is green as committed and red with
+    # the flush deleted, with this line removed.
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
 
     session = DicomSession(str(tmp_path / "session"))
