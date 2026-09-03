@@ -88,11 +88,16 @@ def _private(ds):
             for el in ds if el.tag.group % 2 == 1}
 
 
-def _roundtrip(tmp_path, anonymize=None):
+def _roundtrip(tmp_path, anonymize=None, mutate=None):
     """Ingest a private-block study, optionally anonymize, export, re-read.
 
     `anonymize` is None (export straight through) or the value to give
     `remove_private_tags` before running the privacy pipeline.
+
+    `mutate`, if given, is called with the session after `ingest()` and
+    before `export()`. It is the only way to put a value into the graph
+    that no source file can carry -- a Python `bool`, for instance,
+    which only `set_attr` can produce.
     """
     src = tmp_path / "src"
     src.mkdir()
@@ -102,6 +107,8 @@ def _roundtrip(tmp_path, anonymize=None):
     session = DicomSession(persistence_file=str(tmp_path / "priv.db"))
     try:
         session.ingest(str(src))
+        if mutate is not None:
+            mutate(session)
         if anonymize is not None:
             session.configuration.remove_private_tags = anonymize
             session.audit()
@@ -499,3 +506,45 @@ def test_a_multi_valued_element_within_LO_collapses_nothing_and_warns_nothing(
 
     assert list(ds[0x00091008].value) == ['alpha', 'beta']
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+def test_a_bool_private_value_is_written_as_the_LO_string_True():
+    """The `bool` arm of the fallback encoder, asserted on export (#283).
+
+    `_merge` IS the export merge -- `_export_instance_worker` calls it --
+    so this is the export path, not a unit shim around it. Under the
+    named mutation (`return 'LO', str(value)` -> `return None`) the
+    encoder reports that no VR fits, `_merge` files the tag as data loss
+    and writes no element at all, and the subscript raises `KeyError`.
+
+    `False` is asserted alongside `True` so that what is pinned is the
+    arm's `str(value)`, not a hardcoded "True".
+    """
+    ds = pydicom.Dataset()
+    DicomExporter._merge(ds, {"0009,1017": True})
+
+    assert (ds[0x00091017].VR, ds[0x00091017].value) == ("LO", "True")
+    assert DicomExporter._fallback_encoding(False) == ('LO', 'False')
+
+
+def test_a_bool_private_value_round_trips_as_True_not_1(tmp_path):
+    """The same value through the whole pipeline: set, export, re-read.
+
+    Nothing in a DICOM file ever yields a Python `bool`, so the value
+    has to be set on the graph between ingest and export -- that is what
+    `_roundtrip`'s `mutate` hook is for. The private creator
+    `(0009,0010)` is already written by `_write_src`, so `0009,1017` is
+    a well-formed private tag in that block.
+
+    The VR is deliberately NOT asserted here. The export writes
+    ImplicitVRLittleEndian file meta and only becomes explicit VR on the
+    J2K branch, which depends on the fixture carrying pixels AND on
+    codec availability -- so a VR assertion at this end would be pinned
+    to the environment. The test above is where the VR is deterministic.
+    """
+    def _set_bool(session):
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        inst.set_attr("0009,1017", True)
+
+    value = _private(_roundtrip(tmp_path, mutate=_set_bool)).get("0009,1017")
+    assert value == "True", value

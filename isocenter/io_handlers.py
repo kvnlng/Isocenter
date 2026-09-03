@@ -3085,8 +3085,21 @@ class DicomExporter:
         if isinstance(value, memoryview):
             return 'UN', value.tobytes()
         if isinstance(value, bool):
-            # Before `int`: `bool` is a subclass of it, and "True" is a
-            # better round-trip than "1" for a value that was set as one.
+            # This arm returns exactly what the `int` arm below would:
+            # `str(True)` is already "True", so today deleting it is an
+            # equivalent mutant no test can kill (#283). It is kept as a
+            # pre-placed guard for #154, which is about private tags
+            # ceasing to collapse to `LO`. The day the numeric arm emits
+            # a numeric VR, a `bool` falling through to it becomes `1` --
+            # and ordering above `int` is the entire mechanism that
+            # prevents that, since `bool` is an `int` subclass.
+            #
+            # The comment here used to claim '"True" is a better
+            # round-trip than "1"', a distinction the code does not
+            # make: nothing currently produces "1" for a bool. Under
+            # this project's one-spelling rule a future reader is
+            # entitled to delete a redundant arm, and that sentence was
+            # the justification they would have used.
             return 'LO', str(value)
         if isinstance(value, (int, float)):
             return 'LO', str(value)
