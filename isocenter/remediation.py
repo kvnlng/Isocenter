@@ -18,6 +18,21 @@ REMEDIATION_ACTION_TYPES = frozenset({
     "REMEDIATION_REMOVE",
 })
 
+#: A remediation that was proposed and did not run, so the value it
+#: targeted is still in the graph and will reach the exported file
+#: (#301). One spelling for every declining path, not one per reason:
+#: `audit_summary` counts action types, and the `REMEDIATION_REMOVE`
+#: comment below already rejects splitting one behaviour across two rows
+#: of the report's section 2. The reason lives in the row's `details`.
+#:
+#: **Deliberately not in `REMEDIATION_ACTION_TYPES`.** That frozenset is
+#: the ANONYMIZE evidence set `generate_report` checks (#254); if a
+#: decline counted as evidence, a run in which every remediation
+#: declined would satisfy the check that exists to catch a run whose
+#: remediation rows went missing. Pinned by
+#: `tests/test_declined_remediation_is_recorded.py`.
+REMEDIATION_DECLINED = "REMEDIATION_DECLINED"
+
 
 class RemediationService:
     """
@@ -81,8 +96,15 @@ class RemediationService:
                 continue
 
             try:
-                self._apply_single_remediation(finding, audit_buffer)
-                processed_entities.add(key)
+                # Keyed on the *outcome*, not on "did not raise". A
+                # declining path returns False, and adding its key would
+                # count a remediation that did not happen as applied --
+                # `anonymize()` prints that total -- and would suppress a
+                # later finding against the same attribute, which the key
+                # cannot tell apart because it carries no action type
+                # (#301).
+                if self._apply_single_remediation(finding, audit_buffer):
+                    processed_entities.add(key)
             except Exception as e:
                 failures += 1
                 self.logger.error(
@@ -115,6 +137,18 @@ class RemediationService:
         Args:
             finding (PhiFinding): The finding containing the proposal.
             audit_buffer (list, optional): Buffer to append audit log entries (optimization).
+
+        Returns:
+            bool: True when the entity was actually changed. False on
+                every declining path -- and `apply_remediation` keys its
+                dedup set and its returned count on this, so a decline
+                neither counts as an applied remediation nor suppresses
+                a later finding that could have succeeded against the
+                same attribute (#301). The dedup key carries no action
+                type, so before this a `REMOVE_TAG` that declined
+                blocked a `REPLACE_TAG` on the same tag, and
+                `apply_remediation` returned both of them as applied
+                while `anonymize()` printed the total.
         """
         proposal = finding.remediation_proposal
         entity = finding.entity
@@ -123,7 +157,12 @@ class RemediationService:
             self.logger.warning(
                 f"Finding for {
                     finding.entity_uid} has no entity reference. Skipping.")
-            return
+            self._record_decline(
+                finding,
+                "no entity reference; the finding could not be resolved "
+                "against the live graph",
+                audit_buffer)
+            return False
 
         action_type = ""
         details = ""
@@ -158,7 +197,12 @@ class RemediationService:
                         finding.entity_uid} (Type: {
                         type(entity).__name__}) has no attribute or setter for {
                         proposal.target_attr}")
-                return
+                self._record_decline(
+                    finding,
+                    f"{type(entity).__name__} has no attribute or setter "
+                    f"for {proposal.target_attr}",
+                    audit_buffer)
+                return False
 
         elif proposal.action_type == "SHIFT_DATE":
             # Deterministic Date Shifting
@@ -167,7 +211,13 @@ class RemediationService:
                 self.logger.warning(
                     f"Could not resolve PatientID for {
                         finding.entity_uid}. Skipping date shift.")
-                return
+                self._record_decline(
+                    finding,
+                    f"could not resolve a PatientID to seed the jitter "
+                    f"for {proposal.target_attr}, so the date is "
+                    f"unshifted",
+                    audit_buffer)
+                return False
 
             shift_days = self._get_date_shift(patient_id)
             new_date = self._shift_date_string(proposal.original_value, shift_days)
@@ -192,18 +242,31 @@ class RemediationService:
                 val_str = str(proposal.original_value).strip(
                 ) if proposal.original_value is not None else ""
                 if not val_str:
+                    # The one non-success path that deliberately writes
+                    # no decline row. An empty value is not retained PHI:
+                    # there is nothing to shift and nothing left behind,
+                    # so a row here would take the run to
+                    # REVIEW_REQUIRED over a graph with nothing wrong in
+                    # it -- the cry-wolf shape that gets a signal
+                    # ignored.
                     self.logger.info(
                         f"Skipping jitter for empty date on {
                             finding.entity_uid} (Tag: {
                             proposal.target_attr})")
-                    return
+                    return False
 
                 self.logger.warning(
                     f"Invalid date format for {
                         finding.entity_uid} (Tag: {
                         proposal.target_attr}): {
                         proposal.original_value}")
-                return
+                self._record_decline(
+                    finding,
+                    f"invalid date format for {proposal.target_attr}: "
+                    f"{proposal.original_value!r}, so the value is "
+                    f"unchanged",
+                    audit_buffer)
+                return False
 
         elif proposal.action_type == "REMOVE_TAG":
             # 1. Generic DicomItem support
@@ -266,6 +329,70 @@ class RemediationService:
                         (action_type, finding.entity_uid, details, None, None))
                 else:
                     self.store_backend.log_audit(action_type, finding.entity_uid, details)
+            return True
+        else:
+            # Every other non-success path above `return`s, so reaching
+            # here with an empty `action_type` means one of three things,
+            # and none of them wrote a word before #301: a `REMOVE_TAG`
+            # whose target is in neither `attributes` nor `sequences`; a
+            # `REMOVE_TAG` against an entity with no `attributes` dict
+            # *and* no matching Python attribute (the arm at the bottom
+            # of that block is an `elif` on the outer `hasattr`, so both
+            # fall past it); or a proposal carrying an action type this
+            # method does not implement.
+            #
+            # One `else` here rather than an `else` nested in the
+            # `attributes` arm: nested, it would cover only the first of
+            # the three, and it would stop covering a fourth if one were
+            # ever added above.
+            self._record_decline(
+                finding,
+                f"{proposal.action_type} on {proposal.target_attr} "
+                f"matched no applicable arm for "
+                f"{type(entity).__name__}",
+                audit_buffer)
+            return False
+
+    def _record_decline(self, finding: PhiFinding, reason: str,
+                        audit_buffer: list = None):
+        """Write the audit row for a remediation that did not run (#301).
+
+        The log line each caller already emits is kept and this is added
+        beside it: the log was never the problem, its being the *only*
+        record was. A log line reaches whoever is watching stdout at the
+        time; the compliance report, the grade, and any later session
+        reading this store all key on the audit table, and a value the
+        pipeline was told to remove and did not remove is exactly the
+        thing that has to survive into all three.
+
+        The reason is prose in `details`, not a column. **Rejected: a
+        `decline_reason` column** -- no caller would branch on it, since
+        grading turns on the row existing and the report lists the rows,
+        so it would be a column with no reader. **Rejected: re-using
+        `element_tag`** -- that slot is documented "for `SCAN_GAP` only"
+        in three places (`persistence.py`'s reader, `log_audit`'s
+        docstring and `log_audit_batch`'s), and filling it here would
+        falsify all three.
+
+        Deliberately does **not** call `record_phi_status`. The success
+        block stamps `REMEDIATED`; a declined entity has not been
+        remediated and its status has to keep saying so.
+
+        Same two-shape dispatch as the success block, for the same
+        reason: `log_audit_batch` takes one tuple shape, so a caller with
+        no `loss_scope` and no `element_tag` to describe still writes
+        both slots.
+        """
+        details = f"Remediation declined for {finding.entity_uid}: {reason}"
+        if not self.store_backend:
+            return
+        if audit_buffer is not None:
+            audit_buffer.append(
+                (REMEDIATION_DECLINED, finding.entity_uid, details,
+                 None, None))
+        else:
+            self.store_backend.log_audit(
+                REMEDIATION_DECLINED, finding.entity_uid, details)
 
     def _resolve_patient_id(self, entity, proposal: PhiRemediation = None) -> Optional[str]:
         """

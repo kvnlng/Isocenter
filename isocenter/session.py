@@ -1949,6 +1949,7 @@ class DicomSession:
         data_losses = self.store_backend.get_audit_losses()
         scan_gaps = self._resolve_scan_gaps(
             self.store_backend.get_audit_scan_gaps())
+        declined_remediations = self.store_backend.get_audit_declines()
 
         # Check for unsafe attributes (BurnedInAnnotation)
         unsafe_items = self.store_backend.check_unsafe_attributes()
@@ -2078,6 +2079,19 @@ class DicomSession:
         # nothing could establish is not a clean one (#167).
         open_gaps = [row for row in scan_gaps if row[3] != GAP_REMOVED]
 
+        # A declined remediation grades exactly like an open gap, and
+        # for the same reason: the value it targeted is **still in the
+        # graph** and reaches the exported file, so a report that graded
+        # PASS over one would be asserting the removal happened. Graded
+        # on the row existing rather than on any property of it -- there
+        # is no disposition to resolve here, because unlike a `SCAN_GAP`
+        # nothing downstream removes a value a remediation declined to
+        # touch (#301).
+        #
+        # An empty date writes no row at all, so this cannot fire over a
+        # graph with nothing wrong in it; that gate is in
+        # `_apply_single_remediation`, where the value is in hand.
+
         # Action-specific evidence (#254). The `audit_summary` arm below
         # asks whether the audit log heard about *anything*; this asks
         # whether it heard about what this session did. Without it, a
@@ -2111,10 +2125,12 @@ class DicomSession:
             exceptions=exceptions,
             data_losses=data_losses,
             scan_gaps=scan_gaps,
+            declined_remediations=declined_remediations,
             export_recorded=export_recorded,
             validation_status=("PASS"
                                if audit_summary and not exceptions
                                and not graded_losses and not open_gaps
+                               and not declined_remediations
                                and not unattested
                                else "REVIEW_REQUIRED")
         )

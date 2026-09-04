@@ -58,6 +58,11 @@ class ComplianceReport:
         exceptions (list): List of error tuples (timestamp, action, details).
         data_losses (list): Elements present in the source and not in the
             output, as (timestamp, entity_uid, details, loss_scope).
+        declined_remediations (list): Remediations that were proposed
+            and did not run, as (timestamp, entity_uid, details). The
+            value each one targeted is still in the object graph, which
+            is why one of these takes the grade to `REVIEW_REQUIRED` --
+            the same argument `open_gaps` makes (#301).
         scan_gaps (list): Elements the PHI scan could not open, as
             (timestamp, entity_uid, details, disposition). The
             disposition is one of `GAP_REMOVED`, `GAP_RETAINED` or
@@ -129,6 +134,14 @@ class ComplianceReport:
     # could not open: (timestamp, entity_uid, details). Its own field
     # rather than more `data_losses` -- see get_audit_scan_gaps (#167).
     scan_gaps: list = field(default_factory=list)
+
+    # Remediations that were proposed and did not run, as (timestamp,
+    # entity_uid, details): `REMEDIATION_DECLINED` rows (#301). Its own
+    # field for the same reason `scan_gaps` is: a third claim, not more
+    # of either. 3.1 is content that is not in the export, 3.2 is
+    # content that is and was never read, and this is content that was
+    # read, was meant to be removed, and is still there.
+    declined_remediations: list = field(default_factory=list)
 
     # Export Boundary (#153)
     #
@@ -293,6 +306,34 @@ The following actions were recorded in the secure audit trail:
                 md_content += f"| {gap[0]} | {gap[1]} | {gap[2]} | {gap[3]} |\n"
         else:
             md_content += "\n### 3.2 Unscanned Content\n\n*No unscanned content was recorded.*\n"
+
+        # 3.3 -- the third claim under this number, and the reason it
+        # sits here rather than under a number of its own: 4 and 5 are
+        # asserted verbatim by three test files, so a new top-level
+        # section would renumber Exceptions. It belongs beside 3.2 on
+        # the merits anyway -- 3.2 is content that reached the export
+        # and was never read; this is content that was read, was meant
+        # to be removed, and reached the export regardless.
+        #
+        # **The empty case renders nothing at all**, unlike 3.1 and 3.2,
+        # whose empty prose is load-bearing for the bounded slices
+        # `tests/test_data_loss_reporting.py` and
+        # `tests/test_private_sequence_implicit_vr.py` take between
+        # those headers. Nothing slices on 3.3, and a header saying
+        # "the following remediations declined" over no rows is a claim
+        # about a run that had none.
+        if report.declined_remediations:
+            md_content += (
+                "\n### 3.3 Declined Remediations\n\n> [!WARNING]\n"
+                "> A remediation was proposed for each element below and "
+                "did not run. **The value is still in the data** and "
+                "reached the exported files:\n\n")
+            md_content += ("| Timestamp | Entity | Reason |\n"
+                           "| :--- | :--- | :--- |\n")
+            for decline in report.declined_remediations:
+                # (timestamp, entity_uid, details)
+                md_content += (f"| {decline[0]} | {decline[1]} | "
+                               f"{decline[2]} |\n")
 
         # Exceptions Section
         if report.exceptions:
