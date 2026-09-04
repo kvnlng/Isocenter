@@ -784,6 +784,15 @@ class DicomSession:
                             had_pixels = inst.pixel_array is not None
                             had_waveform = inst.waveform_array is not None
 
+                            # `unload_pixel_data`, deliberately: this
+                            # method's own docstring says nothing is
+                            # discarded, and since #293 that is true --
+                            # an array replaced through
+                            # `set_pixel_data()` and not yet written is
+                            # refused here and stays resident. Do not
+                            # "optimise" this to `discard_pixel_data()`;
+                            # that would free more memory by throwing
+                            # away pixels no one else holds.
                             gave_pixels = inst.unload_pixel_data() and had_pixels
                             gave_waveform = (inst.unload_waveform_data()
                                              and had_waveform)
@@ -944,6 +953,14 @@ class DicomSession:
 
                         with swap_lock:
                             if pixel_due:
+                                # Deliberately does NOT clear
+                                # `_pixel_array_unwritten`: compaction
+                                # rewrites where a frame lives, not which
+                                # frame it is, so a resident array that had
+                                # diverged from the stored one still has
+                                # (#293). Clearing here would make an
+                                # unwritten array look saved because the
+                                # sidecar was tidied.
                                 inst._pixel_loader.offset = pixel_ref[0]
                                 inst._pixel_loader.length = pixel_ref[1]
                                 count += 1
@@ -2680,6 +2697,22 @@ class DicomSession:
                         # Re-point it at this process's.
                         loader.instance = instance
                         instance._pixel_loader = loader
+                        # The worker wrote this frame to the sidecar
+                        # before handing the loader back, so the parent's
+                        # instance is now backed by what it holds -- and
+                        # freeable again (#293).
+                        #
+                        # Belt and braces, and it SURVIVES DELETION
+                        # UNTESTED: on the processes path the parent's
+                        # array was never replaced, so the flag is
+                        # already False, and on the threads path the
+                        # worker mutated this very instance and
+                        # `persist_pixel_data` cleared it before the
+                        # loader came back. Kept because this line is
+                        # what makes the parent's state a consequence of
+                        # the loader it is being handed rather than of
+                        # which path the redaction happened to take.
+                        instance._pixel_array_unwritten = False
                     if mutation.get('pixel_hash'):
                         instance._pixel_hash = mutation['pixel_hash']
 

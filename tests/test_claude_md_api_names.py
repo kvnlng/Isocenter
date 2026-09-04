@@ -36,7 +36,8 @@ NOT_TRACKED_ENTITY = {
     "DicomStore", "store.py", "entities.py", "DicomItem", "attributes",
     "sequences", "Patient", "Study", "Series", "Instance", "TrackedEntity",
     "SidecarPixelLoader", "SidecarWaveformLoader", "get_pixel_data()",
-    "unload_pixel_data()", "set_attr", "add_sequence_item", "max",
+    "unload_pixel_data()", "discard_pixel_data()", "set_pixel_data()",
+    "set_attr", "add_sequence_item", "max",
     "remediation.py",
 }
 

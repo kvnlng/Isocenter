@@ -2089,6 +2089,9 @@ class SqliteStore:
                 # live object), so passing instance=instance works.
                 instance._pixel_loader = self._create_pixel_loader(
                     offset, length, c_alg, instance, pixel_hash=p_hash)
+                # The loader now points at the bytes that are resident, so
+                # the array is recoverable and freeable again (#293).
+                instance._pixel_array_unwritten = False
 
             # 3. Optional: Persist the linkage to DB immediately?
             # It's safer if we do, so if we crash, we know where the pixels are.
@@ -2654,15 +2657,19 @@ class SqliteStore:
             loader = inst._pixel_loader
 
             if arr is None:
-                # NOT in scope here: the case where the resident array had
-                # *diverged* from the loader's frame (a `set_pixel_data`
-                # after a save) before the unload nulled it. This arm then
-                # records the old frame and the save marks the instance
-                # persisted, dropping the new pixels. That is
-                # `unload_pixel_data()`'s precondition being wrong -- its
-                # docstring promises the data "can be restored", which is
-                # false once the resident array has diverged -- not this
-                # TOCTOU. Filed separately.
+                # Recording the loader's own frame is correct here BECAUSE
+                # the precondition is now enforced upstream. This arm used
+                # to be reachable with a *diverged* array: a
+                # `set_pixel_data()` after a save left the loader pointing
+                # at the superseded frame, `unload_pixel_data()` cleared
+                # the new pixels anyway, and this arm then re-recorded the
+                # old offset/length/hash and the save marked the instance
+                # persisted -- store, sidecar, memory and `_pixel_hash` all
+                # agreeing on the wrong frame, with every integrity check
+                # passing. `unload_pixel_data()` now refuses to null a
+                # diverged array (#293), so an `arr is None` here means the
+                # array really was equal to what the loader points at.
+                # Do not relax that refusal without revisiting this arm.
                 if isinstance(loader, SidecarPixelLoader):
                     return _StoredFrame(loader.offset, loader.length,
                                         loader.alg,
@@ -2678,6 +2685,10 @@ class SqliteStore:
             if (getattr(inst, '_pixel_hash', None) == digest
                     and isinstance(loader, SidecarPixelLoader)):
                 inst._pixel_hash = digest
+                # These exact bytes are already in the sidecar and the
+                # loader already points at them, so the resident array
+                # is recoverable and freeable again (#293).
+                inst._pixel_array_unwritten = False
                 return _StoredFrame(loader.offset, loader.length,
                                     loader.alg, digest)
 
@@ -2706,6 +2717,13 @@ class SqliteStore:
             inst._pixel_loader = self._create_pixel_loader(
                 offset, length, _PIXEL_COMPRESSION, inst, pixel_hash=digest)
             inst._pixel_hash = digest
+            # Published: the loader now points at these bytes, so the
+            # resident array is recoverable and freeable. This clear is
+            # what keeps `release_memory()` working after a
+            # `set_pixel_data()`; miss it and every replaced-and-saved
+            # instance becomes permanently unfreeable, silently, because
+            # the sweep only logs counts (#293).
+            inst._pixel_array_unwritten = False
             return _StoredFrame(offset, length, _PIXEL_COMPRESSION, digest)
 
     def _log_save_summary(self, tally) -> None:

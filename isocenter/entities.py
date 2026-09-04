@@ -403,6 +403,21 @@ class Instance(DicomItem):
     # Transient: Hash for Integrity Check
     _pixel_hash: Optional[str] = field(default=None, repr=False)
 
+    # Transient: True when `pixel_array` was replaced through
+    # `set_pixel_data()` and has not since been written anywhere. It is
+    # what `unload_pixel_data()` consults to tell "this frame can be
+    # brought back" from "there is *a* frame that can be brought back",
+    # which is all `file_path or _pixel_loader` ever answered (#293).
+    #
+    # NOT called `_pixel_dirty`. "Dirty" already means two different
+    # things in this codebase -- persistence-dirty (`_revision` vs
+    # `_persisted_revision`) and PHI-dirty (`phi_status`) -- and both
+    # were called "dirty" once, which made them indistinguishable in the
+    # code and in the output users read. A third would be worse than
+    # either. This is narrower than any of them: it tracks one specific
+    # divergence, not a general state of unsavedness.
+    _pixel_array_unwritten: bool = field(default=False, repr=False)
+
     # Transient: Decoded waveform samples, shape (num_samples, num_channels)
     waveform_array: Optional[np.ndarray] = field(default=None, repr=False)
 
@@ -487,15 +502,75 @@ class Instance(DicomItem):
 
     def unload_pixel_data(self) -> bool:
         """
-        Clears the cached pixel_array from memory to free resources.
+        Frees the cached pixel_array, but only when it can be brought back.
 
-        Only performs the clear if the data can be re-loaded (i.e., `file_path`
-        or `_pixel_loader` is present).
+        Two things have to be true, and the second was missing until #293.
+        There must be somewhere to reload from (`file_path` or
+        `_pixel_loader`), **and** the resident array must not have been
+        replaced through `set_pixel_data()` since it was last written.
+        `set_pixel_data()` deliberately leaves `_pixel_loader` alone, so
+        after a save the loader is still there and still points at the
+        frame the replacement superseded: the old check passed while the
+        array and the stored frame had diverged, and the clear discarded
+        the only copy of the new pixels. The next `save_all` then
+        re-recorded the loader's own offset, length and hash and marked
+        the instance persisted, so store, sidecar, memory and
+        `_pixel_hash` all agreed on the old frame and every integrity
+        check passed.
+
+        The precondition is stated exactly, because promising more than
+        the flag tracks would be the same defect in the fix: this refuses
+        when the array was **replaced through `set_pixel_data()`** and
+        not since written. An array mutated **in place** -- `arr =
+        inst.get_pixel_data(); arr[...] = 0` -- diverges too and is not
+        detected, and neither is the writeable arm of
+        `RedactionService._redact_instance_pixels`, which zeroes a
+        file-backed array in place and never calls `set_pixel_data()`.
+        Those sites are unchanged by #293 and were already this way.
+
+        Use `discard_pixel_data()` where dropping unsaved pixels is the
+        intent rather than the accident.
 
         Returns:
             bool: True if unloaded (or already absent), False if it was
-                unsafe to unload -- the data is in memory only and
-                nothing could bring it back.
+                unsafe to unload -- either the data is in memory only and
+                nothing could bring it back, or it has diverged from what
+                is stored.
+        """
+        if self.pixel_array is None:
+            return True
+
+        if self._pixel_array_unwritten:
+            # Same refusal path as the no-loader case below, and silent
+            # for the same reason: this is the guard working. A loader
+            # may well be present -- it just points at the wrong frame.
+            get_logger().debug(
+                "Not unloading pixels for %s: the array was replaced and "
+                "has not been written, so clearing it would discard the "
+                "only copy.", self.sop_instance_uid)
+            return False
+
+        return self.discard_pixel_data()
+
+    def discard_pixel_data(self) -> bool:
+        """
+        Frees the cached pixel_array even if it has unwritten changes.
+
+        This is `unload_pixel_data()`'s behaviour before #293, kept under
+        a name that says what it does. It is for the caller who means to
+        throw the resident array away -- the redaction `finally` blocks,
+        where a partially-zeroed array must be dropped so the next
+        `get_pixel_data()` reloads the original through the loader.
+
+        Two behaviours, two names. This is not an alias for
+        `unload_pixel_data()` and must not become one: "one spelling per
+        behaviour" is about a single behaviour with two names, and these
+        answer different questions -- "free this if it is safe" and
+        "throw this away".
+
+        Returns:
+            bool: True if discarded (or already absent), False if there
+                is nowhere to reload from at all.
         """
         if self.pixel_array is None:
             return True
@@ -555,6 +630,9 @@ class Instance(DicomItem):
                 # Rows 4->3 -- and since set_pixel_data ends in
                 # mark_modified(), the next save() wrote it to SQLite (#186).
                 self.pixel_array = arr
+                # A fresh read from the store or the file: the resident
+                # array now IS what is stored, so it is freeable again (#293).
+                self._pixel_array_unwritten = False
                 return self.pixel_array
             except Exception as e:
                 raise RuntimeError(f"Pixel Loader failed for {self.sop_instance_uid}: {e}") from e
@@ -572,6 +650,9 @@ class Instance(DicomItem):
                     # `attributes` holds, so a re-derivation could only
                     # disagree with them (#186).
                     self.pixel_array = ds.pixel_array
+                    # A fresh read from the store or the file: the resident
+                    # array now IS what is stored, so it is freeable again (#293).
+                    self._pixel_array_unwritten = False
                     return self.pixel_array
                 except (AttributeError, TypeError):
                     # "No pixel data element" was the intent and is still
@@ -634,6 +715,17 @@ class Instance(DicomItem):
                         # Same reasoning as the two branches above: a read
                         # must not write (#186).
                         self.pixel_array = arr
+                        # A fresh read from the store or the file: the resident
+                        # array now IS what is stored, so it is freeable again
+                        # (#293). Unlike its two siblings above, this clear
+                        # SURVIVES DELETION UNTESTED: reaching it needs a
+                        # transfer syntax pydicom cannot decode and imagecodecs
+                        # can, on an instance whose array has diverged, and
+                        # nothing in the suite constructs that. It is here
+                        # because the two arms above are pinned and a read path
+                        # that disagreed with them about whether a read counts
+                        # as a write would be a second answer to one question.
+                        self._pixel_array_unwritten = False
                         return self.pixel_array
                 except (ImportError, AttributeError, RuntimeError):
                     # Fallback failed, proceed to raise original error
@@ -795,8 +887,21 @@ class Instance(DicomItem):
                 trusting the attributes (descriptors that do not describe
                 the bytes) nor trusting the array (this is how #186
                 happened) is honest.
+
+        Note that this does **not** clear `_pixel_loader`. #293 weighed
+        clearing it as a cheaper fix and rejected it: the loader is what
+        lets a partially-redacted array be dropped and the original
+        reloaded, which is the design
+        `tests/test_redaction_failure_is_reported.py` states outright.
+        Instead the divergence is recorded, and `unload_pixel_data()`
+        refuses until it is written.
         """
         self.pixel_array = array
+        # The resident array no longer matches anything on disk or in the
+        # sidecar, and `_pixel_loader` is deliberately left pointing at
+        # the frame it replaced -- so from here until something writes
+        # these bytes, dropping the array would lose them (#293).
+        self._pixel_array_unwritten = True
         shape = array.shape
 
         geom = resolve_pixel_geometry(shape, self.attributes)
