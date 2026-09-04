@@ -74,6 +74,20 @@ class PersistenceManager:
         # entry out of `_inflight` under `_inflight_lock` before it is
         # put back, so only one caller can ever hold a given payload.
         self._recover_lock = threading.Lock()
+        # Makes `_start_worker` idempotent under concurrency. Both call
+        # sites used to do their own check-then-act on thread liveness,
+        # so two callers could observe one dead worker and both start a
+        # replacement -- two consumers on one queue, one sentinel
+        # between them, and `shutdown()`'s join burning its full timeout
+        # on a thread that never got the sentinel (#313, #250's shape).
+        #
+        # **A leaf lock.** Nothing is acquired while it is held and
+        # nothing under it calls into `SqliteStore`; the body is a
+        # liveness check and a thread construction. The order with the
+        # other manager lock is `_recover_lock` -> `_worker_lock`
+        # (`_recover_orphaned_item` already holds the former when it
+        # restarts). Never take `_recover_lock` while holding this one.
+        self._worker_lock = threading.Lock()
 
         self._start_worker()
 
@@ -123,14 +137,24 @@ class PersistenceManager:
         # `test_stale_sentinel` composing: a pending sentinel left by an
         # earlier shutdown is read as stale exactly because `running` is
         # True again, so it is counted off and the worker continues.
-        if self.thread is not None and self.thread.is_alive():
-            self.running = True
-            return
+        # The guard and the create-and-start are ONE critical section,
+        # which is the whole content of #313: split, the check is advice
+        # rather than an answer, and `save_async`'s unlocked pre-check
+        # (which stays, as a fast path) is not the authority.
+        with self._worker_lock:
+            if self.thread is not None and self.thread.is_alive():
+                self.running = True
+                return
 
-        self.running = True
-        self.thread = threading.Thread(target=self._worker, daemon=True)
-        self.thread.start()
-        get_logger().info("PersistenceManager worker thread started.")
+            self.running = True
+            # Named so the stall census in `tests/conftest.py` -- which
+            # counts `threading.enumerate()` by name -- says "nine
+            # PersistenceWorkers" rather than "nine Thread-N", which is
+            # the diagnostic #250 needed and did not have.
+            self.thread = threading.Thread(
+                target=self._worker, daemon=True, name="PersistenceWorker")
+            self.thread.start()
+            get_logger().info("PersistenceManager worker thread started.")
 
     def flush(self):
         """
