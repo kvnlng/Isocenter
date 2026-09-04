@@ -195,15 +195,27 @@ def test_a_clean_ingest_returns_a_clean_summary(tmp_path):
     """The control, and the re-ingest arm: skipped is not failed.
 
     The third ingest is the one that costs a line and is worth it.
-    `IngestSummary.skipped` is set in TWO places -- the early return at
-    `io_handlers.py:961` when every file is already known, and the
-    general path at `:1343` when only some are -- and until #284 only
-    the first was asserted anywhere. That mattered because #284's ruling
+    `IngestSummary.skipped` is set in TWO places -- the early return
+    taken when *every* file is already known, and the terminal return
+    of the general path when only some are -- and until #284 only the
+    first was asserted anywhere. That mattered because #284's ruling
     treats the "Skipping N already imported files" log line as
     best-effort *on the grounds that* `skipped` carries the same number;
     a justification pinned on only one of the two branches, while the
     log line fires on both, is half a justification. Ingesting a folder
     that gained a file exercises the other branch.
+
+    Both branches were cited by line number until #329, and both
+    numbers had drifted hundreds of lines from the code they meant.
+    Neither rule in `tests/test_source_citations.py` could see it: one
+    was still in range and so graded as fine, the other named no file
+    at all and so matched nothing. They are named rather than numbered
+    now, because the number was decorative -- the prose identifies each
+    branch on its own -- and a decorative number is one nobody notices
+    going wrong. That is the opposite of the five
+    `entity.mark_modified()` citations, where the line number *is* the
+    identity of one of five near-identical calls, which is why those
+    are written in the quoting grammar and pinned and these are not.
     """
     src = tmp_path / "src"
     src.mkdir()

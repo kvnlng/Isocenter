@@ -74,6 +74,24 @@ rather than in a comment nobody would find. A future rule could require
 every `line N` to name a file; it would need that citation rewritten
 first, by someone who knows what it meant.
 
+**Stated deferral: Rule 1 is a range check and nothing more.** A
+citation naming a file and a line but quoting no code can only be
+graded against the file's length -- there is nothing to compare the
+line *against*. So it catches the gross failure and nothing else: the
+line-523 citation of a 272-line `config_manager.py` described at the
+top of this docstring is the shape it does catch, and #329 found two
+that it did not -- 361 lines adrift, on code that had nothing to do
+with what they claimed, and graded as fine because the numbers were
+still in range. (Both spelled here without the grammar, for the reason
+given up there.)
+
+Rule 2's quoted code is the only thing that closes that gap, and it
+cannot be required of every citation: two legitimate shapes have no
+line of code to quote -- a range citation, which names a block, and a
+citation naming where a symbol is defined. Widening any grammar to
+accept a bare `:N` is rejected outright; it would match every ratio,
+timeout and port number in the tree.
+
 No `scripts/mutation_probe.py` `TARGETS` entry -- and #310 suggests the
 opposite, so the reason matters. #310 proposes putting this in a file
 already covered under `remediation.py`. That would re-run a pure text
@@ -617,3 +635,28 @@ def test_a_backticked_path_is_in_range_checked(tmp_path):
     assert graded == 2, f"a backticked path must be graded; graded {graded}"
     assert len(offenders) == 1, offenders
     assert "is 2 lines long" in offenders[0]
+
+
+def test_an_in_range_citation_of_the_wrong_line_is_not_caught(tmp_path):
+    """Rule 1's limit, executable (#329).
+
+    Characterization: green on both sides of #329, because nothing here
+    changes behaviour. It states what Rule 1 does *not* do, so that a
+    future reader who assumes a citation is pinned because a guard
+    exists can see the shape that walks past it. #329's two stale
+    citations were exactly this: a number in range, on a line holding
+    something else entirely, reported as clean.
+
+    Closing it needs Rule 2's quoted code, and the module docstring
+    records why that cannot be required of every citation.
+    """
+    _tree(tmp_path,
+          ["def f():", "    first()", "    second()"],
+          "The teardown is at zzz_fixture_mod.py:2.\n")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert graded == 1, graded
+    assert offenders == [], (
+        "Rule 1 has started grading content; if that is deliberate, the "
+        "module docstring's stated deferral is now wrong")
