@@ -29,6 +29,7 @@ on a helper thread: this issue is about a hang, and a test for it must not
 add one -- unfixed code fails in ten seconds instead of wedging the suite.
 """
 import threading
+import time
 
 import pytest
 
@@ -304,3 +305,47 @@ def test_the_worker_records_and_releases_the_item_it_is_holding(pm):
         "the finished item is still recorded: a later flush against a dead "
         "worker would re-queue a payload that was already saved and count "
         "off a task that no longer exists")
+
+
+def test_a_restarted_worker_reaps_the_orphan_without_any_flush(pm):
+    """Recovery must not be reachable only through `flush()` (#315).
+
+    Deliberately the same shape as
+    `test_a_save_queued_after_the_orphaning_does_not_bury_it`, minus the
+    flush. That is the whole test: `_recover_orphaned_item` is reachable
+    from `flush()` and nowhere else, and `Session` flushes from exactly
+    two places. A session that saves, loses a worker and then closes --
+    or simply keeps saving -- never calls it, so the orphaned payload is
+    retained forever in `_inflight` with `unfinished_tasks` stuck above
+    zero, and the *next* flush is the one that finds it, if one ever
+    comes.
+
+    A worker restart is the event that always accompanies the recovery
+    being needed, because it is what `save_async` does when it finds a
+    dead worker. So the newly started worker reaps before it consumes
+    anything, and the orphan drains on the ordinary save path with no
+    flush anywhere.
+    """
+    orphaned = Patient("P_ORPHAN", "Orphan^Test")
+    _make_orphan(pm, orphaned)
+
+    pm.save_async([Patient("P_NEW", "New^Test")])
+    assert pm.thread.is_alive(), (
+        "save_async left no live worker, so nothing restarted and this "
+        "test would be about the dead-worker path instead")
+
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        saved = sorted(p.patient_id for p in pm.store_backend.saved_patients)
+        if saved == ["P_NEW", "P_ORPHAN"]:
+            break
+        time.sleep(0.05)
+
+    assert sorted(p.patient_id for p in pm.store_backend.saved_patients) == [
+        "P_NEW", "P_ORPHAN"], (
+        "the orphaned save never reached the store: recovery lives only "
+        "in flush(), so nothing on the save path can reach it and the "
+        "payload is retained until some later flush -- or forever (#315)")
+    assert pm._inflight == {}, (
+        "the reaped entry is still recorded, so a later recovery would "
+        "re-queue a payload that has already been saved")

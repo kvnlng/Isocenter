@@ -667,6 +667,11 @@ class DicomSession:
                 if first_exception is None:
                     first_exception = exc
 
+        # Order is load-bearing. `shutdown()` reconciles a save its
+        # worker never finished and records an ERROR audit row when it
+        # cannot (#314); `stop()` flushes the audit queue, so those rows
+        # settle before close() returns. Reversed, they would be written
+        # into a queue nothing drains again.
         if hasattr(self, 'persistence_manager'):
             _run_step(self.persistence_manager.shutdown)
         if hasattr(self, 'store_backend'):
@@ -682,10 +687,28 @@ class DicomSession:
     def save(self, sync: bool = False):
         """
         Persists the current session state to the database.
+
         :param sync: If True, blocks until save is complete.
+
+        A synchronous save drains the persistence manager first, the
+        same way `audit()` and `redact()` do. Without that it called
+        `save_all` on the caller's thread while the worker could be
+        inside `save_all` over the same graph and the same sidecar --
+        and since #287 the two sidecar prepasses run fully in parallel,
+        so #287's bound on orphaned frames became per-concurrent-save
+        rather than per-store (#294).
+
+        The price is that `save(sync=True)` **inherits `flush()`'s
+        deliberate never-return-early property**: a genuinely wedged
+        worker now wedges a synchronous save instead of letting it race
+        one. That is the trade `flush()`'s own docstring argues for --
+        callers ask for "synchronous" precisely so they can read or
+        close afterwards.
         """
         if sync and hasattr(self, 'store_backend'):
             get_logger().info("Saving session (Synchronous)...")
+            if hasattr(self, 'persistence_manager'):
+                self.persistence_manager.flush()
             self.store_backend.save_all(
                 self.store.patients, prune_absent_patients=True)
         elif hasattr(self, 'persistence_manager'):
@@ -783,21 +806,51 @@ class DicomSession:
         """
         Manually triggers Sidecar Compaction to reclaim disk space.
         Rewrites the _pixels.bin file, removing orphaned data from deleted or redacted instances.
-        WARNING: This is an expensive I/O operation.
+        WARNING: This is an expensive I/O operation. It leads with
+        `save(sync=True)`, so it inherits that call's never-return-early
+        wait on the persistence manager (#294): a wedged background
+        worker wedges a compaction rather than letting one race it.
 
         PRECONDITION, single-threaded: nothing else may be writing pixel
-        state while this runs. The offset rewiring below rebinds every
-        instance's loader OUTSIDE `SqliteStore._pixel_swap_lock`, so it is
-        safe only because it leads with `save(sync=True)` and is not
-        called concurrently with `redact()` or a background save. That is
-        a convention, not an enforced invariant; bringing the rewiring
-        under the lock is filed separately.
+        state while this runs. Two parts of that are now enforced and
+        the rest is still convention, and the difference matters when
+        you are reading this to decide whether your caller is safe.
+
+        **Enforced.** No save may be outstanding when this is entered:
+        after the synchronous save below, `has_pending_saves()` is
+        consulted and a `RuntimeError` is raised if anything is queued
+        or in flight. The check sits after `save(sync=True)` and before
+        `compact_sidecar()` on purpose -- refusing after the rewrite
+        would leave the file compacted and every in-memory loader on a
+        pre-compaction offset, which is worse than not checking. And the
+        rewiring below rebinds each loader under
+        `SqliteStore._pixel_swap_lock`, so no reader can land between
+        the offset and the length assignments (#295).
+
+        **Still convention.** A save queued *after* that check runs
+        concurrently with the rewrite, and the per-instance lock does
+        not make that safe: it removes the torn rebind, not the
+        possibility of frames being appended during the rewrite.
+        Closing that needs a coarse save-wide lock ordered above the
+        documented `_audit_write_lock` -> `_memory_lock` pair, which is
+        a larger design than this call.
         """
         if hasattr(self, 'store_backend'):
             print("Beginning Sidecar Compaction (this may take a while)...")
 
             # 1. Sync DB so compaction knows true state
             self.save(sync=True)
+
+            # The refusal, between the save and the rewrite. See the
+            # docstring for why this placement is the load-bearing part.
+            if (hasattr(self, 'persistence_manager')
+                    and self.persistence_manager.has_pending_saves()):
+                raise RuntimeError(
+                    "compact() requires that no pending save be "
+                    "outstanding: a background save writing pixel state "
+                    "while the sidecar is rewritten leaves loaders on "
+                    "offsets that no longer exist. Flush the persistence "
+                    "manager and stop other writers first (#295).")
 
             # 2. Compact and get updates
             # Returns Dict[sop_instance_uid, (new_offset, new_length)]
@@ -817,48 +870,89 @@ class DicomSession:
 
             # 3. Patch In-Memory Instances (Preserve References)
             print(f"Updating {len(updates)} in-memory instances...")
-            count = 0
-
-            # Optimization: Pre-check if we have SidecarPixelLoader imported
-
-
-            # We must traverse the whole graph.
-            # DicomStore doesn't index by UID (yet).
-            for p in self.store.patients:
-                for st in p.studies:
-                    for se in st.series:
-                        for inst in se.instances:
-                            if inst.sop_instance_uid in updates:
-                                new_off, new_len = updates[inst.sop_instance_uid]
-
-                                # Update Loader
-                                if inst._pixel_loader and isinstance(
-                                        inst._pixel_loader, SidecarPixelLoader):
-                                    inst._pixel_loader.offset = new_off
-                                    inst._pixel_loader.length = new_len
-                                    count += 1
-
-                                # Note: If inst._pixel_loader is None (e.g. loaded from original DICOM file),
-                                # it doesn't use sidecar, so no update needed.
-                                # If it has pixel_array loaded (RAM), it's fine.
-                                # If we unload() later, we need correct loader.
-                                # BUT if it has pixel_array, does it have a loader?
-                                # persist_pixel_data ensures loader is created.
-                                # So if it was persisted, it has a loader.
-
-                            # Waveform loaders are patched from the blob
-                            # table, not from `updates`: see the note above.
-                            w_ref = wave_updates.get(inst.sop_instance_uid)
-                            if w_ref is not None and isinstance(
-                                    inst._waveform_loader, SidecarWaveformLoader):
-                                inst._waveform_loader.offset = w_ref[0]
-                                inst._waveform_loader.length = w_ref[1]
-                                count += 1
+            count = self._rewire_sidecar_loaders(updates, wave_updates)
 
             print(f"Patched {count} active objects.")
 
         else:
             print("Persistence backend does not support compaction.")
+
+    def _rewire_sidecar_loaders(self, updates, wave_updates) -> int:
+        """Point every in-memory sidecar loader at its post-compaction bytes.
+
+        Args:
+            updates: `{sop_instance_uid: (offset, length)}` for pixels,
+                as `compact_sidecar()` returns it.
+            wave_updates: the same for waveforms, read from the blob
+                table because `compact_sidecar`'s map is pixels-only.
+
+        Returns:
+            int: how many loaders were rebound.
+
+        Extracted from `compact()` so it can be exercised without
+        running a compaction -- through the front door, `compact()`'s
+        own `save(sync=True)` also takes `_pixel_swap_lock`, so a test
+        could not tell this loop's acquisition from the save's.
+
+        **The lock is taken per instance, around both rebinds
+        together.** `offset` and `length` are two assignments and a
+        reader landing between them gets the wrong bytes or runs off the
+        end of the sidecar -- the same shape as #274, where a loader and
+        its hash were swapped separately and the instance read back
+        unredacted pixels under a full redaction attestation. Per
+        instance rather than once around the loop because the offset map
+        is fully in hand before the loop starts, so the critical section
+        is two attribute assignments and never spans a sqlite read.
+
+        The lock is a **leaf** here: nothing is acquired inside it, so
+        the documented `_pixel_swap_lock` -> `sidecar._lock` order is
+        preserved trivially and it is never co-held with `_memory_lock`
+        or `_audit_write_lock`.
+        """
+        count = 0
+        swap_lock = self.store_backend._pixel_swap_lock
+
+        # We must traverse the whole graph.
+        # DicomStore doesn't index by UID (yet).
+        for p in self.store.patients:
+            for st in p.studies:
+                for se in st.series:
+                    for inst in se.instances:
+                        pixel_ref = updates.get(inst.sop_instance_uid)
+                        # Note: a `_pixel_loader` of None (e.g. an
+                        # instance loaded from its original DICOM file)
+                        # does not use the sidecar, so there is nothing
+                        # to update. Anything that was persisted has a
+                        # loader, because `persist_pixel_data` creates
+                        # one.
+                        pixel_due = (
+                            pixel_ref is not None
+                            and isinstance(inst._pixel_loader,
+                                           SidecarPixelLoader))
+
+                        # Waveform loaders are patched from the blob
+                        # table, not from `updates`: see the note in
+                        # compact().
+                        wave_ref = wave_updates.get(inst.sop_instance_uid)
+                        wave_due = (
+                            wave_ref is not None
+                            and isinstance(inst._waveform_loader,
+                                           SidecarWaveformLoader))
+
+                        if not pixel_due and not wave_due:
+                            continue
+
+                        with swap_lock:
+                            if pixel_due:
+                                inst._pixel_loader.offset = pixel_ref[0]
+                                inst._pixel_loader.length = pixel_ref[1]
+                                count += 1
+                            if wave_due:
+                                inst._waveform_loader.offset = wave_ref[0]
+                                inst._waveform_loader.length = wave_ref[1]
+                                count += 1
+
+        return count
 
     def reconcile_private_tags(self) -> int:
         """Drop stored private-tag rows for a store de-identified before 0.9.1.
