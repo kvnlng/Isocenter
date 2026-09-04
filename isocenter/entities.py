@@ -9,7 +9,9 @@ from pydicom.uid import generate_uid
 import isocenter.imagecodecs_handler as h
 from .logger import get_logger
 from .pixel_geometry import (
+    FLOAT_DTYPE_NAMES,
     GeometryEvidence,
+    PIXEL_DTYPE_ATTR,
     declared_int,
     planar_configuration_default,
     resolve_photometric_interpretation,
@@ -1060,6 +1062,25 @@ class Instance(DicomItem):
 
         if planar_configuration_default(self.attributes, geom.samples):
             self._write_int_if_changed("0028,0006", 0)
+
+        # The dtype of the frame now held, kept true here because the
+        # sidecar decodes by it and no DICOM descriptor can tell a
+        # 32-bit float frame from a 32-bit integer one (#183). Written
+        # for every floating-point array, float16 included -- the
+        # sidecar is ours and holds what DICOM has no element for, and a
+        # float16 array that reloads as `uint16` takes the export's
+        # integer path and never files the DATA_LOSS row that says its
+        # pixels could not be written.
+        #
+        # It DELETES as well as writes. Replacing a float instance's
+        # pixels with an integer array and leaving the carrier behind
+        # would have the loader read those integers back as floats --
+        # the same silent corruption arriving from the other direction.
+        name = array.dtype.name if array.dtype.kind == 'f' else None
+        if name in FLOAT_DTYPE_NAMES:
+            self.attributes[PIXEL_DTYPE_ATTR] = name
+        else:
+            self.attributes.pop(PIXEL_DTYPE_ATTR, None)
 
         # BitsAllocated stays derived from the array, deliberately, and is
         # not the same defect as the geometry. The frames-vs-samples

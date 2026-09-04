@@ -50,7 +50,9 @@ import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
+from isocenter.entities import Instance
 from isocenter.io_handlers import LOSS_SCOPE_STANDARD
+from isocenter.persistence import SqliteStore
 from isocenter.session import DicomSession
 
 PARAMETRIC_MAP = "1.2.840.10008.5.1.4.1.1.30"
@@ -1464,3 +1466,218 @@ def test_an_instance_with_no_pixel_element_at_all_still_returns_none(tmp_path):
     inst = Instance("1.2.3.4.5")
     inst.file_path = str(path)
     assert inst.get_pixel_data() is None
+
+
+# --------------------------------------------------------------------
+# The float pair in the sidecar (#183, first half). Before this, nothing
+# extracted (7fe0,0008)/(7fe0,0009) at ingest: `_is_routed` called them
+# routed because `get_pixel_data()` re-read them out of the *source
+# file*, so the bytes survived exactly as long as that file stayed where
+# it was. The metadata index was portable and the pixels were not.
+#
+# The second half of #183 -- pixel data nested inside an Icon Image
+# Sequence -- is NOT addressed here and is still open. `instance_blobs`
+# is UNIQUE(instance_uid, kind), so a second pixel blob per instance
+# needs a `kind` that names the sequence item, and `WHERE kind =
+# 'pixels'` is read literally in two places in `persistence.py`.
+# --------------------------------------------------------------------
+
+def _ingest_save_close_and_move(tmp_path, name, **kwargs):
+    """Ingest a float source, save, close, then delete the source file.
+
+    Deleting rather than mocking: "the file is not where it was" is the
+    condition, and a session reopened on another machine, or after a
+    tidy-up of the staging directory, is the ordinary way to meet it.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_float_src(str(src), **kwargs)
+    db = str(tmp_path / f"{name}.db")
+
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(str(src))
+        session.save()
+    finally:
+        session.close()
+
+    os.remove(str(src / "one.dcm"))
+    return db
+
+
+def _export_from(db, out):
+    session = DicomSession(persistence_file=db)
+    try:
+        session.export(str(out), format="dicom", use_compression=False)
+    finally:
+        session.close()
+
+    written = [os.path.join(r, f)
+               for r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    return written
+
+
+def test_float_pixels_survive_the_source_file_going_away(tmp_path):
+    """RED before #183's first half.
+
+    Measured before the fix: the export writes nothing at all -- `0 of 1
+    instances exported`, one ERROR audit row -- because
+    `get_pixel_data()` reaches `FileNotFoundError: Pixels missing and
+    file not found`. That raise is unconditional in `Instance`, so this
+    is loud on every modality, not only on an image one; the modality
+    question belongs to the export's own `arr is None` arm further down
+    and is not what fires here. Loud is the better half of the defect,
+    and it is still a defect: the metadata index was portable and the
+    pixels were not.
+    """
+    db = _ingest_save_close_and_move(tmp_path, "gone")
+
+    written = _export_from(db, tmp_path / "out")
+    assert len(written) == 1, written
+
+    exported = pydicom.dcmread(written[0])
+    assert (0x7FE0, 0x0008) in exported, (
+        "the exported instance carries no Float Pixel Data: the bytes "
+        "were only ever in the source file, which is gone (#183)")
+    assert np.array_equal(
+        np.frombuffer(exported[(0x7FE0, 0x0008)].value, dtype=np.float32),
+        np.arange(16, dtype=np.float32) + 0.5)
+
+
+def test_double_float_pixels_survive_the_source_file_going_away(tmp_path):
+    """The 64-bit half of the same element pair.
+
+    Worth its own case rather than a parametrisation of the one above:
+    the dtype the sidecar reconstructs with is chosen by *which* element
+    the bytes came from, and a fix that hardcoded float32 would leave
+    this one silently halved.
+    """
+    db = _ingest_save_close_and_move(
+        tmp_path, "gone64", tag=0x7FE00009, vr='OD', dtype=np.float64,
+        bits=64)
+
+    written = _export_from(db, tmp_path / "out")
+    assert len(written) == 1, written
+
+    exported = pydicom.dcmread(written[0])
+    assert (0x7FE0, 0x0009) in exported, (
+        "the exported instance carries no Double Float Pixel Data (#183)")
+    assert np.array_equal(
+        np.frombuffer(exported[(0x7FE0, 0x0009)].value, dtype=np.float64),
+        np.arange(16, dtype=np.float64) + 0.5)
+
+
+def test_a_reloaded_float_instance_reads_its_own_pixels_back(tmp_path):
+    """The graph-level claim behind both exports above.
+
+    Asserted separately because the export has a second route to a
+    passing file -- an implementation that re-read the source would pass
+    the export tests wherever the source still exists. Here the source
+    is gone and the only thing that can answer is the sidecar.
+    """
+    db = _ingest_save_close_and_move(tmp_path, "readback")
+
+    session = DicomSession(persistence_file=db)
+    try:
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        assert inst._pixel_loader is not None, (
+            "no sidecar loader: the float bytes were never extracted (#183)")
+        arr = inst.get_pixel_data()
+        assert arr is not None
+        assert arr.dtype == np.float32, (
+            f"reconstructed as {arr.dtype}: there is no BitsAllocated "
+            "value that means float, so the element the bytes came from "
+            "has to be carried (#183)")
+        assert np.array_equal(
+            arr, (np.arange(16, dtype=np.float32) + 0.5).reshape(4, 4))
+    finally:
+        session.close()
+
+
+def test_an_integer_instance_is_unaffected_by_the_float_carrier(tmp_path):
+    """Selectivity: the carrier must name nothing on an ordinary image.
+
+    Green on both sides -- it guards the fix rather than the defect --
+    and it is the assertion that would go red if the dtype key were
+    written unconditionally, which would make every reloaded integer
+    instance decode its bytes as floats.
+    """
+    from isocenter.pixel_geometry import PIXEL_DTYPE_ATTR
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_int_src(str(src))
+
+    session = DicomSession(persistence_file=str(tmp_path / "int.db"))
+    try:
+        session.ingest(str(src))
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        assert PIXEL_DTYPE_ATTR not in inst.attributes
+    finally:
+        session.close()
+
+
+def test_the_carrier_follows_the_array_when_the_pixels_are_replaced(tmp_path):
+    """`set_pixel_data()` has to keep the carrier true, or it lies.
+
+    The carrier names the dtype of the frame currently held, and the
+    sidecar decodes by it. An integer array set on a float instance and
+    then persisted would otherwise be read back as floats -- the same
+    class of silent corruption #183 is closing, arriving from the other
+    direction.
+    """
+    from isocenter.entities import Instance
+    from isocenter.pixel_geometry import PIXEL_DTYPE_ATTR
+
+    inst = Instance(sop_instance_uid="1.2.183.1")
+    inst.set_pixel_data((np.arange(16, dtype=np.float32) + 0.5).reshape(4, 4))
+    assert inst.attributes.get(PIXEL_DTYPE_ATTR) == "float32"
+
+    inst.set_pixel_data(np.arange(16, dtype=np.float64).reshape(4, 4))
+    assert inst.attributes.get(PIXEL_DTYPE_ATTR) == "float64"
+
+    inst.set_pixel_data(np.arange(16, dtype=np.float16).reshape(4, 4))
+    assert inst.attributes.get(PIXEL_DTYPE_ATTR) == "float16"
+
+    inst.set_pixel_data(np.arange(16, dtype=np.uint16).reshape(4, 4))
+    assert PIXEL_DTYPE_ATTR not in inst.attributes
+
+
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64])
+def test_a_float_frame_comes_back_out_of_the_sidecar_as_a_float(tmp_path, dtype):
+    """The carrier is a dtype and not an element, and float16 is why.
+
+    `SidecarPixelLoader` derives its dtype from BitsAllocated and
+    PixelRepresentation, and neither says "float". A float16 array
+    therefore came back out of the sidecar as `uint16` -- same bytes,
+    different numbers, no warning. The export then took its integer path
+    and never filed the `DATA_LOSS` row that says a float16 array has no
+    DICOM element to be written into.
+
+    That defect was invisible under the GIL and reproducible on 3.14t.
+    `tests/test_export_loss_audit.py::test_a_float16_loss_on_a_failed_
+    write_names_the_missing_file` builds exactly this instance and
+    happened to pass only while the background save had not yet bound a
+    loader, so `release_memory()` refused the unload and the resident
+    float16 array survived to the export worker. Once the save won that
+    race, the reload returned `uint16` and the row vanished. This test
+    pins the round trip directly, so the guard no longer depends on
+    which of the two got there first.
+    """
+    store = SqliteStore(str(tmp_path / f"f{np.dtype(dtype).name}.db"))
+    try:
+        inst = Instance(sop_instance_uid="1.2.183.2")
+        original = (np.arange(16, dtype=dtype) + 0.5).reshape(4, 4)
+        inst.set_pixel_data(original)
+
+        store.persist_pixel_data(inst)
+        inst.pixel_array = None
+
+        back = inst.get_pixel_data()
+        assert back.dtype == np.dtype(dtype), (
+            f"a {np.dtype(dtype).name} frame came back out of the "
+            f"sidecar as {back.dtype} (#183)")
+        assert np.array_equal(back, original)
+    finally:
+        store.stop()

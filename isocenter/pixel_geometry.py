@@ -43,6 +43,51 @@ TAG_NUMBER_OF_FRAMES = "0028,0008"
 TAG_ROWS = "0028,0010"
 TAG_COLUMNS = "0028,0011"
 
+TAG_FLOAT_PIXEL_DATA = "7fe0,0008"
+TAG_DOUBLE_FLOAT_PIXEL_DATA = "7fe0,0009"
+
+#: Where an instance records the numpy dtype of the pixel frame it is
+#: holding, when that dtype is floating-point (#183).
+#:
+#: Not a tag key, and deliberately so. It rides `attributes_json`
+#: because `DicomExporter._merge` skips `t.startswith("_")` and
+#: `_split_core_and_private` keeps a non-tag key inline -- the same
+#: channel `_ISOCENTER_REDACTION_HASH` already uses. A real
+#: `"7fe0,0008"` key in `attributes` would be written back out as an
+#: element by `_merge`, carrying this string as its value.
+#:
+#: It exists because **no DICOM descriptor says "float"**.
+#: `SidecarPixelLoader` derives its dtype from BitsAllocated and
+#: PixelRepresentation, and a 32-bit float frame and a 32-bit integer
+#: frame declare the same 32 -- so without this the sidecar hands back
+#: integers where floats went in, silently. Set at ingest from the
+#: element the bytes came out of, and kept true by `set_pixel_data()`
+#: from the dtype of the array it is handed.
+#:
+#: **The dtype, not the element**, and the difference is float16: it has
+#: no DICOM element at any width, so an element-shaped carrier could not
+#: name it and a `float16` array round-tripped through the sidecar as
+#: `uint16`. The export's float16 arm then never ran, and the
+#: `DATA_LOSS` row that says the pixels could not be written was never
+#: filed. The sidecar is ours and can hold what DICOM has no element
+#: for; what it must never do is hand back a different type from the one
+#: it was given.
+PIXEL_DTYPE_ATTR = "_ISOCENTER_PIXEL_DTYPE"
+
+#: The float dtypes this carrier may name, as an allow-list. A stored
+#: string is data, and `np.dtype()` on an arbitrary one is not something
+#: a loader should do; these three are every floating-point width numpy
+#: and DICOM between them produce here.
+FLOAT_DTYPE_NAMES = frozenset({"float16", "float32", "float64"})
+
+#: Numpy dtype name for each float pixel element. PS3.3 C.7.6.24 fixes
+#: (7fe0,0008) at 32-bit IEEE-754 and C.7.6.25 fixes (7fe0,0009) at
+#: 64-bit.
+FLOAT_DTYPE_BY_ELEMENT = {
+    TAG_FLOAT_PIXEL_DATA: "float32",
+    TAG_DOUBLE_FLOAT_PIXEL_DATA: "float64",
+}
+
 #: Photometric Interpretations that are `SamplesPerPixel = 1`.
 #: PALETTE COLOR is in here deliberately -- it is a single sample indexing a
 #: lookup table, not three interleaved ones.

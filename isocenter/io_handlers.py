@@ -155,7 +155,12 @@ from pydicom.filewriter import write_sequence
 from .entities import Patient, Study, Series, Instance, Equipment, DicomItem
 from .logger import get_logger
 from .pixel_geometry import (
+    FLOAT_DTYPE_BY_ELEMENT,
+    FLOAT_DTYPE_NAMES,
     GeometryEvidence,
+    PIXEL_DTYPE_ATTR,
+    TAG_DOUBLE_FLOAT_PIXEL_DATA,
+    TAG_FLOAT_PIXEL_DATA,
     resolve_photometric_interpretation,
     resolve_pixel_geometry,
 )
@@ -201,7 +206,9 @@ _ITEM_TAG_LE = b"\xfe\xff\x00\xe0"
 #: names the sequence item. That is not a schema change -- `kind` is
 #: unconstrained TEXT and only `persist_blob`'s literal tuple gates it
 #: -- but it is a re-merge path on the export side and a decision about
-#: what `kind` means, which #150 also has an interest in. Filed as #183.
+#: what `kind` means, which #150 also has an interest in. Filed as #183,
+#: whose first half (the top-level float pair) has landed and whose
+#: second half -- this one -- has not.
 #:
 #: (5400,1010) is deliberately absent. Waveform Data is *never* at the
 #: top level -- it lives inside Waveform Sequence items -- so a depth
@@ -212,27 +219,30 @@ _ROOT_ONLY_ROUTED_TAGS = frozenset({
     Tag(0x7fe0, 0x0010),   # Pixel Data
 })
 
-#: The float pixel elements. Also routed, and by a different mechanism
-#: from everything else here: nothing extracts them at ingest, and
-#: `_export_instance_worker` writes them back from the array
-#: `get_pixel_data()` re-reads out of the source file, under their own
-#: tag (#170, #193). That still satisfies `_is_routed`'s question --
-#: something else in the pipeline carries these bytes -- and reporting
-#: them at ingest would file a `DATA_LOSS` row reading "not in the
-#: exported data" about an element that is in the exported data. Which
-#: is the defect #194 opened against the first cut of this fix, pointed
-#: at a second tag.
+#: The float pixel elements. Routed the same way Pixel Data is, since
+#: #183's first half: `ingest_worker` extracts the array and writes it
+#: to the sidecar, and `_export_instance_worker` writes it back under
+#: its own tag (#170, #193). Reporting them at ingest would file a
+#: `DATA_LOSS` row reading "not in the exported data" about an element
+#: that is in the exported data -- the defect #194 opened against the
+#: first cut of this fix, pointed at a second tag.
 #:
-#: Two conditions, both applied in `_is_routed`. Top level only, because
-#: `get_pixel_data()` reads the top level. And only when the instance
-#: has no Pixel Data of its own: the export takes the sidecar array
-#: whenever there is a loader, so in a file carrying both -- which
-#: PS3.5 Section 8.2 forbids, but malformed input exists -- the float half is
-#: genuinely lost and must still be reported.
+#: Two conditions, both applied in `_is_routed`, and both still exactly
+#: as load-bearing as they were. Top level only, because the extraction
+#: reads the top level. And only when the instance has no Pixel Data of
+#: its own: `ingest_worker`'s arms are `if "PixelData" ... elif` the
+#: float pair, so on a file carrying both -- which PS3.5 Section 8.2
+#: forbids, but malformed input exists -- Pixel Data is what reaches the
+#: sidecar and the float half is genuinely lost. One question, one
+#: answer, and it is the same answer `has_pixel_data` gave before the
+#: bytes moved.
 #:
-#: The sidecar is still the missing half, and is still #183: an ingest
-#: that could carry these bytes would survive the source file being
-#: moved, which this cannot.
+#: **#183's second half is still open**: pixel data nested inside an
+#: Icon Image Sequence is not carried, because `instance_blobs` is
+#: UNIQUE(instance_uid, kind) and a second pixel blob per instance needs
+#: a `kind` naming the sequence item -- which two literal
+#: `WHERE kind = 'pixels'` reads in `persistence.py` would have to learn
+#: about, and which is also a decision #150 has an interest in.
 _FLOAT_PIXEL_TAGS = frozenset({
     Tag(0x7fe0, 0x0008),   # Float Pixel Data
     Tag(0x7fe0, 0x0009),   # Double Float Pixel Data
@@ -298,6 +308,7 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 #: in the loss report. Pixel and waveform bytes are unaffected either
 #: way: they are routed to the sidecar before this rule is consulted.
 BINARY_RETENTION_MAX_BYTES = 65534
+
 
 #: Private VRs whose Python value must be an integer. pydicom accepts a
 #: `str` at `add_new` for these -- with a `UserWarning` -- and then
@@ -617,13 +628,13 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     skip was only right for some of them. The (7fe0,0010) inside an Icon
     Image Sequence item vanished with no warning, no audit row and no
     line in a compliance report that says it lists everything missing
-    from the export (#169). It is still skipped -- keeping it is #183 --
-    but it is reported now.
+    from the export (#169). It is still skipped -- keeping it is #183's
+    second half, still open -- but it is reported now.
 
     Which member is which takes two questions, and they are deliberately
     two names. `_is_routed` asks whether something else carries the
-    bytes: the sidecar for top-level (7fe0,0010), and the export's
-    source re-read for the float pair (#170, #193).
+    bytes: the sidecar, for top-level (7fe0,0010) and, since #183's
+    first half, for the float pair as well (#170, #193).
     `_DERIVED_PIXEL_INDEX_TAGS` holds the three that are not data at all
     -- the Extended Offset Table pair and the encapsulated stream's
     total length -- which describe a fragment layout the exported file
@@ -968,9 +979,64 @@ def ingest_worker(fp: str) -> Tuple:
                 return ({'path': fp}, None, None, None, None, None, None,
                         f"Decompression Failed: {e}")
 
-            if p_bytes:
-                # Hash the RAW bytes (stable hash)
-                p_hash = hashlib.sha256(p_bytes).hexdigest()
+        elif any(kw in ds for kw in ("FloatPixelData", "DoubleFloatPixelData")):
+            # The float pair rides the sidecar too, and until #183 it did
+            # not. `populate_attrs` skips group 7fe0 and `_is_routed`
+            # called these "routed" because `get_pixel_data()` re-read
+            # them out of the *source file* -- so the pixels survived
+            # only as long as that file stayed where it was. Move it,
+            # delete it, or export from a session reopened on another
+            # machine, and a float instance produced `FileNotFoundError:
+            # Pixels missing and file not found` on an image modality,
+            # and on a non-image modality a file with no pixel element
+            # and no loss row at all.
+            #
+            # `elif`: PS3.5 Section 8.2 forbids an instance carrying both, and
+            # the export prefers the sidecar array whenever there is a
+            # loader -- so on a malformed file that carries both, Pixel
+            # Data wins here and the float half is genuinely lost, which
+            # is exactly what `_is_routed`'s `has_pixel_data` clause
+            # still reports. One question, one answer.
+            try:
+                arr = np.ascontiguousarray(ds.pixel_array)
+                p_bytes = arr.tobytes()
+                p_alg = 'zlib'
+                # The dtype the sidecar will have to reconstruct with,
+                # taken from the element rather than from `arr.dtype`
+                # so that the two ends of the mapping are one table.
+                # Kept as an underscore key so it rides
+                # `attributes_json` untouched -- `_merge` skips
+                # `t.startswith("_")`, the same channel
+                # `_ISOCENTER_REDACTION_HASH` already uses -- rather
+                # than as a schema change, which #183 also weighs and
+                # which this does not need.
+                inst.attributes[PIXEL_DTYPE_ATTR] = FLOAT_DTYPE_BY_ELEMENT[
+                    TAG_FLOAT_PIXEL_DATA if "FloatPixelData" in ds
+                    else TAG_DOUBLE_FLOAT_PIXEL_DATA]
+            except Exception:  # pylint: disable=broad-except
+                # NOT the `return ... "Decompression Failed"` the Pixel
+                # Data arm above takes, and the asymmetry is deliberate.
+                # This change is meant to be additive: an undecodable
+                # float source ingested before #183 and failed loudly at
+                # export -- `RuntimeError: Lazy load failed ...` from
+                # `get_pixel_data()`, one ERROR audit row naming
+                # pydicom's own words, `0 of 1` written and a
+                # REVIEW_REQUIRED grade (#226). Rejecting it here
+                # instead would move that failure to the door and leave
+                # the report saying `0 of 0 requested`, which is a
+                # weaker claim about a file that was handed to us.
+                #
+                # `p_bytes` stays None, so nothing reaches the sidecar,
+                # no provenance is recorded, and the instance behaves in
+                # every respect as it did before. The float sources that
+                # *can* be decoded gain the sidecar; the ones that
+                # cannot lose nothing.
+                p_bytes = None
+                p_alg = None
+
+        if p_bytes:
+            # Hash the RAW bytes (stable hash)
+            p_hash = hashlib.sha256(p_bytes).hexdigest()
 
         # Extract Waveform Data
         # populate_attrs treats (5400,1010) as routed (#151 changed the
@@ -2496,6 +2562,7 @@ class SidecarPixelLoader:
             self.bits = metadata.get("bits", 8) or 8
             self.pixel_representation = metadata.get("pixel_representation", 0) or 0
             self.pixel_hash = metadata.get("pixel_hash", None)
+            self.pixel_dtype = metadata.get("pixel_dtype", None)
         elif instance:
             self.sop_instance_uid = instance.sop_instance_uid
             # Extract attributes safely
@@ -2506,6 +2573,10 @@ class SidecarPixelLoader:
             self.bits = int(instance.attributes.get("0028,0100", 8) or 8)
             self.pixel_representation = int(instance.attributes.get("0028,0103", 0) or 0)
             self.pixel_hash = pixel_hash or getattr(instance, "_pixel_hash", None)
+            # The dtype of the frame, when it is floating-point. Read
+            # from the instance rather than derived, because no DICOM
+            # descriptor says "float" (#183).
+            self.pixel_dtype = instance.attributes.get(PIXEL_DTYPE_ATTR)
         else:
             raise ValueError("SidecarPixelLoader requires either 'instance' or 'metadata'")
 
@@ -2528,11 +2599,21 @@ class SidecarPixelLoader:
                     f"Loader(offset={self.offset}, length={self.length}, alg={self.alg})"
                 )
 
-        # Reconstruct based on attributes
-        dt = np.uint16 if self.bits > 8 else np.uint8
-        # Handle signed?
-        if self.pixel_representation == 1:
-            dt = np.int16 if self.bits > 8 else np.int8
+        # Reconstruct based on attributes. A recorded float dtype
+        # first: no DICOM descriptor says "float" -- a 32-bit float
+        # frame and a 32-bit integer frame both declare BitsAllocated
+        # 32 -- so a frame whose dtype is floating-point can only be
+        # rebuilt from a dtype that was carried, never from one that
+        # was inferred (#183). Checked against the allow-list, because
+        # this string comes back out of the store and
+        # `np.dtype(anything)` is not a thing a loader should do.
+        if self.pixel_dtype in FLOAT_DTYPE_NAMES:
+            dt = np.dtype(self.pixel_dtype)
+        else:
+            dt = np.uint16 if self.bits > 8 else np.uint8
+            # Handle signed?
+            if self.pixel_representation == 1:
+                dt = np.int16 if self.bits > 8 else np.int8
 
         arr = np.frombuffer(raw, dtype=dt)
 
