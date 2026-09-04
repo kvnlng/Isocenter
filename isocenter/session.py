@@ -687,10 +687,28 @@ class DicomSession:
     def save(self, sync: bool = False):
         """
         Persists the current session state to the database.
+
         :param sync: If True, blocks until save is complete.
+
+        A synchronous save drains the persistence manager first, the
+        same way `audit()` and `redact()` do. Without that it called
+        `save_all` on the caller's thread while the worker could be
+        inside `save_all` over the same graph and the same sidecar --
+        and since #287 the two sidecar prepasses run fully in parallel,
+        so #287's bound on orphaned frames became per-concurrent-save
+        rather than per-store (#294).
+
+        The price is that `save(sync=True)` **inherits `flush()`'s
+        deliberate never-return-early property**: a genuinely wedged
+        worker now wedges a synchronous save instead of letting it race
+        one. That is the trade `flush()`'s own docstring argues for --
+        callers ask for "synchronous" precisely so they can read or
+        close afterwards.
         """
         if sync and hasattr(self, 'store_backend'):
             get_logger().info("Saving session (Synchronous)...")
+            if hasattr(self, 'persistence_manager'):
+                self.persistence_manager.flush()
             self.store_backend.save_all(
                 self.store.patients, prune_absent_patients=True)
         elif hasattr(self, 'persistence_manager'):
@@ -788,7 +806,10 @@ class DicomSession:
         """
         Manually triggers Sidecar Compaction to reclaim disk space.
         Rewrites the _pixels.bin file, removing orphaned data from deleted or redacted instances.
-        WARNING: This is an expensive I/O operation.
+        WARNING: This is an expensive I/O operation. It leads with
+        `save(sync=True)`, so it inherits that call's never-return-early
+        wait on the persistence manager (#294): a wedged background
+        worker wedges a compaction rather than letting one race it.
 
         PRECONDITION, single-threaded: nothing else may be writing pixel
         state while this runs. The offset rewiring below rebinds every

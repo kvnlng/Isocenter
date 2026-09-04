@@ -85,6 +85,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`save(sync=True)` drains the persistence manager before it writes, so "synchronous" means what it says (#294).** `isocenter/session.py`, plus one test in a new `tests/test_sync_save_does_not_overlap_an_async_one.py`.
+
+  It called `store_backend.save_all` on the caller's thread with no regard for what the manager's worker was doing, and the worker may be inside `save_all` over the same object graph at that moment. `save()` followed by `save(sync=True)` is an ordinary sequence, and `compact()` opens with a synchronous save of its own, so this is the documented path rather than a corner. Since #287 the two sidecar prepasses run fully in parallel, which turns #287's bound on orphaned frames from a per-store property into a per-concurrent-save one.
+
+  The fix is the shape `audit()` and `redact()` already use -- `persistence_manager.flush()` first. **The price, stated in the docstring and here:** `save(sync=True)` thereby inherits `flush()`'s deliberate never-return-early property, so a genuinely wedged worker wedges a synchronous save instead of letting it race one. That is the trade `flush()`'s own docstring argues for; callers ask for synchronous precisely so they can read or close afterwards. `compact()` inherits it too, and its docstring now says so.
+
+  The test tags each `save_all` by the thread it runs on rather than by call order -- session setup can already have driven one through -- and asserts the two never interleave. Measured: `1 failed` before, `1 passed` after.
+
 - **`close()` writes the save its worker never finished, instead of walking past it (#314).** `isocenter/persistence_manager.py`, one comment in `isocenter/session.py`, plus five tests in a new `tests/test_close_does_not_drop_an_orphaned_save.py`. **This is a behaviour change to `close()` and to the `atexit` handler**, and it is the sentence #309's entry had to retract.
 
   `PersistenceManager.shutdown()` returned on its first line whenever the worker was already dead. That is exactly the state #309 describes -- an item taken off the queue and never counted off, sitting in `_inflight` -- and it is also where an item still in the deque sits when its consumer stops. `Session.close()` is what `__exit__` calls and is the one call a user makes for the express purpose of having their work on disk, and it dropped both, silently, with no log line and no audit row.
