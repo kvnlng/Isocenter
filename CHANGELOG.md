@@ -85,6 +85,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`flush()` reconciles a save its worker took but never finished, instead of waiting on a count nothing will decrement (#309).** `isocenter/persistence_manager.py`, plus three tests in a new `tests/test_flush_orphan_recovery.py`. `Session.audit()`, `redact()` and `close()` all flush; before this, one worker stopping in a two-bytecode window wedged all three permanently.
+
+  **The state, constructed and measured rather than inferred.** `_worker` takes an item with `queue.get()` and reaches `task_done()` from the `finally` of its inner `try`. That covers every ordinary exception *and* every `BaseException` -- `KeyboardInterrupt`, `SystemExit`, pytest's own `Failed` and `Skipped` all unwind through it. What it does not cover is the item: once `get()` has returned, the payload is out of the deque and `unfinished_tasks` is 1, and a worker that never reaches the `finally` leaves both facts standing. So:
+
+      queue.empty()          is True    -- the item is out of the deque
+      queue.unfinished_tasks == 1       -- nobody counted it off
+
+  `flush()` guarded its restart on `not self.queue.empty()`, so in exactly this state it skipped the restart and went straight to `queue.join()`, which cannot return. Reproduced deterministically, no timing and no `ctypes`: stop the worker cleanly, `put` an item, `get` it from the test thread as the stand-in for a worker that died after `get()`. `STATE: empty=True unfinished=1 alive=False`, `flush returned within 5s: False`.
+
+  **A restart alone does not fix it, which is what forces the design.** Measured the same way: `worker restarted: True`, `join() returned: False`, `unfinished: 1`. The payload is already out of the deque, so a fresh worker has nothing to `get()` and the count never moves. Reconciliation is required, not a restart.
+
+  **The fix.** `_worker` records the item in `self._inflight` immediately after `get()` returns and clears it inside the existing `finally`, *before* `task_done()`. `flush()` reconciles against that field, and only while the worker thread is **dead** -- a dead `Thread` is a stable observation and cannot resume, whereas a live worker holding `_inflight` is simply mid-save, and re-queueing under it would both duplicate the write and unbalance the count. Recovery does `queue.put(payload)` and *then* `queue.task_done()`: reversed, the count reaches zero between the two calls, a waiting `queue.join` wakes, and `flush()` could return before the payload was back -- a dropped save wearing a clean return. Both orderings are recorded as comments at the site, not only here.
+
+  **The wait reports instead of going silent.** The bare `queue.join()` becomes a loop over a short-lived daemon waiter joined with a 30s timeout; each expiry logs the unfinished count, whether the worker is alive and whether an item is in flight, then re-attempts recovery -- so a worker that dies *after* the flush began is recovered too. `_FLUSH_REPORT_INTERVAL_S = 30.0` sits under `pytest.ini`'s `faulthandler_timeout = 300`, so a wedged flush explains itself before any dump. The cost is one short-lived thread per `flush()` call, and `flush()` is per call site -- audit, redact, close -- not per queued item. `unfinished_tasks` is read for the message only; nothing in the recovery path depends on it and nothing anywhere touches `all_tasks_done`, both being CPython implementation details.
+
+  **What this preserves, and what it gives up.**
+
+  - *Preserved*: `flush()` still never returns before the queue is drained. No early return, no dropped save. **A bounded-wait-then-return design was rejected**: it loses saves silently, which is strictly worse than hanging, because callers flush precisely so they can read or close afterwards. The third of the three new tests exists to hold that line -- it parks a save inside `save_all` and asserts `flush()` does not return while it is parked -- and it **passes on unfixed code by design**, its job being to stay green across the fix rather than to go red before it. Its 0.5s negative assertion can only fail towards a false *pass*, never a false failure.
+  - *Preserved*: ordinary exceptions and `BaseException`s raised inside `save_all` remain covered by the existing `finally`. Nothing about that path changed.
+  - *Residual*: the two bytecodes between `get()` returning and `_inflight` being set cannot be closed without atomicity inside `Queue.get`. A hard kill landing exactly there still hangs. The exposure shrinks from *the whole duration of a save* to *two bytecodes*, and such a hang is now self-describing through the 30s warning rather than silent.
+  - *Given up*: a re-enqueued payload may be saved **twice**, if the worker died after `save_all` committed but before `task_done()`. `save_all` is idempotent for a given graph, so that is a redundant write, not corruption -- said out loud rather than left for a reader to discover.
+
+  Red as committed: 2 failed, 1 passed in 20.97s, both failures being the 10-second bounded wait. Every wait on `flush()` in the new file runs on a bounded helper thread, because a test for a hang must not add one.
+
+- **The chaos test's 30 seconds, correctly explained: a live worker was being joined by a second one (#250).** One guard in `_start_worker`, two structural tests. This is the measured half of #250; it is **not** a fix for #250 (see the next entry).
+
+  `_worker` is a `while True`. Setting `running = False` does not end it, and nothing else does either -- only the sentinel `shutdown()` posts does. `_start_worker` guarded on `if not self.running:`, so a save arriving while a live worker sat with `running is False` -- an entirely ordinary state, being the whole window between `shutdown()` setting the flag and the worker draining to the sentinel -- started an **additional** consumer on the same queue and rebound `self.thread`.
+
+  Instrumented, `test_persistence_chaos` run alone: nine toggles, **nine live workers on one queue**. `shutdown()` posts exactly one sentinel and joins `self.thread`; any of the nine may eat it and usually it is not that one, so `join(timeout=30)` ran to the full 30.01s -- and then `atexit` ran `shutdown()` a second time for another 30.01s, *after* pytest's summary line, where nothing is watching.
+
+      [M] shutdown: workers ever started=9 alive now=9
+      [M] shutdown took 30.01s; self.thread alive after join=True; other workers still alive=8
+      ... 1 passed in 33.44s ...
+      [M] shutdown took 30.01s; ...                    <-- atexit, after the summary
+
+  The guard becomes thread liveness, restoring `self.running = True` when a worker is already alive. That composition is what keeps `test_stale_sentinel` working, and it is written into the comment: a sentinel left pending by an earlier shutdown is read as *stale* precisely because `running` is True again, so it is counted off and the worker continues.
+
+  `--durations` on the four persistence-adjacent files, same 25 tests, `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<worktree>`:
+
+      before: 30.01s teardown tests/test_concurrency_stress.py::test_persistence_chaos
+              ... 25 passed in 39.50s
+      after:  (no teardown entry at all)
+              ... 25 passed in 12.73s
+
+  plus the second 30s at interpreter exit, which pytest never counted. `test_persistence_chaos` still passes; it asserts zero data loss, which this does not affect. Of the two new tests, only the thread-identity one goes red against the old guard -- which sentinel a leaked worker eats is a race, so the shutdown test passes either way and is a guard on the property rather than a second red. Said here rather than counted as evidence it is not.
+
+- **The `atexit` flush holds a weakref, and half of what that was expected to buy did not materialise (#250).** `atexit.register` holds its arguments for the life of the process, so `atexit.register(self.shutdown)` made every `PersistenceManager` ever constructed immortal, and with it its `SqliteStore`, that store's sqlite handles and its sidecar descriptors. The registration becomes a module-level function taking `weakref.ref(self)`.
+
+  Nothing is lost, and the reason is structural rather than a judgement call: a manager with a live worker cannot be collected anyway, because the worker holds `self` through `target=self._worker`. Only a manager whose worker has already exited becomes collectable, and it has nothing left to flush. The ordering it depends on was checked, not assumed -- `atexit` callbacks run while daemon threads are still alive; interpreter finalization, which stops them, comes afterwards.
+
+  **Measured over one full suite run, before and after:**
+
+      live PersistenceManager at interpreter exit: 647 -> 1
+      live threads at interpreter exit:            149 -> 150
+
+  The thread count did not move, and the reason is worth more than the number: 147 of those threads are `AuditWorker`, and `SqliteStore` starts that thread with `target=self._audit_worker` -- a bound method, so each store with a running audit writer holds *itself* alive by exactly the mechanism this change removed one level up. Those stores, and their sqlite handles and descriptors, survive regardless of who else refers to them. So what is reclaimed is 646 manager graphs; the lifetime of a store whose audit writer was never stopped is a separate problem this does not touch, and an entry claiming otherwise would be the sort of claim this milestone exists to retire.
+
+  Not undone either: the `atexit` list still grows by one small closure per manager. Unregistering at `shutdown()` was rejected -- a shut-down manager is restartable through `save_async`, and unregistering would cost it its exit-time flush.
+
+  (The 149 already reflects the previous entry; the figure before that guard landed was 212, and 642 managers.)
+
+- **#250 -- what was ruled out, and the statement that it is still open.** No fix is claimed. What this milestone adds is instrumentation (`tests/conftest.py`) and the retraction of two claims that outran their evidence.
+
+  **#309 is real, and #309 is not #250.** Established by reading rather than by sampling: `_worker`'s inner `try/except/finally` reaches `task_done()` for `BaseException` too, so `KeyboardInterrupt`, `SystemExit` and pytest's `Failed`/`Skipped` all unwind through it. The only uncovered window is the two bytecodes between `get()` returning and entering that inner `try`. Reaching it requires a thread killed without unwinding, and nothing in-process can do that except `ctypes`/`PyThreadState_SetAsyncExc` -- `grep -l ctypes tests/` returns nothing. `test_persistence_chaos` does not kill workers; it leaked nine of them, which is the previous entry and is a 60-second cost, not a hang.
+
+  **Two provenance claims are retracted.** The `main.py:330` attribution and the SIGTERM provenance both fail on inspection; neither is evidence for anything and both are withdrawn rather than left standing as background.
+
+  **Reproduction attempts today: 0 for 2.** Two full runs, both green, 5m57s and 5m27s. A stall detector armed at 90s never fired. The exit-time figures above -- 642 immortal managers, 212 live threads, roughly 30 seconds of interpreter exit running past pytest's summary line -- are the measured state of the suite at that point; `RLIMIT_NOFILE` is 1048576 locally, so descriptor exhaustion is not a local suspect.
+
+  **The blind spot the watchdog closes, established by reading `_pytest/faulthandler.py`.** `faulthandler_timeout` arms `dump_traceback_later` inside `pytest_runtest_protocol` and cancels it in that function's `finally`. It therefore covers setup, call and teardown of one item and *nothing else*: not collection, not the gap between items, not `pytest_sessionfinish` or `_ensure_unconfigure`, and not the `atexit` phase after the summary line -- which is exactly where this suite was already spending real time. A hang in any of those produces #250's signature: killed by an outer cap, with no failing test named.
+
+  **A background diagnostic that writes to `sys.stderr` does not exist -- measured.** pytest's fd-level global capture has already `dup2`-ed over fd 2 by the time `tests/conftest.py` is imported, so a direct write to a dup taken at import time produced no output anywhere in the run. The dup that works is taken inside `pytest_configure`, where global capture is suspended: three background writes from a daemon thread appeared live and in order in the run's output, and nothing private to `_pytest` is touched. The rule is written into the file, because it generalises: **a background diagnostic channel must own an fd duplicated while capture is not in place, or it is not a channel.**
+
+  The watchdog is one daemon thread on a 10s tick that reports after `_STALL_S = 120` seconds of nothing and **again every 120s while still stalled**, so a forty-minute hang leaves a series of dumps and a deadlock (identical stacks) can be told from a livelock. Each dump names the phase (`collection`, the nodeid, `sessionfinish`, `unconfigure / atexit`), how long it has been there, total elapsed, `threading.active_count()` with a `Counter` of thread *names* -- 212 names is noise, `{'AuditWorker': 90}` is signal -- `multiprocessing.active_children()`, whose churn across successive dumps is what a respawning pool looks like, and every thread's traceback. Verified end to end with the thresholds temporarily lowered: a sleeping test dumps twice under "running test item", and a test registering a slow `atexit` callback dumps twice *after* the "1 passed" summary line under "unconfigure / atexit". Being a daemon thread it ticks through the `atexit` chain and stops when interpreter finalization begins, which is afterwards.
+
+  120s clears the longest legitimate gap either way -- the chaos teardown, 30.01s before the guard above and ~0s after -- and sits far inside CI's 20-minute Run Tests cap; `tests/test_packaging_contract.py` pins that inequality beside the existing `faulthandler_timeout`, `_SQLITE_BUSY_TIMEOUT_S` and `_WORKER_FAULTHANDLER_TIMEOUT_S` assertions. No change to any of those, to `pytest.ini`, to the CI matrix or to `.github/workflows/tests.yml`.
+
+  **The cause of #250 is still unknown, the issue stays open, and the watchdog is instrumentation rather than a fix.** What changed is that the next occurrence should arrive with a stack instead of a silence.
+
 - **`audit()` drains the persistence manager before it records what it found (#297).** Two lines at the top of `Session.audit()`, mirroring `redact()`'s existing flush. A scan *ends* by advancing `_revision` on every entity it touched -- `_record_scan_results` calls `record_phi_status`, and a new status is a change the store should hold -- and `save()` without `sync=True` returns with `save_all` still running on the persistence manager's thread. Since #287 that window is as long as all of the save's pixel I/O, not just its SQL. An instance dirtied inside the window is not in the dirty set the save froze, so the save neither writes it nor marks it persisted: it is left dirty, and nothing saves it afterwards, because `close()` shuts the manager down without enqueuing a save. Reproduced before the fix: the instance ends `has_unsaved_changes` true with its row already written, and the frame the save had prepared is discarded to all-`None` under the `COALESCE` on the update. The direction is safe -- a lost status, never a false clean claim -- but the loss is permanent and `close()` is silent about it.
 
   **This is reachable on the documented order, which is why a docs-only fix was rejected.** `README.md` and `docs/quickstart.md` both show `session.save()` and, further down, `report = session.audit()`. The quickstart documents an asynchronous save followed by an audit; that is exactly the window.
