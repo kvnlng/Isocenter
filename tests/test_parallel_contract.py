@@ -421,3 +421,56 @@ def test_a_stalled_worker_dumps_its_own_stack_and_still_finishes(
         "no traceback dump reached stderr: the spawned child never armed "
         "its watchdog, so the next CI stall is again missing the child's "
         f"half of the picture (#250). stderr was: {stderr!r}")
+
+
+def test_a_lever_set_both_ways_runs_in_threads(monkeypatch):
+    """The order the three levers resolve in, pinned (#331).
+
+    `docs/environment.md` now states an order, and prose stating a
+    precedence with nothing behind it is the shape this milestone is
+    about -- there was no precedence test at all before this one.
+
+    `ISOCENTER_FORCE_THREADS` wins over `ISOCENTER_FORCE_PROCESSES`
+    because it is asked first; that is a real decision and not an
+    accident of ordering, since the threads lever is the debugging
+    escape hatch for an environment where processes do not work, and an
+    escape hatch that a second variable can veto is not one.
+
+    Worker recycling beats both, whichever way they are set: only
+    `multiprocessing.Pool` implements `maxtasksperchild`. That is why
+    `session.export()`, which passes `maxtasksperchild=25`, ignores both
+    force variables entirely (#185).
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+
+    assert parallel._use_threads(False, None) is True, (
+        "ISOCENTER_FORCE_PROCESSES overrode ISOCENTER_FORCE_THREADS; "
+        "docs/environment.md says the reverse")
+    assert parallel._use_threads(False, 25) is False, (
+        "worker recycling was asked for and threads were chosen anyway; "
+        "only multiprocessing.Pool implements maxtasksperchild")
+
+
+def test_only_the_literal_one_switches_a_flag_on(monkeypatch):
+    """`true`, `yes` and `on` do nothing (#331).
+
+    `_env_is` lowercases and compares against the literal `"1"`. That is
+    documented now, and it is the kind of claim that is cheap to state
+    and expensive to discover wrong: a user who writes `=true` gets the
+    default back with no warning anywhere, unlike a malformed integer,
+    which `_env_int` reports.
+
+    Asserted through the processes lever rather than the threads one, so
+    the expected answer does not depend on whether the interpreter
+    running the test is free-threaded.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "true")
+    monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+
+    assert parallel._env_is("ISOCENTER_FORCE_THREADS", ("1",)) is False, (
+        "'true' switched ISOCENTER_FORCE_THREADS on; the table in "
+        "docs/environment.md says only the literal 1 counts")
+    assert parallel._use_threads(False, None) is False, (
+        "and so the processes lever, which is set to the literal 1, is "
+        "the one that decides")
