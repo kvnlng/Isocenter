@@ -159,6 +159,7 @@ TARGETS = {
                                   "tests/test_shared_executor_lifecycle.py",
                                   "tests/test_sr_anonymization.py",
                                   "tests/test_structured_export.py",
+                                  "tests/test_study_date_roundtrip.py",
                                   "tests/test_waveform_dicom_roundtrip.py",
                                   "tests/test_waveform_ingest.py",
                                   "tests/test_waveform_model.py",

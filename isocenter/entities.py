@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -26,6 +26,32 @@ def _canonical_tag(tag: str) -> str:
     caused, rather than an AttributeError from here.
     """
     return tag.lower() if isinstance(tag, str) else tag
+
+
+def normalize_study_date(value):
+    """The one spelling of "text that names a day becomes a `date`".
+
+    `date.fromisoformat` accepts both the extended form `2024-01-15`
+    -- which is what `_as_stored_date` writes into SQLite -- and, on the
+    3.12 floor, the DICOM basic form `20240115` that a hand-built graph
+    or a `DicomBuilder.add_study` call supplies. Anything it cannot read
+    comes back exactly as it was given: a date we cannot read is a date
+    we do not have, not one we invent, and not one we discard (#60).
+
+    Lives here, not in `persistence`, because both callers need it and
+    `entities` is the one of the two that the other imports.
+    `persistence._as_loaded_date` is this function under the name that
+    says it is `_as_stored_date`'s inverse; `Study.__setattr__` is the
+    same rule applied at assignment, which is what makes the
+    constructor and hydration agree by construction rather than by two
+    parallel parses (#189).
+    """
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return value
 
 
 #: Attribute key under which an instance records the SOP Instance UID it
@@ -1078,6 +1104,27 @@ class Study(TrackedEntity):
                 "(0008,0030) -- Study.study_time -- instead. A datetime "
                 "here comes back from the store as an ISO string and "
                 "exports as an illegal DA value (#188).")
+        # ...and the boundary for #189, which is the same boundary for
+        # the same reason. A DA-spelled string was left as a string here
+        # while hydration turned the identical value into a `date`, so
+        # `export_folder_names` -- which builds the directory with
+        # `str(study.study_date or "NoDate")`, not `format_study_date`
+        # -- filed one study under `Study_20240115_` fresh and
+        # `Study_2024-01-15_` reloaded. The *element* never diverged,
+        # because both export paths render a `date` as `YYYYMMDD`; only
+        # the folder did, which is why the element's indifference must
+        # not be read as the folder's.
+        #
+        # Normalised at assignment rather than at the folder: routing
+        # `export_folder_names` through `format_study_date` would rename
+        # every *ingested* study's directory, a far larger break than
+        # the one it closes. Refusing the string instead would break
+        # `DicomBuilder.add_study`'s own documented example. This is the
+        # one option that leaves `study_date` a single type everywhere,
+        # which is `_as_loaded_date`'s stated goal for the other half of
+        # the same round trip.
+        if name == "study_date":
+            value = normalize_study_date(value)
         # `object.__setattr__`, not zero-argument `super()`:
         # `@dataclass(slots=True)` builds a *new* class, so the closure
         # cell zero-arg super() reads still names the discarded one and

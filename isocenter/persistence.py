@@ -26,7 +26,7 @@ from contextlib import nullcontext
 from pydicom.multival import MultiValue
 
 from .entities import (Patient, Study, Series, Instance, Equipment,
-                       PhiStatus)
+                       PhiStatus, normalize_study_date)
 from .sidecar import SidecarManager
 from .logger import get_logger
 from .privacy import PhiFinding, PhiRemediation
@@ -242,23 +242,22 @@ def _as_loaded_date(value):
     because either one loads as a `date` and both export paths render a
     `date` as `YYYYMMDD` -- `session.export()` by handing it to pydicom,
     `write_tree` via `format_study_date`. The exported *directory name*
-    is not: `export_folder_names` builds it with
-    `str(study.study_date or "NoDate")`, not `format_study_date`, so a
-    hand-built graph carrying `"20240101"` files under `Study_20240101_`
-    before a round trip and `Study_2024-01-01_` after one. Ingested
-    studies never see this -- ingest already produces a `date`, so
-    `str()` yields the ISO spelling on both sides -- and routing the
-    folder through `format_study_date` would rename every existing
-    export's directories, which is worse than the divergence it closes.
-    Known and accepted, filed as #189; do not read the element's
-    indifference as the folder's.
+    used to diverge, because `export_folder_names` builds it with
+    `str(study.study_date or "NoDate")` rather than
+    `format_study_date`: a hand-built graph carrying `"20240101"` filed
+    under `Study_20240101_` before a round trip and `Study_2024-01-01_`
+    after one, so the same study occupied two directories and a
+    re-export into an existing tree wrote a second copy instead of
+    overwriting the first. Closed at the other end of the same rule --
+    `Study.__setattr__` normalises on assignment -- rather than in
+    `export_folder_names`, which would have renamed every *ingested*
+    study's directory (#189).
+
+    The body is `entities.normalize_study_date`, and it must stay that
+    way: two copies of "text that names a day becomes a `date`" is
+    exactly how the two ends came to disagree.
     """
-    if value is None:
-        return None
-    try:
-        return date.fromisoformat(value)
-    except (TypeError, ValueError):
-        return value
+    return normalize_study_date(value)
 
 
 def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
