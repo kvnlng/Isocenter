@@ -17,8 +17,10 @@ swept, and this guard would be red on its own docstring.)
 Three rules, and the reason each stops where it does.
 
 **Rule 1 -- a citation naming a repository file must be in range.**
-Grammar: `` `path.py:N` `` (backticks optional) and `path.py line N`, with
-an optional `-M` end for a range. A citation naming a file that is *not*
+Grammar: `` `path.py:N` `` and `path.py line N`, with an optional `-M`
+end for a range. The path may be wrapped in a **balanced** pair of
+backticks, and the whole citation may sit inside one -- but half a pair
+is malformed prose and is not a citation (#325). A citation naming a file that is *not*
 in this repository is **skipped**: the tree cites pydicom's
 `filereader.py`, `filebase.py` and `filewriter.py`, and this guard has no
 business grading a third-party line number it cannot see and cannot fix.
@@ -29,8 +31,8 @@ otherwise skip everything and report a clean pass, which is the
 this tree (#162, `tests/test_doc_anchors.py`'s fourth deferral).
 
 **Rule 2 -- the content pin.** Grammar: `` `<CODE>` at path.py line N ``
-(a backticked code span, then the word "at", then the file, then the word
-"line"). The cited line, stripped, must equal `<CODE>` exactly. This is
+(a backticked code span, then the word "at", then the file -- bare or in
+its own balanced backtick pair, #325 -- then the word "line"). The cited line, stripped, must equal `<CODE>` exactly. This is
 what #310 actually asks for: an in-range check alone still passes after
 someone inserts a line above 201 and every one of the five citations
 starts pointing one line high.
@@ -97,15 +99,33 @@ _EXCLUDED_DIRS = (".git", ".claude", "__pycache__", "build", "dist",
 _EXCLUDED_PATHS = ("CHANGELOG.md",)
 _EXCLUDED_PREFIXES = ("docs/superpowers/",)
 
+# The cited path, optionally wrapped in a **balanced** pair of
+# backticks (#325). Markdown prose wraps a filename in code ticks as
+# naturally as it writes it bare, and requiring the path bare made the
+# backticked spelling an unmarked way to opt a citation out of every
+# rule below: not red, not graded, silently trusted. Two such citations
+# had drifted 361 lines from the branches they name and nothing in this
+# file could see either one (#329).
+#
+# Two traps, both measured before this was written. The whole group is
+# optional rather than the opening backtick alone: a `` (?P<tick>`?) ``
+# matching the empty string still counts as "participated" for
+# `(?(tick)...)`, so the conditional never fires and the pattern matches
+# nothing at all. And the closing backtick is conditional rather than an
+# independent `` `? ``, because an independent one accepts *half* a pair
+# -- malformed prose -- and being red on writing nobody meant is how a
+# guard gets deleted rather than fixed.
+_CITED_PATH = r"(?P<tick>`)?(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*\.py)(?(tick)`)"
+
 # Rule 1: `path.py:N`, `path.py line N`, either optionally ending `-M`.
 _FILE_CITATION = re.compile(
-    r"([A-Za-z0-9_][A-Za-z0-9_./-]*\.py)(?::|\s+line\s+)(\d+)(?:-(\d+))?")
+    _CITED_PATH + r"(?::|\s+line\s+)(?P<start>\d+)(?:-(?P<end>\d+))?")
 
 # Rule 2: `<code>` at path.py line N. The word "line" is what separates
 # this from the `:N` spelling used for symbol references; see the module
 # docstring's boundary note.
 _CONTENT_CITATION = re.compile(
-    r"`([^`\n]+)`\s+at\s+([A-Za-z0-9_][A-Za-z0-9_./-]*\.py)\s+line\s+(\d+)")
+    r"`(?P<code>[^`\n]+)`\s+at\s+" + _CITED_PATH + r"\s+line\s+(?P<number>\d+)")
 
 MARK_MODIFIED = "entity.mark_modified()"
 
@@ -224,7 +244,7 @@ def check_file_citations(root=None):
         where = path.relative_to(root).as_posix()
         for lineno, text in enumerate(_lines(path), 1):
             for match in _FILE_CITATION.finditer(text):
-                target = _resolve(root, index, match.group(1))
+                target = _resolve(root, index, match.group("path"))
                 if target is None:
                     # Third-party, or a file that no longer exists.
                     # Deliberately not graded; see the module docstring.
@@ -242,7 +262,7 @@ def check_file_citations(root=None):
                 graded += 1
                 total = len(_lines(target))
                 cited_name = target.relative_to(root).as_posix()
-                for number in (match.group(2), match.group(3)):
+                for number in (match.group("start"), match.group("end")):
                     if number is None:
                         continue
                     if not 1 <= int(number) <= total:
@@ -262,7 +282,9 @@ def check_content_citations(root=None):
         where = path.relative_to(root).as_posix()
         for lineno, text in enumerate(_lines(path), 1):
             for match in _CONTENT_CITATION.finditer(text):
-                code, cited, number = match.groups()
+                code = match.group("code")
+                cited = match.group("path")
+                number = match.group("number")
                 target = _resolve(root, index, cited)
                 if target is None:
                     continue
@@ -345,11 +367,15 @@ def test_claude_md_cites_every_mark_modified_call_in_the_checkable_grammar():
     without anyone editing a number here.
     """
     text = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+    # `finditer` and named groups, not `findall`: the tuple grew a
+    # `tick` member in #325, and positional unpacking would have gone
+    # wrong in shape rather than raising.
     cited = {
-        int(number)
-        for code, cited_file, number in _CONTENT_CITATION.findall(text)
-        if code == MARK_MODIFIED
-        and pathlib.PurePosixPath(cited_file).name == "remediation.py"}
+        int(match.group("number"))
+        for match in _CONTENT_CITATION.finditer(text)
+        if match.group("code") == MARK_MODIFIED
+        and pathlib.PurePosixPath(match.group("path")).name
+        == "remediation.py"}
 
     expected = _mark_modified_lines()
     assert expected, (
@@ -537,5 +563,57 @@ def test_a_tree_git_cannot_answer_for_is_swept_whole(tmp_path):
     offenders, graded = check_file_citations(tmp_path)
 
     assert graded == 1
+    assert len(offenders) == 1, offenders
+    assert "is 2 lines long" in offenders[0]
+
+
+def test_a_backticked_path_is_still_content_pinned(tmp_path):
+    """`` `code` at `file.py` line N `` is Rule 2, backticks and all (#325).
+
+    Rule 2 required the path *bare*, and Rule 1 required `:` or the word
+    `line` to follow `.py` immediately -- so a path wrapped in backticks
+    fell through **both**. That spelling is the natural one in Markdown
+    prose, and writing it was an unmarked way to opt a citation out of
+    every rule this file has: not red, not graded, silently trusted.
+
+    The pair must be balanced. Half a pair -- an opening backtick with
+    no closing one -- is malformed prose, and grading it would make this
+    guard red on writing nobody meant, which
+    `test_the_symbol_spelling_is_not_read_as_a_content_pin` exists to
+    prevent for the other spelling.
+    """
+    _tree(
+        tmp_path,
+        ["def f():", "    first()", "    second()"],
+        "Right: `first()` at `zzz_fixture_mod.py` line 2.\n"
+        "Shifted: `second()` at `zzz_fixture_mod.py` line 2.\n"
+        "Half a pair: `second()` at `zzz_fixture_mod.py line 3.\n")
+
+    offenders, checked = check_content_citations(tmp_path)
+
+    assert len(checked) == 2, (
+        "a backticked path must be graded by Rule 2, and half a pair "
+        f"must not be; checked {checked}")
+    assert len(offenders) == 1, offenders
+    assert "'second()'" in offenders[0]
+    assert offenders[0].startswith("notes.md:2:"), offenders[0]
+
+
+def test_a_backticked_path_is_in_range_checked(tmp_path):
+    """Rule 1 was blind to the same spelling (#325).
+
+    A backticked path followed by the word "line" and a number names a
+    file and a line and was invisible to every rule -- #329's two stale
+    citations are written that way. Widening Rule 2 alone would leave a
+    citation carrying no quoted code -- the commonest shape by far --
+    still ungraded.
+    """
+    _tree(tmp_path, ["one", "two"],
+          "Out of range: at `zzz_fixture_mod.py` line 99.\n"
+          "In range: at `zzz_fixture_mod.py` line 2.\n")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert graded == 2, f"a backticked path must be graded; graded {graded}"
     assert len(offenders) == 1, offenders
     assert "is 2 lines long" in offenders[0]
