@@ -238,3 +238,60 @@ def test_every_isocenter_call_in_the_docs_resolves():
         "runs it (#234):\n"
         + "\n".join(f"    {where}:~{line}: .{name}()"
                     for where, line, name in offenders))
+
+
+# --- README's zone-discovery section (#303) -------------------------------
+#
+# `discover_redaction_zones()` and the whole `DiscoveryResult` surface are
+# public API that README described in a "5b" section until that section was
+# deleted, leaving §5a followed by §6 and no documented way in. The two
+# claims the old section got wrong -- what `to_dataframe()`'s columns are,
+# and what `get_density_matrix()` is a matrix *of* -- are why it is worth a
+# guard rather than a one-line fix: the second is the trap, because
+# `get_density_matrix()` normalises by the largest candidate *origin*
+# (`isocenter/discovery.py`, `max(xs)`/`max(ys)`), not by the image's Rows
+# and Columns, so a section that calls it an image heatmap is telling
+# readers to plot coordinates that do not mean what they read as.
+#
+# This lives here rather than in a file of its own because this module is
+# already the home of "what README and docs/ claim about our API", and it
+# needs no `TARGETS` entry for the reason the module docstring gives.
+#
+# The *output* of the section's runnable fence is checked by
+# `tests/test_documented_output_matches.py`; this checks only that the
+# section exists and does not reintroduce the image-space claim.
+_DISCOVERY_HEADING = "### 5b. Zone Discovery"
+
+
+def test_the_readme_documents_zone_discovery_and_its_density_matrix_limit():
+    """README must route users to `discover_redaction_zones()` (#303).
+
+    Checked, in order of how badly getting each one wrong costs the
+    reader: the section exists at all; it names the entry point and the
+    result type; it names the `ocr` extra, without which the scan reads
+    nothing and reports an empty result rather than an error; and it says
+    somewhere in the section that the density matrix is not in image
+    coordinates.
+    """
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    assert _DISCOVERY_HEADING in text, (
+        f"README.md has no {_DISCOVERY_HEADING!r} section, so "
+        "discover_redaction_zones() and DiscoveryResult are public API "
+        "with no documented entry point (#303)")
+
+    start = text.index(_DISCOVERY_HEADING)
+    section = text[start:text.index("\n### ", start + 1)]
+
+    for required in ("discover_redaction_zones", "DiscoveryResult",
+                     "to_zones", "get_density_matrix", "ocr"):
+        assert required in section, (
+            f"README's zone-discovery section never mentions {required!r} "
+            "(#303)")
+
+    # The claim the deleted section got wrong. Phrasing is free; the
+    # section must state, in some form, that the grid is not the image.
+    assert "not an image-space heatmap" in section, (
+        "README's zone-discovery section must state that "
+        "get_density_matrix() is not in image coordinates -- it "
+        "normalises by the largest candidate box origin, not by Rows and "
+        "Columns, so plotting it as an overlay is wrong (#303)")

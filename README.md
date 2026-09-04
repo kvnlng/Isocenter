@@ -253,6 +253,68 @@ You can also export the full inventory to Parquet for external tools
 session.export_dataframe("cohort.parquet", expand_metadata=True)
 ```
 
+### 5b. Zone Discovery (Burned-in Text)
+
+Machines burn identifiers into the pixels themselves, and the same model in the
+same room tends to burn them in the same place every time. `discover_redaction_zones()`
+OCRs a random sample of one machine's instances and reports where text was found,
+so you can write redaction zones from what the data actually does rather than from
+one screenshot.
+
+The scan itself needs the `ocr` extra (`pip install isocenter[ocr]`, which brings
+`pytesseract`; `isocenter.pixel_analysis.HAS_OCR` reports whether it is available).
+Without it there is nothing to read the pixels with and the scan finds nothing.
+Everything on the returned `DiscoveryResult` — filtering, the DataFrame, the zone
+grouping — is plain Python and needs no extra.
+
+```python
+# One machine at a time: zones are a property of the device, not the cohort.
+result = session.discover_redaction_zones(
+    "SN-12345", sample_size=50, min_confidence=80.0)
+
+print(len(result))            # candidate text regions found
+print(result.visualize_heatmap())   # ASCII sketch of where they landed
+
+# Suggested zones, in the [y1, y2, x1, x2] form the redaction config takes.
+for zone in result.to_zones(min_occurrence=0.25):
+    print(zone["type"], zone["zone"], zone["examples"])
+```
+
+A `DiscoveryResult` holds `DiscoveryCandidate` records — `text`, `confidence`,
+`box` (`[x, y, w, h]`), `source_index` (which sampled instance it came from) and
+`classification`. It is iterable and sized, and `filter()` takes either a minimum
+confidence or a predicate. `to_zones()` clusters the candidates, unions each
+cluster's boxes, drops any merged box narrower or shorter than 6 pixels, and keeps
+only clusters seen in at least `min_occurrence` of the sampled instances — a name
+that appears in one frame out of fifty is noise, one that appears in forty is the
+overlay. Each zone's `type` is `LIKELY_NAME` if any member matched the name
+pattern, `PROPER_NOUN` if any was classified as one, and `TEXT` otherwise.
+
+```python
+>>> from isocenter.discovery import DiscoveryCandidate, DiscoveryResult
+>>> result = DiscoveryResult([
+...     DiscoveryCandidate("SMITH^JOHN", 92.0, [10, 8, 60, 12], 0, "NAME_PATTERN"),
+...     DiscoveryCandidate("MERCY GENERAL", 88.0, [200, 180, 50, 10], 1, "PROPER_NOUN"),
+... ], n_sources=2)
+>>> list(result.to_dataframe().columns)
+['text', 'confidence', 'box', 'source_index', 'classification']
+>>> result.get_density_matrix(bins=(2, 2))
+[[1, 0], [0, 1]]
+>>> result.to_zones(min_occurrence=0.5)
+[{'zone': [8, 20, 10, 70], 'type': 'LIKELY_NAME', 'occurrence': 0.5, 'confidence': 92.0, 'examples': ['SMITH^JOHN']}, {'zone': [180, 190, 200, 250], 'type': 'PROPER_NOUN', 'occurrence': 0.5, 'confidence': 88.0, 'examples': ['MERCY GENERAL']}]
+```
+
+`to_dataframe()` needs only pandas, which Isocenter already depends on.
+
+**`get_density_matrix()` is not an image-space heatmap, and the difference matters.**
+It bins each candidate's box *centre* into a grid, but it normalises by the largest
+box *origin* among the candidates — not by the image's Rows and Columns. The grid
+therefore stretches to fit whatever was found, so two scans of the same machine are
+not comparable to each other and neither is comparable to the image; a centre lying
+past the largest origin clamps into the last bin. Read it as "where did the hits fall
+relative to each other", and take the actual coordinates from `to_zones()` or from
+each candidate's `box`.
+
 ### 6. Recover Identity (Optional)
 
 If you have a valid key (`isocenter.key`) and need to retrieve the original identity of an anonymized patient:
