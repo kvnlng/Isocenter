@@ -196,9 +196,52 @@ def test_two_findings_sharing_a_target_write_two_declines(store):
     findings = [_finding(inst, "REMOVE_TAG", "0008,0080"),
                 _finding(inst, "REMOVE_TAG", "0008,0080")]
 
-    RemediationService(store_backend=store).apply_remediation(findings)
+    applied = RemediationService(store_backend=store)\
+        .apply_remediation(findings)
 
     assert len(store.get_audit_declines()) == 2
+    # The other half of the same bool, and it needs its own assertion:
+    # the row count above catches a decline that returned True by way of
+    # the dedup key, but `apply_remediation`'s return is what
+    # `anonymize()` prints ("Anonymized N tags according to policy") and
+    # what its docstring calls "a count of what actually changed". A
+    # decline changed nothing.
+    assert applied == 0, (
+        "a declined remediation was counted as applied, so anonymize() "
+        "reports removing a value that is still in the graph")
+
+
+class _Explodes:
+    """An entity whose setter raises, so its finding reaches the `except`."""
+
+    def set_attr(self, *_args, **_kwargs):
+        raise RuntimeError("entity is read-only")
+
+
+def test_the_failure_warning_counts_declines_among_the_attempts(store,
+                                                                caplog):
+    """The failure warning divides by what was tried, declines included.
+
+    The warning used to read `failures + len(processed_entities)`, which
+    equalled the attempt count only while a decline was added to
+    `processed_entities`. Moving the key to the success arm made that
+    sum stop counting declines, so a run that tried two and failed one
+    reported "1 of 1" -- the operator's only summary line, saying every
+    remediation it attempted had failed. The attempts are counted
+    directly now.
+    """
+    inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
+    findings = [_finding(_Explodes(), "REPLACE_TAG", "0010,0010",
+                         new_value="ANON", uid="1.2.4"),
+                _finding(inst, "REMOVE_TAG", "0008,0080")]
+
+    with caplog.at_level("WARNING"):
+        RemediationService(store_backend=store).apply_remediation(findings)
+
+    summary = [r.message for r in caplog.records
+               if "remediations failed" in r.message]
+    assert summary, "the run failed one remediation and said nothing"
+    assert "1 of 2 remediations failed" in summary[0], summary[0]
 
 
 def test_declines_are_not_anonymisation_evidence():

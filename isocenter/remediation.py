@@ -71,6 +71,16 @@ class RemediationService:
         processed_entities = set()  # To avoid double-processing if multiple findings point to same entity/attr
         audit_buffer = []
         failures = 0
+        # How many proposals actually reached
+        # `_apply_single_remediation`, which is what the failure warning
+        # below means by "of N". Its own counter and not
+        # `failures + len(processed_entities)`: since #301 a decline is
+        # excluded from `processed_entities`, so that sum stopped being
+        # the number attempted the moment the dedup key moved to the
+        # success arm -- it would report "1 of 2 failed" over a run that
+        # tried five. The applied count is `processed_entities`; the
+        # attempted count has to be counted.
+        attempted = 0
 
         for finding in tqdm(findings, desc="Anonymizing Metadata", unit="finding"):
             if not finding.remediation_proposal:
@@ -96,6 +106,10 @@ class RemediationService:
                 continue
 
             try:
+                # Incremented before the call, not after it: a proposal
+                # that raises was still attempted, and the warning below
+                # divides failures by this.
+                attempted += 1
                 # Keyed on the *outcome*, not on "did not raise". A
                 # declining path returns False, and adding its key would
                 # count a remediation that did not happen as applied --
@@ -119,7 +133,7 @@ class RemediationService:
 
         if failures:
             self.logger.warning(
-                f"{failures} of {failures + len(processed_entities)} "
+                f"{failures} of {attempted} "
                 "remediations failed and were not applied. The values they "
                 "targeted are still present.")
 
