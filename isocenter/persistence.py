@@ -2667,9 +2667,23 @@ class SqliteStore:
                 # persisted -- store, sidecar, memory and `_pixel_hash` all
                 # agreeing on the wrong frame, with every integrity check
                 # passing. `unload_pixel_data()` now refuses to null a
-                # diverged array (#293), so an `arr is None` here means the
-                # array really was equal to what the loader points at.
-                # Do not relax that refusal without revisiting this arm.
+                # diverged array (#293).
+                #
+                # That does NOT make `arr is None` mean "the array equalled
+                # the loader's frame", and it must not be read that way:
+                # `discard_pixel_data()`, added in the same change, nulls a
+                # diverged array on purpose and leaves the divergence flag
+                # set. Nothing else nulls `pixel_array` -- every other
+                # write to it (`set_pixel_data()` and `get_pixel_data()`'s
+                # three arms) fills it. So `arr is None` here means one of
+                # exactly two
+                # things: `unload_pixel_data()` cleared an array that was
+                # equal to what the loader points at, or a caller
+                # deliberately discarded one -- the redaction `finally`
+                # blocks, where reverting to the loader's frame IS the
+                # intended outcome. Recording the loader's frame is correct
+                # under both. Do not relax that refusal, or add a third
+                # nulling site, without revisiting this arm.
                 if isinstance(loader, SidecarPixelLoader):
                     return _StoredFrame(loader.offset, loader.length,
                                         loader.alg,
