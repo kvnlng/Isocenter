@@ -189,3 +189,115 @@ def test_a_file_with_no_preamble_is_accepted_by_the_eager_ingest(tmp_path):
     assert summary.ingested == 1
     assert (store.patients[0].studies[0].series[0]
             .instances[0].sop_instance_uid) == sop
+
+
+def _write_headerless_with_pixels(path):
+    """The same shape as `_write_without_preamble`, but carrying pixels.
+
+    A `FileDataset` with a complete `file_meta` -- including a
+    `TransferSyntaxUID`, which is what the pixels have to be decoded
+    against -- written with `enforce_file_format=False` so no preamble
+    and no `DICM` prefix reach the file. That is the combination the
+    eager ingest's `force=True` accepts and a plain `dcmread` refuses,
+    and it is the ordinary shape of a raw vendor dump.
+    """
+    arr = np.arange(16, dtype=np.uint16).reshape(4, 4)
+
+    fm = FileMetaDataset()
+    fm.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.7"
+    fm.MediaStorageSOPInstanceUID = generate_uid()
+    fm.TransferSyntaxUID = ExplicitVRLittleEndian
+    fm.ImplementationClassUID = generate_uid()
+
+    ds = FileDataset(str(path), pydicom.Dataset(), file_meta=fm, preamble=None)
+    ds.PatientID, ds.PatientName = "PAT289", "DOE^JOHN"
+    ds.StudyInstanceUID, ds.SeriesInstanceUID = generate_uid(), generate_uid()
+    ds.SOPInstanceUID = fm.MediaStorageSOPInstanceUID
+    ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.7"
+    ds.Modality, ds.SeriesNumber, ds.StudyDate = "OT", 1, "20230101"
+    ds.Rows, ds.Columns, ds.SamplesPerPixel = 4, 4, 1
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 16, 16, 15
+    ds.PixelRepresentation = 0
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelData = arr.tobytes()
+
+    pydicom.dcmwrite(str(path), ds, enforce_file_format=False)
+    return ds.SOPInstanceUID, arr
+
+
+def _ingest_headerless(path):
+    """Ingest with no sidecar manager, so `file_path` is the only route back.
+
+    `import_files` binds a `_pixel_loader` only when a sidecar is
+    supplied; without one the instance carries neither a loader nor a
+    resident array, and `get_pixel_data()` reaches its third step -- the
+    `file_path` re-read -- on the ordinary path rather than after some
+    explicit clearing.
+    """
+    store = DicomStore()
+    summary = DicomImporter.import_files([str(path)], store)
+    assert summary.failures == []
+    return store.patients[0].studies[0].series[0].instances[0]
+
+
+def test_a_file_the_eager_ingest_accepted_can_reload_its_own_pixels(tmp_path):
+    """The two reads of a source file have to accept the same files (#289).
+
+    `ingest_worker` reads with `force=True` (#281); `get_pixel_data()`'s
+    third step re-read did not. A header-less file therefore ingested
+    cleanly -- metadata indexed, `IngestSummary(ingested=1,
+    failures=[])`, nothing audited -- and then could not produce its own
+    pixels: `RuntimeError: Lazy load failed for ...: File is missing
+    DICOM File Meta Information header or the 'DICM' prefix is missing`.
+    A file accepted at one boundary and refused at the next is the
+    defect, whichever boundary is "right" in isolation.
+    """
+    path = tmp_path / "raw_pixels.dcm"
+    sop, arr = _write_headerless_with_pixels(path)
+
+    # Honest-fixture guard, as in the ingest test above: without it a
+    # fixture that quietly regained its preamble would make everything
+    # below pass under the mutant, and this test would pin nothing.
+    with pytest.raises(pydicom.errors.InvalidDicomError):
+        pydicom.dcmread(str(path))
+
+    inst = _ingest_headerless(path)
+    assert inst.sop_instance_uid == sop
+    # No sidecar, so no loader: the assertion below is about step 3.
+    assert inst._pixel_loader is None
+
+    got = inst.get_pixel_data()
+    assert got is not None
+    assert got.shape == (4, 4)
+    assert np.array_equal(got, arr)
+
+
+def test_unload_reports_a_pixel_array_it_can_actually_bring_back(tmp_path):
+    """The silent half of #289: the loud one is a `RuntimeError`, this is not.
+
+    `unload_pixel_data()`'s contract is that it clears the resident array
+    **only when it can be brought back**, and it accepts `file_path` as
+    one of the two routes back. On a header-less file that route did not
+    work, so the unload returned `True` -- the caller's evidence that the
+    pixels are safe -- and the pixels were then unreachable. No
+    exception, no audit row, nothing in the report.
+
+    The array is assigned rather than set through `set_pixel_data()` on
+    purpose: assignment is exactly what `get_pixel_data()`'s three
+    success arms do, so this is an array that has been read and is
+    resident. `set_pixel_data()` would set `_pixel_array_unwritten` and
+    the unload would refuse for #293's reason instead, which is a
+    different question.
+    """
+    path = tmp_path / "raw_pixels.dcm"
+    _sop, arr = _write_headerless_with_pixels(path)
+    inst = _ingest_headerless(path)
+
+    inst.pixel_array = arr.copy()
+    assert inst.unload_pixel_data() is True
+    assert inst.pixel_array is None
+
+    # ...and the promise the True stood for.
+    back = inst.get_pixel_data()
+    assert back is not None
+    assert np.array_equal(back, arr)

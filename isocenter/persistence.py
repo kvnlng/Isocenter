@@ -26,7 +26,7 @@ from contextlib import nullcontext
 from pydicom.multival import MultiValue
 
 from .entities import (Patient, Study, Series, Instance, Equipment,
-                       PhiStatus)
+                       PhiStatus, normalize_study_date)
 from .sidecar import SidecarManager
 from .logger import get_logger
 from .privacy import PhiFinding, PhiRemediation
@@ -242,23 +242,77 @@ def _as_loaded_date(value):
     because either one loads as a `date` and both export paths render a
     `date` as `YYYYMMDD` -- `session.export()` by handing it to pydicom,
     `write_tree` via `format_study_date`. The exported *directory name*
-    is not: `export_folder_names` builds it with
-    `str(study.study_date or "NoDate")`, not `format_study_date`, so a
-    hand-built graph carrying `"20240101"` files under `Study_20240101_`
-    before a round trip and `Study_2024-01-01_` after one. Ingested
-    studies never see this -- ingest already produces a `date`, so
-    `str()` yields the ISO spelling on both sides -- and routing the
-    folder through `format_study_date` would rename every existing
-    export's directories, which is worse than the divergence it closes.
-    Known and accepted, filed as #189; do not read the element's
-    indifference as the folder's.
+    used to diverge, because `export_folder_names` builds it with
+    `str(study.study_date or "NoDate")` rather than
+    `format_study_date`: a hand-built graph carrying `"20240101"` filed
+    under `Study_20240101_` before a round trip and `Study_2024-01-01_`
+    after one, so the same study occupied two directories and a
+    re-export into an existing tree wrote a second copy instead of
+    overwriting the first. Closed at the other end of the same rule --
+    `Study.__setattr__` normalises on assignment -- rather than in
+    `export_folder_names`, which would have renamed every *ingested*
+    study's directory (#189).
+
+    The body is `entities.normalize_study_date`, and it must stay that
+    way: two copies of "text that names a day becomes a `date`" is
+    exactly how the two ends came to disagree.
     """
-    if value is None:
-        return None
+    return normalize_study_date(value)
+
+
+#: How to read a `value_text` back for the VRs whose values are *not*
+#: text on the wire. The vertical table's column is TEXT, so every value
+#: is stored stringified; for these VRs pydicom refuses the string at
+#: write time -- measured on 3.0.2, `US`/`UL`/`FL` raise
+#: `struct.error: required argument is not an integer` from
+#: `filewriter.write_numbers`, which fails the whole export rather than
+#: the element. Restoring the type is therefore part of restoring the
+#: VR, not a separate nicety (#154).
+#:
+#: The text VRs are deliberately absent. `SH`, `LO`, `UT`, `DS` and `IS`
+#: all write correctly from a `str` -- `DS` and `IS` *are* text on the
+#: wire -- so converting them would invent a Python type the source
+#: never had, which is the "reconstructing a type by inspecting the
+#: value" this table exists to avoid.
+_VERTICAL_VR_PARSERS = {
+    'US': int, 'SS': int, 'UL': int, 'SL': int, 'UV': int, 'SV': int,
+    'AT': int, 'FL': float, 'FD': float,
+}
+
+
+def _vertical_atom_text(vr: str, atom: Any) -> str:
+    """The one rendering of a private value into `value_text`.
+
+    `str(atom)` for everything except `AT`, whose `str()` is the display
+    spelling `'(0010,0010)'` -- which `Tag()` refuses to read back
+    ("unknown DICOM element keyword or an invalid int"). Stored as the
+    decimal integer it is, so `_VERTICAL_VR_PARSERS['AT']` is its exact
+    inverse. This pair has to stay a pair.
+    """
+    if vr == 'AT':
+        try:
+            return str(int(atom))
+        except (TypeError, ValueError):
+            # A value that is no longer a tag. Stored as it reads and
+            # reloaded as text; `_value_fits_vr` refuses it at export
+            # and the fallback runs, which is the pre-#154 behaviour.
+            return str(atom)
+    return str(atom)
+
+
+def _vertical_atom_value(vr: str, text: str) -> Any:
+    """The inverse of `_vertical_atom_text`, keyed on the stored VR."""
+    parser = _VERTICAL_VR_PARSERS.get(vr)
+    if parser is None:
+        return text
     try:
-        return date.fromisoformat(value)
+        return parser(text)
     except (TypeError, ValueError):
-        return value
+        # Unparseable text under a numeric VR: keep the text. The VR
+        # then fails `_value_fits_vr` at export and the value takes the
+        # fallback, which is exactly what it did before #154 -- never
+        # worse than no recorded VR at all.
+        return text
 
 
 def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
@@ -1352,7 +1406,9 @@ class SqliteStore:
                 # only until the session was closed. Pre-fetched here for
                 # the same reason as `wave_refs` above: per-instance would
                 # be one query per instance on every session open.
-                vertical = self.load_vertical_attributes_bulk(conn=conn)
+                vertical_vrs = {}
+                vertical = self.load_vertical_attributes_bulk(
+                    conn=conn, vrs=vertical_vrs)
 
                 se_map = {}
                 for r in se_rows:
@@ -1393,7 +1449,8 @@ class SqliteStore:
                                 "instance %s: %s", r['sop_instance_uid'], exc)
 
                     self._apply_vertical_attributes(
-                        inst, vertical.get(r['sop_instance_uid'], {}))
+                        inst, vertical.get(r['sop_instance_uid'], {}),
+                        vertical_vrs.get(r['sop_instance_uid'], {}))
 
                     # Wire up Sidecar Loader if present
                     if r['pixel_offset'] is not None and r['pixel_length'] is not None:
@@ -1555,11 +1612,14 @@ class SqliteStore:
                 # what makes a later `set_attr` slipping in here survivable
                 # rather than a silent UNSCANNED regression; the invariant
                 # itself lives on that helper.
+                vertical_vrs = {}
                 vertical = self.load_vertical_attributes_bulk(
-                    [i.sop_instance_uid for i in hydrated_instances], conn=conn)
+                    [i.sop_instance_uid for i in hydrated_instances], conn=conn,
+                    vrs=vertical_vrs)
                 for inst in hydrated_instances:
                     self._apply_vertical_attributes(
-                        inst, vertical.get(inst.sop_instance_uid, {}))
+                        inst, vertical.get(inst.sop_instance_uid, {}),
+                        vertical_vrs.get(inst.sop_instance_uid, {}))
 
                 for entity, stored in stored_statuses:
                     entity.record_phi_status(_phi_status_from_stored(stored))
@@ -1590,8 +1650,23 @@ class SqliteStore:
         return data
 
     def _serialize_dicom_item(self, item) -> Dict[str, Any]:
-        """Helper for recursive serialization of generic DicomItems."""
+        """Helper for recursive serialization of generic DicomItems.
+
+        Carries `__vrs__` alongside `__sequences__` (#154). A nested
+        private tag never reaches the `instance_attributes` table -- it
+        rides this JSON -- so `value_rep`, the storage home the top-level
+        carrier uses, does not exist for it. Without this key an inner
+        private tag would behave differently from an outer one on the
+        very same instance.
+
+        `_serialize_item`, the root, deliberately emits **no** top-level
+        `__vrs__`: a root private tag's VR lives in `value_rep`, and a
+        second copy here would be a second answer that can disagree with
+        it after a partial write.
+        """
         data = item.attributes.copy()
+        if getattr(item, "attribute_vrs", None):
+            data['__vrs__'] = dict(item.attribute_vrs)
         if item.sequences:
             seq_data = {}
             for tag, seq in item.sequences.items():
@@ -1605,9 +1680,15 @@ class SqliteStore:
         Populates target_item with attributes and sequences from data dict.
         """
         sequences_data = data.pop('__sequences__', None)
+        vrs_data = data.pop('__vrs__', None)
 
         # 1. Attributes
         target_item.attributes.update(data)
+        if vrs_data:
+            # Assigned, not recorded through `record_attr_vr`, for the
+            # same reason the attributes above are: hydration restores a
+            # state, it does not make an edit (#154).
+            target_item.attribute_vrs.update(vrs_data)
 
         # 2. Sequences
         if sequences_data:
@@ -1619,7 +1700,9 @@ class SqliteStore:
                     target_item.add_sequence_item(tag, new_item)
 
     def save_vertical_attributes(
-            self, instance_uid: str, attributes: Dict[Tuple[str, str], Any], conn: sqlite3.Connection = None):
+            self, instance_uid: str, attributes: Dict[Tuple[str, str], Any],
+            conn: sqlite3.Connection = None,
+            vrs: Dict[Tuple[str, str], str] = None):
         """
         Persists extended attributes to the vertical `instance_attributes` table.
 
@@ -1641,10 +1724,21 @@ class SqliteStore:
             instance_uid (str): The SOP Instance UID.
             attributes (Dict[Tuple[str, str], Any]): Mapping of (Group, Element) hex strings to values.
             conn (sqlite3.Connection, optional): An existing database connection to use for the transaction.
+            vrs (Dict[Tuple[str, str], str], optional): The source VR for
+                each tag, keyed the same way. `value_rep` was reserved for
+                this and hardcoded to `"UN"` until #154; a tag with no
+                entry still stores `"UN"`, which is the honest answer for
+                a value whose VR was never known.
         """
         data_rows = []
         for (grp, elem), val in attributes.items():
-            vr = "UN"  # Todo: Pass VR from caller
+            # `"UN"` remains the default, and it is not a placeholder any
+            # more: it says this value's VR was never recorded, which is
+            # what an Implicit VR source produces for every private
+            # element. `load_vertical_attributes_bulk` reads it back and
+            # `_value_fits_vr` refuses it, so such a value takes the
+            # export fallback exactly as it did before (#154).
+            vr = (vrs or {}).get((grp, elem), "UN")
             # Check for VM > 1. `MultiValue` is what pydicom hands back for a
             # multi-valued element and it is a MutableSequence, NOT a list, so
             # a bare `isinstance(val, list)` sent it down the scalar arm and
@@ -1653,9 +1747,11 @@ class SqliteStore:
             # for the other tier for the same reason.
             if isinstance(val, (list, MultiValue)):
                 for idx, atom in enumerate(val):
-                    data_rows.append((instance_uid, grp, elem, idx, vr, str(atom)))
+                    data_rows.append((instance_uid, grp, elem, idx, vr,
+                                      _vertical_atom_text(vr, atom)))
             else:
-                data_rows.append((instance_uid, grp, elem, 0, vr, str(val)))
+                data_rows.append((instance_uid, grp, elem, 0, vr,
+                                  _vertical_atom_text(vr, val)))
 
         try:
 
@@ -1767,7 +1863,8 @@ class SqliteStore:
     def load_vertical_attributes_bulk(
             self,
             instance_uids: Optional[List[str]] = None,
-            conn: sqlite3.Connection = None
+            conn: sqlite3.Connection = None,
+            vrs: Optional[Dict[str, Dict[Tuple[str, str], str]]] = None
     ) -> Dict[str, Dict[Tuple[str, str], Any]]:
         """Loads the vertical table for many instances in one pass.
 
@@ -1780,12 +1877,18 @@ class SqliteStore:
         memory.
 
         Values come back as they are stored -- `str`, or a `list` of `str`
-        for VM > 1. **No type is restored**, because none is recorded:
-        `value_rep` is hardcoded to "UN" on write and is not read here, so
-        a private `5` reloads as `"5"`. Reconstructing a type by inspecting
-        the text would be a storage-shape decision, and it is #154's, not
-        this method's. For the same reason a saved one-element list reloads
-        as a scalar: the table records no arity either.
+        for VM > 1 -- **except** where `value_rep` names a VR whose values
+        are not text on the wire. `US`, `UL`, `FL` and their siblings come
+        back as numbers, because pydicom refuses a `str` for them at write
+        time and would fail the whole export rather than the element
+        (`_VERTICAL_VR_PARSERS`). Nothing is inferred from the text: the
+        VR the source file gave decides, and a tag stored under `"UN"` --
+        which is every private element of an Implicit VR source -- still
+        reloads as text (#154).
+
+        A saved one-element list still reloads as a scalar: the table
+        records no arity, which is a different gap from the type one and
+        is not closed here.
 
         Args:
             instance_uids (Optional[List[str]]): SOP Instance UIDs to fetch.
@@ -1798,14 +1901,24 @@ class SqliteStore:
                 a plain, non-reentrant lock, so opening a nested connection
                 deadlocks outright. Same convention as
                 `save_vertical_attributes` and `record_blob_ref`.
+            vrs (Optional[Dict]): An accumulator, filled with SOP Instance
+                UID -> {(group, element): value_rep} when given. An
+                out-parameter rather than a second return value, matching
+                `populate_attrs`' `dropped`/`unscanned` and `_merge`'s
+                `losses`: every existing caller reads the return
+                positionally, and widening it to a `(value, vr)` pair
+                would rewrite all of them for one caller's benefit.
+                `"UN"` entries are included -- "no VR was recorded" is an
+                answer, and dropping it would be indistinguishable from
+                "this method was not asked".
 
         Returns:
             Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID ->
             {(group, element): value}. Instances with no vertical rows are
             absent rather than present-and-empty.
         """
-        select = ("SELECT instance_uid, group_id, element_id, value_text"
-                  " FROM instance_attributes")
+        select = ("SELECT instance_uid, group_id, element_id, value_rep,"
+                  " value_text FROM instance_attributes")
         # atom_index is not selected, only ordered by: it decides the order
         # of a multi-valued element's atoms and carries nothing else.
         order = " ORDER BY instance_uid, group_id, element_id, atom_index"
@@ -1832,7 +1945,8 @@ class SqliteStore:
         # nothing saying so. `load_all` and `load_patient` have their own
         # handlers and turn a store-level failure into a logged empty
         # load, which is loud. Failing that way is the point.
-        atoms: Dict[Tuple[str, str, str], List[str]] = {}
+        atoms: Dict[Tuple[str, str, str], List[Any]] = {}
+        reps: Dict[Tuple[str, str, str], str] = {}
         ctx = self._get_connection() if conn is None else nullcontext(conn)
         with ctx as db:
             for sql, params in queries:
@@ -1842,17 +1956,28 @@ class SqliteStore:
                 # covers the whole store.
                 for row in db.execute(sql, params):
                     key = (row['instance_uid'], row['group_id'], row['element_id'])
-                    atoms.setdefault(key, []).append(row['value_text'])
+                    # The stored VR of the FIRST atom stands for the
+                    # element: `save_vertical_attributes` writes one VR
+                    # per element across every atom, so a disagreement
+                    # here would be a corrupt row rather than a case to
+                    # reconcile.
+                    rep = row['value_rep'] or "UN"
+                    reps.setdefault(key, rep)
+                    atoms.setdefault(key, []).append(
+                        _vertical_atom_value(rep, row['value_text']))
 
         results: Dict[str, Dict[Tuple[str, str], Any]] = {}
         for (uid, grp, elem), values in atoms.items():
             results.setdefault(uid, {})[(grp, elem)] = (
                 values if len(values) > 1 else values[0])
+            if vrs is not None:
+                vrs.setdefault(uid, {})[(grp, elem)] = reps[(uid, grp, elem)]
         return results
 
     @staticmethod
     def _apply_vertical_attributes(instance: Instance,
-                                   private: Dict[Tuple[str, str], Any]) -> None:
+                                   private: Dict[Tuple[str, str], Any],
+                                   vrs: Dict[Tuple[str, str], str] = None) -> None:
         """Writes loaded private tags onto an instance being hydrated.
 
         Assigns into `attributes` directly, exactly as `_deserialize_into`
@@ -1874,6 +1999,15 @@ class SqliteStore:
         """
         for (grp, elem), value in private.items():
             instance.attributes[f"{grp},{elem}"] = value
+
+        # Same rule for the VR carrier, and for the same reason:
+        # assigned, never recorded through `record_attr_vr`. `"UN"` is
+        # skipped rather than stored -- it means no VR was ever known,
+        # and a carrier entry saying "unknown" is not the same thing as
+        # no entry, which is what `_merge` reads (#154).
+        for (grp, elem), vr in (vrs or {}).items():
+            if vr and vr != "UN":
+                instance.attribute_vrs[f"{grp},{elem}"] = vr
 
     def persist_blob(self, instance, kind: str, data) -> None:
         """Write a binary blob to the sidecar and record its reference.
@@ -2448,8 +2582,9 @@ class SqliteStore:
 
         # Deferred until the instances exist: instance_attributes has a
         # foreign key onto instances(sop_instance_uid).
-        for uid, attributes in vertical_rows:
-            self.save_vertical_attributes(uid, attributes, conn=conn)
+        for uid, attributes, attribute_vrs in vertical_rows:
+            self.save_vertical_attributes(uid, attributes, conn=conn,
+                                          vrs=attribute_vrs)
 
         tally.instances += len(unsaved)
         return unsaved
@@ -2473,17 +2608,27 @@ class SqliteStore:
 
         Returns:
             Tuple of (instance rows, instance_blobs rows, (uid, private
-            attributes) pairs for the vertical table).
+            attributes, private VRs) triples for the vertical table).
         """
         rows, blob_rows, vertical_rows = [], [], []
 
         for inst, revision in unsaved:
             core, private = _split_core_and_private(self._serialize_item(inst))
+            # The VRs for exactly the tags that made it to the private
+            # tier, re-keyed to that tier's `("gggg", "eeee")` shape. Only
+            # those: an entry for a tag whose value stayed in
+            # `attributes_json` would be a VR with no row to sit on
+            # (#154).
+            private_vrs = {}
+            for key in private:
+                recorded = inst.attribute_vrs.get(",".join(key))
+                if recorded:
+                    private_vrs[key] = recorded
             # Appended even when `private` is empty. An instance whose
             # private tags were all stripped still has to reach
             # `save_vertical_attributes`, or its old rows stay in the table
             # and the next reload puts them back on the graph (#158).
-            vertical_rows.append((inst.sop_instance_uid, private))
+            vertical_rows.append((inst.sop_instance_uid, private, private_vrs))
 
             # The #274 guard, re-checked at the latest possible moment.
             # `_persist_pixels` applied it when it appended the frame, but

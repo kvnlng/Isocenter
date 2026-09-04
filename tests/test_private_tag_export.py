@@ -237,7 +237,12 @@ def test_merging_the_same_attributes_twice_is_idempotent():
 # --------------------------------------------------------------------
 
 @pytest.mark.parametrize("tag, expected", [
-    ("0009,1010", ["1", "2", "3"]),          # source US
+    # Since #154 the source VR is carried, so a private `US` exports as
+    # `US` and its values come back as integers. Before that they were
+    # the strings `_fallback_encoding` made of them, which is what this
+    # row used to expect -- and what this test's docstring said was
+    # #154's to change.
+    ("0009,1010", [1, 2, 3]),                # source US
     ("0009,1011", ["alpha", "beta"]),        # source LO
     ("0009,1012", ["1.5", "2.5"]),           # source DS
     ("0009,1014", ["4", "5"]),               # source IS
@@ -245,10 +250,10 @@ def test_merging_the_same_attributes_twice_is_idempotent():
 def test_a_multi_valued_private_tag_survives_export(tmp_path, tag, expected):
     """#165 as reported: present in the graph, absent from the file.
 
-    The values come back as strings because nothing restores the source
-    VR -- that is #154, and deciding it here would be deciding it on the
-    wrong ticket. What this asserts is that the *values* and their
-    multiplicity survive, which they did not.
+    Three of these four come back as strings because their VRs are text
+    on the wire; the `US` row comes back as integers, since #154 carries
+    the source VR through. What this asserts either way is that the
+    *values* and their multiplicity survive, which they did not.
     """
     kept = _private(_roundtrip(tmp_path))
     assert list(kept.get(tag, [])) == expected, kept

@@ -47,11 +47,18 @@ def test_date_shifting_remediation():
     # Assert
     new_date = study.study_date
     assert new_date != study_date
-    assert len(new_date) == 8
+    # A `date`, not the eight-character string `_shift_date_string`
+    # returns: `Study.__setattr__` normalises a DA-spelled string on
+    # assignment, so a shifted study date is the same type as an
+    # ingested one and as a reloaded one. Before #189 this line read
+    # `len(new_date) == 8`, which pinned the spelling that made a
+    # jittered study file under `Study_20221114_` fresh and
+    # `Study_2022-11-14_` after a reload.
+    assert isinstance(new_date, datetime.date)
 
     # Validate it's a valid date
     orig_dt = datetime.datetime.strptime(study_date, "%Y%m%d")
-    new_dt = datetime.datetime.strptime(new_date, "%Y%m%d")
+    new_dt = datetime.datetime.strptime(new_date.strftime("%Y%m%d"), "%Y%m%d")
 
     # Check that it is shifted backwards (our logic returns negative offset)
     assert new_dt < orig_dt

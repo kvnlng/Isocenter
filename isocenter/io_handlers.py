@@ -125,6 +125,7 @@ import os
 import sys
 import hashlib
 import io
+import struct
 from typing import List, Dict, Any, Optional, Tuple, Iterable
 from datetime import datetime, date
 from dataclasses import dataclass, field
@@ -155,8 +156,12 @@ from pydicom.filewriter import write_sequence
 from .entities import Patient, Study, Series, Instance, Equipment, DicomItem
 from .logger import get_logger
 from .pixel_geometry import (
+    FLOAT_DTYPE_BY_ELEMENT,
+    FLOAT_DTYPE_NAMES,
     GeometryEvidence,
-    planar_configuration_default,
+    PIXEL_DTYPE_ATTR,
+    TAG_DOUBLE_FLOAT_PIXEL_DATA,
+    TAG_FLOAT_PIXEL_DATA,
     resolve_photometric_interpretation,
     resolve_pixel_geometry,
 )
@@ -202,7 +207,9 @@ _ITEM_TAG_LE = b"\xfe\xff\x00\xe0"
 #: names the sequence item. That is not a schema change -- `kind` is
 #: unconstrained TEXT and only `persist_blob`'s literal tuple gates it
 #: -- but it is a re-merge path on the export side and a decision about
-#: what `kind` means, which #150 also has an interest in. Filed as #183.
+#: what `kind` means, which #150 also has an interest in. Filed as #183,
+#: whose first half (the top-level float pair) has landed and whose
+#: second half -- this one -- has not.
 #:
 #: (5400,1010) is deliberately absent. Waveform Data is *never* at the
 #: top level -- it lives inside Waveform Sequence items -- so a depth
@@ -213,27 +220,30 @@ _ROOT_ONLY_ROUTED_TAGS = frozenset({
     Tag(0x7fe0, 0x0010),   # Pixel Data
 })
 
-#: The float pixel elements. Also routed, and by a different mechanism
-#: from everything else here: nothing extracts them at ingest, and
-#: `_export_instance_worker` writes them back from the array
-#: `get_pixel_data()` re-reads out of the source file, under their own
-#: tag (#170, #193). That still satisfies `_is_routed`'s question --
-#: something else in the pipeline carries these bytes -- and reporting
-#: them at ingest would file a `DATA_LOSS` row reading "not in the
-#: exported data" about an element that is in the exported data. Which
-#: is the defect #194 opened against the first cut of this fix, pointed
-#: at a second tag.
+#: The float pixel elements. Routed the same way Pixel Data is, since
+#: #183's first half: `ingest_worker` extracts the array and writes it
+#: to the sidecar, and `_export_instance_worker` writes it back under
+#: its own tag (#170, #193). Reporting them at ingest would file a
+#: `DATA_LOSS` row reading "not in the exported data" about an element
+#: that is in the exported data -- the defect #194 opened against the
+#: first cut of this fix, pointed at a second tag.
 #:
-#: Two conditions, both applied in `_is_routed`. Top level only, because
-#: `get_pixel_data()` reads the top level. And only when the instance
-#: has no Pixel Data of its own: the export takes the sidecar array
-#: whenever there is a loader, so in a file carrying both -- which
-#: PS3.5 Section 8.2 forbids, but malformed input exists -- the float half is
-#: genuinely lost and must still be reported.
+#: Two conditions, both applied in `_is_routed`, and both still exactly
+#: as load-bearing as they were. Top level only, because the extraction
+#: reads the top level. And only when the instance has no Pixel Data of
+#: its own: `ingest_worker`'s arms are `if "PixelData" ... elif` the
+#: float pair, so on a file carrying both -- which PS3.5 Section 8.2
+#: forbids, but malformed input exists -- Pixel Data is what reaches the
+#: sidecar and the float half is genuinely lost. One question, one
+#: answer, and it is the same answer `has_pixel_data` gave before the
+#: bytes moved.
 #:
-#: The sidecar is still the missing half, and is still #183: an ingest
-#: that could carry these bytes would survive the source file being
-#: moved, which this cannot.
+#: **#183's second half is still open**: pixel data nested inside an
+#: Icon Image Sequence is not carried, because `instance_blobs` is
+#: UNIQUE(instance_uid, kind) and a second pixel blob per instance needs
+#: a `kind` naming the sequence item -- which two literal
+#: `WHERE kind = 'pixels'` reads in `persistence.py` would have to learn
+#: about, and which is also a decision #150 has an interest in.
 _FLOAT_PIXEL_TAGS = frozenset({
     Tag(0x7fe0, 0x0008),   # Float Pixel Data
     Tag(0x7fe0, 0x0009),   # Double Float Pixel Data
@@ -299,6 +309,219 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 #: in the loss report. Pixel and waveform bytes are unaffected either
 #: way: they are routed to the sidecar before this rule is consulted.
 BINARY_RETENTION_MAX_BYTES = 65534
+
+
+#: Private VRs whose Python value must be an integer, mapped to the
+#: inclusive range each can actually encode (PS3.5 Table 6.2-1; `AT` is
+#: a four-byte tag, so it takes `UL`'s range).
+#:
+#: They are here for two reasons and the second is not the first over
+#: again. pydicom accepts a `str` at `add_new` for these -- with a
+#: `UserWarning` -- and then raises `struct.error: required argument is
+#: not an integer` from `filewriter.write_numbers` when the dataset is
+#: written, which fails the whole export rather than the offending
+#: element. Measured on pydicom 3.0.2 for `US`, `UL` and `FL`; the
+#: siblings are here by the same encoding rule (all binary-encoded).
+#: And being an `int` is not enough either: `add_new` accepts any Python
+#: integer without complaint, so a private `US` holding `70000` writes
+#: an element `_merge` reports no loss for and then raises `OSError:
+#: 'H' format requires 0 <= number <= 65535` out of the export -- past
+#: `_merge`'s `try`, so again the file rather than the element. A source
+#: element is always in range; this is the value a later `set_attr` or a
+#: remediation rule put there, and the whole point of the gate is that
+#: such a value takes the fallback (#154).
+_INTEGER_VR_RANGE = {
+    'US': (0, 0xFFFF),
+    'SS': (-0x8000, 0x7FFF),
+    'UL': (0, 0xFFFFFFFF),
+    'SL': (-0x80000000, 0x7FFFFFFF),
+    'UV': (0, 0xFFFFFFFFFFFFFFFF),
+    'SV': (-0x8000000000000000, 0x7FFFFFFFFFFFFFFF),
+    'AT': (0, 0xFFFFFFFF),
+}
+
+#: The same, for the binary floating-point VRs, mapped to the `struct`
+#: format the writer will pack with -- so the gate can ask the writer's
+#: question rather than a paraphrase of it. `FD` is here for symmetry:
+#: every Python `float` is a double, so it never declines, and leaving
+#: it out would make the table read as though `FL` were the only float
+#: VR.
+_FLOAT_VR_PACK = {'FL': '<f', 'FD': '<d'}
+
+#: The VR names alone, derived rather than restated. Two spellings of
+#: "which VRs are binary integers" is exactly the drift
+#: `test_every_binary_vr_the_gate_accepts_has_a_way_back_out_of_the_store`
+#: exists to catch one table further out.
+_INTEGER_VRS = frozenset(_INTEGER_VR_RANGE)
+_FLOAT_VRS = frozenset(_FLOAT_VR_PACK)
+
+#: Text VRs and the per-value character cap PS3.5 Table 6.2-1 gives
+#: each. The cap is checked per *value*, never against a multi-valued
+#: join -- the standard bounds each value, which is the same rule
+#: `_fallback_multivalue` already applies.
+_TEXT_VR_MAX = {
+    'AE': 16, 'AS': 4, 'CS': 16, 'DA': 8, 'DS': 16, 'DT': 26,
+    'IS': 12, 'LO': 64, 'LT': 10240, 'PN': 64, 'SH': 16, 'ST': 1024,
+    'TM': 16, 'UI': 64,
+}
+
+#: The text VRs PS3.5 Table 6.2-1 leaves uncapped. Listed, not inferred
+#: from absence in `_TEXT_VR_MAX`: "no cap recorded" is also what an
+#: unknown VR and every binary VR look like, so reading absence as
+#: "unbounded text" would accept a recorded VR this module knows nothing
+#: about. An earlier comment claimed these three were handled by that
+#: absence, and `UC` -- the only one not also in `_VM_ONE_TEXT_VRS` --
+#: was in fact rejected on every path, so a private `UC` element
+#: recorded its VR at ingest and still exported as `UT`.
+_TEXT_VR_UNCAPPED = frozenset({'UT', 'UR', 'UC'})
+
+#: The text VRs whose value multiplicity is fixed at 1, so a backslash
+#: in the value is ordinary text rather than the value delimiter
+#: (PS3.5 6.2). Every other text VR here is 1-n, where a backslash
+#: re-splits the value on read -- #195, from the other side. `UC` is the
+#: one uncapped VR that is 1-n, which is why the two sets are not one.
+_VM_ONE_TEXT_VRS = frozenset({'ST', 'LT', 'UT', 'UR'})
+
+
+def _value_fits_vr(value, vr: str) -> bool:
+    """Can `value` be written under `vr` without changing what it says?
+
+    The gate in front of a recorded private VR (#154). A recorded VR is
+    a fact about the value the *source file* carried; anonymisation,
+    redaction or a plain `set_attr` can replace that value with one the
+    VR no longer suits, and deferring to it then would write an element
+    that is conformant-looking and wrong. Answering False sends the tag
+    to `_fallback_encoding`, which is exactly what happened before this
+    existed -- so a False here is never worse than no recorded VR at
+    all. **A wrong True is.** It is not a shrug back to the old
+    behaviour; it is one of two new failures, and both were measured on
+    pydicom 3.0.2 before the checks below existed:
+
+    * A value `add_new` accepts and `Dataset` conversion then refuses --
+      a non-numeric string under `IS` or `DS` -- raises inside
+      `_merge`'s `try` and files a `DATA_LOSS` row for an element that
+      used to export perfectly well as `LO`. Being a `str` short enough
+      for the cap is not enough for these two; the text has to name a
+      number.
+    * A value both of those accept and `filewriter` then refuses -- an
+      out-of-range integer under `US`, or a `float` too large for `FL`
+      -- raises *past* `_merge`'s `try`, from `write_numbers`, and fails
+      the whole file rather than the element. That is precisely the trap
+      `_fallback_encoding`'s own docstring names, and a recorded VR must
+      not reopen it.
+
+    So "does the value fit" is asked in the writer's terms, not
+    Python's: the type, then the range or the parse, then the cap. The
+    cap applies to a number's rendered text too (`_TEXT_VR_MAX` bounds
+    `IS` at 12 characters and `DS` at 16), because pydicom writes an
+    over-long one without a word.
+
+    What it deliberately does **not** ask is the character *repertoire*:
+    a private `CS` whose value an anonymisation rule replaced with
+    lower-case text still takes its recorded VR. pydicom writes it with
+    a warning, the value is byte-faithful, and nothing is lost -- so
+    this is a conformance nicety and not the class of failure above,
+    where an element or a whole file goes missing. Do not read the
+    absence as an oversight; adding it would need a per-VR repertoire
+    table, and the fallback's `LO` is not conformant for that value
+    either.
+
+    `bool` is refused for every numeric VR before the `int` test, and
+    the ordering is the mechanism: `bool` is an `int` subclass, so
+    `True` under a private `US` would be written as `1`. That is the
+    outcome `_fallback_encoding`'s own `bool` arm was pre-placed to
+    prevent (#283), and this is the day it was pre-placed for.
+
+    Args:
+        value: The value about to be written.
+        vr (str): The VR recorded for this tag at ingest.
+
+    Returns:
+        bool: True when the pairing is safe to write.
+    """
+    if isinstance(value, tuple):
+        # A `tuple` is the one sequence shape `add_new` does not convert
+        # to the element's multi-value form: it reaches `struct.pack` as
+        # a tuple and fails the whole file with "required argument is
+        # not an integer". Nothing in the pipeline produces one --
+        # pydicom hands back `MultiValue`, the store hands back `list`
+        # -- so this is a hand-`set_attr` shape, and `_fallback_multivalue`
+        # has always accepted it. Declining here leaves it exporting
+        # exactly as it did before #154.
+        return False
+
+    if isinstance(value, (list, MultiValue)):
+        # Every value of a multi-valued element must fit, and the VR
+        # must be able to express multiplicity at all: writing two of
+        # three vendor values is the disguised loss `_fallback_multivalue`
+        # exists to refuse.
+        if vr in _VM_ONE_TEXT_VRS:
+            return False
+        return bool(value) and all(_value_fits_vr(a, vr) for a in value)
+
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        # PS3.5 §6.2.2: raw bytes are `UN`, which is what the fallback
+        # already writes.
+        return False
+
+    if isinstance(value, bool):
+        return False
+
+    if isinstance(value, int):
+        if vr in _INTEGER_VR_RANGE:
+            low, high = _INTEGER_VR_RANGE[vr]
+            return low <= value <= high
+        # `IS` values arrive from pydicom as `IS`, an `int` subclass
+        # whose text form is what gets written -- so the cap that bounds
+        # that text bounds this too.
+        return vr == 'IS' and len(str(value)) <= _TEXT_VR_MAX['IS']
+
+    if isinstance(value, float):
+        pack = _FLOAT_VR_PACK.get(vr)
+        if pack is not None:
+            try:
+                struct.pack(pack, value)
+            except (struct.error, OverflowError, ValueError):
+                return False
+            return True
+        # `DSfloat` is a `float` subclass, same reasoning as `IS`, and
+        # pydicom renders it with `str()` -- `str(1 / 3)` is 18
+        # characters, two past what `DS` may carry.
+        return vr == 'DS' and len(str(value)) <= _TEXT_VR_MAX['DS']
+
+    if isinstance(value, str):
+        if vr in _INTEGER_VRS or vr in _FLOAT_VRS:
+            # pydicom raises from `filewriter` rather than from
+            # `add_new`, so this would fail the export, not the element.
+            return False
+        if vr not in _TEXT_VR_MAX and vr not in _TEXT_VR_UNCAPPED:
+            return False
+        if '\\' in value and vr not in _VM_ONE_TEXT_VRS:
+            return False
+        cap = _TEXT_VR_MAX.get(vr)
+        if cap is not None and len(value) > cap:
+            return False
+        if vr in ('IS', 'DS') and value.strip():
+            # `IS` and `DS` are text on the wire, but pydicom converts
+            # them on the way in and raises for text that names no
+            # number -- `ValueError: could not convert string to float`
+            # -- which `_merge` catches and reports as data loss for an
+            # element that exported as `LO` before #154. The empty
+            # string is exempt: it is a conformant empty value and
+            # pydicom writes it. `IS` goes one step further than `DS`,
+            # because it takes the integer of what it parsed: `DS` of
+            # `"nan"` writes, `IS` of `"nan"` raises `cannot convert
+            # float NaN to integer`. All measured on pydicom 3.0.2.
+            try:
+                if vr == 'IS':
+                    int(float(value))
+                else:
+                    float(value)
+            except (TypeError, ValueError, OverflowError):
+                return False
+        return True
+
+    return False
 
 
 def _is_routed(tag, is_root: bool, has_pixel_data: bool) -> bool:
@@ -522,13 +745,13 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     skip was only right for some of them. The (7fe0,0010) inside an Icon
     Image Sequence item vanished with no warning, no audit row and no
     line in a compliance report that says it lists everything missing
-    from the export (#169). It is still skipped -- keeping it is #183 --
-    but it is reported now.
+    from the export (#169). It is still skipped -- keeping it is #183's
+    second half, still open -- but it is reported now.
 
     Which member is which takes two questions, and they are deliberately
     two names. `_is_routed` asks whether something else carries the
-    bytes: the sidecar for top-level (7fe0,0010), and the export's
-    source re-read for the float pair (#170, #193).
+    bytes: the sidecar, for top-level (7fe0,0010) and, since #183's
+    first half, for the float pair as well (#170, #193).
     `_DERIVED_PIXEL_INDEX_TAGS` holds the three that are not data at all
     -- the Extended Offset Table pair and the encapsulated stream's
     total length -- which describe a fragment layout the exported file
@@ -722,8 +945,45 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
             item.set_attr(tag, str(elem.value))
+            _record_private_vr(item, tag, elem)
         else:
             item.set_attr(tag, elem.value)
+            _record_private_vr(item, tag, elem)
+
+
+def _record_private_vr(item, tag: str, elem) -> None:
+    """Keep the VR of a private element beside its value (#154).
+
+    Four conditions, and each of them is what keeps some other
+    behaviour unchanged:
+
+    * **Odd group only.** An even-group tag resolves its VR from the
+      standard dictionary at export time, so recording one here would be
+      a second answer that can drift from the dictionary's.
+    * **Never `UN`.** `UN` is the absence of an answer, not an answer.
+      It is also what *every* private element resolves to under Implicit
+      VR Little Endian, so this condition is what makes an implicit-VR
+      ingest record nothing at all and keeps
+      `tests/test_private_sequence_implicit_vr.py` true by construction
+      rather than by luck.
+    * **Never a bytes value.** PS3.5 §6.2.2 makes `UN` the right VR for
+      raw bytes and `_fallback_encoding` already writes that. There is
+      also nowhere to keep it: `_split_core_and_private` routes an
+      odd-group `bytes` value to `attributes_json`, not to the
+      `instance_attributes` table whose `value_rep` column is this
+      carrier's home on the storage side.
+    * **The private creator included.** (gggg,0010) is `LO`, which is
+      what the fallback already guesses, so recording it changes
+      nothing -- and leaving it out would make the one tag every private
+      block depends on the one tag with no recorded VR.
+    """
+    if elem.tag.group % 2 != 1:
+        return
+    if elem.VR == 'UN':
+        return
+    if isinstance(elem.value, (bytes, bytearray, memoryview)):
+        return
+    item.record_attr_vr(tag, str(elem.VR))
 
 
 def process_sequence(tag, elem, parent_item, dropped: list = None,
@@ -836,9 +1096,64 @@ def ingest_worker(fp: str) -> Tuple:
                 return ({'path': fp}, None, None, None, None, None, None,
                         f"Decompression Failed: {e}")
 
-            if p_bytes:
-                # Hash the RAW bytes (stable hash)
-                p_hash = hashlib.sha256(p_bytes).hexdigest()
+        elif any(kw in ds for kw in ("FloatPixelData", "DoubleFloatPixelData")):
+            # The float pair rides the sidecar too, and until #183 it did
+            # not. `populate_attrs` skips group 7fe0 and `_is_routed`
+            # called these "routed" because `get_pixel_data()` re-read
+            # them out of the *source file* -- so the pixels survived
+            # only as long as that file stayed where it was. Move it,
+            # delete it, or export from a session reopened on another
+            # machine, and a float instance produced `FileNotFoundError:
+            # Pixels missing and file not found` on an image modality,
+            # and on a non-image modality a file with no pixel element
+            # and no loss row at all.
+            #
+            # `elif`: PS3.5 Section 8.2 forbids an instance carrying both, and
+            # the export prefers the sidecar array whenever there is a
+            # loader -- so on a malformed file that carries both, Pixel
+            # Data wins here and the float half is genuinely lost, which
+            # is exactly what `_is_routed`'s `has_pixel_data` clause
+            # still reports. One question, one answer.
+            try:
+                arr = np.ascontiguousarray(ds.pixel_array)
+                p_bytes = arr.tobytes()
+                p_alg = 'zlib'
+                # The dtype the sidecar will have to reconstruct with,
+                # taken from the element rather than from `arr.dtype`
+                # so that the two ends of the mapping are one table.
+                # Kept as an underscore key so it rides
+                # `attributes_json` untouched -- `_merge` skips
+                # `t.startswith("_")`, the same channel
+                # `_ISOCENTER_REDACTION_HASH` already uses -- rather
+                # than as a schema change, which #183 also weighs and
+                # which this does not need.
+                inst.attributes[PIXEL_DTYPE_ATTR] = FLOAT_DTYPE_BY_ELEMENT[
+                    TAG_FLOAT_PIXEL_DATA if "FloatPixelData" in ds
+                    else TAG_DOUBLE_FLOAT_PIXEL_DATA]
+            except Exception:  # pylint: disable=broad-except
+                # NOT the `return ... "Decompression Failed"` the Pixel
+                # Data arm above takes, and the asymmetry is deliberate.
+                # This change is meant to be additive: an undecodable
+                # float source ingested before #183 and failed loudly at
+                # export -- `RuntimeError: Lazy load failed ...` from
+                # `get_pixel_data()`, one ERROR audit row naming
+                # pydicom's own words, `0 of 1` written and a
+                # REVIEW_REQUIRED grade (#226). Rejecting it here
+                # instead would move that failure to the door and leave
+                # the report saying `0 of 0 requested`, which is a
+                # weaker claim about a file that was handed to us.
+                #
+                # `p_bytes` stays None, so nothing reaches the sidecar,
+                # no provenance is recorded, and the instance behaves in
+                # every respect as it did before. The float sources that
+                # *can* be decoded gain the sidecar; the ones that
+                # cannot lose nothing.
+                p_bytes = None
+                p_alg = None
+
+        if p_bytes:
+            # Hash the RAW bytes (stable hash)
+            p_hash = hashlib.sha256(p_bytes).hexdigest()
 
         # Extract Waveform Data
         # populate_attrs treats (5400,1010) as routed (#151 changed the
@@ -1558,7 +1873,25 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
     if photometric:
         ds.PhotometricInterpretation = photometric
 
-    if planar_configuration_default(attributes, geom.samples):
+    # Planar Configuration describes the pixel element *just written*,
+    # and that element is interleaved -- isocenter holds and stores
+    # pixels interleaved, always (see `SidecarPixelLoader.__call__` for
+    # the measurement). So this is not "write a default when none was
+    # declared": a declared 1 is a claim about the source file, `_merge`
+    # has already stamped it onto `ds` by the time this runs, and
+    # leaving it there labelled interleaved bytes as planar. That is a
+    # corrupt exported DICOM file with no error, no warning and no
+    # DATA_LOSS row, and `_READBACK_DESCRIPTORS` does not include this
+    # element, so `verify_readback=True` does not see it either (#210).
+    #
+    # The `samples < 3` half of `planar_configuration_default` is kept
+    # deliberately, spelled out here: an unconditional write would add
+    # (0028,0006) to every monochrome export, an element those files
+    # must not carry. `planar_configuration_default` itself is
+    # unchanged and still has its other caller, `set_pixel_data()`,
+    # where #217's reasoning -- do not overwrite a declared value --
+    # still holds, because that path writes no file.
+    if geom.samples >= 3:
         ds.PlanarConfiguration = 0
 
 
@@ -1633,7 +1966,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         ds = DicomExporter._create_ds(inst)
 
         # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes, losses)
+        DicomExporter._merge(ds, inst.attributes, losses,
+                             vrs=getattr(inst, 'attribute_vrs', None))
         DicomExporter._merge_sequences(ds, inst.sequences, losses)
 
         # 1. Patient Level
@@ -2344,8 +2678,8 @@ class SidecarPixelLoader:
             self.frames = metadata.get("frames", 0) or 0
             self.bits = metadata.get("bits", 8) or 8
             self.pixel_representation = metadata.get("pixel_representation", 0) or 0
-            self.planar_conf = metadata.get("planar_configuration", 0) or 0
             self.pixel_hash = metadata.get("pixel_hash", None)
+            self.pixel_dtype = metadata.get("pixel_dtype", None)
         elif instance:
             self.sop_instance_uid = instance.sop_instance_uid
             # Extract attributes safely
@@ -2355,8 +2689,11 @@ class SidecarPixelLoader:
             self.frames = int(instance.attributes.get("0028,0008", 0) or 0)
             self.bits = int(instance.attributes.get("0028,0100", 8) or 8)
             self.pixel_representation = int(instance.attributes.get("0028,0103", 0) or 0)
-            self.planar_conf = int(instance.attributes.get("0028,0006", 0) or 0)
             self.pixel_hash = pixel_hash or getattr(instance, "_pixel_hash", None)
+            # The dtype of the frame, when it is floating-point. Read
+            # from the instance rather than derived, because no DICOM
+            # descriptor says "float" (#183).
+            self.pixel_dtype = instance.attributes.get(PIXEL_DTYPE_ATTR)
         else:
             raise ValueError("SidecarPixelLoader requires either 'instance' or 'metadata'")
 
@@ -2379,11 +2716,21 @@ class SidecarPixelLoader:
                     f"Loader(offset={self.offset}, length={self.length}, alg={self.alg})"
                 )
 
-        # Reconstruct based on attributes
-        dt = np.uint16 if self.bits > 8 else np.uint8
-        # Handle signed?
-        if self.pixel_representation == 1:
-            dt = np.int16 if self.bits > 8 else np.int8
+        # Reconstruct based on attributes. A recorded float dtype
+        # first: no DICOM descriptor says "float" -- a 32-bit float
+        # frame and a 32-bit integer frame both declare BitsAllocated
+        # 32 -- so a frame whose dtype is floating-point can only be
+        # rebuilt from a dtype that was carried, never from one that
+        # was inferred (#183). Checked against the allow-list, because
+        # this string comes back out of the store and
+        # `np.dtype(anything)` is not a thing a loader should do.
+        if self.pixel_dtype in FLOAT_DTYPE_NAMES:
+            dt = np.dtype(self.pixel_dtype)
+        else:
+            dt = np.uint16 if self.bits > 8 else np.uint8
+            # Handle signed?
+            if self.pixel_representation == 1:
+                dt = np.int16 if self.bits > 8 else np.int8
 
         arr = np.frombuffer(raw, dtype=dt)
 
@@ -2391,19 +2738,36 @@ class SidecarPixelLoader:
         cols = self.cols
         samples = self.samples
         frames = self.frames
-        planar_conf = self.planar_conf
 
+        # **Isocenter holds and stores pixels interleaved, always.** The
+        # sidecar can hold nothing else: pydicom de-planarises on read,
+        # so `ingest_worker` extracts an interleaved `ds.pixel_array`
+        # from a planar source too, `set_pixel_data()` is handed an
+        # interleaved-shaped array (`resolve_pixel_geometry` reads
+        # `(rows, cols, samples)`), and `persist_pixel_data` writes
+        # `arr.tobytes()` of that. Measured on pydicom 3.0.2: a 2-frame
+        # 3x3 RGB file with PlanarConfiguration 1 and planar bytes
+        # 0..53 gives `pixel_array.shape == (2, 3, 3, 3)` and
+        # `ravel() == [0 9 18 1 10 19 ...]` -- interleaved.
+        #
+        # So there is no planar branch here and there must not be one. A
+        # (0028,0006) of 1 in `attributes` describes the *source file*,
+        # never the frame this reads, and reshaping as
+        # `(samples, rows, cols)` plus a transpose -- which is what
+        # stood here -- returned a transposed image for every
+        # single-frame colour instance carrying a declared 1. The
+        # multi-frame arm never had the branch, which is why it was the
+        # correct one; #210's issue text has that inverted and its
+        # Option 1 would have made both arms wrong. `self.planar_conf`
+        # went with the branch: a field nothing reads is a second
+        # answer waiting to disagree with this one. (#210)
         target_shape = None
         if frames > 1:
             target_shape = (frames, rows, cols, samples)
             if samples == 1:
                 target_shape = (frames, rows, cols)
         elif samples > 1:
-            if planar_conf == 0:
-                target_shape = (rows, cols, samples)
-            else:
-                # Planar Configuration 1: (Samples, Rows, Cols)
-                target_shape = (samples, rows, cols)
+            target_shape = (rows, cols, samples)
         else:
             target_shape = (rows, cols)
 
@@ -2420,9 +2784,6 @@ class SidecarPixelLoader:
             else:
                 return arr  # Fallback to 1D
 
-        # If Planar=1, transpose to (Rows, Cols, Samples) for consistency
-        if samples > 1 and frames <= 1 and planar_conf == 1:
-            arr_reshaped = arr_reshaped.transpose(1, 2, 0)
         return arr_reshaped
 
 
@@ -3068,15 +3429,23 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs, losses=None):
+    def _merge(ds, attrs, losses=None, vrs=None):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
         `losses` is an optional list that collects `(scope, detail)` for
         every element that could not be written -- the description, plus
         which side of the private/standard line the tag fell on, which
         is what grades the run (#146). It is an accumulator rather than
-        a return value because `_merge` is called six times per instance
+        a return value because `_merge` is called five times per instance
         and the loss belongs to the instance, not the call.
+
+        `vrs` is the parallel `{tag: vr}` map an item carries for its
+        private tags (`DicomItem.attribute_vrs`, #154). Parallel rather
+        than attached to the values: `attributes` holds what the element
+        *is*, and pairing every value with a VR would change that shape
+        for every reader of it. Only the patient/study/series merges
+        pass nothing, because those mappings are standard tags whose VRs
+        the dictionary already knows.
         """
         for t, v in attrs.items():
             # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
@@ -3122,7 +3491,23 @@ class DicomExporter:
                 # until #118 this arm only logged, so the tags reached
                 # the object graph and the index and then never reached
                 # the file (#118).
-                encoded = DicomExporter._fallback_encoding(v)
+                #
+                # The source element's own VR first, when one was
+                # recorded at ingest and the value STILL CONFORMS TO IT.
+                # The conformance test is the whole design: a recorded
+                # VR is a fact about the value the source file carried,
+                # and anonymisation, redaction or a plain `set_attr` can
+                # replace that value with one the VR no longer fits.
+                # Deferring to it unconditionally would put #195's
+                # backslash and #190's over-long value back through a
+                # VR that mangles them, which is the defect this fix
+                # would otherwise reintroduce one layer up. When it does
+                # not fit, the fallback runs exactly as before (#154).
+                recorded = (vrs or {}).get(t)
+                if recorded is not None and _value_fits_vr(v, recorded):
+                    vr = recorded
+                else:
+                    encoded = DicomExporter._fallback_encoding(v)
 
             try:
                 if vr is None:
@@ -3380,7 +3765,8 @@ class DicomExporter:
                 ds_item = Dataset()
 
                 # Recursively merge item attributes and sub-sequences
-                DicomExporter._merge(ds_item, item.attributes, losses)
+                DicomExporter._merge(ds_item, item.attributes, losses,
+                                     vrs=getattr(item, 'attribute_vrs', None))
                 DicomExporter._merge_sequences(ds_item, item.sequences, losses)
 
                 pydicom_seq.append(ds_item)

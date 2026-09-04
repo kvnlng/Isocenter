@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -9,7 +9,9 @@ from pydicom.uid import generate_uid
 import isocenter.imagecodecs_handler as h
 from .logger import get_logger
 from .pixel_geometry import (
+    FLOAT_DTYPE_NAMES,
     GeometryEvidence,
+    PIXEL_DTYPE_ATTR,
     declared_int,
     planar_configuration_default,
     resolve_photometric_interpretation,
@@ -26,6 +28,32 @@ def _canonical_tag(tag: str) -> str:
     caused, rather than an AttributeError from here.
     """
     return tag.lower() if isinstance(tag, str) else tag
+
+
+def normalize_study_date(value):
+    """The one spelling of "text that names a day becomes a `date`".
+
+    `date.fromisoformat` accepts both the extended form `2024-01-15`
+    -- which is what `_as_stored_date` writes into SQLite -- and, on the
+    3.12 floor, the DICOM basic form `20240115` that a hand-built graph
+    or a `DicomBuilder.add_study` call supplies. Anything it cannot read
+    comes back exactly as it was given: a date we cannot read is a date
+    we do not have, not one we invent, and not one we discard (#60).
+
+    Lives here, not in `persistence`, because both callers need it and
+    `entities` is the one of the two that the other imports.
+    `persistence._as_loaded_date` is this function under the name that
+    says it is `_as_stored_date`'s inverse; `Study.__setattr__` is the
+    same rule applied at assignment, which is what makes the
+    constructor and hydration agree by construction rather than by two
+    parallel parses (#189).
+    """
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return value
 
 
 #: Attribute key under which an instance records the SOP Instance UID it
@@ -233,14 +261,18 @@ class DicomItem(TrackedEntity):
     Attributes:
         attributes (Dict[str, Any]): A dictionary mapping generic DICOM tags to values.
         sequences (Dict[str, DicomSequence]): A dictionary mapping tags to nested DicomSequences.
+        attribute_vrs (Dict[str, str]): The source Value Representation of
+            private tags, where one was known. See `record_attr_vr`.
     """
     # init=False to avoid constructor conflicts during inheritance
     attributes: Dict[str, Any] = field(init=False)
     sequences: Dict[str, DicomSequence] = field(init=False)
+    attribute_vrs: Dict[str, str] = field(init=False)
 
     def __post_init__(self):
         self.attributes = {}
         self.sequences = {}
+        self.attribute_vrs = {}
 
     def set_attr(self, tag: str, value: Any):
         """
@@ -265,6 +297,36 @@ class DicomItem(TrackedEntity):
         """
         self.attributes[_canonical_tag(tag)] = value
         self.mark_modified()
+
+    def record_attr_vr(self, tag: str, vr: str):
+        """Remembers the Value Representation a private tag arrived with.
+
+        The standard data dictionary has no entry for an odd-group tag,
+        so `DicomExporter._merge` could only guess a VR from the Python
+        type of the value, and every number guessed `LO`. A source `US`,
+        `UL`, `FL` or `AT` exported as a decimal string wearing a text
+        VR: byte-faithful, type-destroyed, and reported nowhere (#154).
+        This is where the answer the source file already gave is kept.
+
+        **Odd group only, and never `UN`.** An even-group tag resolves
+        its VR from the dictionary and needs nothing here; a second
+        answer beside the dictionary is one that can disagree with it.
+        `UN` is not recorded because it is the absence of an answer --
+        which is also what makes an Implicit VR ingest, where *every*
+        private element arrives `UN`, record nothing at all and behave
+        exactly as it did before.
+
+        **This is not an edit.** It records what an existing value
+        already was, so it deliberately does not `mark_modified()`:
+        `set_attr` has already advanced the revision for the value
+        itself, and a second bump here would be a change the store is
+        told about twice.
+
+        Args:
+            tag (str): The DICOM tag string. Case-insensitive.
+            vr (str): The two-letter VR from the source element.
+        """
+        self.attribute_vrs[_canonical_tag(tag)] = vr
 
     def add_sequence_item(self, tag: str, item: 'DicomItem'):
         """
@@ -434,6 +496,10 @@ class Instance(DicomItem):
         # Inlined from DicomItem to avoid super() mismatch issues with slots/reloads
         self.attributes = {}
         self.sequences = {}
+        # Must stay in step with `DicomItem.__post_init__`: an inlined
+        # copy is exactly the kind of duplicate that goes one field out
+        # of date and fails as an AttributeError deep inside ingest.
+        self.attribute_vrs = {}
 
         # An instance constructed from a file records that file as its
         # origin, structurally rather than by convention: every
@@ -642,7 +708,29 @@ class Instance(DicomItem):
                 # Read pixel data on demand
                 ds = None
                 try:
-                    ds = pydicom.dcmread(self.file_path)
+                    # `force=True`, and it must stay: the eager read and
+                    # this lazy re-read are two reads of the *same*
+                    # source file, so they have to accept the same
+                    # files. `ingest_worker` forces (#281), so a
+                    # header-less file -- no preamble, no `DICM` prefix,
+                    # the ordinary shape of a raw vendor dump -- indexed
+                    # cleanly and then could not produce its own pixels:
+                    # `RuntimeError: Lazy load failed ... 'DICM' prefix
+                    # is missing`. A file accepted at one boundary and
+                    # refused at the next is the defect, whichever
+                    # boundary would be right on its own (#289).
+                    #
+                    # The cost is stated rather than hidden: if
+                    # `file_path` has since been replaced by a file that
+                    # is not DICOM at all, forcing parses it to a
+                    # dataset with no pixel element, so the
+                    # `any(t in ds ...)` guard below returns None where
+                    # this used to raise. Measured, not reasoned -- the
+                    # imagecodecs fallback is never reached. That
+                    # narrows #226's "could not decode is not None" for
+                    # a population that a forcing ingest had already
+                    # accepted.
+                    ds = pydicom.dcmread(self.file_path, force=True)
 
                     # Cache it in memory. Assigned, not set through
                     # set_pixel_data: pydicom shaped this array from the
@@ -975,6 +1063,25 @@ class Instance(DicomItem):
         if planar_configuration_default(self.attributes, geom.samples):
             self._write_int_if_changed("0028,0006", 0)
 
+        # The dtype of the frame now held, kept true here because the
+        # sidecar decodes by it and no DICOM descriptor can tell a
+        # 32-bit float frame from a 32-bit integer one (#183). Written
+        # for every floating-point array, float16 included -- the
+        # sidecar is ours and holds what DICOM has no element for, and a
+        # float16 array that reloads as `uint16` takes the export's
+        # integer path and never files the DATA_LOSS row that says its
+        # pixels could not be written.
+        #
+        # It DELETES as well as writes. Replacing a float instance's
+        # pixels with an integer array and leaving the carrier behind
+        # would have the loader read those integers back as floats --
+        # the same silent corruption arriving from the other direction.
+        name = array.dtype.name if array.dtype.kind == 'f' else None
+        if name in FLOAT_DTYPE_NAMES:
+            self.attributes[PIXEL_DTYPE_ATTR] = name
+        else:
+            self.attributes.pop(PIXEL_DTYPE_ATTR, None)
+
         # BitsAllocated stays derived from the array, deliberately, and is
         # not the same defect as the geometry. The frames-vs-samples
         # question has no attribute-free answer; the storage width does --
@@ -1078,6 +1185,27 @@ class Study(TrackedEntity):
                 "(0008,0030) -- Study.study_time -- instead. A datetime "
                 "here comes back from the store as an ISO string and "
                 "exports as an illegal DA value (#188).")
+        # ...and the boundary for #189, which is the same boundary for
+        # the same reason. A DA-spelled string was left as a string here
+        # while hydration turned the identical value into a `date`, so
+        # `export_folder_names` -- which builds the directory with
+        # `str(study.study_date or "NoDate")`, not `format_study_date`
+        # -- filed one study under `Study_20240115_` fresh and
+        # `Study_2024-01-15_` reloaded. The *element* never diverged,
+        # because both export paths render a `date` as `YYYYMMDD`; only
+        # the folder did, which is why the element's indifference must
+        # not be read as the folder's.
+        #
+        # Normalised at assignment rather than at the folder: routing
+        # `export_folder_names` through `format_study_date` would rename
+        # every *ingested* study's directory, a far larger break than
+        # the one it closes. Refusing the string instead would break
+        # `DicomBuilder.add_study`'s own documented example. This is the
+        # one option that leaves `study_date` a single type everywhere,
+        # which is `_as_loaded_date`'s stated goal for the other half of
+        # the same round trip.
+        if name == "study_date":
+            value = normalize_study_date(value)
         # `object.__setattr__`, not zero-argument `super()`:
         # `@dataclass(slots=True)` builds a *new* class, so the closure
         # cell zero-arg super() reads still names the discarded one and

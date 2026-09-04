@@ -263,3 +263,69 @@ def test_a_datetime_study_date_is_refused_at_the_boundary():
     assert study.study_date == date(2024, 2, 1)
     study.study_date = None
     assert study.study_date is None
+
+
+def test_a_da_spelled_study_date_exports_to_the_same_folder_after_a_reload():
+    """The one input whose *folder* name changed across a round trip.
+
+    `_as_loaded_date` normalises the DICOM basic spelling `"20240115"`
+    to a `date`, which is the point -- one type everywhere. The
+    (0008,0020) *element* is indifferent to which spelling arrived,
+    because both export paths render a `date` as `YYYYMMDD`. The
+    exported *directory* is not: `export_folder_names` builds it with
+    `str(study.study_date or "NoDate")`, so a hand-built graph carrying
+    `"20240115"` filed under `Study_20240115_` before a save and
+    `Study_2024-01-15_` after one -- the same study in two directories,
+    and a re-export into an existing tree that silently writes a second
+    copy rather than overwriting the first (#189).
+
+    Fixed at `Study.__setattr__`, not in `export_folder_names`: routing
+    the folder through `format_study_date` would rename every *ingested*
+    study's directory, which is a far larger break than the one it
+    closes. Normalising on assignment makes the constructor and
+    hydration agree by construction instead of by two parallel parses.
+    """
+    from isocenter.entities import Patient, Series
+    from isocenter.io_handlers import export_folder_names
+
+    def folder(value):
+        return export_folder_names(
+            Patient("P9", "N"),
+            Study("1.2.9.4", value),
+            Series("1.2.9.5", "OT", 1))[1]
+
+    fresh = folder("20240115")
+    reloaded = folder(_as_loaded_date(_as_stored_date("20240115")))
+    assert fresh == reloaded, (
+        f"a DA-spelled study date files under {fresh!r} before a store "
+        f"round trip and {reloaded!r} after one (#189)")
+
+
+def test_a_da_spelled_study_date_is_normalised_on_assignment():
+    """The mechanism behind the folder fix, stated directly.
+
+    Same rule as `_as_loaded_date`'s -- `date.fromisoformat`, which
+    accepts the basic form `YYYYMMDD` on the 3.12 floor -- so the
+    constructor and hydration cannot answer differently.
+    """
+    assert Study("S", "20240115").study_date == date(2024, 1, 15)
+    assert type(Study("S", "20240115").study_date) is date
+    assert type(Study("S", "2024-01-15").study_date) is date
+
+    study = Study("S", None)
+    study.study_date = "20240115"
+    assert study.study_date == date(2024, 1, 15)
+
+
+def test_an_unreadable_study_date_is_still_kept_as_it_was_given():
+    """#60's rule survives the normalisation: a date we cannot read is a
+    date we do not have, never one we invent -- and never one we discard.
+
+    `test_remediation.py` depends on an unparseable string staying a
+    string here.
+    """
+    assert Study("S", "junk").study_date == "junk"
+    assert Study("S", "2024-13-45").study_date == "2024-13-45"
+    assert Study("S", "").study_date == ""
+    assert Study("S", None).study_date is None
+    assert Study("S", date(2024, 1, 15)).study_date == date(2024, 1, 15)
