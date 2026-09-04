@@ -16,7 +16,7 @@ pytest tests/test_session.py::test_name -x   # one test
 pylint isocenter                    # lint (target >8.5/10; NOT enforced by CI)
 mkdocs serve                     # docs preview (needs the `docs` extra)
 python -m tests.benchmarks.run_stress_test   # benchmark suite
-python -m scripts.mutation_probe            # do the tests notice when behaviour changes?
+python -m scripts.mutation_probe            # do the tests notice when behaviour changes? (by hand: see below)
 ```
 
 Testing is tiered, and the tier decides the breadth, never the depth — every tier runs the whole suite:
@@ -43,6 +43,23 @@ Three other workflows exist. `publish.yml` releases to PyPI by Trusted Publishin
 Tests write `*.db`, `*_pixels.bin`, `isocenter.log`, and a few config/CSV artifacts into the repo root. All are gitignored; leave them alone rather than adding cleanup.
 
 Optional extras degrade gracefully and must keep doing so: `ocr` (pytesseract — `pixel_analysis.HAS_OCR`), `nlp` (spacy — `ZoneDiscoverer` falls back to regex; the `en_core_web_sm` model is deliberately not declared, because PyPI refuses direct-URL requirements), `docs`, `tests` (includes `setuptools`, which the build-based contract tests need and 3.12+ venvs no longer ship), and `dev` (`tests` plus pylint — contributor tooling that `pip install isocenter` must never pull in).
+
+### Running one mutation by hand
+
+Editing a line, running pytest, and reading the result is the obvious way to check whether a test kills a mutant, and it is wrong in two ways the probe is careful about and a hand-run is not. Both have produced a wrong verdict here before, and a wrong verdict is the expensive kind: it retires a test that was working, or leaves one that was not.
+
+```bash
+# From inside your worktree. $W is the worktree, not the main checkout.
+W=$(pwd)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$W /path/to/.venv/bin/python -u -c 'import isocenter; print(isocenter.__file__)'
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$W /path/to/.venv/bin/python -u -m pytest -v tests/test_whatever.py
+```
+
+**Set `PYTHONDONTWRITEBYTECODE=1`.** A `.pyc` written by the *previous* run can be what CPython actually executes, so the verdict is about a mutation that was never in the code under test. This is #174, and it is not hypothetical — it is why `scripts/mutation_probe.py:388` puts the variable in the environment of every pytest it launches, and why `assert_fresh` re-checks each write against CPython's own cache-validation rule before the tests see it. The variable rather than `-B` because `run_parallel()` spawns workers and an interpreter flag reaches a spawned child only through `_args_from_interpreter_flags`. A hand-run gets none of that protection unless you ask for it.
+
+**Set `PYTHONPATH` to the worktree, and then print `isocenter.__file__` and read it.** `isocenter` is installed editable from the main checkout, so a plain `python` inside a worktree can import the main checkout's copy: the measurement is real, it is just about a tree you did not edit. `PYTHONPATH` wins here because this venv's editable install *appends* its finder to `sys.meta_path`, after the stdlib path finder — had it been prepended, neither `PYTHONPATH` nor a `sys.path.insert(0, ...)` would help. That is not something you can see from the outside, which is why the instruction is to print the resolved path rather than to trust the recipe. `tests/test_mutation_runbook.py` runs this recipe against the live install and goes red if it stops working.
+
+Also note `python3` on `PATH` here is a pyenv shim without the project's dependencies; name the venv interpreter explicitly. And run `pytest -v` with no pipe: `-q` buffers, so an interrupted run leaves a log that cannot be told from a hang.
 
 ## Architecture
 
