@@ -156,7 +156,6 @@ from .entities import Patient, Study, Series, Instance, Equipment, DicomItem
 from .logger import get_logger
 from .pixel_geometry import (
     GeometryEvidence,
-    planar_configuration_default,
     resolve_photometric_interpretation,
     resolve_pixel_geometry,
 )
@@ -1558,7 +1557,25 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
     if photometric:
         ds.PhotometricInterpretation = photometric
 
-    if planar_configuration_default(attributes, geom.samples):
+    # Planar Configuration describes the pixel element *just written*,
+    # and that element is interleaved -- isocenter holds and stores
+    # pixels interleaved, always (see `SidecarPixelLoader.__call__` for
+    # the measurement). So this is not "write a default when none was
+    # declared": a declared 1 is a claim about the source file, `_merge`
+    # has already stamped it onto `ds` by the time this runs, and
+    # leaving it there labelled interleaved bytes as planar. That is a
+    # corrupt exported DICOM file with no error, no warning and no
+    # DATA_LOSS row, and `_READBACK_DESCRIPTORS` does not include this
+    # element, so `verify_readback=True` does not see it either (#210).
+    #
+    # The `samples < 3` half of `planar_configuration_default` is kept
+    # deliberately, spelled out here: an unconditional write would add
+    # (0028,0006) to every monochrome export, an element those files
+    # must not carry. `planar_configuration_default` itself is
+    # unchanged and still has its other caller, `set_pixel_data()`,
+    # where #217's reasoning -- do not overwrite a declared value --
+    # still holds, because that path writes no file.
+    if geom.samples >= 3:
         ds.PlanarConfiguration = 0
 
 
@@ -2344,7 +2361,6 @@ class SidecarPixelLoader:
             self.frames = metadata.get("frames", 0) or 0
             self.bits = metadata.get("bits", 8) or 8
             self.pixel_representation = metadata.get("pixel_representation", 0) or 0
-            self.planar_conf = metadata.get("planar_configuration", 0) or 0
             self.pixel_hash = metadata.get("pixel_hash", None)
         elif instance:
             self.sop_instance_uid = instance.sop_instance_uid
@@ -2355,7 +2371,6 @@ class SidecarPixelLoader:
             self.frames = int(instance.attributes.get("0028,0008", 0) or 0)
             self.bits = int(instance.attributes.get("0028,0100", 8) or 8)
             self.pixel_representation = int(instance.attributes.get("0028,0103", 0) or 0)
-            self.planar_conf = int(instance.attributes.get("0028,0006", 0) or 0)
             self.pixel_hash = pixel_hash or getattr(instance, "_pixel_hash", None)
         else:
             raise ValueError("SidecarPixelLoader requires either 'instance' or 'metadata'")
@@ -2391,19 +2406,36 @@ class SidecarPixelLoader:
         cols = self.cols
         samples = self.samples
         frames = self.frames
-        planar_conf = self.planar_conf
 
+        # **Isocenter holds and stores pixels interleaved, always.** The
+        # sidecar can hold nothing else: pydicom de-planarises on read,
+        # so `ingest_worker` extracts an interleaved `ds.pixel_array`
+        # from a planar source too, `set_pixel_data()` is handed an
+        # interleaved-shaped array (`resolve_pixel_geometry` reads
+        # `(rows, cols, samples)`), and `persist_pixel_data` writes
+        # `arr.tobytes()` of that. Measured on pydicom 3.0.2: a 2-frame
+        # 3x3 RGB file with PlanarConfiguration 1 and planar bytes
+        # 0..53 gives `pixel_array.shape == (2, 3, 3, 3)` and
+        # `ravel() == [0 9 18 1 10 19 ...]` -- interleaved.
+        #
+        # So there is no planar branch here and there must not be one. A
+        # (0028,0006) of 1 in `attributes` describes the *source file*,
+        # never the frame this reads, and reshaping as
+        # `(samples, rows, cols)` plus a transpose -- which is what
+        # stood here -- returned a transposed image for every
+        # single-frame colour instance carrying a declared 1. The
+        # multi-frame arm never had the branch, which is why it was the
+        # correct one; #210's issue text has that inverted and its
+        # Option 1 would have made both arms wrong. `self.planar_conf`
+        # went with the branch: a field nothing reads is a second
+        # answer waiting to disagree with this one. (#210)
         target_shape = None
         if frames > 1:
             target_shape = (frames, rows, cols, samples)
             if samples == 1:
                 target_shape = (frames, rows, cols)
         elif samples > 1:
-            if planar_conf == 0:
-                target_shape = (rows, cols, samples)
-            else:
-                # Planar Configuration 1: (Samples, Rows, Cols)
-                target_shape = (samples, rows, cols)
+            target_shape = (rows, cols, samples)
         else:
             target_shape = (rows, cols)
 
@@ -2420,9 +2452,6 @@ class SidecarPixelLoader:
             else:
                 return arr  # Fallback to 1D
 
-        # If Planar=1, transpose to (Rows, Cols, Samples) for consistency
-        if samples > 1 and frames <= 1 and planar_conf == 1:
-            arr_reshaped = arr_reshaped.transpose(1, 2, 0)
         return arr_reshaped
 
 

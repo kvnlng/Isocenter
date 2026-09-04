@@ -331,8 +331,26 @@ def planar_configuration_default(attributes: Any, samples: int) -> bool:
     Only when the instance is colour **and has not declared one**. Forcing it
     to 0 whenever ``samples >= 3`` -- the old behaviour -- overwrote a
     declared planar-1 value with a claim about a layout nothing had
-    converted. `ingest_worker` already normalises 0028,0006 from 1 to 0 at
-    ingest, so on every live path there is nothing here to correct.
+    converted (#217).
+
+    **One caller: `Instance.set_pixel_data()`.** That is the question this
+    answers -- what descriptor should the graph carry when the caller
+    supplied none -- and it writes no file, so a value the caller declared
+    is theirs to keep.
+
+    It is deliberately **not** the question the exporter asks.
+    `_write_pixel_geometry` describes the pixel element it has just
+    written, and that element is interleaved whatever `attributes` says,
+    so it writes 0 for every colour instance and spells the `samples >= 3`
+    gate out itself. Leaving that site on this predicate is what let
+    `write_tree` emit interleaved bytes under a `PlanarConfiguration` of 1
+    (#210).
+
+    An earlier version of this docstring said `ingest_worker`'s
+    normalisation means "on every live path there is nothing here to
+    correct". That was incomplete: ingest is not the only way a declared 1
+    reaches the graph -- a hand-built instance and a reloaded one both
+    carry whatever was set -- and #217's own narrowing is what preserves it.
 
     Args:
         attributes: The instance's attributes mapping.

@@ -141,6 +141,7 @@ TARGETS = {
                                   "tests/test_naming_structure.py",
                                   "tests/test_nested_phi_audit.py",
                                   "tests/test_pixel_geometry_pipeline.py",
+                                  "tests/test_planar_configuration_roundtrip.py",
                                   "tests/test_private_binary_ingest.py",
                                   "tests/test_private_tag_export.py",
                                   "tests/test_pydicom_deprecations.py",
