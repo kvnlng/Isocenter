@@ -51,7 +51,7 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter.entities import Instance
-from isocenter.io_handlers import LOSS_SCOPE_STANDARD
+from isocenter.io_handlers import ExportError, LOSS_SCOPE_STANDARD
 from isocenter.persistence import SqliteStore
 from isocenter.session import DicomSession
 
@@ -192,7 +192,17 @@ def _run(tmp_path, name="fpx", writer=None, src_check=None, **kwargs):
     session = DicomSession(persistence_file=str(tmp_path / f"{name}.db"))
     try:
         session.ingest(str(src))
-        session.export(str(out), format="dicom", use_compression=False)
+        try:
+            session.export(str(out), format="dicom", use_compression=False)
+        except ExportError:
+            # Since #191 an export that delivered **none** of its
+            # planned instances raises rather than returning. The
+            # raise is last, after every record this test reads,
+            # so catching it here changes nothing this helper
+            # measures -- and the helper serves callers whose
+            # export succeeds as well, so it cannot assert the
+            # raise. `tests/test_export_contract.py` pins that.
+            pass
         db_path = session.store_backend.db_path
     finally:
         session.close()
@@ -916,7 +926,11 @@ def test_a_multi_sample_float_export_is_refused_through_the_pipeline(
         # REVIEW_REQUIRED on its own and the grade assertion below would
         # pass with the refusal deleted.
         session.anonymize()
-        session.export(str(out), format="dicom", use_compression=False)
+        # Every instance is refused, so this is a total failure and
+        # raises (#191). The raise is last, after the audit rows and the
+        # delivery counters the report below reads.
+        with pytest.raises(ExportError):
+            session.export(str(out), format="dicom", use_compression=False)
         session.generate_report(str(report_path))
         db_path = session.store_backend.db_path
     finally:
@@ -1363,8 +1377,14 @@ def _run_undecodable(tmp_path, name, report_path=None):
         session.ingest(str(src))
         session.examine()
         session.anonymize()
-        session.export(str(out), format="dicom",
-                       use_compression=False, show_progress=False)
+        # The one planned instance cannot be decoded, so zero of one
+        # reached disk and the export raises (#191). Caught rather than
+        # asserted: this helper's subject is what the failure left
+        # behind -- the ERROR row's text and the report's grade -- and
+        # the raise happens after both are recorded.
+        with pytest.raises(ExportError):
+            session.export(str(out), format="dicom",
+                           use_compression=False, show_progress=False)
         db_path = session.store_backend.db_path
         if report_path is not None:
             session.generate_report(str(report_path))
@@ -1508,7 +1528,17 @@ def _ingest_save_close_and_move(tmp_path, name, **kwargs):
 def _export_from(db, out):
     session = DicomSession(persistence_file=db)
     try:
-        session.export(str(out), format="dicom", use_compression=False)
+        try:
+            session.export(str(out), format="dicom", use_compression=False)
+        except ExportError:
+            # Since #191 an export that delivered **none** of its
+            # planned instances raises rather than returning. The
+            # raise is last, after every record this test reads,
+            # so catching it here changes nothing this helper
+            # measures -- and the helper serves callers whose
+            # export succeeds as well, so it cannot assert the
+            # raise. `tests/test_export_contract.py` pins that.
+            pass
     finally:
         session.close()
 

@@ -1798,6 +1798,50 @@ class ExportSummary:
         return len(self.failures)
 
 
+class ExportError(RuntimeError):
+    """The export delivered nothing (#191).
+
+    Raised by `session.export()` when **zero of N planned** instances
+    reached disk and at least one failed. Not on a partial export: two
+    files out of three is a real, usable result, and raising would
+    discard the summary that says which two and would have to decide the
+    fate of files already written.
+
+    Raised **last**, after every record the run produces -- the collision
+    report, the recoverable-identity disclosure, the delivery counters,
+    the `EXPORT` audit row and `Done.` -- exactly as
+    `_apply_redaction_rules` raises `RedactionError`, and for the same
+    reason: a caller who catches this still holds a correct graph, a
+    complete audit trail and a compliance report grading
+    `REVIEW_REQUIRED`.
+
+    **`RuntimeError`, not `Exception`.** `write_tree` and
+    `_export_instance_worker` already raise bare `RuntimeError`s on this
+    same pipeline, so subclassing keeps every existing
+    `except RuntimeError` catching this one, where subclassing
+    `Exception` directly would turn a caught error into an escaping one.
+    Raising bare would instead throw away the failure list #181 computed,
+    which is the whole of what a caller can act on.
+
+    `write_tree`'s own raise is deliberately left as a bare
+    `RuntimeError`: the two describe different behaviours -- "this
+    serializer could not write" and "the pipeline delivered nothing" --
+    and changing it would be a second API-shape change riding on this
+    one.
+    """
+
+    def __init__(self, failures, attempted, folder=None):
+        self.failures = list(failures)   # [(entity_uid, details)]
+        self.attempted = attempted
+        first = self.failures[0] if self.failures else ("UNKNOWN", "unknown")
+        where = f" to {folder}" if folder else ""
+        super().__init__(
+            f"Export{where} wrote 0 of {attempted} planned instances; "
+            f"{len(self.failures)} failed and nothing reached disk. "
+            f"First: {first[0]}: {first[1]}. See the audit log for the "
+            "rest.")
+
+
 def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool) -> None:
     """Write the descriptors that describe the pixel element just written.
 

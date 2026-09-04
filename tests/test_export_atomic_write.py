@@ -24,9 +24,10 @@ import sqlite3
 from datetime import date
 
 import numpy as np
+import pytest
 
 from isocenter.entities import Instance, Patient, Series, Study
-from isocenter.io_handlers import DicomExporter
+from isocenter.io_handlers import DicomExporter, ExportError
 from isocenter.session import DicomSession
 
 CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
@@ -115,7 +116,12 @@ def test_a_failed_write_leaves_no_orphaned_temp_file(tmp_path):
     session = _session(tmp_path, break_instances=(0, 1, 2))
     out = tmp_path / "out"
     try:
-        session.export(str(out), show_progress=False)
+        # All three fail, so the export raises (#191). Asserted rather
+        # than caught: this test's whole subject is a write that did not
+        # finish, and "no instance reached disk" is exactly the
+        # condition the raise reports.
+        with pytest.raises(ExportError):
+            session.export(str(out), show_progress=False)
     finally:
         session.close()
 

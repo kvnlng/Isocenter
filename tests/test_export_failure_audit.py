@@ -30,7 +30,8 @@ import numpy as np
 import pytest
 
 from isocenter.entities import Instance, Patient, Series, Study
-from isocenter.io_handlers import DicomExporter, ExportOutcome, ExportSummary
+from isocenter.io_handlers import (DicomExporter, ExportError, ExportOutcome,
+                                   ExportSummary)
 from isocenter.session import DicomSession
 
 CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
@@ -103,6 +104,20 @@ def _run(tmp_path, arm):
             os.chmod(out, 0o500)
         try:
             session.export(str(out), format="dicom", show_progress=False)
+        except ExportError:
+            # The `filesystem` arm fails **every** write, and since #191
+            # an export that delivered none of its planned instances
+            # raises rather than returning. Caught rather than asserted
+            # here because this helper's whole subject is what survives
+            # the failure -- the files, the ERROR rows, the report -- and
+            # `ExportError` is raised last, after all of it. The
+            # `validator` arm breaks one of three, which is a partial
+            # export and deliberately does not raise, so this `except`
+            # must not become an `assert raises`.
+            #
+            # `tests/test_export_contract.py` is where the raise itself
+            # is pinned.
+            pass
         finally:
             os.chmod(out, 0o700)
         session.generate_report(str(report))

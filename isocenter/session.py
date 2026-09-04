@@ -14,7 +14,7 @@ import yaml
 from tqdm import tqdm
 
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
-                          ExportSummary, SidecarPixelLoader,
+                          ExportError, ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
                           GRADED_LOSS_SCOPES)
 from .store import DicomStore
@@ -3013,11 +3013,25 @@ class DicomSession:
                 `_export_dicom` for the DICOM format's options.
 
         Returns:
-            The exporter's return value. The DICOM exporter returns None
-            for backward compatibility.
+            The selected format's own result object. The DICOM exporter
+            returns an `io_handlers.ExportSummary`, whose `written`
+            counts the files that reached disk and whose `failures`
+            names the instances that did not. `written` is counted over
+            *de-duplicated* UIDs, because the UID names the output file:
+            two instances sharing one are two successful write
+            operations and one file, the second having overwritten the
+            first (#197). The WFDB exporter returns its own
+            `List[str]` of paths and is unchanged (#191 scopes it out).
+            Every format's result must let a caller detect that nothing
+            was written.
 
         Raises:
             ValueError: If `format` is not a registered export format.
+            io_handlers.ExportError: From the DICOM exporter, when zero
+                of N planned instances reached disk and at least one
+                failed. An empty plan -- zero of zero -- does not raise:
+                a subset that matched nothing is a fact about the run,
+                and the `EXPORT` audit row already carries it.
         """
         from . import exporters
 
@@ -3111,7 +3125,12 @@ class DicomSession:
                 entity_uid=folder,
                 details=(f"DICOM export to {folder}: wrote 0 of 0 planned "
                          f"instances; nothing matched the export plan."))
-            return
+            # Zero of zero, and deliberately not an `ExportError`: a
+            # plan that matched nothing is not an export that failed,
+            # and the row above already says so. The caller still gets a
+            # summary rather than `None`, so `.written` and `.failures`
+            # are askable on every return path (#191).
+            return ExportSummary()
 
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
         summary = self._run_export_batch(tasks, show_progress,
@@ -3147,6 +3166,24 @@ class DicomSession:
                      f"of {len(tasks)} planned instances from "
                      f"{patient_count} patients."))
         print("Done.")
+
+        # Last, after all five records -- the collision report, the
+        # recoverable-identity disclosure, the delivery counters, the
+        # `EXPORT` row and `Done.` -- and in that order for the reason
+        # `_apply_redaction_rules` raises `RedactionError` last: a caller
+        # who catches this still holds a correct graph, a complete audit
+        # trail and a report that grades REVIEW_REQUIRED. Raising earlier
+        # would trade all of that for the exception.
+        #
+        # `written == 0 **and** failures`, never `written == 0` alone: an
+        # empty plan reaching here would otherwise raise, and zero of
+        # zero is not a failure. A *partial* export does not raise
+        # either -- two files out of three is a real result, and raising
+        # would discard the summary naming which two.
+        if summary.written == 0 and summary.failures:
+            raise ExportError(summary.failures, len(tasks), folder)
+
+        return summary
 
     def _report_recoverable_identities(self, tasks, written_uids) -> int:
         """Report instances whose exported copy still carries its originals.

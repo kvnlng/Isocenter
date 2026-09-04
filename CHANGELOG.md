@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **`session.export()` can say it wrote nothing: it returns an `ExportSummary`, and raises `ExportError` when zero of N planned instances reached disk (#191).** New `io_handlers.ExportError`, exported as `isocenter.ExportError`. `_export_dicom` returns `io_handlers.ExportSummary` on every path, including its empty-plan early return. **Breaking**, and the exact shape is below.
+
+  **What a previously-working call now does.** `session.export(folder)` returned `None`. A run that delivered all three of its files and a run that delivered none were indistinguishable at the call site: the failures were audited by #181 and graded by the compliance report, and the *call* looked identical either way. `export()` now returns a summary, and when **zero of N planned instances were written and at least one failed** it raises `io_handlers.ExportError` -- a `RuntimeError` subclass carrying `.failures` (`[(entity_uid, details)]`) and `.attempted`. A caller who wrote `session.export(out)` and read nothing back is unaffected on a successful or partial export, and now gets an exception on a total one.
+
+  **The raise is last**, after all five records the run produces: the collision report, the recoverable-identity disclosure, the `_last_export_written`/`_last_export_requested` pair (#181), the `EXPORT` audit row (#166, which the report's export boundary keys on -- #153) and `Done.`. Same order `_apply_redaction_rules` uses for `RedactionError`, for the same reason: a caller who catches it still holds a correct graph, a complete audit trail, and a report grading `REVIEW_REQUIRED` with `Instances Written | 0 of 3 requested`. A test asserts all five survive the raise.
+
+  **Rejected: raising on any failure.** A partial export is a real, usable result; raising would discard the summary naming which files landed and would have to decide the fate of files already on disk. **Rejected: leaving it returning `None`** -- that is the defect restated. **Rejected: changing the WFDB exporter to match** -- #191 scopes it out, its `List[str]` is consumed positionally by ~25 call sites, and `[]` versus `None` already lets a caller detect that nothing was written. `Exporter.export`'s base docstring now says the return is the format's own result object and that every format's must allow that detection; its `-> List[str]` annotation is dropped, because it was a promise the registry cannot keep.
+
+  **Zero of zero does not raise.** An empty plan returns `ExportSummary()`: a subset that matched nothing is not a failed export, and the `EXPORT` row above that early return already says so. The guard is `written == 0 **and** failures`.
+
+  `ExportSummary` becomes public API, so one subtlety is now user-visible prose rather than an internal note: `written` counts **de-duplicated** UIDs, because the UID names the output file -- two instances sharing one are two successful write operations and one file, the second having overwritten the first (#197).
+
+  `write_tree`'s bare `RuntimeError` is deliberately **left alone**: it and `ExportError` describe different behaviours -- "this serializer could not write" and "the pipeline delivered nothing" -- and changing it would be a second API-shape change riding on the authorised one. `ExportError` subclasses `RuntimeError` so one `except RuntimeError` still catches both; `tests/test_api_coherence.py` gains a **new** test for that (the existing tree-equality test pins layout and is untouched, so a failure contract folded into it would make one red mean two things).
+
+  One existing expectation flips and is updated with its reason in place: `tests/test_export_failure_audit.py`'s `filesystem` arm fails every write, so `_run` now catches `ExportError` -- the helper's subject is what survives the failure, and the raise happens after all of it. Its `validator` arm breaks one of three, is a partial export, and still does not raise.
+
 ### Changed
 
 - **CLAUDE.md now says how to run one mutation by hand, and a test keeps the recipe true (#311).** New subsection at the end of the Commands section, plus `tests/test_mutation_runbook.py`. No library code changes.
