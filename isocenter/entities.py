@@ -259,14 +259,18 @@ class DicomItem(TrackedEntity):
     Attributes:
         attributes (Dict[str, Any]): A dictionary mapping generic DICOM tags to values.
         sequences (Dict[str, DicomSequence]): A dictionary mapping tags to nested DicomSequences.
+        attribute_vrs (Dict[str, str]): The source Value Representation of
+            private tags, where one was known. See `record_attr_vr`.
     """
     # init=False to avoid constructor conflicts during inheritance
     attributes: Dict[str, Any] = field(init=False)
     sequences: Dict[str, DicomSequence] = field(init=False)
+    attribute_vrs: Dict[str, str] = field(init=False)
 
     def __post_init__(self):
         self.attributes = {}
         self.sequences = {}
+        self.attribute_vrs = {}
 
     def set_attr(self, tag: str, value: Any):
         """
@@ -291,6 +295,36 @@ class DicomItem(TrackedEntity):
         """
         self.attributes[_canonical_tag(tag)] = value
         self.mark_modified()
+
+    def record_attr_vr(self, tag: str, vr: str):
+        """Remembers the Value Representation a private tag arrived with.
+
+        The standard data dictionary has no entry for an odd-group tag,
+        so `DicomExporter._merge` could only guess a VR from the Python
+        type of the value, and every number guessed `LO`. A source `US`,
+        `UL`, `FL` or `AT` exported as a decimal string wearing a text
+        VR: byte-faithful, type-destroyed, and reported nowhere (#154).
+        This is where the answer the source file already gave is kept.
+
+        **Odd group only, and never `UN`.** An even-group tag resolves
+        its VR from the dictionary and needs nothing here; a second
+        answer beside the dictionary is one that can disagree with it.
+        `UN` is not recorded because it is the absence of an answer --
+        which is also what makes an Implicit VR ingest, where *every*
+        private element arrives `UN`, record nothing at all and behave
+        exactly as it did before.
+
+        **This is not an edit.** It records what an existing value
+        already was, so it deliberately does not `mark_modified()`:
+        `set_attr` has already advanced the revision for the value
+        itself, and a second bump here would be a change the store is
+        told about twice.
+
+        Args:
+            tag (str): The DICOM tag string. Case-insensitive.
+            vr (str): The two-letter VR from the source element.
+        """
+        self.attribute_vrs[_canonical_tag(tag)] = vr
 
     def add_sequence_item(self, tag: str, item: 'DicomItem'):
         """
@@ -460,6 +494,10 @@ class Instance(DicomItem):
         # Inlined from DicomItem to avoid super() mismatch issues with slots/reloads
         self.attributes = {}
         self.sequences = {}
+        # Must stay in step with `DicomItem.__post_init__`: an inlined
+        # copy is exactly the kind of duplicate that goes one field out
+        # of date and fails as an AttributeError deep inside ingest.
+        self.attribute_vrs = {}
 
         # An instance constructed from a file records that file as its
         # origin, structurally rather than by convention: every

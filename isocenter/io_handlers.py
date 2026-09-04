@@ -299,6 +299,102 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 #: way: they are routed to the sidecar before this rule is consulted.
 BINARY_RETENTION_MAX_BYTES = 65534
 
+#: Private VRs whose Python value must be an integer. pydicom accepts a
+#: `str` at `add_new` for these -- with a `UserWarning` -- and then
+#: raises `struct.error: required argument is not an integer` from
+#: `filewriter.write_numbers` when the dataset is written, which fails
+#: the whole export rather than the offending element. Measured on
+#: pydicom 3.0.2 for `US`, `UL` and `FL`; the siblings are here by the
+#: same encoding rule (PS3.5 Table 6.2-1: all are binary-encoded).
+#: `AT` belongs with them -- its value is a tag, which is an integer.
+_INTEGER_VRS = frozenset({'US', 'SS', 'UL', 'SL', 'UV', 'SV', 'AT'})
+
+#: The same, for the binary floating-point VRs.
+_FLOAT_VRS = frozenset({'FL', 'FD'})
+
+#: Text VRs and the per-value character cap PS3.5 Table 6.2-1 gives
+#: each. Absent means unbounded for this purpose (`UT`, `UR`, `UC`).
+#: The cap is checked per *value*, never against a multi-valued join --
+#: the standard bounds each value, which is the same rule
+#: `_fallback_multivalue` already applies.
+_TEXT_VR_MAX = {
+    'AE': 16, 'AS': 4, 'CS': 16, 'DA': 8, 'DS': 16, 'DT': 26,
+    'IS': 12, 'LO': 64, 'LT': 10240, 'PN': 64, 'SH': 16, 'ST': 1024,
+    'TM': 16, 'UI': 64,
+}
+
+#: The text VRs whose value multiplicity is fixed at 1, so a backslash
+#: in the value is ordinary text rather than the value delimiter
+#: (PS3.5 6.2). Everything else in `_TEXT_VR_MAX` is 1-n, where a
+#: backslash re-splits the value on read -- #195, from the other side.
+_VM_ONE_TEXT_VRS = frozenset({'ST', 'LT', 'UT', 'UR'})
+
+
+def _value_fits_vr(value, vr: str) -> bool:
+    """Can `value` be written under `vr` without changing what it says?
+
+    The gate in front of a recorded private VR (#154). A recorded VR is
+    a fact about the value the *source file* carried; anonymisation,
+    redaction or a plain `set_attr` can replace that value with one the
+    VR no longer suits, and deferring to it then would write an element
+    that is conformant-looking and wrong. Answering False sends the tag
+    to `_fallback_encoding`, which is exactly what happened before this
+    existed -- so a wrong answer here is never worse than no recorded VR
+    at all.
+
+    `bool` is refused for every numeric VR before the `int` test, and
+    the ordering is the mechanism: `bool` is an `int` subclass, so
+    `True` under a private `US` would be written as `1`. That is the
+    outcome `_fallback_encoding`'s own `bool` arm was pre-placed to
+    prevent (#283), and this is the day it was pre-placed for.
+
+    Args:
+        value: The value about to be written.
+        vr (str): The VR recorded for this tag at ingest.
+
+    Returns:
+        bool: True when the pairing is safe to write.
+    """
+    if isinstance(value, (list, tuple, MultiValue)):
+        # Every value of a multi-valued element must fit, and the VR
+        # must be able to express multiplicity at all: writing two of
+        # three vendor values is the disguised loss `_fallback_multivalue`
+        # exists to refuse.
+        if vr in _VM_ONE_TEXT_VRS:
+            return False
+        return bool(value) and all(_value_fits_vr(a, vr) for a in value)
+
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        # PS3.5 §6.2.2: raw bytes are `UN`, which is what the fallback
+        # already writes.
+        return False
+
+    if isinstance(value, bool):
+        return False
+
+    if isinstance(value, int):
+        # `IS` values arrive from pydicom as `IS`, an `int` subclass
+        # whose text form is what gets written.
+        return vr in _INTEGER_VRS or vr == 'IS'
+
+    if isinstance(value, float):
+        # `DSfloat` is a `float` subclass, same reasoning as `IS`.
+        return vr in _FLOAT_VRS or vr == 'DS'
+
+    if isinstance(value, str):
+        if vr in _INTEGER_VRS or vr in _FLOAT_VRS:
+            # pydicom raises from `filewriter` rather than from
+            # `add_new`, so this would fail the export, not the element.
+            return False
+        if vr not in _TEXT_VR_MAX and vr not in _VM_ONE_TEXT_VRS:
+            return False
+        if '\\' in value and vr not in _VM_ONE_TEXT_VRS:
+            return False
+        cap = _TEXT_VR_MAX.get(vr)
+        return cap is None or len(value) <= cap
+
+    return False
+
 
 def _is_routed(tag, is_root: bool, has_pixel_data: bool) -> bool:
     """Does something else in the pipeline carry this element's bytes?
@@ -721,8 +817,45 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
             item.set_attr(tag, str(elem.value))
+            _record_private_vr(item, tag, elem)
         else:
             item.set_attr(tag, elem.value)
+            _record_private_vr(item, tag, elem)
+
+
+def _record_private_vr(item, tag: str, elem) -> None:
+    """Keep the VR of a private element beside its value (#154).
+
+    Four conditions, and each of them is what keeps some other
+    behaviour unchanged:
+
+    * **Odd group only.** An even-group tag resolves its VR from the
+      standard dictionary at export time, so recording one here would be
+      a second answer that can drift from the dictionary's.
+    * **Never `UN`.** `UN` is the absence of an answer, not an answer.
+      It is also what *every* private element resolves to under Implicit
+      VR Little Endian, so this condition is what makes an implicit-VR
+      ingest record nothing at all and keeps
+      `tests/test_private_sequence_implicit_vr.py` true by construction
+      rather than by luck.
+    * **Never a bytes value.** PS3.5 §6.2.2 makes `UN` the right VR for
+      raw bytes and `_fallback_encoding` already writes that. There is
+      also nowhere to keep it: `_split_core_and_private` routes an
+      odd-group `bytes` value to `attributes_json`, not to the
+      `instance_attributes` table whose `value_rep` column is this
+      carrier's home on the storage side.
+    * **The private creator included.** (gggg,0010) is `LO`, which is
+      what the fallback already guesses, so recording it changes
+      nothing -- and leaving it out would make the one tag every private
+      block depends on the one tag with no recorded VR.
+    """
+    if elem.tag.group % 2 != 1:
+        return
+    if elem.VR == 'UN':
+        return
+    if isinstance(elem.value, (bytes, bytearray, memoryview)):
+        return
+    item.record_attr_vr(tag, str(elem.VR))
 
 
 def process_sequence(tag, elem, parent_item, dropped: list = None,
@@ -1650,7 +1783,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         ds = DicomExporter._create_ds(inst)
 
         # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes, losses)
+        DicomExporter._merge(ds, inst.attributes, losses,
+                             vrs=getattr(inst, 'attribute_vrs', None))
         DicomExporter._merge_sequences(ds, inst.sequences, losses)
 
         # 1. Patient Level
@@ -3097,15 +3231,23 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs, losses=None):
+    def _merge(ds, attrs, losses=None, vrs=None):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
         `losses` is an optional list that collects `(scope, detail)` for
         every element that could not be written -- the description, plus
         which side of the private/standard line the tag fell on, which
         is what grades the run (#146). It is an accumulator rather than
-        a return value because `_merge` is called six times per instance
+        a return value because `_merge` is called five times per instance
         and the loss belongs to the instance, not the call.
+
+        `vrs` is the parallel `{tag: vr}` map an item carries for its
+        private tags (`DicomItem.attribute_vrs`, #154). Parallel rather
+        than attached to the values: `attributes` holds what the element
+        *is*, and pairing every value with a VR would change that shape
+        for every reader of it. Only the patient/study/series merges
+        pass nothing, because those mappings are standard tags whose VRs
+        the dictionary already knows.
         """
         for t, v in attrs.items():
             # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
@@ -3151,7 +3293,23 @@ class DicomExporter:
                 # until #118 this arm only logged, so the tags reached
                 # the object graph and the index and then never reached
                 # the file (#118).
-                encoded = DicomExporter._fallback_encoding(v)
+                #
+                # The source element's own VR first, when one was
+                # recorded at ingest and the value STILL CONFORMS TO IT.
+                # The conformance test is the whole design: a recorded
+                # VR is a fact about the value the source file carried,
+                # and anonymisation, redaction or a plain `set_attr` can
+                # replace that value with one the VR no longer fits.
+                # Deferring to it unconditionally would put #195's
+                # backslash and #190's over-long value back through a
+                # VR that mangles them, which is the defect this fix
+                # would otherwise reintroduce one layer up. When it does
+                # not fit, the fallback runs exactly as before (#154).
+                recorded = (vrs or {}).get(t)
+                if recorded is not None and _value_fits_vr(v, recorded):
+                    vr = recorded
+                else:
+                    encoded = DicomExporter._fallback_encoding(v)
 
             try:
                 if vr is None:
@@ -3409,7 +3567,8 @@ class DicomExporter:
                 ds_item = Dataset()
 
                 # Recursively merge item attributes and sub-sequences
-                DicomExporter._merge(ds_item, item.attributes, losses)
+                DicomExporter._merge(ds_item, item.attributes, losses,
+                                     vrs=getattr(item, 'attribute_vrs', None))
                 DicomExporter._merge_sequences(ds_item, item.sequences, losses)
 
                 pydicom_seq.append(ds_item)

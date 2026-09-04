@@ -81,9 +81,12 @@ def test_no_attribute_source_is_merged_twice(sr_context, monkeypatch):
     real_merge = DicomExporter._merge
     real_seqs = DicomExporter._merge_sequences
 
-    def counting_merge(ds, attrs, losses=None):
+    def counting_merge(ds, attrs, losses=None, vrs=None):
+        # `vrs` is forwarded, not dropped: the double has to accept the
+        # real signature or the worker's own call fails and the test
+        # measures the failure instead of the shape (#154).
         seen.append(("attrs", id(attrs)))
-        return real_merge(ds, attrs, losses)
+        return real_merge(ds, attrs, losses, vrs)
 
     def counting_seqs(ds, sequences, losses=None):
         seen.append(("sequences", id(sequences)))
@@ -118,9 +121,9 @@ def test_every_level_is_still_merged(sr_context, monkeypatch):
     merged = []
     real_merge = DicomExporter._merge
 
-    def recording_merge(ds, attrs, losses=None):
+    def recording_merge(ds, attrs, losses=None, vrs=None):
         merged.append(id(attrs))
-        return real_merge(ds, attrs, losses)
+        return real_merge(ds, attrs, losses, vrs)
 
     monkeypatch.setattr(DicomExporter, "_merge", staticmethod(recording_merge))
 

@@ -144,6 +144,7 @@ TARGETS = {
                                   "tests/test_planar_configuration_roundtrip.py",
                                   "tests/test_private_binary_ingest.py",
                                   "tests/test_private_tag_export.py",
+                                  "tests/test_private_tag_vr_roundtrip.py",
                                   "tests/test_pydicom_deprecations.py",
                                   "tests/test_recursive_import.py",
                                   "tests/test_redaction_export.py",
