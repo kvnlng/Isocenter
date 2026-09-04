@@ -587,12 +587,19 @@ class Instance(DicomItem):
         The precondition is stated exactly, because promising more than
         the flag tracks would be the same defect in the fix: this refuses
         when the array was **replaced through `set_pixel_data()`** and
-        not since written. An array mutated **in place** -- `arr =
-        inst.get_pixel_data(); arr[...] = 0` -- diverges too and is not
-        detected, and neither is the writeable arm of
-        `RedactionService._redact_instance_pixels`, which zeroes a
-        file-backed array in place and never calls `set_pixel_data()`.
-        Those sites are unchanged by #293 and were already this way.
+        not since written. An array mutated **in place** diverges too
+        and is not detected. Mutating in place needs a writeable array,
+        and a frame that came from a file or the sidecar is not one --
+        it is `np.frombuffer`-backed, so `arr[...] = 0` on it raises
+        rather than diverging (#323). The reachable shape is a
+        replacement a save has since written: that array *is* writeable
+        and the flag is back to False, so `arr =
+        inst.get_pixel_data(); arr[...] = 0` on it diverges silently.
+        That is exactly the second redaction pass over an instance --
+        the writeable arm of
+        `RedactionService._redact_instance_pixels`, which zeroes the
+        array in place and never calls `set_pixel_data()`. Those sites
+        are unchanged by #293 and were already this way.
 
         Use `discard_pixel_data()` where dropping unsaved pixels is the
         intent rather than the accident.
