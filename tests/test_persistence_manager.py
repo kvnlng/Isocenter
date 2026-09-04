@@ -122,3 +122,95 @@ def test_flush_recover_from_crash(pm):
     assert len(pm.store_backend.saved_patients) == 1
     assert pm.store_backend.saved_patients[0].patient_id == "P_CRASH"
 
+
+
+def test_a_save_after_running_went_false_reuses_the_live_worker(pm):
+    """A live worker is never joined by a second one (#250).
+
+    `_worker` is a `while True`. Setting `running = False` does not end
+    it -- only the sentinel does -- so a live worker with `running is
+    False` is an ordinary state, not a crashed one. While `_start_worker`
+    guarded on the flag, every such toggle started an ADDITIONAL consumer
+    on the same queue and rebound `self.thread`. `test_persistence_chaos`
+    toggles it nine times; the run ended with nine live workers, and
+    since `shutdown()` posts exactly one sentinel and joins only
+    `self.thread`, whichever of the nine ate the sentinel was usually not
+    that one and the `join(timeout=30)` ran to the full 30 seconds --
+    once at teardown and again from `atexit` after pytest's summary line.
+
+    Structural, not timed: the assertion is thread identity.
+    """
+    before = pm.thread
+    assert before.is_alive()
+
+    pm.running = False
+    pm.save_async([Patient("P_REUSE", "Reuse^Test")])
+
+    assert pm.thread is before, (
+        "save_async started a second worker on the same queue while the "
+        "first was still alive; both then compete for one sentinel and "
+        "shutdown() joins whichever thread it happens to hold (#250)")
+    assert pm.running, (
+        "the flag was left False under a live worker, so the next save "
+        "would spawn yet another consumer")
+
+
+def test_shutdown_after_running_went_false_actually_stops_the_worker(pm):
+    """One sentinel is enough because there is only one consumer (#250).
+
+    The other half of the guard: having reused the live worker rather
+    than spawning a second, `shutdown()`'s single sentinel reaches the
+    thread it then joins. A leaked second consumer is what used to eat
+    the sentinel and leave `self.thread` alive for the full 30-second
+    join.
+    """
+    pm.running = False
+    pm.save_async([Patient("P_STOP", "Stop^Test")])
+    pm.flush()
+
+    pm.shutdown()
+
+    assert not pm.thread.is_alive(), (
+        "shutdown() returned with its worker still running: the sentinel "
+        "was consumed by a thread other than the one being joined (#250)")
+
+
+def test_a_closed_sessions_manager_can_be_collected(tmp_path):
+    """The exit handler must not make every manager immortal (#250).
+
+    `atexit.register` holds its arguments for the life of the process, so
+    registering the bound `self.shutdown` kept every manager ever built
+    alive -- and with it its store, that store's sqlite handles, its
+    audit-writer thread and its sidecar descriptors. Measured over one
+    full suite run before this changed: 647 live managers and 149 threads
+    at interpreter exit, 147 of them audit writers.
+
+    The worker liveness assertion is a precondition, not decoration: a
+    running worker holds the manager through `target=self._worker`, so a
+    manager whose worker is alive is uncollectable for a reason that has
+    nothing to do with `atexit`, and this test would fail for the wrong
+    one.
+    """
+    import gc
+    import weakref
+
+    from isocenter.session import DicomSession
+
+    session = DicomSession(str(tmp_path / "collectable"))
+    manager = session.persistence_manager
+    ref = weakref.ref(manager)
+
+    session.close()
+    assert not manager.thread.is_alive(), (
+        "the worker outlived close(), so it still holds the manager and "
+        "this test would measure thread liveness rather than the exit "
+        "handler")
+
+    del session, manager
+    gc.collect()
+
+    assert ref() is None, (
+        "a closed session's persistence manager is still reachable at "
+        "runtime: the atexit registration holds it, and with it a sqlite "
+        "store, an audit-writer thread and the sidecar's descriptors, "
+        "until the process ends (#250)")

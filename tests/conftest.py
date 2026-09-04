@@ -1,4 +1,11 @@
+import collections
+import faulthandler
 import itertools
+import multiprocessing
+import os
+import sys
+import threading
+import time
 
 import pytest
 import numpy as np
@@ -12,6 +19,159 @@ import json
 from datetime import date
 from isocenter.entities import Patient, Study, Series, Instance, Equipment
 from isocenter.builders import DicomBuilder
+
+# ---------------------------------------------------------------------
+# Stall watchdog (#250) -- instrumentation, not a fix
+# ---------------------------------------------------------------------
+#
+# **What pytest's own faulthandler does not cover.** `faulthandler_timeout`
+# is armed by `_pytest/faulthandler.py` inside `pytest_runtest_protocol`
+# and cancelled in that function's `finally`, so it covers setup, call and
+# teardown of one item and nothing else: not collection, not the gap
+# between items, not `pytest_sessionfinish` or the unconfigure chain, and
+# not the `atexit` phase that runs after the summary line. #250's
+# signature -- a run killed by an outer cap with no failing test named --
+# is what a hang in any of those looks like, and the `atexit` phase is
+# where this suite already spends real time.
+#
+# **A background diagnostic that writes to `sys.stderr` does not exist.**
+# Measured: pytest's fd-level global capture has already `dup2`-ed over
+# fd 2 by the time `tests/conftest.py` is imported, so an `os.dup(2)`
+# taken at import time lands on the capture temp file -- a direct write to
+# it produced no output at all in the run's log. The same measurement
+# showed the channel that does work: global capture is *suspended* while
+# `pytest_configure` runs, so `os.dup(2)` taken there is the real stderr,
+# and three background writes from a daemon thread appeared live and in
+# order in the run's output. Nothing private to `_pytest` is touched. The
+# rule this encodes: **a background diagnostic channel must own an fd
+# duplicated while capture is not in place, or it is not a channel.**
+
+#: How long nothing may happen before the watchdog says so.
+#:
+#: Must exceed the longest legitimate gap in a healthy run. The worst was
+#: `test_persistence_chaos`'s 30.01s teardown, now ~0s (#250's worker
+#: leak). 120s is clear of anything the suite does and far inside CI's
+#: Run Tests step cap, which `tests/test_packaging_contract.py` pins.
+_STALL_S = 120.0
+
+#: How often the watchdog looks. Cheap: one wakeup and one subtraction.
+_TICK_S = 10.0
+
+_stderr_fd = None
+#: Held at module scope for the process's lifetime. A file object over the
+#: dup'ed fd that got collected would close the fd out from under
+#: `faulthandler`, whose `file=` keeps only the integer.
+_stderr_file = None
+
+_phase_lock = threading.Lock()
+_phase = "starting"
+_last_nodeid = None
+_last_event = time.monotonic()
+_started = time.monotonic()
+
+
+def _mark(phase, nodeid=None):
+    global _phase, _last_nodeid, _last_event
+    with _phase_lock:
+        _phase = phase
+        if nodeid is not None:
+            _last_nodeid = nodeid
+        _last_event = time.monotonic()
+
+
+def _dump_stall(stalled_for):
+    """Say where the run is stuck, on a channel capture cannot swallow."""
+    with _phase_lock:
+        phase, nodeid, since = _phase, _last_nodeid, _last_event
+    names = collections.Counter(t.name for t in threading.enumerate())
+    try:
+        children = [(c.name, c.pid) for c in multiprocessing.active_children()]
+    except Exception as exc:  # pragma: no cover - diagnostics never raise
+        children = [("<unavailable>", repr(exc))]
+
+    lines = [
+        "",
+        "=" * 70,
+        f"ISOCENTER STALL WATCHDOG: nothing has happened for "
+        f"{stalled_for:.0f}s (#250)",
+        f"  phase          : {phase}",
+        f"  last test item : {nodeid}",
+        f"  in that phase  : {time.monotonic() - since:.0f}s",
+        f"  run elapsed    : {time.monotonic() - _started:.0f}s",
+        f"  threads        : {threading.active_count()} "
+        f"{dict(names.most_common())}",
+        # A churning child list across successive dumps is a pool
+        # respawning; a static one is a child that is stuck.
+        f"  child processes: {children}",
+        "=" * 70,
+        "",
+    ]
+    try:
+        os.write(_stderr_fd, ("\n".join(lines)).encode())
+        # `all_threads` covers this process only; pool children arm their
+        # own watchdog (`parallel._worker_init`).
+        faulthandler.dump_traceback(all_threads=True, file=_stderr_file)
+        _stderr_file.flush()
+    except Exception:  # pragma: no cover - diagnostics never raise
+        pass
+
+
+def _watch():
+    """Report every `_STALL_S` *while still stalled*, not once.
+
+    A series of dumps is what separates a deadlock (identical stacks) from
+    a livelock (stacks that move), and a 40-minute hang should leave a
+    series rather than a single frame.
+    """
+    next_report = _STALL_S
+    while True:
+        time.sleep(_TICK_S)
+        with _phase_lock:
+            idle = time.monotonic() - _last_event
+        if idle >= next_report:
+            _dump_stall(idle)
+            next_report = idle + _STALL_S
+        elif idle < _STALL_S:
+            next_report = _STALL_S
+
+
+def pytest_configure(config):
+    """Take the fd and start the watchdog.
+
+    Here rather than at import: global capture is suspended while this
+    hook runs, so fd 2 is the real stderr. See the measurement above.
+    """
+    global _stderr_fd, _stderr_file
+    if _stderr_fd is not None:  # pragma: no cover - one configure per run
+        return
+    _stderr_fd = os.dup(2)
+    # `closefd=False` so the fd survives if this wrapper is ever replaced;
+    # the module-level reference is what actually keeps it open.
+    _stderr_file = os.fdopen(_stderr_fd, "w", buffering=1, closefd=False)
+    _mark("configure")
+    # Daemon, so a wedged run is not kept alive by the watchdog itself. It
+    # keeps ticking through `pytest_unconfigure` and the whole `atexit`
+    # chain -- the half nothing else covers -- and stops when interpreter
+    # finalization begins, which is after `atexit`.
+    threading.Thread(target=_watch, name="IsocenterStallWatchdog",
+                     daemon=True).start()
+
+
+def pytest_collection(session):
+    _mark("collection")
+
+
+def pytest_runtest_logstart(nodeid, location):
+    _mark("running test item", nodeid)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _mark("sessionfinish")
+
+
+def pytest_unconfigure(config):
+    _mark("unconfigure / atexit")
+
 
 @pytest.fixture(autouse=True)
 def redirect_logging(tmp_path):
