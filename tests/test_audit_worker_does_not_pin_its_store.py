@@ -131,5 +131,9 @@ def test_rows_queued_at_collection_are_reported(tmp_path, caplog):
             "log exists to prevent (#316)")
 
     reported = [r.message for r in caplog.records if "#316" in r.message]
-    assert any("1" in m for m in reported), (
+    # Matched against the phrase, not against the bare digit. `"1" in m`
+    # was satisfied by the `#316` the message ends with, so it held for
+    # a report of seven rows just as happily as for one -- an assertion
+    # about the count that could not see the count.
+    assert any("1 audit row" in m for m in reported), (
         f"the report does not say how many rows were dropped: {reported}")

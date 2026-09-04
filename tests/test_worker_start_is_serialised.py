@@ -1,7 +1,7 @@
 """Two callers that both find a dead worker must still start one (#313).
 
 `PersistenceManager._start_worker` is reached from two places --
-`save_async` (unlocked, `persistence_manager.py:256-258`) and
+`save_async` (unlocked, on the ordinary save path) and
 `_recover_orphaned_item` (under `_recover_lock`) -- and both used to do
 their own check-then-act on `self.thread.is_alive()`. Two threads can
 therefore both observe the same dead worker and both construct one, which
@@ -55,10 +55,6 @@ def pm(tmp_path):
     manager = PersistenceManager(RecordingStore(str(tmp_path / "worker.db")))
     yield manager
     manager.shutdown()
-
-
-def _named_workers():
-    return [t for t in threading.enumerate() if t.name == WORKER_NAME]
 
 
 class _Gate:
@@ -142,7 +138,6 @@ def test_a_save_and_a_flush_racing_a_dead_worker_start_only_one(pm):
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         gate = _Gate(pm, monkeypatch)
-        baseline = len(_named_workers())
 
         saved = _on_helper(lambda: pm.save_async([patient]))
         flushed = _on_helper(pm.flush)
@@ -156,11 +151,15 @@ def test_a_save_and_a_flush_racing_a_dead_worker_start_only_one(pm):
             "save_async and flush() both checked thread liveness and both "
             "acted on it, so one queue now has two consumers competing "
             "for a single shutdown sentinel (#313)")
-        assert len(_named_workers()) == baseline + 1, (
-            "the manager's worker is not identifiable by name, so the "
+        assert pm.thread.name == WORKER_NAME, (
+            f"the manager's worker is named {pm.thread.name!r}, so the "
             "stall census in tests/conftest.py reports it as Thread-N "
             "and a leaked worker cannot be told from any other thread "
-            "(#313)")
+            "(#313). Asserted on this manager's own thread rather than "
+            "on a process-wide count of named workers: a count reads "
+            "state every other test in the run contributes to, which is "
+            "the shape that made test_the_abandoned_worker_exits fail "
+            "on 3.14t while its fix was working perfectly (#316).")
 
 
 def test_two_concurrent_saves_against_a_dead_worker_start_only_one(pm):

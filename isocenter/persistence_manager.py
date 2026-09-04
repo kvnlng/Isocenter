@@ -194,13 +194,18 @@ class PersistenceManager:
         # extra thread per `flush()` CALL on a healthy flush, and one more
         # per report interval while it is still waiting -- earlier waiters
         # stay blocked until the queue drains, so a wedged flush
-        # accumulates one thread every 30s. Never per queued item:
-        # `Session` calls `flush()` from exactly two places, `audit()`
-        # and `redact()`, and not on the save path. (`close()` still
-        # does NOT flush -- it calls `shutdown()`, which returns without
-        # waiting when the worker is already dead. Since #314 that is no
-        # longer a silent drop: `shutdown()` reconciles what it finds on
-        # its way out, bounded at one `save_all`.)
+        # accumulates one thread every 30s. Never per queued item, and
+        # that is the bound that matters: `Session` calls `flush()` from
+        # three places -- `audit()`, `redact()` and, since #294,
+        # `save(sync=True)` (which `compact()` leads with). #294 put
+        # `flush()` on the save path, so "not on the save path" is no
+        # longer the reason the cost is bounded; the reason is that all
+        # three are per *caller invocation* and none is per queued item,
+        # and the waiter is created and reaped inside the call.
+        # (`close()` still does NOT flush -- it calls `shutdown()`, which
+        # returns without waiting when the worker is already dead. Since
+        # #314 that is no longer a silent drop: `shutdown()` reconciles
+        # what it finds on its way out, bounded at one `save_all`.)
         while True:
             waiter = threading.Thread(target=self.queue.join, daemon=True)
             waiter.start()
@@ -348,9 +353,10 @@ class PersistenceManager:
         # because it found the previous worker dead -- so this is where
         # recovery always runs, rather than only where `flush()` happens
         # to look. Before #315 `_recover_orphaned_item` was reachable
-        # from `flush()` and nowhere else, and `Session` flushes from
-        # exactly two places; a session that saved, lost a worker and
-        # then closed never reached it.
+        # from `flush()` and nowhere else, and `Session` flushed from
+        # exactly two places at the time (#294 has since added a third);
+        # a session that saved, lost a worker and then closed never
+        # reached it.
         #
         # **`_reap_orphans()`, never `_recover_orphaned_item()`.** The
         # latter takes `_recover_lock` and then calls `_start_worker`,
@@ -493,13 +499,24 @@ class PersistenceManager:
         state #309 leaves and the one `close()` used to walk past (#314).
 
         **Nothing is touched while a worker is still alive.** A join that
-        timed out means a save is genuinely running: its `_inflight`
-        entry is the item that worker is inside `save_all` with, and
+        timed out means a save is genuinely running: *that worker's*
+        `_inflight` entry is the item it is inside `save_all` with, and
         saving it here would double-write and race. Its queue is worse
         still -- `shutdown()` has already posted the sentinel that stops
         it, and a drain that swallowed that sentinel would leave a
         `while True` worker with nothing left to end it, which is #250's
         leak reintroduced by its own fix. So: report and return.
+
+        **What that leaves unwritten, exactly.** The sentinel sits at the
+        position it was `put` at, so the items *ahead* of it are still
+        the live worker's and it will write them before it stops -- they
+        are deferred, not lost. The items *behind* it were queued after
+        `shutdown()` began; that worker exits on the sentinel without
+        reaching them, and nothing here writes them either. They are the
+        accepted hole, and the reported `queued` counts all three
+        populations together (the sentinel included), which is why the
+        message names it as a queue depth rather than as a count of
+        lost saves.
 
         **`task_done()` exactly once per item consumed**, and the
         arithmetic is the part to get right. A reaped orphan was
@@ -515,6 +532,13 @@ class PersistenceManager:
         so an exception escaping here would replace whatever the user's
         `with` body was unwinding with a persistence one.
 
+        The `in_flight_items` that branch reports is `len(self._inflight)`,
+        which counts entries under **every** owner and so can include a
+        prior worker's orphan alongside the running save. It is a
+        diagnostic for a human reading a teardown log, not a count of
+        running saves, and over-reporting is the right direction to err:
+        the number exists to say that something was left unreconciled.
+
         No manager lock is held across the `save_all`: `_reap_orphans()`
         releases `_inflight_lock` before returning, and neither
         `_recover_lock` nor `_worker_lock` is taken here at all.
@@ -527,8 +551,10 @@ class PersistenceManager:
                     "PersistenceManager.shutdown() timed out with a save "
                     "still running; it is left with its worker rather than "
                     "written here, which would double-write and race it. "
-                    f"in_flight_items={outstanding}, "
-                    f"queued={self.queue.qsize()} (#314).")
+                    f"in_flight_items={outstanding} (recorded under any "
+                    f"owner), queue_depth={self.queue.qsize()} (includes "
+                    "the shutdown sentinel; items behind it are written "
+                    "neither by that worker nor here) (#314).")
             return
 
         items = list(self._reap_orphans())
@@ -558,21 +584,51 @@ class PersistenceManager:
                     "PersistenceManager.shutdown() could not write a save "
                     f"its worker left behind: {exc} (#314).")
             finally:
-                self.queue.task_done()
+                # `task_done()` gets its own guard, and that is not
+                # belt-and-braces. It is the one statement here whose
+                # safety rests on an *arithmetic* argument -- exactly one
+                # call per item consumed, as argued above -- rather than
+                # on construction, and the queue's answer to a wrong
+                # argument is `ValueError: task_done() called too many
+                # times`. In a bare `finally` that escapes `shutdown()`,
+                # and `Session.close()` re-raises the first exception any
+                # of its steps produced, so a miscount would replace
+                # whatever the user's `with` body was unwinding with a
+                # persistence one -- the precise outcome this method's
+                # docstring promises cannot happen. Guarded, "it never
+                # raises" is a property of the code rather than of the
+                # argument (#314).
+                try:
+                    self.queue.task_done()
+                except ValueError as exc:
+                    get_logger().error(
+                        "PersistenceManager.shutdown() counted off more "
+                        f"tasks than the queue is holding: {exc} (#314).")
 
     def _report_unreconciled(self, message):
         """Say -- on both channels -- that a save did not reach the store.
 
         The log line is for whoever is watching the process; the audit
-        row is the durable half, and `Session.close()` runs
-        `store_backend.stop()` after `shutdown()`, which flushes the
-        audit queue, so a row written here settles before close returns.
-        Both are best-effort by construction: this runs on a teardown
-        path and must not raise.
+        row is the durable half. Both are best-effort by construction:
+        this runs on a teardown path and must not raise.
+
+        **The row is settled here rather than by a later `stop()`.**
+        `Session.close()` does run `store_backend.stop()` after
+        `shutdown()`, and that would flush it -- but `_flush_at_exit`
+        calls `shutdown()` with no `stop()` behind it, and that
+        `atexit` path is precisely the new exposure #314 opened. There
+        the row would sit in a queue whose daemon writer the
+        interpreter is about to stop at finalization, so "reported on
+        two channels" would be true on one path and false on the other.
+        `flush_audit_queue()` drains on this thread under
+        `_audit_write_lock`, takes no manager lock, and is bounded by
+        one `log_audit_batch`, so it neither touches the invariant nor
+        turns the teardown into a wait.
         """
         get_logger().error(message)
         try:
             self.store_backend.log_audit("ERROR", "SESSION", message)
+            self.store_backend.flush_audit_queue()
         except Exception as exc:  # pylint: disable=broad-except
             get_logger().error(
                 f"PersistenceManager could not record the unreconciled "
