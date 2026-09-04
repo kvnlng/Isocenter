@@ -2704,31 +2704,69 @@ class DicomSession:
                         # Re-point it at this process's.
                         loader.instance = instance
                         instance._pixel_loader = loader
-                        # The worker wrote this frame to the sidecar
-                        # before handing the loader back, so the parent's
-                        # instance is now backed by what it holds -- and
-                        # freeable again (#293).
+                        # And drop whatever this process is still holding
+                        # (#322). Under processes the worker redacted a
+                        # *copy*: its `discard_pixel_data()` freed the
+                        # child's array, and the parent kept the
+                        # pre-redaction one. Rebinding the loader without
+                        # this line leaves the instance with two answers
+                        # to "what are my pixels" -- a resident stale
+                        # array and a loader on the redacted frame -- and
+                        # everything that asks the instance takes the
+                        # stale one: `_persist_pixels` hashes it, misses
+                        # its `_pixel_hash == digest` dedup guard (that
+                        # hash is the redacted one), appends the stale
+                        # frame to the sidecar and rewires the loader to
+                        # it, so the corruption becomes durable and every
+                        # later session exports pre-redaction pixels under
+                        # a full redaction attestation.
                         #
-                        # REACHABLE BUT UNTESTED, which is not the same
-                        # as redundant. Nothing stops a caller from
-                        # `set_pixel_data()` and then `redact()` with no
-                        # save in between: `_apply_redaction_rules`
-                        # dispatches the live `Instance` and `Instance`
-                        # defines no `__getstate__`, so the processes
-                        # path pickles the resident replacement to the
-                        # worker, which redacts it and returns a loader
-                        # for it. Delete this line in that state and the
-                        # flag stays set forever, so `release_memory()`
-                        # refuses that instance for the rest of the
-                        # session -- silently, because the sweep only
-                        # logs counts. No test constructs that sequence
-                        # today, so the line does survive deletion; the
-                        # test is filed, not written here. On the
-                        # threads path it is genuinely redundant: the
-                        # worker mutated this very instance and
-                        # `persist_pixel_data` cleared the flag before
-                        # the loader came back.
-                        instance._pixel_array_unwritten = False
+                        # Inside `if loader:`, never one indent out. A
+                        # mutation carrying `pixel_hash` and no loader has
+                        # no redacted frame to fall back on, so nulling
+                        # there would leave `_persist_pixels` recording
+                        # the *stale* loader frame stamped with the *new*
+                        # hash -- store, sidecar and `_pixel_hash` all
+                        # agreeing on the wrong frame with every integrity
+                        # check passing, which is #293's shape exactly.
+                        #
+                        # Inside the lock, and it belongs there: this is
+                        # the same `_pixel_swap_lock` `_persist_pixels`
+                        # reads under, so the null is atomic against a
+                        # concurrent background save rather than a second
+                        # window into it -- it strengthens #274. The
+                        # `mark_modified()` below runs after the lock and
+                        # the null does not depend on that ordering; do
+                        # not tidy the null out to join it.
+                        #
+                        # Not a memory hazard, whatever the issue's
+                        # caveat says: nulling the instance's reference
+                        # does not invalidate an array the caller already
+                        # holds. It only stops the *instance* serving
+                        # pre-redaction pixels.
+                        #
+                        # This is the third `pixel_array = None` site, and
+                        # `_persist_pixels`' `arr is None` arm enumerates
+                        # them -- it is updated with this one.
+                        #
+                        # The null is also what makes the divergence flag
+                        # irrelevant here, which is why the
+                        # `_pixel_array_unwritten = False` that used to
+                        # stand on this line is deleted rather than kept
+                        # (#326): `unload_pixel_data()` returns True on a
+                        # `None` array *before* it consults the flag, and
+                        # `get_pixel_data()`'s loader arm clears it on the
+                        # next read. Restore one without the other -- put
+                        # the array back and leave the flag set -- and
+                        # #293's silently-unfreeable instance returns:
+                        # `release_memory()` refuses it for the rest of
+                        # the session and only logs a count.
+                        #
+                        # On the threads path the worker mutated this very
+                        # instance and its `finally` already discarded the
+                        # array, so this null lands on `None`; both
+                        # executors now leave identical state.
+                        instance.pixel_array = None
                     if mutation.get('pixel_hash'):
                         instance._pixel_hash = mutation['pixel_hash']
 

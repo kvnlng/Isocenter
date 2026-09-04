@@ -2821,13 +2821,18 @@ class SqliteStore:
                 # set. Nothing else nulls `pixel_array` -- every other
                 # write to it (`set_pixel_data()` and `get_pixel_data()`'s
                 # three arms) fills it. So `arr is None` here means one of
-                # exactly two
+                # exactly three
                 # things: `unload_pixel_data()` cleared an array that was
                 # equal to what the loader points at, or a caller
                 # deliberately discarded one -- the redaction `finally`
                 # blocks, where reverting to the loader's frame IS the
-                # intended outcome. Recording the loader's frame is correct
-                # under both. Do not relax that refusal, or add a third
+                # intended outcome -- or
+                # `Session._apply_redaction_outcomes` nulled it in the
+                # same breath as rebinding the loader to the frame the
+                # worker just redacted (#322), which is the same intended
+                # outcome reached from the parent side of a processes
+                # pass. Recording the loader's frame is correct under all
+                # three. Do not relax that refusal, or add a fourth
                 # nulling site, without revisiting this arm.
                 if isinstance(loader, SidecarPixelLoader):
                     return _StoredFrame(loader.offset, loader.length,
