@@ -667,6 +667,11 @@ class DicomSession:
                 if first_exception is None:
                     first_exception = exc
 
+        # Order is load-bearing. `shutdown()` reconciles a save its
+        # worker never finished and records an ERROR audit row when it
+        # cannot (#314); `stop()` flushes the audit queue, so those rows
+        # settle before close() returns. Reversed, they would be written
+        # into a queue nothing drains again.
         if hasattr(self, 'persistence_manager'):
             _run_step(self.persistence_manager.shutdown)
         if hasattr(self, 'store_backend'):

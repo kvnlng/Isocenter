@@ -19,6 +19,15 @@ from .logger import get_logger
 #: before any traceback dump arrives and the two land in the same log.
 _FLUSH_REPORT_INTERVAL_S = 30.0
 
+#: How long `shutdown()` waits for its worker to take the sentinel.
+#:
+#: Named rather than inline so tests can shorten it; there is no env
+#: var, because one spelling per behaviour and nothing outside a test
+#: has a reason to move it. A join that times out is not a failure --
+#: it means a save is genuinely still running, which `shutdown()`
+#: reports and leaves alone (#314).
+_SHUTDOWN_JOIN_TIMEOUT_S = 30.0
+
 
 def _flush_at_exit(manager_ref):
     """Flush a manager at interpreter exit, if it is still alive.
@@ -115,6 +124,12 @@ class PersistenceManager:
         # are. Unregistering at `shutdown()` was rejected because a
         # shut-down manager is restartable -- `save_async` starts a fresh
         # worker -- and it would lose its exit-time flush.
+        #
+        # Since #314 this path can perform sqlite WRITES it never
+        # performed before: `shutdown()` reconciles an orphaned or
+        # still-queued save on its way out. Intended, and new. The
+        # ordering it depends on is the one already checked above --
+        # `atexit` runs while daemon threads are still alive.
         atexit.register(_flush_at_exit, weakref.ref(self))
         get_logger().info("PersistenceManager initialized.")
 
@@ -181,10 +196,11 @@ class PersistenceManager:
         # stay blocked until the queue drains, so a wedged flush
         # accumulates one thread every 30s. Never per queued item:
         # `Session` calls `flush()` from exactly two places, `audit()`
-        # and `redact()`, and not on the save path. (`close()` does NOT
-        # flush -- it calls `shutdown()`, which returns immediately when
-        # the worker is already dead. So an orphan reaching `close()`
-        # is dropped silently rather than hanging it.)
+        # and `redact()`, and not on the save path. (`close()` still
+        # does NOT flush -- it calls `shutdown()`, which returns without
+        # waiting when the worker is already dead. Since #314 that is no
+        # longer a silent drop: `shutdown()` reconciles what it finds on
+        # its way out, bounded at one `save_all`.)
         while True:
             waiter = threading.Thread(target=self.queue.join, daemon=True)
             waiter.start()
@@ -411,11 +427,29 @@ class PersistenceManager:
 
     def shutdown(self):
         """
-        Stops the worker thread gracefully.
+        Stops the worker thread gracefully, then reconciles what is left.
 
-        Waits for any pending operations to complete (with a timeout) before
-        killing the thread (via sentinel and join).
+        Waits for any pending operations to complete (with a timeout)
+        before killing the thread (via sentinel and join), and then --
+        always, including on the early return below --
+        `_drain_recoverable_saves()` writes whatever a dead worker left
+        behind. `close()` is the last call a user makes for the express
+        purpose of having their work on disk; before #314 it dropped an
+        orphaned or still-queued save silently.
+
+        **It is not `flush()` and must never become one.** `close()` is
+        what `__exit__` calls, `flush()` documents that it never returns
+        early, and a context manager that does not exit is worse than
+        the bug. The reconciliation is bounded at one `save_all`, and
+        never a wait on the queue's unfinished count.
         """
+        try:
+            self._shutdown_worker()
+        finally:
+            self._drain_recoverable_saves()
+
+    def _shutdown_worker(self):
+        """Post the sentinel and join, which is all `shutdown()` used to do."""
         # Avoid double shutdown or shutdown if never started
         if not self.thread.is_alive():
             return
@@ -434,6 +468,99 @@ class PersistenceManager:
         # Wake up if sleeping on queue
         self.queue.put(None)
 
-        self.thread.join(timeout=30)
+        self.thread.join(timeout=_SHUTDOWN_JOIN_TIMEOUT_S)
         get_logger().info("PersistenceManager stopped.")
         print("Persistence Manager Stopped.")
+
+    def _drain_recoverable_saves(self):
+        """Write what a stopped worker left behind, or say why it cannot.
+
+        Runs from the `finally` of `shutdown()`, so it also covers the early
+        return taken when the worker was already dead -- which is the
+        state #309 leaves and the one `close()` used to walk past (#314).
+
+        **Nothing is touched while a worker is still alive.** A join that
+        timed out means a save is genuinely running: its `_inflight`
+        entry is the item that worker is inside `save_all` with, and
+        saving it here would double-write and race. Its queue is worse
+        still -- `shutdown()` has already posted the sentinel that stops
+        it, and a drain that swallowed that sentinel would leave a
+        `while True` worker with nothing left to end it, which is #250's
+        leak reintroduced by its own fix. So: report and return.
+
+        **`task_done()` exactly once per item consumed**, and the
+        arithmetic is the part to get right. A reaped orphan was
+        `get()`-ed by its dead owner and never counted off, so it owes
+        one. An item still in the deque owes one for the `get_nowait()`
+        below. Miss one and `unfinished_tasks` stays above zero on a
+        manager `save_async` can restart, and the next `flush()` never
+        returns -- #309's hang, reintroduced. Count one too many and the
+        queue raises `ValueError: task_done() called too many times`.
+
+        **It never raises.** `Session.close()` re-raises the first
+        exception any of its steps produced and `__exit__` returns None,
+        so an exception escaping here would replace whatever the user's
+        `with` body was unwinding with a persistence one.
+
+        No manager lock is held across the `save_all`: `_reap_orphans()`
+        releases `_inflight_lock` before returning, and neither
+        `_recover_lock` nor `_worker_lock` is taken here at all.
+        """
+        if self.thread is not None and self.thread.is_alive():
+            with self._inflight_lock:
+                outstanding = len(self._inflight)
+            if outstanding or not self.queue.empty():
+                self._report_unreconciled(
+                    "PersistenceManager.shutdown() timed out with a save "
+                    "still running; it is left with its worker rather than "
+                    "written here, which would double-write and race it. "
+                    f"in_flight_items={outstanding}, "
+                    f"queued={self.queue.qsize()} (#314).")
+            return
+
+        items = list(self._reap_orphans())
+        while True:
+            try:
+                items.append(self.queue.get_nowait())
+            except queue.Empty:
+                break
+
+        for item in items:
+            try:
+                # A `None` here is a stale sentinel from an earlier
+                # `shutdown()` whose worker died without taking it.
+                # `_worker` special-cases these; a drain that does not
+                # runs `patients, prune = None` and raises `TypeError`
+                # out of `close()`.
+                if item is None:
+                    continue
+                patients, prune_absent_patients = item
+                get_logger().warning(
+                    "PersistenceManager.shutdown() is writing a save its "
+                    "worker never finished (#314).")
+                self.store_backend.save_all(
+                    patients, prune_absent_patients=prune_absent_patients)
+            except Exception as exc:  # pylint: disable=broad-except
+                self._report_unreconciled(
+                    "PersistenceManager.shutdown() could not write a save "
+                    f"its worker left behind: {exc} (#314).")
+            finally:
+                self.queue.task_done()
+
+    def _report_unreconciled(self, message):
+        """Say -- on both channels -- that a save did not reach the store.
+
+        The log line is for whoever is watching the process; the audit
+        row is the durable half, and `Session.close()` runs
+        `store_backend.stop()` after `shutdown()`, which flushes the
+        audit queue, so a row written here settles before close returns.
+        Both are best-effort by construction: this runs on a teardown
+        path and must not raise.
+        """
+        get_logger().error(message)
+        try:
+            self.store_backend.log_audit("ERROR", "SESSION", message)
+        except Exception as exc:  # pylint: disable=broad-except
+            get_logger().error(
+                f"PersistenceManager could not record the unreconciled "
+                f"save in the audit log: {exc}")
