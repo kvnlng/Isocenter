@@ -266,9 +266,26 @@ class PersistenceManager:
                 except Exception as e:
                     get_logger().error(f"Background save failed: {e}")
                 finally:
-                    # Cleared *before* `task_done()`: once the count drops
-                    # a waiting flush can return, and it must not find a
-                    # stale item to re-queue behind it.
+                    # Cleared *before* `task_done()`, and the ordering is
+                    # load-bearing in two ways. Reversed, a flush woken by
+                    # the count reaching zero can return with `_inflight`
+                    # still set, and the next recovery against a dead
+                    # worker re-queues a payload that was already saved
+                    # *and* raises `ValueError: task_done() called too
+                    # many times`. In this order, a `queue.join` that has
+                    # returned is proof the clear already happened, which
+                    # is what makes the second assertion in
+                    # `test_the_worker_records_and_releases_the_item_it_is_holding`
+                    # race-free rather than lucky.
+                    #
+                    # The cost of this order is the second of #309's two
+                    # residual windows: a thread killed between the clear
+                    # and `task_done()` returning leaves `_inflight` None
+                    # with the count still at 1, which recovery cannot
+                    # tell from a healthy queue. Nothing is *lost* there
+                    # -- the save already committed -- but the flush hangs
+                    # as permanently as in the first window. Closing
+                    # either needs atomicity inside `Queue`.
                     with self._inflight_lock:
                         self._inflight = None
                     self.queue.task_done()
