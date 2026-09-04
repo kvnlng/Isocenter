@@ -674,6 +674,19 @@ class DicomSession:
         # into a queue nothing drains again.
         if hasattr(self, 'persistence_manager'):
             _run_step(self.persistence_manager.shutdown)
+
+        # After `shutdown()`, and deliberately not through `_run_step`.
+        # Order: `shutdown()` reconciles a save its worker never finished
+        # (#314), so asking before it would report instances that were
+        # about to be marked persisted. Not `_run_step`, because that
+        # records the first exception for `close()` to re-raise -- and a
+        # bug in a diagnostic that turned `close()` into a raise would
+        # abort before the executor shut down, leaking worker
+        # subprocesses for the life of the interpreter, which is the
+        # exact failure this method's ordering exists to prevent. It
+        # swallows its own errors instead.
+        self._warn_about_unsaved_instances()
+
         if hasattr(self, 'store_backend'):
             _run_step(self.store_backend.stop)  # Stops audit thread
 
@@ -683,6 +696,75 @@ class DicomSession:
 
         if first_exception is not None:
             raise first_exception
+
+    def _warn_about_unsaved_instances(self):
+        """Say so when `close()` is about to drop unsaved instance edits (#307).
+
+        `close()` shut the session down in silence over a graph carrying
+        changes no `save()` ever reached, and those changes were gone.
+        The verbs that produce them are the ordinary ones -- `audit()`
+        advances `_revision` through `record_phi_status()`, `anonymize()`
+        and `redact()` mutate -- so the most common firing is
+        "audited, then closed", and the message names *what* is unsaved
+        rather than only how many, because "1 unsaved instance" tells a
+        caller nothing they can act on.
+
+        **Instances only.** `SqliteStore.save_all` calls
+        `mark_persisted()` on instances and on nothing else; no level
+        above them is marked anywhere in the save walk, so every
+        built-then-saved patient, study and series reports
+        `has_unsaved_changes` forever. Warning on those would fire on
+        every correct session, and a warning that fires when nothing is
+        wrong is one people learn to skip. Widening this means fixing the
+        save walk first, with per-parent revision capture -- the
+        `mark_persisted()` trap -- not widening the walk here.
+
+        **A warning and not an audit row.** A row written here would land
+        between `persistence_manager.shutdown()` and
+        `store_backend.stop()`, and could only ever be read by a *later*
+        session's report: a second durable answer to a question the graph
+        in front of the caller already answers, which is the shape this
+        project keeps deleting.
+
+        One bounded pass over the graph and no I/O, so it costs nothing
+        worth measuring even on a large store. It swallows its own
+        errors: see the call site for why a raise here would be worse
+        than the diagnostic being missing.
+
+        Warning twice on a double `close()` is accepted. The graph really
+        is still unsaved the second time, and remembering that it had
+        already been mentioned would be state answering a question the
+        graph answers. Zero unsaved instances is silent, so an ordinary
+        double close says nothing extra.
+        """
+        try:
+            unsaved = [inst
+                       for p in self.store.patients
+                       for st in p.studies
+                       for se in st.series
+                       for inst in se.instances
+                       if inst.has_unsaved_changes]
+            if not unsaved:
+                return
+
+            named = ", ".join(i.sop_instance_uid for i in unsaved[:3])
+            if len(unsaved) > 3:
+                named += f", and {len(unsaved) - 3} more"
+            message = (
+                f"Closing with {len(unsaved)} instance(s) holding unsaved "
+                f"changes; they will not reach the store. Affected: "
+                f"{named}. Call save(sync=True) before close() to keep "
+                f"them.")
+            get_logger().warning(message)
+            print(f"WARNING: {message}")
+        except Exception:  # pylint: disable=broad-except
+            # A diagnostic that cannot run is a diagnostic that is
+            # missing, which is what the caller had before this existed.
+            # A diagnostic that raises is a close() that leaks an
+            # executor.
+            get_logger().debug(
+                "Could not check for unsaved instances during close().",
+                exc_info=True)
 
     def save(self, sync: bool = False):
         """
