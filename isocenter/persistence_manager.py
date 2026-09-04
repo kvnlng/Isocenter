@@ -205,6 +205,44 @@ class PersistenceManager:
                 f"worker_alive={alive}, in_flight_items={inflight} (#309)")
             self._recover_orphaned_item()
 
+    def _reap_orphans(self):
+        """Pop and return the payloads whose owning worker is dead.
+
+        Popping under `_inflight_lock` is what makes re-queueing
+        exactly-once a property of the data rather than of the ordering
+        between two callers: two of them cannot both come away holding
+        the same payload. A live owner's entry is never touched -- that
+        worker is simply mid-save, and re-queueing under it would both
+        duplicate the write and unbalance the queue's count.
+
+        Takes `_inflight_lock` and nothing else, and calls nothing.
+        That is deliberate and is what lets `_worker` call it (see the
+        comment at its head) without the reentrancy that calling
+        `_recover_orphaned_item` there would need.
+        """
+        with self._inflight_lock:
+            return [self._inflight.pop(owner)
+                    for owner in list(self._inflight)
+                    if not owner.is_alive()]
+
+    def _requeue_orphans(self, orphaned):
+        """Put reaped payloads back, `put()` **then** `task_done()`.
+
+        One spelling for that ordering, because it has two callers and
+        the ordering is the load-bearing part. Reversed,
+        `unfinished_tasks` reaches zero between the two calls, a waiting
+        `queue.join` wakes, and `flush()` can return before the payload
+        is back in the deque -- a dropped save wearing a clean return.
+        In this order the net count is unchanged and the payload is
+        queued before the orphan is counted off.
+        """
+        for payload in orphaned:
+            get_logger().warning(
+                "PersistenceManager worker stopped holding a save it "
+                "never finished; re-queueing it (#309).")
+            self.queue.put(payload)
+            self.queue.task_done()
+
     def _recover_orphaned_item(self):
         """Put back a save whose worker took it and never finished it.
 
@@ -222,12 +260,10 @@ class PersistenceManager:
         live worker's own entry is still never touched, so nothing is
         traded away for that.
 
-        The re-queue is deliberately `put()` **then** `task_done()`.
-        Reversed, `unfinished_tasks` reaches zero between the two calls,
-        a waiting `queue.join` wakes, and `flush()` can return before
-        the payload is back in the deque -- a dropped save wearing a
-        clean return. In this order the net count is unchanged and the
-        payload is queued before the orphan is counted off.
+        The reap and the re-queue live in `_reap_orphans` and
+        `_requeue_orphans`, which `_worker` also calls on startup
+        (#315); the `put()`-then-`task_done()` ordering is argued at the
+        latter, in one place because it has two callers.
 
         Re-queueing exactly once does not depend on `_recover_lock`:
         each entry is *popped* out of `_inflight` under `_inflight_lock`
@@ -236,17 +272,7 @@ class PersistenceManager:
         cannot both reach `_start_worker()`.
         """
         with self._recover_lock:
-            with self._inflight_lock:
-                orphaned = [self._inflight.pop(owner)
-                            for owner in list(self._inflight)
-                            if not owner.is_alive()]
-
-            for payload in orphaned:
-                get_logger().warning(
-                    "PersistenceManager worker stopped holding a save it "
-                    "never finished; re-queueing it (#309).")
-                self.queue.put(payload)
-                self.queue.task_done()
+            self._requeue_orphans(self._reap_orphans())
 
             if self.thread is not None and self.thread.is_alive():
                 return
@@ -287,6 +313,27 @@ class PersistenceManager:
         self.queue.put((list(patients), prune_absent_patients))
 
     def _worker(self):
+        # **Reap before consuming anything, on the newly started thread.**
+        # A worker restart is the event that always accompanies a
+        # recovery being needed -- `save_async` starts one precisely
+        # because it found the previous worker dead -- so this is where
+        # recovery always runs, rather than only where `flush()` happens
+        # to look. Before #315 `_recover_orphaned_item` was reachable
+        # from `flush()` and nowhere else, and `Session` flushes from
+        # exactly two places; a session that saved, lost a worker and
+        # then closed never reached it.
+        #
+        # **`_reap_orphans()`, never `_recover_orphaned_item()`.** The
+        # latter takes `_recover_lock` and then calls `_start_worker`,
+        # which takes `_worker_lock`; putting *that* in `_start_worker`
+        # instead would give `_recover_lock` -> `_worker_lock` ->
+        # `_recover_lock` on a non-reentrant lock. Calling the reap --
+        # which takes `_inflight_lock` alone and restarts nothing, since
+        # this thread *is* the restart -- makes that impossible by
+        # construction rather than by a liveness argument about
+        # `self.thread`.
+        self._requeue_orphans(self._reap_orphans())
+
         while True:
             try:
                 # Wait for work

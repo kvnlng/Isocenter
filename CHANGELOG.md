@@ -85,6 +85,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A restarted worker reaps the orphan itself, so recovery no longer lives only in `flush()` (#315).** `isocenter/persistence_manager.py`, plus one test in `tests/test_flush_orphan_recovery.py`.
+
+  #309 gave the manager a way to recover a save its worker took and never finished, and put it in exactly one place: `_recover_orphaned_item`, reachable from `flush()` and nowhere else. `Session` flushes from exactly two places -- `audit()` and `redact()`. So a session that saves, loses a worker and then keeps saving, or closes, never calls it: the payload sits in `_inflight` with `unfinished_tasks` stuck above zero, and it is the *next* flush that finds it, if one ever comes.
+
+  **The reap now also runs at the top of `_worker`, before it consumes anything**, because a worker restart is the event that always accompanies the recovery being needed -- `save_async` starts one precisely because it found the previous worker dead. The orphan therefore drains on the ordinary save path, with no flush anywhere.
+
+  **What is called there is `_reap_orphans()`, never `_recover_orphaned_item()`, and that is the trap of this change.** `_recover_orphaned_item` takes `_recover_lock` and then calls `_start_worker`, which since #313 takes `_worker_lock`. Putting the reap in `_start_worker` instead would give `_recover_lock` -> `_worker_lock` -> `_recover_lock` on a non-reentrant lock -- a self-deadlock on the ordinary restart path. Extracting a reap that takes `_inflight_lock` alone, restarts nothing (this thread *is* the restart) and calls nothing, and calling *that*, makes the inversion impossible by construction rather than by a liveness argument about `self.thread`. The extraction is two helpers, not one: `_requeue_orphans` holds the `put()`-then-`task_done()` ordering that #309 argued for, in one place, because it now has two callers and duplicating that ordering is exactly how it gets reversed later.
+
+  **A weakref-keyed `_inflight` was considered and does not work.** The payload is a `(list, bool)` tuple and `weakref.ref([])` raises `TypeError: cannot create weak reference to 'list' object`. A `WeakKeyDictionary` keyed on the owning `Thread` is constructible but drops the payload when the dead thread is collected, converting retention into silent loss -- the failure mode #309 exists to prevent. Reaping where the restart always runs keeps the payload.
+
+  The test is deliberately `test_a_save_queued_after_the_orphaning_does_not_bury_it` with the flush removed, and its docstring says so. Measured: `1 failed, 5 passed` before, `6 passed` after.
+
 - **Two callers that find the same dead worker no longer both start one (#313).** `isocenter/persistence_manager.py`, plus two tests in a new `tests/test_worker_start_is_serialised.py`.
 
   `_start_worker` is reached from two places and both did their own check-then-act on `self.thread.is_alive()`: `save_async` (unlocked, on the ordinary save path) and `_recover_orphaned_item` (under `_recover_lock`). Neither check is an answer once it is separated from the act -- two threads can observe one dead worker and both construct a replacement. The result is two consumers on one queue, and from there it is #250's shape exactly: `shutdown()` posts one sentinel, whichever worker eats it is usually not the one `self.thread` names, and the `join(timeout=30)` burns its full thirty seconds -- at teardown and again from `atexit`, after pytest's summary line, where nothing is watching.
