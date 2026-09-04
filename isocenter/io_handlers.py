@@ -125,6 +125,7 @@ import os
 import sys
 import hashlib
 import io
+import struct
 from typing import List, Dict, Any, Optional, Tuple, Iterable
 from datetime import datetime, date
 from dataclasses import dataclass, field
@@ -310,18 +311,49 @@ _DERIVED_PIXEL_INDEX_TAGS = frozenset({
 BINARY_RETENTION_MAX_BYTES = 65534
 
 
-#: Private VRs whose Python value must be an integer. pydicom accepts a
-#: `str` at `add_new` for these -- with a `UserWarning` -- and then
-#: raises `struct.error: required argument is not an integer` from
-#: `filewriter.write_numbers` when the dataset is written, which fails
-#: the whole export rather than the offending element. Measured on
-#: pydicom 3.0.2 for `US`, `UL` and `FL`; the siblings are here by the
-#: same encoding rule (PS3.5 Table 6.2-1: all are binary-encoded).
-#: `AT` belongs with them -- its value is a tag, which is an integer.
-_INTEGER_VRS = frozenset({'US', 'SS', 'UL', 'SL', 'UV', 'SV', 'AT'})
+#: Private VRs whose Python value must be an integer, mapped to the
+#: inclusive range each can actually encode (PS3.5 Table 6.2-1; `AT` is
+#: a four-byte tag, so it takes `UL`'s range).
+#:
+#: They are here for two reasons and the second is not the first over
+#: again. pydicom accepts a `str` at `add_new` for these -- with a
+#: `UserWarning` -- and then raises `struct.error: required argument is
+#: not an integer` from `filewriter.write_numbers` when the dataset is
+#: written, which fails the whole export rather than the offending
+#: element. Measured on pydicom 3.0.2 for `US`, `UL` and `FL`; the
+#: siblings are here by the same encoding rule (all binary-encoded).
+#: And being an `int` is not enough either: `add_new` accepts any Python
+#: integer without complaint, so a private `US` holding `70000` writes
+#: an element `_merge` reports no loss for and then raises `OSError:
+#: 'H' format requires 0 <= number <= 65535` out of the export -- past
+#: `_merge`'s `try`, so again the file rather than the element. A source
+#: element is always in range; this is the value a later `set_attr` or a
+#: remediation rule put there, and the whole point of the gate is that
+#: such a value takes the fallback (#154).
+_INTEGER_VR_RANGE = {
+    'US': (0, 0xFFFF),
+    'SS': (-0x8000, 0x7FFF),
+    'UL': (0, 0xFFFFFFFF),
+    'SL': (-0x80000000, 0x7FFFFFFF),
+    'UV': (0, 0xFFFFFFFFFFFFFFFF),
+    'SV': (-0x8000000000000000, 0x7FFFFFFFFFFFFFFF),
+    'AT': (0, 0xFFFFFFFF),
+}
 
-#: The same, for the binary floating-point VRs.
-_FLOAT_VRS = frozenset({'FL', 'FD'})
+#: The same, for the binary floating-point VRs, mapped to the `struct`
+#: format the writer will pack with -- so the gate can ask the writer's
+#: question rather than a paraphrase of it. `FD` is here for symmetry:
+#: every Python `float` is a double, so it never declines, and leaving
+#: it out would make the table read as though `FL` were the only float
+#: VR.
+_FLOAT_VR_PACK = {'FL': '<f', 'FD': '<d'}
+
+#: The VR names alone, derived rather than restated. Two spellings of
+#: "which VRs are binary integers" is exactly the drift
+#: `test_every_binary_vr_the_gate_accepts_has_a_way_back_out_of_the_store`
+#: exists to catch one table further out.
+_INTEGER_VRS = frozenset(_INTEGER_VR_RANGE)
+_FLOAT_VRS = frozenset(_FLOAT_VR_PACK)
 
 #: Text VRs and the per-value character cap PS3.5 Table 6.2-1 gives
 #: each. The cap is checked per *value*, never against a multi-valued
@@ -360,8 +392,39 @@ def _value_fits_vr(value, vr: str) -> bool:
     VR no longer suits, and deferring to it then would write an element
     that is conformant-looking and wrong. Answering False sends the tag
     to `_fallback_encoding`, which is exactly what happened before this
-    existed -- so a wrong answer here is never worse than no recorded VR
-    at all.
+    existed -- so a False here is never worse than no recorded VR at
+    all. **A wrong True is.** It is not a shrug back to the old
+    behaviour; it is one of two new failures, and both were measured on
+    pydicom 3.0.2 before the checks below existed:
+
+    * A value `add_new` accepts and `Dataset` conversion then refuses --
+      a non-numeric string under `IS` or `DS` -- raises inside
+      `_merge`'s `try` and files a `DATA_LOSS` row for an element that
+      used to export perfectly well as `LO`. Being a `str` short enough
+      for the cap is not enough for these two; the text has to name a
+      number.
+    * A value both of those accept and `filewriter` then refuses -- an
+      out-of-range integer under `US`, or a `float` too large for `FL`
+      -- raises *past* `_merge`'s `try`, from `write_numbers`, and fails
+      the whole file rather than the element. That is precisely the trap
+      `_fallback_encoding`'s own docstring names, and a recorded VR must
+      not reopen it.
+
+    So "does the value fit" is asked in the writer's terms, not
+    Python's: the type, then the range or the parse, then the cap. The
+    cap applies to a number's rendered text too (`_TEXT_VR_MAX` bounds
+    `IS` at 12 characters and `DS` at 16), because pydicom writes an
+    over-long one without a word.
+
+    What it deliberately does **not** ask is the character *repertoire*:
+    a private `CS` whose value an anonymisation rule replaced with
+    lower-case text still takes its recorded VR. pydicom writes it with
+    a warning, the value is byte-faithful, and nothing is lost -- so
+    this is a conformance nicety and not the class of failure above,
+    where an element or a whole file goes missing. Do not read the
+    absence as an oversight; adding it would need a per-VR repertoire
+    table, and the fallback's `LO` is not conformant for that value
+    either.
 
     `bool` is refused for every numeric VR before the `int` test, and
     the ordering is the mechanism: `bool` is an `int` subclass, so
@@ -376,7 +439,18 @@ def _value_fits_vr(value, vr: str) -> bool:
     Returns:
         bool: True when the pairing is safe to write.
     """
-    if isinstance(value, (list, tuple, MultiValue)):
+    if isinstance(value, tuple):
+        # A `tuple` is the one sequence shape `add_new` does not convert
+        # to the element's multi-value form: it reaches `struct.pack` as
+        # a tuple and fails the whole file with "required argument is
+        # not an integer". Nothing in the pipeline produces one --
+        # pydicom hands back `MultiValue`, the store hands back `list`
+        # -- so this is a hand-`set_attr` shape, and `_fallback_multivalue`
+        # has always accepted it. Declining here leaves it exporting
+        # exactly as it did before #154.
+        return False
+
+    if isinstance(value, (list, MultiValue)):
         # Every value of a multi-valued element must fit, and the VR
         # must be able to express multiplicity at all: writing two of
         # three vendor values is the disguised loss `_fallback_multivalue`
@@ -394,13 +468,26 @@ def _value_fits_vr(value, vr: str) -> bool:
         return False
 
     if isinstance(value, int):
+        if vr in _INTEGER_VR_RANGE:
+            low, high = _INTEGER_VR_RANGE[vr]
+            return low <= value <= high
         # `IS` values arrive from pydicom as `IS`, an `int` subclass
-        # whose text form is what gets written.
-        return vr in _INTEGER_VRS or vr == 'IS'
+        # whose text form is what gets written -- so the cap that bounds
+        # that text bounds this too.
+        return vr == 'IS' and len(str(value)) <= _TEXT_VR_MAX['IS']
 
     if isinstance(value, float):
-        # `DSfloat` is a `float` subclass, same reasoning as `IS`.
-        return vr in _FLOAT_VRS or vr == 'DS'
+        pack = _FLOAT_VR_PACK.get(vr)
+        if pack is not None:
+            try:
+                struct.pack(pack, value)
+            except (struct.error, OverflowError, ValueError):
+                return False
+            return True
+        # `DSfloat` is a `float` subclass, same reasoning as `IS`, and
+        # pydicom renders it with `str()` -- `str(1 / 3)` is 18
+        # characters, two past what `DS` may carry.
+        return vr == 'DS' and len(str(value)) <= _TEXT_VR_MAX['DS']
 
     if isinstance(value, str):
         if vr in _INTEGER_VRS or vr in _FLOAT_VRS:
@@ -412,7 +499,27 @@ def _value_fits_vr(value, vr: str) -> bool:
         if '\\' in value and vr not in _VM_ONE_TEXT_VRS:
             return False
         cap = _TEXT_VR_MAX.get(vr)
-        return cap is None or len(value) <= cap
+        if cap is not None and len(value) > cap:
+            return False
+        if vr in ('IS', 'DS') and value.strip():
+            # `IS` and `DS` are text on the wire, but pydicom converts
+            # them on the way in and raises for text that names no
+            # number -- `ValueError: could not convert string to float`
+            # -- which `_merge` catches and reports as data loss for an
+            # element that exported as `LO` before #154. The empty
+            # string is exempt: it is a conformant empty value and
+            # pydicom writes it. `IS` goes one step further than `DS`,
+            # because it takes the integer of what it parsed: `DS` of
+            # `"nan"` writes, `IS` of `"nan"` raises `cannot convert
+            # float NaN to integer`. All measured on pydicom 3.0.2.
+            try:
+                if vr == 'IS':
+                    int(float(value))
+                else:
+                    float(value)
+            except (TypeError, ValueError, OverflowError):
+                return False
+        return True
 
     return False
 

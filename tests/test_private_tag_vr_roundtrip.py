@@ -43,10 +43,21 @@ import numpy as np
 import pydicom
 import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.filebase import DicomBytesIO
+from pydicom.filewriter import write_dataset
+from pydicom.multival import MultiValue
 from pydicom.tag import Tag
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from isocenter.io_handlers import DicomExporter
+from isocenter.io_handlers import (
+    _FLOAT_VRS,
+    _INTEGER_VRS,
+    _TEXT_VR_MAX,
+    _TEXT_VR_UNCAPPED,
+    _value_fits_vr,
+    DicomExporter,
+)
+from isocenter.persistence import _VERTICAL_VR_PARSERS
 from isocenter.session import DicomSession
 
 # (element, VR, source value). One row per shape the fallback collapses:
@@ -294,7 +305,13 @@ def test_a_recorded_vr_does_not_turn_a_bool_into_a_number():
 
 
 def test_a_private_binary_value_is_still_written_as_UN():
-    """Green on both sides, and it must stay that way.
+    """A guard on the fix, not evidence of the defect -- and not, as an
+    earlier version of this docstring said, green on both sides. It
+    passes `vrs=` to `_merge`, a parameter the unfixed code does not
+    accept, so on that side it is a `TypeError` about a signature. An
+    unexpected keyword is no more evidence of the defect than the
+    `ImportError` the two #183 tests take, and the two have to be
+    counted the same way.
 
     PS3.5 §6.2.2 makes `UN` the VR for an unknown raw-bytes value, and
     `_split_core_and_private` keeps odd-group `bytes` in
@@ -307,3 +324,172 @@ def test_a_private_binary_value_is_still_written_as_UN():
                          vrs={"0009,1003": "OB"})
     assert ds[0x00091003].VR == 'UN'
     assert ds[0x00091003].value == b"\x01\x02\x03\x04"
+
+
+def _merge_and_write(attrs, vrs):
+    """Merge, then actually serialise -- the second half is the point.
+
+    Three of the five failures below are invisible to `_merge`:
+    `add_new` accepts the value, `_merge` records no loss, and
+    `filewriter` raises only when the bytes are written, which fails the
+    whole file rather than the element. A test that stops at `_merge`
+    cannot see them.
+    """
+    ds = pydicom.Dataset()
+    losses = []
+    DicomExporter._merge(ds, attrs, losses, vrs=vrs)
+    buf = DicomBytesIO()
+    buf.is_little_endian = True
+    buf.is_implicit_VR = False
+    write_dataset(buf, ds)
+    return ds, losses
+
+
+@pytest.mark.parametrize("vr", ['IS', 'DS'])
+def test_a_recorded_vr_does_not_bypass_the_numeric_guard(vr):
+    """A value that no longer names a number must take the fallback.
+
+    `IS` and `DS` are text on the wire, so the cap table was the only
+    thing the gate asked about them -- and a redaction or an
+    anonymisation rule that replaces a vendor `IS` value with a word
+    clears a 12-character cap easily. pydicom then raises `ValueError:
+    could not convert string to float` from inside `_merge`'s `try`, so
+    an element that exported perfectly well as `LO` became a
+    `DATA_LOSS` row instead. The gate's own docstring promised a wrong
+    answer here is "never worse than no recorded VR at all"; for these
+    two VRs it was worse (#154).
+    """
+    ds, losses = _merge_and_write({"0009,1005": "ANONYMIZED"},
+                                  {"0009,1005": vr})
+    assert losses == [], losses
+    assert ds[0x00091005].VR == 'LO'
+    assert ds[0x00091005].value == "ANONYMIZED"
+
+
+def test_a_recorded_vr_does_not_bypass_the_integer_range_guard():
+    """An out-of-range integer fails the FILE, not the element.
+
+    `add_new(tag, 'US', 70000)` is accepted without a word and
+    `struct.pack` raises from `filewriter.write_numbers`, past `_merge`'s
+    `try`: `OSError: 'H' format requires 0 <= number <= 65535`. So this
+    is not a lost tag but a lost export, which is exactly the trap
+    `_fallback_encoding`'s docstring names and which a recorded VR must
+    not reopen. A source `US` element is always in range; this is the
+    value a later `set_attr` put there (#154).
+    """
+    ds, losses = _merge_and_write({"0009,1006": 70000}, {"0009,1006": "US"})
+    assert losses == [], losses
+    assert ds[0x00091006].VR == 'LO'
+    assert ds[0x00091006].value == '70000'
+
+
+def test_a_recorded_vr_does_not_bypass_the_float_width_guard():
+    """The same, one VR over: `FL` is 32-bit and the value is not.
+
+    `3.5e38` is an ordinary Python float and `struct.pack('<f', ...)`
+    cannot carry it -- `OverflowError: float too large to pack with f
+    format`, again from `filewriter` rather than from `add_new` (#154).
+    """
+    ds, losses = _merge_and_write({"0009,100e": 3.5e38},
+                                  {"0009,100e": "FL"})
+    assert losses == [], losses
+    assert ds[0x0009100e].VR == 'LO'
+    assert ds[0x0009100e].value == '3.5e+38'
+
+
+def test_a_recorded_vr_does_not_write_a_number_past_its_cap():
+    """#190's cap binds a rendered number too, not only a `str`.
+
+    `_TEXT_VR_MAX` bounds `DS` at 16 characters, and pydicom renders a
+    float with `str()` and writes the result without complaint --
+    `str(1 / 3)` is 18. The cap was consulted on the `str` arm alone, so
+    a recorded `DS` produced a non-conformant element out of a value
+    that had exported as a conformant `LO` before (#154, #190).
+    """
+    ds, losses = _merge_and_write({"0009,1005": 1.0 / 3},
+                                  {"0009,1005": "DS"})
+    assert losses == [], losses
+    assert ds[0x00091005].VR == 'LO'
+    assert len(str(ds[0x00091005].value)) == 18
+
+
+def test_a_recorded_vr_does_not_bypass_the_multi_value_shape_guard():
+    """A `tuple` is the one sequence shape `add_new` will not convert.
+
+    pydicom hands back `MultiValue` and the store hands back `list`, so
+    a tuple only reaches `attributes` from a hand-written `set_attr` --
+    and `_fallback_multivalue` has always accepted one. Under a recorded
+    binary VR it reached `struct.pack` still a tuple and failed the
+    whole file with "required argument is not an integer" (#154).
+    """
+    ds, losses = _merge_and_write({"0009,1006": (1, 2)},
+                                  {"0009,1006": "US"})
+    assert losses == [], losses
+    assert ds[0x00091006].VR == 'LO'
+    assert list(ds[0x00091006].value) == ['1', '2']
+
+
+def test_every_binary_vr_the_gate_accepts_has_a_way_back_out_of_the_store():
+    """The two tables that decide the reloaded path must name the same VRs.
+
+    `_value_fits_vr` refuses a `str` under any binary VR -- pydicom
+    fails the whole export on one -- and the EAV tier stores every value
+    stringified, so a binary VR reaches the export as a usable value
+    only if `_VERTICAL_VR_PARSERS` reads it back as a number. A VR added
+    to `_INTEGER_VRS` or `_FLOAT_VRS` and not to the parsers is not an
+    error anywhere: the fresh export keeps the recorded VR, the reloaded
+    one silently falls back to `LO`, and the two paths that #154 exists
+    to make agree quietly stop agreeing. This is the assertion that
+    turns that into a red test (#154).
+    """
+    assert set(_VERTICAL_VR_PARSERS) == set(_INTEGER_VRS) | set(_FLOAT_VRS)
+
+
+def test_the_gate_and_the_writer_agree_across_the_whole_vr_table():
+    """The property the five tests above are instances of.
+
+    Every VR either table names, against every value shape those tests
+    use: whenever `_value_fits_vr` says yes, pydicom must write the
+    element under that VR *and* keep every value inside the VR's cap.
+    This is the assertion that catches the next VR added to a table
+    without its range, parse or cap rule -- which is how `UC`, and then
+    `IS`, `DS`, `US` and `FL`, were missed (#154).
+
+    The `accepted` floor is the load-bearing half. The loop only
+    asserts on pairings the gate says yes to, so a gate that said no to
+    everything -- a typo in a VR name, a table that failed to build, an
+    early `return False` -- would run an empty body and report green:
+    the strongest test in this file would become the emptiest one.
+    Counted on the tables as they stand, 153 of the 26x23 pairings are
+    accepted; the floor sits well under that so ordinary table growth
+    does not trip it, and well over zero so a collapse does.
+    """
+    every_vr = sorted(set(_TEXT_VR_MAX) | _TEXT_VR_UNCAPPED
+                      | _INTEGER_VRS | _FLOAT_VRS)
+    shapes = ["", "AB", "12", "1.5", "nan", "ANONYMIZED", "x" * 65,
+              "a\\b", 0, -1, 70000, 2 ** 40, 1.5, 1.0 / 3, 3.5e38,
+              float("inf"), True, None, b"\x01", [1, 2], ["AB", "CD"],
+              (1, 2), []]
+
+    accepted = 0
+    for vr in every_vr:
+        for value in shapes:
+            if not _value_fits_vr(value, vr):
+                continue
+            accepted += 1
+            ds, _ = _merge_and_write({"0009,1001": value},
+                                     {"0009,1001": vr})
+            elem = ds[0x00091001]
+            assert elem.VR == vr, (vr, value, elem.VR)
+            cap = _TEXT_VR_MAX.get(vr)
+            if cap is None:
+                continue
+            atoms = (elem.value if isinstance(elem.value, MultiValue)
+                     else [elem.value])
+            for atom in atoms:
+                assert len(str(atom)) <= cap, (vr, value, atom)
+
+    assert accepted >= 120, (
+        f"the gate accepted only {accepted} of the {len(every_vr)}x"
+        f"{len(shapes)} pairings; the loop above graded that few, so "
+        "its silence is not evidence the gate and the writer agree")
