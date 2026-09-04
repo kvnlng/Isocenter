@@ -1722,7 +1722,10 @@ name protection that never ran.</p>
 <span class="normal"><a href="#__codelineno-0-211">211</a></span>
 <span class="normal"><a href="#__codelineno-0-212">212</a></span>
 <span class="normal"><a href="#__codelineno-0-213">213</a></span>
-<span class="normal"><a href="#__codelineno-0-214">214</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-33" name="__codelineno-0-33"></a><span class="nd">@dataclass</span>
+<span class="normal"><a href="#__codelineno-0-214">214</a></span>
+<span class="normal"><a href="#__codelineno-0-215">215</a></span>
+<span class="normal"><a href="#__codelineno-0-216">216</a></span>
+<span class="normal"><a href="#__codelineno-0-217">217</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-33" name="__codelineno-0-33"></a><span class="nd">@dataclass</span>
 <a id="__codelineno-0-34" name="__codelineno-0-34"></a><span class="k">class</span><span class="w"> </span><span class="nc">IsocenterConfiguration</span><span class="p">:</span>
 <a id="__codelineno-0-35" name="__codelineno-0-35"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-36" name="__codelineno-0-36"></a><span class="sd">    Encapsulates the runtime configuration for a DicomSession.</span>
@@ -1872,38 +1875,41 @@ name protection that never ran.</p>
 <a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">            replacement (str, optional): The replacement value if action is 'REPLACE'.</span>
 <a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">        """</span>
 <a id="__codelineno-0-182" name="__codelineno-0-182"></a>        <span class="n">tag</span> <span class="o">=</span> <span class="n">tag</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
-<a id="__codelineno-0-183" name="__codelineno-0-183"></a>        <span class="c1"># Simple string format storage check?</span>
-<a id="__codelineno-0-184" name="__codelineno-0-184"></a>        <span class="c1"># config_manager uses dicts or strings. We standardize on dict for API set?</span>
-<a id="__codelineno-0-185" name="__codelineno-0-185"></a>        <span class="c1"># Or store as the system expects. System expects:</span>
-<a id="__codelineno-0-186" name="__codelineno-0-186"></a>        <span class="c1"># { "0010,0010": "Patient Name" } OR { "0010,0010": {"name": "...", "action": "..."} }</span>
-<a id="__codelineno-0-187" name="__codelineno-0-187"></a>
-<a id="__codelineno-0-188" name="__codelineno-0-188"></a>        <span class="c1"># If the backend supports structured tags, use that.</span>
-<a id="__codelineno-0-189" name="__codelineno-0-189"></a>        <span class="c1"># Based on config_manager.py line 523, it supports structured.</span>
-<a id="__codelineno-0-190" name="__codelineno-0-190"></a>
-<a id="__codelineno-0-191" name="__codelineno-0-191"></a>        <span class="n">val</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-0-192" name="__codelineno-0-192"></a>            <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Custom Tag"</span><span class="p">,</span>  <span class="c1"># We might not know the name easily without lookup</span>
-<a id="__codelineno-0-193" name="__codelineno-0-193"></a>            <span class="s2">"action"</span><span class="p">:</span> <span class="n">action</span>
-<a id="__codelineno-0-194" name="__codelineno-0-194"></a>        <span class="p">}</span>
-<a id="__codelineno-0-195" name="__codelineno-0-195"></a>        <span class="k">if</span> <span class="n">replacement</span><span class="p">:</span>
-<a id="__codelineno-0-196" name="__codelineno-0-196"></a>            <span class="n">val</span><span class="p">[</span><span class="s2">"replacement"</span><span class="p">]</span> <span class="o">=</span> <span class="n">replacement</span>
-<a id="__codelineno-0-197" name="__codelineno-0-197"></a>
-<a id="__codelineno-0-198" name="__codelineno-0-198"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
-<a id="__codelineno-0-199" name="__codelineno-0-199"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a>        <span class="c1"># `config_manager` accepts a tag value in either of two shapes --</span>
+<a id="__codelineno-0-184" name="__codelineno-0-184"></a>        <span class="c1"># a bare name string, or the structured</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a>        <span class="c1"># `{"name": ..., "action": ...}` form -- and this method always</span>
+<a id="__codelineno-0-186" name="__codelineno-0-186"></a>        <span class="c1"># writes the structured one, because it is the only shape that</span>
+<a id="__codelineno-0-187" name="__codelineno-0-187"></a>        <span class="c1"># can carry the action and the replacement.</span>
+<a id="__codelineno-0-188" name="__codelineno-0-188"></a>        <span class="c1">#</span>
+<a id="__codelineno-0-189" name="__codelineno-0-189"></a>        <span class="c1"># The line number that used to be cited here for that fact</span>
+<a id="__codelineno-0-190" name="__codelineno-0-190"></a>        <span class="c1"># pointed past the end of `config_manager.py` and what it</span>
+<a id="__codelineno-0-191" name="__codelineno-0-191"></a>        <span class="c1"># originally referred to is unrecoverable, so it is deleted</span>
+<a id="__codelineno-0-192" name="__codelineno-0-192"></a>        <span class="c1"># rather than renumbered to a guess (#310). The claim itself is</span>
+<a id="__codelineno-0-193" name="__codelineno-0-193"></a>        <span class="c1"># carried by the structured-tag tests, not by prose.</span>
+<a id="__codelineno-0-194" name="__codelineno-0-194"></a>        <span class="n">val</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-0-195" name="__codelineno-0-195"></a>            <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Custom Tag"</span><span class="p">,</span>  <span class="c1"># We might not know the name easily without lookup</span>
+<a id="__codelineno-0-196" name="__codelineno-0-196"></a>            <span class="s2">"action"</span><span class="p">:</span> <span class="n">action</span>
+<a id="__codelineno-0-197" name="__codelineno-0-197"></a>        <span class="p">}</span>
+<a id="__codelineno-0-198" name="__codelineno-0-198"></a>        <span class="k">if</span> <span class="n">replacement</span><span class="p">:</span>
+<a id="__codelineno-0-199" name="__codelineno-0-199"></a>            <span class="n">val</span><span class="p">[</span><span class="s2">"replacement"</span><span class="p">]</span> <span class="o">=</span> <span class="n">replacement</span>
 <a id="__codelineno-0-200" name="__codelineno-0-200"></a>
-<a id="__codelineno-0-201" name="__codelineno-0-201"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-202" name="__codelineno-0-202"></a><span class="w">        </span><span class="sd">"""</span>
-<a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="sd">        Retrieves a specific rule dictionary (reference).</span>
-<a id="__codelineno-0-204" name="__codelineno-0-204"></a>
-<a id="__codelineno-0-205" name="__codelineno-0-205"></a><span class="sd">        Args:</span>
-<a id="__codelineno-0-206" name="__codelineno-0-206"></a><span class="sd">            serial_number (str): The serial number to find.</span>
+<a id="__codelineno-0-201" name="__codelineno-0-201"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+<a id="__codelineno-0-202" name="__codelineno-0-202"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
+<a id="__codelineno-0-203" name="__codelineno-0-203"></a>
+<a id="__codelineno-0-204" name="__codelineno-0-204"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">get_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<a id="__codelineno-0-205" name="__codelineno-0-205"></a><span class="w">        </span><span class="sd">"""</span>
+<a id="__codelineno-0-206" name="__codelineno-0-206"></a><span class="sd">        Retrieves a specific rule dictionary (reference).</span>
 <a id="__codelineno-0-207" name="__codelineno-0-207"></a>
-<a id="__codelineno-0-208" name="__codelineno-0-208"></a><span class="sd">        Returns:</span>
-<a id="__codelineno-0-209" name="__codelineno-0-209"></a><span class="sd">            Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
-<a id="__codelineno-0-210" name="__codelineno-0-210"></a><span class="sd">        """</span>
-<a id="__codelineno-0-211" name="__codelineno-0-211"></a>        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
-<a id="__codelineno-0-212" name="__codelineno-0-212"></a>            <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
-<a id="__codelineno-0-213" name="__codelineno-0-213"></a>                <span class="k">return</span> <span class="n">r</span>
-<a id="__codelineno-0-214" name="__codelineno-0-214"></a>        <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-208" name="__codelineno-0-208"></a><span class="sd">        Args:</span>
+<a id="__codelineno-0-209" name="__codelineno-0-209"></a><span class="sd">            serial_number (str): The serial number to find.</span>
+<a id="__codelineno-0-210" name="__codelineno-0-210"></a>
+<a id="__codelineno-0-211" name="__codelineno-0-211"></a><span class="sd">        Returns:</span>
+<a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="sd">            Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
+<a id="__codelineno-0-213" name="__codelineno-0-213"></a><span class="sd">        """</span>
+<a id="__codelineno-0-214" name="__codelineno-0-214"></a>        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
+<a id="__codelineno-0-215" name="__codelineno-0-215"></a>            <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
+<a id="__codelineno-0-216" name="__codelineno-0-216"></a>                <span class="k">return</span> <span class="n">r</span>
+<a id="__codelineno-0-217" name="__codelineno-0-217"></a>        <span class="k">return</span> <span class="kc">None</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -2539,7 +2545,10 @@ config_path is set.</p>
 <span class="normal"><a href="#__codelineno-0-196">196</a></span>
 <span class="normal"><a href="#__codelineno-0-197">197</a></span>
 <span class="normal"><a href="#__codelineno-0-198">198</a></span>
-<span class="normal"><a href="#__codelineno-0-199">199</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="k">def</span><span class="w"> </span><span class="nf">set_phi_tag</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">replacement</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="normal"><a href="#__codelineno-0-199">199</a></span>
+<span class="normal"><a href="#__codelineno-0-200">200</a></span>
+<span class="normal"><a href="#__codelineno-0-201">201</a></span>
+<span class="normal"><a href="#__codelineno-0-202">202</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="k">def</span><span class="w"> </span><span class="nf">set_phi_tag</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tag</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">action</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">replacement</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">    Sets or updates a PHI tag policy.</span>
 <a id="__codelineno-0-176" name="__codelineno-0-176"></a>
@@ -2549,23 +2558,26 @@ config_path is set.</p>
 <a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">        replacement (str, optional): The replacement value if action is 'REPLACE'.</span>
 <a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">    """</span>
 <a id="__codelineno-0-182" name="__codelineno-0-182"></a>    <span class="n">tag</span> <span class="o">=</span> <span class="n">tag</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
-<a id="__codelineno-0-183" name="__codelineno-0-183"></a>    <span class="c1"># Simple string format storage check?</span>
-<a id="__codelineno-0-184" name="__codelineno-0-184"></a>    <span class="c1"># config_manager uses dicts or strings. We standardize on dict for API set?</span>
-<a id="__codelineno-0-185" name="__codelineno-0-185"></a>    <span class="c1"># Or store as the system expects. System expects:</span>
-<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="c1"># { "0010,0010": "Patient Name" } OR { "0010,0010": {"name": "...", "action": "..."} }</span>
-<a id="__codelineno-0-187" name="__codelineno-0-187"></a>
-<a id="__codelineno-0-188" name="__codelineno-0-188"></a>    <span class="c1"># If the backend supports structured tags, use that.</span>
-<a id="__codelineno-0-189" name="__codelineno-0-189"></a>    <span class="c1"># Based on config_manager.py line 523, it supports structured.</span>
-<a id="__codelineno-0-190" name="__codelineno-0-190"></a>
-<a id="__codelineno-0-191" name="__codelineno-0-191"></a>    <span class="n">val</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-0-192" name="__codelineno-0-192"></a>        <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Custom Tag"</span><span class="p">,</span>  <span class="c1"># We might not know the name easily without lookup</span>
-<a id="__codelineno-0-193" name="__codelineno-0-193"></a>        <span class="s2">"action"</span><span class="p">:</span> <span class="n">action</span>
-<a id="__codelineno-0-194" name="__codelineno-0-194"></a>    <span class="p">}</span>
-<a id="__codelineno-0-195" name="__codelineno-0-195"></a>    <span class="k">if</span> <span class="n">replacement</span><span class="p">:</span>
-<a id="__codelineno-0-196" name="__codelineno-0-196"></a>        <span class="n">val</span><span class="p">[</span><span class="s2">"replacement"</span><span class="p">]</span> <span class="o">=</span> <span class="n">replacement</span>
-<a id="__codelineno-0-197" name="__codelineno-0-197"></a>
-<a id="__codelineno-0-198" name="__codelineno-0-198"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
-<a id="__codelineno-0-199" name="__codelineno-0-199"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a>    <span class="c1"># `config_manager` accepts a tag value in either of two shapes --</span>
+<a id="__codelineno-0-184" name="__codelineno-0-184"></a>    <span class="c1"># a bare name string, or the structured</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a>    <span class="c1"># `{"name": ..., "action": ...}` form -- and this method always</span>
+<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="c1"># writes the structured one, because it is the only shape that</span>
+<a id="__codelineno-0-187" name="__codelineno-0-187"></a>    <span class="c1"># can carry the action and the replacement.</span>
+<a id="__codelineno-0-188" name="__codelineno-0-188"></a>    <span class="c1">#</span>
+<a id="__codelineno-0-189" name="__codelineno-0-189"></a>    <span class="c1"># The line number that used to be cited here for that fact</span>
+<a id="__codelineno-0-190" name="__codelineno-0-190"></a>    <span class="c1"># pointed past the end of `config_manager.py` and what it</span>
+<a id="__codelineno-0-191" name="__codelineno-0-191"></a>    <span class="c1"># originally referred to is unrecoverable, so it is deleted</span>
+<a id="__codelineno-0-192" name="__codelineno-0-192"></a>    <span class="c1"># rather than renumbered to a guess (#310). The claim itself is</span>
+<a id="__codelineno-0-193" name="__codelineno-0-193"></a>    <span class="c1"># carried by the structured-tag tests, not by prose.</span>
+<a id="__codelineno-0-194" name="__codelineno-0-194"></a>    <span class="n">val</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-0-195" name="__codelineno-0-195"></a>        <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"Custom Tag"</span><span class="p">,</span>  <span class="c1"># We might not know the name easily without lookup</span>
+<a id="__codelineno-0-196" name="__codelineno-0-196"></a>        <span class="s2">"action"</span><span class="p">:</span> <span class="n">action</span>
+<a id="__codelineno-0-197" name="__codelineno-0-197"></a>    <span class="p">}</span>
+<a id="__codelineno-0-198" name="__codelineno-0-198"></a>    <span class="k">if</span> <span class="n">replacement</span><span class="p">:</span>
+<a id="__codelineno-0-199" name="__codelineno-0-199"></a>        <span class="n">val</span><span class="p">[</span><span class="s2">"replacement"</span><span class="p">]</span> <span class="o">=</span> <span class="n">replacement</span>
+<a id="__codelineno-0-200" name="__codelineno-0-200"></a>
+<a id="__codelineno-0-201" name="__codelineno-0-201"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">phi_tags</span><span class="p">[</span><span class="n">tag</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span>
+<a id="__codelineno-0-202" name="__codelineno-0-202"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">save</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2642,10 +2654,7 @@ config_path is set.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>isocenter/configuration.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-201">201</a></span>
-<span class="normal"><a href="#__codelineno-0-202">202</a></span>
-<span class="normal"><a href="#__codelineno-0-203">203</a></span>
-<span class="normal"><a href="#__codelineno-0-204">204</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-204">204</a></span>
 <span class="normal"><a href="#__codelineno-0-205">205</a></span>
 <span class="normal"><a href="#__codelineno-0-206">206</a></span>
 <span class="normal"><a href="#__codelineno-0-207">207</a></span>
@@ -2655,20 +2664,23 @@ config_path is set.</p>
 <span class="normal"><a href="#__codelineno-0-211">211</a></span>
 <span class="normal"><a href="#__codelineno-0-212">212</a></span>
 <span class="normal"><a href="#__codelineno-0-213">213</a></span>
-<span class="normal"><a href="#__codelineno-0-214">214</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-201" name="__codelineno-0-201"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-202" name="__codelineno-0-202"></a><span class="w">    </span><span class="sd">"""</span>
-<a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="sd">    Retrieves a specific rule dictionary (reference).</span>
-<a id="__codelineno-0-204" name="__codelineno-0-204"></a>
-<a id="__codelineno-0-205" name="__codelineno-0-205"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-206" name="__codelineno-0-206"></a><span class="sd">        serial_number (str): The serial number to find.</span>
+<span class="normal"><a href="#__codelineno-0-214">214</a></span>
+<span class="normal"><a href="#__codelineno-0-215">215</a></span>
+<span class="normal"><a href="#__codelineno-0-216">216</a></span>
+<span class="normal"><a href="#__codelineno-0-217">217</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-204" name="__codelineno-0-204"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<a id="__codelineno-0-205" name="__codelineno-0-205"></a><span class="w">    </span><span class="sd">"""</span>
+<a id="__codelineno-0-206" name="__codelineno-0-206"></a><span class="sd">    Retrieves a specific rule dictionary (reference).</span>
 <a id="__codelineno-0-207" name="__codelineno-0-207"></a>
-<a id="__codelineno-0-208" name="__codelineno-0-208"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-209" name="__codelineno-0-209"></a><span class="sd">        Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
-<a id="__codelineno-0-210" name="__codelineno-0-210"></a><span class="sd">    """</span>
-<a id="__codelineno-0-211" name="__codelineno-0-211"></a>    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
-<a id="__codelineno-0-212" name="__codelineno-0-212"></a>        <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
-<a id="__codelineno-0-213" name="__codelineno-0-213"></a>            <span class="k">return</span> <span class="n">r</span>
-<a id="__codelineno-0-214" name="__codelineno-0-214"></a>    <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-208" name="__codelineno-0-208"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-209" name="__codelineno-0-209"></a><span class="sd">        serial_number (str): The serial number to find.</span>
+<a id="__codelineno-0-210" name="__codelineno-0-210"></a>
+<a id="__codelineno-0-211" name="__codelineno-0-211"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="sd">        Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
+<a id="__codelineno-0-213" name="__codelineno-0-213"></a><span class="sd">    """</span>
+<a id="__codelineno-0-214" name="__codelineno-0-214"></a>    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
+<a id="__codelineno-0-215" name="__codelineno-0-215"></a>        <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
+<a id="__codelineno-0-216" name="__codelineno-0-216"></a>            <span class="k">return</span> <span class="n">r</span>
+<a id="__codelineno-0-217" name="__codelineno-0-217"></a>    <span class="k">return</span> <span class="kc">None</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
