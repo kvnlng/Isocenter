@@ -78,20 +78,30 @@ def test_the_abandoned_worker_exits(tmp_path):
 
     Without this, the fix could trade one for the other and the test
     above would still pass.
+
+    **The assertion is thread identity, not a count**, and the first
+    draft got that wrong: a `len(...) == baseline` comparison reads
+    process-global state, and every *other* abandoned store in the run
+    is now also free to exit. Under the GIL the timing hid it; on
+    3.14t the baseline of 5 leftover workers had gone to 0 by the time
+    the poll ran, and the test failed while the fix was working
+    perfectly. Naming this store's own worker cannot drift that way.
     """
-    before = len(_audit_workers())
+    before = set(_audit_workers())
 
     store = SqliteStore(str(tmp_path / "exits.db"))
-    assert len(_audit_workers()) == before + 1, (
-        "the store started no named AuditWorker, so this test would "
-        "measure nothing")
+    started = set(_audit_workers()) - before
+    assert len(started) == 1, (
+        "the store started no named AuditWorker of its own, so this "
+        f"test would measure nothing: {started}")
+    worker = started.pop()
 
     del store
     gc.collect()
 
-    assert _poll(lambda: len(_audit_workers()) == before), (
-        f"the audit worker is still running with no store to serve: "
-        f"{before} -> {len(_audit_workers())} (#316)")
+    assert _poll(lambda: not worker.is_alive()), (
+        "the audit worker is still running with no store to serve, so "
+        "the store it was holding cannot be collected either (#316)")
 
 
 def test_rows_queued_at_collection_are_reported(tmp_path, caplog):
