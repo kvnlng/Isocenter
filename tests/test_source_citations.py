@@ -79,8 +79,12 @@ check against every mutant of `remediation.py`: zero kill signal, paid on
 each one. This file imports no target module, the same argument
 `tests/test_documented_api_exists.py` makes for itself.
 """
+import functools
 import pathlib
 import re
+import subprocess
+
+import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -115,13 +119,61 @@ def _is_excluded(rel):
     return rel.startswith(_EXCLUDED_PREFIXES)
 
 
+@functools.lru_cache(maxsize=None)
+def _tracked_paths(root):
+    """The paths git tracks under `root`, or `None` (#324).
+
+    Mirrors `tests/test_packaging_contract.py`'s
+    `_tracked_paths_in_package()`, down to its treatment of an empty
+    result: `None` means "git could not answer", never "nothing is
+    tracked". An empty listing is not a valid answer for this
+    repository, and a guard that goes green because git is missing is
+    the defect that file's docstring names.
+
+    `git ls-files`, not `git ls-tree HEAD`: a tracked file edited but
+    not committed is prose this tree owns, and is precisely what this
+    guard is for. `-z`, because `core.quotepath` quotes a non-ASCII
+    path and the result is compared against paths taken off disk.
+
+    Cached per root: four tests times two walks is otherwise ten
+    subprocesses for one unchanging answer.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=root, capture_output=True, text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    tracked = frozenset(part for part in proc.stdout.split("\0") if part)
+    return tracked or None
+
+
+def _is_graded(root, rel):
+    """Whether `rel` is prose or source this tree actually carries.
+
+    The tracked set *intersects* the walk rather than replacing it.
+    `git ls-files` still lists a file deleted from the working tree, and
+    `_lines()` would raise `FileNotFoundError` on it; the walk is what
+    keeps the answer to "does this exist" honest.
+
+    When git cannot answer, everything the walk found is graded -- see
+    `test_a_tree_git_cannot_answer_for_is_swept_whole`.
+    """
+    if _is_excluded(rel):
+        return False
+    tracked = _tracked_paths(root)
+    return tracked is None or rel in tracked
+
+
 def _prose_files(root):
     """Every `.py` and `.md` file in the tree whose citations we grade."""
     found = []
     for pattern in ("*.py", "*.md"):
         for path in root.rglob(pattern):
             rel = path.relative_to(root).as_posix()
-            if _is_excluded(rel):
+            if not _is_graded(root, rel):
                 continue
             found.append(path)
     return sorted(found)
@@ -138,7 +190,7 @@ def _source_index(root):
     index = {}
     for path in root.rglob("*.py"):
         rel = path.relative_to(root).as_posix()
-        if _is_excluded(rel):
+        if not _is_graded(root, rel):
             continue
         index.setdefault(path.name, []).append(path)
     return index
@@ -152,8 +204,8 @@ def _resolve(root, index, cited):
     perfectly unambiguous citation fail.
     """
     direct = root / cited
-    if direct.is_file() and not _is_excluded(
-            direct.relative_to(root).as_posix()):
+    if direct.is_file() and _is_graded(
+            root, direct.relative_to(root).as_posix()):
         return direct
     return index.get(pathlib.PurePosixPath(cited).name)
 
@@ -414,3 +466,76 @@ def test_the_symbol_spelling_is_not_read_as_a_content_pin(tmp_path):
 
     assert (content_offenders, checked) == ([], [])
     assert (file_offenders, graded) == ([], 2)
+
+
+def _git(tmp_path, *args):
+    """Run git in `tmp_path`, skipping the test if there is no git."""
+    try:
+        return subprocess.run(["git", *args], cwd=tmp_path,
+                              capture_output=True, text=True, check=True)
+    except FileNotFoundError:
+        pytest.skip("git is not installed; the tracked-set walk cannot "
+                    "be exercised")
+    return None
+
+
+def test_an_untracked_file_is_not_graded(tmp_path, monkeypatch):
+    """A file git does not track is not this tree's prose (#324).
+
+    Both walks are a bare `rglob`, which grades whatever happens to be
+    sitting in the working tree. An untracked scratch `.md` carrying a
+    stale citation turns Rule 1 red on writing that is not in this
+    repository, and an untracked scratch copy of a module makes
+    `_source_index()` report a *correct* citation as ambiguous -- the
+    same failure through a second door. Both are "red on writing that
+    is right", which this file's own docstring names as how a guard
+    gets deleted rather than fixed.
+
+    Staged and never committed, deliberately. A tracked-but-uncommitted
+    edit is exactly the state this guard exists to grade, so the
+    question has to be `git ls-files` and not `git ls-tree HEAD`: there
+    is no HEAD here to read.
+    """
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+
+    _tree(tmp_path, ["def f():", "    first()"],
+          "In range: zzz_fixture_mod.py:2.\n")
+    (tmp_path / "notes.md").rename(tmp_path / "tracked.md")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "zzz_fixture_mod.py", "tracked.md")
+
+    (tmp_path / "untracked.md").write_text(
+        "Scratch: see zzz_fixture_mod.py:99.\n", encoding="utf-8")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert offenders == [], (
+        "an untracked scratch file was graded; a stale citation in a "
+        "file this repository does not carry must not turn CI red")
+    assert graded == 1, (
+        f"expected only the tracked citation to be graded, got {graded}")
+
+
+def test_a_tree_git_cannot_answer_for_is_swept_whole(tmp_path):
+    """No repository -> the bare walk, not a skip (#324).
+
+    An unpacked sdist has no `.git`, and pytest's own `tmp_path` is
+    outside any repository on every platform this runs on. Falling back
+    to the full walk is the only honest answer: skipping would report a
+    clean pass on a tree nothing looked at, which is the failure this
+    file already records twice (#162, `tests/test_doc_anchors.py`).
+
+    Characterization, green on both sides of #324 -- the fallback is new
+    machinery, and this is what pins that it is a fallback and not a
+    skip. It is also what the four fixture tests above quietly depend
+    on: if one of them ever goes red on a tracked-set intersection, this
+    is the test that says why.
+    """
+    _tree(tmp_path, ["one", "two"], "Scratch: see zzz_fixture_mod.py:99.\n")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert graded == 1
+    assert len(offenders) == 1, offenders
+    assert "is 2 lines long" in offenders[0]
