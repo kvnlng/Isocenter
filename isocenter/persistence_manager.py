@@ -4,6 +4,7 @@ Persistence manager for handling background save operations.
 import threading
 import queue
 import atexit
+import weakref
 from typing import List
 from .entities import Patient
 from .persistence import SqliteStore
@@ -17,6 +18,18 @@ from .logger import get_logger
 #: `faulthandler_timeout = 300`, so a wedged flush explains itself
 #: before any traceback dump arrives and the two land in the same log.
 _FLUSH_REPORT_INTERVAL_S = 30.0
+
+
+def _flush_at_exit(manager_ref):
+    """Flush a manager at interpreter exit, if it is still alive.
+
+    Module-level and taking a weak reference, so registering it does not
+    keep the manager (and its store, threads and file descriptors) alive
+    for the life of the process. See the registration site.
+    """
+    manager = manager_ref()
+    if manager is not None:
+        manager.shutdown()
 
 
 class PersistenceManager:
@@ -49,7 +62,31 @@ class PersistenceManager:
 
         self._start_worker()
 
-        atexit.register(self.shutdown)
+        # **A weakref, not `self.shutdown`.** `atexit.register` holds its
+        # arguments for the life of the process, so a bound method made
+        # every manager ever constructed immortal -- and with it its
+        # `SqliteStore`, that store's sqlite handles, its audit-writer
+        # thread and its sidecar file descriptors. Measured over one full
+        # suite run: 647 live managers and 149 threads at interpreter
+        # exit, 147 of them audit writers.
+        #
+        # Nothing is lost by weakening it, and the reason is structural
+        # rather than a judgement call: a manager with a live worker
+        # cannot be collected anyway, because the worker thread holds
+        # `self` through `target=self._worker`. Only a manager whose
+        # worker has already exited becomes collectable, and that manager
+        # has nothing left to flush. The ordering this depends on was
+        # checked rather than assumed -- `atexit` callbacks run while
+        # daemon threads are still alive; interpreter finalization, which
+        # stops them, comes afterwards.
+        #
+        # The registration itself is not undone: the `atexit` list still
+        # grows by one small closure per manager. What is reclaimed is the
+        # manager graph behind it, which is where the handles and threads
+        # are. Unregistering at `shutdown()` was rejected because a
+        # shut-down manager is restartable -- `save_async` starts a fresh
+        # worker -- and it would lose its exit-time flush.
+        atexit.register(_flush_at_exit, weakref.ref(self))
         get_logger().info("PersistenceManager initialized.")
 
     def _start_worker(self):

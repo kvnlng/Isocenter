@@ -173,3 +173,44 @@ def test_shutdown_after_running_went_false_actually_stops_the_worker(pm):
     assert not pm.thread.is_alive(), (
         "shutdown() returned with its worker still running: the sentinel "
         "was consumed by a thread other than the one being joined (#250)")
+
+
+def test_a_closed_sessions_manager_can_be_collected(tmp_path):
+    """The exit handler must not make every manager immortal (#250).
+
+    `atexit.register` holds its arguments for the life of the process, so
+    registering the bound `self.shutdown` kept every manager ever built
+    alive -- and with it its store, that store's sqlite handles, its
+    audit-writer thread and its sidecar descriptors. Measured over one
+    full suite run before this changed: 647 live managers and 149 threads
+    at interpreter exit, 147 of them audit writers.
+
+    The worker liveness assertion is a precondition, not decoration: a
+    running worker holds the manager through `target=self._worker`, so a
+    manager whose worker is alive is uncollectable for a reason that has
+    nothing to do with `atexit`, and this test would fail for the wrong
+    one.
+    """
+    import gc
+    import weakref
+
+    from isocenter.session import DicomSession
+
+    session = DicomSession(str(tmp_path / "collectable"))
+    manager = session.persistence_manager
+    ref = weakref.ref(manager)
+
+    session.close()
+    assert not manager.thread.is_alive(), (
+        "the worker outlived close(), so it still holds the manager and "
+        "this test would measure thread liveness rather than the exit "
+        "handler")
+
+    del session, manager
+    gc.collect()
+
+    assert ref() is None, (
+        "a closed session's persistence manager is still reachable at "
+        "runtime: the atexit registration holds it, and with it a sqlite "
+        "store, an audit-writer thread and the sidecar's descriptors, "
+        "until the process ends (#250)")
