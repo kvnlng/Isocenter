@@ -56,7 +56,7 @@ def _hydrated(db_file, build):
     **The reopen is load-bearing and `save()` alone will not do.** Measured:
     after `session.save()` an instance built in memory still has
     `_pixel_loader is None` and `file_path is None`, so
-    `unload_pixel_data()` refuses -- correctly, since clearing would be a
+    `discard_pixel_data()` refuses -- correctly, since clearing would be a
     silent discard -- and there is no way to read the stored pixels back at
     all. Only a *reloaded* instance carries the `SidecarPixelLoader` these
     tests need in order to drop the resident array and see what the store
@@ -68,7 +68,7 @@ def _hydrated(db_file, build):
     every zone, so zones 1..k-1 were never in the array the instance ended
     up with when zone k raised. `_redact_instance_pixels` copies once, so
     they are. What keeps them out of the store is the persist gate plus
-    the unconditional `unload_pixel_data()`.
+    the unconditional `discard_pixel_data()`.
 
     No caller of this helper exercises that: `_session()` gives each
     machine a **one-zone** rule, deliberately (see its docstring), and a
@@ -426,16 +426,19 @@ def _write_source(path, uid="1.2.3.partial"):
       is zeroed when zone 2 raises -- so it detects the persist too, and
       test 18 uses it. What keeps the partial mutation out of the store
       there is the same `finally` gate this test pins, plus the
-      unconditional `unload_pixel_data()`, which succeeds because
-      `set_pixel_data` does not clear `_pixel_loader`.
+      unconditional `discard_pixel_data()`, which succeeds because
+      `set_pixel_data` does not clear `_pixel_loader`. That is the whole
+      reason #293 rejected clearing the loader there and added a
+      divergence flag instead: dropping the loader would make this
+      unload refuse and leave the partial mutation resident.
     * *built in memory and never reloaded* -- writeable and mutated in
-      place, but `unload_pixel_data()` refuses (no loader, no file path,
+      place, but `discard_pixel_data()` refuses (no loader, no file path,
       clearing would be a silent discard), so the mutated array stays
       resident whatever the persist does. This is the case the design
       states it cannot reach.
     * *backed by a source file* -- pydicom hands back a **writeable**
       array, so zone 1 really is zeroed in place when zone 2 raises, and
-      `unload_pixel_data()` succeeds because the file can restore it. This
+      `discard_pixel_data()` succeeds because the file can restore it. This
       is the only shape in which the persist decides the outcome, and it is
       the ordinary one: every ingested instance is this shape.
     """
@@ -758,8 +761,11 @@ def test_a_failed_reloaded_instance_is_left_as_it_was_found(
     1. `failed = True`, so the `finally` block's persist gate does not run
        and nothing partial reaches the sidecar. That gate is the whole of
        #213's "a failed instance is left as it was found".
-    2. `inst.unload_pixel_data()` then runs unconditionally, and succeeds,
-       because `set_pixel_data` **does not clear `_pixel_loader`**. The
+    2. `inst.discard_pixel_data()` then runs unconditionally, and succeeds,
+       because `set_pixel_data` **does not clear `_pixel_loader`**. It is
+       `discard_` rather than `unload_` since #293: `unload_pixel_data()`
+       now refuses an array replaced through `set_pixel_data` and not
+       since written, which is exactly this array. The
        partially-zeroed copy is dropped.
     3. The next `get_pixel_data()` reloads the original through the loader.
 

@@ -16,7 +16,7 @@ pytest tests/test_session.py::test_name -x   # one test
 pylint isocenter                    # lint (target >8.5/10; NOT enforced by CI)
 mkdocs serve                     # docs preview (needs the `docs` extra)
 python -m tests.benchmarks.run_stress_test   # benchmark suite
-python -m scripts.mutation_probe            # do the tests notice when behaviour changes?
+python -m scripts.mutation_probe            # do the tests notice when behaviour changes? (by hand: see below)
 ```
 
 Testing is tiered, and the tier decides the breadth, never the depth — every tier runs the whole suite:
@@ -44,6 +44,23 @@ Tests write `*.db`, `*_pixels.bin`, `isocenter.log`, and a few config/CSV artifa
 
 Optional extras degrade gracefully and must keep doing so: `ocr` (pytesseract — `pixel_analysis.HAS_OCR`), `nlp` (spacy — `ZoneDiscoverer` falls back to regex; the `en_core_web_sm` model is deliberately not declared, because PyPI refuses direct-URL requirements), `docs`, `tests` (includes `setuptools`, which the build-based contract tests need and 3.12+ venvs no longer ship), and `dev` (`tests` plus pylint — contributor tooling that `pip install isocenter` must never pull in).
 
+### Running one mutation by hand
+
+Editing a line, running pytest, and reading the result is the obvious way to check whether a test kills a mutant, and it is wrong in two ways the probe is careful about and a hand-run is not. Both have produced a wrong verdict here before, and a wrong verdict is the expensive kind: it retires a test that was working, or leaves one that was not.
+
+```bash
+# From inside your worktree. $W is the worktree, not the main checkout.
+W=$(pwd)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$W /path/to/.venv/bin/python -u -c 'import isocenter; print(isocenter.__file__)'
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$W /path/to/.venv/bin/python -u -m pytest -v tests/test_whatever.py
+```
+
+**Set `PYTHONDONTWRITEBYTECODE=1`.** A `.pyc` written by the *previous* run can be what CPython actually executes, so the verdict is about a mutation that was never in the code under test. This is #174, and it is not hypothetical — it is why `scripts/mutation_probe.py:388` puts the variable in the environment of every pytest it launches, and why `assert_fresh` re-checks each write against CPython's own cache-validation rule before the tests see it. The variable rather than `-B` because `run_parallel()` spawns workers and an interpreter flag reaches a spawned child only through `_args_from_interpreter_flags`. A hand-run gets none of that protection unless you ask for it.
+
+**Set `PYTHONPATH` to the worktree, and then print `isocenter.__file__` and read it.** `isocenter` is installed editable from the main checkout, so a plain `python` inside a worktree can import the main checkout's copy: the measurement is real, it is just about a tree you did not edit. `PYTHONPATH` wins here because this venv's editable install *appends* its finder to `sys.meta_path`, after the stdlib path finder — had it been prepended, neither `PYTHONPATH` nor a `sys.path.insert(0, ...)` would help. That is not something you can see from the outside, which is why the instruction is to print the resolved path rather than to trust the recipe. `tests/test_mutation_runbook.py` runs this recipe against the live install and goes red if it stops working.
+
+Also note `python3` on `PATH` here is a pyenv shim without the project's dependencies; name the venv interpreter explicitly. And run `pytest -v` with no pipe: `-q` buffers, so an interrupted run leaves a log that cannot be told from a hang.
+
 ## Architecture
 
 ### The pipeline
@@ -68,9 +85,9 @@ Persistence bookkeeping lives on `TrackedEntity` and is driven by a monotonic co
 
 Persistence-dirty and PHI-dirty are separate questions with separate vocabularies; both were called "dirty" once, which made them indistinguishable in the code and in the output users read. The PHI half is `phi_status`/`record_phi_status()`, keyed on `_phi_status_revision`: a status recorded against a revision the entity has since left reads as `UNSCANNED`, structurally, rather than by convention. Note that `record_phi_status()` **also advances `_revision`** — a new status is a change the store should hold — but **only when the status actually changes**. Recording the status an entity already carries short-circuits, which is what stops a re-scan rewriting the whole graph: measured over a 206-entity graph, a second identical audit adds 0 dirty entities as it stands and would dirty all 192 instances without it (14 patients, studies and series are dirty either way, because the save walk marks only instances persisted — #307). #173 weighed removing it and kept it.
 
-That coupling is why the **five** `mark_modified()` calls in `remediation.py` — lines 148, 181, 218, 239, 247 — look redundant. 181 is the SHIFT_DATE arm that writes a Python attribute, which every flagged study date goes through (the inspector's study scan raises that action on a `Study`, and `Study` has no `set_attr`); 239 is the #167 private-sequence arm. The redundancy is real on a **first** remediation and gone after a **reload**: a loaded graph carries whatever status was stored for each entity, so one already remediated once comes back at `REMEDIATED` and the status recorded at the end of a second remediation is the one it already has, the short-circuit fires, and `mark_modified()` is the only thing left advancing the revision. Delete one and the PHI is stripped from memory while the entity reports nothing to save — the next save skips it and the identifier stays in the database (#173). Each of the five is now pinned by a test naming its line, in `tests/test_remediation_invariants.py`.
+That coupling is why the **five** `mark_modified()` calls in `remediation.py` look redundant: `entity.mark_modified()` at remediation.py line 148, `entity.mark_modified()` at remediation.py line 181, `entity.mark_modified()` at remediation.py line 218, `entity.mark_modified()` at remediation.py line 239, and `entity.mark_modified()` at remediation.py line 247. That is a laborious spelling of a list of five numbers, and it is deliberate: written as a bare run of numbers it is prose no test can read, and `tests/test_source_citations.py` requires each cited line to still hold the code quoted, so an insertion above 148 turns a test red instead of leaving this paragraph quietly one line out (#310). 181 is the SHIFT_DATE arm that writes a Python attribute, which every flagged study date goes through (the inspector's study scan raises that action on a `Study`, and `Study` has no `set_attr`); 239 is the #167 private-sequence arm. The redundancy is real on a **first** remediation and gone after a **reload**: a loaded graph carries whatever status was stored for each entity, so one already remediated once comes back at `REMEDIATED` and the status recorded at the end of a second remediation is the one it already has, the short-circuit fires, and `mark_modified()` is the only thing left advancing the revision. Delete one and the PHI is stripped from memory while the entity reports nothing to save — the next save skips it and the identifier stays in the database (#173). Each of the five is now pinned by a test naming its line, in `tests/test_remediation_invariants.py`.
 
-Instances hold pixel and waveform data lazily via `SidecarPixelLoader`/`SidecarWaveformLoader` callables. `get_pixel_data()` materializes, `unload_pixel_data()` releases. Heavy arrays are never kept resident by default — memory scaling on 100GB+ datasets depends on this.
+Instances hold pixel and waveform data lazily via `SidecarPixelLoader`/`SidecarWaveformLoader` callables. `get_pixel_data()` materializes, `unload_pixel_data()` releases. Heavy arrays are never kept resident by default — memory scaling on 100GB+ datasets depends on this. `unload_pixel_data()` frees only what can be brought back: it refuses an array replaced through `set_pixel_data()` and not since written, because the loader is still pointing at the frame that array replaced and dropping it would lose the new pixels silently (#293). `discard_pixel_data()` is the other question — throw this away, I know it is unsaved — and is what the redaction cleanup blocks call. Two behaviours, two names; do not collapse them.
 
 ### Hybrid storage (`persistence.py`, `sidecar.py`)
 

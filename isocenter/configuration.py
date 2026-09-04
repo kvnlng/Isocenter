@@ -180,14 +180,17 @@ class IsocenterConfiguration:
             replacement (str, optional): The replacement value if action is 'REPLACE'.
         """
         tag = tag.upper()
-        # Simple string format storage check?
-        # config_manager uses dicts or strings. We standardize on dict for API set?
-        # Or store as the system expects. System expects:
-        # { "0010,0010": "Patient Name" } OR { "0010,0010": {"name": "...", "action": "..."} }
-
-        # If the backend supports structured tags, use that.
-        # Based on config_manager.py line 523, it supports structured.
-
+        # `config_manager` accepts a tag value in either of two shapes --
+        # a bare name string, or the structured
+        # `{"name": ..., "action": ...}` form -- and this method always
+        # writes the structured one, because it is the only shape that
+        # can carry the action and the replacement.
+        #
+        # The line number that used to be cited here for that fact
+        # pointed past the end of `config_manager.py` and what it
+        # originally referred to is unrecoverable, so it is deleted
+        # rather than renumbered to a guess (#310). The claim itself is
+        # carried by the structured-tag tests, not by prose.
         val = {
             "name": "Custom Tag",  # We might not know the name easily without lookup
             "action": action

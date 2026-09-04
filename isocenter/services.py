@@ -549,13 +549,13 @@ class RedactionService:
             # while the processes path (3.12's) mutated a copy and left the
             # instance untouched -- the same failed redaction leaving two
             # different sidecars depending on the interpreter. Without the
-            # persist, the unconditional `unload_pixel_data()` below drops
+            # persist, the unconditional `discard_pixel_data()` below drops
             # the mutated array and the next `get_pixel_data()` reloads the
             # original through the loader.
             #
             # The one instance this cannot reach is one with neither a
             # loader nor a `file_path` -- a graph built in memory and never
-            # reloaded. `unload_pixel_data()` refuses there, deliberately,
+            # reloaded. `discard_pixel_data()` refuses there, deliberately,
             # because clearing would be a silent discard, so it keeps the
             # zones applied before the failure. That is accepted: zeroing is
             # monotone, so a partial redaction has removed *more* PHI than
@@ -579,7 +579,13 @@ class RedactionService:
                 except Exception as pe:
                     self.logger.error(f"Failed to persist swap for {inst.sop_instance_uid}: {pe}")
 
-            inst.unload_pixel_data()
+            # `discard_pixel_data`, not `unload_pixel_data`: dropping the
+            # resident array is the INTENT here, not an optimisation. On a
+            # failed redaction it is a partially-zeroed array that must go
+            # so the next `get_pixel_data()` reloads the original through
+            # the loader, and `unload_pixel_data()` now refuses exactly
+            # that case (#293). Byte-for-byte the pre-#293 behaviour.
+            inst.discard_pixel_data()
 
             # Explicit GC to handle large array fragmentation immediately
             gc.collect()
@@ -803,7 +809,7 @@ class RedactionService:
                 self.logger.error(f"  Failed {inst.sop_instance_uid}: {e}")
             finally:
                 # OPTIMIZATION: Release memory immediately after processing
-                # If modified, we MUST persist pixels to sidecar, otherwise unload_pixel_data returns False (unsafe)
+                # If modified, we MUST persist pixels to sidecar, otherwise discard_pixel_data returns False (unsafe)
                 # We check for store_backend availability.
                 #
                 # Not on a failure: zones before the one that raised are
@@ -828,7 +834,13 @@ class RedactionService:
                             f"Failed to persist swap for {
                                 inst.sop_instance_uid}: {pe}")
 
-                inst.unload_pixel_data()
+                # `discard_pixel_data`, not `unload_pixel_data`: dropping the
+                # resident array is the INTENT here, not an optimisation. On a
+                # failed redaction it is a partially-zeroed array that must go
+                # so the next `get_pixel_data()` reloads the original through
+                # the loader, and `unload_pixel_data()` now refuses exactly
+                # that case (#293). Byte-for-byte the pre-#293 behaviour.
+                inst.discard_pixel_data()
 
         # After the pass and before the raise, for the same reason the
         # ERROR rows are: a caller that catches `RedactionError` still

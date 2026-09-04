@@ -634,7 +634,8 @@ def test_the_serial_path_takes_force_too(reloaded_redaction_session):
     is the skip, not the repair arithmetic.
 
     The damage is **persisted**, not left resident. Both paths'
-    `finally` ends in `unload_pixel_data()`, so an array assigned with
+    `finally` ends in `discard_pixel_data()` (`unload_pixel_data()`
+    before #293, and it refuses this case now), so an array assigned with
     `set_pixel_data` alone is dropped on the next pass and the loader
     hands back the redacted frame -- the damage would silently undo
     itself and the force leg would pass over pixels that were never
