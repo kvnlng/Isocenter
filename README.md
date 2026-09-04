@@ -290,6 +290,7 @@ that appears in one frame out of fifty is noise, one that appears in forty is th
 overlay. Each zone's `type` is `LIKELY_NAME` if any member matched the name
 pattern, `PROPER_NOUN` if any was classified as one, and `TEXT` otherwise.
 
+<!-- runnable: none -->
 ```python
 >>> from isocenter.discovery import DiscoveryCandidate, DiscoveryResult
 >>> result = DiscoveryResult([

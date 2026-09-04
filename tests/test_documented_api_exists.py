@@ -25,6 +25,7 @@ name, which `tests/test_mutation_probe_targets.py` reads file *text*
 for.
 """
 import ast
+import doctest
 import pathlib
 import re
 import textwrap
@@ -73,11 +74,17 @@ NOT_OURS = frozenset({
 # short alias in a future fence goes unchecked until someone adds it.
 #
 # The deliberate blind spot, stated in full because understating it
-# would be the same defect this file exists for: seven documented calls
+# would be the same defect this file exists for: twelve documented calls
 # sit on receivers outside this set and are values of ours --
-# `result.*` (six, in `docs/ocr.md`) and `filtered.to_zones()`. All
-# seven were hand-resolved against `isocenter/discovery.py` and
-# `isocenter/privacy.py` and all exist. The rest (`plt`, `df`, `re`,
+# `result.*` (eleven: six in `docs/ocr.md`, five in README's zone
+# discovery section) and `filtered.to_zones()`. All twelve were
+# hand-resolved against `isocenter/discovery.py` and
+# `isocenter/privacy.py` and all exist, and README's five are executed
+# for their *output* by `tests/test_documented_output_matches.py` (#304),
+# which resolves them for real. The count moved from seven to twelve
+# when #303 restored the README section; it is stated here rather than
+# left vague because an understated blind spot is the same defect this
+# file exists for. The rest (`plt`, `df`, `re`,
 # and calls on unnamed receivers) are third-party or chained
 # expressions and are none of our business. Do not widen `ROOTS` to a
 # bare "every attribute call" without reading the allowlist cost above.
@@ -184,16 +191,75 @@ def _receiver_root(node):
     return node.id if isinstance(node, ast.Name) else None
 
 
+def _fence_source(body):
+    """The Python a fence contains, or None if it is not Python.
+
+    A doctest fence (`>>> ...`) is ordinary ```` ```python ```` on the
+    page but is not valid Python, so `ast.parse` raises `SyntaxError` on
+    it and the caller's escape hatch below swallows the *whole* fence --
+    every name in it, silently. That matters now that a fence can opt in
+    to output checking by being written as a doctest
+    (`tests/test_documented_output_matches.py`, #304): opting in there
+    would have opted the fence out here, and the guard would still have
+    reported a clean pass.
+
+    So: parse the fence's doctest examples first and, if it has any,
+    hand back the concatenation of their sources. `Example.source`
+    already carries the prompts stripped and the continuation lines
+    joined, which is why this is a two-line fix rather than a prompt
+    stripper of our own.
+    """
+    examples = doctest.DocTestParser().get_examples(body)
+    if examples:
+        return "".join(example.source for example in examples)
+    # `dedent` first: a fence nested inside a list item is indented, and
+    # `ast.parse` raises IndentationError on it. `docs/quickstart.md`'s
+    # repair snippet is exactly that, and without this it was silently
+    # skipped -- the escape hatch firing on a real fence with real calls
+    # in it rather than on the hypothetical pseudo-code one it was
+    # written for (#234).
+    return textwrap.dedent(body)
+
+
+def _unresolved_calls_in(path, defined):
+    """Documented calls in one file that name no method we define.
+
+    Returns `(where, line, name)` triples. Fences that do not parse are
+    skipped rather than failed -- every fence parses today, but a future
+    pseudo-code fence should not turn the guard red for being prose.
+    """
+    try:
+        where = path.relative_to(REPO).as_posix()
+    except ValueError:      # a tmp_path fixture, not a tree file
+        where = path.name
+    text = path.read_text(encoding="utf-8")
+    offenders = []
+    for match in _PYTHON_FENCE.finditer(text):
+        fence_line = text.count("\n", 0, match.start()) + 1
+        try:
+            tree = ast.parse(_fence_source(match.group(1)))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if _receiver_root(node.func) not in ROOTS:
+                continue
+            if node.func.attr in defined:
+                continue
+            offenders.append((where, fence_line + node.lineno,
+                              node.func.attr))
+    return offenders
+
+
 def test_every_isocenter_call_in_the_docs_resolves():
     """Every documented call on one of our own objects must exist.
 
     `README.md` and `docs/` are the first thing a user runs. A fence
     that raises `AttributeError` on line three is worse than no fence,
     and there is nothing in the build that reads them.
-
-    Fences that do not parse are skipped rather than failed -- every
-    fence parses today, but a future pseudo-code fence should not turn
-    this guard red for being prose.
     """
     defined = _defined_names()
     files = _documentation_files()
@@ -204,33 +270,7 @@ def test_every_isocenter_call_in_the_docs_resolves():
         "broken and this test would otherwise pass vacuously")
     offenders = []
     for path in files:
-        text = path.read_text(encoding="utf-8")
-        for match in _PYTHON_FENCE.finditer(text):
-            fence_line = text.count("\n", 0, match.start()) + 1
-            try:
-                # `dedent` first: a fence nested inside a list item is
-                # indented, and `ast.parse` raises IndentationError on it.
-                # `docs/quickstart.md`'s repair snippet is exactly that,
-                # and without this it was silently skipped -- the escape
-                # hatch below firing on a real fence with real calls in
-                # it rather than on the hypothetical pseudo-code one it
-                # was written for (#234).
-                tree = ast.parse(textwrap.dedent(match.group(1)))
-            except SyntaxError:
-                continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                if not isinstance(node.func, ast.Attribute):
-                    continue
-                if _receiver_root(node.func) not in ROOTS:
-                    continue
-                if node.func.attr in defined:
-                    continue
-                offenders.append((
-                    path.relative_to(REPO).as_posix(),
-                    fence_line + node.lineno,
-                    node.func.attr))
+        offenders.extend(_unresolved_calls_in(path, defined))
 
     assert not offenders, (
         "these documented calls name a method the package does not "
@@ -295,3 +335,36 @@ def test_the_readme_documents_zone_discovery_and_its_density_matrix_limit():
         "get_density_matrix() is not in image coordinates -- it "
         "normalises by the largest candidate box origin, not by Rows and "
         "Columns, so plotting it as an overlay is wrong (#303)")
+
+
+def test_a_doctest_fence_is_still_read_for_method_names(tmp_path):
+    """A `>>>` fence must not fall out of the name check (#304).
+
+    `_PYTHON_FENCE` matches a doctest fence -- its info string is an
+    ordinary ```` ```python ```` -- but `ast.parse` raises `SyntaxError`
+    on the `>>> ` prompts, and the escape hatch above swallows the whole
+    fence. So the moment a fence is rewritten as a doctest so that
+    `tests/test_documented_output_matches.py` can execute it, it stops
+    being read here: opting a fence *in* to output checking silently
+    opted it *out* of name checking, and the file it happened to would
+    still report a clean pass.
+
+    This is the same "a silent skip reads as a pass" failure the escape
+    hatch itself is a controlled instance of (#162), and it is why the
+    fix belongs with the marker rather than after it.
+    """
+    doc = tmp_path / "page.md"
+    doc.write_text(
+        "# Page\n\n"
+        "```python\n"
+        ">>> session = Session('store.db')\n"
+        ">>> session.no_such_method()\n"
+        "```\n",
+        encoding="utf-8")
+
+    offenders = _unresolved_calls_in(doc, _defined_names())
+
+    assert [name for _, _, name in offenders] == ["no_such_method"], (
+        "a doctest fence is not being read for method names, so any "
+        "fence converted to `>>>` drops out of this guard silently "
+        f"(#304); offenders={offenders}")
