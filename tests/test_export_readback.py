@@ -33,7 +33,9 @@ import pydicom
 from pydicom.errors import InvalidDicomError
 
 from isocenter.entities import Instance, Patient, Series, Study
-from isocenter.io_handlers import (DicomExporter, ExportContext,
+import pytest
+
+from isocenter.io_handlers import (DicomExporter, ExportContext, ExportError,
                                    _export_instance_worker)
 from isocenter.session import DicomSession
 
@@ -180,7 +182,12 @@ def test_a_readback_failure_files_an_error_row_and_fails_the_grade(
     report = tmp_path / "report.md"
     try:
         session.anonymize()
-        session.export(str(out), show_progress=False, verify_readback=True)
+        # Every readback mismatches, so no instance is published and the
+        # export raises (#191). The raise is last, after the ERROR rows
+        # and the delivery counters the report below reads.
+        with pytest.raises(ExportError):
+            session.export(str(out), show_progress=False,
+                           verify_readback=True)
         session.generate_report(str(report))
         db_path = session.store_backend.db_path
     finally:

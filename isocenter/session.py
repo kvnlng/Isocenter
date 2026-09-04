@@ -14,7 +14,7 @@ import yaml
 from tqdm import tqdm
 
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
-                          ExportSummary, SidecarPixelLoader,
+                          ExportError, ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
                           GRADED_LOSS_SCOPES)
 from .store import DicomStore
@@ -674,6 +674,19 @@ class DicomSession:
         # into a queue nothing drains again.
         if hasattr(self, 'persistence_manager'):
             _run_step(self.persistence_manager.shutdown)
+
+        # After `shutdown()`, and deliberately not through `_run_step`.
+        # Order: `shutdown()` reconciles a save its worker never finished
+        # (#314), so asking before it would report instances that were
+        # about to be marked persisted. Not `_run_step`, because that
+        # records the first exception for `close()` to re-raise -- and a
+        # bug in a diagnostic that turned `close()` into a raise would
+        # abort before the executor shut down, leaking worker
+        # subprocesses for the life of the interpreter, which is the
+        # exact failure this method's ordering exists to prevent. It
+        # swallows its own errors instead.
+        self._warn_about_unsaved_instances()
+
         if hasattr(self, 'store_backend'):
             _run_step(self.store_backend.stop)  # Stops audit thread
 
@@ -683,6 +696,75 @@ class DicomSession:
 
         if first_exception is not None:
             raise first_exception
+
+    def _warn_about_unsaved_instances(self):
+        """Say so when `close()` is about to drop unsaved instance edits (#307).
+
+        `close()` shut the session down in silence over a graph carrying
+        changes no `save()` ever reached, and those changes were gone.
+        The verbs that produce them are the ordinary ones -- `audit()`
+        advances `_revision` through `record_phi_status()`, `anonymize()`
+        and `redact()` mutate -- so the most common firing is
+        "audited, then closed", and the message names *what* is unsaved
+        rather than only how many, because "1 unsaved instance" tells a
+        caller nothing they can act on.
+
+        **Instances only.** `SqliteStore.save_all` calls
+        `mark_persisted()` on instances and on nothing else; no level
+        above them is marked anywhere in the save walk, so every
+        built-then-saved patient, study and series reports
+        `has_unsaved_changes` forever. Warning on those would fire on
+        every correct session, and a warning that fires when nothing is
+        wrong is one people learn to skip. Widening this means fixing the
+        save walk first, with per-parent revision capture -- the
+        `mark_persisted()` trap -- not widening the walk here.
+
+        **A warning and not an audit row.** A row written here would land
+        between `persistence_manager.shutdown()` and
+        `store_backend.stop()`, and could only ever be read by a *later*
+        session's report: a second durable answer to a question the graph
+        in front of the caller already answers, which is the shape this
+        project keeps deleting.
+
+        One bounded pass over the graph and no I/O, so it costs nothing
+        worth measuring even on a large store. It swallows its own
+        errors: see the call site for why a raise here would be worse
+        than the diagnostic being missing.
+
+        Warning twice on a double `close()` is accepted. The graph really
+        is still unsaved the second time, and remembering that it had
+        already been mentioned would be state answering a question the
+        graph answers. Zero unsaved instances is silent, so an ordinary
+        double close says nothing extra.
+        """
+        try:
+            unsaved = [inst
+                       for p in self.store.patients
+                       for st in p.studies
+                       for se in st.series
+                       for inst in se.instances
+                       if inst.has_unsaved_changes]
+            if not unsaved:
+                return
+
+            named = ", ".join(i.sop_instance_uid for i in unsaved[:3])
+            if len(unsaved) > 3:
+                named += f", and {len(unsaved) - 3} more"
+            message = (
+                f"Closing with {len(unsaved)} instance(s) holding unsaved "
+                f"changes; they will not reach the store. Affected: "
+                f"{named}. Call save(sync=True) before close() to keep "
+                f"them.")
+            get_logger().warning(message)
+            print(f"WARNING: {message}")
+        except Exception:  # pylint: disable=broad-except
+            # A diagnostic that cannot run is a diagnostic that is
+            # missing, which is what the caller had before this existed.
+            # A diagnostic that raises is a close() that leaks an
+            # executor.
+            get_logger().debug(
+                "Could not check for unsaved instances during close().",
+                exc_info=True)
 
     def save(self, sync: bool = False):
         """
@@ -1867,6 +1949,7 @@ class DicomSession:
         data_losses = self.store_backend.get_audit_losses()
         scan_gaps = self._resolve_scan_gaps(
             self.store_backend.get_audit_scan_gaps())
+        declined_remediations = self.store_backend.get_audit_declines()
 
         # Check for unsafe attributes (BurnedInAnnotation)
         unsafe_items = self.store_backend.check_unsafe_attributes()
@@ -1996,6 +2079,19 @@ class DicomSession:
         # nothing could establish is not a clean one (#167).
         open_gaps = [row for row in scan_gaps if row[3] != GAP_REMOVED]
 
+        # A declined remediation grades exactly like an open gap, and
+        # for the same reason: the value it targeted is **still in the
+        # graph** and reaches the exported file, so a report that graded
+        # PASS over one would be asserting the removal happened. Graded
+        # on the row existing rather than on any property of it -- there
+        # is no disposition to resolve here, because unlike a `SCAN_GAP`
+        # nothing downstream removes a value a remediation declined to
+        # touch (#301).
+        #
+        # An empty date writes no row at all, so this cannot fire over a
+        # graph with nothing wrong in it; that gate is in
+        # `_apply_single_remediation`, where the value is in hand.
+
         # Action-specific evidence (#254). The `audit_summary` arm below
         # asks whether the audit log heard about *anything*; this asks
         # whether it heard about what this session did. Without it, a
@@ -2029,10 +2125,12 @@ class DicomSession:
             exceptions=exceptions,
             data_losses=data_losses,
             scan_gaps=scan_gaps,
+            declined_remediations=declined_remediations,
             export_recorded=export_recorded,
             validation_status=("PASS"
                                if audit_summary and not exceptions
                                and not graded_losses and not open_gaps
+                               and not declined_remediations
                                and not unattested
                                else "REVIEW_REQUIRED")
         )
@@ -2704,31 +2802,69 @@ class DicomSession:
                         # Re-point it at this process's.
                         loader.instance = instance
                         instance._pixel_loader = loader
-                        # The worker wrote this frame to the sidecar
-                        # before handing the loader back, so the parent's
-                        # instance is now backed by what it holds -- and
-                        # freeable again (#293).
+                        # And drop whatever this process is still holding
+                        # (#322). Under processes the worker redacted a
+                        # *copy*: its `discard_pixel_data()` freed the
+                        # child's array, and the parent kept the
+                        # pre-redaction one. Rebinding the loader without
+                        # this line leaves the instance with two answers
+                        # to "what are my pixels" -- a resident stale
+                        # array and a loader on the redacted frame -- and
+                        # everything that asks the instance takes the
+                        # stale one: `_persist_pixels` hashes it, misses
+                        # its `_pixel_hash == digest` dedup guard (that
+                        # hash is the redacted one), appends the stale
+                        # frame to the sidecar and rewires the loader to
+                        # it, so the corruption becomes durable and every
+                        # later session exports pre-redaction pixels under
+                        # a full redaction attestation.
                         #
-                        # REACHABLE BUT UNTESTED, which is not the same
-                        # as redundant. Nothing stops a caller from
-                        # `set_pixel_data()` and then `redact()` with no
-                        # save in between: `_apply_redaction_rules`
-                        # dispatches the live `Instance` and `Instance`
-                        # defines no `__getstate__`, so the processes
-                        # path pickles the resident replacement to the
-                        # worker, which redacts it and returns a loader
-                        # for it. Delete this line in that state and the
-                        # flag stays set forever, so `release_memory()`
-                        # refuses that instance for the rest of the
-                        # session -- silently, because the sweep only
-                        # logs counts. No test constructs that sequence
-                        # today, so the line does survive deletion; the
-                        # test is filed, not written here. On the
-                        # threads path it is genuinely redundant: the
-                        # worker mutated this very instance and
-                        # `persist_pixel_data` cleared the flag before
-                        # the loader came back.
-                        instance._pixel_array_unwritten = False
+                        # Inside `if loader:`, never one indent out. A
+                        # mutation carrying `pixel_hash` and no loader has
+                        # no redacted frame to fall back on, so nulling
+                        # there would leave `_persist_pixels` recording
+                        # the *stale* loader frame stamped with the *new*
+                        # hash -- store, sidecar and `_pixel_hash` all
+                        # agreeing on the wrong frame with every integrity
+                        # check passing, which is #293's shape exactly.
+                        #
+                        # Inside the lock, and it belongs there: this is
+                        # the same `_pixel_swap_lock` `_persist_pixels`
+                        # reads under, so the null is atomic against a
+                        # concurrent background save rather than a second
+                        # window into it -- it strengthens #274. The
+                        # `mark_modified()` below runs after the lock and
+                        # the null does not depend on that ordering; do
+                        # not tidy the null out to join it.
+                        #
+                        # Not a memory hazard, whatever the issue's
+                        # caveat says: nulling the instance's reference
+                        # does not invalidate an array the caller already
+                        # holds. It only stops the *instance* serving
+                        # pre-redaction pixels.
+                        #
+                        # This is the third `pixel_array = None` site, and
+                        # `_persist_pixels`' `arr is None` arm enumerates
+                        # them -- it is updated with this one.
+                        #
+                        # The null is also what makes the divergence flag
+                        # irrelevant here, which is why the
+                        # `_pixel_array_unwritten = False` that used to
+                        # stand on this line is deleted rather than kept
+                        # (#326): `unload_pixel_data()` returns True on a
+                        # `None` array *before* it consults the flag, and
+                        # `get_pixel_data()`'s loader arm clears it on the
+                        # next read. Restore one without the other -- put
+                        # the array back and leave the flag set -- and
+                        # #293's silently-unfreeable instance returns:
+                        # `release_memory()` refuses it for the rest of
+                        # the session and only logs a count.
+                        #
+                        # On the threads path the worker mutated this very
+                        # instance and its `finally` already discarded the
+                        # array, so this null lands on `None`; both
+                        # executors now leave identical state.
+                        instance.pixel_array = None
                     if mutation.get('pixel_hash'):
                         instance._pixel_hash = mutation['pixel_hash']
 
@@ -2877,11 +3013,25 @@ class DicomSession:
                 `_export_dicom` for the DICOM format's options.
 
         Returns:
-            The exporter's return value. The DICOM exporter returns None
-            for backward compatibility.
+            The selected format's own result object. The DICOM exporter
+            returns an `io_handlers.ExportSummary`, whose `written`
+            counts the files that reached disk and whose `failures`
+            names the instances that did not. `written` is counted over
+            *de-duplicated* UIDs, because the UID names the output file:
+            two instances sharing one are two successful write
+            operations and one file, the second having overwritten the
+            first (#197). The WFDB exporter returns its own
+            `List[str]` of paths and is unchanged (#191 scopes it out).
+            Every format's result must let a caller detect that nothing
+            was written.
 
         Raises:
             ValueError: If `format` is not a registered export format.
+            io_handlers.ExportError: From the DICOM exporter, when zero
+                of N planned instances reached disk and at least one
+                failed. An empty plan -- zero of zero -- does not raise:
+                a subset that matched nothing is a fact about the run,
+                and the `EXPORT` audit row already carries it.
         """
         from . import exporters
 
@@ -2975,7 +3125,12 @@ class DicomSession:
                 entity_uid=folder,
                 details=(f"DICOM export to {folder}: wrote 0 of 0 planned "
                          f"instances; nothing matched the export plan."))
-            return
+            # Zero of zero, and deliberately not an `ExportError`: a
+            # plan that matched nothing is not an export that failed,
+            # and the row above already says so. The caller still gets a
+            # summary rather than `None`, so `.written` and `.failures`
+            # are askable on every return path (#191).
+            return ExportSummary()
 
         print(f"Exporting {len(tasks)} images from {patient_count} patients...")
         summary = self._run_export_batch(tasks, show_progress,
@@ -3011,6 +3166,24 @@ class DicomSession:
                      f"of {len(tasks)} planned instances from "
                      f"{patient_count} patients."))
         print("Done.")
+
+        # Last, after all five records -- the collision report, the
+        # recoverable-identity disclosure, the delivery counters, the
+        # `EXPORT` row and `Done.` -- and in that order for the reason
+        # `_apply_redaction_rules` raises `RedactionError` last: a caller
+        # who catches this still holds a correct graph, a complete audit
+        # trail and a report that grades REVIEW_REQUIRED. Raising earlier
+        # would trade all of that for the exception.
+        #
+        # `written == 0 **and** failures`, never `written == 0` alone: an
+        # empty plan reaching here would otherwise raise, and zero of
+        # zero is not a failure. A *partial* export does not raise
+        # either -- two files out of three is a real result, and raising
+        # would discard the summary naming which two.
+        if summary.written == 0 and summary.failures:
+            raise ExportError(summary.failures, len(tasks), folder)
+
+        return summary
 
     def _report_recoverable_identities(self, tasks, written_uids) -> int:
         """Report instances whose exported copy still carries its originals.

@@ -1146,6 +1146,42 @@ class SqliteStore:
         except sqlite3.OperationalError:
             return []
 
+    def get_audit_declines(self) -> List[tuple]:
+        """Every `REMEDIATION_DECLINED` entry: a value the sweep left behind.
+
+        Its own reader beside `get_audit_scan_gaps` and for the same
+        reason: it is a different claim. A scan gap says an element could
+        not be *read*; this says an element was read, a remediation was
+        proposed for it, and the remediation did not run -- so the value
+        is still in the graph and will reach the exported file (#301).
+
+        No `loss_scope` and no `element_tag`. The reason lives in
+        `details` prose: a `decline_reason` column would have no reader
+        (the grade turns on the row existing and the report lists the
+        rows), and `element_tag` is documented "for `SCAN_GAP` only" in
+        three places, so borrowing it would falsify all three.
+
+        Flushes first, like every other audit reader: a row still in the
+        queue has not reached the table, so reading before the barrier
+        would report a clean run over a session that had just declined.
+
+        Returns:
+            List[tuple]: (timestamp, entity_uid, details)
+        """
+        self.flush_audit_queue()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT timestamp, entity_uid, details
+                    FROM audit_log
+                    WHERE action_type = 'REMEDIATION_DECLINED'
+                    ORDER BY timestamp ASC
+                """)
+                return cursor.fetchall()
+        except sqlite3.OperationalError:
+            return []
+
     def get_audit_drops(self) -> int:
         """How many audit rows were dropped by a failed batch write.
 
@@ -2821,13 +2857,18 @@ class SqliteStore:
                 # set. Nothing else nulls `pixel_array` -- every other
                 # write to it (`set_pixel_data()` and `get_pixel_data()`'s
                 # three arms) fills it. So `arr is None` here means one of
-                # exactly two
+                # exactly three
                 # things: `unload_pixel_data()` cleared an array that was
                 # equal to what the loader points at, or a caller
                 # deliberately discarded one -- the redaction `finally`
                 # blocks, where reverting to the loader's frame IS the
-                # intended outcome. Recording the loader's frame is correct
-                # under both. Do not relax that refusal, or add a third
+                # intended outcome -- or
+                # `Session._apply_redaction_outcomes` nulled it in the
+                # same breath as rebinding the loader to the frame the
+                # worker just redacted (#322), which is the same intended
+                # outcome reached from the parent side of a processes
+                # pass. Recording the loader's frame is correct under all
+                # three. Do not relax that refusal, or add a fourth
                 # nulling site, without revisiting this arm.
                 if isinstance(loader, SidecarPixelLoader):
                     return _StoredFrame(loader.offset, loader.length,

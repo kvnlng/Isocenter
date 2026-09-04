@@ -454,3 +454,45 @@ def test_the_export_to_parquet_second_spelling_is_gone():
     assert callable(DicomSession.export_dataframe), (
         "`export_dataframe` is missing -- the duplicate was removed but "
         "the surviving writer did not")
+
+
+def test_neither_public_write_path_reports_total_failure_as_success(tmp_path):
+    """The asymmetry #191 named, and the half the tree test does not cover.
+
+    `test_both_public_export_paths_produce_the_same_tree` pins that the
+    two paths *agree about where files go*. It says nothing about what
+    they do when no file goes anywhere, and until #191 they disagreed
+    completely: `write_tree` raised `RuntimeError`, and `session.export()`
+    returned `None` -- indistinguishable, at the call site, from an
+    export that wrote every file.
+
+    A **new** test rather than a modification of that one: the trees
+    assertion is not wrong and does not go red here, and folding a
+    failure contract into a layout test would make one red mean two
+    things.
+
+    `ExportError` subclasses `RuntimeError` precisely so both raises are
+    catchable by one `except`; `write_tree`'s bare raise is deliberately
+    left alone, because the two describe different behaviours -- "this
+    serializer could not write" and "the pipeline delivered nothing".
+    """
+    import pytest as _pytest
+
+    from isocenter.io_handlers import DicomExporter, ExportError
+    from tests.test_export_failure_audit import _session
+
+    session = _session(tmp_path, break_instances=(0, 1, 2))
+    try:
+        patient = session.store.patients[0]
+
+        with _pytest.raises(RuntimeError):
+            DicomExporter.write_tree(patient, str(tmp_path / "via_exporter"))
+
+        with _pytest.raises(ExportError) as caught:
+            session.export(str(tmp_path / "via_session"), show_progress=False)
+    finally:
+        session.close()
+
+    assert isinstance(caught.value, RuntimeError), (
+        "an existing `except RuntimeError` around a full run would stop "
+        "catching the export that delivered nothing")

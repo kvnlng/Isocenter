@@ -32,7 +32,7 @@ this tree (#162, `tests/test_doc_anchors.py`'s fourth deferral).
 (a backticked code span, then the word "at", then the file, then the word
 "line"). The cited line, stripped, must equal `<CODE>` exactly. This is
 what #310 actually asks for: an in-range check alone still passes after
-someone inserts a line above 148 and every one of the five citations
+someone inserts a line above 201 and every one of the five citations
 starts pointing one line high.
 
 The grammar is deliberately narrow, and the boundary was checked against
@@ -44,7 +44,7 @@ Rule 1 only. Getting this boundary wrong would make the guard red on
 correct prose, which is how a guard gets deleted.
 
 **Rule 3 -- the count.** Inserting a *sixth* `entity.mark_modified()`
-below line 247 leaves all five existing citations true and only
+below line 324 leaves all five existing citations true and only
 CLAUDE.md's "five" wrong, and count drift is precisely what happened
 before. So: the set of line numbers cited for `entity.mark_modified()` in
 `remediation.py` must equal the set of lines in that file whose stripped
@@ -265,7 +265,7 @@ def test_every_file_citation_is_in_range():
 def test_a_cited_line_still_holds_the_code_the_citation_quotes():
     """`` `code` at file.py line N `` must still be true of line N.
 
-    An in-range check alone survives an insertion above line 148: all
+    An in-range check alone survives an insertion above line 201: all
     five `entity.mark_modified()` citations quietly start pointing one
     line high and nothing notices. This is the rule that goes red the
     moment that happens.
@@ -316,7 +316,7 @@ def test_the_number_of_citations_matches_the_number_of_calls():
     """Every `entity.mark_modified()` call must be cited, and no other.
 
     Rule 3. The failure this catches is the one Rules 1 and 2 cannot: a
-    *sixth* call inserted below line 247 leaves all five existing
+    *sixth* call inserted below line 324 leaves all five existing
     citations true and only the claim that there are five wrong -- which
     is the drift that happened before (#132 said three).
 

@@ -23,7 +23,7 @@ from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter import io_handlers
 from isocenter.entities import Instance, Patient, Series, Study
-from isocenter.io_handlers import (DicomExporter, ExportOutcome,
+from isocenter.io_handlers import (DicomExporter, ExportError, ExportOutcome,
                                    LOSS_SCOPE_PRIVATE, LOSS_SCOPE_STANDARD)
 from isocenter.session import DicomSession, _ExportOptions
 
@@ -430,7 +430,11 @@ def test_a_float16_loss_on_a_failed_write_names_the_missing_file(tmp_path):
 
     try:
         session.save()
-        session.export(str(out), format="dicom", show_progress=False)
+        # The one planned instance fails, so zero of one reached disk
+        # and the export raises (#191). The raise is last, after the
+        # `DATA_LOSS` and `ERROR` rows this test reads back.
+        with pytest.raises(ExportError):
+            session.export(str(out), format="dicom", show_progress=False)
         db_path = session.store_backend.db_path
     finally:
         session.close()

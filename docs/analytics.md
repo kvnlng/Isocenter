@@ -26,7 +26,14 @@ The report includes:
    after ingest, e.g. by `redact()`, so the row cannot be matched back).
    The latter two grade the session `REVIEW_REQUIRED`, with no scope
    test: a run that exports bytes it could not read does not get to
-   call itself PASS.
+   call itself PASS. 3.3 lists remediations that were **proposed and
+   did not run** -- a finding whose entity could not be resolved
+   against the live graph, a target the action has no arm for, a date
+   with no PatientID to seed its jitter, a value that is not a date --
+   each with its reason. The element each row names is still in the
+   object graph and reached the exported files, so one row grades the
+   session `REVIEW_REQUIRED` on the same argument 3.2 makes. Unlike 3.1
+   and 3.2, 3.3 is omitted entirely from a run that declined nothing.
 4. **Exceptions**: A detailed list of any warnings or errors encountered (e.g., "Corrupt pixel data in File X", "Burned-In Annotation found").
 5. **Manifest**: A summary of the processed cohort (Top studies by size).
 

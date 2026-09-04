@@ -28,7 +28,7 @@ import numpy as np
 import pytest
 
 from isocenter.entities import Instance, Patient, Series, Study
-from isocenter.io_handlers import ExportContext
+from isocenter.io_handlers import ExportContext, ExportError
 from isocenter.session import DicomSession
 
 #: Pixel Spacing, Type 1 for a CT image. An instance without it fails
@@ -188,7 +188,12 @@ def test_a_failed_export_discloses_nothing_because_nothing_was_released(
         os.chmod(out, 0o500)
         with caplog.at_level(logging.WARNING):
             try:
-                session.export(str(out), show_progress=False)
+                # Zero of three written, so the export raises (#191).
+                # The raise is last, after the disclosure decision this
+                # test is about -- which is the point of putting it
+                # there.
+                with pytest.raises(ExportError):
+                    session.export(str(out), show_progress=False)
             finally:
                 os.chmod(out, 0o700)
         session.generate_report(str(report))

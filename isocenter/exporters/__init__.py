@@ -16,7 +16,7 @@ class Exporter:
     a read operation over already-de-identified data.
     """
 
-    def export(self, session, folder: str, **options) -> List[str]:
+    def export(self, session, folder: str, **options):
         """Write the session to `folder`.
 
         Args:
@@ -25,7 +25,18 @@ class Exporter:
             **options: Format-specific options.
 
         Returns:
-            List[str]: Paths written.
+            The format's own result object. `dicom` returns an
+            `io_handlers.ExportSummary`; `wfdb` returns a `List[str]` of
+            paths. **Whatever the shape, it must let a caller detect
+            that nothing was written** -- an empty list, a zero count, a
+            raise. The DICOM exporter returned `None` until #191, so an
+            export that delivered none of its three files was
+            indistinguishable at the call site from one that delivered
+            all three.
+
+            Annotated loosely on purpose: a single `List[str]` return
+            type here was a promise the registry cannot keep, since each
+            format answers "what did you write" in its own terms.
         """
         raise NotImplementedError
 
