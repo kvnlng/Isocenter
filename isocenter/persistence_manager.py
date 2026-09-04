@@ -328,6 +328,19 @@ class PersistenceManager:
         # acceptable "eventual consistency" for this UX.
         self.queue.put((list(patients), prune_absent_patients))
 
+    def has_pending_saves(self):
+        """Is any save queued or in flight right now?
+
+        A point-in-time reading, and callers must treat it as one: a
+        save queued the instant after it returns is not covered. It
+        exists so `Session.compact()` can *refuse* a compaction started
+        against a manager that provably has work outstanding, rather
+        than documenting a precondition nothing checks (#295).
+        """
+        with self._inflight_lock:
+            inflight = bool(self._inflight)
+        return inflight or not self.queue.empty()
+
     def _worker(self):
         # **Reap before consuming anything, on the newly started thread.**
         # A worker restart is the event that always accompanies a
