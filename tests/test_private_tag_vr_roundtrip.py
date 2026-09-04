@@ -54,6 +54,13 @@ from isocenter.session import DicomSession
 # integers of different widths, an integer string, a binary float, and a
 # tag -- whose `str()` is `'(0010,0010)'`, a spelling nothing can read
 # back as a tag.
+#
+# `UC` is the pair to `UT`, and they differ in the one way that matters
+# to the guards: both are uncapped, but `UT` is VM 1 and `UC` is 1-n, so
+# a backslash is text in one and a delimiter in the other. It is here
+# because an uncapped VR is exactly what a table of caps cannot describe
+# by absence -- "not in the cap table" is also what an unknown VR and a
+# binary VR look like.
 TABLE = [
     (0x1003, 'SH', 'abc'),
     (0x1005, 'DS', 1.5),
@@ -63,6 +70,7 @@ TABLE = [
     (0x100d, 'UT', 'u' * 90),
     (0x100e, 'FL', 1.25),
     (0x100f, 'AT', 0x00100010),
+    (0x1010, 'UC', 'c' * 90),
 ]
 
 

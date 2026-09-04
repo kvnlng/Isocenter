@@ -324,9 +324,8 @@ _INTEGER_VRS = frozenset({'US', 'SS', 'UL', 'SL', 'UV', 'SV', 'AT'})
 _FLOAT_VRS = frozenset({'FL', 'FD'})
 
 #: Text VRs and the per-value character cap PS3.5 Table 6.2-1 gives
-#: each. Absent means unbounded for this purpose (`UT`, `UR`, `UC`).
-#: The cap is checked per *value*, never against a multi-valued join --
-#: the standard bounds each value, which is the same rule
+#: each. The cap is checked per *value*, never against a multi-valued
+#: join -- the standard bounds each value, which is the same rule
 #: `_fallback_multivalue` already applies.
 _TEXT_VR_MAX = {
     'AE': 16, 'AS': 4, 'CS': 16, 'DA': 8, 'DS': 16, 'DT': 26,
@@ -334,10 +333,21 @@ _TEXT_VR_MAX = {
     'TM': 16, 'UI': 64,
 }
 
+#: The text VRs PS3.5 Table 6.2-1 leaves uncapped. Listed, not inferred
+#: from absence in `_TEXT_VR_MAX`: "no cap recorded" is also what an
+#: unknown VR and every binary VR look like, so reading absence as
+#: "unbounded text" would accept a recorded VR this module knows nothing
+#: about. An earlier comment claimed these three were handled by that
+#: absence, and `UC` -- the only one not also in `_VM_ONE_TEXT_VRS` --
+#: was in fact rejected on every path, so a private `UC` element
+#: recorded its VR at ingest and still exported as `UT`.
+_TEXT_VR_UNCAPPED = frozenset({'UT', 'UR', 'UC'})
+
 #: The text VRs whose value multiplicity is fixed at 1, so a backslash
 #: in the value is ordinary text rather than the value delimiter
-#: (PS3.5 6.2). Everything else in `_TEXT_VR_MAX` is 1-n, where a
-#: backslash re-splits the value on read -- #195, from the other side.
+#: (PS3.5 6.2). Every other text VR here is 1-n, where a backslash
+#: re-splits the value on read -- #195, from the other side. `UC` is the
+#: one uncapped VR that is 1-n, which is why the two sets are not one.
 _VM_ONE_TEXT_VRS = frozenset({'ST', 'LT', 'UT', 'UR'})
 
 
@@ -397,7 +407,7 @@ def _value_fits_vr(value, vr: str) -> bool:
             # pydicom raises from `filewriter` rather than from
             # `add_new`, so this would fail the export, not the element.
             return False
-        if vr not in _TEXT_VR_MAX and vr not in _VM_ONE_TEXT_VRS:
+        if vr not in _TEXT_VR_MAX and vr not in _TEXT_VR_UNCAPPED:
             return False
         if '\\' in value and vr not in _VM_ONE_TEXT_VRS:
             return False
