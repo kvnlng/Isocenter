@@ -87,13 +87,14 @@ def _make_orphan(manager, patient):
 
     The worker is shut down first and its death asserted, so the test
     thread's `get()` is not racing anything: it *is* the consumer that
-    took the item. `_inflight` is then set by hand, because that is the
-    trace a real worker leaves -- it records the item immediately after
-    `get()` returns and clears it in the `finally` before `task_done()`.
-    Plain attribute assignment with no lock is correct here precisely
-    because the assertion above establishes that no worker exists to
-    contend for it. On unfixed code the attribute is simply never read,
-    so the red these tests produce is the hang itself and not an
+    took the item. The `_inflight` entry is then written by hand under
+    the dead worker's own key, because that is the trace a real worker
+    leaves -- it records the item against `threading.current_thread()`
+    immediately after `get()` returns and pops that key in the `finally`
+    before `task_done()`. Writing the key by hand with no lock is correct
+    here precisely because the assertion above establishes that no worker
+    exists to contend for it. On unfixed code the mapping is simply never
+    read, so the red these tests produce is the hang itself and not an
     `AttributeError`.
     """
     manager.shutdown()
@@ -103,7 +104,7 @@ def _make_orphan(manager, patient):
 
     manager.queue.put(([patient], False))
     orphan = manager.queue.get()
-    manager._inflight = orphan
+    manager._inflight[manager.thread] = orphan
 
     assert manager.queue.empty(), (
         "the item is still in the deque, so this is an ordinary pending "
@@ -144,9 +145,12 @@ def test_flushing_twice_recovers_the_orphan_exactly_once(pm):
     One extra `task_done()` is how this fix breaks. The queue raises
     `ValueError: task_done() called too many times` when the count goes
     negative, and a second recovery of the same payload would also write
-    it to the store twice. The second `flush()` finds a *live* worker --
-    the first restarted one -- and the reconciliation is gated on a dead
-    worker, so it takes no recovery path at all.
+    it to the store twice. The second `flush()` finds nothing to
+    reconcile: the first popped the entry out of `_inflight` before
+    putting the payload back, so there is no longer an orphan owned by a
+    dead thread for it to find. That pop-before-put is what makes
+    exactly-once a property of the data rather than of the ordering
+    between two flushes.
     """
     patient = Patient("P_ORPHAN", "Orphan^Test")
     _make_orphan(pm, patient)
@@ -165,10 +169,49 @@ def test_flushing_twice_recovers_the_orphan_exactly_once(pm):
         "recovery must re-queue it exactly once")
 
 
+def test_a_save_queued_after_the_orphaning_does_not_bury_it(pm):
+    """Recovery is keyed on the item's owner, not on `self.thread` (#309).
+
+    The ordinary sequence, not a corner: a worker dies holding a save,
+    the caller queues another save -- `save_async` restarts the worker,
+    so from here on `self.thread` is alive -- and only then does
+    something flush. `Session.save()` followed by `audit()` or `redact()`
+    is exactly this shape.
+
+    With recovery gated on `self.thread` being dead it is a permanent
+    no-op, and with `_inflight` a single unowned slot the fresh worker's
+    own `get()` overwrites the orphan as it goes past. Both together:
+    the orphaned payload is destroyed, `unfinished_tasks` stays at 1,
+    and `flush()` never returns -- the #309 hang, reached through a
+    restart rather than avoided by one. Measured on the single-slot
+    shape: ``saved: ['P_NEW']``, ``unfinished: 1``, ``inflight: None``,
+    ``flush returned within 8s: False``.
+    """
+    orphaned = Patient("P_ORPHAN", "Orphan^Test")
+    _make_orphan(pm, orphaned)
+
+    pm.save_async([Patient("P_NEW", "New^Test")])
+    assert pm.thread.is_alive(), (
+        "save_async left no live worker, so this test would exercise the "
+        "dead-worker path the other tests already cover")
+
+    done = _flush_on_helper(pm)
+    assert done.wait(10), (
+        "flush() never returned: the orphan's owner is dead but recovery "
+        "asked whether the manager's *current* worker was alive, so it "
+        "recovered nothing (#309)")
+
+    assert sorted(p.patient_id for p in pm.store_backend.saved_patients) == [
+        "P_NEW", "P_ORPHAN"], (
+        "the save queued after the orphaning buried it: a restarted "
+        "worker recorded its own item over the dead worker's, which is "
+        "the only surviving copy of the orphaned payload (#309)")
+
+
 def test_flush_still_waits_for_a_save_that_is_genuinely_running(pm):
     """The guarantee the recovery must not trade away (#309).
 
-    `flush()` exists so that callers -- `audit()`, `redact()`, `close()`
+    `flush()` exists so that callers -- `audit()` and `redact()`
     -- can be sure the queue is drained before they read or shut down.
     A recovery that returned early whenever it could not see progress
     would satisfy the two tests above and destroy this one. So a save
@@ -248,7 +291,7 @@ def test_the_worker_records_and_releases_the_item_it_is_holding(pm):
     pm.save_async([patient])
     assert started.wait(5), "the save never entered save_all"
 
-    assert pm._inflight == ([patient], False), (
+    assert list(pm._inflight.values()) == [([patient], False)], (
         "the worker is inside save_all but recorded nothing: an item taken "
         "off the queue and not recorded is invisible to flush(), which is "
         "the #309 hang with no way out")
@@ -257,7 +300,7 @@ def test_the_worker_records_and_releases_the_item_it_is_holding(pm):
     done = _flush_on_helper(pm)
     assert done.wait(10), "flush() never returned after the save finished"
 
-    assert pm._inflight is None, (
+    assert pm._inflight == {}, (
         "the finished item is still recorded: a later flush against a dead "
         "worker would re-queue a payload that was already saved and count "
         "off a task that no longer exists")

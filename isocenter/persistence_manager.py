@@ -48,16 +48,31 @@ class PersistenceManager:
         self.running = False
         self.thread = None
 
-        # The item the worker took off the queue and has not finished.
-        # `queue.get()` removes the payload from the deque while leaving
-        # `unfinished_tasks` at 1, so a worker that dies in that window
-        # takes the only remaining copy of the save with it and leaves a
-        # count nothing can decrement. This field is that copy (#309).
-        self._inflight = None
+        # `{worker Thread: item}` -- the item each worker took off the
+        # queue and has not finished. `queue.get()` removes the payload
+        # from the deque while leaving `unfinished_tasks` at 1, so a
+        # worker that dies in that window takes the only remaining copy
+        # of the save with it and leaves a count nothing can decrement.
+        # This mapping holds that copy (#309).
+        #
+        # **Keyed by the owning thread, and that is the whole point.** A
+        # single unowned slot loses to the ordinary sequence "worker dies
+        # holding a save, another save is queued, then something
+        # flushes": `save_async` restarts the worker, the fresh worker's
+        # own `get()` overwrites the slot, and the orphan payload is
+        # destroyed while `unfinished_tasks` stays at 1 forever. Measured
+        # on that shape: the new save reached the store, the orphaned one
+        # did not, and `flush()` never returned. Recovery therefore asks
+        # whether *the thread that took this item* is dead, not whether
+        # the manager currently has a live worker.
+        self._inflight = {}
         self._inflight_lock = threading.Lock()
-        # Serialises recovery so two flushes cannot re-queue one payload
-        # twice, which would both duplicate the save and unbalance the
-        # queue's count.
+        # Serialises `_recover_orphaned_item` so two concurrent flushes
+        # cannot both reach `_start_worker()` and leave two consumers on
+        # one queue -- the #250 leak, one level up. Exactly-once re-queue
+        # is *not* what this lock buys: that comes from popping each
+        # entry out of `_inflight` under `_inflight_lock` before it is
+        # put back, so only one caller can ever hold a given payload.
         self._recover_lock = threading.Lock()
 
         self._start_worker()
@@ -141,8 +156,11 @@ class PersistenceManager:
         # per report interval while it is still waiting -- earlier waiters
         # stay blocked until the queue drains, so a wedged flush
         # accumulates one thread every 30s. Never per queued item:
-        # `flush()` is called by audit(), redact() and close(), not on the
-        # save path.
+        # `Session` calls `flush()` from exactly two places, `audit()`
+        # and `redact()`, and not on the save path. (`close()` does NOT
+        # flush -- it calls `shutdown()`, which returns immediately when
+        # the worker is already dead. So an orphan reaching `close()`
+        # is dropped silently rather than hanging it.)
         while True:
             waiter = threading.Thread(target=self.queue.join, daemon=True)
             waiter.start()
@@ -152,7 +170,7 @@ class PersistenceManager:
 
             alive = bool(self.thread and self.thread.is_alive())
             with self._inflight_lock:
-                inflight = self._inflight is not None
+                inflight = len(self._inflight)
             # `unfinished_tasks` is a CPython implementation detail and is
             # read here for the message only. Nothing in the recovery path
             # depends on it, and nothing anywhere touches `all_tasks_done`.
@@ -160,18 +178,25 @@ class PersistenceManager:
                 "PersistenceManager.flush() has waited "
                 f"{_FLUSH_REPORT_INTERVAL_S:g}s: "
                 f"unfinished_tasks={self.queue.unfinished_tasks}, "
-                f"worker_alive={alive}, in_flight_item={inflight} (#309)")
+                f"worker_alive={alive}, in_flight_items={inflight} (#309)")
             self._recover_orphaned_item()
 
     def _recover_orphaned_item(self):
         """Put back a save whose worker took it and never finished it.
 
-        Only ever runs against a **dead** worker. A dead `Thread` is a
-        stable observation -- it cannot resume -- whereas a live worker
-        holding `_inflight` is simply mid-save, and re-queueing under it
-        would both duplicate the write and unbalance the queue's count.
-        This gate is also why a second `flush()` after a recovery is a
-        no-op: the first one restarted the worker.
+        **The liveness question is asked of the item's own owner, not of
+        `self.thread`.** A dead `Thread` is a stable observation -- it
+        cannot resume -- whereas a worker still holding its entry is
+        simply mid-save, and re-queueing under it would both duplicate
+        the write and unbalance the queue's count. Both halves of that
+        argument are about *the thread that took the item*. Gating on
+        `self.thread` instead reads as the same thing only while the
+        manager has had exactly one worker ever: as soon as a save
+        arrives after the orphaning -- `save_async` restarts the worker
+        -- `self.thread` is alive, recovery becomes a permanent no-op,
+        and the flush hangs with the orphan unreachable. Per-owner, a
+        live worker's own entry is still never touched, so nothing is
+        traded away for that.
 
         The re-queue is deliberately `put()` **then** `task_done()`.
         Reversed, `unfinished_tasks` reaches zero between the two calls,
@@ -179,20 +204,28 @@ class PersistenceManager:
         the payload is back in the deque -- a dropped save wearing a
         clean return. In this order the net count is unchanged and the
         payload is queued before the orphan is counted off.
+
+        Re-queueing exactly once does not depend on `_recover_lock`:
+        each entry is *popped* out of `_inflight` under `_inflight_lock`
+        before it is put back, so two concurrent callers cannot both
+        hold the same payload. What `_recover_lock` buys is that they
+        cannot both reach `_start_worker()`.
         """
         with self._recover_lock:
-            if self.thread is not None and self.thread.is_alive():
-                return
-
             with self._inflight_lock:
-                payload, self._inflight = self._inflight, None
+                orphaned = [self._inflight.pop(owner)
+                            for owner in list(self._inflight)
+                            if not owner.is_alive()]
 
-            if payload is not None:
+            for payload in orphaned:
                 get_logger().warning(
                     "PersistenceManager worker stopped holding a save it "
                     "never finished; re-queueing it (#309).")
                 self.queue.put(payload)
                 self.queue.task_done()
+
+            if self.thread is not None and self.thread.is_alive():
+                return
 
             if self.queue.unfinished_tasks:
                 get_logger().warning(
@@ -235,13 +268,16 @@ class PersistenceManager:
                 # Wait for work
                 item = self.queue.get(timeout=1.0)
 
-                # Record the item before anything can fail. From here to
-                # the `finally` below, this field is the only reference to
-                # the payload that a `flush()` can reach: the deque no
-                # longer holds it (#309).
+                # Record the item before anything can fail, under this
+                # thread's own key. From here to the `finally` below,
+                # this entry is the only reference to the payload that a
+                # `flush()` can reach: the deque no longer holds it
+                # (#309). Keying on the thread rather than writing a
+                # single slot is what stops a *restarted* worker erasing
+                # a dead one's orphan on its way past.
                 if item is not None:
                     with self._inflight_lock:
-                        self._inflight = item
+                        self._inflight[threading.current_thread()] = item
 
                 # If we get a sentinel (None), we exit
                 if item is None:
@@ -268,26 +304,26 @@ class PersistenceManager:
                 finally:
                     # Cleared *before* `task_done()`, and the ordering is
                     # load-bearing in two ways. Reversed, a flush woken by
-                    # the count reaching zero can return with `_inflight`
-                    # still set, and the next recovery against a dead
-                    # worker re-queues a payload that was already saved
-                    # *and* raises `ValueError: task_done() called too
-                    # many times`. In this order, a `queue.join` that has
-                    # returned is proof the clear already happened, which
-                    # is what makes the second assertion in
+                    # the count reaching zero can return with this entry
+                    # still present, and a later recovery -- once this
+                    # thread is dead -- re-queues a payload that was
+                    # already saved *and* leaves the count one above
+                    # zero for good. In this order, a `queue.join` that
+                    # has returned is proof the clear already happened,
+                    # which is what makes the second assertion in
                     # `test_the_worker_records_and_releases_the_item_it_is_holding`
                     # race-free rather than lucky.
                     #
                     # The cost of this order is the second of #309's two
                     # residual windows: a thread killed between the clear
-                    # and `task_done()` returning leaves `_inflight` None
-                    # with the count still at 1, which recovery cannot
-                    # tell from a healthy queue. Nothing is *lost* there
-                    # -- the save already committed -- but the flush hangs
+                    # and `task_done()` returning leaves no entry with
+                    # the count still at 1, which recovery cannot tell
+                    # from a healthy queue. Nothing is *lost* there --
+                    # the save already committed -- but the flush hangs
                     # as permanently as in the first window. Closing
                     # either needs atomicity inside `Queue`.
                     with self._inflight_lock:
-                        self._inflight = None
+                        self._inflight.pop(threading.current_thread(), None)
                     self.queue.task_done()
 
             except queue.Empty:
