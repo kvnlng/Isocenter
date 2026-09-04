@@ -53,7 +53,10 @@ def test_lazy_loading(tmp_path):
 
         # Assert
         assert data.shape == (50, 50)
-        mock_read.assert_called_once_with(inst.file_path)
+        # `force=True` is part of the call, not decoration: it is what
+        # makes this re-read accept the same files the eager ingest
+        # accepted (#289, #281).
+        mock_read.assert_called_once_with(inst.file_path, force=True)
         # Verify it cached the result
         assert inst.pixel_array is not None
 

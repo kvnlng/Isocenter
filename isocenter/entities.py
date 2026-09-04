@@ -668,7 +668,29 @@ class Instance(DicomItem):
                 # Read pixel data on demand
                 ds = None
                 try:
-                    ds = pydicom.dcmread(self.file_path)
+                    # `force=True`, and it must stay: the eager read and
+                    # this lazy re-read are two reads of the *same*
+                    # source file, so they have to accept the same
+                    # files. `ingest_worker` forces (#281), so a
+                    # header-less file -- no preamble, no `DICM` prefix,
+                    # the ordinary shape of a raw vendor dump -- indexed
+                    # cleanly and then could not produce its own pixels:
+                    # `RuntimeError: Lazy load failed ... 'DICM' prefix
+                    # is missing`. A file accepted at one boundary and
+                    # refused at the next is the defect, whichever
+                    # boundary would be right on its own (#289).
+                    #
+                    # The cost is stated rather than hidden: if
+                    # `file_path` has since been replaced by a file that
+                    # is not DICOM at all, forcing parses it to a
+                    # dataset with no pixel element, so the
+                    # `any(t in ds ...)` guard below returns None where
+                    # this used to raise. Measured, not reasoned -- the
+                    # imagecodecs fallback is never reached. That
+                    # narrows #226's "could not decode is not None" for
+                    # a population that a forcing ingest had already
+                    # accepted.
+                    ds = pydicom.dcmread(self.file_path, force=True)
 
                     # Cache it in memory. Assigned, not set through
                     # set_pixel_data: pydicom shaped this array from the
