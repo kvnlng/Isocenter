@@ -290,6 +290,66 @@ def test_a_recorded_vr_does_not_bypass_the_length_guard():
     assert ds[0x00091001].value == long_value
 
 
+def test_the_range_guard_still_runs_on_the_reloaded_path(tmp_path):
+    """The guard where the value is most likely to be out of range.
+
+    Every other guard test here calls `_merge` directly, which is the
+    fresh journey. This one is the reloaded one, and it is not a
+    duplicate: on the fresh path an out-of-range `US` can only come from
+    a `set_attr` still in memory, while on the reloaded path the value
+    is *reconstructed* -- `instance_attributes` stores `str(val)` in a
+    TEXT column and `_VERTICAL_VR_PARSERS['US']` turns `"70000"` back
+    into an `int` -- so the gate is handed a plausible-looking integer
+    with no memory of where it came from. Both ends of that composition
+    have to hold, and only one of them is `_merge`.
+
+    The assertion is on the *file*, not on the element, because the
+    failure this prevents is not a mislabelled element: `add_new`
+    accepts 70000 under `US` without a word and `struct.pack` raises
+    from `filewriter.write_numbers`, past `_merge`'s `try`, so before
+    the range guard this export wrote nothing at all (#154).
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_src(str(src))
+    db = str(tmp_path / "range.db")
+    out = tmp_path / "out"
+
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(str(src))
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        assert inst.attribute_vrs["0009,1006"] == 'US'
+        # What an anonymisation rule or a hand `set_attr` can do to a
+        # perfectly conformant source element: 7 becomes 70000, which is
+        # still an `int` and is one past what `US` can encode.
+        inst.set_attr("0009,1006", 70000)
+        session.save()
+    finally:
+        session.close()
+
+    session = DicomSession(persistence_file=db)
+    try:
+        reloaded = session.store.patients[0].studies[0].series[0].instances[0]
+        assert reloaded.attributes["0009,1006"] == 70000
+        assert isinstance(reloaded.attributes["0009,1006"], int)
+        assert reloaded.attribute_vrs["0009,1006"] == 'US'
+        session.export(str(out), format="dicom", show_progress=False)
+    finally:
+        session.close()
+
+    written = glob.glob(str(out / "**" / "*.dcm"), recursive=True)
+    assert written, (
+        "the export wrote no file: an out-of-range value under a "
+        "recorded binary VR reached `struct.pack` and failed the whole "
+        "dataset rather than the element (#154)")
+    exported = pydicom.dcmread(written[0])
+    assert exported[Tag(0x0009, 0x1006)].VR != 'US', (
+        "70000 does not fit `US`, so the recorded VR must not be used "
+        "for it")
+    assert '70000' in str(exported[Tag(0x0009, 0x1006)].value)
+
+
 def test_a_recorded_vr_does_not_turn_a_bool_into_a_number():
     """The `bool` arm of `_fallback_encoding` was pre-placed for this day.
 
