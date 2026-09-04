@@ -215,3 +215,49 @@ def test_flush_still_waits_for_a_save_that_is_genuinely_running(pm):
         "flush() never returned after the save was released")
     assert [p.patient_id for p in pm.store_backend.saved_patients] == [
         "P_INFLIGHT"], "the released save never reached the store"
+
+
+def test_the_worker_records_and_releases_the_item_it_is_holding(pm):
+    """The recording half, which the other three do not exercise (#309).
+
+    Tests 1 and 2 set `_inflight` by hand -- that is what makes them
+    deterministic, and it is also why they say nothing about the two
+    lines in `_worker` that do it for real. Deleting either leaves those
+    tests green while the production path stops leaving anything for a
+    recovery to find, which is the #309 hang back again.
+
+    Same Event handshake as the test above, so nothing new is invented:
+    the save parks inside `save_all`, which is precisely the window in
+    which a worker holds an item, and the assertions read the field while
+    it is provably parked. Verified one mutation at a time: dropping the
+    record leaves the first assertion red, dropping the clear in the
+    `finally` leaves the second red, and no other test in the suite moves.
+    """
+    started, release = threading.Event(), threading.Event()
+    real_save_all = pm.store_backend.save_all
+
+    def parked_save_all(patients, prune_absent_patients=False):
+        started.set()
+        release.wait(10)
+        return real_save_all(
+            patients, prune_absent_patients=prune_absent_patients)
+
+    pm.store_backend.save_all = parked_save_all
+
+    patient = Patient("P_HELD", "Held^Test")
+    pm.save_async([patient])
+    assert started.wait(5), "the save never entered save_all"
+
+    assert pm._inflight == ([patient], False), (
+        "the worker is inside save_all but recorded nothing: an item taken "
+        "off the queue and not recorded is invisible to flush(), which is "
+        "the #309 hang with no way out")
+
+    release.set()
+    done = _flush_on_helper(pm)
+    assert done.wait(10), "flush() never returned after the save finished"
+
+    assert pm._inflight is None, (
+        "the finished item is still recorded: a later flush against a dead "
+        "worker would re-queue a payload that was already saved and count "
+        "off a task that no longer exists")

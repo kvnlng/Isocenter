@@ -136,9 +136,13 @@ class PersistenceManager:
         self._recover_orphaned_item()
 
         # `queue.join()` on a short-lived daemon so the wait can be
-        # interrupted periodically to report and re-check. One extra
-        # thread per `flush()` call, not per queued item: `flush()` is
-        # called by audit(), redact() and close(), not on the save path.
+        # interrupted periodically to report and re-check. Cost is one
+        # extra thread per `flush()` CALL on a healthy flush, and one more
+        # per report interval while it is still waiting -- earlier waiters
+        # stay blocked until the queue drains, so a wedged flush
+        # accumulates one thread every 30s. Never per queued item:
+        # `flush()` is called by audit(), redact() and close(), not on the
+        # save path.
         while True:
             waiter = threading.Thread(target=self.queue.join, daemon=True)
             waiter.start()
