@@ -143,7 +143,7 @@ class PersistenceManager:
         **It never returns early.** A bounded wait that gave up and
         returned would turn a visible hang into a silently dropped save,
         which is strictly worse: callers flush precisely so they can read
-        or close afterwards. What is bounded is the *silence* -- every
+        or shut down afterwards. What is bounded is the *silence* -- every
         `_FLUSH_REPORT_INTERVAL_S` a wait that has not finished says what
         it is waiting for and re-attempts recovery, so a worker that dies
         after this flush began is recovered too.
