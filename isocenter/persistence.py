@@ -14,6 +14,7 @@ import json
 import queue
 import threading
 import time
+import weakref
 import hashlib
 import base64
 import traceback
@@ -300,6 +301,82 @@ def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
 
 
 
+def _report_abandoned_audit_rows(audit_queue):
+    """Say that a collected store took undrained audit rows with it.
+
+    This loss is **new** (#316): until the worker stopped pinning its
+    store, a store with queued rows could not be collected at all. So it
+    needs a channel, and the queue is held strongly by the worker
+    precisely so the exit path can count what it is dropping rather than
+    dropping it silently -- which is the one thing an audit log must
+    never do.
+    """
+    pending = audit_queue.qsize()
+    if pending:
+        get_logger().warning(
+            f"An SqliteStore was collected with {pending} audit row(s) "
+            f"still queued; those rows are lost. Call stop() -- or close "
+            f"the session -- to settle the audit log before dropping a "
+            f"store (#316).")
+
+
+def _audit_worker_loop(store_ref, stop_event, wakeup, audit_queue):
+    """Background audit writer that does not keep its store alive.
+
+    Module-level, taking a **weak** reference. `SqliteStore.__init__`
+    used `target=self._audit_worker`, and a running `Thread` holds its
+    target while a bound method holds `self` -- so every store ever
+    constructed was immortal for as long as its worker ran, and the
+    worker's only exit is `stop()`, which nothing calls on a store its
+    owner simply dropped. Measured over one full suite run: 149 threads
+    at interpreter exit, 147 of them audit writers, each holding a
+    store, its sqlite handles and its sidecar descriptors. #250 fixed
+    the same shape for `PersistenceManager`; this is the other half its
+    argument named.
+
+    **Why exiting on a dead weakref is safe, in one line.**
+    `flush_audit_queue()` calls `_drain_and_write()` on the *caller's*
+    thread, and `_drain_and_write` takes `_audit_write_lock` itself. The
+    read barrier does not depend on this worker existing at all -- the
+    worker only removes background latency. So a worker that exits
+    cannot weaken the barrier, cannot invert `_audit_write_lock` ->
+    `_memory_lock` (same locks, same order), and does not touch the
+    untimed wait's semantics.
+
+    Two things not to "simplify":
+
+    - **`del store` before returning to the wait.** A strong reference
+      held across the one-second wait on `wakeup` restores exactly the
+      immortality this fixes -- for a second at a time, forever.
+    - **The Events and the Queue are held strongly, and that is safe.**
+      `threading.Event` references nothing, and audit rows are plain
+      string tuples (see `log_audit`), so the queue holds no entity
+      graph and no store.
+    """
+    while not stop_event.is_set():
+        wakeup.wait(timeout=1.0)
+        # Clear before draining, never after: a `put`+`set` landing
+        # here has its `set` erased, but the row is in the queue
+        # before the clear, so the drain below still takes it.
+        wakeup.clear()
+        store = store_ref()
+        if store is None:
+            _report_abandoned_audit_rows(audit_queue)
+            return
+        try:
+            store._drain_and_write()
+        except Exception as e:  # pylint: disable=broad-except
+            # Don't crash thread
+            store.logger.error(f"Audit Worker Error: {e}")
+        finally:
+            del store
+
+    # Flush remaining
+    store = store_ref()
+    if store is not None:
+        store._drain_and_write()
+
+
 class SqliteStore:
     """
     Handles persistence of the Object Graph to a SQLite database.
@@ -501,7 +578,10 @@ class SqliteStore:
         # waited out while holding it.
         self._pixel_swap_lock = threading.Lock()
         self._audit_thread = threading.Thread(
-            target=self._audit_worker, daemon=True, name="AuditWorker")
+            target=_audit_worker_loop,
+            args=(weakref.ref(self), self._stop_event, self._audit_wakeup,
+                  self.audit_queue),
+            daemon=True, name="AuditWorker")
         self._audit_thread.start()
 
     def __getstate__(self):
@@ -544,7 +624,10 @@ class SqliteStore:
         self._audit_drop_lock = threading.Lock()
         self._pixel_swap_lock = threading.Lock()
         self._audit_thread = threading.Thread(
-            target=self._audit_worker, daemon=True, name="AuditWorker")
+            target=_audit_worker_loop,
+            args=(weakref.ref(self), self._stop_event, self._audit_wakeup,
+                  self.audit_queue),
+            daemon=True, name="AuditWorker")
         self._audit_thread.start()
 
     @contextlib.contextmanager
@@ -824,34 +907,6 @@ class SqliteStore:
             # the barrier's guarantee and the loop's exit.
             if len(batch) < 100:
                 return
-
-    def _audit_worker(self):
-        """Background thread to batch write audit logs.
-
-        It waits on `_audit_wakeup` rather than on the queue, and owns
-        nothing while it waits. Blocking on `audit_queue.get()` is the
-        defect this fixes: `get()` returns a row into a local name
-        *before* any lock can be taken, so a barrier could still slip
-        into the gap between the return and the acquisition (#218).
-
-        The barrier's correctness does not depend on this Event at all
-        -- `flush_audit_queue` drains under the lock itself. A broken
-        wakeup costs background-write latency, never read-your-writes.
-        """
-        while not self._stop_event.is_set():
-            self._audit_wakeup.wait(timeout=1.0)
-            # Clear before draining, never after: a `put`+`set` landing
-            # here has its `set` erased, but the row is in the queue
-            # before the clear, so the drain below still takes it.
-            self._audit_wakeup.clear()
-            try:
-                self._drain_and_write()
-            except Exception as e:  # pylint: disable=broad-except
-                # Don't crash thread
-                self.logger.error(f"Audit Worker Error: {e}")
-
-        # Flush remaining
-        self._drain_and_write()
 
     def stop(self):
         """Stops the audit worker and flushes queue."""
