@@ -833,33 +833,44 @@ class DicomSession:
         inherits its precondition exactly, **limit included**: it
         refuses an array replaced through `set_pixel_data()` and not
         since written, and an array mutated **in place** is not tracked,
-        so it is dropped here. The writeable arm of
-        `RedactionService._redact_instance_pixels` is that shape: it
-        zeroes the array in place and never calls `set_pixel_data()`, so
-        nothing records the divergence and a later `get_pixel_data()`
-        returns the frame from before the redaction. It is reached on
-        the *second* pass over an instance, because a frame read from a
-        file or the sidecar is not writeable and that method's other arm
-        copies it through `set_pixel_data()` first.
-        `unload_pixel_data()` states the precondition in full and this
-        does not restate it.
+        so it is dropped here and the next `get_pixel_data()` returns
+        the frame from before the mutation. Reaching that needs a
+        writeable array, which means a replacement a save has already
+        written: a frame read from a file or the sidecar is
+        `np.frombuffer`-backed and read-only, so mutating one raises
+        instead of diverging. `unload_pixel_data()` states the
+        precondition in full and this does not restate it.
 
-        This used to say flatly that nothing is discarded (#323). It was
-        never true of that path, and detection is the wrong axis for
-        making it true: hashing the resident array here was rejected by
-        #293 for this exact call site -- a full pass over pixel bytes on
-        the path the 100GB scaling story depends on -- and `_pixel_hash`
-        is not always populated, since hydration wires a loader without
-        one, so a `None` would have to mean either "refuse everything
-        hydrated", turning the only RAM-reclaiming operation this
-        library has into a no-op after a reload, or "allow", which is
-        the hole again. What closes it is making in-place mutation
-        impossible: `get_pixel_data()` returning a copy, or a
-        `writeable=False` view, so divergence can arise only through
-        `set_pixel_data()`. That is breaking, it has an in-tree caller
-        in `_redact_instance_pixels`' writeable arm, and it puts a copy
-        on every read of the memory-critical path -- so it is stated
-        here rather than done quietly.
+        **Redaction is not an instance of it**, and the measurement is
+        recorded because two docstrings have now said it was.
+        `RedactionService._redact_instance_pixels`' writeable arm does
+        mutate in place and never calls `set_pixel_data()`, but on a
+        reloaded instance that arm is never entered -- the array is
+        read-only, so every pass takes the copying arm -- and when it
+        *is* entered both callers persist the pixels and then call
+        `discard_pixel_data()` unconditionally in their `finally`, so
+        nothing survives the pass for this sweep to drop. Without a
+        `store_backend` that discard loses the mutation on its own,
+        which is a different defect with a different fix. The shape this
+        limit belongs to is any caller that mutates a written array in
+        place, which is what `tests/test_pixel_divergence.py` does.
+
+        This used to say flatly that nothing is discarded (#323). It
+        was never true of an in-place mutation, and detection is the
+        wrong axis for making it true: hashing the resident array here
+        was rejected by #293 for this exact call site -- a full pass
+        over pixel bytes on the path the 100GB scaling story depends on
+        -- and `_pixel_hash` is not always populated, since hydration
+        wires a loader without one, so a `None` would have to mean
+        either "refuse everything hydrated", turning the only
+        RAM-reclaiming operation this library has into a no-op after a
+        reload, or "allow", which is the hole again. What closes it is
+        making in-place mutation impossible: `get_pixel_data()`
+        returning a copy, or a `writeable=False` view, so divergence
+        can arise only through `set_pixel_data()`. That is breaking, it
+        has an in-tree caller in `_redact_instance_pixels`' writeable
+        arm, and it puts a copy on every read of the memory-critical
+        path -- so it is stated here rather than done quietly.
 
         Useful after running extensive redaction or export operations.
 

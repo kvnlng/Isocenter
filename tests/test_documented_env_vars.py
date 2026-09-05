@@ -28,7 +28,10 @@ demands rows for them. The pattern also requires a **string literal**
 argument, which is what keeps `_env_int`'s and `_env_is`'s own
 definitions -- `os.environ.get(name)` -- out of the result.
 
-**Bound to `docs/environment.md` only, not to CLAUDE.md.** CLAUDE.md's
+**Bound to a row in `docs/environment.md`, and to that file only.** A
+name mentioned inside another row's prose is not a row a reader can
+find, and this table has such prose -- see the comment on
+`_REGISTRY_ROW`, which records the measurement. CLAUDE.md's
 parallelism paragraph already omits `ISOCENTER_LOG_LEVEL`,
 `ISOCENTER_DB_PATH`, `ISOCENTER_LOG_FILE` and
 `ISOCENTER_WORKER_FAULTHANDLER`, and it points at `docs/environment.md`
@@ -54,6 +57,22 @@ REGISTRY = REPO / "docs" / "environment.md"
 _READ_SITE = re.compile(
     r"(?:_env_is|_env_int|os\.getenv|os\.environ\.get)\(\s*"
     r"[\"'](ISOCENTER_[A-Z0-9_]+)[\"']")
+
+# The registry's own row, and not a mention anywhere in the file. A
+# substring test -- `name not in registry` -- reads a name appearing in
+# some *other* row's prose as documentation of that name, and this
+# table has such prose: the `ISOCENTER_FORCE_PROCESSES` row spells out
+# the precedence and names `ISOCENTER_FORCE_THREADS` and
+# `ISOCENTER_MAX_TASKS_PER_CHILD` inside it. Measured: with the
+# substring test, deleting the whole `ISOCENTER_FORCE_THREADS` row left
+# this guard green. A row is what a reader can actually find, so a row
+# is what is required.
+#
+# No separate vacuity floor for this pattern: if it stops matching the
+# table, every name read becomes undocumented and the assertion below
+# fails loudly, which is the opposite of the silent pass a floor exists
+# to prevent.
+_REGISTRY_ROW = re.compile(r"^\|\s*\*\*`(ISOCENTER_[A-Z0-9_]+)`\*\*", re.M)
 
 
 def _names_read():
@@ -87,10 +106,11 @@ def test_every_environment_variable_the_package_reads_is_documented():
         "otherwise pass vacuously (#331)")
 
     registry = REGISTRY.read_text(encoding="utf-8")
-    missing = sorted(name for name in found if name not in registry)
+    documented = set(_REGISTRY_ROW.findall(registry))
+    missing = sorted(name for name in found if name not in documented)
 
     assert not missing, (
-        "these environment variables are read by the package and appear "
-        f"nowhere in {REGISTRY.relative_to(REPO).as_posix()} (#331):\n    "
+        "these environment variables are read by the package and have no "
+        f"row in {REGISTRY.relative_to(REPO).as_posix()} (#331):\n    "
         + "\n    ".join(f"{name} -- read at {', '.join(found[name])}"
                         for name in missing))

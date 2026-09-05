@@ -388,9 +388,19 @@ def test_an_in_place_mutation_is_lost_by_release_memory(tmp_path):
     `RedactionService._redact_instance_pixels` has two arms: its
     not-writeable arm copies and calls `set_pixel_data()`, and only the
     array that leaves *that* arm is writeable. So the sequence here is
-    the sequence in the code -- replace, save, then mutate in place --
-    and it is the second redaction pass over an instance, not the first,
-    that loses its work.
+    replace, save, then mutate in place -- the only way to hold a
+    writeable array the store believes it has already written.
+
+    **Not the redaction path, measured.** An earlier draft of this
+    docstring said the writeable arm of `_redact_instance_pixels` was
+    this shape on a second pass. It is not, in either direction: on a
+    reloaded instance the arm is never entered, because
+    `get_pixel_data()` returns a read-only frame and the copying arm
+    takes every pass; and when it *is* entered, both callers persist the
+    pixels and then call `discard_pixel_data()` unconditionally in their
+    `finally`, so nothing survives the pass for `release_memory()` to
+    drop. The limit characterized here belongs to any caller that
+    mutates a written array in place, which is what this test is.
 
     The save between is load-bearing and asserted, not assumed:
     `_pixel_array_unwritten` must be **False** at the moment of the
@@ -409,10 +419,12 @@ def test_an_in_place_mutation_is_lost_by_release_memory(tmp_path):
 
         assert not inst.get_pixel_data().flags.writeable, (
             "setup: a file-backed frame is expected to be read-only, "
-            "which is why the writeable arm needs the replacement below")
+            "which is why an in-place mutation needs the replacement "
+            "below")
 
-        # The not-writeable arm of `_redact_instance_pixels`, in two
-        # lines: copy, hand it over, and let a save write it.
+        # The same two moves the not-writeable arm of
+        # `_redact_instance_pixels` makes -- copy, hand it over -- plus
+        # the save that arm's caller does afterwards.
         inst.set_pixel_data(inst.get_pixel_data().copy())
         session.save(sync=True)
 
@@ -423,14 +435,15 @@ def test_an_in_place_mutation_is_lost_by_release_memory(tmp_path):
             "prove nothing")
         assert arr.flags.writeable, (
             "setup: the replacement did not leave a writeable array, so "
-            "the arm being characterized is unreachable from here")
+            "the mutation being characterized is unreachable from here")
         assert not inst._pixel_array_unwritten, (  # pylint: disable=protected-access
             "setup: the save did not clear the divergence flag, so this "
             "would characterize #293's refusal and not the hole next to "
             "it")
 
-        # The writeable arm of `_redact_instance_pixels`: mutate in
-        # place, never call `set_pixel_data`, nothing records it.
+        # In place, never through `set_pixel_data`, so nothing
+        # records it. Any caller can do this; see the docstring for why
+        # `_redact_instance_pixels` is not one of them.
         arr[...] = 0
 
         session.release_memory()

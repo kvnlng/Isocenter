@@ -19,8 +19,13 @@ Three rules, and the reason each stops where it does.
 **Rule 1 -- a citation naming a repository file must be in range.**
 Grammar: `` `path.py:N` `` and `path.py line N`, with an optional `-M`
 end for a range. The path may be wrapped in a **balanced** pair of
-backticks, and the whole citation may sit inside one -- but half a pair
-is malformed prose and is not a citation (#325). A citation naming a file that is *not*
+backticks, and the whole citation may sit inside one (#325). Half a
+pair is not a spelling this rule adds: a *trailing* stray backtick
+stops the citation matching at all, and a *leading* one is simply read
+past, so `` `path.py line 3 `` grades as the bare citation it would be
+without it. Both behaviours predate #325 -- the balanced pair is the
+only thing that changed -- and Rule 2 below is the rule that refuses
+half a pair outright. A citation naming a file that is *not*
 in this repository is **skipped**: the tree cites pydicom's
 `filereader.py`, `filebase.py` and `filewriter.py`, and this guard has no
 business grading a third-party line number it cannot see and cannot fix.
@@ -128,11 +133,13 @@ _EXCLUDED_PREFIXES = ("docs/superpowers/",)
 # Two traps, both measured before this was written. The whole group is
 # optional rather than the opening backtick alone: a `` (?P<tick>`?) ``
 # matching the empty string still counts as "participated" for
-# `(?(tick)...)`, so the conditional never fires and the pattern matches
-# nothing at all. And the closing backtick is conditional rather than an
-# independent `` `? ``, because an independent one accepts *half* a pair
-# -- malformed prose -- and being red on writing nobody meant is how a
-# guard gets deleted rather than fixed.
+# `(?(tick)...)`, so the closing backtick becomes *mandatory* and every
+# bare citation -- the great majority of them -- stops matching, leaving
+# only the fully ticked spelling. And the closing backtick is
+# conditional rather than an independent `` `? ``, because an
+# independent one accepts *half* a pair in Rule 2 -- malformed prose --
+# and being red on writing nobody meant is how a guard gets deleted
+# rather than fixed.
 _CITED_PATH = r"(?P<tick>`)?(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*\.py)(?(tick)`)"
 
 # Rule 1: `path.py:N`, `path.py line N`, either optionally ending `-M`.
