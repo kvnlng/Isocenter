@@ -27,6 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`docs/environment.md` no longer promises a worker count the code abandoned, and the real one is pinned (#333).** One row rewritten; one test added to `tests/test_parallel_contract.py`. No library code changes.
+
+  The `ISOCENTER_MAX_WORKERS` row said the default was `CPU_COUNT * 1.5`. `_resolve_strategy` computes `_env_int("ISOCENTER_MAX_WORKERS") or (os.cpu_count() or 1)` -- one worker per CPU -- and the comment beside that expression records the 1.5x as an *earlier version's* behaviour, dropped on purpose because predictable beats marginally faster when a run is hours long. So the table was not merely stale: it advertised, as the current default, the exact number the code's own comment says was rejected. A user sizing a machine from that row provisioned for half again as many workers as they would ever get.
+
+  **A second, smaller inaccuracy in the same cell.** It said "worker **processes**". `max_workers` also sizes the `ThreadPoolExecutor` on the threads path, which is the *default* on a free-threaded build -- one of the two interpreters the PR gate runs. The row now says "processes or threads, whichever the two force rows below resolve to; the same number sizes both pools."
+
+  **The row both states the value and names what owns it**, which is #310's shape applied to a value rather than to a line number. Citing `_resolve_strategy` alone would destroy the row's only job, since a reader sizing a machine cannot be sent to read `parallel.py`; restating the value alone is what drifted for the life of the row. It also keeps the abandoned 1.5x, as the reason -- a reader who remembers the old number needs to know it is gone rather than merely undocumented.
+
+  **The test is a characterization test and is green on the unfixed code, deliberately, and this entry says so rather than manufacturing a red.** The code was already right; the docs were wrong, and CLAUDE.md rules out grading prose by its wording. `test_the_default_worker_count_is_one_per_cpu` asserts `_resolve_strategy(...).max_workers == (os.cpu_count() or 1)` with the variable unset, and -- on a machine with more than one CPU -- that it is **not** `int(cpu_count * 1.5)`. Verified in the direction that matters by hand-mutating the expression to the 1.5x reading: `Red: 1 failed, 0 passed`, `assert 21 == 14`. The negative half is guarded on `cpus > 1` because the two readings coincide at 0 and 1 CPUs, so an unguarded assertion would be red on a one-CPU runner while the code was right.
+
+  **Considered and rejected: extending `tests/test_documented_env_vars.py` to grade defaults.** That file grades presence and its docstring already argues why it grades only the direction it can be sure of; comparing prose against an expression is undecidable for most rows (`ISOCENTER_MAX_TASKS_PER_CHILD` -> *Unlimited*), and a check that works for one row and silently skips the rest is the silent-skip pattern that file refuses. **Also rejected: a negative pin** (`assert "1.5" not in <row>`) -- red today and green after, but still a wording pin: it forbids one spelling and would not fire on `1.5x` or `150%`.
+
+  **Flagged and deliberately not fixed here: #335.** `_env_int("ISOCENTER_MAX_WORKERS") or (os.cpu_count() or 1)` reads `ISOCENTER_MAX_WORKERS=0` as absent and falls through to the default in silence. It lives in the very expression this entry documents; it is a behaviour change rather than a prose one, and it is filed.
+
 - **CLAUDE.md now says how to run one mutation by hand, and a test keeps the recipe true (#311).** New subsection at the end of the Commands section, plus `tests/test_mutation_runbook.py`. No library code changes.
 
   `python -m scripts.mutation_probe` was documented; running a single mutation by hand was not, and the obvious way to do it is wrong in two ways the probe is careful about. Both have produced a wrong verdict in this project before, and a wrong verdict is the expensive kind -- it retires a test that was working, or keeps one that was not.

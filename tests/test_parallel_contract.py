@@ -474,3 +474,51 @@ def test_only_the_literal_one_switches_a_flag_on(monkeypatch):
     assert parallel._use_threads(False, None) is False, (
         "and so the processes lever, which is set to the literal 1, is "
         "the one that decides")
+
+
+def test_the_default_worker_count_is_one_per_cpu(monkeypatch):
+    """The number `docs/environment.md`'s default cell is written from (#333).
+
+    **This test is green on the code it was written against, and that is
+    the finding.** The table said the default was `CPU_COUNT * 1.5` for
+    the life of that row. `_resolve_strategy` has never computed that,
+    and the comment beside the expression records the 1.5x as an earlier
+    version's behaviour that was dropped on purpose -- predictable beats
+    marginally faster when a run is hours long. So the defect was
+    entirely in the prose and the fix is entirely in the prose. What was
+    missing was anything holding the number still, which is why this is a
+    characterization test rather than a red one: the convention the two
+    tests above already use for a claim the docs make and the code was
+    already keeping (both #331). Asserting on the wording instead would
+    pin a spelling rather than a behaviour, and forbidding the string
+    "1.5" would not fire on `1.5x` or `150%`.
+
+    Asserted on `_resolve_strategy` rather than through `run_parallel`
+    with a mocked executor, because the claim is about the *number*, not
+    about which pool receives it -- the pool question has its own tests
+    two rows up.
+
+    The negative half is not decoration, and it is guarded rather than
+    unconditional: `os.cpu_count()` and `int(cpu_count * 1.5)` are equal
+    when `cpu_count()` is 0 or 1, so on a one-CPU runner an unguarded
+    negative assertion would be red while the code was right, and a
+    silently-satisfied one would say nothing about the reading it exists
+    to rule out.
+    """
+    monkeypatch.delenv("ISOCENTER_MAX_WORKERS", raising=False)
+
+    strategy = parallel._resolve_strategy(
+        None, 1, None, False, False, False, "", None)
+
+    cpus = os.cpu_count() or 1
+    assert strategy.max_workers == cpus, (
+        "the default worker count is no longer one per CPU, so "
+        "docs/environment.md's default cell has to be rewritten with it "
+        f"-- it is written from this call (#333). Got {strategy.max_workers} "
+        f"for {cpus} CPUs")
+    if cpus > 1:
+        assert strategy.max_workers != int(cpus * 1.5), (
+            "the 1.5x an earlier version used is back; it was abandoned "
+            "on purpose (the comment beside the expression says why) and "
+            "the docs spent the life of that row claiming it was still "
+            "in force (#333)")
