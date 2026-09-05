@@ -37,7 +37,8 @@ import time
 import weakref
 
 from isocenter.persistence import SqliteStore
-from isocenter.persistence_manager import PersistenceManager
+from isocenter.persistence_manager import (PersistenceManager,
+                                           _report_abandoned_saves)
 
 
 def _persistence_workers():
@@ -187,5 +188,72 @@ def test_saves_queued_at_collection_are_reported(tmp_path, caplog):
     # a report of seven saves just as happily as for one -- an assertion
     # about the count that cannot see the count. #316's first draft wrote
     # exactly that.
-    assert any("1 queued save" in m for m in reported), (
+    #
+    # **The phrase runs past the word it pluralises**, for the same
+    # reason the `EXPORT` row's counts are asserted whole in
+    # `tests/test_wfdb_partial_export_is_audited.py`: `"1 queued save"`
+    # is a prefix of `"1 queued saves"`, so it is satisfied whether the
+    # message's ternary reads `'' if pending == 1 else 's'` or the exact
+    # inverse. Carrying on into `that never reached` puts the `s`
+    # position inside the match, so an inverted ternary fails here.
+    assert any("1 queued save that never reached" in m for m in reported), (
         f"the report does not say how many saves were dropped: {reported}")
+
+
+def test_an_abandoned_manager_with_nothing_queued_reports_nothing(caplog):
+    """The report must not be a constant, and must count in the plural.
+
+    `_report_abandoned_saves` is called directly rather than through a
+    dropped manager, and that is what makes this deterministic. The
+    message names no manager, so a test that watched `caplog` while its
+    own manager was collected could be satisfied -- or, worse, failed --
+    by *another* test's abandoned worker reporting into the same window:
+    every worker in the run polls on its own second, and the suite drops
+    managers constantly. Calling the function is the only way to ask
+    about one manager's report.
+
+    **Two claims, and each is the floor under the other.** An empty
+    queue must produce **no** record: a warning saying a session lost
+    `0` saves would fire on every `Session` dropped without `close()`,
+    which is a false claim of data loss on the ordinary abandoned path,
+    and a warning that is always there is one its readers learn to skip
+    -- the same argument `test_a_clean_wfdb_export_writes_no_error_row`
+    makes for the `ERROR` row it is the floor under. And a queue holding
+    two saves must say `2 queued saves`, which is the plural branch of
+    the ternary the test above pins the singular branch of; without it
+    the `else 's'` arm is never executed by anything.
+
+    The shutdown sentinel is in the queue on purpose. It is consumed by
+    the drain and must not be counted: reporting a `None` as a lost save
+    is a false claim about data loss, which is why the function counts
+    rather than reading `qsize()`.
+    """
+    with caplog.at_level(logging.WARNING):
+        _report_abandoned_saves(queue.Queue())
+    assert [r.message for r in caplog.records if "#318" in r.message] == [], (
+        "a manager abandoned with nothing queued reported a loss anyway; "
+        "the warning is a constant rather than a report of something "
+        "that happened, and it claims data loss on every session dropped "
+        "without close() (#318)")
+
+    empty_then_sentinel = queue.Queue()
+    empty_then_sentinel.put(None)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        _report_abandoned_saves(empty_then_sentinel)
+    assert [r.message for r in caplog.records if "#318" in r.message] == [], (
+        "a shutdown sentinel was counted as a lost save: a `None` is the "
+        "stop signal, and reporting it is a false claim of data loss "
+        "(#318)")
+
+    two = queue.Queue()
+    two.put(([], False))
+    two.put(None)
+    two.put(([], False))
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        _report_abandoned_saves(two)
+    reported = [r.message for r in caplog.records if "#318" in r.message]
+    assert any("2 queued saves that never reached" in m for m in reported), (
+        "the report does not count two saves in the plural, so the "
+        f"ternary's else-arm is executed by nothing: {reported}")

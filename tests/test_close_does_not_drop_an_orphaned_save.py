@@ -131,6 +131,47 @@ def test_shutdown_drains_a_queued_save_the_dead_worker_never_took(pm):
     assert pm.queue.unfinished_tasks == 0
 
 
+def test_the_drain_counts_off_a_reaped_orphan_and_a_queued_save_alike(pm):
+    """The arithmetic `_drain_queued_saves(already_held=())` exists for (#319).
+
+    The two tests above take one population each, and each is
+    individually satisfied by a drain that counts off only its own kind.
+    This is the case where both are present at once, which is the whole
+    reason #319 shared one method between `_drain_recoverable_saves` and
+    the worker's post-sentinel arm rather than writing the loop twice.
+
+    **The two owe their `task_done()` for different reasons**, which is
+    what makes a shared count easy to get wrong. A reaped orphan was
+    already `get()`-ed by its dead owner and never counted off; an item
+    still in the deque owes one for the `get_nowait()` the drain itself
+    does. Count either kind twice and the queue raises `ValueError:
+    task_done() called too many times` out of `close()`; miss either and
+    `unfinished_tasks` stays above zero on a manager `save_async` can
+    restart, and the next `flush()` never returns -- #309's hang.
+
+    The stale sentinel is in the middle on purpose: it is consumed and
+    counted off but never written, so a drain that counted rows written
+    rather than items consumed lands one short here and nowhere else.
+    """
+    _make_orphan(pm, Patient("P_ORPHAN", "Orphan^Test"))
+    pm.queue.put(None)
+    pm.queue.put(([Patient("P_QUEUED", "Queued^Test")], False))
+    assert pm.queue.unfinished_tasks == 3
+
+    pm.shutdown()
+
+    assert [p.patient_id for p in pm.store_backend.saved_patients] == [
+        "P_ORPHAN", "P_QUEUED"], (
+        "the drain wrote only one of the two populations it was handed: "
+        "a reaped orphan and an item still in the deque are both saves "
+        "close() is the last chance to write (#314, #319)")
+    assert pm.queue.unfinished_tasks == 0, (
+        "the drain counted off one population and not the other, so "
+        "unfinished_tasks stays above zero on a manager save_async can "
+        "restart and the next flush() never returns -- #309's hang, "
+        "reintroduced by the shared drain (#319)")
+
+
 def test_a_stale_sentinel_does_not_crash_shutdowns_drain(pm):
     """A `None` in the deque is a sentinel, not a payload (#314).
 

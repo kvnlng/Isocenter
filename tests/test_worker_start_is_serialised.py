@@ -67,14 +67,24 @@ class _Gate:
 
     **The target is `pm_module._persistence_worker_loop`, not
     `manager._worker`.** Since #318 the worker is started with a
-    module-level function over a weakref rather than a bound method, so
-    the old comparison would match nothing and every construction --
-    including both racing workers -- would be delegated straight past
-    the gate. The test would then pass while measuring nothing, which is
-    the direction that matters: it would report `_start_worker` as
-    serialised without ever having held two callers at its door. Keying
-    on the module attribute also survives a rename of the loop, because
-    it is the same object `_start_worker` passes.
+    module-level function over a weakref rather than a bound method.
+    `_worker` was *deleted* with that change rather than left behind, so
+    the old spelling does not quietly match nothing -- it raises
+    `AttributeError: 'PersistenceManager' object has no attribute
+    '_worker'` inside the factory, on the thread `_start_worker` is
+    constructing, and both tests here go red. Measured, by putting the
+    old comparison back: `2 failed`.
+
+    That is the benign direction, and it is worth saying which direction
+    it is, because the dangerous one is one small edit away. Had #318
+    kept a `_worker` shim -- or had this keyed on a *name* rather than
+    on the object, `kwargs.get("target").__name__ != "_worker"` -- the
+    comparison would match nothing, every construction including both
+    racing workers would be delegated straight past the gate, and the
+    test would report `_start_worker` as serialised without ever having
+    held two callers at its door. Keying on the module attribute is what
+    rules that out: it is the same object `_start_worker` passes, so it
+    survives a rename of the loop and cannot silently stop matching.
     """
 
     def __init__(self, manager, monkeypatch, parties=2):

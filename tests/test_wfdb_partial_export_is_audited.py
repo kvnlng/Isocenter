@@ -150,10 +150,20 @@ def test_a_swallowed_wfdb_failure_is_recorded_as_an_error_row(
     exports = _rows(session, "EXPORT")
     assert len(exports) == 1, f"expected one EXPORT row, got {exports}"
     export_detail = exports[0][1]
-    assert "1 record" in export_detail and "1 instance" in export_detail, (
-        "the EXPORT row names only what was written, so the whole-run "
-        "question -- 'it says 1, was it 1 of 1 or 1 of 2?' -- still has "
-        f"no answer at the level a reader looks first: {export_detail!r}")
+    # The whole phrase, not `"1 record" in ...` and `"1 instance" in ...`.
+    # Both of those are *prefixes* of their own plurals, so a run with
+    # one written and one failed satisfies them whether the ternaries
+    # read `'record' if n == 1 else 'records'` or the exact inverse --
+    # measured: inverting both ternaries left all four tests in this file
+    # green. This test carries the two singular branches (1 and 1) and
+    # `test_a_clean_wfdb_export_writes_no_error_row` carries the two
+    # plural ones (2 and 0), so between them every branch of the row's
+    # wording is held.
+    assert "wrote 1 record, 1 instance failed." in export_detail, (
+        "the EXPORT row does not name both counts in their singular "
+        "form, so the whole-run question -- 'it says 1, was it 1 of 1 "
+        "or 1 of 2?' -- still has no answer at the level a reader looks "
+        f"first: {export_detail!r}")
 
     text = _report_text(session, tmp_path, "partial.md")
     assert "REVIEW_REQUIRED" in _grade(text), (
@@ -184,7 +194,12 @@ def test_a_clean_wfdb_export_writes_no_error_row(tmp_path):
 
         exports = _rows(session, "EXPORT")
         assert len(exports) == 1, f"expected one EXPORT row, got {exports}"
-        assert "0 instance" in exports[0][1], (
+        # The plural half of the pair argued at the assertion in
+        # `test_a_swallowed_wfdb_failure_is_recorded_as_an_error_row`:
+        # two written and zero failed exercises both `else` branches,
+        # and `"0 instance"` alone would be satisfied by `0 instance`
+        # just as happily as by `0 instances`.
+        assert "wrote 2 records, 0 instances failed." in exports[0][1], (
             "the EXPORT row does not say that nothing failed; a count "
             "that appears only on the bad path cannot be read as zero "
             f"on the good one: {exports[0][1]!r}")
