@@ -603,11 +603,20 @@ def test_a_waveform_with_no_samples_does_not_cost_the_run_its_pass(tmp_path):
     pins that skip as deliberate. So the scope is `STANDARD`: reported,
     not graded.
 
-    **The scope assertion is red before the fix (there is no row); the
-    end-to-end grade assertion is green on both sides, vacuously, for the
-    same reason.** The grade assertion is here to go red the moment
-    someone drifts the scope to `SIGNAL`, which is the only way this can
-    quietly become the thing it was chosen not to be.
+    **The grade is asserted before the scope, and the order is the whole
+    point.** Both assertions are red before the fix (there is no row at
+    all). Afterwards they guard different mutations, and only in this
+    order: on a drift to `SIGNAL` the *grade* is what goes red -- the
+    harm, named as the harm -- because a `SIGNAL` row really does take
+    this run to `REVIEW_REQUIRED` (measured, not assumed). Written the
+    other way round the scope assertion fires first, pytest stops, and
+    the grade assertion is never evaluated on the one mutation its
+    docstring claims it exists for: green vacuously today, and
+    *unreached* on the drift, which is a test that reads as coverage and
+    is not. The scope assertion is still here and still kills something
+    the grade cannot -- a `SIGNAL` row that stops being graded because
+    `GRADED_LOSS_SCOPES` changed underneath it, which would leave the
+    grade green while the scope had drifted.
 
     Two waveform instances, not one: a zero-record export is #191/#332
     territory with grade effects of its own, and the two-instance shape
@@ -655,11 +664,27 @@ def test_a_waveform_with_no_samples_does_not_cost_the_run_its_pass(tmp_path):
 
         rows = _data_loss_rows(session, emptied.sop_instance_uid)
         assert len(rows) == 1, f"expected one DATA_LOSS row, got {rows!r}"
+
+        # The grade first, and the scope second. A drift to `SIGNAL` fails
+        # both, and whichever is written first is the only one pytest
+        # evaluates -- so the harm gets to be the failure message, and the
+        # scope assertion below is left guarding what the grade cannot.
+        report = tmp_path / "report.md"
+        session.generate_report(str(report))
+        text = report.read_text(encoding="utf-8")
+        status = [ln for ln in text.splitlines() if "Validation Status" in ln]
+        assert status, f"no Validation Status line in report:\n{text}"
+        assert "PASS" in status[0], (
+            f"a skipped waveform cost the run its grade: {status[0]!r}. "
+            f"A DATA_LOSS row scoped SIGNAL is in GRADED_LOSS_SCOPES and "
+            f"takes this run to REVIEW_REQUIRED -- which is option 1 "
+            f"(reclassify the skip as a failure) arriving under option "
+            f"3's name")
+
         assert rows[0][1] == LOSS_SCOPE_STANDARD, (
-            f"the row is scoped {rows[0][1]!r}. SIGNAL is in "
-            "GRADED_LOSS_SCOPES and would take this run to "
-            "REVIEW_REQUIRED -- which is option 1 (reclassify the skip "
-            "as a failure) arriving under option 3's name")
+            f"the row is scoped {rows[0][1]!r} and the run still graded "
+            "PASS, so the scope drifted and GRADED_LOSS_SCOPES no longer "
+            "catches it")
 
         # The EXPORT row still says nothing about it, and this states that
         # rather than fixing it: `written` is unchanged and `failed` is 0.
@@ -672,14 +697,6 @@ def test_a_waveform_with_no_samples_does_not_cost_the_run_its_pass(tmp_path):
                    for (d,) in export_rows), (
             f"the EXPORT row's wording changed; it is #332's and this "
             f"fix does not touch it: {export_rows!r}")
-
-        report = tmp_path / "report.md"
-        session.generate_report(str(report))
-        text = report.read_text(encoding="utf-8")
-        status = [ln for ln in text.splitlines() if "Validation Status" in ln]
-        assert status, f"no Validation Status line in report:\n{text}"
-        assert "PASS" in status[0], (
-            f"a skipped waveform cost the run its grade: {status[0]!r}")
     finally:
         session.close()
 
@@ -724,6 +741,49 @@ def test_an_instance_with_no_waveform_sequence_files_nothing(tmp_path):
             "a plain CT instance filed a DATA_LOSS row; the #338 emitter "
             "has been widened to the non-waveform return and every slice "
             "in a mixed series now reports loss")
+    finally:
+        session.close()
+
+
+def test_a_uid_less_instance_files_a_row_keyed_on_its_source_file(tmp_path):
+    """The fallback arm of the row's key, which nothing else reaches (#338).
+
+    `entity_uid` is the locating column of section 3.1 of the compliance
+    report, and this arm is the only thing standing between a UID-less
+    instance and a row headed `UNKNOWN` -- which nobody can look up, and
+    which a second UID-less instance in the same run would duplicate
+    exactly. Every other test here has a UID, so without this the
+    fallback is code with no cover: it could collapse to a constant and
+    the suite would not notice.
+
+    `source_path` and not `file_path`, the same choice `close()`'s
+    warning makes for the same reason (#337): redaction detaches
+    `file_path` and leaves `source_path` true.
+    """
+    import logging
+
+    from isocenter.exporters.wfdb import WfdbExporter
+    from isocenter.session import DicomSession
+
+    patient, study, series, instance = _no_sample_waveform_instance(
+        uid="1.2.3.WILLBECLEARED.SOP")
+    instance.sop_instance_uid = None
+    instance.source_path = str(tmp_path / "no-uid.dcm")
+
+    session = DicomSession(persistence_file=str(tmp_path / "nouid.db"))
+    try:
+        result = WfdbExporter()._write_instance(
+            str(tmp_path / "out"), patient, study, series, instance,
+            logging.getLogger("isocenter.wfdb_no_uid_test"), {},
+            store_backend=session.store_backend)
+
+        assert result is None
+        assert _data_loss_rows(session, "UNKNOWN") == [], (
+            "the row was keyed UNKNOWN while the instance carried a source "
+            "path; section 3.1 now names something nobody can look up")
+        rows = _data_loss_rows(session, instance.source_path)
+        assert len(rows) == 1, (
+            f"expected the row to be keyed on the source file, got {rows!r}")
     finally:
         session.close()
 

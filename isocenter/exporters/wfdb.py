@@ -503,7 +503,18 @@ class WfdbExporter(Exporter):
             # This row makes the loss findable; it does not make the
             # `EXPORT` line sum. That would need a third counter, which
             # #338 rules out.
-            uid = instance.sop_instance_uid or "UNKNOWN"
+            # `entity_uid` is the locating column of the compliance
+            # report's section 3.1 table, so it chains the way
+            # `_report_export_losses` chains its own `DATA_LOSS` rows
+            # (`r.sop_instance_uid or r.output_path`) rather than
+            # collapsing straight to `"UNKNOWN"` like the `except` arm
+            # above -- that arm falls back on a worker result that may
+            # carry nothing at all, and this one has an instance in hand.
+            # A row keyed `UNKNOWN` is a row nobody can look up, and a
+            # second UID-less instance in the same run would file a
+            # second one indistinguishable from the first.
+            uid = (instance.sop_instance_uid or instance.source_path
+                   or "UNKNOWN")
             cause = ("nothing is held for this instance" if samples is None
                      else "a loader produced an empty array")
             # Single line and no `|`: this renders straight into a

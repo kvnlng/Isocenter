@@ -350,17 +350,26 @@ def test_the_truncation_still_counts_when_the_first_three_are_unidentified(
         tmp_path, capsys):
     """"and N more" is arithmetic over `unsaved`, not over what was named.
 
-    Four UID-less instances: three are rendered through the fallback and
-    the fourth is summarised. Before #337 the join raised on the first of
-    them and there was no message to truncate, so this is red for the
-    same reason as the first test -- and it stays green afterwards only
-    while the count keeps coming from `len(unsaved)` rather than from the
-    length of the rendered list.
+    Four instances with **neither** a UID nor a `source_path`, which is
+    what the name says and what the last arm of the chain is for: three
+    are rendered as `<unidentified instance N>` and the fourth is
+    summarised. Giving them source paths instead would truncate just as
+    correctly while exercising the *middle* arm, so the terminal arm
+    would never meet the truncation at all -- and it is the arm most
+    likely to be dropped by someone who reads the chain as ending at
+    `source_path`.
+
+    Before #337 the join raised on the first of them and there was no
+    message to truncate, so this is red for the same reason as the first
+    test -- and it stays green afterwards only while the count keeps
+    coming from `len(unsaved)` rather than from the length of the
+    rendered list.
     """
     session = _session(tmp_path, name="fourbare", count=4)
-    for n, inst in enumerate(_instances(session)):
+    for inst in _instances(session):
         inst.sop_instance_uid = None
-        inst.source_path = f"/tmp/bare-{n}.dcm"
+        inst.source_path = None
+        inst.file_path = None
         inst.mark_modified()
 
     capsys.readouterr()
@@ -368,6 +377,13 @@ def test_the_truncation_still_counts_when_the_first_three_are_unidentified(
     out = capsys.readouterr().out
 
     assert "4 instance(s)" in out
-    assert "and 1 more" in out, (
-        "four unidentified instances did not truncate to three named "
-        "and one counted")
+    # One string, not three `in` checks: the point is that exactly three
+    # are named, in order, through the terminal arm, and that the fourth
+    # is counted rather than named. `out` carries the message twice (the
+    # logger's console handler and the `print`), so counting occurrences
+    # would measure the channel rather than the rendering.
+    assert ("Affected: <unidentified instance 1>, <unidentified instance 2>, "
+            "<unidentified instance 3>, and 1 more." in out), (
+        f"four instances with neither a UID nor a source path did not "
+        f"render as three through the terminal arm plus one counted: "
+        f"{out!r}")
