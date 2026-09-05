@@ -679,7 +679,7 @@ def test_a_forced_thread_request_is_reported_when_worker_recycling_overrides_it(
         "lost to a value passed somewhere else")
 
 
-def test_no_warning_when_recycling_was_not_contradicted(caplog):
+def test_no_warning_when_recycling_was_not_contradicted(caplog, monkeypatch):
     """The silence half, and it is the ordinary export path.
 
     `session.export()` calls exactly this -- `force_threads=False`, no
@@ -687,7 +687,16 @@ def test_no_warning_when_recycling_was_not_contradicted(caplog):
     Nobody asked for threads, so nothing was overridden, and a warning
     on every export would be noise that teaches readers to filter this
     logger.
+
+    The `delenv` is not decoration. `_use_threads` reads
+    `ISOCENTER_FORCE_THREADS` from the ambient environment, so without
+    it this test asserts silence about whatever the operator happens to
+    have exported -- and would go green inside a full pytest run purely
+    because the sibling test's `setenv` is undone after it. A test whose
+    subject is "no warning" must own every input that could produce one.
     """
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+
     with caplog.at_level(logging.WARNING):
         assert parallel._use_threads(False, 25) is False
 
@@ -719,6 +728,11 @@ def test_export_runs_in_processes_by_decision(monkeypatch):
     `tests/test_redaction_identity.py`,
     `tests/test_redaction_attestation.py`,
     `tests/test_redaction_multizone.py` and this file.
+
+    `tests/profile_memory.py` is listed for its assumption, not for its
+    protection: it is neither collected nor importable, and its own
+    assertion drifted to `10` against the shipped `25` without anything
+    noticing (#347). The other eight run on every push.
     """
     from types import SimpleNamespace
 
@@ -771,7 +785,7 @@ def test_a_zero_tasks_per_child_is_reported_rather_than_raising_in_the_pool(
     assert any("ISOCENTER_MAX_TASKS_PER_CHILD" in record.message
                for record in caplog.records), (
         "the value was rejected without naming the variable")
-    assert any("0" in record.message for record in caplog.records), (
+    assert any("set to 0" in record.message for record in caplog.records), (
         "the warning does not quote the value that was rejected")
 
 

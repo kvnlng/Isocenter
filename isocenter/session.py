@@ -3570,6 +3570,12 @@ class DicomSession:
         means revisiting eight test files and `tests/profile_memory.py`,
         which assume this subprocess boundary;
         `test_export_runs_in_processes_by_decision` names them.
+        `tests/profile_memory.py` is the weakest of the nine and is
+        named anyway: pytest does not collect it (the filename matches
+        neither default pattern) and it cannot import (`psutil` is in no
+        extra), so its own `maxtasksperchild` assertion has drifted to
+        `10` unnoticed -- #347. It still records the assumption; it just
+        does not currently defend it.
 
         `store_backend` is passed explicitly because this is a static
         method and the workers may be in subprocesses: the handle cannot

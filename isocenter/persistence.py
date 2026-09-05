@@ -2017,13 +2017,19 @@ class SqliteStore:
         reloads as text (#154).
 
         Arity comes back too, since #328. `value_count` is read off the
-        first row of an element exactly as `value_rep` is: `0` is an
-        empty container, `n >= 1` is a list even at `n == 1`, and NULL
+        first row of an element exactly as `value_rep` is: `0` over the
+        placeholder row is an empty container, `n >= 1` is a list even
+        at `n == 1`, and NULL
         is either a scalar or a row written before the column existed --
         both of which take the old rule, "more than one atom is a list".
-        The column is never used to truncate or pad: the rows decide the
-        values, and a stored count that disagrees with them is a corrupt
-        row, not a licence to drop values that are sitting in the table.
+        The column is never used to truncate or pad, in either
+        direction: the rows decide the values, and a stored count that
+        disagrees with them is a corrupt row, not a licence to drop
+        values that are sitting in the table. That holds at `0` too --
+        the empty container is recognised by the placeholder row's shape
+        (one atom, NULL text) and not by the count alone, so a `0`
+        written over real atoms hands them back rather than swallowing
+        them.
 
         An atom stored as a NULL `value_text` comes back as `None`, not
         as the text `None` (#339). The export then reports it as data
@@ -2124,7 +2130,15 @@ class SqliteStore:
             # atom (#339) both carry a NULL `value_text` and differ only
             # here, so a reader that looked at the text first would
             # reload `[]` as `[None]`.
-            if count == 0:
+            #
+            # `values == [None]` is the placeholder row's exact shape --
+            # one atom, NULL text -- and no writer produces `0` over any
+            # other. Checking it costs one comparison and buys the
+            # no-truncation rule without an exception: a hand-edited
+            # store carrying `0` over three real atoms hands back the
+            # three, where a bare `count == 0` silently returned `[]`
+            # and dropped values that were sitting in the table.
+            if count == 0 and values == [None]:
                 value = []
             elif count is None:
                 # No recorded arity: the pre-#328 rule, which is what a

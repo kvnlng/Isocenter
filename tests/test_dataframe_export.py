@@ -719,9 +719,14 @@ def test_the_page_size_default_is_not_a_public_knob():
     a user bounding memory on a large export got 500-row pages and no
     error.
 
-    The name is private now, so it stops rendering in the API reference
-    and stops reading as configuration; `page_size=` is the one spelling
-    for the behaviour. Pre-1.0, the public name is **deleted rather than
+    The name is private now, so it stops reading as configuration to a
+    reader of the class, an autocompleting editor and `dir()`;
+    `page_size=` is the one spelling for the behaviour. It is *not*
+    about the rendered API reference: measured on the published page,
+    no class attribute renders there at all -- 33 member anchors, all
+    methods and dunders -- and after the rename the private name still
+    appears in the shown source and as the signature's default, which
+    is correct. Pre-1.0, the public name is **deleted rather than
     aliased**, so this asserts its absence: re-adding
     `FLATTENED_PAGE_SIZE = _FLATTENED_PAGE_SIZE` for compatibility would
     restore exactly the two spellings that caused this.

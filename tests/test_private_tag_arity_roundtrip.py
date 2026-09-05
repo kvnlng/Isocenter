@@ -243,23 +243,41 @@ def test_a_stored_count_that_disagrees_with_the_rows_does_not_truncate():
 
     A hand-edited or corrupt store can hold a count that disagrees with
     the number of rows. The read path trusts the rows for the values and
-    uses the count only to decide list-versus-scalar and the empty case:
-    it does not truncate to the count and does not pad. Truncating would
-    make a wrong number in one column into a silent loss of values that
-    are sitting right there in the table.
+    uses the count only to decide list-versus-scalar: it does not
+    truncate to the count and does not pad. Truncating would make a
+    wrong number in one column into a silent loss of values that are
+    sitting right there in the table.
+
+    Both directions are asserted, because they fail differently. An
+    over-count is harmless under any implementation -- there is nothing
+    to slice away. An **under**-count is the dangerous one, and `0` is
+    the extreme of it: a reader that took `count == 0` as "empty
+    container" on its own returned `[]` over two real atoms and dropped
+    them. The empty container is recognised by its placeholder row's
+    shape instead -- one atom, NULL text -- so `0` written over real
+    values hands the values back.
     """
     store = SqliteStore(":memory:")
     try:
-        store.save_vertical_attributes("I328T", {("0029", "1042"): ["A", "B"]})
+        store.save_vertical_attributes(
+            "I328T", {("0029", "1042"): ["A", "B"],
+                      ("0029", "1043"): ["C", "D"]})
         with store._get_connection() as conn:
             conn.execute(
                 "UPDATE instance_attributes SET value_count = 5"
-                " WHERE instance_uid = 'I328T'")
+                " WHERE instance_uid = 'I328T' AND element_id = '1042'")
+            conn.execute(
+                "UPDATE instance_attributes SET value_count = 0"
+                " WHERE instance_uid = 'I328T' AND element_id = '1043'")
         loaded = store.load_vertical_attributes("I328T")
     finally:
         store.stop()
 
     assert loaded[("0029", "1042")] == ["A", "B"]
+    assert loaded[("0029", "1043")] == ["C", "D"], (
+        "a count of 0 over two real atoms reloaded as %r; the rows are "
+        "the values, and a wrong number in one column must not delete "
+        "them" % (loaded[("0029", "1043")],))
 
 
 def test_a_store_created_before_the_arity_column_still_opens(tmp_path):
