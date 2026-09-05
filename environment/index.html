@@ -1242,8 +1242,8 @@
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_MAX_WORKERS</code></strong></td>
-<td style="text-align: left;"><em>Auto</em></td>
-<td style="text-align: left;">Override the number of parallel worker processes. Default is <code>CPU_COUNT * 1.5</code>.</td>
+<td style="text-align: left;"><code>os.cpu_count()</code></td>
+<td style="text-align: left;">Override how many workers a parallel run uses — <strong>processes or threads</strong>, whichever the two force rows below resolve to; the same number sizes both pools. The default is <strong>one per CPU</strong>, and <code>1</code> when <code>os.cpu_count()</code> cannot answer. <code>_resolve_strategy</code> in <code>parallel.py</code> owns that expression and is the only place it is computed. An earlier version used <code>CPU_COUNT * 1.5</code> and it was <strong>deliberately abandoned</strong> — predictable beats marginally faster when a run is hours long — so if you remember the 1.5x, it is gone rather than merely undocumented. This row stated it for its whole life with nothing behind it (#333); <code>tests/test_parallel_contract.py</code> now holds the number still.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_CHUNKSIZE</code></strong></td>
