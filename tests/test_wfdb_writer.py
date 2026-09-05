@@ -477,3 +477,303 @@ def test_write_instance_with_no_sample_data_is_skipped_not_crashed(tmp_path, cap
     assert result is None, f"expected None (skipped), got {result!r}"
     assert any("no sample data" in r.message for r in caplog.records), (
         "expected a warning explaining the instance was skipped")
+
+
+# --- #338: a waveform instance with no samples ------------------------------
+#
+# `_write_instance` returns `None` for two reasons the export loop cannot
+# tell apart. One is an ordinary non-waveform instance -- a CT slice in a
+# mixed series -- which must never be counted as anything. The other is an
+# instance that *declares* a Waveform Sequence and produces no samples: a
+# record the run was asked for and did not write, which `written` does not
+# hold, `failed` does not count, and the `EXPORT` row therefore does not
+# mention. It was invisible in every channel except a log line.
+#
+# **`DATA_LOSS`, scoped `STANDARD`.** The exporter already writes
+# `DATA_LOSS` rows for dropped multiplex groups and `generate_report`
+# already renders them, so this is existing vocabulary rather than a new
+# category. The *scope* is the real decision: `LOSS_SCOPE_SIGNAL` is in
+# `GRADED_LOSS_SCOPES` and takes `validation_status` to `REVIEW_REQUIRED`,
+# which would flip exactly the previously-clean runs #338 says must not
+# flip. `STANDARD` reports without grading.
+#
+# **What this does not fix, deliberately:** the `EXPORT` row still reads
+# "wrote N records, 0 instances failed" with N unchanged. The row makes the
+# loss findable; it does not make that line sum. Only a third counter
+# would, and #338 rules that out.
+
+
+def _no_sample_waveform_instance(uid="1.2.3.NOSAMPLES.SOP"):
+    """A graph whose one instance declares a Waveform Sequence and holds none.
+
+    Same construction as
+    `test_write_instance_with_no_sample_data_is_skipped_not_crashed`
+    above -- `build_ecg_dataset`, then the sequence item alone, with
+    `waveform_array` left unset and no loader attached.
+    """
+    import datetime
+
+    from isocenter.entities import DicomItem, Instance, Patient, Series, Study
+    from isocenter.io_handlers import populate_attrs
+    from scripts.generate_waveform_test_data import build_ecg_dataset
+
+    ds = build_ecg_dataset(channels=[("MDC_ECG_LEAD_I", "Lead I")],
+                           patient_id="NOSAMP01", num_samples=50)
+    patient = Patient("NOSAMP01", "ANON_NOSAMP01")
+    study = Study("1.2.3.NOSAMPLES.STUDY", datetime.date(2026, 1, 1))
+    series = Series("1.2.3.NOSAMPLES.SERIES", "ECG", 1)
+    instance = Instance(uid, ds.SOPClassUID, 1)
+    wf_item = DicomItem()
+    populate_attrs(ds.WaveformSequence[0], wf_item)
+    instance.add_sequence_item("5400,0100", wf_item)
+    assert instance.get_waveform_data() is None
+    return patient, study, series, instance
+
+
+def _data_loss_rows(session, entity_uid):
+    """`DATA_LOSS` rows for one UID, read through the audit barrier.
+
+    `flush_audit_queue()` first, always: `log_audit` enqueues and the
+    writer thread drains on its own schedule, so a bare SELECT answers
+    `[]` for a store that holds the row -- and `[]` is also the unfixed
+    answer, which would make every red here indistinguishable from a
+    timing artefact. Same helper shape as
+    `tests/test_wfdb_partial_export_is_audited.py`.
+    """
+    import sqlite3
+
+    session.store_backend.flush_audit_queue()
+    with sqlite3.connect(session.persistence_file) as conn:
+        return conn.execute(
+            "SELECT details, loss_scope FROM audit_log "
+            "WHERE action_type='DATA_LOSS' AND entity_uid=?",
+            (entity_uid,)).fetchall()
+
+
+def test_a_waveform_with_no_samples_files_a_data_loss_row(tmp_path):
+    """The record the run was asked for and did not write is findable (#338).
+
+    `written` does not hold it, `failed` does not count it, and the
+    `EXPORT` row's "0 instances failed" is true -- it did not fail, it
+    was skipped. Before this, `logger.warning` was the only trace, and a
+    log line is not a channel the compliance report can read.
+    """
+    import logging
+
+    from isocenter.exporters.wfdb import WfdbExporter
+    from isocenter.session import DicomSession
+
+    patient, study, series, instance = _no_sample_waveform_instance()
+    session = DicomSession(persistence_file=str(tmp_path / "nosamples.db"))
+    try:
+        result = WfdbExporter()._write_instance(
+            str(tmp_path / "out"), patient, study, series, instance,
+            logging.getLogger("isocenter.wfdb_no_samples_row_test"), {},
+            store_backend=session.store_backend)
+
+        assert result is None, "the skip itself must not change"
+        rows = _data_loss_rows(session, instance.sop_instance_uid)
+        assert len(rows) == 1, (
+            f"expected exactly one DATA_LOSS row for this instance, got "
+            f"{rows!r}")
+        details = rows[0][0]
+        assert "Waveform Sequence" in details, (
+            "the row does not say what was declared, so a reader cannot "
+            "tell it from an instance that never claimed to hold a "
+            "waveform")
+        assert "nothing is held for this instance" in details, (
+            f"this instance arrives through the `samples is None` arm "
+            f"and the row reports the other arm's cause: {details!r}")
+        assert "|" not in details, (
+            "the detail renders into a markdown table cell in the "
+            "compliance report; a pipe splits the row")
+        assert "\n" not in details
+    finally:
+        session.close()
+
+
+def test_a_waveform_with_no_samples_does_not_cost_the_run_its_pass(tmp_path):
+    """The grading call, pinned (#338).
+
+    `LOSS_SCOPE_SIGNAL` is in `GRADED_LOSS_SCOPES` and takes
+    `validation_status` to `REVIEW_REQUIRED`. A `SIGNAL`-scoped row here
+    would be "reclassify the skip as a failure" wearing `DATA_LOSS`'s
+    clothes -- it flips exactly the runs #338 says must not flip, and
+    `test_write_instance_with_no_sample_data_is_skipped_not_crashed`
+    pins that skip as deliberate. So the scope is `STANDARD`: reported,
+    not graded.
+
+    **The scope assertion is red before the fix (there is no row); the
+    end-to-end grade assertion is green on both sides, vacuously, for the
+    same reason.** The grade assertion is here to go red the moment
+    someone drifts the scope to `SIGNAL`, which is the only way this can
+    quietly become the thing it was chosen not to be.
+
+    Two waveform instances, not one: a zero-record export is #191/#332
+    territory with grade effects of its own, and the two-instance shape
+    is also what shows the arithmetic this fix does *not* close -- the
+    surviving record is written, nothing failed, and the `EXPORT` line
+    still does not account for the third thing that happened.
+    """
+    import sqlite3
+
+    from isocenter.io_handlers import LOSS_SCOPE_STANDARD
+    from isocenter.session import DicomSession
+    from scripts.generate_waveform_test_data import write_fixture
+
+    src = tmp_path / "src"
+    src.mkdir()
+    write_fixture(str(src / "a.dcm"), num_samples=64, patient_id="WF_KEPT",
+                  patient_name="Kept^Test")
+    write_fixture(str(src / "b.dcm"), num_samples=64, patient_id="WF_EMPTY",
+                  patient_name="Empty^Test")
+
+    session = DicomSession(persistence_file=str(tmp_path / "pass.db"))
+    try:
+        session.ingest(str(src))
+        # An un-anonymized session grades REVIEW_REQUIRED for reasons that
+        # have nothing to do with this exporter, and the PASS floor would
+        # then pass while measuring nothing -- the trap
+        # `tests/test_wfdb_partial_export_is_audited.py` records.
+        session.anonymize()
+
+        instances = [i for p in session.store.patients for st in p.studies
+                     for se in st.series for i in se.instances]
+        assert len(instances) == 2
+        emptied = instances[0]
+        emptied.waveform_array = None
+        emptied._waveform_loader = None
+        assert emptied.get_waveform_data() is None, (
+            "the instance still has samples, so this test is measuring "
+            "an ordinary export")
+
+        written = session.export(str(tmp_path / "out"), format="wfdb",
+                                 show_progress=False)
+
+        assert len(written) == 1, (
+            f"the surviving waveform must still be written; got {written!r}")
+
+        rows = _data_loss_rows(session, emptied.sop_instance_uid)
+        assert len(rows) == 1, f"expected one DATA_LOSS row, got {rows!r}"
+        assert rows[0][1] == LOSS_SCOPE_STANDARD, (
+            f"the row is scoped {rows[0][1]!r}. SIGNAL is in "
+            "GRADED_LOSS_SCOPES and would take this run to "
+            "REVIEW_REQUIRED -- which is option 1 (reclassify the skip "
+            "as a failure) arriving under option 3's name")
+
+        # The EXPORT row still says nothing about it, and this states that
+        # rather than fixing it: `written` is unchanged and `failed` is 0.
+        session.store_backend.flush_audit_queue()
+        with sqlite3.connect(session.persistence_file) as conn:
+            export_rows = conn.execute(
+                "SELECT details FROM audit_log WHERE action_type='EXPORT'"
+            ).fetchall()
+        assert any("wrote 1 record" in d and "0 instances failed" in d
+                   for (d,) in export_rows), (
+            f"the EXPORT row's wording changed; it is #332's and this "
+            f"fix does not touch it: {export_rows!r}")
+
+        report = tmp_path / "report.md"
+        session.generate_report(str(report))
+        text = report.read_text(encoding="utf-8")
+        status = [ln for ln in text.splitlines() if "Validation Status" in ln]
+        assert status, f"no Validation Status line in report:\n{text}"
+        assert "PASS" in status[0], (
+            f"a skipped waveform cost the run its grade: {status[0]!r}")
+    finally:
+        session.close()
+
+
+def test_an_instance_with_no_waveform_sequence_files_nothing(tmp_path):
+    """The guard the fix must not widen (#338).
+
+    `_write_instance` returns `None` at two sites. This is the other one:
+    an instance that declares no Waveform Sequence at all -- a CT slice
+    in a mixed series -- which is not loss and was never asked to be a
+    record.
+
+    Green today and it must stay green. Without it, the obvious wrong
+    implementation (emit on every `None` return) passes the two tests
+    above and files a `DATA_LOSS` row per CT slice, burying the real
+    ones. Passed a **live** `store_backend` on purpose: with `None` it
+    would take the no-store branch and stay green against exactly that
+    implementation.
+    """
+    import datetime
+    import logging
+
+    from isocenter.entities import Instance, Patient, Series, Study
+    from isocenter.exporters.wfdb import WfdbExporter
+    from isocenter.session import DicomSession
+
+    patient = Patient("CT01", "ANON_CT01")
+    study = Study("1.2.3.CT.STUDY", datetime.date(2026, 1, 1))
+    series = Series("1.2.3.CT.SERIES", "CT", 1)
+    instance = Instance("1.2.3.CT.SOP", "1.2.840.10008.5.1.4.1.1.2", 1)
+    assert instance.sequences.get("5400,0100") is None
+
+    session = DicomSession(persistence_file=str(tmp_path / "ct.db"))
+    try:
+        result = WfdbExporter()._write_instance(
+            str(tmp_path / "out"), patient, study, series, instance,
+            logging.getLogger("isocenter.wfdb_plain_ct_test"), {},
+            store_backend=session.store_backend)
+
+        assert result is None
+        assert _data_loss_rows(session, instance.sop_instance_uid) == [], (
+            "a plain CT instance filed a DATA_LOSS row; the #338 emitter "
+            "has been widened to the non-waveform return and every slice "
+            "in a mixed series now reports loss")
+    finally:
+        session.close()
+
+
+def test_an_empty_sample_array_is_reported_as_the_other_cause(tmp_path):
+    """The `samples.size == 0` arm, which no other test reaches (#338).
+
+    `get_waveform_data()` returns `None` when nothing was ever ingested
+    and an empty array when a loader ran and produced no samples. Both
+    are the same loss and carry the same `STANDARD` scope; they differ
+    only in what this frame can honestly say about the cause, and the
+    detail says only that. Without this test the two-branch `cause`
+    expression is half-covered and the wrong branch could be reached by
+    either input with nothing noticing -- the tests above all arrive
+    through `samples is None`.
+
+    Deliberately **not** a claim about the source. From the exporter's
+    frame "nothing was ingested" and "the source carried a Waveform
+    Sequence with no samples" are indistinguishable, so neither arm
+    asserts which happened.
+    """
+    import logging
+
+    from isocenter.exporters.wfdb import WfdbExporter
+    from isocenter.io_handlers import LOSS_SCOPE_STANDARD
+    from isocenter.session import DicomSession
+
+    patient, study, series, instance = _no_sample_waveform_instance(
+        uid="1.2.3.EMPTYARRAY.SOP")
+    instance.waveform_array = np.array([], dtype=np.int16)
+    samples = instance.get_waveform_data()
+    assert samples is not None and samples.size == 0, (
+        "this test is meant to arrive through the empty-array arm and is "
+        "arriving through the None one")
+
+    session = DicomSession(persistence_file=str(tmp_path / "emptyarr.db"))
+    try:
+        result = WfdbExporter()._write_instance(
+            str(tmp_path / "out"), patient, study, series, instance,
+            logging.getLogger("isocenter.wfdb_empty_array_test"), {},
+            store_backend=session.store_backend)
+
+        assert result is None
+        rows = _data_loss_rows(session, instance.sop_instance_uid)
+        assert len(rows) == 1, f"expected one DATA_LOSS row, got {rows!r}"
+        details, scope = rows[0]
+        assert "empty array" in details, (
+            f"the empty-array arm reported the other arm's cause: "
+            f"{details!r}")
+        assert scope == LOSS_SCOPE_STANDARD, (
+            f"the two arms must carry one scope; got {scope!r}")
+    finally:
+        session.close()
