@@ -24,9 +24,12 @@ Two things this file deliberately pins rather than fixes:
   owner's call. `test_a_numeric_private_value_reloads_as_a_string`
   states the current shape so a later fix has to change a test on
   purpose.
-* **The table stores no arity either.** A one-element list saves as a
-  single row and reloads as a scalar, for the same reason. Same root as
-  #154; not invented around here.
+* **The table stored no arity either**, so a one-element list saved as a
+  single row and reloaded as a scalar, and an empty one reloaded as an
+  absent tag. That half is closed: `value_count` records the container's
+  length (#328), and `test_a_private_tag_holding_an_empty_list_survives`
+  below is the expectation this file used to pin the other way round.
+  The type half above is still open.
 """
 import contextlib
 import glob
@@ -512,15 +515,21 @@ def test_a_row_left_behind_by_an_older_version_is_loaded_onto_the_graph(tmp_path
         "something else did")
 
 
-def test_a_private_tag_holding_an_empty_list_does_not_survive(tmp_path):
-    """The one exception to "private tags survive a reload".
+def test_a_private_tag_holding_an_empty_list_survives(tmp_path):
+    """This test's polarity is reversed, and #328 is why.
 
-    An empty value has no atom to write, so it produces no rows, and the
-    tier records no arity to tell "no rows" from "no such tag" apart --
-    the same gap that turns a saved one-element list back into a scalar.
-    It did not survive before this fix either, along with everything else
-    on the tier. Stated here so a reader auditing their vendor block after
-    an upgrade finds it written down rather than discovering it.
+    It used to pin the opposite -- an empty private list did NOT survive
+    a reload -- and that was the honest reading of the tier as it stood:
+    an empty value has no atom to write, so it produced no rows, and
+    nothing recorded the arity that would tell "no rows" from "no such
+    tag" apart. The value was gone and the export omitted the tag with
+    no `DATA_LOSS` row saying so, while the same graph exported without
+    a reload wrote a present, zero-length element.
+
+    `value_count` closes it (#328): an empty container writes one
+    placeholder row carrying a `0`, and the read side rebuilds the `[]`.
+    The old expectation is not merely relaxed here, it is inverted, so
+    it is rewritten with its reason rather than deleted.
     """
     db = str(tmp_path / "empty.db")
     SqliteStore(db).save_all([_hand_built_patient(
@@ -528,7 +537,7 @@ def test_a_private_tag_holding_an_empty_list_does_not_survive(tmp_path):
 
     loaded = SqliteStore(db).load_all()[0].studies[0].series[0].instances[0]
     assert loaded.attributes.get("0009,1001") == "kept"
-    assert "0009,1006" not in loaded.attributes
+    assert loaded.attributes.get("0009,1006") == []
 
 
 def test_applying_a_loaded_private_tag_is_not_an_edit():

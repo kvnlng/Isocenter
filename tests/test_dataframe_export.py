@@ -650,3 +650,90 @@ def test_a_page_size_below_one_is_rejected():
             store.get_flattened_instances(page_size=0)
     finally:
         store.stop()
+
+
+@pytest.mark.parametrize("page_size, before", [
+    (2.5, "sqlite3.IntegrityError: datatype mismatch, on the first next()"),
+    (None, "TypeError from the < comparison"),
+    ("5", "TypeError from the < comparison"),
+    (1e9, "no error at all until sqlite refused the float"),
+])
+def test_a_non_integer_page_size_is_rejected_as_a_bad_argument(
+        page_size, before):
+    """A bad argument reads as a bad argument, and does so at the call (#202).
+
+    The guard was `if page_size < 1`, which admits anything that compares
+    to an int and lets everything else through. `None` and `"5"` raised
+    `TypeError: '<' not supported between instances of ...` -- from the
+    guard, so at least at the call. `2.5` was worse: it *passed* the
+    guard, travelled into `LIMIT ?`, and raised
+    `sqlite3.IntegrityError: datatype mismatch` on the first `next()`, a
+    database error out of a public method for what is a caller's typo,
+    and one page of rows later than the call that caused it.
+
+    The float case is why this test asserts at the call rather than
+    around the iteration: the method is a plain function wrapping a
+    generator precisely so its checks fire when it is called, and a
+    check that only fires on iteration gives that up.
+    """
+    store = _store_with_instances(":memory:")
+    try:
+        with pytest.raises(ValueError):
+            store.get_flattened_instances(page_size=page_size)
+    finally:
+        store.stop()
+
+
+def test_a_boolean_page_size_is_refused_before_it_is_read_as_an_int():
+    """`bool` is refused before `int`, and the ordering is the mechanism.
+
+    `isinstance(True, int)` is `True` and `True < 1` is `False`, so
+    `page_size=True` sailed through the old guard *and* would sail
+    through a naive `isinstance(page_size, int)` one -- and then page the
+    walk one row at a time, which is a correctness-preserving disaster
+    rather than an error. This repo refuses `bool` before `int` twice
+    already for the same subclass reason, in `_fallback_encoding`'s
+    `bool` arm and in `_value_fits_vr`'s ordering (#283), both with
+    comments saying the ordering is what does the work.
+    """
+    store = _store_with_instances(":memory:")
+    try:
+        with pytest.raises(ValueError):
+            store.get_flattened_instances(page_size=True)
+    finally:
+        store.stop()
+
+
+def test_the_page_size_default_is_not_a_public_knob():
+    """What #202 held still: the constant was renamed, not made real.
+
+    `FLATTENED_PAGE_SIZE` was a public class attribute that
+    `get_flattened_instances` took its default from -- and a default
+    argument is evaluated once, when the `def` runs, so the `500` was
+    baked into `__defaults__` at import and the attribute was never read
+    again. Rebinding it did nothing: measured, a default-arg walk over
+    six rows took one connection after setting the attribute to `2`,
+    where honouring it would have taken three. That is two spellings for
+    one behaviour with only one of them working, which is the failure
+    *one spelling per behaviour* exists to prevent, and it was silent --
+    a user bounding memory on a large export got 500-row pages and no
+    error.
+
+    The name is private now, so it stops reading as configuration to a
+    reader of the class, an autocompleting editor and `dir()`;
+    `page_size=` is the one spelling for the behaviour. It is *not*
+    about the rendered API reference: measured on the published page,
+    no class attribute renders there at all -- 33 member anchors, all
+    methods and dunders -- and after the rename the private name still
+    appears in the shown source and as the signature's default, which
+    is correct. Pre-1.0, the public name is **deleted rather than
+    aliased**, so this asserts its absence: re-adding
+    `FLATTENED_PAGE_SIZE = _FLATTENED_PAGE_SIZE` for compatibility would
+    restore exactly the two spellings that caused this.
+    """
+    from isocenter.persistence import SqliteStore
+
+    assert not hasattr(SqliteStore, "FLATTENED_PAGE_SIZE"), (
+        "the public name is back; it advertises a knob that a default "
+        "argument evaluated at import cannot provide (#202)")
+    assert SqliteStore._FLATTENED_PAGE_SIZE == 500

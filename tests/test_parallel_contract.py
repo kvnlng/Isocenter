@@ -440,6 +440,13 @@ def test_a_lever_set_both_ways_runs_in_threads(monkeypatch):
     `multiprocessing.Pool` implements `maxtasksperchild`. That is why
     `session.export()`, which passes `maxtasksperchild=25`, ignores both
     force variables entirely (#185).
+
+    The second assertion below now also **emits a warning**, since #185:
+    `ISOCENTER_FORCE_THREADS` is set and recycling was asked for, which
+    is exactly the contradiction that arm announces. Nothing here reads
+    caplog, so no assertion changes -- but the two tests interact
+    through the environment, and the caplog tests for that warning set
+    their own rather than inheriting this one's.
     """
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
     monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
@@ -612,3 +619,224 @@ def test_an_explicit_zero_worker_count_is_not_an_environment_typo(monkeypatch):
         "an explicit max_workers=0 was rewritten to the default; the "
         "environment guard has escaped its `if max_workers is None` "
         "arm and is now swallowing a caller's own bug")
+
+
+# --------------------------------------------------------------------
+# Worker recycling versus a forced thread request (#185)
+# --------------------------------------------------------------------
+#
+# `session.export()` passes `maxtasksperchild=25`, and worker recycling
+# rules threads out however the rest of the environment is set -- only
+# `multiprocessing.Pool` implements it. So the export path runs in
+# processes on every interpreter, including a free-threaded build, and
+# `ISOCENTER_FORCE_THREADS` cannot change that. That is a decision (the
+# recycling reclaims memory leaked by the imaging C libraries, and a
+# thread pool has no process to recycle), and until now it was a silent
+# one: the request was dropped with nothing anywhere saying so.
+
+
+def test_a_forced_thread_request_is_reported_when_worker_recycling_overrides_it(
+        monkeypatch, caplog):
+    """The override is announced, once, where the precedence lives (#185).
+
+    Both levers reach the same arm and both are asserted: the
+    environment variable, which is what `docs/environment.md` documents
+    as the way to force threads, and the `force_threads=True` argument,
+    which is reachable only from user code -- the one in-library
+    `force_threads=True` (the discovery scan) passes no
+    `maxtasksperchild` and so never contradicts anything.
+
+    The message has to name **both** levers and quote the recycling
+    value: a warning that says only "there is a conflict" cannot be
+    matched against what the operator typed, which is the same argument
+    `_env_int`'s and `ISOCENTER_MAX_WORKERS`' warnings already make.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+
+    with caplog.at_level(logging.WARNING):
+        assert parallel._use_threads(False, 25) is False, (
+            "recycling must still win; this test is about the silence, "
+            "not about the decision")
+
+    messages = [record.message for record in caplog.records]
+    assert any("ISOCENTER_FORCE_THREADS" in message for message in messages), (
+        "the request was overridden without naming the lever that was "
+        "ignored, so an operator cannot tell why threads did not happen")
+    assert any("maxtasksperchild" in message for message in messages), (
+        "the warning does not name what overrode the request")
+    assert any("25" in message for message in messages), (
+        "the warning does not quote the recycling value that won")
+
+    caplog.clear()
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS")
+    with caplog.at_level(logging.WARNING):
+        assert parallel._use_threads(True, 25) is False
+
+    argument_messages = [record.message for record in caplog.records]
+    assert any("force_threads" in message for message in argument_messages), (
+        "an explicit force_threads=True argument was overridden in "
+        "silence; the caller can see their own literal, but not that it "
+        "lost to a value passed somewhere else")
+
+
+def test_no_warning_when_recycling_was_not_contradicted(caplog, monkeypatch):
+    """The silence half, and it is the ordinary export path.
+
+    `session.export()` calls exactly this -- `force_threads=False`, no
+    environment variable, `maxtasksperchild=25` -- on every export.
+    Nobody asked for threads, so nothing was overridden, and a warning
+    on every export would be noise that teaches readers to filter this
+    logger.
+
+    The `delenv` is not decoration. `_use_threads` reads
+    `ISOCENTER_FORCE_THREADS` from the ambient environment, so without
+    it this test asserts silence about whatever the operator happens to
+    have exported -- and would go green inside a full pytest run purely
+    because the sibling test's `setenv` is undone after it. A test whose
+    subject is "no warning" must own every input that could produce one.
+    """
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+
+    with caplog.at_level(logging.WARNING):
+        assert parallel._use_threads(False, 25) is False
+
+    assert not [record for record in caplog.records
+                if "maxtasksperchild" in record.message], (
+        "the ordinary export path warns; nothing was contradicted")
+
+
+def test_export_runs_in_processes_by_decision(monkeypatch, caplog):
+    """A characterization test for a prose change (#185).
+
+    `docs/environment.md` and `_run_export_batch`'s docstring now say
+    that `session.export()` runs in processes on every interpreter,
+    including free-threaded builds, and why: workers are recycled every
+    25 tasks so memory leaked by the imaging C libraries is reclaimed,
+    and a thread pool has no process to recycle. A prose change admits
+    no red, so this pins the code the prose describes rather than the
+    prose itself -- grepping the document for the sentence would pin the
+    wording and pass just as happily if the wording were wrong.
+
+    What it holds still: the `25`. If it ever becomes `None`, the export
+    path takes threads on a free-threaded build, and eight test files
+    plus `tests/profile_memory.py` assume a subprocess boundary and must
+    be revisited before that lands --
+    `tests/test_private_tag_vr_roundtrip.py`,
+    `tests/test_redaction_failure_is_reported.py`,
+    `tests/test_float_pixel_data_export.py`,
+    `tests/test_export_worker_graph_purity.py`,
+    `tests/test_redaction_identity.py`,
+    `tests/test_redaction_attestation.py`,
+    `tests/test_redaction_multizone.py` and this file.
+
+    `tests/profile_memory.py` is listed for its assumption, not for its
+    protection: it is neither collected nor importable, and its own
+    assertion drifted to `10` against the shipped `25` without anything
+    noticing (#347). The other eight run on every push.
+    """
+    from types import SimpleNamespace
+
+    from isocenter import session as session_module
+
+    captured = {}
+
+    def fake_export_batch(tasks, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(written=0, failures=[])
+
+    monkeypatch.setattr(session_module.DicomExporter, "export_batch",
+                        staticmethod(fake_export_batch))
+
+    session_module.DicomSession._run_export_batch([], show_progress=False)
+
+    assert captured["maxtasksperchild"] == 25, (
+        "the export path stopped asking for worker recycling; that is a "
+        "decision with a memory argument behind it and eight test files "
+        "resting on the process boundary it creates (#185)")
+
+    # The warning `_use_threads` emits repeats this number as a literal
+    # sentence -- "session.export() always sets maxtasksperchild=25" --
+    # and nothing reads it from here, so it can drift exactly the way
+    # tests/profile_memory.py's `10` drifted from this same `25` (#347).
+    # Tying the two together is the whole point of capturing the kwarg:
+    # the shipped log line must quote what the shipped call passes.
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+    with caplog.at_level(logging.WARNING):
+        parallel._use_threads(True, captured["maxtasksperchild"])
+
+    sentence = "session.export() always sets maxtasksperchild=%s" % (
+        captured["maxtasksperchild"],)
+    assert any(sentence in record.message for record in caplog.records), (
+        "the override warning tells operators session.export() sets a "
+        "number that is not the one it sets; the message is prose in "
+        "shipped output and this is the only thing reading it against "
+        "the call (#347's defect class)")
+
+
+def test_a_zero_tasks_per_child_is_reported_rather_than_raising_in_the_pool(
+        monkeypatch, caplog):
+    """`ISOCENTER_MAX_TASKS_PER_CHILD=0` is the mirror of #335's defect.
+
+    `_env_int` returns `0` -- the `if not raw` guard sees the non-empty
+    string `"0"` -- and `0 is not None`, so it turned threads off on
+    every call site except export and then reached
+    `multiprocessing.Pool`, which raises `ValueError: maxtasksperchild
+    must be a positive int or None` naming no environment variable. The
+    new override warning made it noisier rather than better: it warned
+    about a conflict and then crashed.
+
+    Both assertions matter. The value must fall back to the documented
+    *Unlimited*, which also re-enables the free-threaded threads path
+    that a `0` was silently switching off; and the rejection must name
+    the variable and the value, because a message that quotes neither
+    cannot be matched against what was typed.
+    """
+    monkeypatch.setenv("ISOCENTER_MAX_TASKS_PER_CHILD", "0")
+
+    with caplog.at_level(logging.WARNING):
+        strategy = parallel._resolve_strategy(
+            1, 1, None, False, False, False, "", None)
+
+    assert strategy.maxtasksperchild is None, (
+        "0 was carried to multiprocessing.Pool, which raises ValueError: "
+        "maxtasksperchild must be a positive int or None")
+    assert any("ISOCENTER_MAX_TASKS_PER_CHILD" in record.message
+               for record in caplog.records), (
+        "the value was rejected without naming the variable")
+    assert any("set to 0" in record.message for record in caplog.records), (
+        "the warning does not quote the value that was rejected")
+
+
+def test_a_negative_tasks_per_child_is_rejected_in_the_same_arm(
+        monkeypatch, caplog):
+    """`0` and every negative in one arm, as #335 argued for its own value.
+
+    Neither is a recycling interval, `multiprocessing.Pool` raises on
+    both with the same message, and an operator who typed either made
+    the same mistake. Two behaviours for two wrong values would be two
+    things to remember.
+    """
+    monkeypatch.setenv("ISOCENTER_MAX_TASKS_PER_CHILD", "-5")
+
+    with caplog.at_level(logging.WARNING):
+        strategy = parallel._resolve_strategy(
+            1, 1, None, False, False, False, "", None)
+
+    assert strategy.maxtasksperchild is None
+    assert any("-5" in record.message for record in caplog.records)
+
+
+def test_an_explicit_zero_tasks_per_child_argument_still_reaches_the_pool(
+        monkeypatch):
+    """The guard stays under `if maxtasksperchild is None`, as #335's does.
+
+    `run_parallel(..., maxtasksperchild=0)` is a programming error in a
+    line the caller can see, not a misconfigured deployment. Rewriting
+    it to *Unlimited* would hide their bug on a log line nobody is
+    reading, so the argument still travels to the pool and still raises
+    there.
+    """
+    strategy = parallel._resolve_strategy(
+        1, 1, 0, False, False, False, "", None)
+
+    assert strategy.maxtasksperchild == 0

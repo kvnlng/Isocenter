@@ -280,7 +280,7 @@ _VERTICAL_VR_PARSERS = {
 }
 
 
-def _vertical_atom_text(vr: str, atom: Any) -> str:
+def _vertical_atom_text(vr: str, atom: Any) -> Optional[str]:
     """The one rendering of a private value into `value_text`.
 
     `str(atom)` for everything except `AT`, whose `str()` is the display
@@ -288,7 +288,22 @@ def _vertical_atom_text(vr: str, atom: Any) -> str:
     ("unknown DICOM element keyword or an invalid int"). Stored as the
     decimal integer it is, so `_VERTICAL_VR_PARSERS['AT']` is its exact
     inverse. This pair has to stay a pair.
+
+    `None` is the one value that is not stringified, and it is a SQL
+    NULL instead (#339). `str(None)` is the four-character text `None`,
+    which is a conformant `LO` value, so a zero-length private element
+    -- what pydicom hands back for `DS`, `US`, `AT`, `UN` and their
+    siblings when the source wrote no value -- reloaded as a word the
+    source never said and was exported as though it had. Absent beats
+    fabricated, which is the ruling #60 made for a missing Study Date.
+
+    The guard has to come BEFORE the `AT` arm. Without it `int(None)`
+    raises `TypeError`, the arm's own `except` catches it, and it
+    returns `str(atom)` -- the same fabricated `'None'`, arriving
+    through a handler documented for "a value that is no longer a tag".
     """
+    if atom is None:
+        return None
     if vr == 'AT':
         try:
             return str(int(atom))
@@ -300,8 +315,24 @@ def _vertical_atom_text(vr: str, atom: Any) -> str:
     return str(atom)
 
 
-def _vertical_atom_value(vr: str, text: str) -> Any:
-    """The inverse of `_vertical_atom_text`, keyed on the stored VR."""
+def _vertical_atom_value(vr: str, text: Optional[str]) -> Any:
+    """The inverse of `_vertical_atom_text`, keyed on the stored VR.
+
+    A NULL `value_text` is the atom that was `None` (#339), and nothing
+    else can produce one: every other arm above goes through `str()`,
+    which never returns `None`, so no row written by any released
+    version can be NULL here.
+    """
+    if text is None:
+        # Behaviour-equivalent to falling through, and written anyway.
+        # A numeric VR would reach `int(None)` -> `TypeError` -> the
+        # `except` arm below, and a text VR would return the `None`
+        # because `parser is None` -- both answer `None` already. But
+        # that `except` arm's comment says "keep the text", and a SQL
+        # NULL is not text: leaving the normal path to run through an
+        # exception handler documented for something else would make
+        # the arm's own comment false.
+        return None
     parser = _VERTICAL_VR_PARSERS.get(vr)
     if parser is None:
         return text
@@ -451,7 +482,16 @@ class SqliteStore:
     #: which keeps the method's memory promise intact on the 100GB+
     #: datasets it exists for, while making the per-page cost (one rowid
     #: seek plus `page_size` primary-key joins) disappear into the noise.
-    FLATTENED_PAGE_SIZE = 500
+    #:
+    #: Private, and the underscore is the smaller half of why (#202).
+    #: This is the *default* and not a knob: `get_flattened_instances`
+    #: takes it as a default argument, which Python evaluates once when
+    #: the `def` runs, so the number is baked into `__defaults__` at
+    #: import and rebinding this attribute -- on the class or on a
+    #: subclass -- changes nothing. Measured: after setting it to `2`, a
+    #: default-argument walk over six rows still took one connection.
+    #: `page_size=` is the one spelling for the behaviour.
+    _FLATTENED_PAGE_SIZE = 500
 
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS patients (
@@ -513,6 +553,7 @@ class SqliteStore:
         atom_index INTEGER DEFAULT 0,
         value_rep TEXT,
         value_text TEXT,
+        value_count INTEGER,
         FOREIGN KEY(instance_uid) REFERENCES instances(sop_instance_uid) ON DELETE CASCADE,
         UNIQUE(instance_uid, group_id, element_id, atom_index)
     );
@@ -793,6 +834,31 @@ class SqliteStore:
             "PRAGMA table_info(studies)").fetchall()}
         if "date_shifted" not in study_columns:
             conn.execute("ALTER TABLE studies ADD COLUMN date_shifted INTEGER")
+
+        # `value_count` on instance_attributes (#328). The tier is one
+        # row per value atom and recorded no arity, so a one-element
+        # list reloaded as a scalar and an empty one reloaded as an
+        # absent tag. The column carries the container's length on every
+        # row of an element, denormalized exactly as `value_rep` is.
+        #
+        # Rows predating the column read NULL, and NULL keeps the old
+        # rule: more than one atom is a list, one atom is a scalar.
+        # There is deliberately no back-fill. An `UPDATE ... SET
+        # value_count = 1` sweep would answer for exactly the rows that
+        # never had an answer -- a legacy one-atom row does not know
+        # whether it was `['X']` or `'X'` -- which is the fabrication
+        # the column exists to stop. Same direction as `loss_scope`,
+        # `element_tag` and `date_shifted` above: NULL is ungraded, not
+        # guessed at.
+        #
+        # ADD COLUMN does not rebuild the UNIQUE index or
+        # `idx_inst_attr_uid` and does not rewrite rows, so a tier with
+        # millions of rows is not a migration cost.
+        attribute_columns = {row[1] for row in conn.execute(
+            "PRAGMA table_info(instance_attributes)").fetchall()}
+        if "value_count" not in attribute_columns:
+            conn.execute(
+                "ALTER TABLE instance_attributes ADD COLUMN value_count INTEGER")
 
     def _backfill_legacy_blobs(self, conn):
         """Migrate 0.6.x pixel_* columns into instance_blobs.
@@ -1756,6 +1822,19 @@ class SqliteStore:
         block that `remove_private_tags=True` deleted back into a
         de-identified graph on the next reload.
 
+        `value_text` is NULL for exactly one thing: an atom whose value
+        was `None` (#339). Every other rendering goes through `str()`,
+        which never returns `None`, so no row written by any released
+        version can hold a NULL there and the meaning needs no
+        migration to claim.
+
+        `value_count` carries the container's length on every row of an
+        element (#328), denormalized per atom exactly as `value_rep` is,
+        and `NULL` for a value that was not a container at all. An empty
+        container has no atom to hang it on, so it writes one
+        **placeholder row** -- atom 0, `value_text` NULL, `value_count`
+        0 -- whose atom the read side discards unread.
+
         Args:
             instance_uid (str): The SOP Instance UID.
             attributes (Dict[Tuple[str, str], Any]): Mapping of (Group, Element) hex strings to values.
@@ -1782,12 +1861,27 @@ class SqliteStore:
             # looking like a list. `IsocenterJSONEncoder` unwraps MultiValue
             # for the other tier for the same reason.
             if isinstance(val, (list, MultiValue)):
+                if not val:
+                    # The placeholder row for an empty container (#328).
+                    # There is no atom, so `value_text` is NULL and the
+                    # read side throws the atom away without looking at
+                    # it -- the row exists only to carry the `0`. A
+                    # container with no values still has to write
+                    # something, or "the tag was present and empty" and
+                    # "the tag was not there" are the same absence of
+                    # rows, which is exactly what they were.
+                    data_rows.append(
+                        (instance_uid, grp, elem, 0, vr, None, 0))
+                    continue
                 for idx, atom in enumerate(val):
                     data_rows.append((instance_uid, grp, elem, idx, vr,
-                                      _vertical_atom_text(vr, atom)))
+                                      _vertical_atom_text(vr, atom), len(val)))
             else:
+                # NULL, not `1`. A scalar is not a container of one, and
+                # storing `1` here would make a value that was written
+                # as `'X'` reload as `['X']`.
                 data_rows.append((instance_uid, grp, elem, 0, vr,
-                                  _vertical_atom_text(vr, val)))
+                                  _vertical_atom_text(vr, val), None))
 
         try:
 
@@ -1807,8 +1901,8 @@ class SqliteStore:
 
                 if data_rows:
                     db.executemany("""
-                        INSERT INTO instance_attributes (instance_uid, group_id, element_id, atom_index, value_rep, value_text)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO instance_attributes (instance_uid, group_id, element_id, atom_index, value_rep, value_text, value_count)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, data_rows)
 
         except sqlite3.Error as e:
@@ -1922,9 +2016,26 @@ class SqliteStore:
         which is every private element of an Implicit VR source -- still
         reloads as text (#154).
 
-        A saved one-element list still reloads as a scalar: the table
-        records no arity, which is a different gap from the type one and
-        is not closed here.
+        Arity comes back too, since #328. `value_count` is read off the
+        first row of an element exactly as `value_rep` is: `0` over the
+        placeholder row is an empty container, `n >= 1` is a list even
+        at `n == 1`, and NULL
+        is either a scalar or a row written before the column existed --
+        both of which take the old rule, "more than one atom is a list".
+        The column is never used to truncate or pad, in either
+        direction: the rows decide the values, and a stored count that
+        disagrees with them is a corrupt row, not a licence to drop
+        values that are sitting in the table. That holds at `0` too --
+        the empty container is recognised by the placeholder row's shape
+        (one atom, NULL text) and not by the count alone, so a `0`
+        written over real atoms hands them back rather than swallowing
+        them.
+
+        An atom stored as a NULL `value_text` comes back as `None`, not
+        as the text `None` (#339). The export then reports it as data
+        loss exactly as the in-memory path does, rather than writing a
+        conformant-looking `LO` element carrying a word the source never
+        said.
 
         Args:
             instance_uids (Optional[List[str]]): SOP Instance UIDs to fetch.
@@ -1954,7 +2065,7 @@ class SqliteStore:
             absent rather than present-and-empty.
         """
         select = ("SELECT instance_uid, group_id, element_id, value_rep,"
-                  " value_text FROM instance_attributes")
+                  " value_text, value_count FROM instance_attributes")
         # atom_index is not selected, only ordered by: it decides the order
         # of a multi-valued element's atoms and carries nothing else.
         order = " ORDER BY instance_uid, group_id, element_id, atom_index"
@@ -1983,6 +2094,7 @@ class SqliteStore:
         # load, which is loud. Failing that way is the point.
         atoms: Dict[Tuple[str, str, str], List[Any]] = {}
         reps: Dict[Tuple[str, str, str], str] = {}
+        counts: Dict[Tuple[str, str, str], Optional[int]] = {}
         ctx = self._get_connection() if conn is None else nullcontext(conn)
         with ctx as db:
             for sql, params in queries:
@@ -1999,13 +2111,47 @@ class SqliteStore:
                     # reconcile.
                     rep = row['value_rep'] or "UN"
                     reps.setdefault(key, rep)
+                    # `value_count` is read off the first row for the
+                    # same reason `value_rep` is: it is written per
+                    # element across every atom.
+                    counts.setdefault(key, row['value_count'])
                     atoms.setdefault(key, []).append(
                         _vertical_atom_value(rep, row['value_text']))
 
         results: Dict[str, Dict[Tuple[str, str], Any]] = {}
         for (uid, grp, elem), values in atoms.items():
-            results.setdefault(uid, {})[(grp, elem)] = (
-                values if len(values) > 1 else values[0])
+            count = counts[(uid, grp, elem)]
+            # `count == 0`, never `not count`: `None` is falsey and means
+            # "no arity was recorded", which is a scalar or a legacy row
+            # -- reading it as an empty container would turn every one of
+            # them into `[]`. And the count is asked BEFORE `value_text`
+            # is consulted, which is the other half of the same trap:
+            # the empty container's placeholder row and a real `None`
+            # atom (#339) both carry a NULL `value_text` and differ only
+            # here, so a reader that looked at the text first would
+            # reload `[]` as `[None]`.
+            #
+            # `values == [None]` is the placeholder row's exact shape --
+            # one atom, NULL text -- and no writer produces `0` over any
+            # other. Checking it costs one comparison and buys the
+            # no-truncation rule without an exception: a hand-edited
+            # store carrying `0` over three real atoms hands back the
+            # three, where a bare `count == 0` silently returned `[]`
+            # and dropped values that were sitting in the table.
+            if count == 0 and values == [None]:
+                value = []
+            elif count is None:
+                # No recorded arity: the pre-#328 rule, which is what a
+                # scalar wants and the only honest answer for a row
+                # written before the column existed.
+                value = values if len(values) > 1 else values[0]
+            else:
+                # A container, even at one value. `list(values)` rather
+                # than a slice to `count`: the rows are the values, and
+                # a count that disagrees with them is a corrupt row, not
+                # a licence to drop values that are in the table.
+                value = list(values)
+            results.setdefault(uid, {})[(grp, elem)] = value
             if vrs is not None:
                 vrs.setdefault(uid, {})[(grp, elem)] = reps[(uid, grp, elem)]
         return results
@@ -2958,7 +3104,7 @@ class SqliteStore:
     def get_flattened_instances(self,
                                 patient_ids: List[str] = None,
                                 instance_uids: List[str] = None,
-                                page_size: int = FLATTENED_PAGE_SIZE):
+                                page_size: int = _FLATTENED_PAGE_SIZE):
         """
         Yields a flat dictionary for every instance in the DB.
 
@@ -2993,24 +3139,40 @@ class SqliteStore:
         Args:
             patient_ids (List[str], optional): Filter by list of Patient IDs.
             instance_uids (List[str], optional): Filter by list of SOP Instance UIDs.
-            page_size (int, optional): Rows per page. Trades resident
-                memory against the number of queries; see
-                `FLATTENED_PAGE_SIZE`. Must be >= 1 -- `LIMIT 0` returns
-                an empty page, and an empty page is how the walk decides
-                it has finished, so a zero would silently report an empty
-                store.
+            page_size (int, optional): Rows per page, defaulting to 500.
+                Trades resident memory against the number of queries.
+                Must be an `int` >= 1 -- `LIMIT 0` returns an empty page,
+                and an empty page is how the walk decides it has
+                finished, so a zero would silently report an empty store.
 
         Yields:
             dict: Flattend dictionary representing row data (patient, study, series, instance paths).
 
         Raises:
-            ValueError: If `page_size` is below 1. This is a plain method
-                wrapping a generator precisely so the check fires at the
-                call, not on the first `next()`.
+            ValueError: If `page_size` is not a whole number >= 1. This
+                is a plain method wrapping a generator precisely so the
+                check fires at the call, not on the first `next()` --
+                which is what a `2.5` used to do, reaching `LIMIT ?` and
+                raising `sqlite3.IntegrityError: datatype mismatch` a
+                page later, out of a public method, for a caller's typo.
         """
-        if page_size < 1:
+        # `bool` before `int`, and the ordering is the mechanism:
+        # `isinstance(True, int)` is True and `True < 1` is False, so
+        # `page_size=True` passed the old guard and would pass a bare
+        # `isinstance(page_size, int)` too -- and then page one row at a
+        # time, silently. Same subclass trap, and the same answer, as
+        # `_fallback_encoding`'s `bool` arm and `_value_fits_vr`'s
+        # ordering in `io_handlers.py` (#283).
+        #
+        # No `int()` coercion for a float. `1e9` is a whole number and
+        # `2.5` is not, and a rule that accepted one would have to
+        # decide what to do with the other; refusing the type outright
+        # says which spelling this method takes.
+        if (isinstance(page_size, bool)
+                or not isinstance(page_size, int)
+                or page_size < 1):
             raise ValueError(
-                f"page_size must be >= 1, got {page_size}")
+                f"page_size must be a whole number >= 1, got {page_size!r}")
         return self._iter_flattened_instances(
             patient_ids, instance_uids, page_size)
 

@@ -231,7 +231,36 @@ def _resolve_strategy(max_workers, chunksize, maxtasksperchild, disable_gc,
         chunksize = _env_int("ISOCENTER_CHUNKSIZE") or 1
 
     if maxtasksperchild is None:
-        maxtasksperchild = _env_int("ISOCENTER_MAX_TASKS_PER_CHILD")
+        configured = _env_int("ISOCENTER_MAX_TASKS_PER_CHILD")
+        if configured is not None and configured < 1:
+            # The exact mirror of the `ISOCENTER_MAX_WORKERS` arm above
+            # (#335), one bunch later (#185). `_env_int` returns `0` --
+            # its `if not raw` guard sees the non-empty string `"0"` --
+            # and `0 is not None`, so a zero turned threads off on every
+            # call site except export and then reached
+            # `multiprocessing.Pool`, which raises `ValueError:
+            # maxtasksperchild must be a positive int or None` naming no
+            # environment variable. `0` and every negative in one arm,
+            # for the same reason that one gives: neither is a recycling
+            # interval and an operator who typed either made the same
+            # mistake.
+            #
+            # Fixed here rather than in `_env_int`, which is shared with
+            # `ISOCENTER_MAX_WORKERS` and `ISOCENTER_CHUNKSIZE`: a
+            # rejection inside it would take the warning above dead and
+            # decide `ISOCENTER_CHUNKSIZE`'s answer as a side effect
+            # (#341 is where that is decided).
+            get_logger().warning(
+                "ISOCENTER_MAX_TASKS_PER_CHILD is set to %d, which is not "
+                "a usable number of tasks per worker. Ignoring it and "
+                "recycling no workers. Set it to 1 or more to recycle.",
+                configured)
+            configured = None
+        # Deliberately inside `if maxtasksperchild is None`, so an
+        # explicit `maxtasksperchild=0` argument still reaches the pool
+        # and still raises: that is a programming error in a line the
+        # caller can see, not a misconfigured deployment.
+        maxtasksperchild = configured
 
     disable_gc = disable_gc or _env_is("ISOCENTER_DISABLE_GC", ("1",))
 
@@ -255,8 +284,41 @@ def _use_threads(force_threads: bool, maxtasksperchild: Optional[int]) -> bool:
     Worker recycling has the last word: only `multiprocessing.Pool`
     implements `maxtasksperchild`, so asking for it rules threads out
     however the rest of the environment is set.
+
+    This is also where that override is **announced** (#185). It is the
+    only place that knows both halves -- `_resolve_strategy` calls it
+    once per `run_parallel`, in the parent process, where the caller's
+    logger is reachable -- and it is the whole of the precedence, so a
+    warning anywhere else would be a second copy of this rule.
+
+    The warning fires when, and only when, threads were actually asked
+    for. `session.export()` passes `maxtasksperchild=25` on every
+    export and asks for nothing else, so the ordinary path is silent; a
+    line on every export would be noise that teaches readers to filter
+    this logger.
     """
     if maxtasksperchild is not None:
+        forced_by_env = _env_is("ISOCENTER_FORCE_THREADS", ("1",))
+        if force_threads or forced_by_env:
+            # Name both levers and quote the value, the way `_env_int`'s
+            # and `ISOCENTER_MAX_WORKERS`' warnings do: a message that
+            # says only "these conflict" cannot be matched against what
+            # was typed. It says which lever to unset, because with
+            # `ISOCENTER_MAX_TASKS_PER_CHILD` and
+            # `ISOCENTER_FORCE_THREADS` both set this fires on EVERY
+            # `run_parallel` call -- ingest, the PHI scan, OCR
+            # verification, zone discovery, redaction -- which is
+            # correct and is a lot of output on a long run.
+            get_logger().warning(
+                "%s was set, but worker recycling (maxtasksperchild=%s) "
+                "was also asked for and only multiprocessing.Pool "
+                "implements it, so this run uses processes. "
+                "session.export() always sets maxtasksperchild=25, so it "
+                "runs in processes on every interpreter including "
+                "free-threaded builds; elsewhere, unset "
+                "ISOCENTER_MAX_TASKS_PER_CHILD to get threads.",
+                "ISOCENTER_FORCE_THREADS" if forced_by_env
+                else "force_threads=True", maxtasksperchild)
         return False
     if force_threads or _env_is("ISOCENTER_FORCE_THREADS", ("1",)):
         return True

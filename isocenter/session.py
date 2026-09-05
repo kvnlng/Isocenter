@@ -1172,8 +1172,10 @@ class DicomSession:
 
         Returns:
             int: `instance_attributes` rows deleted -- rows, not tags
-            (a VM=3 value is three rows). 0 means the tier already
-            agreed with the core and nothing changed.
+            (a VM=3 value is three rows, and a tag holding an empty
+            value is the one placeholder row that carries its zero
+            length -- #328). 0 means the tier already agreed with the
+            core and nothing changed.
         """
         rows_deleted, dropped = self.store_backend.reconcile_private_tags()
         if not dropped:
@@ -3550,6 +3552,30 @@ class DicomSession:
         Uses `export_batch`'s own pool rather than `self._executor`: workers
         are recycled every 25 tasks so memory leaked by the imaging C
         libraries is reclaimed, which `ProcessPoolExecutor` cannot do.
+
+        **Processes here are a decision, not an accident (#185).** Asking
+        for `maxtasksperchild` rules threads out in `_use_threads` --
+        only `multiprocessing.Pool` implements recycling -- so this, the
+        heaviest path in the library and the one that pickles the most,
+        runs in processes on **every** interpreter, including a
+        free-threaded build where every other `run_parallel` call site
+        takes threads. `ISOCENTER_FORCE_THREADS` cannot change it, and
+        as of #185 says so rather than being dropped in silence.
+
+        The trade was weighed and taken: a leak in a JPEG 2000 encoder
+        on a 100GB+ run is a real thing to defend against, a thread pool
+        has no process to recycle, and the cost is pickling an
+        `ExportContext` -- attributes, sequences, and a numpy array per
+        task where pixels are resident -- across a pipe. Reversing it
+        means revisiting eight test files and `tests/profile_memory.py`,
+        which assume this subprocess boundary;
+        `test_export_runs_in_processes_by_decision` names them.
+        `tests/profile_memory.py` is the weakest of the nine and is
+        named anyway: pytest does not collect it (the filename matches
+        neither default pattern) and it cannot import (`psutil` is in no
+        extra), so its own `maxtasksperchild` assertion has drifted to
+        `10` unnoticed -- #347. It still records the assumption; it just
+        does not currently defend it.
 
         `store_backend` is passed explicitly because this is a static
         method and the workers may be in subprocesses: the handle cannot
