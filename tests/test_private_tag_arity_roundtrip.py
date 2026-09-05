@@ -280,6 +280,47 @@ def test_a_stored_count_that_disagrees_with_the_rows_does_not_truncate():
         "them" % (loaded[("0029", "1043")],))
 
 
+def test_a_one_element_container_holding_a_none_is_not_read_as_empty():
+    """The collision the `values == [None]` gate lives at (#328, #339).
+
+    Two different things reach the table as a single row with a NULL
+    `value_text`: the empty container's placeholder, written with
+    `value_count = 0`, and a genuine one-element list whose only atom is
+    a zero-length numeric-VR value, written with `value_count = 1` under
+    #339's rule. The shape check that stops a corrupt `0` truncating
+    real atoms looks at exactly that row, so this is where the two
+    issues touch and the one case the gate could get wrong.
+
+    `save_vertical_attributes` separates them at the write: `[None]` is
+    truthy, so it takes the `len(val)` arm and never the `not val` one.
+    The count is therefore `1`, the gate does not fire, and the element
+    comes back as the one-element list it was. Nothing else in either
+    file asserts this -- `[]` versus `[None]` is pinned as a *precedence*
+    question, over a placeholder row, and `[None, "B"]` is multi-atom.
+    """
+    store = SqliteStore(":memory:")
+    try:
+        store.save_vertical_attributes(
+            "I328N", {("0029", "1060"): [None], ("0029", "1061"): []})
+        with store._get_connection() as conn:
+            counts = {row[0]: row[1] for row in conn.execute(
+                "SELECT element_id, value_count FROM instance_attributes"
+                " WHERE instance_uid = 'I328N'").fetchall()}
+        loaded = store.load_vertical_attributes("I328N")
+    finally:
+        store.stop()
+
+    assert counts == {"1060": 1, "1061": 0}, (
+        "the writer stopped telling the two apart at the count, which "
+        "is the only place they differ on disk: %r" % (counts,))
+    assert loaded[("0029", "1060")] == [None], (
+        "a one-element container holding a zero-length value reloaded "
+        "as %r; the gate read it as the empty container's placeholder "
+        "and swallowed the atom"
+        % (loaded[("0029", "1060")],))
+    assert loaded[("0029", "1061")] == []
+
+
 def test_a_store_created_before_the_arity_column_still_opens(tmp_path):
     """Upgrading must not require rebuilding the session.
 

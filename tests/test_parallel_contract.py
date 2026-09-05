@@ -705,7 +705,7 @@ def test_no_warning_when_recycling_was_not_contradicted(caplog, monkeypatch):
         "the ordinary export path warns; nothing was contradicted")
 
 
-def test_export_runs_in_processes_by_decision(monkeypatch):
+def test_export_runs_in_processes_by_decision(monkeypatch, caplog):
     """A characterization test for a prose change (#185).
 
     `docs/environment.md` and `_run_export_batch`'s docstring now say
@@ -753,6 +753,24 @@ def test_export_runs_in_processes_by_decision(monkeypatch):
         "the export path stopped asking for worker recycling; that is a "
         "decision with a memory argument behind it and eight test files "
         "resting on the process boundary it creates (#185)")
+
+    # The warning `_use_threads` emits repeats this number as a literal
+    # sentence -- "session.export() always sets maxtasksperchild=25" --
+    # and nothing reads it from here, so it can drift exactly the way
+    # tests/profile_memory.py's `10` drifted from this same `25` (#347).
+    # Tying the two together is the whole point of capturing the kwarg:
+    # the shipped log line must quote what the shipped call passes.
+    monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+    with caplog.at_level(logging.WARNING):
+        parallel._use_threads(True, captured["maxtasksperchild"])
+
+    sentence = "session.export() always sets maxtasksperchild=%s" % (
+        captured["maxtasksperchild"],)
+    assert any(sentence in record.message for record in caplog.records), (
+        "the override warning tells operators session.export() sets a "
+        "number that is not the one it sets; the message is prose in "
+        "shipped output and this is the only thing reading it against "
+        "the call (#347's defect class)")
 
 
 def test_a_zero_tasks_per_child_is_reported_rather_than_raising_in_the_pool(
