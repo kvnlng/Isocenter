@@ -544,6 +544,7 @@ class SqliteStore:
         atom_index INTEGER DEFAULT 0,
         value_rep TEXT,
         value_text TEXT,
+        value_count INTEGER,
         FOREIGN KEY(instance_uid) REFERENCES instances(sop_instance_uid) ON DELETE CASCADE,
         UNIQUE(instance_uid, group_id, element_id, atom_index)
     );
@@ -824,6 +825,31 @@ class SqliteStore:
             "PRAGMA table_info(studies)").fetchall()}
         if "date_shifted" not in study_columns:
             conn.execute("ALTER TABLE studies ADD COLUMN date_shifted INTEGER")
+
+        # `value_count` on instance_attributes (#328). The tier is one
+        # row per value atom and recorded no arity, so a one-element
+        # list reloaded as a scalar and an empty one reloaded as an
+        # absent tag. The column carries the container's length on every
+        # row of an element, denormalized exactly as `value_rep` is.
+        #
+        # Rows predating the column read NULL, and NULL keeps the old
+        # rule: more than one atom is a list, one atom is a scalar.
+        # There is deliberately no back-fill. An `UPDATE ... SET
+        # value_count = 1` sweep would answer for exactly the rows that
+        # never had an answer -- a legacy one-atom row does not know
+        # whether it was `['X']` or `'X'` -- which is the fabrication
+        # the column exists to stop. Same direction as `loss_scope`,
+        # `element_tag` and `date_shifted` above: NULL is ungraded, not
+        # guessed at.
+        #
+        # ADD COLUMN does not rebuild the UNIQUE index or
+        # `idx_inst_attr_uid` and does not rewrite rows, so a tier with
+        # millions of rows is not a migration cost.
+        attribute_columns = {row[1] for row in conn.execute(
+            "PRAGMA table_info(instance_attributes)").fetchall()}
+        if "value_count" not in attribute_columns:
+            conn.execute(
+                "ALTER TABLE instance_attributes ADD COLUMN value_count INTEGER")
 
     def _backfill_legacy_blobs(self, conn):
         """Migrate 0.6.x pixel_* columns into instance_blobs.
@@ -1793,6 +1819,13 @@ class SqliteStore:
         version can hold a NULL there and the meaning needs no
         migration to claim.
 
+        `value_count` carries the container's length on every row of an
+        element (#328), denormalized per atom exactly as `value_rep` is,
+        and `NULL` for a value that was not a container at all. An empty
+        container has no atom to hang it on, so it writes one
+        **placeholder row** -- atom 0, `value_text` NULL, `value_count`
+        0 -- whose atom the read side discards unread.
+
         Args:
             instance_uid (str): The SOP Instance UID.
             attributes (Dict[Tuple[str, str], Any]): Mapping of (Group, Element) hex strings to values.
@@ -1819,12 +1852,27 @@ class SqliteStore:
             # looking like a list. `IsocenterJSONEncoder` unwraps MultiValue
             # for the other tier for the same reason.
             if isinstance(val, (list, MultiValue)):
+                if not val:
+                    # The placeholder row for an empty container (#328).
+                    # There is no atom, so `value_text` is NULL and the
+                    # read side throws the atom away without looking at
+                    # it -- the row exists only to carry the `0`. A
+                    # container with no values still has to write
+                    # something, or "the tag was present and empty" and
+                    # "the tag was not there" are the same absence of
+                    # rows, which is exactly what they were.
+                    data_rows.append(
+                        (instance_uid, grp, elem, 0, vr, None, 0))
+                    continue
                 for idx, atom in enumerate(val):
                     data_rows.append((instance_uid, grp, elem, idx, vr,
-                                      _vertical_atom_text(vr, atom)))
+                                      _vertical_atom_text(vr, atom), len(val)))
             else:
+                # NULL, not `1`. A scalar is not a container of one, and
+                # storing `1` here would make a value that was written
+                # as `'X'` reload as `['X']`.
                 data_rows.append((instance_uid, grp, elem, 0, vr,
-                                  _vertical_atom_text(vr, val)))
+                                  _vertical_atom_text(vr, val), None))
 
         try:
 
@@ -1844,8 +1892,8 @@ class SqliteStore:
 
                 if data_rows:
                     db.executemany("""
-                        INSERT INTO instance_attributes (instance_uid, group_id, element_id, atom_index, value_rep, value_text)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO instance_attributes (instance_uid, group_id, element_id, atom_index, value_rep, value_text, value_count)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, data_rows)
 
         except sqlite3.Error as e:
@@ -1959,9 +2007,14 @@ class SqliteStore:
         which is every private element of an Implicit VR source -- still
         reloads as text (#154).
 
-        A saved one-element list still reloads as a scalar: the table
-        records no arity, which is a different gap from the type one and
-        is not closed here.
+        Arity comes back too, since #328. `value_count` is read off the
+        first row of an element exactly as `value_rep` is: `0` is an
+        empty container, `n >= 1` is a list even at `n == 1`, and NULL
+        is either a scalar or a row written before the column existed --
+        both of which take the old rule, "more than one atom is a list".
+        The column is never used to truncate or pad: the rows decide the
+        values, and a stored count that disagrees with them is a corrupt
+        row, not a licence to drop values that are sitting in the table.
 
         An atom stored as a NULL `value_text` comes back as `None`, not
         as the text `None` (#339). The export then reports it as data
@@ -1997,7 +2050,7 @@ class SqliteStore:
             absent rather than present-and-empty.
         """
         select = ("SELECT instance_uid, group_id, element_id, value_rep,"
-                  " value_text FROM instance_attributes")
+                  " value_text, value_count FROM instance_attributes")
         # atom_index is not selected, only ordered by: it decides the order
         # of a multi-valued element's atoms and carries nothing else.
         order = " ORDER BY instance_uid, group_id, element_id, atom_index"
@@ -2026,6 +2079,7 @@ class SqliteStore:
         # load, which is loud. Failing that way is the point.
         atoms: Dict[Tuple[str, str, str], List[Any]] = {}
         reps: Dict[Tuple[str, str, str], str] = {}
+        counts: Dict[Tuple[str, str, str], Optional[int]] = {}
         ctx = self._get_connection() if conn is None else nullcontext(conn)
         with ctx as db:
             for sql, params in queries:
@@ -2042,13 +2096,39 @@ class SqliteStore:
                     # reconcile.
                     rep = row['value_rep'] or "UN"
                     reps.setdefault(key, rep)
+                    # `value_count` is read off the first row for the
+                    # same reason `value_rep` is: it is written per
+                    # element across every atom.
+                    counts.setdefault(key, row['value_count'])
                     atoms.setdefault(key, []).append(
                         _vertical_atom_value(rep, row['value_text']))
 
         results: Dict[str, Dict[Tuple[str, str], Any]] = {}
         for (uid, grp, elem), values in atoms.items():
-            results.setdefault(uid, {})[(grp, elem)] = (
-                values if len(values) > 1 else values[0])
+            count = counts[(uid, grp, elem)]
+            # `count == 0`, never `not count`: `None` is falsey and means
+            # "no arity was recorded", which is a scalar or a legacy row
+            # -- reading it as an empty container would turn every one of
+            # them into `[]`. And the count is asked BEFORE `value_text`
+            # is consulted, which is the other half of the same trap:
+            # the empty container's placeholder row and a real `None`
+            # atom (#339) both carry a NULL `value_text` and differ only
+            # here, so a reader that looked at the text first would
+            # reload `[]` as `[None]`.
+            if count == 0:
+                value = []
+            elif count is None:
+                # No recorded arity: the pre-#328 rule, which is what a
+                # scalar wants and the only honest answer for a row
+                # written before the column existed.
+                value = values if len(values) > 1 else values[0]
+            else:
+                # A container, even at one value. `list(values)` rather
+                # than a slice to `count`: the rows are the values, and
+                # a count that disagrees with them is a corrupt row, not
+                # a licence to drop values that are in the table.
+                value = list(values)
+            results.setdefault(uid, {})[(grp, elem)] = value
             if vrs is not None:
                 vrs.setdefault(uid, {})[(grp, elem)] = reps[(uid, grp, elem)]
         return results

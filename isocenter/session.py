@@ -1172,8 +1172,10 @@ class DicomSession:
 
         Returns:
             int: `instance_attributes` rows deleted -- rows, not tags
-            (a VM=3 value is three rows). 0 means the tier already
-            agreed with the core and nothing changed.
+            (a VM=3 value is three rows, and a tag holding an empty
+            value is the one placeholder row that carries its zero
+            length -- #328). 0 means the tier already agreed with the
+            core and nothing changed.
         """
         rows_deleted, dropped = self.store_backend.reconcile_private_tags()
         if not dropped:
