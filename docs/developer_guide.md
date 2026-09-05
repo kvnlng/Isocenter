@@ -91,13 +91,21 @@ publisher configuration is updated to match.
    `isocenter.__version__` re-exports it.
 3. Update `version` and `date-released` in `CITATION.cff`.
 4. Merge to `main` with CI green.
-5. Tag `vx.y.z`. **The tag must match the declared version exactly** --
+5. **Rehearse on TestPyPI before tagging**: run `publish.yml` manually
+   (`workflow_dispatch`) with `target: testpypi`. It runs the same build
+   gates and the same four-version matrix as a real release, but while
+   the version number is still spendable. This matters because
+   `test-supported` (3.13, 3.14) runs *after* the tag on a real release
+   and only reports -- it cannot block the upload -- so a break there
+   ships with the number already spent. PRs gate 3.12 and 3.14t only, so
+   3.13 and 3.14 are otherwise unobserved between merge and release.
+6. Tag `vx.y.z`. **The tag must match the declared version exactly** --
    the build job reads the version out of the built wheel and refuses to
    publish a mismatch. Publishing
    `v0.7.1` from a tree that still says `0.7.0` would produce a release
    nobody can install under the name they were given, and permanently
    spend the version it did claim, since PyPI never allows reuse.
-6. **Publish a GitHub Release.** This is the trigger; pushing a tag alone
+7. **Publish a GitHub Release.** This is the trigger; pushing a tag alone
    does nothing. That is deliberate -- a release is a decision someone
    makes, whereas a mistyped `git push --tags` should not be able to burn
    a version number.
@@ -110,10 +118,19 @@ shipped in no distribution at all and nothing failed -- every loader
 guards on `os.path.exists` and degrades to a default, so a published
 release audited against an empty PHI policy and reported clean.
 
-To rehearse against TestPyPI, run the workflow manually
-(`workflow_dispatch`) with `target: testpypi`. Note that neither index
-allows re-uploading a version, so a rehearsal consumes that version
-number on TestPyPI.
+Neither index allows re-uploading a version, so the step-5 rehearsal
+consumes that version number on TestPyPI. That is the whole cost, and it
+buys the only look at 3.13 and 3.14 that happens while the real version
+number can still be spent.
+
+**If `test-supported` is red, that is a decision, not a formality.** Either
+fix it and re-tag, or delete that classifier from `setup.py` before
+releasing -- `setup.py` says outright that a classifier CI does not back is
+the same unbacked promise the old `python_requires=">=3.9"` was. Note that
+a red job here is *more* likely to be a flake than a real break (v0.9.1's
+publish had 3.13 fail and pass on rerun), which is exactly what makes it
+dangerous: "just rerun it" is the reading that ships a real break. Rerun to
+learn whether it is deterministic, not to make it go away.
 
 ### Archiving and DOIs
 
