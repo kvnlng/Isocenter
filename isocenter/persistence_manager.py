@@ -205,6 +205,52 @@ def _persistence_worker_loop(manager_ref, work_queue):
                     work_queue.task_done()
                     continue
                 work_queue.task_done()
+                # **Write what is behind this sentinel before stopping
+                # (#319).** At this instant this thread stands exactly at
+                # the sentinel's position and is the queue's sole
+                # consumer, so everything still in the deque is precisely
+                # "behind the sentinel", by construction rather than by a
+                # timing argument. `shutdown()` posts the sentinel and
+                # joins; items queued after that -- by a direct `put`, or
+                # by `_requeue_orphans` from a `flush()` racing the
+                # shutdown -- used to be written by nobody. That was
+                # #314's accepted hole, and this closes it.
+                #
+                # **It runs here and not in `shutdown()`**, which is the
+                # obvious place and the wrong one: `shutdown()` would be
+                # calling `save_all` on its own thread while this worker
+                # is inside `save_all` over the same graph and the same
+                # sidecar -- the concurrency #294 removed, and what
+                # `_drain_recoverable_saves` refuses to do for the same
+                # reason. It also does not extend `close()`: `shutdown()`
+                # still returns at its join timeout and this catch-up
+                # write happens afterwards, on the daemon worker.
+                #
+                # **The manager is held strongly across the drain, and
+                # that is a different pin from the one #318 removed.**
+                # The drain needs `manager.store_backend` to write at
+                # all, and this pin is bounded by the drain rather than
+                # renewed every second around a blocking wait. The
+                # `finally` at the bottom of the loop drops it, and
+                # `break` runs that `finally`.
+                #
+                # **The `try` is not there because the drain can raise.**
+                # `_drain_queued_saves` is total by construction -- every
+                # item is written under its own `try`, and `task_done()`
+                # is guarded. It is there because the `break` must be
+                # reached *whatever* a future edit to that method does:
+                # inside the outer `try` alone, anything escaping would
+                # be swallowed by `except Exception` below and `while
+                # True` would resume with `running is False` and an empty
+                # queue -- a worker spinning on `queue.Empty` with
+                # nothing left to stop it, which is #250's leak
+                # reintroduced by #319's own fix.
+                try:
+                    manager._drain_queued_saves()
+                except Exception as exc:  # pylint: disable=broad-except
+                    get_logger().error(
+                        "PersistenceManager worker could not write the "
+                        f"saves queued behind its sentinel: {exc} (#319).")
                 break
 
             # Perform the save
@@ -650,25 +696,16 @@ class PersistenceManager:
         `while True` worker with nothing left to end it, which is #250's
         leak reintroduced by its own fix. So: report and return.
 
-        **What that leaves unwritten, exactly.** The sentinel sits at the
-        position it was `put` at, so the items *ahead* of it are still
-        the live worker's and it will write them before it stops -- they
-        are deferred, not lost. The items *behind* it were queued after
-        `shutdown()` began; that worker exits on the sentinel without
-        reaching them, and nothing here writes them either. They are the
-        accepted hole, and the reported `queued` counts all three
-        populations together (the sentinel included), which is why the
-        message names it as a queue depth rather than as a count of
-        lost saves.
-
-        **`task_done()` exactly once per item consumed**, and the
-        arithmetic is the part to get right. A reaped orphan was
-        `get()`-ed by its dead owner and never counted off, so it owes
-        one. An item still in the deque owes one for the `get_nowait()`
-        below. Miss one and `unfinished_tasks` stays above zero on a
-        manager `save_async` can restart, and the next `flush()` never
-        returns -- #309's hang, reintroduced. Count one too many and the
-        queue raises `ValueError: task_done() called too many times`.
+        **Nothing is left unwritten by that, since #319.** The sentinel
+        sits at the position it was `put` at, so the items *ahead* of it
+        are still the live worker's and it will write them before it
+        stops. The items *behind* it were queued after `shutdown()`
+        began; **that worker now writes them too, at the instant it takes
+        its own sentinel** -- see `_drain_queued_saves` and the sentinel
+        arm of `_persistence_worker_loop`. Both populations are deferred
+        rather than lost, which is why the reported number is still a
+        queue *depth* (it counts the sentinel as well) rather than a
+        count of lost saves.
 
         **It never raises.** `Session.close()` re-raises the first
         exception any of its steps produced and `__exit__` returns None,
@@ -690,17 +727,72 @@ class PersistenceManager:
             with self._inflight_lock:
                 outstanding = len(self._inflight)
             if outstanding or not self.queue.empty():
+                # "Still running" now covers one state it did not before
+                # (#319): the thread may be inside its own post-sentinel
+                # drain rather than inside a user's save. Either way it is
+                # the queue's sole consumer and must not be raced, which
+                # is the only thing this branch decides -- so the message
+                # says what is true of both, and no longer claims that
+                # what is behind the sentinel goes unwritten.
                 self._report_unreconciled(
-                    "PersistenceManager.shutdown() timed out with a save "
-                    "still running; it is left with its worker rather than "
-                    "written here, which would double-write and race it. "
-                    f"in_flight_items={outstanding} (recorded under any "
-                    f"owner), queue_depth={self.queue.qsize()} (includes "
-                    "the shutdown sentinel; items behind it are written "
-                    "neither by that worker nor here) (#314).")
+                    "PersistenceManager.shutdown() timed out with its "
+                    "worker still running; whatever it holds is left with "
+                    "it rather than written here, which would double-write "
+                    f"and race it. in_flight_items={outstanding} (recorded "
+                    f"under any owner), queue_depth={self.queue.qsize()} "
+                    "(includes the shutdown sentinel; that worker writes "
+                    "what is behind its own sentinel before it stops, "
+                    "#319) (#314).")
             return
 
-        items = list(self._reap_orphans())
+        self._drain_queued_saves(self._reap_orphans())
+
+    def _drain_queued_saves(self, already_held=()):
+        """Write every item left in the deque, and count each one off.
+
+        Two callers, one spelling. `_drain_recoverable_saves` calls it
+        for a manager whose worker is dead, passing the orphans it
+        reaped; `_persistence_worker_loop` calls it with nothing held,
+        at the instant it takes its own shutdown sentinel, to write what
+        was queued behind that sentinel (#319). The `task_done()`
+        arithmetic below is the reason this is one method rather than
+        two copies.
+
+        **The worker never reaps, and that asymmetry is deliberate.**
+        `_reap_orphans` is about items a *dead* thread was holding;
+        the worker calling it would be asking that question about
+        itself. So the reap stays with the caller that has a reason to
+        ask it, and arrives here as `already_held`.
+
+        **`task_done()` exactly once per item consumed**, and the
+        arithmetic is the part to get right. A reaped orphan was
+        `get()`-ed by its dead owner and never counted off, so it owes
+        one. An item still in the deque owes one for the `get_nowait()`
+        below. Miss one and `unfinished_tasks` stays above zero on a
+        manager `save_async` can restart, and the next `flush()` never
+        returns -- #309's hang, reintroduced. Count one too many and the
+        queue raises `ValueError: task_done() called too many times`.
+
+        **One pass to `Empty`, never a re-post loop.** Two sentinels with
+        `running` still False would ping-pong forever under a re-post;
+        `None` is skipped and counted off instead.
+
+        **An item queued after this sees `Empty` is not stranded.** It
+        arrives through `save_async`, which restarts a worker once this
+        thread is dead. That is unchanged by #319 and is named here so it
+        is not read as new.
+
+        **`_inflight` is deliberately not written during this drain.** A
+        thread killed mid-drain loses the item it holds -- the same class
+        as #309's two documented residual windows, and closing either
+        needs atomicity inside `Queue`.
+
+        **It never raises**, and both callers depend on that: one runs
+        from `Session.close()`, which would otherwise replace whatever a
+        user's `with` body was unwinding; the other must reach its
+        `break`, or a `while True` worker is left with nothing to stop it.
+        """
+        items = list(already_held)
         while True:
             try:
                 items.append(self.queue.get_nowait())
@@ -717,15 +809,19 @@ class PersistenceManager:
                 if item is None:
                     continue
                 patients, prune_absent_patients = item
+                # Not "shutdown() is writing ...": since #319 the
+                # other caller is the worker itself, taking its own
+                # sentinel, and a log line naming the wrong thread is
+                # the kind of small lie that costs an hour.
                 get_logger().warning(
-                    "PersistenceManager.shutdown() is writing a save its "
-                    "worker never finished (#314).")
+                    "PersistenceManager is writing a save its worker "
+                    "never finished (#314, #319).")
                 self.store_backend.save_all(
                     patients, prune_absent_patients=prune_absent_patients)
             except Exception as exc:  # pylint: disable=broad-except
                 self._report_unreconciled(
-                    "PersistenceManager.shutdown() could not write a save "
-                    f"its worker left behind: {exc} (#314).")
+                    "PersistenceManager could not write a save its worker "
+                    f"left behind: {exc} (#314, #319).")
             finally:
                 # `task_done()` gets its own guard, and that is not
                 # belt-and-braces. It is the one statement here whose
@@ -733,7 +829,7 @@ class PersistenceManager:
                 # call per item consumed, as argued above -- rather than
                 # on construction, and the queue's answer to a wrong
                 # argument is `ValueError: task_done() called too many
-                # times`. In a bare `finally` that escapes `shutdown()`,
+                # times`. In a bare `finally` that escapes this method,
                 # and `Session.close()` re-raises the first exception any
                 # of its steps produced, so a miscount would replace
                 # whatever the user's `with` body was unwinding with a
@@ -745,8 +841,8 @@ class PersistenceManager:
                     self.queue.task_done()
                 except ValueError as exc:
                     get_logger().error(
-                        "PersistenceManager.shutdown() counted off more "
-                        f"tasks than the queue is holding: {exc} (#314).")
+                        "PersistenceManager counted off more tasks than the "
+                        f"queue is holding: {exc} (#314).")
 
     def _report_unreconciled(self, message):
         """Say -- on both channels -- that a save did not reach the store.
