@@ -1253,7 +1253,7 @@
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_MAX_TASKS_PER_CHILD</code></strong></td>
 <td style="text-align: left;"><em>Unlimited</em></td>
-<td style="text-align: left;">Restart worker processes after N tasks to release memory. Useful if you suspect memory leaks in underlying libraries.</td>
+<td style="text-align: left;">Restart worker processes after N tasks to release memory. Useful if you suspect memory leaks in underlying libraries. Setting it at all <strong>turns threads off</strong> for every call site it reaches, because only <code>multiprocessing.Pool</code> implements recycling — see the ordering note in the <code>ISOCENTER_FORCE_PROCESSES</code> row below. <strong>It cannot reach <code>session.export()</code> in either direction</strong>: <code>_resolve_strategy</code> consults the environment only when the <code>maxtasksperchild</code> argument is <code>None</code>, and the export path always passes <code>25</code>, so neither raising nor lowering this changes what an export does. A value <strong>below 1</strong> — <code>0</code> or any negative — is not a recycling interval: it is reported with a warning naming the variable and the value, and no recycling is used. Until #185, <code>0</code> was carried into <code>multiprocessing.Pool</code>, which raised <code>ValueError: maxtasksperchild must be a positive int or None</code> without naming this variable — the same defect #335 fixed for <code>ISOCENTER_MAX_WORKERS</code>.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_DISABLE_GC</code></strong></td>
@@ -1263,7 +1263,7 @@
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_FORCE_THREADS</code></strong></td>
 <td style="text-align: left;"><code>0</code></td>
-<td style="text-align: left;">Set to <code>1</code> to force using Threads instead of Processes (bypass multiprocessing). Useful for debugging or when running in environments that don't support <code>fork</code>.</td>
+<td style="text-align: left;">Set to <code>1</code> to force using Threads instead of Processes (bypass multiprocessing). Useful for debugging or when running in environments that don't support <code>fork</code>. <strong>It does not apply to <code>session.export()</code></strong>, which passes <code>maxtasksperchild=25</code> and therefore runs in processes on every interpreter, free-threaded builds included. That is a decision rather than an oversight: recycling a worker every 25 tasks reclaims memory leaked by the imaging C libraries, and a thread pool has no process to recycle, so the pickling cost is paid on purpose (#185). The request used to be dropped in silence; it is now reported with a warning naming both levers, so <code>export()</code> remains the one path you cannot debug, breakpoint or coverage-measure in the calling process.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_FORCE_PROCESSES</code></strong></td>
