@@ -522,3 +522,93 @@ def test_the_default_worker_count_is_one_per_cpu(monkeypatch):
             "on purpose (the comment beside the expression says why) and "
             "the docs spent the life of that row claiming it was still "
             "in force (#333)")
+
+
+def test_a_zero_worker_count_is_reported_like_a_malformed_one(
+        monkeypatch, caplog):
+    """`ISOCENTER_MAX_WORKERS=0` is a typo, and it was read as no value (#335).
+
+    `_resolve_strategy` settled the count with
+    `_env_int(...) or (os.cpu_count() or 1)`, and `or` cannot tell an
+    unset variable from a set-but-falsey one. So `0` -- the one integer a
+    worker pool can never honour -- was the one integer that vanished
+    without a word, while `banana` two tests up was reported.
+
+    **The count itself was already right, and that is the point.** The
+    first assertion below passes on both sides of the fix; the second is
+    the red one. An operator who set `0` got a run at CPU width with
+    nothing anywhere saying their setting was discarded, which is exactly
+    the symptom `_env_int`'s docstring says the malformed-value warning
+    exists to prevent.
+    """
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "0")
+
+    with caplog.at_level(logging.WARNING):
+        strategy = parallel._resolve_strategy(
+            None, 1, None, False, False, False, "", None)
+
+    assert strategy.max_workers == (os.cpu_count() or 1), (
+        "a rejected worker count must fall back to the documented "
+        "default, not to some third number")
+    assert any("ISOCENTER_MAX_WORKERS" in record.message
+               for record in caplog.records), (
+        "0 was discarded without a word; a malformed value is reported "
+        "and the one value a pool can never honour was not")
+    assert any("0" in record.message for record in caplog.records), (
+        "the warning does not name the value that was rejected, so it "
+        "cannot be matched against what the operator typed")
+
+
+def test_a_negative_worker_count_is_reported_rather_than_carried_to_the_pool(
+        monkeypatch, caplog):
+    """A negative count reached the pool constructor and raised there (#335).
+
+    Worse than the zero case above: `_env_int` returns `-1`, `-1` is
+    truthy, so `or` passed it straight through and the strategy carried
+    it into `ThreadPoolExecutor`/`ProcessPoolExecutor` (`ValueError:
+    max_workers must be greater than 0`) or, on the recycling path, into
+    `multiprocessing.Pool` (`ValueError: Number of processes must be at
+    least 1`). Neither message names an environment variable, so the
+    traceback pointed at isocenter's own call and not at the setting that
+    caused it.
+
+    Both assertions are red before the fix: the value is wrong *and* the
+    channel is silent.
+    """
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "-1")
+
+    with caplog.at_level(logging.WARNING):
+        strategy = parallel._resolve_strategy(
+            None, 1, None, False, False, False, "", None)
+
+    assert strategy.max_workers == (os.cpu_count() or 1), (
+        "a negative worker count is still being carried to the pool "
+        "constructor, which raises a ValueError naming no environment "
+        "variable")
+    assert any("ISOCENTER_MAX_WORKERS" in record.message
+               for record in caplog.records), (
+        "the negative value was rejected in silence")
+    assert any("-1" in record.message for record in caplog.records), (
+        "the warning does not name the value that was rejected")
+
+
+def test_an_explicit_zero_worker_count_is_not_an_environment_typo(monkeypatch):
+    """The guard stays under `if max_workers is None` (#335).
+
+    `run_parallel(..., max_workers=0)` is a programming error in the
+    caller's own source, not a misconfigured deployment: the caller can
+    see the literal, and silently rewriting it to the CPU count would
+    hide a bug in a line they wrote. A warning on a log line nobody is
+    reading is the right channel for an environment variable and the
+    wrong one for an argument, so the explicit value keeps travelling to
+    the pool and keeps raising there.
+    """
+    monkeypatch.delenv("ISOCENTER_MAX_WORKERS", raising=False)
+
+    strategy = parallel._resolve_strategy(
+        0, 1, None, False, False, False, "", None)
+
+    assert strategy.max_workers == 0, (
+        "an explicit max_workers=0 was rewritten to the default; the "
+        "environment guard has escaped its `if max_workers is None` "
+        "arm and is now swallowing a caller's own bug")

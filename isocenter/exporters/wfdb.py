@@ -466,13 +466,74 @@ class WfdbExporter(Exporter):
         """
         seq = instance.sequences.get(WAVEFORM_SEQUENCE_TAG)
         if seq is None or not seq.items:
+            # An ordinary non-waveform instance -- a CT slice sharing a
+            # series with an ECG. It was never asked to become a record,
+            # so it is not loss and files nothing. Deliberately NOT
+            # merged with the arm below: both return `None` and the loop
+            # cannot tell them apart, so an emitter placed here would
+            # write one `DATA_LOSS` row per slice and bury the real ones
+            # (#338).
             return None
 
         samples = instance.get_waveform_data()
         if samples is None or samples.size == 0:
-            logger.warning(
-                f"Instance {instance.sop_instance_uid} declares a waveform "
-                "but has no sample data; skipping.")
+            # This one *is* loss, and it was invisible in every channel
+            # but a log line (#338). The instance declared a waveform and
+            # produced no record: `written` does not hold it, `failed`
+            # does not count it (nothing raised), and the `EXPORT` row's
+            # "0 instances failed" is therefore true while a record the
+            # run was asked for is missing.
+            #
+            # **`STANDARD` and not `SIGNAL`.** `LOSS_SCOPE_SIGNAL` is in
+            # `GRADED_LOSS_SCOPES` and takes `validation_status` to
+            # `REVIEW_REQUIRED`, which would reclassify a skip that
+            # `tests/test_wfdb_writer.py` pins as deliberate and flip
+            # previously-clean runs. Reported, not graded.
+            #
+            # **The detail is about this export, not about the source.**
+            # `get_waveform_data()` returns `None` when nothing was ever
+            # ingested, which from here is indistinguishable from a
+            # source that carried a Waveform Sequence with no samples --
+            # so claiming the source *had* samples would assert what this
+            # frame cannot establish (the shape `persistence.py` refuses
+            # when it declines to back-fill `loss_scope` from `details`).
+            # The two arms do differ in what they know, and say only
+            # that.
+            #
+            # This row makes the loss findable; it does not make the
+            # `EXPORT` line sum. That would need a third counter, which
+            # #338 rules out.
+            # `entity_uid` is the locating column of the compliance
+            # report's section 3.1 table, so it chains the way
+            # `_report_export_losses` chains its own `DATA_LOSS` rows
+            # (`r.sop_instance_uid or r.output_path`) rather than
+            # collapsing straight to `"UNKNOWN"` like the `except` arm
+            # above -- that arm falls back on a worker result that may
+            # carry nothing at all, and this one has an instance in hand.
+            # A row keyed `UNKNOWN` is a row nobody can look up, and a
+            # second UID-less instance in the same run would file a
+            # second one indistinguishable from the first.
+            uid = (instance.sop_instance_uid or instance.source_path
+                   or "UNKNOWN")
+            cause = ("nothing is held for this instance" if samples is None
+                     else "a loader produced an empty array")
+            # Single line and no `|`: this renders straight into a
+            # markdown table cell in the compliance report. Composed here
+            # rather than flattened after the fact, like the neighbouring
+            # `DATA_LOSS` emitter and unlike the `except` arm, which
+            # cannot know what an arbitrary exception's `str()` holds.
+            detail = (
+                "Declared a Waveform Sequence but no sample data reached "
+                f"this export ({cause}), so no record was written.")
+            logger.warning(f"{uid}: {detail}")
+            if store_backend is not None:
+                # `log_audit`, never `log_audit_batch` -- the reason is
+                # at the loop's `except` arm above.
+                store_backend.log_audit(
+                    action_type="DATA_LOSS",
+                    entity_uid=uid,
+                    details=detail,
+                    loss_scope=LOSS_SCOPE_STANDARD)
             return None
 
         waveform = Waveform.from_dicom_item(seq.items[0])

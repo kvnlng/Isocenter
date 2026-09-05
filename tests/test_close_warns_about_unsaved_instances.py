@@ -63,8 +63,15 @@ CT_REQUIRED = (
 WARNING_FRAGMENT = "unsaved change"
 
 
-def _session(tmp_path, name="close"):
-    """Two exportable CT instances, saved synchronously, in a fresh store."""
+def _session(tmp_path, name="close", count=2):
+    """`count` exportable CT instances, saved synchronously, in a fresh store.
+
+    `count` defaults to the two every test here used before #337 needed
+    four, so the truncation case ("and N more") can be built from the
+    same fixture rather than from instances hand-assembled beside it --
+    a second construction would be a second answer to what an
+    exportable instance is.
+    """
     session = DicomSession(str(tmp_path / f"{name}.db"))
 
     patient = Patient("PAT1", "Original Name")
@@ -72,7 +79,7 @@ def _session(tmp_path, name="close"):
     study.study_time = "120000"
     series = Series("SE_1", "CT", 1)
 
-    for n in range(2):
+    for n in range(count):
         inst = Instance(f"1.2.826.0.1.{n}", CT_STORAGE, n + 1)
         inst.file_path = None
         for tag, value in CT_REQUIRED:
@@ -244,3 +251,139 @@ def test_a_second_close_warns_again(tmp_path, capsys):
     session.close()
 
     assert WARNING_FRAGMENT in capsys.readouterr().out
+
+
+def test_an_unsaved_instance_with_no_uid_is_still_warned_about(
+        tmp_path, capsys):
+    """A `None` UID cost the warning entirely, not just its name (#337).
+
+    `", ".join(i.sop_instance_uid for i in unsaved[:3])` raises
+    `TypeError: sequence item 0: expected str instance, NoneType found`
+    on an instance whose UID is `None`, and the `except Exception` guard
+    around the whole diagnostic swallows it. So the observable symptom is
+    **no warning at all** -- for the graph most in need of one, since an
+    instance with no UID is the one a caller can least easily find again.
+
+    `source_path` and not `file_path` in the fallback: redaction detaches
+    `file_path` (`entities.py` says so at the field), and redaction is
+    exactly what leaves an instance dirty at close.
+    """
+    session = _session(tmp_path, name="nouid")
+    inst = _instances(session)[0]
+    inst.sop_instance_uid = None
+    inst.source_path = "/tmp/whatever.dcm"
+    inst.mark_modified()
+
+    capsys.readouterr()
+    session.close()
+    out = capsys.readouterr().out
+
+    assert WARNING_FRAGMENT in out, (
+        "the warning was lost outright: the join raised TypeError on the "
+        "None UID and the guard swallowed it, so a caller about to drop "
+        "an unidentifiable instance was told nothing")
+    assert "1 instance(s)" in out
+    assert "whatever.dcm" in out, (
+        "the warning fired but does not locate the instance; '1 unsaved "
+        "instance' is the non-information #307 exists to replace")
+
+
+def test_an_unsaved_instance_with_an_empty_uid_is_still_located(
+        tmp_path, capsys):
+    """`""` is the dataclass default, and it joined to nothing (#337).
+
+    `Instance.sop_instance_uid` is declared `str = ""`, so a
+    default-constructed malformed instance carries the empty string
+    rather than `None`. That joins without raising and the warning fires
+    -- reading `Affected: . Call save(sync=True)...`. The crash is not
+    the whole defect: a fix that only stops the `TypeError` leaves this
+    case naming nothing, and this is the case a real session is likelier
+    to produce.
+    """
+    session = _session(tmp_path, name="emptyuid")
+    inst = _instances(session)[0]
+    inst.sop_instance_uid = ""
+    inst.source_path = "/tmp/empty-uid.dcm"
+    inst.mark_modified()
+
+    capsys.readouterr()
+    session.close()
+    out = capsys.readouterr().out
+
+    assert WARNING_FRAGMENT in out
+    assert "empty-uid.dcm" in out, (
+        "the empty UID joined to nothing and the warning named no "
+        "instance at all")
+
+
+def test_an_instance_with_neither_uid_nor_source_path_is_still_located(
+        tmp_path, capsys):
+    """The last arm has to be total, or the crash is only moved (#337).
+
+    `instance_number` is `int = 0` on the dataclass and never `None`, so
+    the chain always terminates in something joinable. A hand-built
+    instance can reach `close()` with no UID and no file behind it --
+    every fixture in this suite builds one that way -- and if the
+    fallback ended at `source_path` that graph would raise the same
+    `TypeError` into the same guard and lose the same warning.
+    """
+    session = _session(tmp_path, name="bare")
+    inst = _instances(session)[0]
+    inst.sop_instance_uid = None
+    inst.source_path = None
+    inst.file_path = None
+    inst.mark_modified()
+
+    capsys.readouterr()
+    session.close()
+    out = capsys.readouterr().out
+
+    assert WARNING_FRAGMENT in out, (
+        "an instance with no UID and no source path lost the warning "
+        "again; the fallback chain is not total")
+    assert str(inst.instance_number) in out, (
+        "nothing in the message distinguishes this instance from any "
+        "other unidentified one")
+
+
+def test_the_truncation_still_counts_when_the_first_three_are_unidentified(
+        tmp_path, capsys):
+    """"and N more" is arithmetic over `unsaved`, not over what was named.
+
+    Four instances with **neither** a UID nor a `source_path`, which is
+    what the name says and what the last arm of the chain is for: three
+    are rendered as `<unidentified instance N>` and the fourth is
+    summarised. Giving them source paths instead would truncate just as
+    correctly while exercising the *middle* arm, so the terminal arm
+    would never meet the truncation at all -- and it is the arm most
+    likely to be dropped by someone who reads the chain as ending at
+    `source_path`.
+
+    Before #337 the join raised on the first of them and there was no
+    message to truncate, so this is red for the same reason as the first
+    test -- and it stays green afterwards only while the count keeps
+    coming from `len(unsaved)` rather than from the length of the
+    rendered list.
+    """
+    session = _session(tmp_path, name="fourbare", count=4)
+    for inst in _instances(session):
+        inst.sop_instance_uid = None
+        inst.source_path = None
+        inst.file_path = None
+        inst.mark_modified()
+
+    capsys.readouterr()
+    session.close()
+    out = capsys.readouterr().out
+
+    assert "4 instance(s)" in out
+    # One string, not three `in` checks: the point is that exactly three
+    # are named, in order, through the terminal arm, and that the fourth
+    # is counted rather than named. `out` carries the message twice (the
+    # logger's console handler and the `print`), so counting occurrences
+    # would measure the channel rather than the rendering.
+    assert ("Affected: <unidentified instance 1>, <unidentified instance 2>, "
+            "<unidentified instance 3>, and 1 more." in out), (
+        f"four instances with neither a UID nor a source path did not "
+        f"render as three through the terminal arm plus one counted: "
+        f"{out!r}")
