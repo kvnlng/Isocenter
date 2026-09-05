@@ -193,9 +193,36 @@ def _resolve_strategy(max_workers, chunksize, maxtasksperchild, disable_gc,
     # exist, which is the opposite of the point.
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     if max_workers is None:
+        configured = _env_int("ISOCENTER_MAX_WORKERS")
+        if configured is not None and configured < 1:
+            # `0` and every negative in one arm, so there is not one
+            # behaviour for `0` and another for `-1`: neither is a
+            # worker count, and an operator who typed either made the
+            # same mistake. The value is named as well as the variable,
+            # the way `_env_int`'s own warning does -- a message that
+            # does not quote what was rejected cannot be matched against
+            # what was typed.
+            get_logger().warning(
+                "ISOCENTER_MAX_WORKERS is set to %d, which is not a usable "
+                "worker count. Ignoring it and using the default. Set it to "
+                "1 to run with a single worker.", configured)
+            configured = None
         # One worker per CPU, not the 1.5x an earlier version used:
         # predictable beats marginally faster when a run is hours long.
-        max_workers = _env_int("ISOCENTER_MAX_WORKERS") or (os.cpu_count() or 1)
+        #
+        # Not `configured or (...)`: `or` is what discarded a `0` here
+        # in silence, because the one value that must be reported is the
+        # one value that is falsey (#335). A negative was worse -- truthy,
+        # so it travelled to the pool constructor and raised there, in a
+        # message naming no environment variable.
+        #
+        # Deliberately inside `if max_workers is None`, so an explicit
+        # `max_workers=0` argument still reaches the pool and still
+        # raises. That is a programming error in a line the caller can
+        # see, not a misconfigured deployment; rewriting it to the CPU
+        # count would hide their bug on a log line nobody is reading.
+        max_workers = (configured if configured is not None
+                       else (os.cpu_count() or 1))
 
     if chunksize == 1:
         # Only consulted at the default. An explicit `chunksize=1` is
