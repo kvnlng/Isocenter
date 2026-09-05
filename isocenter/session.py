@@ -747,7 +747,27 @@ class DicomSession:
             if not unsaved:
                 return
 
-            named = ", ".join(i.sop_instance_uid for i in unsaved[:3])
+            named = ", ".join(
+                # `sop_instance_uid` is `""` by dataclass default and can
+                # be `None` on a hand-built or partly-ingested instance.
+                # `""` joins fine and names nothing ("Affected: ."); `None`
+                # raises `TypeError` into the guard below and the warning
+                # is lost outright -- for the graph most in need of one,
+                # since an instance with no UID is the one a caller can
+                # least easily find again (#337).
+                #
+                # The fallback has to *locate*, not merely be joinable:
+                # three instances rendered as "<unknown>, <unknown>,
+                # <unknown>" is the same non-information this message
+                # exists to replace (#307), without the crash.
+                # `source_path` and not `file_path` -- redaction detaches
+                # `file_path` (see the field in `entities.py`), and
+                # redaction is exactly what leaves an instance dirty at
+                # close. `instance_number` is `int = 0` and never `None`,
+                # so the last arm is total and the chain cannot raise.
+                i.sop_instance_uid or i.source_path
+                or f"<unidentified instance {i.instance_number}>"
+                for i in unsaved[:3])
             if len(unsaved) > 3:
                 named += f", and {len(unsaved) - 3} more"
             message = (
