@@ -482,7 +482,16 @@ class SqliteStore:
     #: which keeps the method's memory promise intact on the 100GB+
     #: datasets it exists for, while making the per-page cost (one rowid
     #: seek plus `page_size` primary-key joins) disappear into the noise.
-    FLATTENED_PAGE_SIZE = 500
+    #:
+    #: Private, and the underscore is the smaller half of why (#202).
+    #: This is the *default* and not a knob: `get_flattened_instances`
+    #: takes it as a default argument, which Python evaluates once when
+    #: the `def` runs, so the number is baked into `__defaults__` at
+    #: import and rebinding this attribute -- on the class or on a
+    #: subclass -- changes nothing. Measured: after setting it to `2`, a
+    #: default-argument walk over six rows still took one connection.
+    #: `page_size=` is the one spelling for the behaviour.
+    _FLATTENED_PAGE_SIZE = 500
 
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS patients (
@@ -3081,7 +3090,7 @@ class SqliteStore:
     def get_flattened_instances(self,
                                 patient_ids: List[str] = None,
                                 instance_uids: List[str] = None,
-                                page_size: int = FLATTENED_PAGE_SIZE):
+                                page_size: int = _FLATTENED_PAGE_SIZE):
         """
         Yields a flat dictionary for every instance in the DB.
 
@@ -3116,24 +3125,40 @@ class SqliteStore:
         Args:
             patient_ids (List[str], optional): Filter by list of Patient IDs.
             instance_uids (List[str], optional): Filter by list of SOP Instance UIDs.
-            page_size (int, optional): Rows per page. Trades resident
-                memory against the number of queries; see
-                `FLATTENED_PAGE_SIZE`. Must be >= 1 -- `LIMIT 0` returns
-                an empty page, and an empty page is how the walk decides
-                it has finished, so a zero would silently report an empty
-                store.
+            page_size (int, optional): Rows per page, defaulting to 500.
+                Trades resident memory against the number of queries.
+                Must be an `int` >= 1 -- `LIMIT 0` returns an empty page,
+                and an empty page is how the walk decides it has
+                finished, so a zero would silently report an empty store.
 
         Yields:
             dict: Flattend dictionary representing row data (patient, study, series, instance paths).
 
         Raises:
-            ValueError: If `page_size` is below 1. This is a plain method
-                wrapping a generator precisely so the check fires at the
-                call, not on the first `next()`.
+            ValueError: If `page_size` is not a whole number >= 1. This
+                is a plain method wrapping a generator precisely so the
+                check fires at the call, not on the first `next()` --
+                which is what a `2.5` used to do, reaching `LIMIT ?` and
+                raising `sqlite3.IntegrityError: datatype mismatch` a
+                page later, out of a public method, for a caller's typo.
         """
-        if page_size < 1:
+        # `bool` before `int`, and the ordering is the mechanism:
+        # `isinstance(True, int)` is True and `True < 1` is False, so
+        # `page_size=True` passed the old guard and would pass a bare
+        # `isinstance(page_size, int)` too -- and then page one row at a
+        # time, silently. Same subclass trap, and the same answer, as
+        # `_fallback_encoding`'s `bool` arm and `_value_fits_vr`'s
+        # ordering in `io_handlers.py` (#283).
+        #
+        # No `int()` coercion for a float. `1e9` is a whole number and
+        # `2.5` is not, and a rule that accepted one would have to
+        # decide what to do with the other; refusing the type outright
+        # says which spelling this method takes.
+        if (isinstance(page_size, bool)
+                or not isinstance(page_size, int)
+                or page_size < 1):
             raise ValueError(
-                f"page_size must be >= 1, got {page_size}")
+                f"page_size must be a whole number >= 1, got {page_size!r}")
         return self._iter_flattened_instances(
             patient_ids, instance_uids, page_size)
 

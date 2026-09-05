@@ -27,6 +27,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`FLATTENED_PAGE_SIZE` stops advertising a knob it never provided, and a bad `page_size` reads as a bad argument (#202).** One constant renamed to `SqliteStore._FLATTENED_PAGE_SIZE`, one default argument and one docstring following it, one widened guard in `get_flattened_instances` (`isocenter/persistence.py`); three tests in `tests/test_dataframe_export.py`. **The public name is deleted, not aliased.**
+
+  `SqliteStore.FLATTENED_PAGE_SIZE = 500` was a public class attribute, and `get_flattened_instances` took its default from it. A default argument is evaluated once, when the `def` runs, so the `500` was baked into `__defaults__` at import and the attribute was never read again: rebinding it -- on the class, on an instance, or on a subclass -- did nothing. Measured: after `SqliteStore.FLATTENED_PAGE_SIZE = 2`, a default-argument walk over six rows took **one** connection, where honouring the `2` would have taken three; an explicit `page_size=2` took four. Three things pointed a user at it as though it were configuration -- the docstring named it, the nine-line comment beside it explains a trade-off that only matters if someone might change it, and `docs/api/persistence.md` is a bare `::: isocenter.persistence` with no `members:` filter, so it rendered in the published API reference beside the method that appeared to consume it. Two spellings for one behaviour with only one of them working, failing silently: a user bounding memory on a large export got 500-row pages and no error.
+
+  **Made private rather than made real, and there is no compatibility alias.** `page_size=` already is the one spelling for the behaviour, so making the attribute genuinely overridable would have added a second one rather than fixing the count. The comment stays -- it explains where 500 comes from -- and gains a sentence saying explicitly that this is the default and not a knob, which the underscore alone does not tell a reader. Pre-1.0, a renamed name is deleted, so `FLATTENED_PAGE_SIZE = _FLATTENED_PAGE_SIZE` is not added; a test asserts the public name is *absent*, because re-adding it for compatibility would restore exactly the two spellings that caused this.
+
+  **Three exception cells change, and one of them changes when it fires.** The guard was `if page_size < 1`, which admits anything comparable to an int:
+
+  | `page_size` | before | now |
+  | --- | --- | --- |
+  | `0`, `-1` | `ValueError` at the call | unchanged |
+  | `None` | `TypeError: '<' not supported between instances of 'NoneType' and 'int'` | `ValueError` |
+  | `"5"` | `TypeError: '<' not supported between instances of 'str' and 'int'` | `ValueError` |
+  | `2.5` | passed the guard; `sqlite3.IntegrityError: datatype mismatch` from `LIMIT ?` **on the first `next()`** | `ValueError` at the call |
+  | `1e9` | passed the guard; same `IntegrityError` on the first `next()` | `ValueError` |
+  | `True` | passed the guard and paged **one row at a time** | `ValueError` |
+
+  None of these "worked", so nothing that was correct changes. The float rows are the ones worth the entry: the method is a plain function wrapping a generator *precisely* so its checks fire at the call rather than on the first `next()`, and a float gave that up -- it returned a generator, and the failure arrived a page later, as a database error out of a public method, for what is a caller's typo.
+
+  **`bool` is refused before `int`, and the ordering is the mechanism.** `isinstance(True, int)` is `True` and `True < 1` is `False`, so `page_size=True` passed the old guard *and* would pass a naive `isinstance(page_size, int)` one -- and then page the walk one row at a time, silently and correctly, which is worse than an error. This repo refuses `bool` before `int` twice already for the same subclass reason: `_fallback_encoding`'s `bool` arm and `_value_fits_vr`'s ordering (#283), both with comments saying the ordering is what does the work. The comment here points at that precedent.
+
+  **No `int()` coercion for a float**, deliberately: `1e9` is a whole number and `2.5` is not, and a rule that accepted the first would have to decide about the second. Refusing the type says which spelling the method takes, and the comment says so before someone adds the coercion "helpfully".
+
+  **`_iter_flattened_instances` gets no guard of its own.** It is private and reachable only through the checked entry point; that division is the reason the wrapper exists and its docstring already explains it.
+
+  **`docs/api/persistence.md` is left as a bare `::: isocenter.persistence`, and this is the one claim in this entry that could not be verified locally.** The premise -- that a leading underscore removes the name from the rendered page with no docs change -- rests on mkdocstrings-python's default `filters`, and `mkdocs.yml` sets no override (only `paths`, `show_root_heading`, `show_source`), so the default applies. The `docs` extra is not installed in the development venv used here, so the site could not be built and the page could not be diffed. If `_FLATTENED_PAGE_SIZE` still renders, that page needs a `members:` or `filters:` block and this entry's "no docs change" clause is false.
+
+  **Red: 6 failed, 8 passed** across the `page_size` tests. `None` and `"5"` were red on the `TypeError`; `2.5`, `1e9` and `True` were red on `DID NOT RAISE ValueError`, which is the defect stated exactly -- the call returned a generator and said nothing. The characterization test was red on `hasattr(SqliteStore, "FLATTENED_PAGE_SIZE")`. `test_a_page_size_below_one_is_rejected` (#164) already covered `0` and is untouched; the new cases sit in the same file so the guard's rows read together.
+
 - **`docs/environment.md` no longer promises a worker count the code abandoned, and the real one is pinned (#333).** One row rewritten; one test added to `tests/test_parallel_contract.py`. No library code changes.
 
   The `ISOCENTER_MAX_WORKERS` row said the default was `CPU_COUNT * 1.5`. `_resolve_strategy` computes `_env_int("ISOCENTER_MAX_WORKERS") or (os.cpu_count() or 1)` -- one worker per CPU -- and the comment beside that expression records the 1.5x as an *earlier version's* behaviour, dropped on purpose because predictable beats marginally faster when a run is hours long. So the table was not merely stale: it advertised, as the current default, the exact number the code's own comment says was rejected. A user sizing a machine from that row provisioned for half again as many workers as they would ever get.
