@@ -41,13 +41,226 @@ def _flush_at_exit(manager_ref):
         manager.shutdown()
 
 
+def _report_abandoned_saves(work_queue, held=None):
+    """Say that a collected manager took unwritten saves with it.
+
+    This loss is **new** (#318): until the worker stopped pinning its
+    manager, a manager with queued saves could not be collected at all.
+    So it needs a channel, and the queue is held strongly by the worker
+    precisely so the exit path can count what it is dropping.
+
+    **A log line and no audit row**, and that is the same conclusion
+    `_report_abandoned_audit_rows` reached one level down. Writing the
+    row would need `manager.store_backend`, which is gone -- that is the
+    whole premise -- and a second weakref to the store would be added
+    surface for a report that would almost never resolve, since a
+    `Session` holds the manager and the store together and they die
+    together.
+
+    **It drains rather than reading `qsize()`**, which is where it parts
+    company with `_report_abandoned_audit_rows`. That queue holds only
+    rows; this one also holds shutdown sentinels, and counting a `None`
+    as a lost save would be a false claim about data loss -- the worse
+    direction to err. `_drain_recoverable_saves` calls the same number a
+    "queue depth" for exactly this reason. Draining is safe here and
+    nowhere else: the manager is unreachable, so no `flush()` can be
+    waiting on the count and no other consumer can be started.
+
+    `held` is the item this worker had already taken off the deque when
+    it found the manager gone, passed rather than pushed back so that
+    the queue's unfinished count is not disturbed for a caller that
+    cannot exist.
+    """
+    pending = 1 if held is not None else 0
+    while True:
+        try:
+            item = work_queue.get_nowait()
+        except queue.Empty:
+            break
+        if item is not None:
+            pending += 1
+    if pending:
+        get_logger().warning(
+            f"A PersistenceManager was collected with {pending} queued "
+            f"save{'' if pending == 1 else 's'} that never reached the "
+            f"store; they are lost. Call close() -- or use the session "
+            f"as a context manager -- rather than dropping a session "
+            f"mid-flight (#318).")
+
+
+def _persistence_worker_loop(manager_ref, work_queue):
+    """Background save worker that does not keep its manager alive.
+
+    Module-level, taking a **weak** reference. `_start_worker` used
+    `target=self._worker`, and a running `Thread` holds its target while
+    a bound method holds `self` -- so a manager with a live worker was
+    immortal, and with it its `SqliteStore`, that store's sqlite
+    handles, its audit-writer thread and its sidecar descriptors. #316
+    fixed the same shape for the store's own audit writer; this is the
+    other half, which #250's `atexit` fix named in passing.
+
+    **The population is bounded, and was checked against CPython rather
+    than assumed.** The `finally` in `threading.Thread.run` does `del
+    self._target, self._args, self._kwargs`, so a worker that has
+    already *finished* does not pin its manager. Only a running one
+    does. (Spelled without a trailing call on purpose:
+    `tests/test_documented_api_exists.py` reads a dotted method call in
+    a package string as a method this package promises, and `run` here
+    is CPython's, not ours.)
+
+    Four things not to "simplify":
+
+    - **`del manager` before returning to the blocking wait.**
+      `work_queue.get(timeout=1.0)` blocks for a second, and a strong
+      reference held across it restores exactly the immortality this
+      fixes -- for a second at a time, forever. `_audit_worker_loop`'s
+      comment says the same thing about its own wait.
+    - **The weakref is a thread argument and is never stored on the
+      manager.** Stored, it would be reachable from the object it is
+      supposed not to keep alive, which is harmless but is also the
+      first step back towards a strong reference someone adds later.
+    - **The `queue.Empty` arm resolves the weakref too.** An idle
+      abandoned manager never reaches a successful `get()`, so a loop
+      that only checked after one would spin here forever: a leaked
+      manager traded for a leaked thread, with the collectability test
+      still green.
+    - **The queue is held strongly, and that is safe *and*
+      load-bearing.** It holds `(list(patients), bool)` tuples -- entity
+      graphs, never the manager -- so there is no cycle back, and it is
+      what lets the exit path count what it abandons. Same argument
+      `_audit_worker_loop` makes for its own queue.
+
+    A dead weakref is a second stop signal alongside the sentinel, and
+    the division between them is worth stating because #319 hangs off
+    the other one: **manager alive at the sentinel -> the worker drains
+    what is behind it and writes it (#319); manager collected -> the
+    worker exits and reports the count on the log, because there is no
+    store left to write to (#318).**
+    """
+    # **Reap before consuming anything, on the newly started thread.**
+    # A worker restart is the event that always accompanies a recovery
+    # being needed -- `save_async` starts one precisely because it found
+    # the previous worker dead -- so this is where recovery always runs,
+    # rather than only where `flush()` happens to look. Before #315
+    # `_recover_orphaned_item` was reachable from `flush()` and nowhere
+    # else, and `Session` flushed from exactly two places at the time
+    # (#294 has since added a third); a session that saved, lost a
+    # worker and then closed never reached it.
+    #
+    # **`_reap_orphans()`, never `_recover_orphaned_item()`.** The latter
+    # takes `_recover_lock` and then calls `_start_worker`, which takes
+    # `_worker_lock`; putting *that* in `_start_worker` instead would
+    # give `_recover_lock` -> `_worker_lock` -> `_recover_lock` on a
+    # non-reentrant lock. Calling the reap -- which takes
+    # `_inflight_lock` alone and restarts nothing, since this thread *is*
+    # the restart -- makes that impossible by construction rather than by
+    # a liveness argument about `self.thread`.
+    manager = manager_ref()
+    if manager is None:
+        _report_abandoned_saves(work_queue)
+        return
+    try:
+        manager._requeue_orphans(manager._reap_orphans())
+    finally:
+        del manager
+
+    while True:
+        manager = None
+        try:
+            try:
+                item = work_queue.get(timeout=1.0)
+            except queue.Empty:
+                # Resolved here as well as after a successful `get()`.
+                # An idle abandoned manager reaches this arm and nothing
+                # else, forever.
+                if manager_ref() is None:
+                    _report_abandoned_saves(work_queue)
+                    return
+                continue
+
+            manager = manager_ref()
+            if manager is None:
+                # `item` is already off the deque; it is passed to the
+                # report rather than pushed back, so the queue's
+                # unfinished count is not disturbed for a `flush()` that
+                # can no longer exist.
+                _report_abandoned_saves(work_queue, held=item)
+                return
+
+            # Record the item before anything can fail, under this
+            # thread's own key. From here to the `finally` below, this
+            # entry is the only reference to the payload that a `flush()`
+            # can reach: the deque no longer holds it (#309). Keying on
+            # the thread rather than writing a single slot is what stops
+            # a *restarted* worker erasing a dead one's orphan on its way
+            # past.
+            if item is not None:
+                with manager._inflight_lock:
+                    manager._inflight[threading.current_thread()] = item
+
+            # If we get a sentinel (None), we exit
+            if item is None:
+                if manager.running:
+                    # Stale sentinel from previous shutdown - ignore it
+                    work_queue.task_done()
+                    continue
+                work_queue.task_done()
+                break
+
+            # Perform the save
+            # Everything from unpacking onwards runs under the same
+            # try/finally, so `task_done()` is reached no matter what
+            # fails. A malformed item that escaped this block would
+            # leave the queue's unfinished count permanently above
+            # zero, and `flush()` waits on it: one bad item and every
+            # later save hangs forever.
+            try:
+                patients, prune_absent_patients = item
+                manager.store_backend.save_all(
+                    patients, prune_absent_patients=prune_absent_patients)
+            except Exception as e:  # pylint: disable=broad-except
+                get_logger().error(f"Background save failed: {e}")
+            finally:
+                # Cleared *before* `task_done()`, and the ordering is
+                # load-bearing in two ways. Reversed, a flush woken by
+                # the count reaching zero can return with this entry
+                # still present, and a later recovery -- once this
+                # thread is dead -- re-queues a payload that was
+                # already saved *and* leaves the count one above
+                # zero for good. In this order, a `queue.join` that
+                # has returned is proof the clear already happened,
+                # which is what makes the second assertion in
+                # `test_the_worker_records_and_releases_the_item_it_is_holding`
+                # race-free rather than lucky.
+                #
+                # The cost of this order is the second of #309's two
+                # residual windows: a thread killed between the clear
+                # and `task_done()` returning leaves no entry with
+                # the count still at 1, which recovery cannot tell
+                # from a healthy queue. Nothing is *lost* there --
+                # the save already committed -- but the flush hangs
+                # as permanently as in the first window. Closing
+                # either needs atomicity inside `Queue`.
+                with manager._inflight_lock:
+                    manager._inflight.pop(threading.current_thread(), None)
+                work_queue.task_done()
+
+        except Exception as e:  # pylint: disable=broad-except
+            get_logger().error(f"Worker crashed: {e}")
+        finally:
+            # The one-second wait above is reached with no strong
+            # reference held. See the docstring.
+            del manager
+
+
 class PersistenceManager:
     """
     Offloads persistence operations to a background thread to unblock the main thread.
 
     This manager:
     - Maintains a queue of patient snapshots to save.
-    - Runs a background worker thread (`_worker`) to process the queue.
+    - Runs a background worker thread (`_persistence_worker_loop`, module-level
+      over a weakref since #318) to process the queue.
     - Registers an `atexit` handler to ensure pending data is flushed before process termination.
     """
 
@@ -108,15 +321,33 @@ class PersistenceManager:
         # suite run: 647 live managers and 149 threads at interpreter
         # exit, 147 of them audit writers.
         #
-        # Nothing is lost by weakening it, and the reason is structural
-        # rather than a judgement call: a manager with a live worker
-        # cannot be collected anyway, because the worker thread holds
-        # `self` through `target=self._worker`. Only a manager whose
-        # worker has already exited becomes collectable, and that manager
-        # has nothing left to flush. The ordering this depends on was
-        # checked rather than assumed -- `atexit` callbacks run while
-        # daemon threads are still alive; interpreter finalization, which
-        # stops them, comes afterwards.
+        # **That argument used to run differently, and #318 falsified
+        # it.** It said nothing was lost structurally, because a manager
+        # with a live worker could not be collected at all -- the worker
+        # held `self` through `target=self._worker` -- so only a manager
+        # whose worker had already exited became collectable, and that
+        # one had nothing left to flush. Since #318 the worker holds a
+        # weakref, so a manager *can* be collected with saves still
+        # queued, and those saves are lost: the worker exits on the dead
+        # weakref and reports the count on the log
+        # (`_report_abandoned_saves`).
+        #
+        # **The loss is inherent, not a choice made here.** The worker
+        # cannot write without `manager.store_backend`, and holding the
+        # store strongly is the exact pin #318 removes.
+        #
+        # **What is still not lost is what this registration is for.**
+        # `close()`, `with`, and a `Session` still referenced at
+        # interpreter exit all reach `shutdown()`: on the last of those
+        # the weakref below resolves and the flush runs. The newly-lossy
+        # population is a `Session` dropped mid-flight without
+        # `close()`, which CLAUDE.md already documents as unsupported
+        # ("leaks worker subprocesses if skipped"). #316 made the same
+        # trade one level down.
+        #
+        # The ordering this depends on was checked rather than assumed --
+        # `atexit` callbacks run while daemon threads are still alive;
+        # interpreter finalization, which stops them, comes afterwards.
         #
         # The registration itself is not undone: the `atexit` list still
         # grows by one small closure per manager. What is reclaimed is the
@@ -134,8 +365,8 @@ class PersistenceManager:
         get_logger().info("PersistenceManager initialized.")
 
     def _start_worker(self):
-        # **The guard is thread liveness, not `self.running`.** `_worker`
-        # is a `while True`; setting `running = False` does not end it, and
+        # **The guard is thread liveness, not `self.running`.** The worker
+        # loop is a `while True`; setting `running = False` does not end it, and
         # nothing else does either -- only the sentinel `shutdown()` posts
         # does. So *a live worker with `running is False`* is a normal
         # state (it is the whole window between `shutdown()` setting the
@@ -166,8 +397,18 @@ class PersistenceManager:
             # counts `threading.enumerate()` by name -- says "nine
             # PersistenceWorkers" rather than "nine Thread-N", which is
             # the diagnostic #250 needed and did not have.
+            # **A module-level target over a weakref, not
+            # `target=self._worker`.** A running `Thread` holds its
+            # target and a bound method holds `self`, so the bound
+            # spelling made every manager with a live worker immortal --
+            # and with it its store, that store's sqlite handles, its
+            # audit-writer thread and its sidecar descriptors (#318).
+            # The queue is passed alongside because the worker needs it
+            # after the weakref goes dead, to count what it abandons.
             self.thread = threading.Thread(
-                target=self._worker, daemon=True, name="PersistenceWorker")
+                target=_persistence_worker_loop,
+                args=(weakref.ref(self), self.queue),
+                daemon=True, name="PersistenceWorker")
             self.thread.start()
             get_logger().info("PersistenceManager worker thread started.")
 
@@ -237,7 +478,7 @@ class PersistenceManager:
         duplicate the write and unbalance the queue's count.
 
         Takes `_inflight_lock` and nothing else, and calls nothing.
-        That is deliberate and is what lets `_worker` call it (see the
+        That is deliberate and is what lets the worker loop call it (see the
         comment at its head) without the reentrancy that calling
         `_recover_orphaned_item` there would need.
         """
@@ -282,7 +523,7 @@ class PersistenceManager:
         traded away for that.
 
         The reap and the re-queue live in `_reap_orphans` and
-        `_requeue_orphans`, which `_worker` also calls on startup
+        `_requeue_orphans`, which `_persistence_worker_loop` also calls on startup
         (#315); the `put()`-then-`task_done()` ordering is argued at the
         latter, in one place because it has two callers.
 
@@ -345,104 +586,6 @@ class PersistenceManager:
         with self._inflight_lock:
             inflight = bool(self._inflight)
         return inflight or not self.queue.empty()
-
-    def _worker(self):
-        # **Reap before consuming anything, on the newly started thread.**
-        # A worker restart is the event that always accompanies a
-        # recovery being needed -- `save_async` starts one precisely
-        # because it found the previous worker dead -- so this is where
-        # recovery always runs, rather than only where `flush()` happens
-        # to look. Before #315 `_recover_orphaned_item` was reachable
-        # from `flush()` and nowhere else, and `Session` flushed from
-        # exactly two places at the time (#294 has since added a third);
-        # a session that saved, lost a worker and then closed never
-        # reached it.
-        #
-        # **`_reap_orphans()`, never `_recover_orphaned_item()`.** The
-        # latter takes `_recover_lock` and then calls `_start_worker`,
-        # which takes `_worker_lock`; putting *that* in `_start_worker`
-        # instead would give `_recover_lock` -> `_worker_lock` ->
-        # `_recover_lock` on a non-reentrant lock. Calling the reap --
-        # which takes `_inflight_lock` alone and restarts nothing, since
-        # this thread *is* the restart -- makes that impossible by
-        # construction rather than by a liveness argument about
-        # `self.thread`.
-        self._requeue_orphans(self._reap_orphans())
-
-        while True:
-            try:
-                # Wait for work
-                item = self.queue.get(timeout=1.0)
-
-                # Record the item before anything can fail, under this
-                # thread's own key. From here to the `finally` below,
-                # this entry is the only reference to the payload that a
-                # `flush()` can reach: the deque no longer holds it
-                # (#309). Keying on the thread rather than writing a
-                # single slot is what stops a *restarted* worker erasing
-                # a dead one's orphan on its way past.
-                if item is not None:
-                    with self._inflight_lock:
-                        self._inflight[threading.current_thread()] = item
-
-                # If we get a sentinel (None), we exit
-                if item is None:
-                    if self.running:
-                        # Stale sentinel from previous shutdown - ignore it
-                        self.queue.task_done()
-                        continue
-                    self.queue.task_done()
-                    break
-
-                # Perform the save
-                # Everything from unpacking onwards runs under the same
-                # try/finally, so `task_done()` is reached no matter what
-                # fails. A malformed item that escaped this block would
-                # leave the queue's unfinished count permanently above
-                # zero, and `flush()` waits on it: one bad item and every
-                # later save hangs forever.
-                try:
-                    patients, prune_absent_patients = item
-                    self.store_backend.save_all(
-                        patients, prune_absent_patients=prune_absent_patients)
-                except Exception as e:
-                    get_logger().error(f"Background save failed: {e}")
-                finally:
-                    # Cleared *before* `task_done()`, and the ordering is
-                    # load-bearing in two ways. Reversed, a flush woken by
-                    # the count reaching zero can return with this entry
-                    # still present, and a later recovery -- once this
-                    # thread is dead -- re-queues a payload that was
-                    # already saved *and* leaves the count one above
-                    # zero for good. In this order, a `queue.join` that
-                    # has returned is proof the clear already happened,
-                    # which is what makes the second assertion in
-                    # `test_the_worker_records_and_releases_the_item_it_is_holding`
-                    # race-free rather than lucky.
-                    #
-                    # The cost of this order is the second of #309's two
-                    # residual windows: a thread killed between the clear
-                    # and `task_done()` returning leaves no entry with
-                    # the count still at 1, which recovery cannot tell
-                    # from a healthy queue. Nothing is *lost* there --
-                    # the save already committed -- but the flush hangs
-                    # as permanently as in the first window. Closing
-                    # either needs atomicity inside `Queue`.
-                    with self._inflight_lock:
-                        self._inflight.pop(threading.current_thread(), None)
-                    self.queue.task_done()
-
-            except queue.Empty:
-                # Check exit condition periodically if using timeout,
-                # but we rely on sentinel for clean shutdown.
-                # However, if running becomes False (force kill?) and no sentinel?
-                # shutdown() sends sentinel.
-                if not self.running and self.queue.empty():
-                    # Fallback exit? No, stick to sentinel.
-                    pass
-                continue
-            except Exception as e:
-                get_logger().error(f"Worker crashed: {e}")
 
     def shutdown(self):
         """
@@ -568,7 +711,7 @@ class PersistenceManager:
             try:
                 # A `None` here is a stale sentinel from an earlier
                 # `shutdown()` whose worker died without taking it.
-                # `_worker` special-cases these; a drain that does not
+                # The worker loop special-cases these; a drain that does not
                 # runs `patients, prune = None` and raises `TypeError`
                 # out of `close()`.
                 if item is None:

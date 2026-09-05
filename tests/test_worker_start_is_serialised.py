@@ -64,6 +64,17 @@ class _Gate:
     the `threading` module -- so the factory keys on the worker's own
     target and delegates every other construction (notably `flush()`'s
     waiter thread) to the real class untouched.
+
+    **The target is `pm_module._persistence_worker_loop`, not
+    `manager._worker`.** Since #318 the worker is started with a
+    module-level function over a weakref rather than a bound method, so
+    the old comparison would match nothing and every construction --
+    including both racing workers -- would be delegated straight past
+    the gate. The test would then pass while measuring nothing, which is
+    the direction that matters: it would report `_start_worker` as
+    serialised without ever having held two callers at its door. Keying
+    on the module attribute also survives a rename of the loop, because
+    it is the same object `_start_worker` passes.
     """
 
     def __init__(self, manager, monkeypatch, parties=2):
@@ -75,7 +86,7 @@ class _Gate:
         real_thread = threading.Thread
 
         def factory(*args, **kwargs):
-            if kwargs.get("target") != manager._worker:
+            if kwargs.get("target") is not pm_module._persistence_worker_loop:
                 return real_thread(*args, **kwargs)
             with self._lock:
                 self._count += 1
