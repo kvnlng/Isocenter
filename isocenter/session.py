@@ -829,8 +829,49 @@ class DicomSession:
         Attempts to release memory by unloading cached pixel and waveform
         data from all instances.
 
-        Safe to call: each unload happens only when the data can be
-        restored (from disk or the sidecar), so nothing is discarded.
+        Each unload goes through `Instance.unload_pixel_data()` and
+        inherits its precondition exactly, **limit included**: it
+        refuses an array replaced through `set_pixel_data()` and not
+        since written, and an array mutated **in place** is not tracked,
+        so it is dropped here and the next `get_pixel_data()` returns
+        the frame from before the mutation. Reaching that needs a
+        writeable array, which means a replacement a save has already
+        written: a frame read from a file or the sidecar is
+        `np.frombuffer`-backed and read-only, so mutating one raises
+        instead of diverging. `unload_pixel_data()` states the
+        precondition in full and this does not restate it.
+
+        **Redaction is not an instance of it**, and the measurement is
+        recorded because two docstrings have now said it was.
+        `RedactionService._redact_instance_pixels`' writeable arm does
+        mutate in place and never calls `set_pixel_data()`, but on a
+        reloaded instance that arm is never entered -- the array is
+        read-only, so every pass takes the copying arm -- and when it
+        *is* entered both callers persist the pixels and then call
+        `discard_pixel_data()` unconditionally in their `finally`, so
+        nothing survives the pass for this sweep to drop. Without a
+        `store_backend` that discard loses the mutation on its own,
+        which is a different defect with a different fix. The shape this
+        limit belongs to is any caller that mutates a written array in
+        place, which is what `tests/test_pixel_divergence.py` does.
+
+        This used to say flatly that nothing is discarded (#323). It
+        was never true of an in-place mutation, and detection is the
+        wrong axis for making it true: hashing the resident array here
+        was rejected by #293 for this exact call site -- a full pass
+        over pixel bytes on the path the 100GB scaling story depends on
+        -- and `_pixel_hash` is not always populated, since hydration
+        wires a loader without one, so a `None` would have to mean
+        either "refuse everything hydrated", turning the only
+        RAM-reclaiming operation this library has into a no-op after a
+        reload, or "allow", which is the hole again. What closes it is
+        making in-place mutation impossible: `get_pixel_data()`
+        returning a copy, or a `writeable=False` view, so divergence
+        can arise only through `set_pixel_data()`. That is breaking, it
+        has an in-tree caller in `_redact_instance_pixels`' writeable
+        arm, and it puts a copy on every read of the memory-critical
+        path -- so it is stated here rather than done quietly.
+
         Useful after running extensive redaction or export operations.
 
         Waveforms matter here as much as pixels: samples are cached as
@@ -874,14 +915,15 @@ class DicomSession:
                             # that would free more memory by throwing
                             # away pixels no one else holds.
                             #
-                            # That is narrower than this method's
-                            # docstring, which promises flatly that
-                            # nothing is discarded. #293 did not make
-                            # that promise true: an array mutated in
-                            # place is not tracked, so it is still
-                            # dropped here silently -- the limit
-                            # `unload_pixel_data()`'s own docstring
-                            # states. Filed rather than papered over.
+                            # An array mutated in place is not tracked,
+                            # so it is still dropped here silently --
+                            # the limit `unload_pixel_data()`'s own
+                            # docstring states. #293 did not make that
+                            # true; #323 narrowed this method's
+                            # docstring to say so, rather than leave it
+                            # promising that nothing is discarded, and
+                            # what would actually close it is stated
+                            # there.
                             gave_pixels = inst.unload_pixel_data() and had_pixels
                             gave_waveform = (inst.unload_waveform_data()
                                              and had_waveform)

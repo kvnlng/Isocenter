@@ -587,12 +587,33 @@ class Instance(DicomItem):
         The precondition is stated exactly, because promising more than
         the flag tracks would be the same defect in the fix: this refuses
         when the array was **replaced through `set_pixel_data()`** and
-        not since written. An array mutated **in place** -- `arr =
-        inst.get_pixel_data(); arr[...] = 0` -- diverges too and is not
-        detected, and neither is the writeable arm of
-        `RedactionService._redact_instance_pixels`, which zeroes a
-        file-backed array in place and never calls `set_pixel_data()`.
-        Those sites are unchanged by #293 and were already this way.
+        not since written. An array mutated **in place** diverges too
+        and is not detected. Mutating in place needs a writeable array,
+        and a frame that came from a file or the sidecar is not one --
+        it is `np.frombuffer`-backed, so `arr[...] = 0` on it raises
+        rather than diverging (#323). The reachable shape is a
+        replacement a save has since written: that array *is* writeable
+        and the flag is back to False, so `arr =
+        inst.get_pixel_data(); arr[...] = 0` on it diverges silently.
+        Any caller holding such an array can do it; nothing here is
+        changed by #293.
+
+        **Not `RedactionService._redact_instance_pixels`' writeable
+        arm**, which two versions of this paragraph have now claimed it
+        was -- #293's ("zeroes a file-backed array in place", which
+        cannot happen: a file-backed array is read-only) and #323's
+        first attempt ("the second redaction pass"). Measured: that arm
+        does zero in place and never calls `set_pixel_data()`, but on a
+        reloaded instance it is not entered at all, on any pass, because
+        `get_pixel_data()` hands back a read-only frame and the copying
+        arm takes it every time. When it *is* entered -- a resident
+        writeable array a save has already written -- both callers
+        (`redact_machine_instances` and `execute_redaction_task`)
+        persist the pixels and then call `discard_pixel_data()`
+        unconditionally in their `finally`, so nothing survives the pass
+        for an unload to drop. With no `store_backend` the persist is
+        skipped and that same discard loses the mutation immediately,
+        which is a different defect with a different fix.
 
         Use `discard_pixel_data()` where dropping unsaved pixels is the
         intent rather than the accident.

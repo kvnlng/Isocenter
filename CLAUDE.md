@@ -101,7 +101,7 @@ Three tiers, split by DICOM group parity and size:
 
 ### Parallelism (`parallel.py`)
 
-Everything heavy funnels through `run_parallel()`, which picks processes vs. threads and worker counts from env vars — `ISOCENTER_MAX_WORKERS`, `ISOCENTER_CHUNKSIZE`, `ISOCENTER_FORCE_THREADS`, `ISOCENTER_MAX_TASKS_PER_CHILD`, `ISOCENTER_DISABLE_GC`, `ISOCENTER_SHOW_PROGRESS` (see `docs/environment.md`). Worker functions live at module scope (`scan_worker`, `_verify_worker`, `ingest_worker`, `_export_instance_worker`) because they must pickle. Findings strip their `entity` back-reference before crossing a process boundary and are rehydrated on the far side (`_rehydrate_findings`).
+Everything heavy funnels through `run_parallel()`, which picks processes vs. threads and worker counts from env vars — `ISOCENTER_MAX_WORKERS`, `ISOCENTER_CHUNKSIZE`, `ISOCENTER_FORCE_THREADS`, `ISOCENTER_FORCE_PROCESSES`, `ISOCENTER_MAX_TASKS_PER_CHILD`, `ISOCENTER_DISABLE_GC`, `ISOCENTER_SHOW_PROGRESS` — `docs/environment.md` is the registry and `tests/test_documented_env_vars.py` keeps it complete; this list is a pointer, not a copy, and deliberately omits the variables that are not about parallelism. Worker functions live at module scope (`scan_worker`, `_verify_worker`, `ingest_worker`, `_export_instance_worker`) because they must pickle. Findings strip their `entity` back-reference before crossing a process boundary and are rehydrated on the far side (`_rehydrate_findings`).
 
 ### Privacy path
 

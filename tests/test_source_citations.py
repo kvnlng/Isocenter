@@ -17,8 +17,15 @@ swept, and this guard would be red on its own docstring.)
 Three rules, and the reason each stops where it does.
 
 **Rule 1 -- a citation naming a repository file must be in range.**
-Grammar: `` `path.py:N` `` (backticks optional) and `path.py line N`, with
-an optional `-M` end for a range. A citation naming a file that is *not*
+Grammar: `` `path.py:N` `` and `path.py line N`, with an optional `-M`
+end for a range. The path may be wrapped in a **balanced** pair of
+backticks, and the whole citation may sit inside one (#325). Half a
+pair is not a spelling this rule adds: a *trailing* stray backtick
+stops the citation matching at all, and a *leading* one is simply read
+past, so `` `path.py line 3 `` grades as the bare citation it would be
+without it. Both behaviours predate #325 -- the balanced pair is the
+only thing that changed -- and Rule 2 below is the rule that refuses
+half a pair outright. A citation naming a file that is *not*
 in this repository is **skipped**: the tree cites pydicom's
 `filereader.py`, `filebase.py` and `filewriter.py`, and this guard has no
 business grading a third-party line number it cannot see and cannot fix.
@@ -29,8 +36,8 @@ otherwise skip everything and report a clean pass, which is the
 this tree (#162, `tests/test_doc_anchors.py`'s fourth deferral).
 
 **Rule 2 -- the content pin.** Grammar: `` `<CODE>` at path.py line N ``
-(a backticked code span, then the word "at", then the file, then the word
-"line"). The cited line, stripped, must equal `<CODE>` exactly. This is
+(a backticked code span, then the word "at", then the file -- bare or in
+its own balanced backtick pair, #325 -- then the word "line"). The cited line, stripped, must equal `<CODE>` exactly. This is
 what #310 actually asks for: an in-range check alone still passes after
 someone inserts a line above 201 and every one of the five citations
 starts pointing one line high.
@@ -72,6 +79,24 @@ rather than in a comment nobody would find. A future rule could require
 every `line N` to name a file; it would need that citation rewritten
 first, by someone who knows what it meant.
 
+**Stated deferral: Rule 1 is a range check and nothing more.** A
+citation naming a file and a line but quoting no code can only be
+graded against the file's length -- there is nothing to compare the
+line *against*. So it catches the gross failure and nothing else: the
+line-523 citation of a 272-line `config_manager.py` described at the
+top of this docstring is the shape it does catch, and #329 found two
+that it did not -- 361 lines adrift, on code that had nothing to do
+with what they claimed, and graded as fine because the numbers were
+still in range. (Both spelled here without the grammar, for the reason
+given up there.)
+
+Rule 2's quoted code is the only thing that closes that gap, and it
+cannot be required of every citation: two legitimate shapes have no
+line of code to quote -- a range citation, which names a block, and a
+citation naming where a symbol is defined. Widening any grammar to
+accept a bare `:N` is rejected outright; it would match every ratio,
+timeout and port number in the tree.
+
 No `scripts/mutation_probe.py` `TARGETS` entry -- and #310 suggests the
 opposite, so the reason matters. #310 proposes putting this in a file
 already covered under `remediation.py`. That would re-run a pure text
@@ -79,8 +104,12 @@ check against every mutant of `remediation.py`: zero kill signal, paid on
 each one. This file imports no target module, the same argument
 `tests/test_documented_api_exists.py` makes for itself.
 """
+import functools
 import pathlib
 import re
+import subprocess
+
+import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -93,15 +122,35 @@ _EXCLUDED_DIRS = (".git", ".claude", "__pycache__", "build", "dist",
 _EXCLUDED_PATHS = ("CHANGELOG.md",)
 _EXCLUDED_PREFIXES = ("docs/superpowers/",)
 
+# The cited path, optionally wrapped in a **balanced** pair of
+# backticks (#325). Markdown prose wraps a filename in code ticks as
+# naturally as it writes it bare, and requiring the path bare made the
+# backticked spelling an unmarked way to opt a citation out of every
+# rule below: not red, not graded, silently trusted. Two such citations
+# had drifted 361 lines from the branches they name and nothing in this
+# file could see either one (#329).
+#
+# Two traps, both measured before this was written. The whole group is
+# optional rather than the opening backtick alone: a `` (?P<tick>`?) ``
+# matching the empty string still counts as "participated" for
+# `(?(tick)...)`, so the closing backtick becomes *mandatory* and every
+# bare citation -- the great majority of them -- stops matching, leaving
+# only the fully ticked spelling. And the closing backtick is
+# conditional rather than an independent `` `? ``, because an
+# independent one accepts *half* a pair in Rule 2 -- malformed prose --
+# and being red on writing nobody meant is how a guard gets deleted
+# rather than fixed.
+_CITED_PATH = r"(?P<tick>`)?(?P<path>[A-Za-z0-9_][A-Za-z0-9_./-]*\.py)(?(tick)`)"
+
 # Rule 1: `path.py:N`, `path.py line N`, either optionally ending `-M`.
 _FILE_CITATION = re.compile(
-    r"([A-Za-z0-9_][A-Za-z0-9_./-]*\.py)(?::|\s+line\s+)(\d+)(?:-(\d+))?")
+    _CITED_PATH + r"(?::|\s+line\s+)(?P<start>\d+)(?:-(?P<end>\d+))?")
 
 # Rule 2: `<code>` at path.py line N. The word "line" is what separates
 # this from the `:N` spelling used for symbol references; see the module
 # docstring's boundary note.
 _CONTENT_CITATION = re.compile(
-    r"`([^`\n]+)`\s+at\s+([A-Za-z0-9_][A-Za-z0-9_./-]*\.py)\s+line\s+(\d+)")
+    r"`(?P<code>[^`\n]+)`\s+at\s+" + _CITED_PATH + r"\s+line\s+(?P<number>\d+)")
 
 MARK_MODIFIED = "entity.mark_modified()"
 
@@ -115,13 +164,61 @@ def _is_excluded(rel):
     return rel.startswith(_EXCLUDED_PREFIXES)
 
 
+@functools.lru_cache(maxsize=None)
+def _tracked_paths(root):
+    """The paths git tracks under `root`, or `None` (#324).
+
+    Mirrors `tests/test_packaging_contract.py`'s
+    `_tracked_paths_in_package()`, down to its treatment of an empty
+    result: `None` means "git could not answer", never "nothing is
+    tracked". An empty listing is not a valid answer for this
+    repository, and a guard that goes green because git is missing is
+    the defect that file's docstring names.
+
+    `git ls-files`, not `git ls-tree HEAD`: a tracked file edited but
+    not committed is prose this tree owns, and is precisely what this
+    guard is for. `-z`, because `core.quotepath` quotes a non-ASCII
+    path and the result is compared against paths taken off disk.
+
+    Cached per root: four tests times two walks is otherwise ten
+    subprocesses for one unchanging answer.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=root, capture_output=True, text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    tracked = frozenset(part for part in proc.stdout.split("\0") if part)
+    return tracked or None
+
+
+def _is_graded(root, rel):
+    """Whether `rel` is prose or source this tree actually carries.
+
+    The tracked set *intersects* the walk rather than replacing it.
+    `git ls-files` still lists a file deleted from the working tree, and
+    `_lines()` would raise `FileNotFoundError` on it; the walk is what
+    keeps the answer to "does this exist" honest.
+
+    When git cannot answer, everything the walk found is graded -- see
+    `test_a_tree_git_cannot_answer_for_is_swept_whole`.
+    """
+    if _is_excluded(rel):
+        return False
+    tracked = _tracked_paths(root)
+    return tracked is None or rel in tracked
+
+
 def _prose_files(root):
     """Every `.py` and `.md` file in the tree whose citations we grade."""
     found = []
     for pattern in ("*.py", "*.md"):
         for path in root.rglob(pattern):
             rel = path.relative_to(root).as_posix()
-            if _is_excluded(rel):
+            if not _is_graded(root, rel):
                 continue
             found.append(path)
     return sorted(found)
@@ -138,7 +235,7 @@ def _source_index(root):
     index = {}
     for path in root.rglob("*.py"):
         rel = path.relative_to(root).as_posix()
-        if _is_excluded(rel):
+        if not _is_graded(root, rel):
             continue
         index.setdefault(path.name, []).append(path)
     return index
@@ -152,8 +249,8 @@ def _resolve(root, index, cited):
     perfectly unambiguous citation fail.
     """
     direct = root / cited
-    if direct.is_file() and not _is_excluded(
-            direct.relative_to(root).as_posix()):
+    if direct.is_file() and _is_graded(
+            root, direct.relative_to(root).as_posix()):
         return direct
     return index.get(pathlib.PurePosixPath(cited).name)
 
@@ -172,7 +269,7 @@ def check_file_citations(root=None):
         where = path.relative_to(root).as_posix()
         for lineno, text in enumerate(_lines(path), 1):
             for match in _FILE_CITATION.finditer(text):
-                target = _resolve(root, index, match.group(1))
+                target = _resolve(root, index, match.group("path"))
                 if target is None:
                     # Third-party, or a file that no longer exists.
                     # Deliberately not graded; see the module docstring.
@@ -190,7 +287,7 @@ def check_file_citations(root=None):
                 graded += 1
                 total = len(_lines(target))
                 cited_name = target.relative_to(root).as_posix()
-                for number in (match.group(2), match.group(3)):
+                for number in (match.group("start"), match.group("end")):
                     if number is None:
                         continue
                     if not 1 <= int(number) <= total:
@@ -210,7 +307,9 @@ def check_content_citations(root=None):
         where = path.relative_to(root).as_posix()
         for lineno, text in enumerate(_lines(path), 1):
             for match in _CONTENT_CITATION.finditer(text):
-                code, cited, number = match.groups()
+                code = match.group("code")
+                cited = match.group("path")
+                number = match.group("number")
                 target = _resolve(root, index, cited)
                 if target is None:
                     continue
@@ -293,11 +392,15 @@ def test_claude_md_cites_every_mark_modified_call_in_the_checkable_grammar():
     without anyone editing a number here.
     """
     text = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+    # `finditer` and named groups, not `findall`: the tuple grew a
+    # `tick` member in #325, and positional unpacking would have gone
+    # wrong in shape rather than raising.
     cited = {
-        int(number)
-        for code, cited_file, number in _CONTENT_CITATION.findall(text)
-        if code == MARK_MODIFIED
-        and pathlib.PurePosixPath(cited_file).name == "remediation.py"}
+        int(match.group("number"))
+        for match in _CONTENT_CITATION.finditer(text)
+        if match.group("code") == MARK_MODIFIED
+        and pathlib.PurePosixPath(match.group("path")).name
+        == "remediation.py"}
 
     expected = _mark_modified_lines()
     assert expected, (
@@ -414,3 +517,153 @@ def test_the_symbol_spelling_is_not_read_as_a_content_pin(tmp_path):
 
     assert (content_offenders, checked) == ([], [])
     assert (file_offenders, graded) == ([], 2)
+
+
+def _git(tmp_path, *args):
+    """Run git in `tmp_path`, skipping the test if there is no git."""
+    try:
+        return subprocess.run(["git", *args], cwd=tmp_path,
+                              capture_output=True, text=True, check=True)
+    except FileNotFoundError:
+        pytest.skip("git is not installed; the tracked-set walk cannot "
+                    "be exercised")
+    return None
+
+
+def test_an_untracked_file_is_not_graded(tmp_path, monkeypatch):
+    """A file git does not track is not this tree's prose (#324).
+
+    Both walks are a bare `rglob`, which grades whatever happens to be
+    sitting in the working tree. An untracked scratch `.md` carrying a
+    stale citation turns Rule 1 red on writing that is not in this
+    repository, and an untracked scratch copy of a module makes
+    `_source_index()` report a *correct* citation as ambiguous -- the
+    same failure through a second door. Both are "red on writing that
+    is right", which this file's own docstring names as how a guard
+    gets deleted rather than fixed.
+
+    Staged and never committed, deliberately. A tracked-but-uncommitted
+    edit is exactly the state this guard exists to grade, so the
+    question has to be `git ls-files` and not `git ls-tree HEAD`: there
+    is no HEAD here to read.
+    """
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
+
+    _tree(tmp_path, ["def f():", "    first()"],
+          "In range: zzz_fixture_mod.py:2.\n")
+    (tmp_path / "notes.md").rename(tmp_path / "tracked.md")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "zzz_fixture_mod.py", "tracked.md")
+
+    (tmp_path / "untracked.md").write_text(
+        "Scratch: see zzz_fixture_mod.py:99.\n", encoding="utf-8")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert offenders == [], (
+        "an untracked scratch file was graded; a stale citation in a "
+        "file this repository does not carry must not turn CI red")
+    assert graded == 1, (
+        f"expected only the tracked citation to be graded, got {graded}")
+
+
+def test_a_tree_git_cannot_answer_for_is_swept_whole(tmp_path):
+    """No repository -> the bare walk, not a skip (#324).
+
+    An unpacked sdist has no `.git`, and pytest's own `tmp_path` is
+    outside any repository on every platform this runs on. Falling back
+    to the full walk is the only honest answer: skipping would report a
+    clean pass on a tree nothing looked at, which is the failure this
+    file already records twice (#162, `tests/test_doc_anchors.py`).
+
+    Characterization, green on both sides of #324 -- the fallback is new
+    machinery, and this is what pins that it is a fallback and not a
+    skip. It is also what the four fixture tests above quietly depend
+    on: if one of them ever goes red on a tracked-set intersection, this
+    is the test that says why.
+    """
+    _tree(tmp_path, ["one", "two"], "Scratch: see zzz_fixture_mod.py:99.\n")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert graded == 1
+    assert len(offenders) == 1, offenders
+    assert "is 2 lines long" in offenders[0]
+
+
+def test_a_backticked_path_is_still_content_pinned(tmp_path):
+    """`` `code` at `file.py` line N `` is Rule 2, backticks and all (#325).
+
+    Rule 2 required the path *bare*, and Rule 1 required `:` or the word
+    `line` to follow `.py` immediately -- so a path wrapped in backticks
+    fell through **both**. That spelling is the natural one in Markdown
+    prose, and writing it was an unmarked way to opt a citation out of
+    every rule this file has: not red, not graded, silently trusted.
+
+    The pair must be balanced. Half a pair -- an opening backtick with
+    no closing one -- is malformed prose, and grading it would make this
+    guard red on writing nobody meant, which
+    `test_the_symbol_spelling_is_not_read_as_a_content_pin` exists to
+    prevent for the other spelling.
+    """
+    _tree(
+        tmp_path,
+        ["def f():", "    first()", "    second()"],
+        "Right: `first()` at `zzz_fixture_mod.py` line 2.\n"
+        "Shifted: `second()` at `zzz_fixture_mod.py` line 2.\n"
+        "Half a pair: `second()` at `zzz_fixture_mod.py line 3.\n")
+
+    offenders, checked = check_content_citations(tmp_path)
+
+    assert len(checked) == 2, (
+        "a backticked path must be graded by Rule 2, and half a pair "
+        f"must not be; checked {checked}")
+    assert len(offenders) == 1, offenders
+    assert "'second()'" in offenders[0]
+    assert offenders[0].startswith("notes.md:2:"), offenders[0]
+
+
+def test_a_backticked_path_is_in_range_checked(tmp_path):
+    """Rule 1 was blind to the same spelling (#325).
+
+    A backticked path followed by the word "line" and a number names a
+    file and a line and was invisible to every rule -- #329's two stale
+    citations are written that way. Widening Rule 2 alone would leave a
+    citation carrying no quoted code -- the commonest shape by far --
+    still ungraded.
+    """
+    _tree(tmp_path, ["one", "two"],
+          "Out of range: at `zzz_fixture_mod.py` line 99.\n"
+          "In range: at `zzz_fixture_mod.py` line 2.\n")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert graded == 2, f"a backticked path must be graded; graded {graded}"
+    assert len(offenders) == 1, offenders
+    assert "is 2 lines long" in offenders[0]
+
+
+def test_an_in_range_citation_of_the_wrong_line_is_not_caught(tmp_path):
+    """Rule 1's limit, executable (#329).
+
+    Characterization: green on both sides of #329, because nothing here
+    changes behaviour. It states what Rule 1 does *not* do, so that a
+    future reader who assumes a citation is pinned because a guard
+    exists can see the shape that walks past it. #329's two stale
+    citations were exactly this: a number in range, on a line holding
+    something else entirely, reported as clean.
+
+    Closing it needs Rule 2's quoted code, and the module docstring
+    records why that cannot be required of every citation.
+    """
+    _tree(tmp_path,
+          ["def f():", "    first()", "    second()"],
+          "The teardown is at zzz_fixture_mod.py:2.\n")
+
+    offenders, graded = check_file_citations(tmp_path)
+
+    assert graded == 1, graded
+    assert offenders == [], (
+        "Rule 1 has started grading content; if that is deliberate, the "
+        "module docstring's stated deferral is now wrong")

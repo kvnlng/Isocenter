@@ -346,8 +346,11 @@ def run_parallel(
     Executes `func(item)` in parallel using multiple processes or threads.
 
     Adapts strategy based on environment variables (`ISOCENTER_MAX_WORKERS`,
-    `ISOCENTER_FORCE_THREADS`, `ISOCENTER_CHUNKSIZE`, `ISOCENTER_MAX_TASKS_PER_CHILD`,
-    `ISOCENTER_DISABLE_GC`) and presence of GIL. Defaults to `ProcessPoolExecutor`.
+    `ISOCENTER_FORCE_THREADS`, `ISOCENTER_FORCE_PROCESSES`, `ISOCENTER_CHUNKSIZE`,
+    `ISOCENTER_MAX_TASKS_PER_CHILD`, `ISOCENTER_DISABLE_GC`) and presence of GIL.
+    Defaults to `ProcessPoolExecutor`. `docs/environment.md` carries the whole
+    table, including the order the three threads-or-processes levers resolve in
+    (`_use_threads` is where that order lives).
 
     Args:
         func (Callable[[T], R]): The worker function.

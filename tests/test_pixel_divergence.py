@@ -367,3 +367,99 @@ def test_replacing_pixels_with_identical_bytes_leaves_them_freeable(tmp_path):
             "clear-site in the de-duplication arm is missing")
     finally:
         store.stop()
+
+
+def test_an_in_place_mutation_is_lost_by_release_memory(tmp_path):
+    """The limit `release_memory()` now states, executable (#323).
+
+    Characterization: green on both sides, because #323 changes prose and
+    nothing else. Its job is the one no assertion on prose can do -- a
+    docstring cannot be asserted on without pinning today's wording
+    rather than its truth, and a later "fix" that changed this behaviour
+    while leaving the docstring alone would make the prose false again
+    with nothing red.
+
+    **Reaching the writeable arm takes three steps, and the shape of the
+    setup is a finding.** A frame that arrived from the sidecar or from
+    pydicom is `np.frombuffer`-backed and **not writeable**, so the
+    one-liner `unload_pixel_data()`'s docstring gives -- `arr =
+    inst.get_pixel_data(); arr[...] = 0` -- raises on a freshly ingested
+    instance rather than diverging. That is also why
+    `RedactionService._redact_instance_pixels` has two arms: its
+    not-writeable arm copies and calls `set_pixel_data()`, and only the
+    array that leaves *that* arm is writeable. So the sequence here is
+    replace, save, then mutate in place -- the only way to hold a
+    writeable array the store believes it has already written.
+
+    **Not the redaction path, measured.** An earlier draft of this
+    docstring said the writeable arm of `_redact_instance_pixels` was
+    this shape on a second pass. It is not, in either direction: on a
+    reloaded instance the arm is never entered, because
+    `get_pixel_data()` returns a read-only frame and the copying arm
+    takes every pass; and when it *is* entered, both callers persist the
+    pixels and then call `discard_pixel_data()` unconditionally in their
+    `finally`, so nothing survives the pass for `release_memory()` to
+    drop. The limit characterized here belongs to any caller that
+    mutates a written array in place, which is what this test is.
+
+    The save between is load-bearing and asserted, not assumed:
+    `_pixel_array_unwritten` must be **False** at the moment of the
+    mutation, or this would be characterizing #293's refusal instead of
+    the hole beside it.
+    """
+    src = tmp_path / "in"
+    src.mkdir()
+    original = np.arange(4 * 4, dtype=np.uint16).reshape((4, 4))
+    write_source(src / "a.dcm", original, sop_uid="1.2.901.1")
+
+    with DicomSession(str(tmp_path / "inplace.db")) as session:
+        session.ingest(str(src))
+        session.save(sync=True)
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+
+        assert not inst.get_pixel_data().flags.writeable, (
+            "setup: a file-backed frame is expected to be read-only, "
+            "which is why an in-place mutation needs the replacement "
+            "below")
+
+        # The same two moves the not-writeable arm of
+        # `_redact_instance_pixels` makes -- copy, hand it over -- plus
+        # the save that arm's caller does afterwards.
+        inst.set_pixel_data(inst.get_pixel_data().copy())
+        session.save(sync=True)
+
+        arr = inst.get_pixel_data()
+        assert arr is inst.pixel_array, (
+            "setup: get_pixel_data() handed back a copy, so an in-place "
+            "mutation could not reach the instance and this test would "
+            "prove nothing")
+        assert arr.flags.writeable, (
+            "setup: the replacement did not leave a writeable array, so "
+            "the mutation being characterized is unreachable from here")
+        assert not inst._pixel_array_unwritten, (  # pylint: disable=protected-access
+            "setup: the save did not clear the divergence flag, so this "
+            "would characterize #293's refusal and not the hole next to "
+            "it")
+
+        # In place, never through `set_pixel_data`, so nothing
+        # records it. Any caller can do this; see the docstring for why
+        # `_redact_instance_pixels` is not one of them.
+        arr[...] = 0
+
+        session.release_memory()
+
+        # The attribute is the only observable here: `release_memory()`
+        # returns None and reports its counts to the log. Resident is
+        # still the right thing to assert on -- the array was
+        # materialized two statements ago, so the only way it survives
+        # this call is the unload refusing it or never being reached.
+        assert inst.pixel_array is None, (
+            "release_memory() refused the in-place mutation, or never "
+            "reached this instance; either way the frame is still "
+            "resident and the limit #323 narrowed the docstring to "
+            "state no longer holds")
+
+        assert np.array_equal(inst.get_pixel_data(), original), (
+            "the reloaded frame is not the pre-mutation one -- the "
+            "in-place mutation survived, and release_memory()'s stated "
+            "limit no longer holds")
