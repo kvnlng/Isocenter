@@ -332,6 +332,7 @@ class WfdbExporter(Exporter):
         # called directly by tests with no session behind it.
         store_backend = getattr(session, "store_backend", None)
         written = []
+        failed = 0
         used_names = {}  # out_dir -> set of record names already claimed
 
         for patient in session.store.patients:
@@ -349,15 +350,58 @@ class WfdbExporter(Exporter):
                         # whole run, leaving every later patient silently
                         # unexported with no indication on disk that the
                         # run was partial.
+                        #
+                        # Containment is only half the pattern, and the
+                        # other half was missing until #332: the DICOM
+                        # path records an `ERROR` audit row per failure
+                        # (`DicomExporter._report_export_failures`), and
+                        # this one recorded none -- so `get_audit_errors()`
+                        # found nothing, the report's "Exceptions &
+                        # Errors" section was empty, and a run that lost
+                        # records graded PASS. A returned list one entry
+                        # short is not a channel: nothing compares its
+                        # length against the graph.
                         try:
                             path = self._write_instance(
                                 folder, patient, study, series, instance, logger,
                                 used_names, include_annotation_text,
                                 store_backend)
                         except Exception as e:
-                            logger.error(
-                                f"WFDB export failed for instance "
-                                f"{instance.sop_instance_uid}: {e}")
+                            failed += 1
+                            # Fall back the way `_report_export_failures`
+                            # does. `sop_instance_uid` may be `None`, and
+                            # sqlite stores that without complaint -- a
+                            # row nobody can look up is barely better
+                            # than no row.
+                            uid = instance.sop_instance_uid or "UNKNOWN"
+                            detail = (f"WFDB export failed for instance "
+                                      f"{uid}: {e}")
+                            # Flattened and pipe-escaped before it is
+                            # recorded, as `io_handlers.py` does for the
+                            # same reason: an arbitrary exception's
+                            # `str()` can carry newlines and pipes, and
+                            # this renders straight into a markdown table
+                            # row in the compliance report. The
+                            # neighbouring `DATA_LOSS` site does not
+                            # flatten because it composes its own
+                            # single-line detail; this one cannot know
+                            # what it is holding.
+                            detail = " ".join(detail.split()).replace(
+                                "|", "\\|")
+                            logger.error(detail)
+                            if store_backend is not None:
+                                # `log_audit`, never `log_audit_batch` --
+                                # the reason is at
+                                # `DicomExporter._report_export_losses`:
+                                # the batch method writes straight to the
+                                # database while the audit writer thread
+                                # is live and swallows `sqlite3.Error`
+                                # into a log line, so contention would
+                                # lose the very entry that exists because
+                                # a log line was not enough.
+                                store_backend.log_audit(
+                                    action_type="ERROR", entity_uid=uid,
+                                    details=detail)
                             continue
                         if path:
                             written.append(path)
@@ -367,12 +411,22 @@ class WfdbExporter(Exporter):
         # format: `generate_report` keys its export boundary on the
         # row's absence (#153), so a format that skipped it would tell
         # its users their finished export never happened.
+        #
+        # It names the failure count as well as the written one (#332).
+        # "wrote 8 records" cannot be read as "8 of 10" or as "8 of 8",
+        # and the whole-run question is the one a reader asks first --
+        # the per-instance rows above answer *which*, this answers
+        # *whether*. It is stated on every run, including a clean one,
+        # so `0 instances failed` is a fact rather than an absence.
         if store_backend is not None:
             store_backend.log_audit(
                 action_type="EXPORT",
                 entity_uid=folder,
                 details=(f"WFDB export to {folder}: wrote {len(written)} "
-                         f"records."))
+                         f"{'record' if len(written) == 1 else 'records'}, "
+                         f"{failed} "
+                         f"{'instance' if failed == 1 else 'instances'} "
+                         f"failed."))
         return written
 
     @staticmethod
