@@ -1332,6 +1332,14 @@ publisher configuration is updated to match.</p>
    <code>isocenter.__version__</code> re-exports it.</li>
 <li>Update <code>version</code> and <code>date-released</code> in <code>CITATION.cff</code>.</li>
 <li>Merge to <code>main</code> with CI green.</li>
+<li><strong>Rehearse on TestPyPI before tagging</strong>: run <code>publish.yml</code> manually
+   (<code>workflow_dispatch</code>) with <code>target: testpypi</code>. It runs the same build
+   gates and the same four-version matrix as a real release, but while
+   the version number is still spendable. This matters because
+   <code>test-supported</code> (3.13, 3.14) runs <em>after</em> the tag on a real release
+   and only reports -- it cannot block the upload -- so a break there
+   ships with the number already spent. PRs gate 3.12 and 3.14t only, so
+   3.13 and 3.14 are otherwise unobserved between merge and release.</li>
 <li>Tag <code>vx.y.z</code>. <strong>The tag must match the declared version exactly</strong> --
    the build job reads the version out of the built wheel and refuses to
    publish a mismatch. Publishing
@@ -1350,10 +1358,18 @@ environment <em>outside the source tree</em>, asserting it carries its own
 shipped in no distribution at all and nothing failed -- every loader
 guards on <code>os.path.exists</code> and degrades to a default, so a published
 release audited against an empty PHI policy and reported clean.</p>
-<p>To rehearse against TestPyPI, run the workflow manually
-(<code>workflow_dispatch</code>) with <code>target: testpypi</code>. Note that neither index
-allows re-uploading a version, so a rehearsal consumes that version
-number on TestPyPI.</p>
+<p>Neither index allows re-uploading a version, so the step-5 rehearsal
+consumes that version number on TestPyPI. That is the whole cost, and it
+buys the only look at 3.13 and 3.14 that happens while the real version
+number can still be spent.</p>
+<p><strong>If <code>test-supported</code> is red, that is a decision, not a formality.</strong> Either
+fix it and re-tag, or delete that classifier from <code>setup.py</code> before
+releasing -- <code>setup.py</code> says outright that a classifier CI does not back is
+the same unbacked promise the old <code>python_requires="&gt;=3.9"</code> was. Note that
+a red job here is <em>more</em> likely to be a flake than a real break (v0.9.1's
+publish had 3.13 fail and pass on rerun), which is exactly what makes it
+dangerous: "just rerun it" is the reading that ships a real break. Rerun to
+learn whether it is deterministic, not to make it go away.</p>
 <h3 id="archiving-and-dois">Archiving and DOIs</h3>
 <p>Once the Zenodo GitHub integration is enabled for this repository, each
 published GitHub Release is archived and issued a version DOI, under a
