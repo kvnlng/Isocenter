@@ -131,6 +131,47 @@ def test_shutdown_drains_a_queued_save_the_dead_worker_never_took(pm):
     assert pm.queue.unfinished_tasks == 0
 
 
+def test_the_drain_counts_off_a_reaped_orphan_and_a_queued_save_alike(pm):
+    """The arithmetic `_drain_queued_saves(already_held=())` exists for (#319).
+
+    The two tests above take one population each, and each is
+    individually satisfied by a drain that counts off only its own kind.
+    This is the case where both are present at once, which is the whole
+    reason #319 shared one method between `_drain_recoverable_saves` and
+    the worker's post-sentinel arm rather than writing the loop twice.
+
+    **The two owe their `task_done()` for different reasons**, which is
+    what makes a shared count easy to get wrong. A reaped orphan was
+    already `get()`-ed by its dead owner and never counted off; an item
+    still in the deque owes one for the `get_nowait()` the drain itself
+    does. Count either kind twice and the queue raises `ValueError:
+    task_done() called too many times` out of `close()`; miss either and
+    `unfinished_tasks` stays above zero on a manager `save_async` can
+    restart, and the next `flush()` never returns -- #309's hang.
+
+    The stale sentinel is in the middle on purpose: it is consumed and
+    counted off but never written, so a drain that counted rows written
+    rather than items consumed lands one short here and nowhere else.
+    """
+    _make_orphan(pm, Patient("P_ORPHAN", "Orphan^Test"))
+    pm.queue.put(None)
+    pm.queue.put(([Patient("P_QUEUED", "Queued^Test")], False))
+    assert pm.queue.unfinished_tasks == 3
+
+    pm.shutdown()
+
+    assert [p.patient_id for p in pm.store_backend.saved_patients] == [
+        "P_ORPHAN", "P_QUEUED"], (
+        "the drain wrote only one of the two populations it was handed: "
+        "a reaped orphan and an item still in the deque are both saves "
+        "close() is the last chance to write (#314, #319)")
+    assert pm.queue.unfinished_tasks == 0, (
+        "the drain counted off one population and not the other, so "
+        "unfinished_tasks stays above zero on a manager save_async can "
+        "restart and the next flush() never returns -- #309's hang, "
+        "reintroduced by the shared drain (#319)")
+
+
 def test_a_stale_sentinel_does_not_crash_shutdowns_drain(pm):
     """A `None` in the deque is a sentinel, not a payload (#314).
 
@@ -212,6 +253,103 @@ def test_shutdown_is_still_bounded_when_a_save_is_genuinely_running(pm,
         "P_INFLIGHT"], (
         "the parked save was written twice (or not at all): shutdown() "
         "must never save a live worker's item inline")
+
+
+def test_the_worker_writes_what_was_queued_behind_its_own_sentinel(pm,
+                                                                   caplog):
+    """#314's accepted hole, closed (#319).
+
+    `shutdown()` posts a sentinel and joins. Items queued *behind* that
+    sentinel were written by nobody: the worker exits on the sentinel
+    without reaching them, and `_drain_recoverable_saves` takes its
+    early return because the thread is still alive. Reachability is low
+    -- it needs `running` still `False` when the worker meets the
+    sentinel, which `save_async` prevents by restoring the flag, so it
+    takes a direct `put` or a `_requeue_orphans` from a `flush()` racing
+    the shutdown, *and* the 30 s join to have timed out -- but "rare" is
+    not "reported", and a lost save is the one thing this class must not
+    do quietly.
+
+    **The drain runs on the worker, not in `shutdown()`.** At the
+    instant the worker takes its sentinel it stands exactly at the
+    sentinel's position and is the queue's sole consumer, so everything
+    still in the deque is "behind the sentinel" by construction.
+    Draining from `shutdown()` instead would run `save_all` on the
+    shutdown thread while this worker is inside `save_all` over the same
+    graph and the same sidecar -- the concurrency #294 removed, which
+    `Session.save`'s docstring and `_drain_recoverable_saves`'s both
+    refuse -- and it would make `close()` perform N inline saves under a
+    wedged worker, trading away the bounded-never-a-wait property
+    `shutdown()` is built around.
+
+    **The `put` is direct, bypassing `save_async`, and that is what
+    places the item behind the sentinel at all.** `save_async` calls
+    `_start_worker`, which sets `running = True` under a live worker, so
+    the worker would read the sentinel as *stale* and carry on -- which
+    is `test_stale_sentinel`'s composition and is untouched here. Same
+    construction as `test_a_stale_sentinel_does_not_crash_shutdowns_drain`
+    above.
+
+    **The poll is asserted inside the test body**, and that is not
+    style. The `pm` fixture's teardown calls `shutdown()` again, and on
+    a dead worker that writes `P_BEHIND` for a completely different
+    reason (#314's dead-worker branch). A test that checked the store
+    after teardown would be green on the unfixed code.
+    """
+    started, release = threading.Event(), threading.Event()
+    real_save_all = pm.store_backend.save_all
+
+    def parked_save_all(patients, prune_absent_patients=False):
+        started.set()
+        release.wait(20)
+        return real_save_all(
+            patients, prune_absent_patients=prune_absent_patients)
+
+    pm.store_backend.save_all = parked_save_all
+    pm.save_async([Patient("P_INFLIGHT", "Parked^Test")])
+    assert started.wait(5), "the save never entered save_all"
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(pm_module, "_SHUTDOWN_JOIN_TIMEOUT_S", 1.0)
+            done = _on_helper(pm.shutdown)
+            assert done.wait(15), "shutdown() did not return"
+
+        # After shutdown() has returned, so this lands strictly behind
+        # the sentinel it already posted.
+        pm.queue.put(([Patient("P_BEHIND", "Behind^Sentinel")], False))
+
+        release.set()
+
+        deadline = time.monotonic() + 15.0
+        written = False
+        while time.monotonic() < deadline:
+            if any(p.patient_id == "P_BEHIND"
+                   for p in pm.store_backend.saved_patients):
+                written = True
+                break
+            time.sleep(0.05)
+
+    assert written, (
+        "the save queued behind the shutdown sentinel reached nobody: "
+        "the worker stopped at the sentinel without looking past it, and "
+        "_drain_recoverable_saves had already returned because that "
+        "worker was still alive. It is the accepted hole #314 recorded "
+        "and #319 closes")
+
+    deadline = time.monotonic() + 15.0
+    while pm.thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not pm.thread.is_alive(), (
+        "the worker never exited: a drain that does not reach its "
+        "`break` leaves a `while True` worker with `running is False` "
+        "spinning on queue.Empty forever -- #250's leak, reintroduced "
+        "by #319's own fix (#319)")
+
+    assert pm.queue.unfinished_tasks == 0, (
+        "the drained save was written but never counted off, so a "
+        "manager save_async restarts would hang the next flush() "
+        "forever -- #309's hang, reintroduced")
 
 
 def test_a_session_that_loses_its_worker_still_writes_on_exit(tmp_path):

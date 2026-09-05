@@ -64,6 +64,27 @@ class _Gate:
     the `threading` module -- so the factory keys on the worker's own
     target and delegates every other construction (notably `flush()`'s
     waiter thread) to the real class untouched.
+
+    **The target is `pm_module._persistence_worker_loop`, not
+    `manager._worker`.** Since #318 the worker is started with a
+    module-level function over a weakref rather than a bound method.
+    `_worker` was *deleted* with that change rather than left behind, so
+    the old spelling does not quietly match nothing -- it raises
+    `AttributeError: 'PersistenceManager' object has no attribute
+    '_worker'` inside the factory, on the thread `_start_worker` is
+    constructing, and both tests here go red. Measured, by putting the
+    old comparison back: `2 failed`.
+
+    That is the benign direction, and it is worth saying which direction
+    it is, because the dangerous one is one small edit away. Had #318
+    kept a `_worker` shim -- or had this keyed on a *name* rather than
+    on the object, `kwargs.get("target").__name__ != "_worker"` -- the
+    comparison would match nothing, every construction including both
+    racing workers would be delegated straight past the gate, and the
+    test would report `_start_worker` as serialised without ever having
+    held two callers at its door. Keying on the module attribute is what
+    rules that out: it is the same object `_start_worker` passes, so it
+    survives a rename of the loop and cannot silently stop matching.
     """
 
     def __init__(self, manager, monkeypatch, parties=2):
@@ -75,7 +96,7 @@ class _Gate:
         real_thread = threading.Thread
 
         def factory(*args, **kwargs):
-            if kwargs.get("target") != manager._worker:
+            if kwargs.get("target") is not pm_module._persistence_worker_loop:
                 return real_thread(*args, **kwargs)
             with self._lock:
                 self._count += 1

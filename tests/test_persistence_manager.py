@@ -185,11 +185,19 @@ def test_a_closed_sessions_manager_can_be_collected(tmp_path):
     full suite run before this changed: 647 live managers and 149 threads
     at interpreter exit, 147 of them audit writers.
 
-    The worker liveness assertion is a precondition, not decoration: a
-    running worker holds the manager through `target=self._worker`, so a
-    manager whose worker is alive is uncollectable for a reason that has
-    nothing to do with `atexit`, and this test would fail for the wrong
-    one.
+    The worker liveness assertion is a precondition, not decoration, and
+    **since #318 it defends a different thing than it used to.** It used
+    to say the manager was uncollectable for a reason that had nothing
+    to do with `atexit`: a running worker held it through
+    `target=self._worker`. That pin is gone -- the worker now holds a
+    weakref -- so what the assertion defends is the *single*, unpolled
+    `ref() is None` below: a live worker still holds a transient strong
+    reference between resolving its weakref and dropping it again, and
+    a single assertion taken against a running worker would be flaky in
+    the false-failure direction. `close()` stops the worker, so there is
+    nothing to poll for here; the abandoned-manager population, which
+    has to be polled, is
+    `tests/test_persistence_worker_does_not_pin_its_manager.py`.
     """
     import gc
     import weakref
