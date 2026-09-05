@@ -280,7 +280,7 @@ _VERTICAL_VR_PARSERS = {
 }
 
 
-def _vertical_atom_text(vr: str, atom: Any) -> str:
+def _vertical_atom_text(vr: str, atom: Any) -> Optional[str]:
     """The one rendering of a private value into `value_text`.
 
     `str(atom)` for everything except `AT`, whose `str()` is the display
@@ -288,7 +288,22 @@ def _vertical_atom_text(vr: str, atom: Any) -> str:
     ("unknown DICOM element keyword or an invalid int"). Stored as the
     decimal integer it is, so `_VERTICAL_VR_PARSERS['AT']` is its exact
     inverse. This pair has to stay a pair.
+
+    `None` is the one value that is not stringified, and it is a SQL
+    NULL instead (#339). `str(None)` is the four-character text `None`,
+    which is a conformant `LO` value, so a zero-length private element
+    -- what pydicom hands back for `DS`, `US`, `AT`, `UN` and their
+    siblings when the source wrote no value -- reloaded as a word the
+    source never said and was exported as though it had. Absent beats
+    fabricated, which is the ruling #60 made for a missing Study Date.
+
+    The guard has to come BEFORE the `AT` arm. Without it `int(None)`
+    raises `TypeError`, the arm's own `except` catches it, and it
+    returns `str(atom)` -- the same fabricated `'None'`, arriving
+    through a handler documented for "a value that is no longer a tag".
     """
+    if atom is None:
+        return None
     if vr == 'AT':
         try:
             return str(int(atom))
@@ -300,8 +315,24 @@ def _vertical_atom_text(vr: str, atom: Any) -> str:
     return str(atom)
 
 
-def _vertical_atom_value(vr: str, text: str) -> Any:
-    """The inverse of `_vertical_atom_text`, keyed on the stored VR."""
+def _vertical_atom_value(vr: str, text: Optional[str]) -> Any:
+    """The inverse of `_vertical_atom_text`, keyed on the stored VR.
+
+    A NULL `value_text` is the atom that was `None` (#339), and nothing
+    else can produce one: every other arm above goes through `str()`,
+    which never returns `None`, so no row written by any released
+    version can be NULL here.
+    """
+    if text is None:
+        # Behaviour-equivalent to falling through, and written anyway.
+        # A numeric VR would reach `int(None)` -> `TypeError` -> the
+        # `except` arm below, and a text VR would return the `None`
+        # because `parser is None` -- both answer `None` already. But
+        # that `except` arm's comment says "keep the text", and a SQL
+        # NULL is not text: leaving the normal path to run through an
+        # exception handler documented for something else would make
+        # the arm's own comment false.
+        return None
     parser = _VERTICAL_VR_PARSERS.get(vr)
     if parser is None:
         return text
@@ -1756,6 +1787,12 @@ class SqliteStore:
         block that `remove_private_tags=True` deleted back into a
         de-identified graph on the next reload.
 
+        `value_text` is NULL for exactly one thing: an atom whose value
+        was `None` (#339). Every other rendering goes through `str()`,
+        which never returns `None`, so no row written by any released
+        version can hold a NULL there and the meaning needs no
+        migration to claim.
+
         Args:
             instance_uid (str): The SOP Instance UID.
             attributes (Dict[Tuple[str, str], Any]): Mapping of (Group, Element) hex strings to values.
@@ -1925,6 +1962,12 @@ class SqliteStore:
         A saved one-element list still reloads as a scalar: the table
         records no arity, which is a different gap from the type one and
         is not closed here.
+
+        An atom stored as a NULL `value_text` comes back as `None`, not
+        as the text `None` (#339). The export then reports it as data
+        loss exactly as the in-memory path does, rather than writing a
+        conformant-looking `LO` element carrying a word the source never
+        said.
 
         Args:
             instance_uids (Optional[List[str]]): SOP Instance UIDs to fetch.
