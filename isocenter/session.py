@@ -4989,30 +4989,7 @@ class DicomSession:
         withheld = []
         patient_count = 0
 
-        # One boolean for the whole run, computed before the walk (#183):
-        # the gate for every nested icon that is not its carrier's own
-        # depth-1 icon. Store-wide and not per instance, because an icon
-        # under Referenced Image Sequence is a thumbnail of a *different*
-        # SOP instance and redaction's `regenerate_uid()` makes following
-        # the reference fail open. Over `self.store.patients` rather than
-        # `target_ids`, deliberately: a subset that excludes the redacted
-        # instances must not turn the gate off for the ones it keeps.
-        #
-        # Two halves: an attestation anywhere, or a zones rule that
-        # **matches a series in the store** (#542). A rule for a scanner
-        # nobody has redacts nothing, and counting it -- as #183's "any
-        # rule with zones" did -- stripped every icon from every file.
-        # Each carrier's own icon is decided per instance in the worker.
-        drop_foreign = redaction_in_effect(
-            instance
-            for patient in self.store.patients
-            for study in patient.studies
-            for series in study.series
-            for instance in series.instances) or any(
-                self._redaction_zones_for(series)
-                for patient in self.store.patients
-                for study in patient.studies
-                for series in study.series)
+        drop_foreign = self._foreign_icon_gate()
 
         for patient in self.store.patients:
             if patient.patient_id not in target_ids:
@@ -5036,10 +5013,9 @@ class DicomSession:
                     for instance in series.instances:
                         why = _why_excluded(
                             options, patient, study, series, instance)
+                        if why not in (None, OUTSIDE_THE_SUBSET):
+                            withheld.append((instance.sop_instance_uid, why))
                         if why is not None:
-                            if why != OUTSIDE_THE_SUBSET:
-                                withheld.append(
-                                    (instance.sop_instance_uid, why))
                             continue
 
                         tasks.append(ExportContext(
@@ -5058,6 +5034,32 @@ class DicomSession:
                             verify_readback=options.verify_readback))
 
         return tasks, patient_count, withheld
+
+    def _foreign_icon_gate(self) -> bool:
+        """Drop every nested icon that is not its carrier's own? (#183, #542)
+
+        One boolean for the whole run, computed before the walk. Store-wide
+        and not per instance, because an icon under Referenced Image
+        Sequence is a thumbnail of a *different* SOP instance and
+        redaction's `regenerate_uid()` makes following the reference fail
+        open. Over `self.store.patients` rather than the export's
+        `target_ids` or subset, deliberately: a subset that excludes the
+        redacted instances must not turn the gate off for the ones it
+        keeps.
+
+        Two halves: an attestation anywhere, or a zones rule that **matches
+        a series in the store** (#542). A rule for a scanner nobody has
+        redacts nothing, and counting it -- as #183's "any rule with zones"
+        did -- stripped every icon from every file. Each carrier's own
+        depth-1 icon is decided per instance in the worker instead.
+        """
+        every_series = [series for patient in self.store.patients
+                        for study in patient.studies
+                        for series in study.series]
+        return redaction_in_effect(
+            instance for series in every_series
+            for instance in series.instances) or any(
+                self._redaction_zones_for(series) for series in every_series)
 
     def _redaction_zones_for(self, series) -> list:
         """The configured pixel-redaction zones for this series' scanner."""

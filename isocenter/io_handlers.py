@@ -4023,6 +4023,42 @@ def redaction_in_effect(instances: Iterable["Instance"]) -> bool:
     return any(REDACTION_HASH_ATTR in inst.attributes for inst in instances)
 
 
+def _redaction_icon_loss(path, terminal_tag, seq_tag, inst, ctx) -> Optional[str]:
+    """Why the redaction gate drops this nested payload, or None (#542).
+
+    Two tiers. The carrier's own depth-1 icon (`_is_own_icon_path`)
+    thumbnails the carrier, so it goes iff *this* instance's pixels are
+    redacted: the attestation on the instance the worker holds (`_merge`
+    never mutates `inst.attributes`, so the `_`-prefixed key is still
+    there), or zones applied by this export. Zones count whether or not
+    the redaction then applies -- a declined redaction still leaves the
+    icon a thumbnail of pixels the caller asked to remove, and failing
+    closed is the answer. Every other nested payload may thumbnail a
+    different, redacted instance and takes the store-wide
+    `ctx.drop_foreign_icons`.
+
+    Returns:
+        Optional[str]: The `DATA_LOSS` detail for a drop, one text per
+        tier, or None when the gate keeps the payload.
+    """
+    if _is_own_icon_path(path):
+        if REDACTION_HASH_ATTR not in inst.attributes and not ctx.redaction_zones:
+            return None
+        return (f"Standard tag {terminal_tag} inside {seq_tag} was dropped "
+                f"with its sequence item because this instance's pixel data "
+                f"is redacted. An icon is a downsampled copy of a frame and "
+                f"nothing scans or redacts one, so exporting it would ship a "
+                f"thumbnail of what redaction removed.")
+    if not ctx.drop_foreign_icons:
+        return None
+    return (f"Standard tag {terminal_tag} inside {seq_tag} was dropped with "
+            f"its sequence item because this export redacts pixel data, and "
+            f"an icon here may be a thumbnail of a redacted instance. Nothing "
+            f"scans or redacts an icon, and a reference to a redacted "
+            f"instance cannot be followed once redaction has regenerated its "
+            f"UID.")
+
+
 def _instances_in(patient, studies) -> Iterable["Instance"]:
     """Every instance under `studies`, for the store-wide redaction gate."""
     for study in studies or getattr(patient, "studies", ()):
@@ -4114,42 +4150,15 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
 
         item, parent, seq_tag = resolved
 
-        # The redaction gate, in two tiers (#542). The carrier's own
-        # depth-1 icon thumbnails the carrier, so it goes iff *this*
-        # instance's pixels are redacted: the attestation on the instance
-        # the worker holds (`_merge` never mutates `inst.attributes`, so
-        # the `_`-prefixed key is still here), or zones applied by this
-        # export. Zones count whether or not the redaction then applies --
-        # a declined redaction still leaves the icon a thumbnail of
-        # pixels the caller asked to remove, and failing closed is the
-        # answer. Every other nested payload may thumbnail a different,
-        # redacted instance and takes the store-wide flag.
-        #
-        # SIGNAL for both: acquired content that was in the source and is
-        # not in the export, which grades (#542, Q8). #183 wrote STANDARD,
-        # so a redaction that stripped every thumbnail graded PASS. The
-        # three other icon losses below stay STANDARD: an item gone or
+        # SIGNAL: acquired content that was in the source and is not in
+        # the export, which grades (#542, Q8). #183 wrote STANDARD, so a
+        # redaction that stripped every thumbnail graded PASS. The three
+        # other icon losses in this loop stay STANDARD: an item gone or
         # reordered, or a failed restore, are not losses redaction caused.
-        if _is_own_icon_path(path):
-            if REDACTION_HASH_ATTR in inst.attributes or ctx.redaction_zones:
-                removals.append((parent, seq_tag, item))
-                losses.append((LOSS_SCOPE_SIGNAL, (
-                    f"Standard tag {terminal_tag} inside {seq_tag} was "
-                    f"dropped with its sequence item because this "
-                    f"instance's pixel data is redacted. An icon is a "
-                    f"downsampled copy of a frame and nothing scans or "
-                    f"redacts one, so exporting it would ship a thumbnail "
-                    f"of what redaction removed.")))
-                continue
-        elif ctx.drop_foreign_icons:
+        redacted = _redaction_icon_loss(path, terminal_tag, seq_tag, inst, ctx)
+        if redacted is not None:
             removals.append((parent, seq_tag, item))
-            losses.append((LOSS_SCOPE_SIGNAL, (
-                f"Standard tag {terminal_tag} inside {seq_tag} was dropped "
-                f"with its sequence item because this export redacts pixel "
-                f"data, and an icon here may be a thumbnail of a redacted "
-                f"instance. Nothing scans or redacts an icon, and a "
-                f"reference to a redacted instance cannot be followed "
-                f"once redaction has regenerated its UID.")))
+            losses.append((LOSS_SCOPE_SIGNAL, redacted))
             continue
 
         # The shifted-index guard. Position is the only identity a sequence
