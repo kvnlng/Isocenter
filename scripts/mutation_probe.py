@@ -149,7 +149,8 @@ TARGETS = {
                                "tests/test_shared_executor_lifecycle.py",
                                "tests/test_redaction_names_its_strategy.py",
                                "tests/test_memory_store_reports_its_processes_lever.py",
-                               "tests/test_duplicate_sop_uid_at_ingest.py"],
+                               "tests/test_duplicate_sop_uid_at_ingest.py",
+                               "tests/test_annex_e_end_to_end.py"],
                               80),
     "isocenter/crypto.py": (["tests/test_crypto.py", "tests/test_reversibility.py"], 30),
     # --- The #439 rows. Each was measured at budget 30 on 3.12.14 with other

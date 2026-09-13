@@ -83,17 +83,20 @@ def test_the_floor_is_the_basic_profile_plus_the_research_defaults():
 
     assert FLOOR_POLICY == {**BASIC_PROFILE, **RESEARCH_DEFAULTS}
     assert all(tag == tag.lower() for tag in FLOOR_POLICY)
-    assert len(FLOOR_POLICY) == 36
+    # Patient's Age is a basic rule since #547, so all three research
+    # defaults override one and the floor adds nothing.
+    assert len(FLOOR_POLICY) == 620
 
     assert RESEARCH_DEFAULTS["0008,0020"]["action"] == "JITTER"
     assert RESEARCH_DEFAULTS["0010,0040"]["action"] == "KEEP"
     assert RESEARCH_DEFAULTS["0010,1010"]["action"] == "KEEP"
     assert set(RESEARCH_DEFAULTS) == {"0008,0020", "0010,0040", "0010,1010"}
 
-    # The two profile edits the ruling and the export need.
-    assert BASIC_PROFILE["0008,1010"]["action"] == "REMOVE"     # Station Name
+    # The two profile edits the ruling and the export need. Station Name
+    # is X/Z/D in Table E.1-1, so EMPTY since #547.
+    assert BASIC_PROFILE["0008,1010"]["action"] == "EMPTY"      # Station Name
     assert BASIC_PROFILE["0008,0030"]["action"] == "EMPTY"      # Study Time
-    assert len(BASIC_PROFILE) == 35
+    assert len(BASIC_PROFILE) == 620
 
     # Derived, not aliased: the floor's entries are not the profile's
     # objects, so an edit to one cannot rewrite the other.
@@ -177,19 +180,21 @@ def _exported_dicoms(folder):
 
 
 #: Keyword -> what the floor leaves on disk. `None` means the element is
-#: absent; `""` means present and empty.
+#: absent; `""` means present and empty. Since #547 every code with a `Z`
+#: arm in PS3.15 Table E.1-1 empties rather than removes, so only the
+#: `X/D` pair (Series Date and Time) is absent.
 _CT_SMALL_AFTER_THE_FLOOR = {
-    "StudyID": None,
-    "SeriesDate": None,
-    "AcquisitionDate": None,
-    "ContentDate": None,
-    "StationName": None,
-    "InstitutionName": None,
-    "ContentTime": None,
-    "SeriesTime": None,
-    "AcquisitionTime": None,
-    "StudyTime": "",
-    "StudyDescription": "",
+    "StudyID": "",               # Z
+    "SeriesDate": None,          # X/D
+    "AcquisitionDate": "",       # X/Z
+    "ContentDate": "",           # Z/D
+    "StationName": "",           # X/Z/D
+    "InstitutionName": "",       # X/Z/D
+    "ContentTime": "",           # Z/D
+    "SeriesTime": None,          # X/D
+    "AcquisitionTime": "",       # X/Z
+    "StudyTime": "",             # Z
+    "StudyDescription": "",      # X, emptied for folder naming
 }
 
 
@@ -229,6 +234,33 @@ def test_a_bare_session_export_on_ct_small_carries_none_of_the_issues_tags(tmp_p
     assert str(ds.PatientID) != str(original.PatientID)
 
 
+def test_type_2_attributes_survive_as_zero_length(tmp_path):
+    """Accession Number, Referring Physician's Name, Study ID and Patient's
+    Birth Date are Type 2 in the Patient and General Study modules, and
+    PS3.15 Table E.1-1 gives each `Z`. On 0.9.7 the basic profile removed
+    all four, so every bare-session export was missing required elements,
+    and `IODValidator` -- which does not check them -- said nothing: #503's
+    Study Time defect at four more tags (#547).
+
+    Kills: any one of the four flipped back to REMOVE."""
+    original = _ct_small_into(str(tmp_path / "in"))
+    type_2 = ("AccessionNumber", "ReferringPhysicianName", "StudyID",
+              "PatientBirthDate")
+    for keyword in type_2:
+        assert keyword in original, f"fixture drift: CT_small has no {keyword}"
+
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.anonymize(session.audit())
+        summary = session.export(str(tmp_path / "out"), use_compression=False)
+
+    assert summary.written == 1, summary.failures
+    ds = pydicom.dcmread(_exported_dicoms(str(tmp_path / "out"))[0])
+    for keyword in type_2:
+        assert keyword in ds, f"{keyword} is absent: a Type 2 element was removed"
+        assert str(ds[keyword].value) == "", f"{keyword} is {ds[keyword].value!r}"
+
+
 def test_the_documented_quick_start_exports_ct_small(tmp_path):
     """`create_config` -> `load_config` -> `audit` -> `anonymize` ->
     `export` on `CT_small.dcm`: the README's Quick Start, end to end, on a
@@ -258,7 +290,7 @@ def test_the_documented_quick_start_exports_ct_small(tmp_path):
     assert "StudyTime" in ds and str(ds.StudyTime) == ""
     for keyword in ("StationName", "StudyID", "InstitutionName", "SeriesDate"):
         assert keyword in original, f"fixture drift: CT_small has no {keyword}"
-        assert keyword not in ds, f"{keyword} reached the export as {ds[keyword].value!r}"
+        assert not ds.get(keyword), f"{keyword} reached the export as {ds[keyword].value!r}"
 
 
 def test_a_bare_session_status_and_manifest_after_anonymize(tmp_path):
@@ -282,17 +314,19 @@ def test_a_bare_session_status_and_manifest_after_anonymize(tmp_path):
             items = json.load(f)["items"]
         assert [item["anonymized"] for item in items] == [True]
 
-    # One floor finding declined: the audit sees Station Name, then the
+    # One floor finding declined: the audit sees Series Date, then the
     # value is gone before the remediation runs, so REMOVE_TAG matches no
-    # arm and `_record_decline` names the instance.
+    # arm and `_record_decline` names the instance. A REMOVE rule, because
+    # an EMPTY one (Station Name's since #547) writes "" over a missing
+    # value rather than declining.
     _ct_small_into(str(tmp_path / "in2"))
     with Session(str(tmp_path / "s2.db")) as session:
         session.ingest(str(tmp_path / "in2"))
         report = session.audit()
         instance = session.store.patients[0].studies[0].series[0].instances[0]
-        assert any(f.tag == "0008,1010" for f in report), (
-            "the floor did not flag Station Name")
-        del instance.attributes["0008,1010"]
+        assert any(f.tag == "0008,0021" for f in report), (
+            "the floor did not flag Series Date")
+        del instance.attributes["0008,0021"]
         session.anonymize(report)
 
         assert instance.phi_status is PhiStatus.IDENTIFIED
@@ -409,7 +443,7 @@ def _report_method_line(session, tmp_path, name):
 
 
 def test_the_report_counts_the_policy_in_force(tmp_path):
-    """The bare report says 36 rules and `session defaults`; a
+    """The bare report says 620 rules and `session defaults`; a
     `privacy_profile: none` session says 0. Kills `generate_report`'s
     `load_phi_config()` fallback for an empty `phi_tags` -- under it the
     `none` session reports a floor the scan never applied, which is the
@@ -508,7 +542,7 @@ def test_a_saved_configuration_reloads_under_the_same_policy(tmp_path):
 
 def test_the_loader_lowercases_user_keys_before_the_merge(tmp_path):
     """A user key spelled `0008,103E` under `privacy_profile: basic` yields
-    one `0008,103e` entry (35, not 36) carrying the user's action. Kills
+    one `0008,103e` entry (620, not 621) carrying the user's action. Kills
     a merge that leaves the uppercase key beside the profile's: the
     inspector collapses them at scan time with the later one winning by
     dict order, and the report counts a rule that never existed."""
@@ -532,7 +566,7 @@ def test_the_loader_lowercases_user_keys_before_the_merge(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_a_config_without_a_profile_line_extends_the_floor(tmp_path, caplog):
-    """`phi_tags: {'0018,1030': REMOVE}` with no `privacy_profile` line
+    """`phi_tags: {'0018,0015': REMOVE}` with no `privacy_profile` line
     loads the floor plus that one tag, names no profile, and logs that
     the floor was applied. Kills an absent line meaning an empty base
     (1 tag, and Study ID and Institution Name back in the export -- the
@@ -542,23 +576,27 @@ def test_a_config_without_a_profile_line_extends_the_floor(tmp_path, caplog):
     from isocenter.profiles import FLOOR_POLICY
 
     config = tmp_path / "onetag.yaml"
-    config.write_text("phi_tags:\n  '0018,1030': {action: REMOVE, name: Protocol}\n",
+    config.write_text("phi_tags:\n  '0018,0015': {action: REMOVE, name: Body Part}\n",
                       encoding="utf-8")
 
     with caplog.at_level(logging.INFO, logger="isocenter"):
         tags, _, _, _, profile = ConfigLoader.load_unified_config(str(config))
 
+    # Body Part Examined, which Table E.1-1 does not name: Protocol Name
+    # was the tag here until #547 made it a basic rule, and a tag the
+    # floor already holds no longer shows "plus one".
+    assert "0018,0015" not in FLOOR_POLICY
     assert tags == {**FLOOR_POLICY,
-                    "0018,1030": {"action": "REMOVE", "name": "Protocol"}}
-    assert tags["0020,0010"]["action"] == "REMOVE"      # Study ID
+                    "0018,0015": {"action": "REMOVE", "name": "Body Part"}}
+    assert tags["0020,0010"]["action"] == "EMPTY"       # Study ID
     assert profile is None
     assert "floor policy" in caplog.text
 
 
 def test_keep_opts_a_tag_out_of_the_floor(tmp_path):
     """`action: KEEP` in a file with no profile line opts one tag out of
-    the floor, and the key may be spelled uppercase. Loaded: 36 entries,
-    one `0008,103e` carrying KEEP (not 37 with the KEEP winning only by
+    the floor, and the key may be spelled uppercase. Loaded: 620 entries,
+    one `0008,103e` carrying KEEP (not 621 with the KEEP winning only by
     dict order); the audit raises nothing for it; and a KEEP on
     Institution Name survives to the exported CT_small. Kills the
     override order reversed (floor over user) and the loader not
@@ -593,7 +631,7 @@ def test_keep_opts_a_tag_out_of_the_floor(tmp_path):
     assert summary.written == 1, summary.failures
     ds = pydicom.dcmread(_exported_dicoms(str(tmp_path / "out"))[0])
     assert str(ds.InstitutionName) == str(original.InstitutionName)
-    assert "StudyID" not in ds, "the floor beneath the KEEPs did not apply"
+    assert ds.StudyID == "", "the floor beneath the KEEPs did not apply"
 
 
 def test_the_default_phi_policy_is_the_floor():
@@ -634,7 +672,7 @@ def test_a_loaded_config_does_not_edit_the_floor_a_later_session_seeds_from(tmp_
         first.load_config(str(config))
         assert first.configuration.phi_tags["0008,0080"]["action"] == "KEEP"
     with Session(str(tmp_path / "b.db")) as later:
-        assert later.configuration.phi_tags["0008,0080"]["action"] == "REMOVE"
+        assert later.configuration.phi_tags["0008,0080"]["action"] == "EMPTY"
         assert later.configuration.phi_tags == expected
     assert FLOOR_POLICY == expected
 
@@ -659,7 +697,7 @@ def test_privacy_profile_none_lowercases_the_files_keys(tmp_path):
 def test_report_section_5_names_the_decline_on_a_bare_session(tmp_path):
     """A floor finding that declines costs the bare run its PASS, and
     section 5 says why. The decline is made as in the manifest test:
-    Station Name is flagged by the audit and gone before the remediation
+    Series Date is flagged by the audit and gone before the remediation
     runs. Kills the declined-remediation term dropped from
     `generate_report`'s review reasons (section 5 then gives no reason
     for the decline)."""
@@ -668,8 +706,8 @@ def test_report_section_5_names_the_decline_on_a_bare_session(tmp_path):
         session.ingest(str(tmp_path / "in"))
         report = session.audit()
         instance = session.store.patients[0].studies[0].series[0].instances[0]
-        assert any(f.tag == "0008,1010" for f in report)
-        del instance.attributes["0008,1010"]
+        assert any(f.tag == "0008,0021" for f in report)
+        del instance.attributes["0008,0021"]
         session.anonymize(report)
         path = tmp_path / "report.md"
         session.generate_report(str(path))
