@@ -76,11 +76,15 @@ def _session(tmp_path, nested=False):
     instance.file_path = None
     instance.set_pixel_data(np.full((16, 16), 200, dtype=np.uint8))
     if nested:
+        # View Code Sequence and Code Meaning: tags PS3.15 Table E.1-1 does
+        # not name, so the floor's `anonymize()` leaves the item for the
+        # pass to edit. It was Request Attributes Sequence until #547 made
+        # that a basic rule, and anonymize removed it before the edit.
         item = DicomItem()
-        item.set_attr("0040,0007", "Original step description")
-        seq = DicomSequence(tag="0040,0275")
+        item.set_attr("0008,0104", "Original code meaning")
+        seq = DicomSequence(tag="0054,0220")
         seq.items.append(item)
-        instance.sequences["0040,0275"] = seq
+        instance.sequences["0054,0220"] = seq
     series.instances.append(instance)
     study.series.append(series)
     patient.studies.append(study)
@@ -160,7 +164,7 @@ def _top_level_edit(inst):
 
 
 def _nested_edit(inst):
-    inst.sequences["0040,0275"].items[0].set_attr("0040,0007", "Edited during the pass")
+    inst.sequences["0054,0220"].items[0].set_attr("0008,0104", "Edited during the pass")
 
 
 @pytest.mark.parametrize("edit", [_top_level_edit, _nested_edit],

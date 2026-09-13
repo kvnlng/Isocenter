@@ -89,22 +89,23 @@ There are three configurations a reader of this guide can be in:
 - **A bare `Session()`, never `load_config()`-ed.** `phi_tags` is the
   floor policy, `FLOOR_POLICY` (`isocenter/profiles.py`): the basic
   profile below plus the three research defaults `create_config()`
-  writes (Study Date jittered, Patient's Sex and Age kept) -- 36 rules.
+  writes (Study Date jittered, Patient's Sex and Age kept) -- 620 rules.
   Until #495 this configuration applied no tag policy at all, and Study
   ID, Institution Name, Station Name and the series/acquisition/content
   dates reached the export.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic`; `load_config()` expands that into
-  `PRIVACY_PROFILES["basic"]` (`isocenter/profiles.py`) -- **35 tags, 35
-  effective** -- covering patient identity, study/series dates and
-  times, and institution/physician fields, based on DICOM PS3.15 Annex
-  E's Basic Profile. This is what actually runs on the documented path.
+  `PRIVACY_PROFILES["basic"]` (`isocenter/profiles.py`) -- **620 tags, 620
+  effective** -- the Basic Profile column of DICOM PS3.15 Annex E Table
+  E.1-1 (2026c), with its departures named in
+  [Configuration](configuration.md#privacy-profile). This is what
+  actually runs on the documented path.
   `(0070,0006)` was the exception until 0.8.0: it lives inside Waveform
   Annotation Sequence, and the scan never opened sequences (#57), so it
   sat in the profile doing nothing. It fires now.
   The scaffold lists only the three research defaults beneath
   `privacy_profile: basic` -- the entries of the floor whose action
-  differs from the profile's -- so the loaded policy is the same 36
+  differs from the profile's -- so the loaded policy is the same 620
   rules a bare session applies.
 - **Your own `phi_tags` configuration.** With no `privacy_profile`
   line it is layered on the floor policy; with `privacy_profile: basic`
@@ -125,8 +126,9 @@ because the series description becomes a **directory name** -- every
 
 **The three free-text surfaces specific to waveform export are now
 remediated in the exporter itself, not by profile membership** -- the
-PHI scan is tag-gated (see above), so a profile entry alone would not
-protect a bare `Session()` that never called `load_config()`. Both are
+PHI scan is tag-gated (see above), so a profile entry alone protects
+only a session whose policy carries it: a bare `Session()` applies the
+floor since #495, but `privacy_profile: none` applies nothing. Both are
 handled unconditionally, regardless of which of the three
 configurations above you're in:
 
@@ -137,7 +139,11 @@ configurations above you're in:
   including genuinely operator-typed text -- is replaced with a
   positional `ch<N>` token instead of being written verbatim. `N` is
   the **zero-based** channel index, not DICOM's 1-based ChannelNumber
-  -- `ch1` is the *second* channel.
+  -- `ch1` is the *second* channel. Channel Label is also removed by the
+  basic profile since 0.9.8 (PS3.15 Table E.1-1 gives it `X`), so on a
+  configured or bare session a channel with no coded Channel Source is
+  named `ch<N>` even when its label was a known lead name. Give
+  `(003A,0203)` `action: KEEP` to keep recognisable lead names.
 - **Unformatted Text Value `(0070,0006)`** -- is omitted from the
   `note` field of `annotations.json` by default. It routinely holds
   free-text clinical commentary, so exporting it is opt-in: pass

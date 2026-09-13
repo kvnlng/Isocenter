@@ -181,7 +181,7 @@ def format_header(record_name: str,
         start_date_note (str, optional): The complete comment text
             preserving a start date when `start_datetime` is None because
             no real time-of-day is available -- e.g. Acquisition DateTime
-            and Study Time both removed by the Basic profile. Writing a
+            and Study Time both emptied by the Basic profile. Writing a
             fabricated `00:00:00` into the record line to keep the date
             would be worse than omitting it (see
             `WfdbExporter._start_datetime`); losing the date outright
@@ -788,8 +788,9 @@ class WfdbExporter(Exporter):
         Never fabricates a time-of-day. When `study.study_date` is a real
         (shifted or unshifted) date but no real time-of-day is available --
         which is now the normal case on a fully configured, anonymized
-        session, since the Basic profile (#38) removes both Acquisition
-        DateTime (0008,002A) and Study Time (0008,0030) -- the record's
+        session, since the Basic profile empties both Acquisition
+        DateTime (0008,002A) and Study Time (0008,0030), and an empty
+        value reads as absent here (#503, #547) -- the record's
         start time/date fields are omitted entirely rather than
         substituting a fake "00:00:00". header(5) does not support a
         date-only start time: PhysioNet's own spec documents base_date as

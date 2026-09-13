@@ -152,6 +152,60 @@ def test_a_remove_of_a_tag_the_instance_does_not_carry_is_recorded(store):
     assert "0008,0080" in rows[0][2]
 
 
+@pytest.mark.parametrize("new_value", ["", "ANONYMIZED"],
+                         ids=["EMPTY", "REPLACE"])
+def test_a_replace_of_a_tag_the_instance_no_longer_carries_is_recorded(
+        store, new_value):
+    """`REMOVE_TAG`'s decline, for the value-writing half (#547).
+
+    The audit saw the tag; it was gone before the remediation ran. Red
+    before: `set_attr` wrote the replacement anyway, fabricating an
+    element the graph did not hold -- #57's decoy at the top level -- and
+    the row said `REMEDIATION_REPLACE`. #547 moved 13 basic rules from
+    `REMOVE`, which declined here, to `EMPTY`, which did not, and added
+    141 more `EMPTY` rules. `REPLACE` shares the arm and the defect.
+
+    Kills: the absent-target decline removed from the `REPLACE_TAG` arm.
+    """
+    inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
+    inst.set_attr("0010,0010", "DOE^JOHN")
+
+    changed = RemediationService(
+        store_backend=store, project_secret=FIXED_A)._apply_single_remediation(
+            _finding(inst, "REPLACE_TAG", "0008,1010", new_value=new_value,
+                     original="STATION-7"))
+    rows = store.get_audit_declines()
+
+    assert changed is False
+    assert "0008,1010" not in inst.attributes
+    assert len(rows) == 1
+    assert "0008,1010" in rows[0][2]
+
+
+def test_a_value_aimed_at_a_sequence_is_recorded(store):
+    """A hand-built `REPLACE_TAG` with a value, aimed at a tag the item
+    holds as a sequence. The scan never proposes one -- it warns instead
+    (#547) -- and there is no value to write into a sequence, so it
+    declines rather than setting an attribute beside it.
+
+    Kills: the sequence case of the absent-target decline writing the
+    value anyway."""
+    from isocenter.entities import DicomItem
+    inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
+    inst.add_sequence_item("0040,0275", DicomItem())
+
+    changed = RemediationService(
+        store_backend=store, project_secret=FIXED_A)._apply_single_remediation(
+            _finding(inst, "REPLACE_TAG", "0040,0275", new_value="ANONYMIZED"))
+    rows = store.get_audit_declines()
+
+    assert changed is False
+    assert "0040,0275" not in inst.attributes
+    assert len(inst.sequences["0040,0275"].items) == 1
+    assert len(rows) == 1
+    assert "sequence" in rows[0][2]
+
+
 def test_a_remove_against_an_entity_with_no_attributes_dict_is_recorded(store):
     """The second `REMOVE_TAG` fall-through shape, which the plan missed.
 
