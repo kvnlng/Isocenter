@@ -417,8 +417,10 @@ class WaveformChannel:
         been observed carrying names, MRNs and clinical commentary.
 
         The check lives here rather than in the privacy profile on purpose:
-        the PHI scan is tag-gated, so a profile entry protects only sessions
-        that loaded a configuration. A bare Session() would still leak.
+        the PHI scan is tag-gated, so a profile entry protects only a
+        session whose policy carries it. The floor (#495) and the basic
+        profile (#547) remove Channel Label, but `privacy_profile: none`
+        or a `KEEP` on it leaves the label to this check alone.
 
         Args:
             index (int, optional): Zero-based channel index, used for the

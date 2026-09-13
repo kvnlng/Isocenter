@@ -22,12 +22,12 @@
 version: '2.0'
 privacy_profile: basic
 phi_tags:
-  0010,0040:
-    action: KEEP
-    name: Patient's Sex
   0008,0020:
     action: JITTER
     name: Study Date
+  0010,0040:
+    action: KEEP
+    name: Patient's Sex
   0010,1010:
     action: KEEP
     name: Patient's Age

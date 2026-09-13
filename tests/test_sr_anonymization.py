@@ -90,3 +90,45 @@ def test_phi_inspector_deep_scan():
     assert f.entity_path == (("0040,a730", 0),), (
         "the finding must record where the item sits, or it cannot be "
         "found again after crossing a process boundary")
+
+
+def test_sr_d_codes_are_zero_length(tmp_path):
+    """pydicom's `test-SR.dcm` through a bare session: Verifying Observer
+    Name and Verification DateTime are present and zero-length (#547).
+
+    **This pins a documented non-conformance, on purpose.** PS3.15 Table
+    E.1-1 gives both `D`: replace with a non-zero-length dummy consistent
+    with the VR. Isocenter has no dummy-value action, so the basic profile
+    maps `D` to EMPTY, and both are Type 1 in the SR Document General
+    module. The SR still exports, because `IODValidator` does not know SR.
+    When the dummy-value action lands (#557) this test flips, and should.
+
+    Kills: `D` mapped to REMOVE (the elements become absent), and the
+    Verifying Observer Sequence given a rule of its own (it would be
+    removed or emptied, and its items with it)."""
+    import os
+    import shutil
+    import pydicom.data
+
+    os.makedirs(tmp_path / "in")
+    src = pydicom.data.get_testdata_file("test-SR.dcm")
+    shutil.copy(src, tmp_path / "in" / "sr.dcm")
+    original = pydicom.dcmread(src)
+    assert original.VerifyingObserverSequence[0].VerifyingObserverName, \
+        "fixture drift: test-SR.dcm has no Verifying Observer Name"
+
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.anonymize(session.audit())
+        summary = session.export(str(tmp_path / "out"), use_compression=False)
+
+    assert summary.written == 1, summary.failures
+    written = [os.path.join(root, name) for root, _, names in os.walk(tmp_path / "out")
+               for name in names if name.endswith(".dcm")]
+    out = pydicom.dcmread(written[0])
+
+    observers = out.VerifyingObserverSequence
+    assert len(observers) == len(original.VerifyingObserverSequence)
+    for item in observers:
+        assert "VerifyingObserverName" in item and not item.VerifyingObserverName
+        assert "VerificationDateTime" in item and not item.VerificationDateTime

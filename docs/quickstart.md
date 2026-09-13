@@ -33,7 +33,7 @@ session.examine()
 
 ## 3. Configure & Audit
 
-Before changing anything, define your privacy rules. Use `create_config` to generate a scaffolding based on your inventory, then `audit` to scan that inventory against your rules. This "Measure Twice, Cut Once" approach lets you identify all PHI risks before applying any irreversible changes. Skipping this step does not skip de-identification: a session that has loaded no configuration still applies a **floor policy** of 36 tag rules (the PS3.15 basic profile plus Study Date jittered, Sex and Age kept), and removes private tags. The config file is where you record the policy you actually want; see [Configuration](configuration.md#privacy-profile).
+Before changing anything, define your privacy rules. Use `create_config` to generate a scaffolding based on your inventory, then `audit` to scan that inventory against your rules. This "Measure Twice, Cut Once" approach lets you identify all PHI risks before applying any irreversible changes. Skipping this step does not skip de-identification: a session that has loaded no configuration still applies a **floor policy** of 620 tag rules (the PS3.15 Annex E Basic Profile table, 2026c, with UIDs not yet replaced, plus Study Date jittered, Sex and Age kept), and removes private tags. The config file is where you record the policy you actually want; see [Configuration](configuration.md#privacy-profile).
 
 ```python
 # Create a default configuration file (v2.0 YAML)

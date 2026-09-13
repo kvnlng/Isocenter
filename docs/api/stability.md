@@ -175,7 +175,11 @@ no configuration, `phi_tags` is a copy of the floor policy,
 `profiles.FLOOR_POLICY`, and `audit()`/`anonymize()` apply it; a config
 with no `privacy_profile` line extends it, and one with
 `privacy_profile: none` opts out of it (#495). `set_phi_tag()`
-stores lowercase keys, as every other key in the policy is.
+stores lowercase keys, as every other key in the policy is. What the
+floor and `privacy_profile: basic` contain is **not** frozen: the basic
+profile is PS3.15 Annex E Table E.1-1 of a named edition (2026c since
+0.9.8, #547), its membership follows that edition, and a change to it
+can arrive in a minor release, listed under Breaking in the changelog.
 
 **Exceptions.** `RedactionError(failures, attempted)`, a `RuntimeError`,
 with `.failures` (a list of `(entity_uid, details)`) and `.attempted`,
@@ -230,9 +234,8 @@ for such a patient arriving in the same store is a keyed subject with
 a different offset. The offset is not derivable from the exported
 pseudonym, or from any other value its derivation uses, without the
 secret; that is not a promise that no exported date is recoverable
-(a date tag no rule shifts, such as Instance Creation Date
-`(0008,0012)`, is exported as ingested, and UIDs can embed dates,
-#544). The project secret's file format (`write_project_secret`) is
+(a date tag no rule names is exported as ingested, and UIDs can
+embed dates, #544). The project secret's file format (`write_project_secret`) is
 not a data promise.
 
 **Output vocabularies.** These are five separate vocabularies, not one
