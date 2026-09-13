@@ -1109,15 +1109,15 @@ _IMAGE_MODALITIES = frozenset({"CT", "MR", "US", "DX", "CR",
 #: the emitter and stored on the audit row rather than re-derived, and
 #: why they differ, are argued once each -- CHANGELOG.md, #146 and #150.
 #:
-#: SIGNAL exists because group parity turned out to be a proxy for "how
-#: much should the reader care", and one emitter broke the proxy: a
-#: discarded waveform multiplex group lives under a standard tag, and it
-#: is acquired signal that was in the source and is not in the export --
-#: not an annotation layer with a defined home elsewhere, which is what
-#: makes an overlay routine (#150). The discriminator is what the loss
-#: *was*, not how bad it felt: STANDARD stays the scope for routine
-#: standard-group drops, and widening the report's grading test to
-#: STANDARD would take every overlay with it.
+#: SIGNAL is acquired content that was in the source and is not in the
+#: export: a discarded waveform multiplex group (#150), or an icon dropped
+#: because pixel data is redacted (#542). It exists because group parity
+#: was a proxy for "how much should the reader care" and those emitters
+#: broke it -- both live under standard tags, and neither is an annotation
+#: layer with a defined home elsewhere, which is what makes an overlay
+#: routine. The discriminator is what the loss *was*: STANDARD stays the
+#: scope for routine standard-group drops (widening the grading test to
+#: STANDARD would take every overlay with it).
 LOSS_SCOPE_PRIVATE = "PRIVATE"
 LOSS_SCOPE_STANDARD = "STANDARD"
 LOSS_SCOPE_SIGNAL = "SIGNAL"
@@ -3143,14 +3143,16 @@ class ExportContext:
     pixel_length: Optional[int] = None
     pixel_alg: Optional[str] = None
     redaction_zones: List[Tuple] = field(default_factory=list)
-    #: Drop every nested icon in this export, whoever carries it (#183).
-    #: Computed ONCE per export run, store-wide, by `redaction_in_effect`
-    #: -- not per instance, because an icon under Referenced Image Sequence
-    #: is a thumbnail of a *different* SOP instance and a per-instance
-    #: condition is blind to that. See `redaction_in_effect` for why the
-    #: narrower gate fails open. Both context builders set it; a builder
-    #: that forgets ships thumbnails of redacted frames.
-    drop_nested_icons: bool = False
+    #: Drop every nested icon that is **not** the carrier's own depth-1
+    #: Icon Image Sequence item (#183, #542). Store-wide, because such an
+    #: icon may thumbnail a different, redacted SOP instance whose UID
+    #: redaction regenerated (#183): computed ONCE per export run by the
+    #: context builder -- see `redaction_in_effect` for why a per-instance
+    #: condition fails open for it. The carrier's own icon is gated per
+    #: instance in the worker instead (`_is_own_icon_path`). Both context
+    #: builders set it; a builder that forgets ships thumbnails of
+    #: redacted frames.
+    drop_foreign_icons: bool = False
     #: Re-read the written file, compare its descriptors and decode and
     #: compare every sample before delivering it (#209, #449). Off by
     #: default: it costs a second parse and a full decode per instance
@@ -3939,60 +3941,84 @@ def _verify_readback(path: str, ds, written_pixels=None,
 REDACTION_HASH_ATTR = "_ISOCENTER_REDACTION_HASH"
 
 
-def redaction_in_effect(instances: Iterable["Instance"], rules=None) -> bool:
-    """Does anything in this export's world redact pixels? (#183 Q2/Q10)
+#: Icon Image Sequence, in the lowercase-hex spelling item paths use.
+_ICON_IMAGE_SEQUENCE_TAG = "0088,0200"
 
-    **Store-wide on purpose, and narrowing it is a de-identification
-    regression.** An Icon Image Sequence item is a downsampled copy of a
-    frame, and nothing in this pipeline scans or redacts one: every pixel
-    consumer reads `instance.get_pixel_data()`, which is the top-level frame
-    and only that -- the burned-in identifier scan, both redaction paths and
-    the export alike. So carrying icon bytes out of a session that redacted
-    re-exports a thumbnail of exactly what redaction zeroed, with no scan
-    and no zones applied.
 
-    The obvious narrower gate -- "was *this* instance redacted" -- is blind
-    to the shape this feature's own headline spelling has. An icon under
-    Referenced Image Sequence (0008,1140) is a thumbnail of the SOP instance
-    being *referenced* (PS3.3 C.7.6.16), not of the one carrying it, so a
-    redacted image and the untouched instance that thumbnails it can be
-    different files. And it cannot be resolved by following the reference:
-    redaction calls `regenerate_uid()`, so `ReferencedSOPInstanceUID` names
-    a UID that is no longer in the store and the lookup returns nothing for
-    precisely the instances that were redacted. **It fails open**, which is
-    the worst available answer.
+def _is_own_icon_path(path) -> bool:
+    """Is this nested payload the carrier's own icon? (#542)
 
-    Two conditions, because either alone has a hole:
+    True exactly for a depth-1 Icon Image Sequence item: a path of one step
+    whose sequence is (0088,0200). Such an icon is a thumbnail of the
+    instance carrying it (PS3.3 C.7.6.1.1.6), so it can only show what
+    *this* instance's redaction removed, and gating it per instance cannot
+    fail open. Everything else -- an icon under Referenced Image Sequence,
+    an icon inside an icon, pixel data under any other sequence -- is
+    *foreign*: it may be a thumbnail of a different instance, and keeps the
+    store-wide gate. Decided from the path alone, never by following a
+    reference, because redaction's `regenerate_uid()` breaks the reference
+    for exactly the instances that were redacted.
+    """
+    return len(path) == 1 and path[0][0] == _ICON_IMAGE_SEQUENCE_TAG
 
-    - The **attestation** is the load-bearing half. `_redaction_zones_for`
-      looks zones up at *export* time from the *current* configuration,
-      keyed on the series' device serial number, while `RedactionService`
-      redacts whatever `rois` its caller passed. So the zones list is empty
-      at export while the pixels are redacted whenever the rule was edited,
-      the serial changed, the service was driven directly, or the series has
-      no equipment at all.
-    - The **rules** are the belt, for a redaction that is configured but has
-      not run yet in this session.
+
+def redaction_in_effect(instances: Iterable["Instance"]) -> bool:
+    """Does any instance this export can see carry a redaction attestation?
+
+    The store-wide half of the nested-icon gate (#183 Q2/Q10, narrowed by
+    #542): the answer for every nested icon that is **not** its carrier's
+    own depth-1 Icon Image Sequence item (`_is_own_icon_path`).
+
+    **Store-wide on purpose, and narrowing it for those icons is a
+    de-identification regression.** An Icon Image Sequence item is a
+    downsampled copy of a frame, and nothing in this pipeline scans or
+    redacts one: every pixel consumer reads `instance.get_pixel_data()`,
+    which is the top-level frame and only that -- the burned-in identifier
+    scan, both redaction paths and the export alike. So carrying icon bytes
+    out of a session that redacted can re-export a thumbnail of exactly
+    what redaction zeroed, with no scan and no zones applied.
+
+    The per-instance gate -- "was *this* instance redacted" -- is blind to
+    an icon under Referenced Image Sequence (0008,1140), which is a
+    thumbnail of the SOP instance being *referenced* (PS3.3 C.7.6.16), not
+    of the one carrying it, so a redacted image and the untouched instance
+    that thumbnails it can be different files. And it cannot be resolved by
+    following the reference: redaction calls `regenerate_uid()`, so
+    `ReferencedSOPInstanceUID` names a UID that is no longer in the store
+    and the lookup returns nothing for precisely the instances that were
+    redacted. **It fails open**, which is the worst available answer.
+
+    **Why the carrier's own icon is safely per instance (#542).** A depth-1
+    Icon Image Sequence item thumbnails its carrier (PS3.3 C.7.6.1.1.6), so
+    it can only show what *this* instance's redaction removed. The worker
+    drops it iff this instance carries the attestation or has zones
+    applied at export; applying the store-wide answer to it as well, as
+    #183 did, stripped every unredacted instance's own thumbnail out of the
+    export once anything was redacted, and graded it PASS.
+
+    This function is the **attestation** half, and the load-bearing one.
+    `_redaction_zones_for` looks zones up at *export* time from the
+    *current* configuration, keyed on the series' device serial number,
+    while `RedactionService` redacts whatever `rois` its caller passed. So
+    the zones list is empty at export while the pixels are redacted
+    whenever the rule was edited, the serial changed, the service was
+    driven directly, or the series has no equipment at all. The session
+    adds the configuration belt itself -- a zones rule that **matches a
+    series in the store**, for a redaction configured but not yet run --
+    because only it can match rules to series; a rule matching no series
+    redacts nothing and is no reason to drop an icon (#542). It used to be
+    a `rules` parameter here that counted any rule with zones, matched or
+    not. `write_tree` has no configuration to consult and uses this alone.
 
     Args:
         instances: Every instance this export can see. The session path
             passes the whole store; `write_tree` passes the tree it is
             about to write.
-        rules: Configuration rules, or None. **None is not "no rules" -- it
-            is "this caller has no configuration to consult"**, which is
-            `write_tree`'s situation structurally: it is the serializer,
-            with no session behind it. The attestation half still applies
-            there, because dropping an icon out of a redacted graph is a
-            property of carrying icon bytes at all rather than a pipeline
-            step the serializer skips.
 
     Returns:
-        bool: True when every nested icon in this export must be dropped.
+        bool: True when any instance carries the attestation.
     """
-    for inst in instances:
-        if REDACTION_HASH_ATTR in inst.attributes:
-            return True
-    return any((rule or {}).get("redaction_zones") for rule in (rules or ()))
+    return any(REDACTION_HASH_ATTR in inst.attributes for inst in instances)
 
 
 def _instances_in(patient, studies) -> Iterable["Instance"]:
@@ -4086,14 +4112,42 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
 
         item, parent, seq_tag = resolved
 
-        if ctx.drop_nested_icons:
+        # The redaction gate, in two tiers (#542). The carrier's own
+        # depth-1 icon thumbnails the carrier, so it goes iff *this*
+        # instance's pixels are redacted: the attestation on the instance
+        # the worker holds (`_merge` never mutates `inst.attributes`, so
+        # the `_`-prefixed key is still here), or zones applied by this
+        # export. Zones count whether or not the redaction then applies --
+        # a declined redaction still leaves the icon a thumbnail of
+        # pixels the caller asked to remove, and failing closed is the
+        # answer. Every other nested payload may thumbnail a different,
+        # redacted instance and takes the store-wide flag.
+        #
+        # SIGNAL for both: acquired content that was in the source and is
+        # not in the export, which grades (#542, Q8). #183 wrote STANDARD,
+        # so a redaction that stripped every thumbnail graded PASS. The
+        # three other icon losses below stay STANDARD: an item gone or
+        # reordered, or a failed restore, are not losses redaction caused.
+        if _is_own_icon_path(path):
+            if REDACTION_HASH_ATTR in inst.attributes or ctx.redaction_zones:
+                removals.append((parent, seq_tag, item))
+                losses.append((LOSS_SCOPE_SIGNAL, (
+                    f"Standard tag {terminal_tag} inside {seq_tag} was "
+                    f"dropped with its sequence item because this "
+                    f"instance's pixel data is redacted. An icon is a "
+                    f"downsampled copy of a frame and nothing scans or "
+                    f"redacts one, so exporting it would ship a thumbnail "
+                    f"of what redaction removed.")))
+                continue
+        elif ctx.drop_foreign_icons:
             removals.append((parent, seq_tag, item))
-            losses.append((LOSS_SCOPE_STANDARD, (
+            losses.append((LOSS_SCOPE_SIGNAL, (
                 f"Standard tag {terminal_tag} inside {seq_tag} was dropped "
                 f"with its sequence item because this export redacts pixel "
-                f"data. An icon is a downsampled copy of a frame and "
-                f"nothing scans or redacts one, so exporting it would ship "
-                f"a thumbnail of what redaction removed.")))
+                f"data, and an icon here may be a thumbnail of a redacted "
+                f"instance. Nothing scans or redacts an icon, and a "
+                f"reference to a redacted instance cannot be followed "
+                f"once redaction has regenerated its UID.")))
             continue
 
         # The shifted-index guard. Position is the only identity a sequence
@@ -5762,7 +5816,7 @@ class DicomExporter:
             studies: List[Study],
             out_dir: str,
             compression: str = None,
-            drop_nested_icons: bool = False) -> List[ExportContext]:
+            drop_foreign_icons: bool = False) -> List[ExportContext]:
         """
         Generates ExportContext objects for the given studies.
 
@@ -5774,12 +5828,14 @@ class DicomExporter:
             studies (List[Study]): List of studies to export.
             out_dir (str): Output directory.
             compression (str, optional): Compression format (e.g. 'j2k').
-            drop_nested_icons (bool): Copied onto every context (#183).
-                Passed in rather than computed here because it is a
+            drop_foreign_icons (bool): Copied onto every context (#183,
+                #542). Passed in rather than computed here because it is a
                 **store-wide** answer and this method sees one patient: a
-                per-patient computation would carry icons for the patients
-                that happen not to have been redacted, which is exactly the
-                narrowing `redaction_in_effect` documents as failing open.
+                per-patient computation would carry foreign icons for the
+                patients that happen not to have been redacted, which is
+                exactly the narrowing `redaction_in_effect` documents as
+                failing open. Each carrier's own icon needs nothing from
+                here: the worker reads the attestation off the instance.
 
         Returns:
             List[ExportContext]: List of prepared export contexts.
@@ -5886,7 +5942,7 @@ class DicomExporter:
                         pixel_offset=sc_offset,
                         pixel_length=sc_length,
                         pixel_alg=sc_alg,
-                        drop_nested_icons=drop_nested_icons,
+                        drop_foreign_icons=drop_foreign_icons,
                     )
                     contexts.append(ctx)
         return contexts
@@ -6126,20 +6182,22 @@ class DicomExporter:
 
         # Planning Phase: Generate Contexts
         #
-        # The nested-icon gate is computed here, once, over the whole tree
+        # The foreign-icon gate is computed here, once, over the whole tree
         # about to be written -- not inside `_generate_export_contexts`,
-        # which sees one patient at a time (#183). `rules=None` because
-        # there is no session and so no configuration to consult: this is
-        # the serializer, and the configuration half of the condition is
+        # which sees one patient at a time (#183). Attestation only: there
+        # is no session and so no configuration to consult; this is the
+        # serializer, and the configuration half of the condition is
         # structurally unavailable to it. The attestation half is not, and
         # applies -- dropping an icon out of a graph that carries a
         # redaction attestation is a property of carrying icon bytes at
         # all, not one of the pipeline gates `write_tree` deliberately
-        # skips.
-        drop_icons = redaction_in_effect(_instances_in(patient, studies))
+        # skips. Each carrier's own icon needs nothing extra here (#542):
+        # the worker reads the attestation off that instance, and the
+        # contexts carry no zones on this path.
+        drop_foreign = redaction_in_effect(_instances_in(patient, studies))
         export_tasks = DicomExporter._generate_export_contexts(
             patient, studies, out_dir, compression,
-            drop_nested_icons=drop_icons)
+            drop_foreign_icons=drop_foreign)
 
         # Execution Phase
         if not export_tasks:

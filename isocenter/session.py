@@ -4983,20 +4983,30 @@ class DicomSession:
         withheld = []
         patient_count = 0
 
-        # One boolean for the whole run, computed before the walk (#183).
-        # Store-wide and not per instance, because an icon under Referenced
-        # Image Sequence is a thumbnail of a *different* SOP instance and
-        # redaction's `regenerate_uid()` makes following the reference fail
-        # open. Over `self.store.patients` rather than `target_ids`,
-        # deliberately: a subset that excludes the redacted instances must
-        # not turn the gate off for the ones it keeps.
-        drop_icons = redaction_in_effect(
-            (instance
-             for patient in self.store.patients
-             for study in patient.studies
-             for series in study.series
-             for instance in series.instances),
-            rules=self.configuration.rules)
+        # One boolean for the whole run, computed before the walk (#183):
+        # the gate for every nested icon that is not its carrier's own
+        # depth-1 icon. Store-wide and not per instance, because an icon
+        # under Referenced Image Sequence is a thumbnail of a *different*
+        # SOP instance and redaction's `regenerate_uid()` makes following
+        # the reference fail open. Over `self.store.patients` rather than
+        # `target_ids`, deliberately: a subset that excludes the redacted
+        # instances must not turn the gate off for the ones it keeps.
+        #
+        # Two halves: an attestation anywhere, or a zones rule that
+        # **matches a series in the store** (#542). A rule for a scanner
+        # nobody has redacts nothing, and counting it -- as #183's "any
+        # rule with zones" did -- stripped every icon from every file.
+        # Each carrier's own icon is decided per instance in the worker.
+        drop_foreign = redaction_in_effect(
+            instance
+            for patient in self.store.patients
+            for study in patient.studies
+            for series in study.series
+            for instance in series.instances) or any(
+                self._redaction_zones_for(series)
+                for patient in self.store.patients
+                for study in patient.studies
+                for series in study.series)
 
         for patient in self.store.patients:
             if patient.patient_id not in target_ids:
@@ -5038,7 +5048,7 @@ class DicomSession:
                             compression=('j2k' if options.use_compression
                                          else None),
                             redaction_zones=zones,
-                            drop_nested_icons=drop_icons,
+                            drop_foreign_icons=drop_foreign,
                             verify_readback=options.verify_readback))
 
         return tasks, patient_count, withheld
