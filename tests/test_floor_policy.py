@@ -314,19 +314,18 @@ def test_a_bare_session_status_and_manifest_after_anonymize(tmp_path):
             items = json.load(f)["items"]
         assert [item["anonymized"] for item in items] == [True]
 
-    # One floor finding declined: the audit sees Series Date, then the
-    # value is gone before the remediation runs, so REMOVE_TAG matches no
-    # arm and `_record_decline` names the instance. A REMOVE rule, because
-    # an EMPTY one (Station Name's since #547) writes "" over a missing
-    # value rather than declining.
+    # One floor finding declined: the audit sees Station Name, then the
+    # value is gone before the remediation runs, so its EMPTY finding
+    # (X/Z/D since #547) has no target and `_record_decline` names the
+    # instance, as REMOVE_TAG's does.
     _ct_small_into(str(tmp_path / "in2"))
     with Session(str(tmp_path / "s2.db")) as session:
         session.ingest(str(tmp_path / "in2"))
         report = session.audit()
         instance = session.store.patients[0].studies[0].series[0].instances[0]
-        assert any(f.tag == "0008,0021" for f in report), (
-            "the floor did not flag Series Date")
-        del instance.attributes["0008,0021"]
+        assert any(f.tag == "0008,1010" for f in report), (
+            "the floor did not flag Station Name")
+        del instance.attributes["0008,1010"]
         session.anonymize(report)
 
         assert instance.phi_status is PhiStatus.IDENTIFIED
@@ -697,7 +696,7 @@ def test_privacy_profile_none_lowercases_the_files_keys(tmp_path):
 def test_report_section_5_names_the_decline_on_a_bare_session(tmp_path):
     """A floor finding that declines costs the bare run its PASS, and
     section 5 says why. The decline is made as in the manifest test:
-    Series Date is flagged by the audit and gone before the remediation
+    Station Name is flagged by the audit and gone before the remediation
     runs. Kills the declined-remediation term dropped from
     `generate_report`'s review reasons (section 5 then gives no reason
     for the decline)."""
@@ -706,8 +705,8 @@ def test_report_section_5_names_the_decline_on_a_bare_session(tmp_path):
         session.ingest(str(tmp_path / "in"))
         report = session.audit()
         instance = session.store.patients[0].studies[0].series[0].instances[0]
-        assert any(f.tag == "0008,0021" for f in report)
-        del instance.attributes["0008,0021"]
+        assert any(f.tag == "0008,1010" for f in report)
+        del instance.attributes["0008,1010"]
         session.anonymize(report)
         path = tmp_path / "report.md"
         session.generate_report(str(path))

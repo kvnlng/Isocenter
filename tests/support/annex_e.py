@@ -11,8 +11,13 @@ departs from the table is written below, once, with its reason.
 To refresh the table: replace the fixture with the new edition's rows
 (the fixture's header says what each field is), rename the file and
 `EDITION`, update the edition named in `docs/configuration.md`, and
-regenerate the literal by printing `derive(load_table())`. A test fails
-at each step that is skipped.
+regenerate the literal by pasting `render_literal(load_table())` over
+it. A test fails at each step that is skipped.
+
+The literal's explanatory comments live in `LITERAL_COMMENTS` below and
+are emitted by `render_literal`, and the literal is held equal to that
+rendering, comments included: a comment written by hand into the literal
+would be lost on the next regeneration, so it has to be written here.
 
 In `tests/support/` because pytest collects only `test_*.py` at the top
 of `tests/` (#347). No `isocenter` import, so the mutation probe charges
@@ -116,6 +121,55 @@ DEVIATIONS = {
 #: groups 6000-601E (PS3.5 7.6).
 REPEATING_GROUPS = {"60xx": [f"{group:04x}" for group in range(0x6000, 0x6020, 2)]}
 
+#: Comment lines `render_literal` writes above a rule in the literal, by
+#: rule key: history and cross-references a reader of `profiles.py` needs
+#: at the entry. A departure's reason belongs in `DEVIATIONS`.
+LITERAL_COMMENTS = {
+    "0008,0020": [
+        "Z in the table. Entity-owned: anonymize() shifts the study's own",
+        "date whatever this rule says, and #537 decides what the rule",
+        "should govern. The floor JITTERs it (RESEARCH_DEFAULTS).",
+    ],
+    "0008,002a": [
+        "DT-valued twin of Acquisition Date: until #38 raw acquisition",
+        "timing survived a full anonymize() pass while the plain date was",
+        "stripped.",
+    ],
+    "0008,0030": [
+        "Z, and Type 2 in General Study (PS3.3 C.7.2.1), so the element",
+        "stays present and empty. REMOVE here plus a validator that called",
+        "it Type 1 meant the documented Quick Start exported nothing on any",
+        "CT file (#495).",
+    ],
+    "0008,1010": [
+        "Absent until #495, so CT_small's `CT01_OC0` survived even the",
+        "documented path.",
+    ],
+    "0008,1030": [
+        "X in the table, EMPTY here: the export directory names read it",
+        "(`io_handlers.export_folder_names`), and zero length is valid",
+        "wherever X is. The same for Series Description below.",
+    ],
+    "0008,2111": [
+        "Isocenter's own redaction note here is exempt, by exact value, in",
+        "`PhiInspector._scan_instance`: safe export would otherwise skip",
+        "every redacted instance.",
+    ],
+    "0010,0010": [
+        "Z in the table. Entity-owned, as Patient ID below (Z/D): #537.",
+    ],
+    "0070,0006": [
+        "Free-text annotation commentary. Reaches annotations.json `note`",
+        "when a caller opts in via include_annotation_text; remediated here",
+        "so that opting in still does not surface raw text.",
+    ],
+    "6000,3000": [
+        "Repeating group 60xx: one rule per even group 6000-601E, because",
+        "the loader refuses mask keys. Removing Overlay Data leaves the",
+        "rest of the Overlay Plane module (#556).",
+    ],
+}
+
 
 def load_table(path=FIXTURE):
     """The fixture as a dict: `edition`, `source`, `fetched`, `rows`."""
@@ -147,3 +201,25 @@ def derive(table):
             profile[f"{concrete},{element}"] = {"action": action,
                                                 "name": rule_name(row)}
     return profile
+
+
+def render_literal(table):
+    """The `BASIC_PROFILE = {...}` block of `isocenter/profiles.py`, as
+    text: `derive(table)` in key order, each entry's table code as a
+    trailing comment, and `LITERAL_COMMENTS` above the entries they name.
+    Paste it over the block to regenerate; the test compares it with the
+    file character for character."""
+    rows = {row["key"]: row for row in table["rows"]}
+    lines = ["BASIC_PROFILE = {"]
+    for key, rule in sorted(derive(table).items()):
+        for comment in LITERAL_COMMENTS.get(key, []):
+            lines.append(f"    # {comment}")
+        group, element = key.split(",")
+        row = rows.get(key) or next(
+            rows[f"{mask},{element}"] for mask, groups in REPEATING_GROUPS.items()
+            if group in groups)
+        name = json.dumps(rule["name"], ensure_ascii=False)
+        lines.append(f'    "{key}": {{"action": "{rule["action"]}", '
+                     f'"name": {name}}},  # {row["basic"]}')
+    lines.append("}")
+    return "\n".join(lines) + "\n"

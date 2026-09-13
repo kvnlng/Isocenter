@@ -344,6 +344,7 @@ TARGETS = {
                               "tests/test_scaffold_features.py",
                               "tests/test_shipped_resource_is_required.py",
                               "tests/test_sequence_rules.py",
+                              "tests/test_empty_on_a_binary_value.py",
                               "tests/test_sr_anonymization.py",
                               "tests/test_the_jitter_seed_survives_anonymize.py",
                               "tests/test_a_pre_097_store_keeps_one_offset_per_patient.py",
@@ -368,6 +369,7 @@ TARGETS = {
                                   "tests/test_remediation_invariants.py",
                                   "tests/test_phi_retention.py",
                                   "tests/test_sequence_rules.py",
+                                  "tests/test_empty_on_a_binary_value.py",
                                   "tests/test_scaffold_features.py",
                                   # A hand extra (#441): it reaches
                                   # `apply_remediation` through
@@ -464,6 +466,7 @@ TARGETS = {
                                   "tests/test_sidecar_gate_crosses_processes.py",
                                   "tests/test_sidecar_gate_order.py",
                                   "tests/test_sequence_rules.py",
+                                  "tests/test_empty_on_a_binary_value.py",
                                   "tests/test_sr_anonymization.py",
                                   "tests/test_structured_export.py",
                                   "tests/test_study_date_roundtrip.py",
@@ -971,6 +974,7 @@ TARGETS = {
                                "tests/test_signed_lossless_jpeg_decode.py",
                                "tests/test_single_frame_encapsulated_decode.py",
                                "tests/test_sequence_rules.py",
+                               "tests/test_empty_on_a_binary_value.py",
                                "tests/test_sr_anonymization.py",
                                "tests/test_structured_export.py",
                                "tests/test_study_date_roundtrip.py",

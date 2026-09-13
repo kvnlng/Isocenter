@@ -746,7 +746,10 @@ class PhiInspector:
                 needs_remediation = True
                 remediation_action = "REMOVE_TAG"
             elif action_code == "EMPTY":
-                if val != "":
+                # Zero-length bytes are empty too: a binary element EMPTY
+                # wrote reads back as `b""`, from the file and from the
+                # store, and `b"" != ""` raised it again (#547).
+                if val != "" and val != b"":
                     needs_remediation = True
                     remediation_action = "REPLACE_TAG"
                     new_val = ""

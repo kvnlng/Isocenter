@@ -266,22 +266,22 @@ class RemediationService:
         if proposal.action_type == "REPLACE_TAG":
             # Direct replacement
 
-            # 0. EMPTY on a sequence: zero items, not a "" attribute
-            # written beside it (#547).
-            if (proposal.new_value == "" and hasattr(entity, "clear_sequence_items")
-                    and proposal.target_attr in entity.sequences):
-                entity.clear_sequence_items(proposal.target_attr)
-                details = f"Emptied Sequence {proposal.target_attr} on {finding.entity_uid}"
-                action_type = "REMEDIATION_REPLACE"
-
-            # 1. Generic DicomItem support (Instance, Series, etc.)
-            elif hasattr(entity, "set_attr"):
-                # Tag ID is expected in proposal.target_attr (e.g. "0010,0010")
-                entity.set_attr(proposal.target_attr, proposal.new_value)
-                details = f"Remediated {
-                    finding.entity_uid} (Tag {
-                    proposal.target_attr}) -> {
-                    proposal.new_value}"
+            # 1. A DicomItem: an Instance, or an item inside a sequence.
+            # `_replace_on_item` decides what is written and whether the
+            # target is still there to write it to: zero items for EMPTY
+            # on a sequence, zero-length bytes for EMPTY on a binary VR,
+            # and a decline -- the one REMOVE_TAG already records -- for
+            # a target the item no longer holds, rather than an element
+            # the graph did not have written into it (#547). `details`
+            # None means nothing was written. One call here rather than
+            # the cases inline, so the pinned `mark_modified()` lines
+            # below do not move with them.
+            if hasattr(entity, "set_attr"):
+                details, declined = self._replace_on_item(entity, finding)
+                if declined:
+                    self._record_decline(finding, declined, audit_buffer)
+                if details is None:
+                    return False
                 action_type = "REMEDIATION_REPLACE"
 
             # 2. Python Object Attribute support (Patient.patient_name)
@@ -540,6 +540,105 @@ class RemediationService:
                 f"{type(entity).__name__}",
                 audit_buffer)
             return False
+
+    #: The VRs whose value is bytes, so whose empty value is `b""`.
+    #: `UN` included: pydicom accepts a str there without a word, but the
+    #: element reads back as `b""` all the same, and the scan has to meet
+    #: one spelling of empty. "OB or OW" is how the dictionary names the
+    #: overlay and pixel-data tags that may be either.
+    _BINARY_VRS = frozenset({"OB", "OD", "OF", "OL", "OV", "OW", "UN",
+                             "OB or OW"})
+
+    def _replace_on_item(self, entity, finding: PhiFinding
+                         ) -> Tuple[Optional[str], Optional[str]]:
+        """`REPLACE_TAG` on a `DicomItem`: `(details, decline_reason)`.
+
+        `details` is the audit row's text when the item was changed and
+        None when nothing was written; `decline_reason` is set when that
+        was a decline. The caller writes both rows, so the action type
+        and `audit_buffer` stay where `tests/test_frozen_surface.py`'s Pin
+        A reads them.
+
+        Three things the arm used to get wrong, all reached by default
+        once #547 made the basic profile the whole of Table E.1-1:
+
+        - **A target the item no longer holds declines.** The audit saw
+          the tag and something removed it before the remediation ran.
+          `REMOVE_TAG` has always declined there (its arms match nothing
+          and the bottom `else` records it); this arm called `set_attr`
+          regardless, which put back an element the graph no longer had
+          -- #57's decoy, at the top level -- and filed
+          `REMEDIATION_REPLACE` for it. Four basic rules were `EMPTY`
+          while the profile was 35; since #547, 154 of 620 are.
+          The same for a sequence that vanished: the old sequence branch
+          was gated on the tag being in `sequences`, so it fell through
+          to `set_attr` and wrote `""` under the SQ key, which the
+          exporter wrote as a zero-item SQ. A value other than `""` aimed
+          at a sequence declines too: there is no value to write into
+          one, and the scan never proposes it (it warns instead).
+        - **EMPTY on a sequence clears its items, and only says so when
+          it did.** `clear_sequence_items` returns False for a sequence
+          already at zero items; that is what the rule asks for, so, as
+          for an empty date, no decline row and no success row either.
+        - **EMPTY on a binary VR writes `b""`.** The str `""` in an OB
+          element made pydicom warn in the export worker, and the file
+          read back as `b""`, which the scan's `val != ""` then raised
+          again: the floor did not converge on its own output. The VR
+          decides -- the item's recorded one for a private tag, the
+          dictionary's otherwise -- and the value's type only when
+          neither knows. The VR first because the value's type is not
+          reliable: a binary slot can already hold a str (a `""` written
+          before this fix reloads as one).
+        """
+        # Local: the dictionary is wanted only on this arm, and `entities`
+        # is imported at module scope for other names already.
+        from pydicom.datadict import dictionary_VR  # pylint: disable=import-outside-toplevel
+        from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
+
+        proposal = finding.remediation_proposal
+        tag = _canonical_tag(proposal.target_attr)
+        attributes = getattr(entity, "attributes", None)
+        sequences = getattr(entity, "sequences", None) or {}
+
+        if tag in sequences and proposal.new_value == "":
+            if not entity.clear_sequence_items(tag):
+                self.logger.info(
+                    f"Sequence {tag} on {self._log_subject(finding)} is "
+                    "already empty; nothing to do")
+                return None, None
+            return (f"Emptied Sequence {proposal.target_attr} on "
+                    f"{finding.entity_uid}"), None
+
+        if isinstance(attributes, dict) and tag not in attributes:
+            if tag in sequences:
+                reason = (f"{tag} is a sequence on the "
+                          f"{type(entity).__name__}, and "
+                          f"{proposal.new_value!r} cannot be written to one")
+            else:
+                reason = (f"{tag} is no longer on the "
+                          f"{type(entity).__name__}; writing "
+                          f"{proposal.new_value!r} would create an element "
+                          "the graph did not hold")
+            self.logger.warning(
+                f"Remediation declined for {self._log_subject(finding)}: "
+                f"{tag} is not there to replace")
+            return None, reason
+
+        value = proposal.new_value
+        if value == "":
+            vr = (getattr(entity, "attribute_vrs", None) or {}).get(tag)
+            if vr is None:
+                try:
+                    vr = dictionary_VR(int(tag.replace(",", ""), 16))
+                except (KeyError, ValueError, AttributeError):
+                    vr = None
+            if vr in self._BINARY_VRS or (
+                    vr is None and isinstance(
+                        (attributes or {}).get(tag), (bytes, bytearray))):
+                value = b""
+        entity.set_attr(proposal.target_attr, value)
+        return (f"Remediated {finding.entity_uid} (Tag {proposal.target_attr}) "
+                f"-> {proposal.new_value}"), None
 
     @staticmethod
     def _log_subject(finding: PhiFinding) -> str:

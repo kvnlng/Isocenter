@@ -21,8 +21,9 @@ de-identification are not written (#554). See docs/configuration.md.
 # with zero sites. `tests/test_basic_profile_annex_e.py` holds it equal to
 # `derive()` in `tests/support/annex_e.py`, which reads the vendored table
 # (`tests/fixtures/ps3.15-2026c-table-e1-1.json`). To change a rule,
-# change the mapping or a named departure there, and regenerate this
-# literal from `derive(load_table())`. Until 0.9.8 this was a hand-picked
+# change the mapping, a named departure or `LITERAL_COMMENTS` there, and
+# paste `render_literal(load_table())` over this literal; a comment
+# written here by hand fails the same test. Until 0.9.8 this was a hand-picked
 # 35 rows, and nothing said which of the other 621 were left out.
 #
 # How a code becomes an action: `X` and `X/D` remove; every code with a

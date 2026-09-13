@@ -20,7 +20,8 @@ import re
 from isocenter.profiles import BASIC_PROFILE, FLOOR_POLICY, RESEARCH_DEFAULTS
 
 from support.annex_e import (ACTION_FOR_CODE, DEVIATIONS, EDITION, NO_ENTRY,
-                             NO_ENTRY_CODES, derive, load_table)
+                             NO_ENTRY_CODES, derive, load_table,
+                             render_literal)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -62,6 +63,62 @@ def test_basic_profile_is_derived_from_annex_e():
     assert len(BASIC_PROFILE) == 620
     assert collections.Counter(rule["action"] for rule in BASIC_PROFILE.values()) == {
         "REMOVE": 466, "EMPTY": 154}
+
+
+#: Rows read off PS3.15 2026c Table E.1-1 itself, not off the fixture: one
+#: or more of each code the mapping turns into a rule, a sequence of each
+#: action, and a `U` row. The histogram test above cannot see a consistent
+#: swap of two codes with equal counts in the fixture; these rows can.
+#: Checked against the review's independent parse of the standard's HTML
+#: (stdlib `html.parser`, no code shared with the fixture's extractor).
+#: A table refresh that changes one of these changes this list on purpose.
+FROM_THE_STANDARD = {
+    # key: (name, Basic Prof. code, rule action or None)
+    "0010,1000": ("Other Patient IDs", "X", "REMOVE"),
+    "0008,0021": ("Series Date", "X/D", "REMOVE"),
+    "0018,1030": ("Protocol Name", "X/D", "REMOVE"),
+    "0008,0050": ("Accession Number", "Z", "EMPTY"),
+    "0010,0030": ("Patient's Birth Date", "Z", "EMPTY"),
+    "0008,0023": ("Content Date", "Z/D", "EMPTY"),
+    "0008,1010": ("Station Name", "X/Z/D", "EMPTY"),
+    "0040,a075": ("Verifying Observer Name", "D", "EMPTY"),
+    "0040,0275": ("Request Attributes Sequence", "X", "REMOVE"),
+    "0008,1110": ("Referenced Study Sequence", "X/Z", "EMPTY"),
+    "0020,000d": ("Study Instance UID", "U", None),
+}
+
+
+def test_rows_pinned_from_the_standard_itself():
+    """Kills a consistent code swap in the fixture (every X read as Z and
+    back, say), which leaves every count above unchanged, and a mapping
+    change that flips a whole code."""
+    rows = {row["key"]: row for row in load_table()["rows"]}
+
+    for key, (name, code, action) in FROM_THE_STANDARD.items():
+        assert rows[key]["name"] == name, key
+        assert rows[key]["basic"] == code, (key, rows[key]["basic"])
+        if action is None:
+            assert key not in BASIC_PROFILE, key
+        else:
+            assert BASIC_PROFILE[key]["action"] == action, key
+    assert {code for _, code, _ in FROM_THE_STANDARD.values()} == (
+        set(ACTION_FOR_CODE) | {"U"})
+
+
+def test_the_literal_is_its_rendering_comments_included():
+    """`profiles.py` says to regenerate the literal. A comment written into
+    it by hand would be lost the next time someone does, so the block is
+    compared with `render_literal()` as text, and its comments live in
+    `LITERAL_COMMENTS`.
+
+    Kills: a comment added, edited or dropped in the literal and not in
+    `LITERAL_COMMENTS`, and a trailing code comment that disagrees with
+    the table."""
+    text = (REPO / "isocenter" / "profiles.py").read_text(encoding="utf-8")
+    start = text.index("BASIC_PROFILE = {\n")
+    end = text.index("\n}\n", start) + len("\n}\n")
+
+    assert text[start:end] == render_literal(load_table())
 
 
 def test_the_floor_overrides_three_basic_rules_and_adds_none():

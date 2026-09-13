@@ -15,9 +15,11 @@ What each rule now means on a sequence:
 - `REMOVE` deletes it, through the arm #167 added for private sequences.
 - `EMPTY` leaves it present with zero items. A zero-item sequence is how
   a Type 2 sequence says "no value", and it is what Annex E's `Z` means.
-- `KEEP` does nothing.
+- `KEEP` does nothing, silently.
 - `REPLACE`, `SHIFT` and `JITTER` have no meaning on a sequence: one
-  warning per tag and action, and no finding.
+  warning per tag and action per inspector -- so per patient per audit,
+  since each patient's scan task builds its own -- and no finding.
+- A target gone between audit and anonymize declines, as `REMOVE` does.
 
 Both findings join the deepest-first container list, for #167's reason:
 a nested finding has to be remediated before its container goes, or its
@@ -101,14 +103,27 @@ def test_a_configured_rule_on_a_sequence_raises_a_finding():
     assert found[0].entity_path == ()
 
 
-def test_keep_on_a_sequence_raises_nothing():
+def test_keep_on_a_sequence_raises_nothing(caplog):
+    """KEEP is what the docs and the CHANGELOG tell a user to write to
+    retain a sequence, so it must be silent as well as finding-free: a
+    WARNING there would print "has no meaning on a sequence" for every
+    patient of every audit, at the user who followed the advice.
+
+    Kills: the KEEP exclusion dropped from the warn-once condition (the
+    review's M10, which survived an assertion on findings alone)."""
     instance = _instance_from(_request_attributes_dataset())
     inspector = PhiInspector(
         config_tags={REQUEST_ATTRIBUTES: _rule("KEEP")},
         remove_private_tags=False)
 
-    assert not _findings_for(inspector._scan_instance(instance, "P1"),
-                             REQUEST_ATTRIBUTES)
+    with caplog.at_level(logging.DEBUG, logger="isocenter"):
+        findings = inspector._scan_instance(instance, "P1")
+
+    assert not _findings_for(findings, REQUEST_ATTRIBUTES)
+    warnings = [r.getMessage() for r in caplog.records
+                if r.levelno >= logging.WARNING
+                and REQUEST_ATTRIBUTES in r.getMessage()]
+    assert warnings == []
 
 
 @pytest.mark.parametrize("rule", [_rule("REPLACE"), _rule("JITTER"),
@@ -412,6 +427,65 @@ def test_empty_on_a_sequence_writes_a_zero_item_sequence_and_no_attribute(tmp_pa
     assert (0x0008, 0x1110) in out
     assert out[0x0008, 0x1110].VR == "SQ"
     assert len(out[0x0008, 0x1110].value) == 0
+
+
+def test_empty_on_a_sequence_gone_before_anonymize_declines(tmp_path):
+    """The audit sees the sequence; it is gone before the remediation
+    runs. Red before: the sequence arm was gated on the tag being in
+    `sequences`, so control fell to `set_attr` and wrote `""` under the
+    SQ key -- the exporter then wrote a zero-item SQ that was not in the
+    graph, and the audit row said `REMEDIATION_REPLACE`. `REMOVE` on the
+    same vanished sequence declines, and `EMPTY` now does too.
+
+    Kills: the absent-target decline removed from the `REPLACE_TAG` arm."""
+    def add(ds):
+        ds.add_new(0x00081110, "SQ", Sequence([Dataset()]))
+    _ct_small_with(str(tmp_path / "in"), add)
+    db = str(tmp_path / "s.db")
+
+    with Session(db) as session:
+        session.configuration.phi_tags[REFERENCED_STUDY] = _rule("EMPTY")
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        assert _findings_for(report, REFERENCED_STUDY), "setup: raised"
+        del instance.sequences[REFERENCED_STUDY]
+        session.anonymize(report)
+
+        assert REFERENCED_STUDY not in instance.attributes
+        assert REFERENCED_STUDY not in instance.sequences
+        summary = session.export(str(tmp_path / "out"), use_compression=False)
+        session.save(sync=True)
+
+    assert summary.written == 1, summary.failures
+    assert (0x0008, 0x1110) not in _written(str(tmp_path / "out"))
+    assert [d for d in _rows(db, "REMEDIATION_DECLINED")
+            if REFERENCED_STUDY in d], _rows(db, "REMEDIATION_DECLINED")
+    assert not [d for d in _rows(db, "REMEDIATION_REPLACE")
+                if REFERENCED_STUDY in d]
+
+
+def test_empty_on_a_sequence_already_emptied_writes_no_row():
+    """The items went between audit and anonymize, and the sequence is
+    still there. Nothing is left behind -- a zero-item sequence is what
+    the rule asks for -- so, as for an empty date, no decline row; and
+    nothing changed, so no `Emptied Sequence` row either. Red before: the
+    ignored return of `clear_sequence_items` filed a `REMEDIATION_REPLACE`
+    for a no-op and stamped the instance REMEDIATED.
+
+    Kills: `clear_sequence_items`' return value ignored."""
+    inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.add_sequence(REFERENCED_STUDY)
+    inst.mark_persisted()
+
+    changed = RemediationService()._apply_single_remediation(
+        _empty_finding(inst, REFERENCED_STUDY))
+
+    assert changed is False
+    assert inst.phi_status is not PhiStatus.REMEDIATED
+    assert inst.sequences[REFERENCED_STUDY].items == []
+    assert REFERENCED_STUDY not in inst.attributes
+    assert not inst.has_unsaved_changes
 
 
 def test_a_zeroed_sequence_is_clear_on_re_audit(tmp_path):
