@@ -185,10 +185,13 @@ session = Session("my_project.db")
 session.enable_reversible_anonymization("isocenter.key")
 
 # Recover the original PatientName and PatientID
-# Recover the original identity and restore attributes in-memory
+# Recover the original identity and restore attributes in-memory;
+# a later session.save() stores them.
 # restore=True (default) automatically updates all instances with original values
 session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=True)
 
 # Now, accessing p.patient_name or instance attributes returns original data
 print(f"Restored: {session.store.patients[0].patient_name}")
 ```
+
+A restored patient reads `phi_status` `UNSCANNED`, not `REMEDIATED`: it holds its original identifiers again. If another patient in the session already holds the restored Patient ID (raw files for that patient ingested before the restore), the two are merged into the patient that was loaded first ([#548](https://github.com/kvnlng/Isocenter/issues/548), [#552](https://github.com/kvnlng/Isocenter/issues/552)).

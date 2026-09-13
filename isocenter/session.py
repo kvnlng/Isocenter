@@ -3505,7 +3505,16 @@ class DicomSession:
         Args:
             patient_id (str): The PatientID to search for and recover.
             restore (bool): If True, applies the recovered attributes back to ALL
-                            in-memory instances for this patient.
+                            in-memory instances for this patient. The restore
+                            is recorded, so a later `save()` stores it, and a
+                            patient already holding the restored Patient ID
+                            is merged into whichever of the two was in the
+                            session first (#552, #548).
+
+        Raises:
+            RuntimeError: With `restore=True`, when a patient holding the
+                restored Patient ID was de-identified under a different
+                date-offset scheme. Raised before anything is restored.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversibility not enabled.")
@@ -3531,6 +3540,13 @@ class DicomSession:
 
         if original_attrs:
             if restore:
+                # Asked before anything is written: the merge below
+                # refuses a group mixing jitter schemes too, but after the
+                # loop every instance already holds the original values,
+                # and a refusal there would leave two patients with one
+                # ID under two schemes in the graph (#548).
+                self.store._refuse_a_merge_across_schemes(
+                    renamed=(p, original_attrs.get("0010,0020", p.patient_id)))
                 count = 0
                 for st in p.studies:
                     for se in st.series:
@@ -3540,10 +3556,27 @@ class DicomSession:
                             count += 1
 
                 # Update Patient Object top-level properties if Name/ID changed
+                before = (p.patient_name, p.patient_id)
                 if "0010,0010" in original_attrs:
                     p.patient_name = original_attrs["0010,0010"]
                 if "0010,0020" in original_attrs:
                     p.patient_id = original_attrs["0010,0020"]
+                # Recorded, because `Patient` tracks no assignment: a
+                # restore that marked nothing was skipped by the next save,
+                # which then deleted the pseudonym's row and every study
+                # under it (#552). It also retires the patient's stale
+                # REMEDIATED -- a status recorded at an earlier revision
+                # reads UNSCANNED, which is the truth for a patient holding
+                # its original identifiers again.
+                if (p.patient_name, p.patient_id) != before:
+                    p.mark_modified()
+                # A raw study for the restored ID, ingested before the
+                # restore, is a second `Patient` holding it: the same
+                # subject by construction, so the two are merged as
+                # `anonymize()` merges them, or refused if they were
+                # de-identified under different date-offset schemes (#548).
+                self.store._merge_patients_sharing_an_id(
+                    drain=self.persistence_manager.flush)
 
                 get_logger().info(f"Restored identity attributes to {count} instances.")
         else:
@@ -4239,6 +4272,11 @@ class DicomSession:
         If `findings` is None, a full audit is performed using the current configuration,
         and all resulting findings are remediated ("Blind Execute").
 
+        Two patients left holding one Patient ID -- a study ingested under
+        a patient's original ID after that patient was anonymized -- are
+        merged into whichever was in the session first, and the other is
+        removed from `store.patients` (#548).
+
         Args:
             findings (List[PhiFinding], optional): Specific findings to clean.
 
@@ -4271,7 +4309,21 @@ class DicomSession:
 
         count = 0
         if findings:
+            remediator._use_instance_owners(self._nested_finding_owners(findings))
             count = remediator.apply_remediation(findings)
+
+        # A patient ingested under its original ID after that patient was
+        # anonymized has just been given the pseudonym the stored patient
+        # already carries: two objects, one row, and the next save's
+        # scoped deletes removed each other's studies (#548). Merged
+        # here, after every proposal in the report has been applied
+        # under the scheme its scan stamped -- never inside
+        # `apply_remediation`, which would move the five `mark_modified()`
+        # line pins in `tests/test_remediation_invariants.py`. The drain
+        # runs only when there is something to merge: `audit()` drains on
+        # entry and this path, handed its findings, does not.
+        self.store._merge_patients_sharing_an_id(
+            drain=self.persistence_manager.flush)
 
         if count:
             # A nonzero count is the session claiming remediations were
@@ -5032,6 +5084,38 @@ class DicomSession:
                     f.entity = study_map[f.entity_uid]
             elif f.entity_type == "Instance":
                 f.entity = self._live_target(instance_map.get(f.entity_uid), f)
+
+    def _nested_finding_owners(self, findings) -> dict:
+        """`id(item) -> Instance` for each finding raised inside a sequence.
+
+        What `RemediationService._use_instance_owners` needs so that a
+        remediation inside a sequence reaches the instance holding it
+        (#494). Found by the finding's UID and then confirmed by
+        following its `entity_path` from the candidate back to the very
+        item the finding carries: a hand-built graph can give two
+        instances one UID (`docs/api/stability.md`), and the UID alone
+        would stamp and dirty the wrong one. A finding whose item is under
+        no instance in the session names no owner, and is remediated on
+        the item alone, as before.
+        """
+        nested = [f for f in findings
+                  if f.entity_path and f.entity is not None
+                  and f.entity_type == "Instance"]
+        if not nested:
+            return {}
+        by_uid = {}
+        for p in self.store.patients:
+            for st in p.studies:
+                for se in st.series:
+                    for inst in se.instances:
+                        by_uid.setdefault(inst.sop_instance_uid, []).append(inst)
+        owners = {}
+        for f in nested:
+            for inst in by_uid.get(f.entity_uid, ()):
+                if resolve_item_path(inst, f.entity_path) is f.entity:
+                    owners[id(f.entity)] = inst
+                    break
+        return owners
 
     @staticmethod
     def _live_target(instance, finding):

@@ -20,7 +20,8 @@ import hashlib
 import base64
 import secrets
 import traceback
-from typing import List, Optional, Dict, Any, Tuple, NamedTuple
+from collections import Counter
+from typing import List, Optional, Dict, Any, Set, Tuple, NamedTuple
 from dataclasses import dataclass
 from datetime import date, datetime
 from contextlib import nullcontext
@@ -96,6 +97,49 @@ def _phi_status_from_stored(value) -> PhiStatus:
 def _in_clause(values):
     """A parameter placeholder list for an IN clause of this length."""
     return ",".join("?" * len(values))
+
+
+class _HeldUids(NamedTuple):
+    """Every study, series and instance UID a list of patients holds."""
+    studies: Set[str]
+    series: Set[str]
+    instances: Set[str]
+
+
+def _held_uids(patients) -> _HeldUids:
+    """What a save must not delete: each UID any object in `patients` holds.
+
+    One walk over the graph, read at the moment the scoped deletes run,
+    so a UID renamed in place since the prepass is read as it is now
+    (#548; `SqliteStore.save_all`).
+    """
+    held = _HeldUids(set(), set(), set())
+    for patient in patients:
+        for study in patient.studies:
+            held.studies.add(study.study_instance_uid)
+            for series in study.series:
+                held.series.add(series.series_instance_uid)
+                for instance in series.instances:
+                    held.instances.add(instance.sop_instance_uid)
+    return held
+
+
+def _warn_on_shared_patient_ids(logger, patients) -> None:
+    """One WARNING when two `Patient` objects in a save carry one ID (#548).
+
+    The store holds one `patients` row per ID, so the row's name and
+    status come from whichever object the walk reaches last; every study
+    is kept (`_held_uids`). A counts-only line: since 0.9.7 the log file
+    names no Patient ID, because a log shipped beside an export would
+    otherwise pair identities with what replaced them.
+    """
+    per_id = Counter(p.patient_id for p in patients)
+    sharing = sum(n for n in per_id.values() if n > 1)
+    if sharing:
+        logger.warning(
+            "%d Patient objects share a Patient ID with another; the store "
+            "holds one row for each ID and keeps every study; reload to see "
+            "them as one patient", sharing)
 
 
 def _delete_instances(cur, uids) -> None:
@@ -3650,6 +3694,7 @@ class SqliteStore:
             "Saving %d patients to %s (Incremental)...", len(patients), self.db_path)
 
         tally = _SaveTally()
+        _warn_on_shared_patient_ids(self.logger, patients)
         # Instances are marked clean only after the commit returns. Doing it
         # inside the walk -- as this method used to -- means a rolled-back
         # save leaves memory believing it was written, so the retry skips
@@ -3692,8 +3737,22 @@ class SqliteStore:
                     # child that moved to a different parent already
                     # points at it and a scoped delete will not mistake
                     # it for a removal (#77).
+                    #
+                    # And no scoped delete removes a row some object in
+                    # `patients` still holds (#548). Two parent objects
+                    # can share one row -- two `Patient`s with one
+                    # `patient_id` resolve to one `patients` row -- and a
+                    # delete scoped to one object's list then removes the
+                    # children the other object holds. Built HERE, inside
+                    # the transaction and after the walk, not beside the
+                    # prepass: redaction renames `sop_instance_uid` in
+                    # place under no lock this save takes, and a set
+                    # frozen at the prepass would keep the old UID's row
+                    # beside the renamed one's
+                    # (`test_an_instance_renamed_after_the_prepass_is_still_written`).
+                    held = _held_uids(patients)
                     for delete, parent, parent_pk in pending_deletions:
-                        delete(cur, parent, parent_pk)
+                        delete(cur, parent, parent_pk, held)
 
                     if prune_absent_patients:
                         self._delete_absent_patients(cur, patients)
@@ -3731,6 +3790,16 @@ class SqliteStore:
         if patient_pk is None:
             return []
 
+        # The study-level sibling of the two re-parentings below, and the
+        # one that matters most: a patient's ID is exactly what
+        # de-identification replaces, so after a reload every Patient ID
+        # replacement writes a NEW patient row, and a study the pass did
+        # not change is never upserted onto it. Its key would go on naming
+        # the old row, which `_delete_absent_patients` deletes with the
+        # study beneath it (#551). A merge that moves a clean study to the
+        # patient already holding its new ID depends on this too (#548).
+        self._reparent_studies(cur, patient, patient_pk)
+
         saved = []
         for study in patient.studies:
             study_pk = self._upsert_study(cur, study, patient_pk, tally)
@@ -3763,8 +3832,24 @@ class SqliteStore:
         return saved
 
     def _upsert_patient(self, cur, patient, tally) -> Optional[int]:
-        """Writes the patient row if dirty; returns its primary key."""
-        if patient.has_unsaved_changes:
+        """Writes the patient row if dirty or missing; returns its primary key.
+
+        **Or missing** (#552): a patient with no row under its ID is not
+        persisted, whatever its revision says. `Patient` tracks no
+        attribute assignment, so `patient.patient_id = ...` -- in user
+        code, or in `recover_patient_identity` before it recorded the
+        change -- left a clean patient under an ID with no row. The save
+        then wrote nothing, found no key, skipped the whole subtree, and
+        the prune deleted the old ID's row with every study beneath it.
+        This reads the store rather than the bookkeeping, so it moves no
+        revision and needs no setter. On the ordinary paths it never
+        fires: an ingested patient is dirty until its first save, and a
+        hydrated one was read from its row.
+        """
+        existing = cur.execute(
+            "SELECT id FROM patients WHERE patient_id=?",
+            (patient.patient_id,)).fetchone()
+        if patient.has_unsaved_changes or existing is None:
             # `jitter_scheme` is written on every INSERT, so a NULL can
             # only come from a release before 0.9.7, and never
             # overwritten on conflict: a patient's class is fixed once,
@@ -3781,6 +3866,8 @@ class SqliteStore:
             """, (patient.patient_id, patient.patient_name,
                   patient.phi_status.value, patient._jitter_scheme))
             tally.patients += 1
+        else:
+            return existing[0]
 
         # Re-read rather than use lastrowid: the row may have existed
         # already, in which case the UPSERT updated it and no id was
@@ -3848,6 +3935,18 @@ class SqliteStore:
         return row[0] if row else None
 
     @staticmethod
+    def _reparent_studies(cur, patient, patient_pk) -> None:
+        """Point this patient's study rows at it. See `_reparent_series`."""
+        uids = [s.study_instance_uid for s in patient.studies]
+        if not uids:
+            return
+        placeholders = ",".join("?" * len(uids))
+        cur.execute(
+            f"UPDATE studies SET patient_id_fk=? "
+            f"WHERE study_instance_uid IN ({placeholders}) AND patient_id_fk!=?",
+            (patient_pk, *uids, patient_pk))
+
+    @staticmethod
     def _reparent_series(cur, study, study_pk) -> None:
         """Point this study's series rows at it, wherever they were before.
 
@@ -3880,39 +3979,47 @@ class SqliteStore:
             (series_pk, *uids, series_pk))
 
     @staticmethod
-    def _delete_removed_instances(cur, series, series_pk) -> int:
-        """Deletes rows for instances no longer present in memory.
+    def _delete_removed_instances(cur, series, series_pk, held) -> int:
+        """Deletes this series' instance rows that no object in the save holds.
 
         Run for every series, changed or not. Removing an instance from a
         series' list mutates a plain Python list, which marks nothing --
         so the only way to notice a deletion is to compare the two sets.
+
+        The comparison is against `held` -- every UID the saved list
+        holds, at any parent -- and not against this series' own list
+        (#548): two `Series` objects can share this row, and each list is
+        only half of what memory holds. A partial save
+        (`prune_absent_patients=False`, a sub-list) still deletes a row
+        whose object moved to a patient outside the list, as it always
+        did: `held` is built from the list given, not the whole session.
         """
         stored = {row[0] for row in cur.execute(
             "SELECT sop_instance_uid FROM instances WHERE series_id_fk=?",
             (series_pk,)).fetchall()}
-        removed = stored - {i.sop_instance_uid for i in series.instances}
+        removed = stored - held.instances
         _delete_instances(cur, removed)
         return len(removed)
 
     @staticmethod
-    def _delete_removed_series(cur, study, study_pk) -> int:
-        """Deletes series no longer present in memory, and their instances."""
+    def _delete_removed_series(cur, study, study_pk, held) -> int:
+        """Deletes this study's series that no object in the save holds, and
+        their instances. See `_delete_removed_instances` for `held`."""
         stored = {row[1]: row[0] for row in cur.execute(
             "SELECT id, series_instance_uid FROM series WHERE study_id_fk=?",
             (study_pk,)).fetchall()}
-        in_memory = {s.series_instance_uid for s in study.series}
-        removed = [pk for uid, pk in stored.items() if uid not in in_memory]
+        removed = [pk for uid, pk in stored.items() if uid not in held.series]
         _delete_series_subtrees(cur, removed)
         return len(removed)
 
     @staticmethod
-    def _delete_removed_studies(cur, patient, patient_pk) -> int:
-        """Deletes studies no longer present in memory, and their subtrees."""
+    def _delete_removed_studies(cur, patient, patient_pk, held) -> int:
+        """Deletes this patient's studies that no object in the save holds,
+        and their subtrees. See `_delete_removed_instances` for `held`."""
         stored = {row[1]: row[0] for row in cur.execute(
             "SELECT id, study_instance_uid FROM studies WHERE patient_id_fk=?",
             (patient_pk,)).fetchall()}
-        in_memory = {s.study_instance_uid for s in patient.studies}
-        removed = [pk for uid, pk in stored.items() if uid not in in_memory]
+        removed = [pk for uid, pk in stored.items() if uid not in held.studies]
         _delete_study_subtrees(cur, removed)
         return len(removed)
 
@@ -3923,9 +4030,12 @@ class SqliteStore:
         This is what closes the gap anonymisation opens. Patients are
         upserted on `patient_id`, so changing that value -- exactly what
         de-identification does -- writes a *new* row and orphans the old
-        one, with the original name and identifier still in it. The
-        studies are re-parented to the new row, so nothing ever visits the
-        old one again and no scoped deletion reaches it.
+        one, with the original name and identifier still in it.
+        `_reparent_studies` points every study the patient holds at the
+        new row on every save, dirty or not, so nothing ever visits the
+        old one again and no scoped deletion reaches it. (Until #551 only
+        a study the pass had itself changed was re-parented; a clean one
+        stayed under the old row and was deleted here.)
 
         Runs after every patient has been written, never before: the
         re-parenting has to have happened already, or this would delete

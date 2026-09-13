@@ -346,7 +346,8 @@ TARGETS = {
                               "tests/test_the_jitter_seed_survives_anonymize.py",
                               "tests/test_a_pre_097_store_keeps_one_offset_per_patient.py",
                               "tests/test_the_project_secret_keys_the_pseudonym_and_offset.py",
-                              "tests/test_the_project_secret_lives_in_the_store.py"], 30),
+                              "tests/test_the_project_secret_lives_in_the_store.py",
+                              "tests/test_nested_remediation_reaches_the_instance.py"], 30),
     "isocenter/remediation.py": (["tests/test_audit_suppression.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
                                   "tests/test_an_unshifted_date_is_raised.py",
@@ -378,7 +379,8 @@ TARGETS = {
                                   "tests/test_the_jitter_seed_survives_anonymize.py",
                                   "tests/test_a_pre_097_store_keeps_one_offset_per_patient.py",
                                   "tests/test_the_project_secret_keys_the_pseudonym_and_offset.py",
-                                  "tests/test_the_project_secret_lives_in_the_store.py"], 30),
+                                  "tests/test_the_project_secret_lives_in_the_store.py",
+                                  "tests/test_nested_remediation_reaches_the_instance.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_api_coherence.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
                                   "tests/test_audit_read_barrier.py",
@@ -543,7 +545,13 @@ TARGETS = {
                                   "tests/test_vertical_table.py",
                                   "tests/test_worker_start_is_serialised.py",
                                   "tests/test_a_pre_097_store_keeps_one_offset_per_patient.py",
-                                  "tests/test_the_project_secret_lives_in_the_store.py"], 30),
+                                  "tests/test_the_project_secret_lives_in_the_store.py",
+                                  "tests/test_a_restored_patient_is_saved.py",
+                                  "tests/test_save_keeps_rows_memory_holds.py",
+                                  # Beyond the scan, by a measured kill (#441's rule): deleting the
+                                  # `_reparent_studies` call in `_save_patient` is killed by
+                                  # test_restore_onto_an_id_a_raw_patient_holds_merges_them (#548, #551).
+                                  "tests/test_patients_sharing_an_id_are_merged.py"], 30),
     # 587 sites (e184933). Until #414 the facade had no row, so no mutant
     # of `Session` -- the ingest/audit/anonymize/redact/export ordering,
     # `_make_lightweight_copy`, `_verify_worker`, the report's boundary
@@ -760,7 +768,15 @@ TARGETS = {
                               "tests/test_ybr_jpegls_read_doors.py",
                               "tests/test_ybr_read_door_labels.py",
                               "tests/test_a_pre_097_store_keeps_one_offset_per_patient.py",
-                              "tests/test_the_project_secret_lives_in_the_store.py"],
+                              "tests/test_the_project_secret_lives_in_the_store.py",
+                              "tests/test_nested_remediation_reaches_the_instance.py",
+                              # Beyond the scan, by measured kills (#441's rule): deleting either
+                              # `_merge_patients_sharing_an_id` call is killed by
+                              # test_patients_sharing_an_id_are_merged.py (#548), and deleting
+                              # the restore's `p.mark_modified()` by
+                              # test_a_restored_patient_is_saved.py (#552).
+                              "tests/test_a_restored_patient_is_saved.py",
+                              "tests/test_patients_sharing_an_id_are_merged.py"],
                              30),
     # 196 sites. Until #419 this module had no row, so the persistence
     # bookkeeping every CLAUDE.md trap is about -- `mark_modified`,
@@ -971,7 +987,11 @@ TARGETS = {
                                "tests/test_ybr_read_door_labels.py",
                                "tests/test_a_pre_097_store_keeps_one_offset_per_patient.py",
                                "tests/test_the_project_secret_keys_the_pseudonym_and_offset.py",
-                               "tests/test_the_project_secret_lives_in_the_store.py"],
+                               "tests/test_the_project_secret_lives_in_the_store.py",
+                               "tests/test_a_restored_patient_is_saved.py",
+                               "tests/test_nested_remediation_reaches_the_instance.py",
+                               "tests/test_patients_sharing_an_id_are_merged.py",
+                               "tests/test_save_keeps_rows_memory_holds.py"],
                               30),
     # 81 sites; budget 60 is stride 1 (81 // 60), so every site is
     # probed, exhaustive because it is cheap, like parallel.py's 80. It
