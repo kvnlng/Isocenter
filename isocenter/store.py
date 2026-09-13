@@ -84,22 +84,10 @@ class DicomStore:
         Returns:
             (patients merged away, studies moved).
         """
-        groups: Dict[str, List[Patient]] = {}
-        for patient in self.patients:
-            groups.setdefault(patient.patient_id, []).append(patient)
-        groups = {pid: members for pid, members in groups.items()
-                  if len(members) > 1}
+        groups = self._patients_sharing_an_id()
         if not groups:
             return 0, 0
-
-        mismatched = sum(
-            len(members) for members in groups.values()
-            if len({m._jitter_scheme for m in members}) > 1)
-        if mismatched:
-            raise RuntimeError(
-                f"{mismatched} patients in this session share a Patient ID "
-                "but were de-identified under different date-offset schemes; "
-                "merging them would give their dates two offsets")
+        self._refuse_a_merge_across_schemes()
 
         if drain is not None:
             drain()
@@ -133,6 +121,43 @@ class DicomStore:
             "the patient already holding the same Patient ID; "
             f"{moved} {'study' if moved == 1 else 'studies'} moved (#548)")
         return merged, moved
+
+    def _patients_sharing_an_id(
+            self, renamed: Optional[Tuple[Patient, str]] = None
+    ) -> Dict[str, List[Patient]]:
+        """Patient ID -> members, for every ID more than one object holds.
+
+        `renamed` is `(patient, patient_id)`: group as though that patient
+        already held that ID, without assigning it.
+        """
+        groups: Dict[str, List[Patient]] = {}
+        for patient in self.patients:
+            pid = patient.patient_id
+            if renamed is not None and patient is renamed[0]:
+                pid = renamed[1]
+            groups.setdefault(pid, []).append(patient)
+        return {pid: members for pid, members in groups.items()
+                if len(members) > 1}
+
+    def _refuse_a_merge_across_schemes(
+            self, renamed: Optional[Tuple[Patient, str]] = None) -> None:
+        """Raise the #548 `RuntimeError` if a merge would mix jitter schemes.
+
+        `recover_patient_identity` calls it with `renamed` *before* it
+        writes the original identifiers back: the merge's own check runs
+        after the restore, when a refusal would leave the graph holding
+        two patients with one ID under two schemes. The message names a
+        count, never an ID.
+        """
+        mismatched = sum(
+            len(members)
+            for members in self._patients_sharing_an_id(renamed).values()
+            if len({m._jitter_scheme for m in members}) > 1)
+        if mismatched:
+            raise RuntimeError(
+                f"{mismatched} patients in this session share a Patient ID "
+                "but were de-identified under different date-offset schemes; "
+                "merging them would give their dates two offsets")
 
     def get_unique_equipment(self) -> List[Equipment]:
         """

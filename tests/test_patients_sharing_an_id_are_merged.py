@@ -307,3 +307,56 @@ def test_restore_onto_an_id_a_raw_patient_holds_merges_them(tmp_path, mode):
         [patient] = session.store.patients
         assert patient.patient_id == "PAT-001"
         assert len(patient.studies) == 2
+
+
+def test_a_restore_across_jitter_schemes_refuses_before_it_restores(
+        tmp_path, monkeypatch):
+    """The refusal comes before the restore writes anything, not after.
+
+    The merge itself refuses a mixed group, but by the time it runs in
+    `recover_patient_identity` every instance already holds the original
+    identifiers and the patient its original ID: a refusal there leaves
+    the graph holding two patients with one ID under two schemes. So the
+    restore asks first, as if the patient already held the ID it is about
+    to get back. The stored patient is re-classed unkeyed by hand, as a
+    pre-0.9.7 store would load it.
+    """
+    write_ct(tmp_path / "first" / "a.dcm", "PAT-001", "1")
+    write_ct(tmp_path / "second" / "c.dcm", "PAT-001", "3")
+    db = str(tmp_path / "store.db")
+    key = str(tmp_path / "isocenter.key")
+    with Session(db) as session:
+        session.ingest(str(tmp_path / "first"))
+        session.enable_reversible_anonymization(key)
+        report = session.audit()
+        session.lock_identities("PAT-001")
+        session.anonymize(report)
+        session.save(sync=True)
+
+    with Session(db) as session:
+        session.enable_reversible_anonymization(key)
+        [stored] = session.store.patients
+        pseudonym = stored.patient_id
+        session.ingest(str(tmp_path / "second"))
+        stored._jitter_scheme = JITTER_SCHEME_UNKEYED
+        [inst] = [i for st in stored.studies for se in st.series
+                  for i in se.instances]
+        revisions = (stored._revision, inst._revision)
+        attributes = dict(inst.attributes)
+        drained = []
+        monkeypatch.setattr(session.persistence_manager, "flush",
+                            lambda: drained.append(1))
+
+        with pytest.raises(RuntimeError) as raised:
+            session.recover_patient_identity(pseudonym, restore=True)
+
+        assert str(raised.value) == (
+            "2 patients in this session share a Patient ID but were "
+            "de-identified under different date-offset schemes; merging "
+            "them would give their dates two offsets")
+        assert stored.patient_id == pseudonym
+        untouched = inst.attributes == attributes
+        assert untouched
+        assert (stored._revision, inst._revision) == revisions
+        assert len(session.store.patients) == 2
+        assert drained == []

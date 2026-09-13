@@ -3505,7 +3505,16 @@ class DicomSession:
         Args:
             patient_id (str): The PatientID to search for and recover.
             restore (bool): If True, applies the recovered attributes back to ALL
-                            in-memory instances for this patient.
+                            in-memory instances for this patient. The restore
+                            is recorded, so a later `save()` stores it, and a
+                            patient already holding the restored Patient ID
+                            is merged into whichever of the two was in the
+                            session first (#552, #548).
+
+        Raises:
+            RuntimeError: With `restore=True`, when a patient holding the
+                restored Patient ID was de-identified under a different
+                date-offset scheme. Raised before anything is restored.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversibility not enabled.")
@@ -3531,6 +3540,13 @@ class DicomSession:
 
         if original_attrs:
             if restore:
+                # Asked before anything is written: the merge below
+                # refuses a group mixing jitter schemes too, but after the
+                # loop every instance already holds the original values,
+                # and a refusal there would leave two patients with one
+                # ID under two schemes in the graph (#548).
+                self.store._refuse_a_merge_across_schemes(
+                    renamed=(p, original_attrs.get("0010,0020", p.patient_id)))
                 count = 0
                 for st in p.studies:
                     for se in st.series:
@@ -4255,6 +4271,11 @@ class DicomSession:
         If `findings` is provided, only those specific findings are remediated.
         If `findings` is None, a full audit is performed using the current configuration,
         and all resulting findings are remediated ("Blind Execute").
+
+        Two patients left holding one Patient ID -- a study ingested under
+        a patient's original ID after that patient was anonymized -- are
+        merged into whichever was in the session first, and the other is
+        removed from `store.patients` (#548).
 
         Args:
             findings (List[PhiFinding], optional): Specific findings to clean.
