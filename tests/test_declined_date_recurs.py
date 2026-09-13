@@ -47,6 +47,7 @@ import pytest
 
 from isocenter.entities import Equipment, Instance, Patient, PhiStatus, Series, Study
 from isocenter.session import DicomSession
+from support.project_secret import FIXED_A
 
 SC_SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7"
 CONTENT_DATE = "0008,0023"
@@ -318,7 +319,12 @@ def test_the_arm_declines_nothing_for_a_blank_the_scan_no_longer_raises(
             entity_uid=instance.sop_instance_uid, entity_type="Instance",
             field_name=tag, value=value, reason="PHI", tag=tag,
             entity=instance, remediation_proposal=proposal)
-        service = RemediationService(store_backend=session.store_backend)
+        # Given a secret, or the arm never runs: `_get_date_shift` raises
+        # before the blank guard is reached. Until #553 that raise wrote no
+        # row, so "no decline" held without the arm executing at all; since
+        # a raise is a decline, the missing secret is what this would read.
+        service = RemediationService(store_backend=session.store_backend,
+                                     project_secret=FIXED_A)
         assert service.apply_remediation([finding]) == 0
         assert instance.attributes[tag] == value
     declined = [d for d in _declines(tmp_path / "m.db") if tag in d]
