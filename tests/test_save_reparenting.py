@@ -122,3 +122,122 @@ def test_a_genuinely_removed_series_is_still_deleted(store):
 
     assert _rows(store, "SELECT 1 FROM series WHERE series_instance_uid='SE1'") == []
     assert _rows(store, "SELECT 1 FROM instances") == []
+
+
+# ---------------------------------------------------------------------------
+# One level up: a study follows the patient that holds it (#551).
+#
+# `_reparent_series` and `_reparent_instances` were added for #77, and the
+# study level had no sibling. A study the pass left unchanged is not
+# upserted, so its `patient_id_fk` went on naming the patient's OLD row
+# after the patient's ID was replaced -- and `_delete_absent_patients`
+# then deleted that row together with the study beneath it. A dated study
+# escaped only because SHIFT_DATE had dirtied it.
+# ---------------------------------------------------------------------------
+
+def _patient_with_one_study(pid="OLD"):
+    p = Patient(pid, "Patient Old")
+    st = Study("S", "20230101")
+    se = Series("S.1", "CT", 1)
+    se.instances.append(Instance("S.1.1", "1.2.3", 1, file_path="/tmp/s.dcm"))
+    st.series.append(se)
+    p.studies.append(st)
+    return p, st
+
+
+def _counts(store):
+    return tuple(_rows(store, f"SELECT COUNT(*) FROM {t}")[0][0]
+                 for t in ("patients", "studies", "series", "instances"))
+
+
+def test_a_clean_study_moved_between_patients_is_reparented(store):
+    """A list mutation marks nothing, so the save corrects the key itself."""
+    p1, st = _patient_with_one_study("P1")
+    p2 = Patient("P2", "Patient Two")
+    store.save_all([p1, p2], prune_absent_patients=True)
+    p1.mark_subtree_persisted()
+    p2.mark_subtree_persisted()
+
+    p1.studies.remove(st)
+    p2.studies.append(st)
+    store.save_all([p1, p2], prune_absent_patients=True)
+
+    rows = _rows(store, """
+        SELECT p.patient_id FROM studies st
+        JOIN patients p ON p.id = st.patient_id_fk
+        WHERE st.study_instance_uid = 'S'""")
+    assert [r[0] for r in rows] == ["P2"]
+    loaded = {p.patient_id: p for p in store.load_all()}
+    assert [s.study_instance_uid for s in loaded["P2"].studies] == ["S"]
+    assert len(loaded["P2"].studies[0].series[0].instances) == 1
+    assert loaded["P1"].studies == []
+
+
+def test_a_renamed_patient_keeps_its_clean_study(store):
+    """#551 with nothing but the save: a new ID, and a study nobody touched.
+
+    Measured on 1c41e5e: (1, 0, 0, 0). The new ID's row was inserted, the
+    study row still named the old one, and the prune took it.
+    """
+    p, st = _patient_with_one_study("OLD")
+    store.save_all([p], prune_absent_patients=True)
+    p.mark_subtree_persisted()
+
+    p.patient_id = "NEW"
+    p.mark_modified()
+    assert not st.has_unsaved_changes
+    store.save_all([p], prune_absent_patients=True)
+
+    assert _counts(store) == (1, 1, 1, 1)
+    assert _rows(store, "SELECT patient_id FROM patients") == [("NEW",)]
+
+
+#: Both parallel paths; `audit()` clones the graph whichever it picks.
+MODES = ["threads", "processes"]
+
+
+@pytest.fixture
+def mode(request, monkeypatch):
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+    if request.param == "threads":
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
+    else:
+        monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+    return request.param
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_anonymize_after_a_reload_keeps_an_undated_study(tmp_path, mode):
+    """#551 end to end, through the public API only.
+
+    One patient whose study has no StudyDate, so no finding dirties the
+    study: `ingest()`, `audit()`, `save()`; reopen; `audit()` records the
+    status the study already carries (the #173 short-circuit) and
+    `anonymize()` replaces the Patient ID. Measured on 1c41e5e:
+    (1, 1, 1, 1) after the first session and (1, 0, 0, 0) after the second.
+    """
+    from isocenter import Session
+    from support.ct_small_files import row_counts, write_ct
+
+    write_ct(tmp_path / "in" / "a.dcm", "PAT-001", "1", study_date=None)
+    db = tmp_path / "store.db"
+    with Session(str(db)) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.audit()
+        session.save(sync=True)
+    assert row_counts(db) == (1, 1, 1, 1)
+
+    with Session(str(db)) as session:
+        report = session.audit()
+        study = session.store.patients[0].studies[0]
+        session.anonymize(report)
+        assert session.store.patients[0].patient_id.startswith("ANON_")
+        assert not study.has_unsaved_changes, (
+            "the study was dirtied by the pass, so this no longer reaches "
+            "the clean-study path it exists to cover")
+        session.save(sync=True)
+
+    assert row_counts(db) == (1, 1, 1, 1)
