@@ -478,6 +478,33 @@ class DicomItem(TrackedEntity):
         self.add_sequence(tag).items.append(item)
         self.mark_modified()
 
+    def clear_sequence_items(self, tag: str) -> bool:
+        """
+        Empties the sequence at `tag` to zero items, keeping it present.
+
+        What an `EMPTY` rule on a sequence does (#547): a zero-item
+        sequence is how a Type 2 sequence carries no value. A method here
+        rather than a `del` plus `mark_modified()` in `remediation.py`, for
+        the reason `set_attr` and `add_sequence_item` are methods: the
+        revision moves with the change, in one place.
+
+        `add_sequence`'s rule the other way round: `mark_modified()` only
+        when items were actually removed, so clearing an already-empty or
+        absent sequence changes nothing the store must hold.
+
+        Args:
+            tag (str): The DICOM tag for the sequence. Case-insensitive.
+
+        Returns:
+            bool: True when items were removed.
+        """
+        sequence = self.sequences.get(_canonical_tag(tag))
+        if sequence is None or not sequence.items:
+            return False
+        sequence.items.clear()
+        self.mark_modified()
+        return True
+
     def mark_subtree_persisted(self):
         """Marks this item and every item nested in its sequences as stored."""
         self._persisted_revision = self._revision
