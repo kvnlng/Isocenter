@@ -100,7 +100,7 @@ class RemediationService:
         """
         processed_entities = set()  # To avoid double-processing if multiple findings point to same entity/attr
         audit_buffer = []
-        self._declined_entities = []
+        self._declined_entities, self._satisfied_keys = [], set()
         self._owner_copies = set()
         # Entity-level findings first, everything else after in its own
         # relative order (#496). The owner's write has to land before the
@@ -142,9 +142,9 @@ class RemediationService:
             # scan began opening sequences, #57).
             #
             # `target_attr` is the attribute the proposal actually writes,
-            # which is what "already handled" should mean.
-            key = (finding.entity_uid, finding.entity_path,
-                   finding.remediation_proposal.target_attr)
+            # which is what "already handled" should mean. One spelling,
+            # shared with the scan tally that settles the pass (#553).
+            key = _remediation_key(finding)
             if key in processed_entities or key in folded_keys:
                 continue
 
@@ -178,10 +178,7 @@ class RemediationService:
                     processed_entities.add(key)
             except Exception as e:
                 failures += 1
-                self.logger.error(
-                    f"Failed to apply remediation for {
-                        self._log_subject(finding)} ({
-                        finding.field_name}): {describe_exception(e)}")
+                self._record_decline(finding, self._raised(finding, e), audit_buffer)
 
         if folded_keys:
             self.logger.info(
@@ -204,9 +201,12 @@ class RemediationService:
         # `test_a_pass_that_only_declined_leaves_the_status_alone` pins, and the
         # manifest keeps reading the status rather than the audit
         # trail's declines, so there is one source for the answer.
-        for entity in self._declined_entities:
-            if entity.phi_status is PhiStatus.REMEDIATED:
-                entity.record_phi_status(PhiStatus.IDENTIFIED)
+        #
+        # The same holds for what the pass was never handed (#553): a
+        # raise is a decline, and an entity the last audit raised more
+        # against than the passes on it handled is demoted too, settled
+        # against the scan tally. `_settle_statuses` says how.
+        self._settle_statuses(findings, processed_entities | folded_keys)
 
         # Flush audit logs
         if self.store_backend and audit_buffer:
@@ -273,15 +273,15 @@ class RemediationService:
             # and a decline -- the one REMOVE_TAG already records -- for
             # a target the item no longer holds, rather than an element
             # the graph did not have written into it (#547). `details`
-            # None means nothing was written. One call here rather than
-            # the cases inline, so the pinned `mark_modified()` lines
-            # below do not move with them.
+            # None is a decline, or the end state already there (#567):
+            # `_satisfied` stamps that. One call rather than the cases
+            # inline, so the pinned `mark_modified()` lines do not move.
             if hasattr(entity, "set_attr"):
                 details, declined = self._replace_on_item(entity, finding)
                 if declined:
                     self._record_decline(finding, declined, audit_buffer)
                 if details is None:
-                    return False
+                    return self._satisfied(finding, declined)
                 action_type = "REMEDIATION_REPLACE"
 
             # 2. Python Object Attribute support (Patient.patient_name)
@@ -559,6 +559,12 @@ class RemediationService:
         and `audit_buffer` stay where `tests/test_frozen_surface.py`'s Pin
         A reads them.
 
+        **The contract on `(None, None)`: it means the item already holds
+        what the rule asks**, and the caller stamps the entity REMEDIATED
+        on the strength of it (#567). Any other path that writes nothing
+        must return a reason, or it reads as remediated with the value
+        still there.
+
         Three things the arm used to get wrong, all reached by default
         once #547 made the basic profile the whole of Table E.1-1:
 
@@ -578,8 +584,9 @@ class RemediationService:
           one, and the scan never proposes it (it warns instead).
         - **EMPTY on a sequence clears its items, and only says so when
           it did.** `clear_sequence_items` returns False for a sequence
-          already at zero items; that is what the rule asks for, so, as
-          for an empty date, no decline row and no success row either.
+          already at zero items; that is what the rule asks for, so no
+          decline row and no success row either -- `(None, None)`, which
+          the caller stamps REMEDIATED with no row (#567).
         - **EMPTY on a binary VR writes `b""`.** The str `""` in an OB
           element made pydicom warn in the export worker, and the file
           read back as `b""`, which the scan's `val != ""` then raised
@@ -731,6 +738,105 @@ class RemediationService:
             self.store_backend.log_audit(
                 REMEDIATION_DECLINED, finding.entity_uid, details)
 
+    def _raised(self, finding: PhiFinding, error: Exception) -> str:
+        """Log a remediation that raised, and return its decline reason (#553).
+
+        The `except` arm in `apply_remediation` used to log this line and
+        nothing else: no row and no demotion. So a proposal that raised
+        left its entity REMEDIATED -- stamped by a sibling's success --
+        with the value still in the graph, and the run graded PASS. A
+        raise is a decline: the value was not removed, and may be partly
+        written, which the reason says.
+
+        Flattened and pipe-escaped: the reason lands in `details`, which
+        the report's section 3.3 renders into a markdown table cell, and
+        an exception's text is under nobody's control. The log line keeps
+        `_log_subject`, so a patient finding's Patient ID stays out of it.
+        """
+        self.logger.error(
+            f"Failed to apply remediation for {self._log_subject(finding)} "
+            f"({finding.field_name}): {describe_exception(error)}")
+        proposal = finding.remediation_proposal
+        reason = (f"{proposal.action_type} on {proposal.target_attr} raised "
+                  f"{describe_exception(error)}; the value may be unchanged "
+                  "or partly written")
+        return " ".join(reason.split()).replace("|", "\\|")
+
+    def _satisfied(self, finding: PhiFinding, declined) -> bool:
+        """A `REPLACE_TAG` whose end state the item already holds (#567).
+
+        `_replace_on_item` returns `(None, None)` for exactly one case: an
+        `EMPTY` on a sequence already at zero items. Nothing was written,
+        so there is no row and nothing is counted as applied -- and
+        nothing is left to remove either, so the entity (and the instance
+        holding a nested item) is stamped REMEDIATED, and the key is
+        counted as handled for the scan tally. It used to be left at
+        whatever status the audit gave it: IDENTIFIED, over an instance
+        with nothing in it, beside a PASS grade.
+
+        No `mark_modified()`: nothing changed. The stamp itself advances
+        the revision when the status changes, which is right -- a status
+        change is a change the store should hold.
+
+        `_satisfied_keys` is rebound, never mutated: its class default is
+        a `frozenset` shared by every service, and a direct
+        `_apply_single_remediation` call never passes the reset in
+        `apply_remediation`.
+
+        Always returns False, the caller's value for "nothing written".
+        """
+        if not declined:
+            finding.entity.record_phi_status(PhiStatus.REMEDIATED)
+            owner = self._instance_owners.get(id(finding.entity))
+            if owner is not None:
+                owner.record_phi_status(PhiStatus.REMEDIATED)
+            self._satisfied_keys = (self._satisfied_keys
+                                    | {_remediation_key(finding)})
+        return False
+
+    def _settle_statuses(self, findings: list, handled: set) -> None:
+        """Demote every entity a pass left REMEDIATED over something it did
+        not remove (#486, #553).
+
+        Two sources, one demotion:
+
+        - **A decline** -- including a proposal that raised -- names its
+          entity in `_declined_entities`. The success block stamps
+          REMEDIATED per proposal and cannot know what a later proposal on
+          the same entity will do; the pass can.
+        - **The scan tally**, when `audit()` built one: every uid this
+          pass's findings name is settled against the keys the pass
+          handled (applied, folded or already satisfied). An incomplete
+          uid demotes every entity the pass's findings under it resolve
+          to, and the instance holding a nested one. Keyed on the
+          scan-time `entity_uid` strings, not live entities: a patient's
+          `patient_id` changes during the pass.
+
+        Only an entity that ends the pass REMEDIATED is touched: one that
+        only declined keeps whatever status it had, which
+        `test_a_pass_that_only_declined_leaves_the_status_alone` pins.
+        `getattr`, because a hand-built entity need carry no status.
+        """
+        by_uid = {}
+        for key in handled | self._satisfied_keys:
+            by_uid.setdefault(key[0], set()).add(key)
+        demote = list(self._declined_entities)
+        if self._scan_tally is not None:
+            incomplete = {
+                uid for uid in {f.entity_uid for f in findings
+                                if f.remediation_proposal}
+                if self._scan_tally.settle(uid, by_uid.get(uid, ())) is False}
+            for finding in findings:
+                if (finding.entity_uid in incomplete
+                        and finding.entity is not None):
+                    demote.append(finding.entity)
+                    owner = self._instance_owners.get(id(finding.entity))
+                    if owner is not None:
+                        demote.append(owner)
+        for entity in demote:
+            if getattr(entity, "phi_status", None) is PhiStatus.REMEDIATED:
+                entity.record_phi_status(PhiStatus.IDENTIFIED)
+
     #: The `Patient`/`Study` fields the exporter stamps onto every exported
     #: instance from the entity, with the tag each is the value of
     #: (`session._patient_attributes`, `_study_attributes`). Exactly these
@@ -785,13 +891,33 @@ class RemediationService:
         REMEDIATED, and a nested decline names it for the pass-end
         demotion, exactly as a top-level finding on the instance would.
 
-        What this does not do, deliberately (#553): the pass still speaks
-        only for the findings handed to it, so a partial list stamps an
-        owner REMEDIATED over findings it was not given, and a proposal
-        that raised demotes nothing -- both true of top-level findings
-        too, and decided there rather than here.
+        What this does not do: decide that the pass is the whole story. A
+        partial list, and a proposal that raised, are settled at the pass
+        end against the scan tally and the declines (#553), for nested
+        and top-level findings alike; this only says which instance a
+        nested entity belongs to.
         """
         self._instance_owners = self._MappingProxyType(dict(owners))
+
+    #: What the session's last `audit()` raised, per scan-time entity uid
+    #: (#553): a `_ScanTally`, or None when there is no audit behind the
+    #: pass -- hand-built findings, a reopened session -- which keeps the
+    #: pass's own accounting. Set by `_use_scan_tally`; a class attribute
+    #: for `_instance_owners`' reason.
+    _scan_tally = None
+    #: Keys of the proposals whose end state the graph already held this
+    #: pass (#567), counted as handled by the tally. Rebound, never
+    #: mutated, so the class default is safe to share.
+    _satisfied_keys = frozenset()
+
+    def _use_scan_tally(self, tally) -> None:
+        """Settle this service's passes against `tally` (#553).
+
+        The session's own tally, not a copy: a partial pass leaves the
+        keys it handled in it, so the next pass over the same audit
+        completes what this one did not.
+        """
+        self._scan_tally = tally
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each
@@ -1258,3 +1384,100 @@ def _date_shift_declines(value) -> bool:
     # The class's own module; the parser is private to it, not to the class.
     return RemediationService._shift_date_string(  # pylint: disable=protected-access
         value, 0) is None
+
+
+def _remediation_key(finding: PhiFinding) -> tuple:
+    """What `apply_remediation` dedupes on, and what the scan tally counts.
+
+    `(entity_uid, entity_path, target_attr)`: the attribute the proposal
+    writes, and where it lives -- see the comment at the dedup for why
+    each half is there. One spelling for both readers, so "already
+    handled" and "what the audit raised" cannot drift apart (#553).
+    """
+    return (finding.entity_uid, finding.entity_path,
+            finding.remediation_proposal.target_attr)
+
+
+#: The width of the scan tally's hash-sum.
+_TALLY_MASK = (1 << 64) - 1
+
+
+def _key_digest(keys) -> int:
+    """The 64-bit sum of `hash(key)` over a set of remediation keys."""
+    return sum(hash(key) & _TALLY_MASK for key in keys) & _TALLY_MASK
+
+
+class _ScanTally:
+    """What the last `audit()` raised, per scan-time `entity_uid` (#553).
+
+    `anonymize(findings=...)` applies what it is handed, and each success
+    stamps its entity REMEDIATED. Without this, one of an instance's 202
+    findings handed alone read REMEDIATED over the other 201, and the
+    manifest's `anonymized` -- documented as "left no identifier
+    unremediated" -- read that status. The tally is how a pass knows what
+    else the audit raised against an entity it touched.
+
+    **Two ints per entity**: how many distinct remediation keys the audit
+    raised under the uid, and their 64-bit hash-sum. Not the keys: a CT
+    instance raises about two hundred, and holding them for every
+    instance of a large cohort for the life of the session is memory the
+    ordinary path, which handles every key, never reads.
+
+    `settle(uid, handled)` is asked once per pass for each uid the pass's
+    findings name, with the keys the pass handled under it (applied,
+    folded into an owner's write, or already satisfied):
+
+    - **None**: the audit raised nothing under that uid. No opinion; the
+      pass accounts for itself, as a pass with no audit behind it does.
+    - **True**: the handled keys, merged with those earlier passes on the
+      same audit handled, are exactly the raised set. The uid is dropped,
+      so a later pass over it has no opinion either.
+    - **False**: they are not. The merged set is kept in `_partial` until
+      a later pass completes it, so two complementary partial passes end
+      complete and the same partial list handed twice does not: the
+      comparison is between sets, never a running count.
+
+    **What is compared.** The merged set's size and its hash-sum against
+    the raised pair. A merged set *larger* than the raised count holds a
+    key the audit did not raise under that uid -- a hand-built finding --
+    and is incomplete: fail-closed, a hand-built finding can demote an
+    entity and never complete one. The hash-sum only stops such a key
+    from making up the count in place of a raised key that was not
+    handled; two distinct sets of equal size colliding is about 2^-64.
+    It is not a secret and not an integrity check. `hash()` of a str is
+    salted per process, which is safe here because the tally is built
+    and settled in the parent process of one session and never crosses a
+    boundary; it is not persisted, so a reopened session has no tally and
+    keeps pass accounting.
+
+    **`_partial`'s cost.** Nothing on a full pass. A deliberately partial
+    workflow -- a patient-level pass now, the instances later -- keeps
+    the handled key set of every uid it left incomplete, about 77 B per
+    handled key (measured): about two keys per patient for a patient-only
+    pass, one per instance for a one-finding-per-instance list. Freed when
+    the uid completes, or by the next `audit()`, which replaces the tally.
+    """
+
+    def __init__(self, findings):
+        raised = {}
+        for finding in findings:
+            if finding.remediation_proposal is None or not finding.entity_uid:
+                continue
+            raised.setdefault(finding.entity_uid, set()).add(
+                _remediation_key(finding))
+        self._raised = {uid: (len(keys), _key_digest(keys))
+                        for uid, keys in raised.items()}
+        self._partial = {}
+
+    def settle(self, uid, handled) -> Optional[bool]:
+        """Whether the keys handled under `uid` complete what was raised."""
+        raised = self._raised.get(uid)
+        if raised is None:
+            return None
+        merged = self._partial.get(uid, frozenset()) | frozenset(handled)
+        if (len(merged), _key_digest(merged)) == raised:
+            del self._raised[uid]
+            self._partial.pop(uid, None)
+            return True
+        self._partial[uid] = merged
+        return False

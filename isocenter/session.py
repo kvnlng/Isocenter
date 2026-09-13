@@ -907,6 +907,11 @@ class DicomSession:
         # the report omits the row rather than claiming a zero.
         self._last_export_written = None
         self._last_export_requested = None
+        # What the last `audit()` raised, per scan-time entity uid, so a
+        # partial `anonymize(findings=...)` cannot stamp REMEDIATED over
+        # identifiers it was not handed (#553). None until an audit runs,
+        # and not persisted: a reopened session keeps pass accounting.
+        self._scan_tally = None
 
         # The verbs this session actually performed ("REDACTION",
         # "ANONYMIZE"), so `generate_report` can demand action-specific
@@ -2452,7 +2457,12 @@ class DicomSession:
         later edit invalidates it. That is why this runs after
         rehydration: it needs the live objects, not the worker copies.
         """
+        from .remediation import _ScanTally
+
         identified = {f.entity_uid for f in findings if f.entity_uid}
+        # Keyed on the same scan-time uids as `identified`, and replaced
+        # by every audit, so a new report settles against its own scan.
+        self._scan_tally = _ScanTally(findings)
 
         def record(entity, uid):
             entity.record_phi_status(
@@ -4397,6 +4407,7 @@ class DicomSession:
         count = 0
         if findings:
             remediator._use_instance_owners(self._nested_finding_owners(findings))
+            remediator._use_scan_tally(self._scan_tally)
             count = remediator.apply_remediation(findings)
 
         # A patient ingested under its original ID after that patient was
