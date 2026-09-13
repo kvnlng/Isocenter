@@ -1453,8 +1453,9 @@ class _ScanTally:
     **`_partial`'s cost.** Nothing on a full pass. A deliberately partial
     workflow -- a patient-level pass now, the instances later -- keeps
     the handled key set of every uid it left incomplete, about 77 B per
-    handled key (measured): about two keys per patient for a patient-only
-    pass, one per instance for a one-finding-per-instance list. Freed when
+    handled key (measured on CT_small when #553 was designed): about two
+    keys per patient for a patient-only pass, one per instance for a
+    one-finding-per-instance list. Freed when
     the uid completes, or by the next `audit()`, which replaces the tally.
     """
 
