@@ -36,7 +36,7 @@ import pydicom
 import pytest
 from pydicom.data import get_testdata_file
 
-from isocenter.io_handlers import ExportSummary
+from isocenter.io_handlers import DicomExporter, ExportError, ExportSummary
 from isocenter.session import DicomSession
 
 ROOT = "1.2.826.0.1.3680043.10.536"
@@ -337,3 +337,42 @@ def test_a_second_export_does_not_keep_the_first_ones_withheld_count(
         session.close()
 
     assert "| Instances Written | 2 of 2 requested |" in text, text
+
+
+def test_a_failed_batch_beside_a_withheld_instance_counts_both(
+        tmp_path, monkeypatch):
+    """Every planned write fails and one more was withheld.
+
+    Two numbers meet here and answer different questions: the report's
+    denominator is the cohort asked for (planned plus withheld), and
+    `ExportError.attempted` is what the batch tried to write. A fix that
+    folded the withheld count into `attempted` would tell a caller the
+    batch failed on an instance it never touched.
+
+    `export_batch` is called in the parent process, so the monkeypatch
+    reaches it.
+    """
+    session, withheld, kept, _value = _two_patients_one_identified(
+        tmp_path, "instance")
+
+    def _all_failed(*_args, **_kwargs):
+        return ExportSummary(failures=[(kept, "disk full")])
+
+    try:
+        monkeypatch.setattr(DicomExporter, "export_batch", _all_failed)
+        with pytest.raises(ExportError) as raised:
+            session.export(str(tmp_path / "out"), check_burned_in=True,
+                           use_compression=False, show_progress=False)
+        text = _report(session, tmp_path)
+        exports = _rows(session, "EXPORT")
+    finally:
+        session.close()
+
+    assert raised.value.attempted == 1, raised.value.attempted
+    assert [uid for uid, _detail in raised.value.failures] == [kept]
+    assert withheld not in [uid for uid, _d in raised.value.failures]
+    assert "| Instances Written | 0 of 2 requested |" in text, text
+    assert len(exports) == 1, exports
+    assert exports[0][1].endswith(
+        "wrote 0 of 1 planned instances from 2 patients; 1 more withheld "
+        "by the pre-export scan (check_burned_in=True)."), exports
