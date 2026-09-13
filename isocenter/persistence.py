@@ -128,8 +128,10 @@ def _warn_on_shared_patient_ids(logger, patients) -> None:
     """One WARNING when two `Patient` objects in a save carry one ID (#548).
 
     The store holds one `patients` row per ID, so the row's name and
-    status come from whichever object the walk reaches last; every study
-    is kept (`_held_uids`). A counts-only line: since 0.9.7 the log file
+    status come from the last of those objects the save writes: each one
+    with unsaved changes, and the first one walked if the store had no
+    row for the ID (`_upsert_patient`). If none is written the row keeps
+    what it held. Every study is kept (`_held_uids`). A counts-only line: since 0.9.7 the log file
     names no Patient ID, because a log shipped beside an export would
     otherwise pair identities with what replaced them.
     """

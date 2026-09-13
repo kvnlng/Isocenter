@@ -3509,7 +3509,13 @@ class DicomSession:
                             is recorded, so a later `save()` stores it, and a
                             patient already holding the restored Patient ID
                             is merged into whichever of the two was in the
-                            session first (#552, #548).
+                            session first (#552, #548). Restore puts back the
+                            locked identity tags only: every other date stays
+                            shifted by the patient's offset, so intervals are
+                            intact and a later `audit()` does not shift it
+                            again. A date among the locked tags is put back
+                            like any locked tag, and a later `audit()` raises
+                            it again.
 
         Raises:
             RuntimeError: With `restore=True`, when a patient holding the
@@ -3547,6 +3553,14 @@ class DicomSession:
                 # ID under two schemes in the graph (#548).
                 self.store._refuse_a_merge_across_schemes(
                     renamed=(p, original_attrs.get("0010,0020", p.patient_id)))
+                # Drained before the first write, as `audit()` and
+                # `redact()` drain on entry: the loop below writes onto
+                # every instance and the patient, and a queued save could
+                # be walking them (#297). After the refusal, so a refused
+                # restore leaves the queue as it found it. The merge's own
+                # drain cannot stand in -- it runs only on a collision,
+                # after these writes.
+                self.persistence_manager.flush()
                 count = 0
                 for st in p.studies:
                     for se in st.series:
@@ -4285,6 +4299,14 @@ class DicomSession:
                 excluded, so a caller can tell a clean run from a partial
                 one -- this used to be unreported, and the console line
                 below printed the literal "None".
+
+        Raises:
+            RuntimeError: When two patients left holding one Patient ID
+                were de-identified under different date-offset schemes
+                (#548). Raised at the merge, after the remediations are
+                applied. Unreachable on a graph the library built -- a
+                keyed and an unkeyed pseudonym differ in length -- and
+                reachable on one built in user code.
         """
         from .remediation import RemediationService
 

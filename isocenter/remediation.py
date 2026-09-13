@@ -660,14 +660,18 @@ class RemediationService:
     #: session -- the direct tests, hand-built findings -- stamps the item
     #: alone, as it always did: it has no graph to find an owner in, and
     #: a guess from `entity_uid` could name the wrong one of two
-    #: instances sharing a UID. Never mutated in place; the setter
-    #: replaces it. Here rather than in `__init__` for `ENTITY_FIELD_TAGS`'
-    #: reason above: nothing is added above the five pinned lines (#310).
+    #: instances sharing a UID. Read-only: it is a class attribute, so an
+    #: in-place write would reach every service in the process; the
+    #: setter replaces it. Here rather than in `__init__` for
+    #: `ENTITY_FIELD_TAGS`' reason above: nothing is added above the five
+    #: pinned lines (#310) -- which is also why `MappingProxyType` is
+    #: imported here and not with the module's imports.
     #: No reset in `apply_remediation` for the same reason, and none is
     #: needed: `Session.anonymize()` builds a fresh service per call.
-    _instance_owners: dict = {}
+    from types import MappingProxyType as _MappingProxyType
+    _instance_owners = _MappingProxyType({})
 
-    def _use_instance_owners(self, owners: dict) -> None:
+    def _use_instance_owners(self, owners) -> None:
         """Name the instance that holds each nested finding's item (#494).
 
         A nested success then marks that instance modified and stamps it
@@ -680,7 +684,7 @@ class RemediationService:
         that raised demotes nothing -- both true of top-level findings
         too, and decided there rather than here.
         """
-        self._instance_owners = dict(owners)
+        self._instance_owners = self._MappingProxyType(dict(owners))
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each

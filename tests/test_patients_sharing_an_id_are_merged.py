@@ -136,6 +136,9 @@ def test_anonymize_merges_a_reingested_patient_into_the_stored_one(
     ((PhiStatus.CLEARED, None), PhiStatus.UNSCANNED),
     ((PhiStatus.IDENTIFIED, None), PhiStatus.IDENTIFIED),
     ((PhiStatus.REMEDIATED, PhiStatus.CLEARED), PhiStatus.REMEDIATED),
+    # The leg that is a privacy claim: a patient made partly of data
+    # never scanned, or edited since, does not read REMEDIATED.
+    ((PhiStatus.REMEDIATED, None), PhiStatus.UNSCANNED),
 ])
 def test_the_merged_status_is_the_most_conservative_member(statuses, merged):
     """IDENTIFIED > UNSCANNED > REMEDIATED > CLEARED.
@@ -259,7 +262,7 @@ def test_names_that_disagree_keep_the_survivors_and_log_no_ids(caplog):
     assert dropped.studies == []
     messages = [r.getMessage() for r in caplog.records]
     assert [r for r in caplog.records if r.levelno == logging.WARNING], messages
-    assert any("Merged 1 patient" in m and "1 study moved" in m
+    assert any("Merged 1 patient into" in m and "1 study moved" in m
                for m in messages), messages
     for m in messages:
         for secret in ("X-548", "Survivor^Name", "Dropped^Name"):
@@ -360,3 +363,55 @@ def test_a_restore_across_jitter_schemes_refuses_before_it_restores(
         assert (stored._revision, inst._revision) == revisions
         assert len(session.store.patients) == 2
         assert drained == []
+
+
+@pytest.mark.parametrize("collision", [False, True],
+                         ids=["plain", "onto-a-raw-patient"])
+def test_a_restore_drains_pending_saves_before_it_writes(tmp_path,
+                                                         monkeypatch,
+                                                         collision):
+    """The restore writes onto every instance and the patient; a queued
+    save could be walking them while it does (#297, as `audit()` and
+    `redact()` drain on entry).
+
+    The merge drains too, but only on a collision and only after the
+    restore has written, so it cannot stand in for this one: the first
+    flush has to see the patient still under its pseudonym.
+    """
+    write_ct(tmp_path / "first" / "a.dcm", "PAT-001", "1")
+    write_ct(tmp_path / "second" / "c.dcm", "PAT-001", "3")
+    db = str(tmp_path / "store.db")
+    key = str(tmp_path / "isocenter.key")
+    with Session(db) as session:
+        session.ingest(str(tmp_path / "first"))
+        session.enable_reversible_anonymization(key)
+        report = session.audit()
+        session.lock_identities("PAT-001")
+        session.anonymize(report)
+        session.save(sync=True)
+
+    with Session(db) as session:
+        session.enable_reversible_anonymization(key)
+        [stored] = session.store.patients
+        pseudonym = stored.patient_id
+        if collision:
+            session.ingest(str(tmp_path / "second"))
+        [inst] = [i for st in stored.studies for se in st.series
+                  for i in se.instances]
+        attributes = dict(inst.attributes)
+        seen = []
+        real_flush = session.persistence_manager.flush
+
+        def recording_flush():
+            seen.append((stored.patient_id, inst.attributes == attributes))
+            return real_flush()
+
+        monkeypatch.setattr(session.persistence_manager, "flush",
+                            recording_flush)
+        session.recover_patient_identity(pseudonym, restore=True)
+
+        assert seen, "the restore never drained the persistence queue"
+        assert seen[0] == (pseudonym, True), (
+            "the restore wrote before the drain")
+        assert stored.patient_id == "PAT-001"
+        assert inst.attributes != attributes

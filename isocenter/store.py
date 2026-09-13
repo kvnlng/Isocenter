@@ -65,9 +65,12 @@ class DicomStore:
         raises `RuntimeError` before `drain` is called or anything is
         touched. A row holds one scheme, and either choice would give some
         of that subject's dates a second offset or silently re-class a
-        legacy patient. Unreachable from `anonymize()` -- a keyed and an
-        unkeyed pseudonym differ in length -- and reachable through a
-        restore.
+        legacy patient. Unreachable from `anonymize()` on a graph the
+        library built -- a keyed and an unkeyed pseudonym differ in length
+        -- and reachable through a restore. A graph built in user code can
+        reach it from `anonymize()` too, and there the refusal comes after
+        the remediations are applied; a restore asks first
+        (`_refuse_a_merge_across_schemes`).
 
         **Offsets need nothing.** The caller runs this after remediation,
         and a pseudonym and its original seed one offset

@@ -346,3 +346,15 @@ def test_remediation_without_owners_behaves_as_before():
     assert item.phi_status is PhiStatus.REMEDIATED
     assert inst.phi_status is PhiStatus.IDENTIFIED
     assert not inst.has_unsaved_changes
+
+
+def test_the_owner_map_cannot_be_mutated_in_place():
+    """It is a class attribute, so an in-place write would reach every
+    service in the process. The setter replaces it; nothing else may."""
+    service = RemediationService()
+    with pytest.raises(TypeError):
+        service._instance_owners[1] = object()
+    service._use_instance_owners({2: object()})
+    with pytest.raises(TypeError):
+        service._instance_owners[3] = object()
+    assert dict(RemediationService._instance_owners) == {}
