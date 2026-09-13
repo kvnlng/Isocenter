@@ -336,14 +336,15 @@ def test_a_bare_session_status_and_manifest_after_anonymize(tmp_path):
 
 
 def test_a_lock_after_anonymize_is_refused_on_the_floor_path(tmp_path):
-    """#492's refusal holds on the bare path. The floor removes the
-    instance's own 0010,0010/0010,0020, so a refusal that read only those
-    copies saw nothing: measured, lock -> anonymize -> lock again raised
-    nothing and wrote a token holding only `{'0010,0040': 'O'}` over the
-    good one, and recovery lost the name and ID. Kills the stash's
-    fallback to the patient's name and ID removed (M17): the absent copies
-    are then never stashed, so never checked, and both orders stop
-    raising."""
+    """#492's refusal holds on the bare path. Until #537 the floor removed
+    the instance's own 0010,0010/0010,0020, so a refusal that read only
+    those copies saw nothing: measured, lock -> anonymize -> lock again
+    raised nothing and wrote a token holding only `{'0010,0040': 'O'}`
+    over the good one, and recovery lost the name and ID. The floor's
+    rows for both are REPLACE now, so the copies hold the replacements
+    and the refusal reads them there; the stash's fallback to the
+    patient's values (M17) is pinned by the next test, whose policy still
+    removes a copy."""
     _ct_small_into(str(tmp_path / "in"))
     with Session(str(tmp_path / "s.db")) as session:
         session.enable_reversible_anonymization(str(tmp_path / "k.key"))
@@ -355,7 +356,7 @@ def test_a_lock_after_anonymize_is_refused_on_the_floor_path(tmp_path):
         assert first["0010,0020"] == "1CT1"
 
         session.anonymize(session.audit())
-        assert "0010,0010" not in inst.attributes, "the floor did not remove the copy"
+        assert inst.attributes["0010,0010"] == "ANONYMIZED"
         patient = session.store.patients[0]
         token = inst.sequences["0400,0500"].items[0].attributes["0400,0510"]
         with pytest.raises(RuntimeError, match=r"0010,0010 \('ANONYMIZED'\)"):
@@ -377,32 +378,52 @@ def test_a_lock_after_anonymize_is_refused_on_the_floor_path(tmp_path):
 
 
 def test_a_re_lock_after_an_instance_only_anonymize_stashes_the_patients_identity(tmp_path):
-    """The third route: only the instance findings are applied, so the
-    floor removes the instance's own 0010,0010/0010,0020 while the patient
-    still holds the originals. Nothing is a replacement, so nothing is
-    refused -- and the stash read only the (now absent) copies: measured
-    by review of #509, the new token held only `{'0010,0040': 'O'}` and
-    recovery lost the name and ID. The stash now takes an absent copy's
-    value from the patient, as the no-instances fallback already did.
-    Kills that fallback removed (recovery has no name or ID)."""
+    """The third route: only the instance findings are applied, so a
+    policy that removes the instance's own 0010,0010 leaves the patient
+    holding the original. Nothing is a replacement, so nothing is refused
+    -- and the stash read only the (now absent) copy: measured by review
+    of #509, under the floor as it then was, the new token held only
+    `{'0010,0040': 'O'}` and recovery lost the name and ID. The stash now
+    takes an absent copy's value from the patient, as the no-instances
+    fallback already did. Kills that fallback removed (M17: the name is
+    then stashed as nothing, which the held-token check refuses).
+
+    The floor's own name and ID rows are REPLACE since #537, so the policy
+    here is the floor with the name removed and the ID kept; the floor
+    itself now leaves `ANONYMIZED` on the copy, which the refusal names,
+    asserted last."""
     _ct_small_into(str(tmp_path / "in"))
+    locked = ["0010,0010", "0010,0020"]
     with Session(str(tmp_path / "s.db")) as session:
         session.enable_reversible_anonymization(str(tmp_path / "k.key"))
         session.ingest(str(tmp_path / "in"))
+        session.configuration.phi_tags.update({
+            "0010,0010": {"action": "REMOVE"}, "0010,0020": {"action": "KEEP"}})
         patient = session.store.patients[0]
         inst = patient.studies[0].series[0].instances[0]
-        session.lock_identities("1CT1")
+        session.lock_identities("1CT1", tags_to_lock=locked)
 
         session.anonymize([f for f in session.audit() if f.entity_type == "Instance"])
-        assert "0010,0010" not in inst.attributes, "the floor did not remove the copy"
-        assert "0010,0020" not in inst.attributes, "the floor did not remove the copy"
+        assert "0010,0010" not in inst.attributes, "the policy did not remove the copy"
         assert (str(patient.patient_name), patient.patient_id) == (
             "CompressedSamples^CT1", "1CT1"), "the patient was anonymized too"
 
-        session.lock_identities(patient.patient_id)
+        session.lock_identities(patient.patient_id, tags_to_lock=locked)
         again = session.reversibility_service.recover_original_data(inst)
     assert again["0010,0010"] == "CompressedSamples^CT1", again
     assert again["0010,0020"] == "1CT1", again
+
+    _ct_small_into(str(tmp_path / "in2"))
+    with Session(str(tmp_path / "s2.db")) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "k2.key"))
+        session.ingest(str(tmp_path / "in2"))
+        patient = session.store.patients[0]
+        inst = patient.studies[0].series[0].instances[0]
+        session.lock_identities("1CT1")
+        session.anonymize([f for f in session.audit() if f.entity_type == "Instance"])
+        assert inst.attributes["0010,0010"] == "ANONYMIZED"
+        with pytest.raises(RuntimeError, match=r"0010,0010 \('ANONYMIZED'\)"):
+            session.lock_identities(patient.patient_id)
 
 
 # ---------------------------------------------------------------------------

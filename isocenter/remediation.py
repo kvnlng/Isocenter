@@ -76,11 +76,11 @@ class RemediationService:
         # Entities `_record_decline` named during the current pass;
         # reset by `apply_remediation` and read at its end.
         self._declined_entities: list = []
-        # The instance copies an entity-level write reached during the
-        # current pass, as `(id(instance), tag)`, and the foldable instance
-        # findings waiting on each copy. Reset by `apply_remediation`; read
-        # by `_folds_into_owner` and `_write_to_instances` (#496).
-        self._owner_copies: set = set()
+        # The copies an entity-level write reached this pass, `(id(instance),
+        # tag) -> removed`, and the foldable instance findings waiting on
+        # each (#496, #537: a REMOVE folds only where the owner removed).
+        # Reset by `apply_remediation`; read by `_folds_into_owner`.
+        self._owner_copies: dict = {}
         self._pending_folds: dict = {}
         self.jitter_config = date_jitter_config or {"min_days": -365, "max_days": -1}
 
@@ -101,7 +101,7 @@ class RemediationService:
         processed_entities = set()  # To avoid double-processing if multiple findings point to same entity/attr
         audit_buffer = []
         self._declined_entities, self._satisfied_keys = [], set()
-        self._owner_copies = set()
+        self._owner_copies = {}
         # Entity-level findings first, everything else after in its own
         # relative order (#496). The owner's write has to land before the
         # instance findings on the same copies are judged, or which value
@@ -632,6 +632,24 @@ class RemediationService:
             return None, reason
 
         value = proposal.new_value
+        if value != "":
+            # A value the tag's VR cannot hold declines (#560). The loader
+            # refuses such a rule, so this is reached by a finding built by
+            # hand: an OB given `ANONYMIZED` failed the export with
+            # `TypeError`, and a DA exported the literal. The dictionary VR
+            # of a standard tag only, never the recorded one: a private
+            # value its VR cannot hold is written as LO, and declining
+            # there would keep the identifier. A decline, `(None, reason)`,
+            # never `(None, None)`, which says the rule is already met.
+            from .config_manager import _dictionary_vr_refuses  # pylint: disable=import-outside-toplevel
+            refused_vr = _dictionary_vr_refuses(tag, value)
+            if refused_vr is not None:
+                reason = (f"{tag} is {refused_vr}, which cannot hold "
+                          f"{value!r}; the value is left unchanged (#560)")
+                self.logger.warning(
+                    f"Remediation declined for {self._log_subject(finding)}: "
+                    f"{reason}")
+                return None, reason
         if value == "":
             vr = (getattr(entity, "attribute_vrs", None) or {}).get(tag)
             if vr is None:
@@ -1060,8 +1078,11 @@ class RemediationService:
                     # This copy now holds the owner's value; an
                     # instance finding on it later in the pass folds
                     # into this write rather than running (#496).
-                    self._owner_copies.add((id(instance), tag))
-                    folds += self._pending_folds.get((id(instance), tag), 0)
+                    # Whether the write removed it: a REMOVE folds only
+                    # into a removal, anything else only into a value.
+                    removed = value is None
+                    self._owner_copies[(id(instance), tag)] = removed
+                    folds += self._pending_folds.get((id(instance), tag, removed), 0)
                     written += 1
         return written, folds
 
@@ -1086,11 +1107,19 @@ class RemediationService:
         exactly this copy: the finding's own instance, at the top level,
         on the tag the owner wrote. A folded finding does not run.
 
+        A REMOVE folds only into a write that *removed* the copy, and a
+        REPLACE only into one that wrote a value (`_owner_copies` records
+        which). REMOVE was exempt until #537 made an owner's REMOVE
+        reachable: the owner's removal took the copy away, the instance's
+        own REMOVE then matched nothing and filed `REMEDIATION_DECLINED`,
+        and a correct outcome graded REVIEW_REQUIRED. An owner that wrote
+        a value does not absorb an instance REMOVE, which still runs and
+        removes the copy; one rule feeds both levels on every scanned path,
+        so that pairing only arises from a hand-built list.
+
         Three things never fold, each measured before this was written:
 
-        - **REMOVE.** It writes no second value, it is the policy's
-          explicit request, and it was already order-independent: it runs
-          after the owner's write, and the copy ends absent either way.
+        - **A mismatch of the two** above.
         - **A nested copy.** The owner's write and the exporter's stamp
           reach the dataset root only; a copy inside a sequence is the
           instance scan's to judge. There is no `entity_path` check for
@@ -1106,40 +1135,44 @@ class RemediationService:
           row already grades such a run REVIEW_REQUIRED.
         """
         proposal = finding.remediation_proposal
-        if proposal.action_type == "REMOVE_TAG":
-            return False
         # No "is this an instance?" check either, for the same reason as
         # the nested case: a Patient, a Study or a None entity is never in
         # `_owner_copies`, which holds only the instances the owner wrote
-        # -- so the lookup alone decides.
-        return (id(finding.entity), proposal.target_attr) in self._owner_copies
+        # -- so the lookup alone decides. `.get` is None for a copy no
+        # owner reached, and `None is True/False` is False.
+        removed = self._owner_copies.get((id(finding.entity), proposal.target_attr))
+        return removed is (proposal.action_type == "REMOVE_TAG")
 
     @staticmethod
     def _foldable_instance_findings(findings: list) -> dict:
         """The instance findings that fold if an owner's write reaches
-        their copy, counted per `(id(instance), tag)` (#496).
+        their copy, counted per `(id(instance), tag, removed)` (#496).
 
         Counted before the pass so an owner's audit row can name its folds
         when it is appended: the row is complete from the start, and no
         row is rewritten after the fact, which Pin A in
         `tests/test_frozen_surface.py` refuses. Distinct dedup keys only,
-        because a duplicate is skipped, not folded twice. REMOVE never
-        folds (see `_folds_into_owner`), so it is never counted. Only a
-        copy an owner's write reaches is ever asked for its count, so a
-        finding counted here whose copy no owner reaches costs nothing.
+        because a duplicate is skipped, not folded twice. `removed` is
+        whether the finding is a REMOVE, which folds only into an owner's
+        removal (see `_folds_into_owner`, #537): keyed on it, an owner that
+        removed counts only the REMOVEs waiting on its copies, and one that
+        wrote a value only the rest. Only a copy an owner's write reaches
+        is ever asked for its count, so a finding counted here whose copy
+        no owner reaches costs nothing.
         """
         pending = {}
         seen = set()
         for finding in findings:
             proposal = finding.remediation_proposal
-            if (not proposal or proposal.action_type == "REMOVE_TAG"
-                    or not hasattr(finding.entity, "set_attr")):
+            if not proposal or not hasattr(finding.entity, "set_attr"):
                 continue
-            key = (finding.entity_uid, finding.entity_path, proposal.target_attr)
+            removed = proposal.action_type == "REMOVE_TAG"
+            key = (finding.entity_uid, finding.entity_path, proposal.target_attr,
+                   removed)
             if key in seen:
                 continue
             seen.add(key)
-            copy = (id(finding.entity), proposal.target_attr)
+            copy = (id(finding.entity), proposal.target_attr, removed)
             pending[copy] = pending.get(copy, 0) + 1
         return pending
 

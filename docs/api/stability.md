@@ -178,7 +178,10 @@ no configuration, `phi_tags` is a copy of the floor policy,
 `profiles.FLOOR_POLICY`, and `audit()`/`anonymize()` apply it; a config
 with no `privacy_profile` line extends it, and one with
 `privacy_profile: none` opts out of it (#495). `set_phi_tag()`
-stores lowercase keys, as every other key in the policy is. What the
+stores lowercase keys, as every other key in the policy is, stores
+`replacement` as the rule's `value` (#538), and raises `ValueError`,
+leaving the policy and its file unchanged, for an unknown action or a
+rule `load_config` would refuse (below). What the
 floor and `privacy_profile: basic` contain is **not** frozen: the basic
 profile is PS3.15 Annex E Table E.1-1 of a named edition (2026c since
 0.9.8, #547), its membership follows that edition, and a change to it
@@ -211,9 +214,16 @@ instances it read in `n_sources`. `ValueError` from
 (not `.yaml`/`.yml`, YAML syntax, a root that is not a mapping, an
 unknown `privacy_profile`, an unknown `action`, a `phi_tags`,
 `date_jitter` or `machines` of the wrong shape, a rule
-`_validate_rule` rejects) and `FileNotFoundError` when it does not
-exist; after either, the configuration is exactly what it was before
-the call (#456).
+`_validate_rule` rejects, or a `phi_tags` rule Isocenter cannot honour:
+a Patient ID rule other than `KEEP` or `REPLACE` with no value, a
+`value:` under an action other than `REPLACE` or of a non-string type,
+a `replacement:` key, `SHIFT`/`JITTER` on a standard tag that is not DA
+or DT, or `REPLACE` on a standard tag whose VR cannot hold the value it
+would write -- #537, #538, #559, #560) and `FileNotFoundError` when it
+does not exist; after either, the configuration is exactly what it was
+before the call (#456). `audit()` without `config_path` raises the
+same `ValueError` for such a rule in `session.configuration.phi_tags`,
+before it creates a project secret.
 
 **Environment.** Every `ISOCENTER_*` name in
 [Environment Variables](../environment.md), its default and its

@@ -23,10 +23,15 @@ The measured cases and what each now ends at:
   finding is **folded** into the owner's write -- it does not run, the
   instance holds the owner's value, and the owner's audit row says how many
   were folded.
-- C REMOVE: still runs, after the owner's write, so the copy is absent in
-  both orders. Absent is no second value, and REMOVE is the policy's
-  explicit request (already order-independent before this fix).
-- D KEEP: no instance finding; the #492 write makes them agree.
+- C REMOVE: ran after the owner's write, so the copy was absent in both
+  orders. Since #537 the rule governs the owner too, the owner's removal
+  takes the copy away, and the instance's REMOVE folds into it, as A, B
+  and E do.
+- D KEEP: no finding on the owner or the copy; both keep the original
+  (#537; before, the owner was replaced and #492 wrote that onto them).
+
+Since #537 Patient ID can only be kept or pseudonymised, so EMPTY and
+REMOVE are exercised on the name and the date.
 - F the owner's own finding declines: nothing reached the copy, so the
   instance applies its own proposal. Suppressing it would leave the real
   original date in both frozen readers -- #492's leak -- and the owner's
@@ -59,8 +64,10 @@ PID = "P496"
 OWNED = ("0010,0010", "0010,0020", "0008,0020")
 ORDERS = ("scan-order", "reversed")
 REPLACE = {"0010,0010": "Patient Name", "0010,0020": "Patient ID"}
-EMPTY = {"0010,0010": {"action": "EMPTY"}, "0010,0020": {"action": "EMPTY"}}
-REMOVE = {"0010,0010": {"action": "REMOVE"}, "0010,0020": {"action": "REMOVE"}}
+# Patient ID may not be emptied or removed since #537 (the rule is
+# refused), so EMPTY and REMOVE are exercised on the name and the date.
+EMPTY = {"0010,0010": {"action": "EMPTY"}, "0008,0020": {"action": "EMPTY"}}
+REMOVE = {"0010,0010": {"action": "REMOVE"}, "0008,0020": {"action": "REMOVE"}}
 KEEP = {"0010,0010": {"action": "KEEP"}, "0010,0020": {"action": "KEEP"}}
 JITTER = {"0008,0020": {"action": "JITTER"}}
 REPLACE_DATE = {"0008,0020": "Study Date"}
@@ -162,14 +169,19 @@ def test_a_replace_policy_counts_the_owner_once_and_says_what_it_folded(tmp_path
 
 @pytest.mark.parametrize("order", ORDERS)
 def test_an_empty_policy_leaves_the_patients_value_on_every_instance(tmp_path, order):
-    """EMPTY on an owned tag never reached the file -- the exporter stamps
-    the Patient's value over it -- so the instance copy agrees with that."""
+    """The exporter stamps the owner's value on every file, so the instance
+    copy agrees with the owner's. Since #537 EMPTY governs the owner too:
+    both end empty (before, the owner kept `ANONYMIZED` and the copies
+    were written with it)."""
     with _built(tmp_path) as session:
         _anonymize(session, EMPTY, order)
         patient = session.store.patients[0]
+        study = patient.studies[0]
+        assert (patient.patient_name, study.study_date) == ("", "")
         for inst in _instances(session):
             assert inst.attributes["0010,0010"] == patient.patient_name
             assert inst.attributes["0010,0020"] == patient.patient_id
+            assert inst.attributes["0008,0020"] == ""
 
 
 @pytest.mark.parametrize("dates", [("20240101", "20240101"), ("20240101", "20240105")],
@@ -208,21 +220,98 @@ def test_the_end_state_does_not_depend_on_finding_order(tmp_path, policy):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("order", ORDERS)
-def test_a_remove_policy_still_removes_the_instance_copy(tmp_path, order):
-    """REMOVE is exempt from the fold: it writes no second value, it is the
-    policy's explicit request, and it was already order-independent. It
-    runs after the owner's write, so the copy is absent in both orders and
-    every REMOVE row survives."""
+def test_a_remove_policy_folds_into_the_owners_removal(tmp_path, order):
+    """C. Since #537 a REMOVE rule on the name or the date governs the
+    owner, and the owner's removal deletes the instance copies
+    (`_write_to_instances`, value None). The instance's own REMOVE on the
+    same copy then matched nothing and recorded `REMEDIATION_DECLINED ...
+    matched no applicable arm`, grading a correct outcome REVIEW_REQUIRED
+    (measured on ac33641 with hand-built findings). It now folds, as
+    REPLACE and EMPTY do: the copies are absent in both orders, no
+    decline, and each owner row names its folds.
+
+    Kills the REMOVE early return kept in `_folds_into_owner` (a declined
+    row appears) and the pending count keyed without `removed` (see
+    `test_a_remove_does_not_fold_into_a_written_owner`)."""
     with _built(tmp_path) as session:
-        assert _anonymize(session, REMOVE, order) == 7
+        # patient_name and study_date removed, patient_id pseudonymised;
+        # the four instance REMOVEs fold.
+        assert _anonymize(session, REMOVE, order) == 3
+        patient = session.store.patients[0]
+        assert patient.patient_name is None
+        assert patient.studies[0].study_date is None
         for copy in _copies(session):
             assert copy["0010,0010"] == "<absent>"
-            assert copy["0010,0020"] == "<absent>"
-    assert len(_audit_rows(tmp_path / "m.db", "REMEDIATION_REMOVE")) == 4
-    # The owners' rows claim no folds: nothing was folded into them.
-    owner_rows = _audit_rows(tmp_path / "m.db", "REMEDIATION_REPLACE")
-    assert len(owner_rows) == 2
-    assert not any("folded" in row for row in owner_rows), owner_rows
+            assert copy["0008,0020"] == "<absent>"
+        for inst in _instances(session):
+            assert inst.phi_status is PhiStatus.REMEDIATED
+        session.save(sync=True)
+        report = tmp_path / "r.md"
+        session.generate_report(str(report))
+    assert _audit_rows(tmp_path / "m.db", "REMEDIATION_DECLINED") == []
+    rows = _audit_rows(tmp_path / "m.db", "REMEDIATION_REMOVE")
+    assert len(rows) == 2, rows
+    for row in rows:
+        assert row.endswith("; removed from 2 instance copies; "
+                            "2 instance-level findings on this tag folded into it"), row
+    assert "**Grade Basis:** PASS" in report.read_text(encoding="utf-8")
+
+
+class _Rows:
+    """A store backend that keeps the audit rows it is handed."""
+
+    def __init__(self):
+        self.rows = []
+
+    def log_audit_batch(self, rows):
+        self.rows.extend(rows)
+
+    def log_audit(self, *row):
+        self.rows.append(row)
+
+
+def _hand_built(entity, tag, action, new_value=None, entity_type="Instance"):
+    from isocenter.privacy import PhiFinding, PhiRemediation
+    return PhiFinding(
+        entity_uid=getattr(entity, "sop_instance_uid", "owner"),
+        entity_type=entity_type, field_name=tag, value="v", reason="hand-built",
+        tag=tag, entity=entity,
+        remediation_proposal=PhiRemediation(action, tag, new_value=new_value))
+
+
+def test_a_remove_does_not_fold_into_a_written_owner():
+    """An owner that *wrote* a value does not absorb an instance REMOVE:
+    the copy holds the owner's value, and the policy asked for it gone.
+    Only reachable with hand-built findings (one rule feeds both levels
+    on every scanned path). And the other way round, an owner that
+    *removed* absorbs the REMOVE but not an instance REPLACE on the same
+    copy, which declines against the absent tag. Kills `_folds_into_owner`
+    ignoring `removed`, and the pending count keyed without it (the owner
+    row would claim 2 folds)."""
+    patient = _patient_with_one_instance(NAME, PID)
+    instance = patient.studies[0].series[0].instances[0]
+    backend = _Rows()
+    applied = RemediationService(store_backend=backend).apply_remediation([
+        _hand_built(patient, "patient_name", "REPLACE_TAG", "ANONYMIZED", "Patient"),
+        _hand_built(instance, "0010,0010", "REMOVE_TAG"),
+    ])
+    assert applied == 2
+    assert "0010,0010" not in instance.attributes
+    owner_row = next(r[2] for r in backend.rows if "patient_name" in r[2])
+    assert "folded" not in owner_row, owner_row
+    assert not [r for r in backend.rows if r[0] == "REMEDIATION_DECLINED"]
+
+    patient = _patient_with_one_instance(NAME, PID)
+    instance = patient.studies[0].series[0].instances[0]
+    backend = _Rows()
+    RemediationService(store_backend=backend).apply_remediation([
+        _hand_built(patient, "patient_name", "REMOVE_TAG", entity_type="Patient"),
+        _hand_built(instance, "0010,0010", "REMOVE_TAG"),
+        _hand_built(instance, "0010,0010", "REPLACE_TAG", "ANONYMIZED"),
+    ])
+    assert "0010,0010" not in instance.attributes
+    owner_row = next(r[2] for r in backend.rows if "patient_name" in r[2])
+    assert owner_row.endswith("; 1 instance-level finding on this tag folded into it"), owner_row
 
 
 @pytest.mark.parametrize("order", ORDERS)
@@ -241,15 +330,19 @@ def test_findings_handed_in_twice_fold_once(tmp_path, order):
 
 @pytest.mark.parametrize("order", ORDERS)
 def test_a_keep_policy_leaves_the_patients_value_on_every_instance(tmp_path, order):
-    """D. KEEP raises no instance finding, so there is nothing to fold;
-    the owner's #492 write alone makes the copies agree, and the scan's
-    CLEARED on the instances survives it."""
+    """D. KEEP raises no finding on the patient or on the copies, so the
+    name and ID are kept everywhere (#537: until 0.9.8 the patient was
+    anonymized whatever the rule said, and #492's write put its
+    replacement on the copies). The one remediation is the study date,
+    which has no rule; the scan's CLEARED on the instances survives its
+    write."""
     with _built(tmp_path) as session:
-        assert _anonymize(session, KEEP, order) == 3
+        assert _anonymize(session, KEEP, order) == 1
         patient = session.store.patients[0]
+        assert (patient.patient_name, patient.patient_id) == (NAME, PID)
         for inst in _instances(session):
-            assert inst.attributes["0010,0010"] == patient.patient_name
-            assert inst.attributes["0010,0020"] == patient.patient_id
+            assert inst.attributes["0010,0010"] == NAME
+            assert inst.attributes["0010,0020"] == PID
             assert inst.phi_status is PhiStatus.CLEARED
 
 
@@ -420,12 +513,15 @@ def test_a_copy_of_an_owners_replacement_is_not_skipped_without_an_owner():
 
 
 def test_an_owned_tag_remove_is_not_skipped_by_the_scan():
-    """REMOVE is exempt from the skip as it is from the fold: a copy of the
-    owner's replacement under a REMOVE rule is still removed."""
+    """REMOVE is exempt from the scan's skip: a copy of the owner's
+    replacement under a REMOVE rule is still raised, and folds into the
+    owner's removal. The name only: a REMOVE on Patient ID is refused
+    (#537)."""
     anon_id = "ANON_0123456789ab"
-    findings = PhiInspector(config_tags=REMOVE, project_secret=FIXED_A).scan_patient(
+    findings = PhiInspector(config_tags={"0010,0010": {"action": "REMOVE"}},
+                            project_secret=FIXED_A).scan_patient(
         _patient_with_one_instance("ANONYMIZED", anon_id))
-    assert _instance_tags(findings) == [("0010,0010", ()), ("0010,0020", ())]
+    assert _instance_tags(findings) == [("0010,0010", ())]
 
 
 def test_remediation_folds_only_a_copy_the_owners_write_reached():
@@ -513,17 +609,21 @@ def test_the_entity_first_sort_keeps_private_sequence_removals_deepest_first(tmp
     assert [row.split()[2] for row in rows] == [inner_tag, outer_tag], rows
 
 
-@pytest.mark.parametrize("policy", [REPLACE, EMPTY], ids=["replace", "empty"])
-def test_an_original_that_looks_like_a_replacement_is_not_a_finding(tmp_path, policy):
+def test_an_original_that_looks_like_a_replacement_is_not_a_finding(tmp_path):
     """The skip's cost, named (review of #508). A source file whose own
     PatientName is `ANONYMIZED` and PatientID `ANON_REAL77` raised 2
-    instance findings under REPLACE and 4 under EMPTY before #496, and
-    `anonymize()` returned 3 and 5. Now it raises none and returns 1, the
-    study date: the copies equal the Patient's values, and those pass
-    `scan_patient`'s replacement test, which is why the Patient itself was
-    never raised on them either. The copies keep the values."""
+    instance findings under REPLACE before #496, and `anonymize()`
+    returned 3. Now it raises none and returns 1, the study date: the
+    copies equal the Patient's values, and those pass `scan_patient`'s
+    replacement test, which is why the Patient itself was never raised on
+    them either. The copies keep the values.
+
+    REPLACE only since #537. The EMPTY case this also ran emptied Patient
+    ID, which is now refused, and an EMPTY rule on the name judges the
+    name by the rule it is under: `ANONYMIZED` is not empty, so the
+    patient and its copies are emptied, which is the rule's request."""
     with _built(tmp_path, name="ANONYMIZED", pid="ANON_REAL77") as session:
-        session.configuration.phi_tags = policy
+        session.configuration.phi_tags = REPLACE
         findings = list(session.audit())
         assert [f for f in findings if f.entity_type == "Instance"] == []
         assert session.anonymize(findings) == 1

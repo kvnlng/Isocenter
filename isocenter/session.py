@@ -23,9 +23,9 @@ from .services import (RedactionService, RedactionOutcome, RedactionError,
                        carry_phi_status_across_redaction,
                        _report_redaction_failures)
 from .config_manager import (ConfigLoader, _is_tag_key,
-                             require_package_resource)
-from .privacy import (PhiInspector, PhiFinding, PhiReport, _is_replacement_id,
-                      _is_replacement_name)
+                             require_package_resource, validate_phi_policy)
+from .privacy import (PhiInspector, PhiFinding, PhiReport, _holds_owned_replacement,
+                      _is_replacement_id, _is_replacement_name)
 from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_REMOVED,
                         GAP_RETAINED, GAP_UNRESOLVED)
@@ -2140,8 +2140,10 @@ class DicomSession:
             ValueError: If the file fails validation -- not `.yaml`/`.yml`,
                 YAML syntax, a root that is not a mapping, an unknown
                 `privacy_profile`, an unknown `action`, a `phi_tags`,
-                `date_jitter` or `machines` of the wrong shape, or a rule
-                `_validate_rule` rejects. Either way the configuration is
+                `date_jitter` or `machines` of the wrong shape, a rule
+                `_validate_rule` rejects, or a `phi_tags` rule the
+                pipeline cannot honour (`config_manager.validate_phi_policy`,
+                #537/#538/#559/#560). Either way the configuration is
                 exactly what it was before the call.
         """
         get_logger().info(f"Loading configuration from {config_file}...")
@@ -2378,6 +2380,12 @@ class DicomSession:
 
         Returns:
             PhiReport: An object containing valid PHI findings, iterable and exportable.
+
+        Raises:
+            ValueError: When the policy -- the file at `config_path`, or
+                `configuration.phi_tags` -- holds a rule the pipeline cannot
+                honour (`config_manager.validate_phi_policy`), before a
+                project secret is created (#537, #560).
         """
 
         # A scan ENDS by advancing `_revision` on every entity it
@@ -2409,6 +2417,11 @@ class DicomSession:
             # accepted, and a root-level tag file loaded tags the scan
             # then never matched.
             tags_to_use, _, _, _, _ = ConfigLoader.load_unified_config(config_path)
+        else:
+            # `configuration.phi_tags` can be assigned directly, which no
+            # loader sees. The same refusal the loader raises (#537, #560),
+            # and before the project secret below, for #456's reason.
+            validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
 
         # The project secret, once, in the parent, before any work: a
         # store holding dates shifted under a secret it no longer has
@@ -3475,8 +3488,20 @@ class DicomSession:
         # present is what gets stashed, so it alone is checked: a patient
         # reading ANONYMIZED beside copies that still hold the originals
         # has originals to stash.
+        #
+        # The constants alone stopped being enough in 0.9.8 (#537): the
+        # rule on Patient's Name and Patient ID now governs the patient, so
+        # `anonymize()` can leave a custom `value:` on the name, and that
+        # reads as no replacement by the constants. So the name and ID are
+        # also judged by the rule in force (`_holds_owned_replacement`, the
+        # scan's own test), and the constants stay ORed in for every tag,
+        # which is the lock's business and not the scan's. A blank is not
+        # judged here: it is the check below.
+        phi_tags = self.configuration.phi_tags
         for tag, val in original_attrs.items():
-            if _is_replacement_name(val) or _is_replacement_id(val):
+            if (_is_replacement_name(val) or _is_replacement_id(val)
+                    or (tag in ("0010,0010", "0010,0020") and str(val).strip()
+                        and _holds_owned_replacement(phi_tags, tag, val))):
                 raise RuntimeError(
                     f"lock_identities: patient {patient_id!r} already "
                     f"carries a replacement in {tag} ({val!r}), so there "
@@ -3484,6 +3509,27 @@ class DicomSession:
                     "identities before anonymize(), and do not re-lock a "
                     "patient after it; the token this call would have "
                     "written is unchanged.")
+
+        # A re-lock may not stash less than the token it replaces (#537).
+        # Under an EMPTY or REMOVE rule on the name, `anonymize()` leaves
+        # `""` or nothing, which no replacement test catches, and a lock
+        # taken after it would write a token without the name over one
+        # that held it. The existing token is read, not `tags_to_lock`: a
+        # tag it never held loses nothing, so a wider re-lock is allowed.
+        if first_instance is not None:
+            held = self.reversibility_service.recover_original_data(first_instance) or {}
+            for tag in tags_to_lock:
+                if not str(held.get(tag) or "").strip():
+                    continue
+                new = original_attrs.get(tag)
+                if new is None or not str(new).strip():
+                    lost = "nothing" if new is None else "an empty value"
+                    raise RuntimeError(
+                        f"lock_identities: patient {patient_id!r} already has a "
+                        f"locked identity holding {tag}, and this lock would "
+                        f"replace it with {lost}; lock identities before "
+                        "anonymize(), and do not re-lock a patient after it; "
+                        "the token this call would have written is unchanged.")
 
         # Optimization: Encrypt once per patient
         token = self.reversibility_service.generate_identity_token(

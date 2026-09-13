@@ -191,8 +191,23 @@ class IsocenterConfiguration:
         Args:
             tag (str): The DICOM tag to target (e.g. "0010,0010").
             action (str): The remediation action ('KEEP', 'REMOVE', 'REPLACE', 'JITTER', 'EMPTY').
-            replacement (str, optional): The replacement value if action is 'REPLACE'.
+            replacement (str, optional): The value `REPLACE` writes, stored
+                as the rule's `value` (#538). Until 0.9.8 it was stored
+                under a `replacement` key nothing read, and `ANONYMIZED`
+                was written.
+
+        Raises:
+            ValueError: For an unknown action, and for a rule the pipeline
+                cannot honour (`config_manager.validate_phi_policy`: a
+                Patient ID rule other than KEEP or REPLACE with no value,
+                a `replacement` under an action other than REPLACE,
+                SHIFT/JITTER on a standard tag that is not DA or DT, or
+                REPLACE on a standard tag whose VR cannot hold the value).
+                Raised before the policy or its file is changed.
         """
+        # Local: config_manager imports profiles, as this module does, and
+        # is the one home of the refusal text.
+        from .config_manager import validate_phi_policy  # pylint: disable=import-outside-toplevel
         # Lowercase, as every other key in the policy is (profiles.py's
         # header comment gives the reason). This was `tag.upper()`, so
         # `set_phi_tag("0008,103e", ...)` stored `0008,103E` beside the
@@ -216,7 +231,13 @@ class IsocenterConfiguration:
             "action": action
         }
         if replacement:
-            val["replacement"] = replacement
+            val["value"] = replacement
+
+        # Before the assignment and the save (#456): a refused rule leaves
+        # the policy and its file as they were. This refuses an unknown
+        # action too, with the loader's words; until 0.9.8 `OBLITERATE`
+        # was stored and scanned as REPLACE.
+        validate_phi_policy({tag: val}, "set_phi_tag")
 
         self.phi_tags[tag] = val
         self.save()

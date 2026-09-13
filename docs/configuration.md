@@ -26,8 +26,9 @@ Save this as `isocenter_config.yaml`:
 privacy_profile: "basic"
 
 # 2. Date Jitter
-# Range for the per-patient date shift, applied to Study Date and to
-# every tag whose rule is SHIFT or JITTER (consistent across studies).
+# Range for the per-patient date shift, applied to every tag whose rule
+# is SHIFT or JITTER (consistent across studies), and to Study Date under
+# no rule or REPLACE with no value.
 date_jitter:
   min_days: -30
   max_days: -10
@@ -74,7 +75,7 @@ privacy_profile: "basic"
 * **`basic`**: The Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c** (`BASIC_PROFILE` in `isocenter/profiles.py`, 620 tag rules). Each row maps to a rule: `X` removes the attribute; `Z`, and any code that allows zero length (`X/Z`, `Z/D`, `X/Z/D`), empties it, so a Type 2 attribute stays present; `D` empties it too. Isocenter has no dummy-value action yet ([#557](https://github.com/kvnlng/Isocenter/issues/557)), so an attribute that is Type 1 in its IOD (for example Verifying Observer Name in a Structured Report) is written zero-length, which makes that file non-conformant. A rule on a sequence removes the sequence, or empties it to zero items; identifiers nested inside any sequence are handled wherever they sit. It is **not** the whole of Annex E:
     * **UIDs are not replaced** ([#544](https://github.com/kvnlng/Isocenter/issues/544)). Study, Series and SOP Instance UIDs are exported as they were ingested (a redacted instance gets a new SOP Instance UID, and references to it are not updated), so an export can be linked back to its source by anyone who can see the source UIDs. The table's `U` rows have no rule.
     * Patient Identity Removed `(0012,0062)`, De-identification Method `(0012,0063)` and Longitudinal Temporal Information Modified `(0028,0303)` are not written ([#554](https://github.com/kvnlng/Isocenter/issues/554)).
-    * Patient's Name, Patient ID and Study Date are replaced by `anonymize()` whatever their rule says ([#537](https://github.com/kvnlng/Isocenter/issues/537)).
+    * Patient's Name and Patient ID are `REPLACE` rather than the table's `Z`: the name becomes `ANONYMIZED`, a dummy `Z` permits, and the ID becomes the keyed `ANON_` pseudonym, because a Patient ID rule may not empty or remove it ([#537](https://github.com/kvnlng/Isocenter/issues/537)). Study Date follows the table and is exported zero-length; the floor shifts it instead.
     * Deliberate departures from the table: Study and Series Description are emptied rather than removed, because the export directory names read them. Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned, and an icon is dropped when its pixels may show what redaction removed, in two tiers ([#542](https://github.com/kvnlng/Isocenter/issues/542)): an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a *different* instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export. The retired Curve groups `(50xx)` are not removed, and removing Overlay Data `(60xx,3000)` leaves the rest of its Overlay Plane module ([#556](https://github.com/kvnlng/Isocenter/issues/556)). Isocenter's own redaction note in Derivation Description `(0008,2111)` is kept; any other Derivation Description is removed. Private attributes are the `remove_private_tags` sweep, not a rule.
 
     The table removes or empties attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them `action: "KEEP"` to retain it. Membership follows the named edition and can change in a minor release; such a change is listed under **Breaking** in the changelog. A store anonymized under 0.9.7's 35-rule profile still reads as anonymized: run `audit()` and then `anonymize()` on it before exporting again ([#555](https://github.com/kvnlng/Isocenter/issues/555)). That removes what 0.9.8 removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source restores them.
@@ -87,13 +88,24 @@ A session that has loaded no configuration applies the **floor policy**, `FLOOR_
 
 **Omitting `privacy_profile` means the floor beneath your `phi_tags`.** A file with a few tags and no profile line extends the floor rather than replacing it, so a one-tag config cannot switch the floor off by accident. To opt a single tag out, give it `action: "KEEP"`; to opt out of the floor entirely, write `privacy_profile: "none"`.
 
-!!! warning "Three tags are not governed by `phi_tags`"
+!!! note "Patient's Name, Patient ID and Study Date"
 
-    Patient's Name `(0010,0010)`, Patient ID `(0010,0020)` and Study Date `(0008,0020)` belong to the patient and study, and `anonymize()` always replaces them -- the name with `ANONYMIZED`, the ID with an `ANON_` pseudonym, the study date with its per-patient shift -- under every profile, including `none`. A `KEEP`, `REMOVE`, `EMPTY` or `REPLACE` rule on one of them does not change the exported value ([#537](https://github.com/kvnlng/Isocenter/issues/537)).
+    These three belong to the patient and the study, and the exporter writes the patient's and study's value on every file. Their rule governs that value ([#537](https://github.com/kvnlng/Isocenter/issues/537); until 0.9.8 `anonymize()` replaced all three whatever the rule said):
+
+    | Rule | Patient's Name | Patient ID | Study Date |
+    | :--- | :--- | :--- | :--- |
+    | none, or `REPLACE` with no `value:` | `ANONYMIZED` | the keyed `ANON_` pseudonym | the per-patient shift |
+    | `REPLACE` with `value:` | the value | refused | the value (a valid DA) |
+    | `KEEP` | kept | kept | kept |
+    | `EMPTY` | zero-length | refused | zero-length |
+    | `REMOVE` | zero-length in the file; removed from the instance's own copy | refused | zero-length in the file; removed from the instance's own copy |
+    | `SHIFT` / `JITTER` | refused | refused | the per-patient shift |
+
+    `REMOVE` still writes the element, at zero length: both are Type 2 in their modules, so a file without them would not conform. A Patient ID rule other than `KEEP` or `REPLACE` with no value raises `ValueError`, because the ID is what keeps two patients apart and `anonymize()` merges patients that share one. On Study Date, the string form (`"0008,0020": "Study Date"`) is `REPLACE` with no value, and means the shift.
 
 ### Date Jitter
 
-Sets the range of the per-patient date shift. It is applied to Study Date and to every tag whose rule is `SHIFT` or `JITTER`; other date tags follow their own rule, and the `basic` profile *removes or empties* the dates Table E.1-1 names (Series, Acquisition, Content, Instance Creation and the rest) rather than shifting them. A date tag no rule names is exported as ingested: under `basic` or the floor that is a date the table does not name, and under `privacy_profile: none` it is every date your `phi_tags` leave out, so add a rule for any such date that must not leave the site.
+Sets the range of the per-patient date shift. It is applied to every tag whose rule is `SHIFT` or `JITTER`, and to Study Date when it has no rule or `REPLACE` with no value; other date tags follow their own rule, and the `basic` profile *removes or empties* the dates Table E.1-1 names (Series, Acquisition, Content, Instance Creation and the rest) rather than shifting them. A date tag no rule names is exported as ingested: under `basic` or the floor that is a date the table does not name, and under `privacy_profile: none` it is every date your `phi_tags` leave out, so add a rule for any such date that must not leave the site.
 
 * **Logic**: Isocenter derives each patient's offset from a secret it generates for the project and keeps inside the session store. The offset is the same for every study and series of that patient, so intervals survive, and it cannot be computed from the exported pseudonym, or from any other value the derivation uses, without that secret. That is a statement about the offset, not a guarantee that no exported date can be recovered: a date tag no rule shifts is exported as it was, UIDs that embed a date carry it ([#544](https://github.com/kvnlng/Isocenter/issues/544)), and a whole-day shift keeps the weekday. A patient a store de-identified before 0.9.7 keeps that store's unkeyed, computable offset (see the second Migration Guide link below). The offset is not random per run, and it hides absolute dates only from someone who holds neither the store nor the secret: a store and its exports must not travel together, because the store holds the secret and its audit log records each offset. From 0.9.7 the log file (`isocenter.log`) records neither original Patient IDs nor offsets. To keep offsets consistent across stores (for example, a later batch for the same patients, or re-ingesting an export), write the secret out of one store with `session.store_backend.write_project_secret(path)` and load it into the next with `load_project_secret(path)` before that store's first `audit()` ([Migration Guide](migration.md#carrying-a-project-secret-between-stores)). Within one store, a later batch for a patient already in it, ingested under its original Patient ID, joins that patient's studies when `anonymize()` gives it the same pseudonym, and its dates land on the same offset ([#548](https://github.com/kvnlng/Isocenter/issues/548)). Releases before 0.9.7 derived the offset without a secret, so it could be computed from an exported file ([Migration Guide](migration.md#stores-de-identified-before-097-ghsa-phg9-vcvc-j4r7)).
 * **Config**:
@@ -226,14 +238,21 @@ Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex stri
 
 | Action | Logic | Example Config |
 | :--- | :--- | :--- |
-| **`REPLACE`** | Replaces the value with `ANONYMIZED`. A `value:` key is accepted and not used ([#538](https://github.com/kvnlng/Isocenter/issues/538)). | `action: "REPLACE"` |
-| **`REMOVE`** | Completely deletes the tag from the dataset. | `action: "REMOVE"` |
-| **`EMPTY`** | Sets the tag value to an empty string. | `action: "EMPTY"` |
-| **`SHIFT`** | Applies the per-patient Date Jitter offset (Dates only). | `action: "SHIFT"` |
+| **`REPLACE`** | Replaces the value with its `value:`, or with `ANONYMIZED` when there is none ([#538](https://github.com/kvnlng/Isocenter/issues/538)). A tag's string form (`"0008,0080": "Institution Name"`) is `REPLACE` with no value. | `action: "REPLACE"`, `value: "Project-X"` |
+| **`REMOVE`** | Completely deletes the tag from the dataset. Patient's Name and Study Date are the exception: they are written at zero length (see the note above). | `action: "REMOVE"` |
+| **`EMPTY`** | Sets the tag value to an empty string (zero-length bytes for a binary VR). | `action: "EMPTY"` |
+| **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range) is left unchanged and recorded as declined ([#559](https://github.com/kvnlng/Isocenter/issues/559)). | `action: "SHIFT"` |
 | **`JITTER`** | Same as `SHIFT`. The generated scaffold and the floor policy use it for Study Date. | `action: "JITTER"` |
 | **`KEEP`** | Explicitly retains the original value (Exception to profile). | `action: "KEEP"` |
 
-Any other action makes `load_config()` raise `ValueError` naming the tag. The three patient- and study-owned tags above are not governed by these actions.
+Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
+
+* a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (the name `set_phi_tag` saved in 0.9.7; rename it `value:`);
+* a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
+* `SHIFT` or `JITTER` on a standard tag that is not DA or DT ([#559](https://github.com/kvnlng/Isocenter/issues/559));
+* `REPLACE` on a standard tag whose VR cannot hold what it writes -- `ANONYMIZED` in a DA, TM, DT, UI, AS, DS or IS, or any text in a binary or numeric VR ([#560](https://github.com/kvnlng/Isocenter/issues/560)). Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
+
+Private tags are not checked against a VR: the exporter writes a private value its VR cannot hold as `LO`.
 
 **Example:**
 
@@ -241,6 +260,7 @@ Any other action makes `load_config()` raise `ValueError` naming the tag. The th
 phi_tags:
   "0008,1030": { "action": "EMPTY", "name": "StudyDescription" }
   "0010,0030": { "action": "SHIFT", "name": "PatientBirthDate" }
+  "0008,0080": { "action": "REPLACE", "value": "Project-X", "name": "InstitutionName" }
 ```
 
 ### Pixel Redaction (Machines)
@@ -330,7 +350,7 @@ Update a rule by serial number.
 
 `set_phi_tag(tag, action, replacement=None)`
 
-Update the policy for a specific DICOM tag. `REPLACE` always writes `ANONYMIZED`; the `replacement` argument is stored in the policy and not currently applied ([#538](https://github.com/kvnlng/Isocenter/issues/538)).
+Update the policy for a specific DICOM tag. `replacement` is stored as the rule's `value:`, which `REPLACE` writes ([#538](https://github.com/kvnlng/Isocenter/issues/538)). An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
 
 ```python
 # Force removal of PatientWeight

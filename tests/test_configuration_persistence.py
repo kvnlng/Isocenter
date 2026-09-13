@@ -91,7 +91,10 @@ class TestConfigurationPersistence:
         phi = data.get("phi_tags", {})
         assert "0010,0010" in phi
         assert phi["0010,0010"]["action"] == "REPLACE"
-        assert phi["0010,0010"]["replacement"] == "John Doe"
+        # Stored as the rule's `value`, which REPLACE writes (#538); the
+        # `replacement` key it was saved under until 0.9.8 was never read.
+        assert phi["0010,0010"]["value"] == "John Doe"
+        assert "replacement" not in phi["0010,0010"]
 
         session.close()
 

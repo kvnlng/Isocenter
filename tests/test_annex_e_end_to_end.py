@@ -202,7 +202,10 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
     rows = {row["key"]: row for row in load_table()["rows"]}
     no_rule = set(NO_ENTRY) | {key for key, d in DEVIATIONS.items() if d["action"] is None}
     entity_owned = {key for key, d in DEVIATIONS.items() if d["authority"] == "#537"}
-    floor_keeps = {"0010,0040", "0010,1010"}   # Patient's Sex and Age
+    # The floor's research defaults: Patient's Sex and Age kept, Study
+    # Date jittered rather than the table's Z (the basic profile empties
+    # it since #537).
+    floor_keeps = {"0010,0040", "0010,1010", "0008,0020"}
 
     survivors = []
     for element in out.iterall():
@@ -216,7 +219,8 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
             survivors.append((_key(element.tag), row["name"], element.value))
     assert survivors == [], survivors
 
-    # The entity-owned three hold anonymize()'s own replacement (#537).
+    # The owned three hold the floor's replacements: its REPLACE rows on
+    # the name and ID, its JITTER on the date (#537).
     assert out.PatientName == "ANONYMIZED"
     assert re.fullmatch(r"ANON_[0-9a-f]{24}", out.PatientID), out.PatientID
     assert out.StudyDate and out.StudyDate != source.StudyDate

@@ -62,7 +62,7 @@ def test_basic_profile_is_derived_from_annex_e():
 
     assert len(BASIC_PROFILE) == 620
     assert collections.Counter(rule["action"] for rule in BASIC_PROFILE.values()) == {
-        "REMOVE": 466, "EMPTY": 154}
+        "REMOVE": 463, "EMPTY": 155, "REPLACE": 2}
 
 
 #: Rows read off PS3.15 2026c Table E.1-1 itself, not off the fixture: one
@@ -170,10 +170,15 @@ def test_every_deviation_names_its_reason_and_issue():
             f"{key}'s deviation rests on {symbol} in {path}, which is gone")
 
 
-def test_the_entity_owned_three_are_the_ones_537_decides():
-    """#537 changes these three rules in one place. Kills one dropped."""
-    assert {key for key, d in DEVIATIONS.items() if d["authority"] == "#537"} == {
-        "0010,0010", "0010,0020", "0008,0020"}
+def test_537s_two_deviations_are_the_patients_name_and_id():
+    """#537 decided the three owned rules: Study Date follows the table
+    (Z, so EMPTY), and Patient's Name and Patient ID depart from it to
+    REPLACE -- a dummy Z permits, and the keyed pseudonym, the only
+    replacement a Patient ID rule may ask for. Kills a third departure
+    kept on Study Date, and either of the two dropped."""
+    assert {key: d["action"] for key, d in DEVIATIONS.items()
+            if d["authority"] == "#537"} == {"0010,0010": "REPLACE",
+                                             "0010,0020": "REPLACE"}
 
 
 def test_the_configuration_page_names_the_fixture_edition():
