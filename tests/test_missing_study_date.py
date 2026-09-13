@@ -165,3 +165,29 @@ def test_an_absent_date_survives_a_save_and_reload(tmp_path):
             "no date")
     finally:
         reopened.close()
+
+
+@pytest.mark.parametrize("source_date", [None, ""], ids=["absent", "empty"])
+def test_a_ct_with_no_study_date_exports(tmp_path, monkeypatch, source_date):
+    """Study Date is Type 2 in General Study (PS3.3 C.7.2.1): present and
+    zero-length is conformant. `IODValidator` held it as Type 1, so a CT
+    whose source had no Study Date, or an empty one, failed its export
+    with `[Type 1 Error] Missing 0008,0020 in Common` and wrote 0 of 1 --
+    on a bare session, before any rule touched the tag. #537 makes it the
+    default path: the basic profile's own `EMPTY` on Study Date leaves
+    exactly this. Kills the validator's `'2'` restored to `'1'`."""
+    from support.ct_small_files import write_ct
+    from isocenter import Session
+
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    write_ct(tmp_path / "in" / "a.dcm", "P537", "537", study_date=source_date)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.anonymize(session.audit())
+        summary = session.export(str(tmp_path / "out"), use_compression=False)
+
+    assert summary.written == 1, summary.failures
+    (written,) = [p for p in (tmp_path / "out").rglob("*.dcm")]
+    ds = pydicom.dcmread(str(written))
+    assert "StudyDate" in ds
+    assert ds.StudyDate == ""
