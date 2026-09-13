@@ -97,7 +97,7 @@ def test_basic_profile_covers_datetime_twins_of_the_dates_it_removes():
         "acquisition and procedure timing that survives anonymize().")
 
 
-def test_basic_profile_datetime_twins_are_actually_set_to_remove():
+def test_basic_profile_datetime_twins_actually_carry_their_table_action():
     """Membership alone does not prove a tag is remediated.
 
     `test_basic_profile_covers_datetime_twins_of_the_dates_it_removes`
@@ -108,20 +108,25 @@ def test_basic_profile_datetime_twins_are_actually_set_to_remove():
     `"0040,0251"`'s action from `REMOVE` to `KEEP` survived the full suite
     with no test catching it. Assert the action explicitly for all five
     tags Task 1 (#38) added.
+
+    All five were REMOVE until #547. Acquisition DateTime is `X/Z/D` in
+    PS3.15 Table E.1-1, and every code with a `Z` arm empties, so it is
+    EMPTY; the four procedure step tags are `X`. Either action removes
+    the value, which is what this test is about.
     """
     required = {
-        "0008,002a": "Acquisition DateTime",
-        "0040,0244": "Performed Procedure Step Start Date",
-        "0040,0245": "Performed Procedure Step Start Time",
-        "0040,0250": "Performed Procedure Step End Date",
-        "0040,0251": "Performed Procedure Step End Time",
+        "0008,002a": "EMPTY",    # Acquisition DateTime, X/Z/D
+        "0040,0244": "REMOVE",   # Performed Procedure Step Start Date, X
+        "0040,0245": "REMOVE",   # Performed Procedure Step Start Time, X
+        "0040,0250": "REMOVE",   # Performed Procedure Step End Date, X
+        "0040,0251": "REMOVE",   # Performed Procedure Step End Time, X
     }
     wrong = {
         tag: BASIC_PROFILE[tag]["action"]
-        for tag in required
-        if BASIC_PROFILE[tag]["action"] != "REMOVE"
+        for tag, action in required.items()
+        if BASIC_PROFILE[tag]["action"] != action
     }
-    assert not wrong, f"expected action REMOVE for {required}; got {wrong}"
+    assert not wrong, f"expected {required}; got {wrong}"
 
 
 def test_basic_profile_keys_are_all_lowercase():
@@ -167,7 +172,7 @@ def test_documented_basic_profile_tag_count_matches_the_code():
     doc = pathlib.Path(__file__).resolve().parent.parent / "docs" / "waveforms.md"
     text = doc.read_text(encoding="utf-8")
 
-    # Matches the "**35 tags, 35 effective**" phrasing.
+    # Matches the "**620 tags, 620 effective**" phrasing.
     match = re.search(r"\*\*(\d+) tags, (\d+)\s+effective\*\*", text)
     assert match, (
         "could not find the Basic-profile tag-count sentence in "

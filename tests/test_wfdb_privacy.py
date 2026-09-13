@@ -443,7 +443,7 @@ def test_acquisition_and_procedure_step_timing_is_remediated_end_to_end(tmp_path
     casing does not match the lowercased ingested keys (#41), or if its
     action is silently wrong (mutating "0040,0251" from REMOVE to KEEP
     survived the full suite -- see test_profiles.py's
-    test_basic_profile_datetime_twins_are_actually_set_to_remove). This
+    test_basic_profile_datetime_twins_actually_carry_their_table_action). This
     asserts every one of the five values is gone from the object graph
     after a real remediation pass, not merely that the profile mentions
     the tags. Runs the documented Quick Start flow end-to-end:
