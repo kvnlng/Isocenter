@@ -266,8 +266,16 @@ class RemediationService:
         if proposal.action_type == "REPLACE_TAG":
             # Direct replacement
 
+            # 0. EMPTY on a sequence: zero items, not a "" attribute
+            # written beside it (#547).
+            if (proposal.new_value == "" and hasattr(entity, "clear_sequence_items")
+                    and proposal.target_attr in entity.sequences):
+                entity.clear_sequence_items(proposal.target_attr)
+                details = f"Emptied Sequence {proposal.target_attr} on {finding.entity_uid}"
+                action_type = "REMEDIATION_REPLACE"
+
             # 1. Generic DicomItem support (Instance, Series, etc.)
-            if hasattr(entity, "set_attr"):
+            elif hasattr(entity, "set_attr"):
                 # Tag ID is expected in proposal.target_attr (e.g. "0010,0010")
                 entity.set_attr(proposal.target_attr, proposal.new_value)
                 details = f"Remediated {

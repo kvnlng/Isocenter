@@ -412,6 +412,10 @@ class PhiInspector:
         # regardless of which future profile or config file introduces it.
         self.phi_tags = self._normalize_tag_keys(self.phi_tags)
         self._warn_on_bare_action_values()
+        # (tag, action) pairs already warned about as meaningless on a
+        # sequence, so an audit says it once rather than once per
+        # instance (#547).
+        self._sequence_actions_warned = set()
 
     # Action names a caller is most likely to write where a description
     # belongs, having read `Dict[str, str]` and reasonably concluded the
@@ -680,24 +684,9 @@ class PhiInspector:
                             action_type="REMOVE_TAG",
                             target_attr=seq_tag)))
 
-            # Deepest first, for the same reason the whole block is
-            # appended last: a private sequence can hold another one,
-            # and `iter_item_tree` yields the container before the thing
-            # inside it. In that order remediation deletes the outer
-            # sequence, and the inner finding -- whose `entity` was
-            # resolved before either ran -- then deletes from a dict
-            # that is no longer reachable from the instance and files a
-            # `REMEDIATION_REMOVE` row for it. The export is right
-            # either way; the audit trail is not, and "every row
-            # describes an item that was still in the graph" is the
-            # claim this ordering exists to keep. Stable, so sequences
-            # at equal depth keep the walk's order (#167).
-            seq_removals.sort(key=lambda f: len(f.entity_path),
-                              reverse=True)
-
         # 2. Configured PHI Tags
         if not self.phi_tags:
-            return findings + seq_removals
+            return findings + self._innermost_first(seq_removals)
 
         for item, tag, path in scan_targets:
             # Parse config
@@ -732,6 +721,20 @@ class PhiInspector:
             if (action_code != "REMOVE" and not path
                     and self._holds_owners_replacement(tag, val, patient, study)):
                 continue
+
+            # Isocenter's own redaction note is not PHI (#547). PS3.15
+            # Table E.1-1 removes Derivation Description, and redaction
+            # writes this exact value there; `export(check_burned_in=True)`
+            # re-audits and skips every entity with a finding, so without
+            # this no redacted instance would ever pass safe export. The
+            # value, not the tag: an operator's text here is still
+            # removed. Local import because `services` pulls in numpy and
+            # the pixel stack, and this runs only when the tag is present.
+            if tag == "0008,2111":
+                from .services import (  # pylint: disable=import-outside-toplevel
+                    _REDACTION_DERIVATION_DESCRIPTION)
+                if val == _REDACTION_DERIVATION_DESCRIPTION:
+                    continue
 
             # Determine if remediation is needed
             needs_remediation = False
@@ -859,7 +862,86 @@ class PhiInspector:
                     entity_path=path,
                     remediation_proposal=proposal
                 ))
-        return findings + seq_removals
+
+        # 3. Configured rules on sequence tags (#547). The loop above
+        # reads `attributes` alone, so until 0.9.8 a `REMOVE` or `EMPTY`
+        # on a sequence raised nothing and the sequence was exported with
+        # its items: every user rule on one, and 56 rows of Table E.1-1.
+        # Container findings, so into `seq_removals` with the private
+        # ones and for their reason -- remediated after anything raised
+        # inside them.
+        swept = {(id(f.entity), f.tag) for f in seq_removals}
+        for owner, path in iter_item_tree(instance):
+            for seq_tag in list(owner.sequences.keys()):
+                config_val = self.phi_tags.get(seq_tag)
+                # The private sweep already raised this one.
+                if not config_val or (id(owner), seq_tag) in swept:
+                    continue
+                if isinstance(config_val, dict):
+                    description = config_val.get("name", "Unknown Tag")
+                    action_code = config_val.get("action", "REPLACE").upper()
+                else:
+                    description = str(config_val)
+                    action_code = "REPLACE"
+
+                if action_code == "REMOVE":
+                    proposal = PhiRemediation(action_type="REMOVE_TAG",
+                                              target_attr=seq_tag)
+                elif action_code == "EMPTY":
+                    # Zero items is already empty, as `val != ""` is for
+                    # an attribute: a re-audit must read it clear.
+                    if not owner.sequences[seq_tag].items:
+                        continue
+                    proposal = PhiRemediation(action_type="REPLACE_TAG",
+                                              target_attr=seq_tag,
+                                              new_value="")
+                else:
+                    if (action_code != "KEEP" and (seq_tag, action_code)
+                            not in self._sequence_actions_warned):
+                        self._sequence_actions_warned.add((seq_tag, action_code))
+                        get_logger().warning(
+                            f"Rule {action_code} on {seq_tag} ({description}) "
+                            "has no meaning on a sequence and is not applied; "
+                            "use REMOVE, EMPTY or KEEP")
+                    continue
+
+                seq_removals.append(PhiFinding(
+                    entity_uid=instance.sop_instance_uid,
+                    entity_type="Instance",
+                    field_name=(f"{description} (Deep)" if owner is not instance
+                                else description),
+                    value="<SEQUENCE>",
+                    reason=f"Matched PHI Tag {seq_tag} ({description})",
+                    tag=seq_tag,
+                    patient_id=patient_id,
+                    entity=owner,
+                    entity_path=path,
+                    remediation_proposal=proposal))
+
+        return findings + self._innermost_first(seq_removals)
+
+    @staticmethod
+    def _innermost_first(seq_removals: List[PhiFinding]) -> List[PhiFinding]:
+        """The container findings, deepest first.
+
+        Deepest first, for the same reason the whole list is appended
+        last: a sequence can hold another one, and `iter_item_tree` yields
+        the container before the thing inside it. In that order
+        remediation deletes the outer sequence, and the inner finding --
+        whose `entity` was resolved before either ran -- then deletes from
+        a dict that is no longer reachable from the instance and files a
+        `REMEDIATION_REMOVE` row for it. The export is right either way;
+        the audit trail is not, and "every row describes an item that was
+        still in the graph" is the claim this ordering exists to keep.
+        Stable, so sequences at equal depth keep the walk's order (#167).
+
+        Applied on every return, not only when `remove_private_tags` is
+        on: it sat inside that block while private sequences were the only
+        container findings, and a configured sequence inside a configured
+        sequence needs the same order with the sweep off (#547).
+        """
+        return sorted(seq_removals, key=lambda f: len(f.entity_path),
+                      reverse=True)
 
     @staticmethod
     def _holds_owners_replacement(tag: str, value: Any, patient: Patient,
