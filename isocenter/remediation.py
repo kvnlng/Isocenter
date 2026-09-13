@@ -1213,108 +1213,108 @@ class RemediationService:
         offset = (val % span) + min_days
         return offset
 
+    #: The shapes `_shift_date_string` shifts (#559), matched whole and
+    #: ASCII-only. A DA, or a DT whose first eight digits are its date,
+    #: at any of DT's precisions; the non-standard dotted DT this parser
+    #: always accepted; and the ISO date and date-time.
+    _DA_OR_DT = (r"([0-9]{4})([0-9]{2})([0-9]{2})"
+                 r"(?:([0-9]{2})(?:([0-9]{2})(?:([0-9]{2})(?:\.[0-9]{1,6})?)?)?)?")
+    _DOTTED_DT = (r"([0-9]{4})([0-9]{2})([0-9]{2})"
+                  r"\.([0-9]{2})([0-9]{2})([0-9]{2})(?:\.[0-9]+)?")
+    _ISO = (r"([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})"
+            r"(?:([ T])([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}))?")
+
     @staticmethod
     def _shift_date_string(date_val, days: int) -> Optional[str]:
         """
-        Shifts a date by `days`.
+        Shifts a date by `days`, or returns None when `date_val` is not a
+        date this can shift -- which the `SHIFT_DATE` arm records as a
+        decline, and `_date_shift_declines` reads as "would decline".
 
-        Handles messy/varying input formats (DA, DT, ISO).
-        Preserves original format where possible.
+        A `date` or `datetime` is shifted as itself. A string is read by
+        shape, and only these shapes shift:
+
+        - `YYYYMMDD` (DA), and a DT that begins with one --
+          `YYYYMMDDHH`, `...HHMM`, `...HHMMSS`, `...HHMMSS.F` to six
+          fraction digits. The date moves; everything after it is
+          re-attached exactly as written.
+        - The dotted DT `YYYYMMDD.HHMMSS[.F...]` this parser has always
+          accepted, the same way.
+        - ISO `YYYY-MM-DD`, optionally with ` HH:MM:SS` or `THH:MM:SS`,
+          rendered zero-padded as before.
+
+        The time part must be a clock time (hour < 24, minute and second
+        < 60), and a shift that leaves years 1-9999 declines rather than
+        raising `OverflowError` into the pass.
+
+        **Why not `strptime` (#559).** This was a loop over strptime
+        formats, and `%Y%m%d` is not length-strict: it reads `072731`, a
+        Study Time, as the year 0727, so a JITTER rule on a TM wrote
+        `07270219`, a DA-shaped value, into the TM. A six-digit date
+        `230515` became `23041226`; an hour-precision DateTime
+        `2023051510` matched `%Y%m%d%H%M%S` as `2023 05 1 5 10` and came
+        back `20230421050100`, date and time both wrong. Each branch also
+        re-rendered with `strftime`, which turned a fraction of `.1` into
+        `.100000`, and a year below 1000 into three digits on Linux.
+
+        **The accept set only narrows.** Every value this shifted before
+        and shifted correctly is still shifted, to the same result but for
+        the two fraction spellings above; only the fabricating shapes
+        (TM-shaped, six- and seven-digit dates, a dotted time that is not
+        six digits) now decline. Widening it is not safe:
+        `_date_shift_declines` answers "would this shift" for the legacy
+        scan branch, which skips what would shift as already shifted, so
+        a wider parser silently skips PHI on a pre-0.9.6 store.
 
         Args:
             date_val (Union[str, date, datetime]): The original date value.
             days (int): Delta in days.
 
         Returns:
-            Optional[str]: The shifted date string (or object), same type as input.
+            Optional[str]: The shifted value (a `date`/`datetime` for one),
+                or None when the value is declined.
         """
-        # Handles date and datetime objects
+        # Local: the patterns are wanted on this path only, and `re`
+        # caches their compiled forms.
+        import re  # pylint: disable=import-outside-toplevel
+
         if hasattr(date_val, 'strftime'):
             return date_val + timedelta(days=days)
-
-        # Try parsing with multiple supported formats
-        # We process them in order of specificity
-        formats = [
-            "%Y%m%d",                # DA: 20230515
-            "%Y-%m-%d",              # ISO DA: 2024-05-11
-            "%Y%m%d%H%M%S",          # DT: 20230515104822
-            "%Y%m%d.%H%M%S",         # DT: 20230515.104822
-            "%Y%m%d%H%M%S.%f",       # DT: 20230515104822.123456
-            "%Y%m%d.%H%M%S.%f",      # DT: 20230515.104822.123456
-            "%Y-%m-%d %H:%M:%S",     # ISO DT: 2024-05-11 10:48:22
-            "%Y-%m-%dT%H:%M:%S"      # ISO T DT: 2024-05-11T10:48:22
-        ]
-
-        # Handle DICOM's potential for variable millisecond precision if needed
-        # But for now let's try standard formats.
-        # If the input contains fractional seconds that don't match %f (6 digits),
-        # we might need to pad/truncate, but let's assume standard behavior first
-        # based on the user provided example.
-        # Pro-tip: 20230515.104822.677 is 3 digits. %f expects zero-padded to 6 usually in strict parsing,
-        # but let's see. If it fails, we can add a pre-processing step.
-
-        # Actually, for robust DICOM DT handling with generic python strptime,
-        # we might need to handle the .FFFFFF part manually if it varies.
-        # Let's try to match exactly what we can.
-
-        date_str = str(date_val).strip()
-        if not date_str:
+        if date_val is None:
             return None
+        text = str(date_val).strip()
 
-        for fmt in formats:
+        def moved(year, month, day):
             try:
-                dt = datetime.strptime(date_str, fmt)
-                new_dt = dt + timedelta(days=days)
-                return new_dt.strftime(fmt)
-            except ValueError:
+                return datetime(int(year), int(month), int(day)) + timedelta(days=days)
+            except (ValueError, OverflowError):
+                return None
+
+        def is_clock_time(hour, minute, second):
+            return all(part is None or int(part) < limit
+                       for part, limit in ((hour, 24), (minute, 60), (second, 60)))
+
+        for pattern in (RemediationService._DA_OR_DT, RemediationService._DOTTED_DT):
+            match = re.fullmatch(pattern, text)
+            if match is None:
                 continue
+            shifted = moved(*match.group(1, 2, 3))
+            if shifted is None or not is_clock_time(*match.group(4, 5, 6)):
+                return None
+            return (f"{shifted.year:04d}{shifted.month:02d}{shifted.day:02d}"
+                    f"{text[8:]}")
 
-        # If we are here, we might have odd millisecond precision (e.g. .677)
-        # Attempt to handle flexible fractional seconds if a dot is present towards the end
-        if '.' in date_str:
-            # Try to separate main part and fractional part
-            # This is a basic fallback for proper DICOM DT like 20230515.104822.677
-            try:
-                # Naive check for the "dots" format
-                parts = date_str.split('.')
-                if len(parts) >= 3:  # YYYYMMDD.HHMMSS.mmmmmm
-                    # Re-assemble without fraction to shift, then append fraction?
-                    # No, shift might cross day boundary, so 'time' part doesn't change,
-                    # but 'date' part changes.
-                    # But if we cross DST? DICOM doesn't handle DST explicitly in DT usually, it's just local time.
-                    # Actually, simplest is:
-                    # 1. Parse just the date part (first 8 chars)
-                    # 2. Shift it
-                    # 3. Re-attach the rest?
-                    # That preserves time exactly, which is what 'SHIFT_DATE' usually intends (days delta).
-                    # Let's limit this special handling to when we know it's a date+time string
-                    # BOTH halves are load-bearing, and the length check
-                    # is the one that looks redundant and is not (#132).
-                    # `strptime` with `%Y%m%d` is NOT length-strict:
-                    # `"2023051"` parses as 2023-05-01 and `"230515"` as
-                    # 2305-01-05, raising nothing. So an all-digit
-                    # `parts[0]` of the wrong length reaches `strptime`
-                    # happily, and without `len(...) == 8` this branch
-                    # would shift a date the caller never wrote and
-                    # re-attach `date_str[8:]`, which is misaligned for
-                    # any length but 8. Measured with `or` substituted:
-                    # `"2023051.104822.1234567"` returns
-                    # `"20230511104822.1234567"` -- a fabricated value
-                    # that still looks like a DT -- where the real code
-                    # returns None and the caller declines to remediate.
-                    # Pinned by `test_remediation_dates.py::
-                    # test_a_malformed_date_part_is_declined_rather_than
-                    # _shifted_into_a_fabricated_one`.
-                    if len(parts[0]) == 8 and parts[0].isdigit():
-                        base_date = parts[0]
-                        rest = date_str[8:]  # everything after YYYYMMDD
-                        dt = datetime.strptime(base_date, "%Y%m%d")
-                        new_dt = dt + timedelta(days=days)
-                        return new_dt.strftime("%Y%m%d") + rest
-            except ValueError:
-                pass
-
-        return None
+        match = re.fullmatch(RemediationService._ISO, text)
+        if match is None:
+            return None
+        shifted = moved(*match.group(1, 2, 3))
+        if shifted is None or not is_clock_time(*match.group(5, 6, 7)):
+            return None
+        rendered = f"{shifted.year:04d}-{shifted.month:02d}-{shifted.day:02d}"
+        if match.group(4):
+            hour, minute, second = (int(part) for part in match.group(5, 6, 7))
+            rendered += f"{match.group(4)}{hour:02d}:{minute:02d}:{second:02d}"
+        return rendered
 
     def add_global_deid_tags(self, entity):
         """
@@ -1408,7 +1408,11 @@ def _date_shift_declines(value) -> bool:
     The answer is the arm's own parser rather than a second one, so the
     scan re-raises exactly what the arm declines: a DA range, a
     multi-valued DA, and a DT with a UTC offset are declined here the same
-    as `'notadate'`. Blank is False because the arm skips a blank value
+    as `'notadate'`. Since #559 the parser is length-strict, so a
+    TM-shaped value (`072731`) or a six-digit date, which it used to
+    misread as a date, now answers True here too: the legacy branch
+    re-raises it where it used to skip it, which is right, because the
+    arm never could shift it. Blank is False because the arm skips a blank value
     without a decline -- nothing is left behind -- and answering True
     would make this predicate disagree with the arm it models.
 
