@@ -23,7 +23,10 @@ loop. So the fix is a row, not plumbing -- and deliberately not a change
 to what `export()` returns: `session.export(format="wfdb")` returns
 `List[str]` consumed positionally at ~25 sites, and an attempted/written
 count would be a second result shape for a question the audit log
-already answers (#191 declined the format-dependent return).
+already answers (#191 declined the format-dependent return). #541 later
+added the one exception that list could not express: every attempted
+record failing raises `ExportError`, as the DICOM path does, after the
+rows; a partial failure still returns the list.
 
 The second test is the vacuity floor. Without it the new row could be a
 constant that every export writes, which would grade a clean run
@@ -34,6 +37,7 @@ import sqlite3
 import pytest
 
 from isocenter.exporters.wfdb import WfdbExporter
+from isocenter.io_handlers import ExportError
 from isocenter.session import DicomSession
 from scripts.generate_waveform_test_data import write_fixture
 
@@ -211,8 +215,8 @@ def test_a_clean_wfdb_export_writes_no_error_row(tmp_path):
         session.close()
 
 
-def test_a_failure_with_no_store_behind_it_does_not_raise(tmp_path,
-                                                          monkeypatch):
+def test_a_failure_with_no_store_behind_it_raises_export_error_not_attribute_error(
+        tmp_path, monkeypatch):
     """`_write_instance` is called directly, with `store_backend=None`.
 
     The split `io_handlers.py` already makes for `write_tree()`: the log
@@ -220,6 +224,14 @@ def test_a_failure_with_no_store_behind_it_does_not_raise(tmp_path,
     that wrote the row without checking would turn every session-less
     call -- the fixture generators in `scripts/`, and the exporter's own
     unit tests -- into an `AttributeError` on `None`.
+
+    Until #541 this asserted the call *returned* `[]`. Every attempted
+    record failing now raises `ExportError`, and it raises with or
+    without a store: the exception is the caller's channel, not the
+    store's, so guarding it on `store_backend` would hand a session-less
+    caller the empty success #541 is about. What this test still exists
+    for is that the raise is `ExportError` and not an `AttributeError`
+    on the missing store.
     """
     session = _session_with_two_ecgs(tmp_path, name="wfdb_nostore.db")
     try:
@@ -231,13 +243,121 @@ def test_a_failure_with_no_store_behind_it_does_not_raise(tmp_path,
         monkeypatch.setattr(WfdbExporter, "_write_instance", failing)
         monkeypatch.setattr(session, "store_backend", None, raising=False)
 
-        written = exporter.export(session, str(tmp_path / "out"))
+        with pytest.raises(ExportError) as raised:
+            exporter.export(session, str(tmp_path / "out"))
 
-        assert written == [], (
-            f"nothing should have been written: {written}")
+        assert raised.value.attempted == 2, raised.value.attempted
+        assert len(raised.value.failures) == 2, raised.value.failures
     finally:
         session.store_backend = None
         session.persistence_manager.shutdown()
+
+
+# --- #541: every attempted record failing is not an empty success ---------
+#
+# `WfdbExporter.export` returned `[]` when every record it attempted
+# failed -- the same value a store with no waveforms returns. The ERROR
+# rows and the REVIEW_REQUIRED grade were right, but a caller testing the
+# return saw an empty success. The DICOM path has raised `ExportError` for
+# that shape since #191; this is the same rule for the second format:
+# raised last, after every row, and never on a partial export or on one
+# that attempted nothing.
+
+
+def test_every_record_failing_raises_export_error_after_the_rows(
+        tmp_path, monkeypatch):
+    """Raised last: the ERROR rows and the EXPORT row are already written."""
+    session = _session_with_two_ecgs(tmp_path, name="wfdb_allfail.db")
+    try:
+        def failing(self, *args, **kwargs):
+            raise RuntimeError("waveform channel table is malformed")
+
+        monkeypatch.setattr(WfdbExporter, "_write_instance", failing)
+        folder = str(tmp_path / "out")
+        with pytest.raises(ExportError) as raised:
+            session.export(folder, format="wfdb")
+
+        assert folder in str(raised.value), str(raised.value)
+        assert len(_rows(session, "ERROR")) == 2, _rows(session, "ERROR")
+        exports = _rows(session, "EXPORT")
+        assert len(exports) == 1, exports
+        assert exports[0][1] == (
+            f"WFDB export to {folder}: wrote 0 records, 2 instances "
+            f"failed."), exports
+    finally:
+        session.close()
+
+
+def test_export_error_failures_name_each_instance(tmp_path, monkeypatch):
+    """`.failures` is the `(uid, detail)` list, one entry per record."""
+    session = _session_with_two_ecgs(tmp_path, name="wfdb_names.db")
+    try:
+        uids = sorted(i.sop_instance_uid for i in _instances(session))
+
+        def failing(self, *args, **kwargs):
+            raise RuntimeError("waveform channel table is malformed")
+
+        monkeypatch.setattr(WfdbExporter, "_write_instance", failing)
+        with pytest.raises(ExportError) as raised:
+            session.export(str(tmp_path / "out"), format="wfdb")
+    finally:
+        session.close()
+
+    failures = raised.value.failures
+    assert sorted(uid for uid, _detail in failures) == uids, failures
+    assert all("malformed" in detail and "\n" not in detail
+               for _uid, detail in failures), failures
+    assert raised.value.attempted == 2
+
+
+def test_a_partial_wfdb_failure_still_returns_the_written_list(
+        broken_first_instance, tmp_path):
+    """One of two fails: a real result, returned, not raised."""
+    session, _doomed = broken_first_instance
+    written = session.export(str(tmp_path / "out"), format="wfdb")
+    assert len(written) == 1, written
+
+
+def test_a_store_without_waveforms_returns_an_empty_list(tmp_path):
+    """Nothing attempted, nothing failed: `[]` is the true answer."""
+    import pydicom
+    from pydicom.data import get_testdata_file
+
+    src = tmp_path / "src"
+    src.mkdir()
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ds.save_as(str(src / "ct.dcm"))
+    session = DicomSession(persistence_file=str(tmp_path / "ct_only.db"))
+    try:
+        session.ingest(str(src))
+        written = session.export(str(tmp_path / "out"), format="wfdb")
+        errors = _rows(session, "ERROR")
+    finally:
+        session.close()
+
+    assert written == []
+    assert errors == []
+
+
+def test_a_waveform_without_samples_is_not_an_attempt(tmp_path):
+    """No samples is a #338 skip with its own row, not a failure (Q5)."""
+    session = _session_with_two_ecgs(tmp_path, name="wfdb_nosamples.db")
+    try:
+        instances = _instances(session)
+        for instance in instances:
+            instance.waveform_array = None
+            instance._waveform_loader = None
+            assert instance.get_waveform_data() is None
+        written = session.export(str(tmp_path / "out"), format="wfdb")
+        losses = _rows(session, "DATA_LOSS")
+        errors = _rows(session, "ERROR")
+    finally:
+        session.close()
+
+    assert written == []
+    assert errors == []
+    assert sorted(uid for uid, _d in losses) == sorted(
+        i.sop_instance_uid for i in instances), losses
 
 
 def test_an_instance_with_no_uid_is_still_named_in_the_row(tmp_path,
@@ -268,7 +388,13 @@ def test_an_instance_with_no_uid_is_still_named_in_the_row(tmp_path,
             raise RuntimeError("boom")
 
         monkeypatch.setattr(WfdbExporter, "_write_instance", failing)
-        session.export(str(tmp_path / "out"), format="wfdb")
+        # Every record fails, so since #541 the call raises after the
+        # rows; the fallback has to name the instance in the exception's
+        # failure list as well as in the row.
+        with pytest.raises(ExportError) as raised:
+            session.export(str(tmp_path / "out"), format="wfdb")
+        assert [uid for uid, _d in raised.value.failures] == [
+            "UNKNOWN", "UNKNOWN"], raised.value.failures
 
         errors = _rows(session, "ERROR")
         assert errors, "no ERROR row was written at all"

@@ -11,8 +11,8 @@ from typing import List, Optional
 import numpy as np
 
 from . import Exporter, register
-from ..io_handlers import (export_folder_names, format_study_date,
-                           LOSS_SCOPE_STANDARD)
+from ..io_handlers import (ExportError, export_folder_names,
+                           format_study_date, LOSS_SCOPE_STANDARD)
 from ..logger import get_logger
 from ..waveform import Waveform, WaveformChannel
 
@@ -337,9 +337,20 @@ class WfdbExporter(Exporter):
                 below.
 
         Returns:
-            List[str]: Paths of the `.hea` files written.
+            List[str]: Paths of the `.hea` files written. Empty when the
+            export attempted nothing -- no waveform instances in scope,
+            or only waveforms with no samples, each of which files its
+            own `STANDARD` `DATA_LOSS` row (#338). A partial export
+            returns the records that did reach disk.
 
         Raises:
+            io_handlers.ExportError: When at least one record was
+                attempted and none was written (#541), raised last,
+                after every `ERROR` row and the `EXPORT` row, with or
+                without a store behind the session. `.failures` names
+                each record as `(uid, detail)` and `.attempted` counts
+                the records that failed. Until #541 this returned `[]`,
+                indistinguishable from a store with no waveforms.
             TypeError: If `options` carries any name outside
                 `_WFDB_OPTIONS`. Until #410 an unrecognised option was
                 dropped without a word, so a mistyped `patient_ids`
@@ -382,6 +393,11 @@ class WfdbExporter(Exporter):
         store_backend = getattr(session, "store_backend", None)
         written = []
         failed = 0
+        # `(uid, detail)` per failed record, the shape `ExportError`
+        # carries (#541). `failed` alone could say that nothing was
+        # delivered but not which records, which is all a caller who
+        # catches the exception can act on.
+        failures = []
         used_names = {}  # out_dir -> set of record names already claimed
 
         for patient in session.store.patients:
@@ -437,6 +453,7 @@ class WfdbExporter(Exporter):
                             # what it is holding.
                             detail = " ".join(detail.split()).replace(
                                 "|", "\\|")
+                            failures.append((uid, detail))
                             logger.error(detail)
                             if store_backend is not None:
                                 # `log_audit`, never `log_audit_batch` --
@@ -476,6 +493,23 @@ class WfdbExporter(Exporter):
                          f"{failed} "
                          f"{'instance' if failed == 1 else 'instances'} "
                          f"failed."))
+        # Last, after every ERROR row and the EXPORT row, for the reason
+        # `_export_dicom` raises there (#191): a caller who catches this
+        # still holds a complete audit trail and a report grading
+        # REVIEW_REQUIRED (#541). Until #541 this returned `[]`, the same
+        # value as a store with no waveforms, so a caller testing the
+        # return saw an empty success.
+        #
+        # `failed and not written`, never `not written` alone: a store
+        # with no waveform instances, or waveforms with no samples (a
+        # #338 skip with its own STANDARD row), attempted nothing and
+        # `[]` is the truth about it. Never `failed` alone either: a
+        # partial export is a real result, and raising would discard the
+        # list naming what did reach disk. And not guarded on
+        # `store_backend`: the exception is the caller's channel, not
+        # the store's, so a session-less caller is owed it too.
+        if failed and not written:
+            raise ExportError(failures, failed, folder)
         return written
 
     @staticmethod
