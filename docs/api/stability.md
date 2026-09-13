@@ -110,7 +110,10 @@ keyword-only parameters with the same defaults (#379, Q10).
 
 **`Session` attributes.** `store` (a `DicomStore` whose `.patients` is
 the `List[Patient]` the quickstart indexes), `configuration` (an
-`IsocenterConfiguration`), `persistence_file`.
+`IsocenterConfiguration`), `persistence_file`. `anonymize()` and
+`recover_patient_identity()` merge two patients that end up with the
+same Patient ID into the one that was in the session first, removing the
+other from `store.patients` (#548).
 
 **Shapes the frozen methods return** (attribute names).
 `IngestSummary(ingested, failures, declined, skipped)` plus `failed`;
@@ -360,17 +363,15 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   Each item's `anonymized` is `true` when the last tag-policy PHI scan
   left no identifier unremediated on that instance's patient, study or
   instance, and none of the three has been edited since: each carries
-  `REMEDIATED` or `CLEARED` at its current revision (#486). Three things
+  `REMEDIATED` or `CLEARED` at its current revision (#486). Two things
   it is not. It is not "`anonymize()` ran": an input the scan found clean
   reads `true` after `audit()` alone. And it says nothing about burned-in
-  pixel text, which the tag scan does not read. And it does not see
-  inside sequences: `anonymize()` stamps the nested item it changed,
-  not the instance, so an instance whose only findings were inside a
-  sequence reads `false` until the next `audit()` records the instance
-  `CLEARED` (#494). `false` means the status does not establish it: a
-  session that never scanned, an entity edited since its scan, an
-  entity whose last pass declined a remediation on it, or that nested
-  case.
+  pixel text, which the tag scan does not read. A remediation inside a
+  sequence counts as one on its instance: the instance reads
+  `REMEDIATED` after `anonymize()`, or `IDENTIFIED` if anything on it or
+  inside it declined (#494). `false` means the status does not establish
+  it: a session that never scanned, an entity edited since its scan, or
+  an entity whose last pass declined a remediation on it or inside it.
 - **The `.pass.lock` / `.lock` file names**, the sidecar's `_pixels.bin`
   suffix, the audit table's columns, the schema's table names.
 

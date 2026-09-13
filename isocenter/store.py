@@ -3,10 +3,22 @@ Root of the Object Graph + Persistence Logic.
 """
 import os
 import pickle
-from typing import Dict, List, Set
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
-from .entities import Patient, Equipment, SOURCE_SOP_UID_ATTR
+from .entities import Patient, Equipment, PhiStatus, SOURCE_SOP_UID_ATTR
 from .logger import get_logger
+
+#: How much a status assures, least first, for a merge (#548): a patient
+#: made of several can claim no more than its least-assured member. A
+#: member never scanned (or edited since) is below one whose identifiers
+#: are known to be gone, and above one whose identifiers are known to be
+#: there.
+_MERGE_STATUS_RANK = {
+    PhiStatus.CLEARED: 0,
+    PhiStatus.REMEDIATED: 1,
+    PhiStatus.UNSCANNED: 2,
+    PhiStatus.IDENTIFIED: 3,
+}
 
 
 class DicomStore:
@@ -19,6 +31,108 @@ class DicomStore:
 
     def __init__(self):
         self.patients: List[Patient] = []
+
+    def _merge_patients_sharing_an_id(
+            self, drain: Optional[Callable[[], None]] = None) -> Tuple[int, int]:
+        """Make every Patient ID name one `Patient` object again (#548).
+
+        The store keeps one `patients` row per ID (`UNIQUE(patient_id)`),
+        so two objects with one ID are one patient whether or not memory
+        agrees. They arise when `anonymize()` gives a re-ingested study's
+        patient the pseudonym a stored patient already carries, or when
+        `recover_patient_identity(restore=True)` puts back an ID a raw
+        patient holds. Left in the graph, each object's scoped delete
+        removed the other's studies at the next save.
+
+        **Survivor.** The first object in `patients` order: hydrated
+        patients precede ingested ones and an earlier ingest precedes a
+        later one, so it is the one that came from the store whenever one
+        did. It keeps its identity and its `patient_name` (a differing
+        name draws one WARNING, counts only) and takes the others'
+        studies in order. Each other object is removed from `patients`
+        with its `studies` emptied, so a caller still holding one sees a
+        detached patient rather than a second parent of the same studies.
+
+        **Status.** The most conservative member's, ranked IDENTIFIED >
+        UNSCANNED > REMEDIATED > CLEARED, read from every member before
+        anything moves. Recorded on the survivor only when it differs, and
+        `record_phi_status` advancing the revision on a change is what
+        makes the save write it. The moved studies are not marked: the
+        save re-points their rows (`SqliteStore._reparent_studies`), and
+        marking them would claim an edit to the study that did not happen.
+
+        **Refusal.** A group whose members carry different jitter schemes
+        raises `RuntimeError` before `drain` is called or anything is
+        touched. A row holds one scheme, and either choice would give some
+        of that subject's dates a second offset or silently re-class a
+        legacy patient. Unreachable from `anonymize()` -- a keyed and an
+        unkeyed pseudonym differ in length -- and reachable through a
+        restore.
+
+        **Offsets need nothing.** The caller runs this after remediation,
+        and a pseudonym and its original seed one offset
+        (`privacy.canonical_patient_key`).
+
+        Args:
+            drain: Called once, only when there is something to merge,
+                after the refusal check and before the first mutation.
+                The session passes its persistence manager's `flush`: a
+                queued save snapshots the list, not the objects, and one
+                still holding a duplicate would walk it after its studies
+                moved and write its name and status over the survivor's.
+
+        Returns:
+            (patients merged away, studies moved).
+        """
+        groups: Dict[str, List[Patient]] = {}
+        for patient in self.patients:
+            groups.setdefault(patient.patient_id, []).append(patient)
+        groups = {pid: members for pid, members in groups.items()
+                  if len(members) > 1}
+        if not groups:
+            return 0, 0
+
+        mismatched = sum(
+            len(members) for members in groups.values()
+            if len({m._jitter_scheme for m in members}) > 1)
+        if mismatched:
+            raise RuntimeError(
+                f"{mismatched} patients in this session share a Patient ID "
+                "but were de-identified under different date-offset schemes; "
+                "merging them would give their dates two offsets")
+
+        if drain is not None:
+            drain()
+
+        merged = moved = renamed = 0
+        dropped = set()
+        for members in groups.values():
+            survivor, others = members[0], members[1:]
+            status = max((m.phi_status for m in members),
+                         key=_MERGE_STATUS_RANK.__getitem__)
+            for other in others:
+                if other.patient_name != survivor.patient_name:
+                    renamed += 1
+                survivor.studies.extend(other.studies)
+                moved += len(other.studies)
+                other.studies.clear()
+                dropped.add(id(other))
+                merged += 1
+            if survivor.phi_status is not status:
+                survivor.record_phi_status(status)
+        self.patients[:] = [p for p in self.patients if id(p) not in dropped]
+
+        logger = get_logger()
+        if renamed:
+            logger.warning(
+                f"{renamed} merged patient(s) carried a Patient Name different "
+                "from the patient they were merged into; the surviving "
+                "patient's name is kept and stamped on every study (#548)")
+        logger.info(
+            f"Merged {merged} {'patient' if merged == 1 else 'patients'} into "
+            "the patient already holding the same Patient ID; "
+            f"{moved} {'study' if moved == 1 else 'studies'} moved (#548)")
+        return merged, moved
 
     def get_unique_equipment(self) -> List[Equipment]:
         """

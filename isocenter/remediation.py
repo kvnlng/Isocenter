@@ -477,11 +477,27 @@ class RemediationService:
                 if folds:
                     details += (f"; {_count(folds, 'instance-level finding')} on this "
                                 f"tag folded into it")
+            # The instance holding a nested item this wrote (#494). An
+            # item has no link to its instance and `DicomItem.set_attr`
+            # moves only the item, so without this the instance neither
+            # read REMEDIATED nor had anything to save. The owner's
+            # `mark_modified()` looks redundant beside the stamp below and
+            # is not: an owner already reading REMEDIATED -- loaded that
+            # way, or stamped by an earlier call and saved since --
+            # short-circuits the stamp, and then this is the only thing
+            # that makes the save write the replacement inside it (#173,
+            # one level down). Before the stamp, for the reason the next
+            # comment gives.
+            owner = self._instance_owners.get(id(entity))
+            if owner is not None:
+                owner.mark_modified()
             # Recorded after the change, never before: remediation modifies
             # the entity, so a status stamped first would name a revision
             # the entity immediately leaves behind and would read as
             # UNSCANNED the moment anyone asked.
             entity.record_phi_status(PhiStatus.REMEDIATED)
+            if owner is not None:
+                owner.record_phi_status(PhiStatus.REMEDIATED)
             self.logger.info(self._log_line(action_type, finding, wrote))
             if self.store_backend:
                 if audit_buffer is not None:
@@ -592,6 +608,11 @@ class RemediationService:
         """
         if finding.entity is not None:
             self._declined_entities.append(finding.entity)
+            # A decline inside a sequence leaves the value in the
+            # instance, so the instance is demoted with the item (#494).
+            owner = self._instance_owners.get(id(finding.entity))
+            if owner is not None:
+                self._declined_entities.append(owner)
         details = f"Remediation declined for {finding.entity_uid}: {reason}"
         if not self.store_backend:
             return
@@ -632,6 +653,34 @@ class RemediationService:
         # one-truth treatment (#497 review, R7).
         "study_time": "0008,0030",
     }
+
+    #: `id(nested item) -> Instance` holding it, for the findings of this
+    #: pass raised inside a sequence (#494). Empty unless
+    #: `_use_instance_owners` is called, so a service used without a
+    #: session -- the direct tests, hand-built findings -- stamps the item
+    #: alone, as it always did: it has no graph to find an owner in, and
+    #: a guess from `entity_uid` could name the wrong one of two
+    #: instances sharing a UID. Never mutated in place; the setter
+    #: replaces it. Here rather than in `__init__` for `ENTITY_FIELD_TAGS`'
+    #: reason above: nothing is added above the five pinned lines (#310).
+    #: No reset in `apply_remediation` for the same reason, and none is
+    #: needed: `Session.anonymize()` builds a fresh service per call.
+    _instance_owners: dict = {}
+
+    def _use_instance_owners(self, owners: dict) -> None:
+        """Name the instance that holds each nested finding's item (#494).
+
+        A nested success then marks that instance modified and stamps it
+        REMEDIATED, and a nested decline names it for the pass-end
+        demotion, exactly as a top-level finding on the instance would.
+
+        What this does not do, deliberately (#553): the pass still speaks
+        only for the findings handed to it, so a partial list stamps an
+        owner REMEDIATED over findings it was not given, and a proposal
+        that raised demotes nothing -- both true of top-level findings
+        too, and decided there rather than here.
+        """
+        self._instance_owners = dict(owners)
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each
