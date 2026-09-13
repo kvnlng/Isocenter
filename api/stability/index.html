@@ -1502,7 +1502,10 @@ which until 0.9.4 it silently did not -- and are the batch method's own
 keyword-only parameters with the same defaults (#379, Q10).</p>
 <p><strong><code>Session</code> attributes.</strong> <code>store</code> (a <code>DicomStore</code> whose <code>.patients</code> is
 the <code>List[Patient]</code> the quickstart indexes), <code>configuration</code> (an
-<code>IsocenterConfiguration</code>), <code>persistence_file</code>.</p>
+<code>IsocenterConfiguration</code>), <code>persistence_file</code>. <code>anonymize()</code> and
+<code>recover_patient_identity()</code> merge two patients that end up with the
+same Patient ID into the one that was in the session first, removing the
+other from <code>store.patients</code> (#548).</p>
 <p><strong>Shapes the frozen methods return</strong> (attribute names).
 <code>IngestSummary(ingested, failures, declined, skipped)</code> plus <code>failed</code>;
 <code>ExportSummary(written_uids, failures)</code> plus <code>written</code>, <code>failed</code>;
@@ -1737,17 +1740,15 @@ in a 1.x release with a CHANGELOG entry naming both spellings:</p>
   Each item's <code>anonymized</code> is <code>true</code> when the last tag-policy PHI scan
   left no identifier unremediated on that instance's patient, study or
   instance, and none of the three has been edited since: each carries
-  <code>REMEDIATED</code> or <code>CLEARED</code> at its current revision (#486). Three things
+  <code>REMEDIATED</code> or <code>CLEARED</code> at its current revision (#486). Two things
   it is not. It is not "<code>anonymize()</code> ran": an input the scan found clean
   reads <code>true</code> after <code>audit()</code> alone. And it says nothing about burned-in
-  pixel text, which the tag scan does not read. And it does not see
-  inside sequences: <code>anonymize()</code> stamps the nested item it changed,
-  not the instance, so an instance whose only findings were inside a
-  sequence reads <code>false</code> until the next <code>audit()</code> records the instance
-  <code>CLEARED</code> (#494). <code>false</code> means the status does not establish it: a
-  session that never scanned, an entity edited since its scan, an
-  entity whose last pass declined a remediation on it, or that nested
-  case.</li>
+  pixel text, which the tag scan does not read. A remediation inside a
+  sequence counts as one on its instance: the instance reads
+  <code>REMEDIATED</code> after <code>anonymize()</code>, or <code>IDENTIFIED</code> if anything on it or
+  inside it declined (#494). <code>false</code> means the status does not establish
+  it: a session that never scanned, an entity edited since its scan, or
+  an entity whose last pass declined a remediation on it or inside it.</li>
 <li><strong>The <code>.pass.lock</code> / <code>.lock</code> file names</strong>, the sidecar's <code>_pixels.bin</code>
   suffix, the audit table's columns, the schema's table names.</li>
 </ul>
