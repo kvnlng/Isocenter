@@ -429,6 +429,59 @@ def test_empty_on_a_sequence_writes_a_zero_item_sequence_and_no_attribute(tmp_pa
     assert len(out[0x0008, 0x1110].value) == 0
 
 
+def test_a_nested_emptied_sequence_reaches_the_store_after_a_reload(tmp_path):
+    """The nested form of the reload test above, through a real store: an
+    instance a first pass left REMEDIATED and saved is reopened, audited
+    under an EMPTY rule on a sequence *inside* a sequence item, saved,
+    anonymized, saved and reopened. The clear moves only the nested item,
+    and the instance's REMEDIATED stamp short-circuits, so the instance
+    must be marked modified by the remediation's owner hook (#494) or the
+    save skips it and the items come back on reopen.
+
+    Red on #547 alone (one item back after reopen; the review measured the
+    same) and green with #561's owner hook. Here the owner's REMEDIATED
+    stamp is a status change -- the audit left the instance IDENTIFIED --
+    so the stamp alone advances the revision; the hook's
+    `mark_modified()` for an owner already REMEDIATED is #561's tests' to
+    hold.
+
+    Kills: the owner hook reverted (`_instance_owners` never consulted)."""
+    def add(ds):
+        ds.update(_nested_observer_dataset())
+    _ct_small_with(str(tmp_path / "in"), add)
+    db = str(tmp_path / "s.db")
+    owners = {"0010,0010": _rule("REMOVE"), "0010,0020": _rule("REMOVE"),
+              "0008,0020": _rule("REMOVE")}
+
+    with Session(db) as session:
+        session.configuration.remove_private_tags = False
+        session.configuration.phi_tags = dict(owners)
+        session.ingest(str(tmp_path / "in"))
+        session.anonymize(session.audit())
+        session.save(sync=True)
+
+    with Session(db) as session:
+        session.configuration.remove_private_tags = False
+        session.configuration.phi_tags = {
+            **owners, VERIFYING_OBSERVER_CODE: _rule("EMPTY")}
+        report = session.audit()
+        assert _findings_for(report, VERIFYING_OBSERVER_CODE), "setup: raised"
+        session.save(sync=True)
+        session.anonymize(report)
+        observer = (session.store.patients[0].studies[0].series[0]
+                    .instances[0].sequences[VERIFYING_OBSERVER].items[0])
+        assert observer.sequences[VERIFYING_OBSERVER_CODE].items == [], \
+            "setup: cleared in memory"
+        session.save(sync=True)
+
+    with Session(db) as session:
+        observer = (session.store.patients[0].studies[0].series[0]
+                    .instances[0].sequences[VERIFYING_OBSERVER].items[0])
+        assert observer.sequences[VERIFYING_OBSERVER_CODE].items == [], (
+            "the nested sequence was emptied in memory and came back from "
+            "the store: the instance was never saved")
+
+
 def test_empty_on_a_sequence_gone_before_anonymize_declines(tmp_path):
     """The audit sees the sequence; it is gone before the remediation
     runs. Red before: the sequence arm was gated on the tag being in
