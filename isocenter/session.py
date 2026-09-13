@@ -4447,7 +4447,9 @@ class DicomSession:
             two instances sharing one are two successful write
             operations and one file, the second having overwritten the
             first (#197). The WFDB exporter returns its own
-            `List[str]` of paths and is unchanged (#191 scopes it out).
+            `List[str]` of paths (#191 scopes the summary type out); an
+            empty list means nothing was attempted, because since #541 an
+            export that attempted records and wrote none raises instead.
             Every format's result must let a caller detect that nothing
             was written.
 
@@ -4461,11 +4463,15 @@ class DicomSession:
                 exported every patient. Nothing is written either way.
                 The two formats do not accept the same options, so a
                 caller forwarding one dict to both must split it.
-            io_handlers.ExportError: From the DICOM exporter, when zero
-                of N planned instances reached disk and at least one
-                failed. An empty plan -- zero of zero -- does not raise:
+            io_handlers.ExportError: From either exporter, when zero of
+                N attempted instances reached disk and at least one
+                failed -- the DICOM path since #191, the WFDB path since
+                #541. An empty plan -- zero of zero -- does not raise:
                 a subset that matched nothing is a fact about the run,
-                and the `EXPORT` audit row already carries it.
+                and the `EXPORT` audit row already carries it. Nor does
+                a DICOM export whose every instance the pre-export scan
+                withheld (#536): nothing was attempted, and its `WARNING`
+                rows grade the run.
         """
         from . import exporters
 

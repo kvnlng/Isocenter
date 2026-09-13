@@ -20,7 +20,7 @@ There is no command-line tool and none is planned. The Python API is the whole i
 The behaviours that matter most are refusals, so they come first.
 
 - **Modify a source file.** Ingest reads; anonymize and redact change an in-memory graph; nothing reaches disk until `export()` writes copies to a directory you name. A crashed or abandoned run leaves the originals exactly as they were.
-- **Grade a lossy export `PASS`.** Every step that can lose data writes an audit row, and the compliance report reads those rows. A cohort that lost a file, a private tag, a waveform group, or a pixel frame grades `REVIEW_REQUIRED` and names the loss. A DICOM export that wrote nothing raises `ExportError` rather than returning quietly; a WFDB export records each failed record as an `ERROR` row and returns the records it did write ([#541](https://github.com/kvnlng/Isocenter/issues/541)).
+- **Grade a lossy export `PASS`.** Every step that can lose data writes an audit row, and the compliance report reads those rows. A cohort that lost a file, a private tag, a waveform group, or a pixel frame grades `REVIEW_REQUIRED` and names the loss. An export that attempted instances and wrote none of them raises `ExportError` rather than returning quietly, in both the DICOM and WFDB formats; a partial export returns what it wrote, with an `ERROR` row for each failure ([#541](https://github.com/kvnlng/Isocenter/issues/541)).
 - **Pass through pixels it could not decode.** If a compressed frame cannot be decompressed, because of a missing codec or a corrupt stream, the export fails on that instance rather than copying bytes it never inspected.
 - **Advertise a Python version it does not test.** The suite runs on Python 3.12 and on the free-threaded 3.14t build on every pull request, and on all four supported versions at release. The classifiers on PyPI list only those, and a test fails if the matrix is narrowed without removing the classifier.
 
@@ -171,7 +171,7 @@ Remediation happens in memory, then export writes the result:
 
 1. **Anonymize**: strips, replaces, or shifts metadata tags according to your config.
 2. **Redact**: loads pixel data and scrubs the configured zones on matched machines.
-3. **Export**: writes clean files to a new directory. With `check_burned_in=True` the export runs `audit()` first and skips every instance that still carries an identifier. The skip is a logged warning only: it writes no audit row and is not counted in the report, which can grade a run that withheld everything `PASS` ([#536](https://github.com/kvnlng/Isocenter/issues/536)). Compare the returned summary against the cohort to see what was held back.
+3. **Export**: writes clean files to a new directory. With `check_burned_in=True` the export runs `audit()` first and withholds every instance that still carries an identifier. Each withheld instance writes a `WARNING` audit row naming it and the level that carried the identifier (never the value), counts as requested but not written ("1 of 2 requested"), and grades the run `REVIEW_REQUIRED` ([#536](https://github.com/kvnlng/Isocenter/issues/536)). An export that withheld everything returns an empty summary rather than raising.
 
 ```python
 # Apply metadata remediation (anonymization) using the findings

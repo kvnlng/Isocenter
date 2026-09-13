@@ -188,7 +188,7 @@ can arrive in a minor release, listed under Breaking in the changelog.
 with `.failures` (a list of `(entity_uid, details)`) and `.attempted`,
 raised after the whole pass; `ExportError(failures, attempted,
 folder=None)`, a `RuntimeError`, raised last and only when zero of N
-reached disk. `compact()` raises `RuntimeError` while a pass is open
+reached disk, by both the `dicom` and (since #541) the `wfdb` format. `compact()` raises `RuntimeError` while a pass is open
 (below); `redact()` raises `RuntimeError` on a `:memory:` store when
 the environment asks for worker recycling, after the persistence
 drain and before any work is done (#400). `audit()`, `anonymize()` and
@@ -266,6 +266,9 @@ audit table for strings that are never written there (#396).
   audit rows failed to write and were dropped, so the report
   under-counts what was done; either one costs the run its PASS.
 - The **`loss_scope` strings**: `STANDARD`, `PRIVATE`, `SIGNAL`.
+  The third is acquired content that was in the source and is not in the
+  export: a discarded waveform multiplex group (#150), or an icon dropped
+  because pixel data is redacted (#542).
 
 An existing string is never renamed or removed in 1.x; new strings may
 be added with a CHANGELOG entry. The *method* that returns the rows

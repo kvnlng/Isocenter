@@ -26,6 +26,18 @@ measured: every 8-bit YBR source, lossy or native, is decoded to RGB with
 the label left as declared. §16.6's reason for refusing lossy syntaxes
 ("a decoder whose colour-space behaviour nobody checked") is therefore
 gone for JPEG Baseline and JPEG 2000. Both clauses are struck in place.
+**Superseded in part:** #542 (v0.9.8). §8's redaction gate is no longer
+one store-wide boolean over every nested icon: the carrier's own depth-1
+Icon Image Sequence item is dropped only when that instance carries the
+attestation or has zones applied at export, and every other nested icon
+keeps a store-wide gate narrowed from "any configuration rule carry
+`redaction_zones`" to a zones rule that matches a series in the store.
+Struck in place: §8's condition and its recommendation (a) "Drop every
+nested icon"; §8's "`LOSS_SCOPE_STANDARD` by the parity rule" for the
+gate's row, which is now `SIGNAL`; and §16.4's
+`redaction_in_effect(instances, rules=None)`, "passes … the rules" and
+`ExportContext.drop_nested_icons` (now `redaction_in_effect(instances)`
+and `drop_foreign_icons`, with the matched-rule half in the session).
 **Base:** `main` at `007705d`
 **Measured with:**
 `/Users/kevin/Developer/Isocenter/.venv/bin/python` (CPython 3.14.6),
@@ -255,12 +267,16 @@ The workable condition is store-wide, ~~computed once in
 `_generate_export_contexts`~~ (**amended, see §16.4: there are two
 context builders and only one of them has a configuration**) and carried
 as one boolean on `ExportContext`: *does any instance in this store carry
-`_ISOCENTER_REDACTION_HASH`, or does any configuration rule carry
-`redaction_zones`?* Two options if it is true:
+`_ISOCENTER_REDACTION_HASH`, or does ~~any configuration rule carry
+`redaction_zones`~~?* (**Superseded by #542:** a zones rule counts only
+when it matches a series in the store.) Two options if it is true:
 
-- **(a) Conservative — recommended.** Drop **every** nested icon in the
-  export, each with its `DATA_LOSS` row. One boolean, one query, no path
-  analysis, and no way to be wrong in the unsafe direction.
+- **(a) Conservative — recommended.** ~~Drop **every** nested icon in the
+  export, each with its `DATA_LOSS` row.~~ One boolean, one query, no path
+  analysis, and no way to be wrong in the unsafe direction. (**Superseded
+  by #542:** the store-wide boolean now governs every nested icon *except*
+  the carrier's own depth-1 Icon Image Sequence item, which is dropped
+  only when that instance is redacted or has zones applied at export.)
 - **(b) Narrow.** Drop only icons whose path passes through `0008,1140`
   (and any other referencing sequence — Source Image Sequence
   `0008,2112`, Referenced Series Sequence `0008,1115`, …). Keeps
@@ -1222,8 +1238,11 @@ Three reasons for the item removal rather than a bare skip:
 3. Icon Image Sequence is Type 3 wherever the macro is included, so an
    absent sequence is conformant and an under-populated item is not.
 
-The scope for that row is `LOSS_SCOPE_STANDARD` by the parity rule
-(`7fe0` is even), consistent with every other row this family files.
+~~The scope for that row is `LOSS_SCOPE_STANDARD` by the parity rule
+(`7fe0` is even), consistent with every other row this family files.~~
+(**Superseded by #542:** the gate's row is `LOSS_SCOPE_SIGNAL`, an icon
+dropped because pixel data is redacted; the family's other rows stay
+`STANDARD`.)
 Whether a redaction-driven icon drop deserves `SIGNAL` is #150's
 question and must not be decided here as a ride-along — the emitter
 comment at `io_handlers.py:577-593` is explicit about that.
@@ -1544,9 +1563,9 @@ gate cannot be computed inside it: it is called from
 (`io_handlers.py`), which is the serializer and has no session behind
 it. A `Configuration` does not exist to consult there.
 
-So `redaction_in_effect(instances, rules=None)` is one function called
-at two sites. The session path passes the whole store's instances *and*
-the rules; `write_tree` passes the tree it is about to write and `None`,
+So ~~`redaction_in_effect(instances, rules=None)`~~ is one function called
+at two sites. The session path passes the whole store's instances ~~*and*
+the rules~~; `write_tree` passes the tree it is about to write and `None`,
 which applies the `_ISOCENTER_REDACTION_HASH` attestation half only.
 That is the right split rather than a shortfall: the attestation is a
 property of the graph, so the serializer can see it, while "a rule is
@@ -1554,7 +1573,11 @@ configured but has not run" is a pipeline fact the serializer has no
 access to by design.
 
 The boolean is still computed once per export and carried on
-`ExportContext.drop_nested_icons`, which is what Q10 asked for.
+~~`ExportContext.drop_nested_icons`~~, which is what Q10 asked for.
+(**Superseded by #542:** `redaction_in_effect(instances)` takes no rules;
+the session ORs in a zones rule that matches a series in the store, and
+the flag is `ExportContext.drop_foreign_icons`, which governs every nested
+icon but the carrier's own.)
 
 **Measured that the gate is load-bearing:** replacing
 `redaction_in_effect`'s body with `return False` turns six tests red,

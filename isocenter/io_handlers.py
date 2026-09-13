@@ -3261,7 +3261,9 @@ class ExportError(RuntimeError):
     """The export delivered nothing (#191).
 
     Raised by `session.export()` when **zero of N planned** instances
-    reached disk and at least one failed. Not on a partial export: two
+    reached disk and at least one failed, in both formats: the DICOM path
+    since #191, and `WfdbExporter.export` since #541, where N is the
+    waveform records attempted. Not on a partial export: two
     files out of three is a real, usable result, and raising would
     discard the summary that says which two and would have to decide the
     fate of files already written.

@@ -69,7 +69,7 @@ Remediation is a multi-stage process performed in-memory:
 
 1. **Anonymize**: Strips or replaces metadata tags (PatientID, Names, Dates) based on your config.
 2. **Redact**: Loads pixel data and scrubs burned-in PHI from defined regions.
-3. **Export**: The final "Gatekeeper". Writes clean files to a new directory. With `check_burned_in=True` the export runs `audit()` first and skips every instance that still carries an identifier, on itself or a parent, under the policy in force -- so on a session that has not run `anonymize()`, that is every instance carrying a value any rule of the policy would act on. The skip is a logged warning only: it writes no audit row and is not counted in the report, so a run that withheld every instance can still grade `PASS` ([#536](https://github.com/kvnlng/Isocenter/issues/536)). Compare the returned `ExportSummary` against the cohort to see what was held back.
+3. **Export**: The final "Gatekeeper". Writes clean files to a new directory. With `check_burned_in=True` the export runs `audit()` first and skips every instance that still carries an identifier, on itself or a parent, under the policy in force -- so on a session that has not run `anonymize()`, that is every instance carrying a value any rule of the policy would act on. Each withheld instance writes one `WARNING` audit row naming the instance and the level (patient, study, series or instance) that carried the identifier -- never the value -- so the report grades `REVIEW_REQUIRED` and lists each one in section 4. "Instances Written" counts withheld instances as requested ("1 of 2 requested"), and the `EXPORT` row says how many were withheld ([#536](https://github.com/kvnlng/Isocenter/issues/536)). An export that withheld everything returns an empty `ExportSummary` and does not raise: nothing failed. An instance outside `subset` is not withheld; it was never asked for.
 
 ```python
 # Apply metadata remediation (anonymization) using the findings
@@ -124,11 +124,17 @@ verification that same inadmissible label is written as declared with a
 verification on can cost you a file the default export would have
 delivered, by design.
 
-Once any instance in the store has been redacted, or any loaded rule has
-redaction zones, the export removes every small preview image (Icon Image
-Sequence) from every file it writes, redacted or not, because nothing
-scans or redacts icons. Each removal is a `DATA_LOSS` row and does not
-change the grade ([#542](https://github.com/kvnlng/Isocenter/issues/542)).
+Nothing scans or redacts a small preview image (an Icon Image Sequence
+item), so the export removes the ones that could show redacted pixels
+([#542](https://github.com/kvnlng/Isocenter/issues/542)). An instance's
+own icon is removed only from that instance's file, when the instance was
+redacted or has redaction zones applied by this export. Every other nested
+icon -- one under Referenced Image Sequence, for instance, which is a
+thumbnail of a different image -- is removed from every file once any
+instance in the store was redacted or a loaded rule's zones match a series
+in the store; a rule for a scanner the store does not hold removes
+nothing. Each removal is a `SIGNAL` `DATA_LOSS` row and grades the run
+`REVIEW_REQUIRED`.
 
 !!! warning "Redacted on 0.9.0 or earlier with a multi-zone rule?"
 

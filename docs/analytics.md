@@ -53,19 +53,20 @@ A per-instance manifest is not part of the report; it is a separate document wri
     or identify what went missing.
 
     A dropped **standard** element -- a large Overlay Data plane
-    `(60xx,3000)`, say, or a nested icon image removed by a redacting
-    export -- does not. Those come off ordinary images by the thousand,
+    `(60xx,3000)`, say -- does not. Those come off ordinary images by the thousand,
     so a grade that moved on them would read `REVIEW_REQUIRED` for most
     cohorts and stop carrying information.
 
     Read the Data Loss section on its own terms either way: its **Scope**
     column says which rows were graded -- `PRIVATE` and `SIGNAL` rows are,
     `STANDARD` rows are not -- and `unrecorded` means a row written by a
-    version that predated the distinction. `SIGNAL` is the one
-    standard-group loss that grades: a discarded waveform multiplex group
-    is acquired signal that was in the source and is not in the export
+    version that predated the distinction. `SIGNAL` is the
+    standard-group loss that grades: acquired content that was in the
+    source and is not in the export -- a discarded waveform multiplex group
     ([#150](https://github.com/kvnlng/Isocenter/issues/150); see
-    [Waveforms](waveforms.md)).
+    [Waveforms](waveforms.md)), or a nested icon image dropped because
+    pixel data is redacted
+    ([#542](https://github.com/kvnlng/Isocenter/issues/542)).
 
 !!! warning "Generate the report after `export()`"
 
