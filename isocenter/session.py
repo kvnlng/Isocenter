@@ -3514,8 +3514,11 @@ class DicomSession:
                             shifted by the patient's offset, so intervals are
                             intact and a later `audit()` does not shift it
                             again. A date among the locked tags is put back
-                            like any locked tag, and a later `audit()` raises
-                            it again.
+                            on the instances like any locked tag, and a later
+                            `audit()` raises it again -- except that Study
+                            Date stays shifted on the `Study`, and `export()`
+                            writes the study's value over the instance's, so
+                            the exported file carries it shifted (#566).
 
         Raises:
             RuntimeError: With `restore=True`, when a patient holding the
