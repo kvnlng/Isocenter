@@ -1494,22 +1494,23 @@ data rather than a footnote.</p>
 <li><strong>A bare <code>Session()</code>, never <code>load_config()</code>-ed.</strong> <code>phi_tags</code> is the
   floor policy, <code>FLOOR_POLICY</code> (<code>isocenter/profiles.py</code>): the basic
   profile below plus the three research defaults <code>create_config()</code>
-  writes (Study Date jittered, Patient's Sex and Age kept) -- 36 rules.
+  writes (Study Date jittered, Patient's Sex and Age kept) -- 620 rules.
   Until #495 this configuration applied no tag policy at all, and Study
   ID, Institution Name, Station Name and the series/acquisition/content
   dates reached the export.</li>
 <li><strong>The Quick Start above.</strong> <code>create_config()</code> scaffolds a config with
   <code>privacy_profile: basic</code>; <code>load_config()</code> expands that into
-  <code>PRIVACY_PROFILES["basic"]</code> (<code>isocenter/profiles.py</code>) -- <strong>35 tags, 35
-  effective</strong> -- covering patient identity, study/series dates and
-  times, and institution/physician fields, based on DICOM PS3.15 Annex
-  E's Basic Profile. This is what actually runs on the documented path.
+  <code>PRIVACY_PROFILES["basic"]</code> (<code>isocenter/profiles.py</code>) -- <strong>620 tags, 620
+  effective</strong> -- the Basic Profile column of DICOM PS3.15 Annex E Table
+  E.1-1 (2026c), with its departures named in
+  <a href="../configuration/#privacy-profile">Configuration</a>. This is what
+  actually runs on the documented path.
   <code>(0070,0006)</code> was the exception until 0.8.0: it lives inside Waveform
   Annotation Sequence, and the scan never opened sequences (#57), so it
   sat in the profile doing nothing. It fires now.
   The scaffold lists only the three research defaults beneath
   <code>privacy_profile: basic</code> -- the entries of the floor whose action
-  differs from the profile's -- so the loaded policy is the same 36
+  differs from the profile's -- so the loaded policy is the same 620
   rules a bare session applies.</li>
 <li><strong>Your own <code>phi_tags</code> configuration.</strong> With no <code>privacy_profile</code>
   line it is layered on the floor policy; with <code>privacy_profile: basic</code>
@@ -1529,8 +1530,9 @@ because the series description becomes a <strong>directory name</strong> -- ever
 <code>.hea</code>/<code>.dat</code>/<code>.annotations.json</code> this exporter writes lives inside it.</p>
 <p><strong>The three free-text surfaces specific to waveform export are now
 remediated in the exporter itself, not by profile membership</strong> -- the
-PHI scan is tag-gated (see above), so a profile entry alone would not
-protect a bare <code>Session()</code> that never called <code>load_config()</code>. Both are
+PHI scan is tag-gated (see above), so a profile entry alone protects
+only a session whose policy carries it: a bare <code>Session()</code> applies the
+floor since #495, but <code>privacy_profile: none</code> applies nothing. Both are
 handled unconditionally, regardless of which of the three
 configurations above you're in:</p>
 <ul>
@@ -1541,7 +1543,11 @@ configurations above you're in:</p>
   including genuinely operator-typed text -- is replaced with a
   positional <code>ch&lt;N&gt;</code> token instead of being written verbatim. <code>N</code> is
   the <strong>zero-based</strong> channel index, not DICOM's 1-based ChannelNumber
-  -- <code>ch1</code> is the <em>second</em> channel.</li>
+  -- <code>ch1</code> is the <em>second</em> channel. Channel Label is also removed by the
+  basic profile since 0.9.8 (PS3.15 Table E.1-1 gives it <code>X</code>), so on a
+  configured or bare session a channel with no coded Channel Source is
+  named <code>ch&lt;N&gt;</code> even when its label was a known lead name. Give
+  <code>(003A,0203)</code> <code>action: KEEP</code> to keep recognisable lead names.</li>
 <li><strong>Unformatted Text Value <code>(0070,0006)</code></strong> -- is omitted from the
   <code>note</code> field of <code>annotations.json</code> by default. It routinely holds
   free-text clinical commentary, so exporting it is opt-in: pass

@@ -1564,7 +1564,11 @@ no configuration, <code>phi_tags</code> is a copy of the floor policy,
 <code>profiles.FLOOR_POLICY</code>, and <code>audit()</code>/<code>anonymize()</code> apply it; a config
 with no <code>privacy_profile</code> line extends it, and one with
 <code>privacy_profile: none</code> opts out of it (#495). <code>set_phi_tag()</code>
-stores lowercase keys, as every other key in the policy is.</p>
+stores lowercase keys, as every other key in the policy is. What the
+floor and <code>privacy_profile: basic</code> contain is <strong>not</strong> frozen: the basic
+profile is PS3.15 Annex E Table E.1-1 of a named edition (2026c since
+0.9.8, #547), its membership follows that edition, and a change to it
+can arrive in a minor release, listed under Breaking in the changelog.</p>
 <p><strong>Exceptions.</strong> <code>RedactionError(failures, attempted)</code>, a <code>RuntimeError</code>,
 with <code>.failures</code> (a list of <code>(entity_uid, details)</code>) and <code>.attempted</code>,
 raised after the whole pass; <code>ExportError(failures, attempted,
@@ -1616,10 +1620,9 @@ for such a patient arriving in the same store is a keyed subject with
 a different offset. The offset is not derivable from the exported
 pseudonym, or from any other value its derivation uses, without the
 secret; that is not a promise that no exported date is recoverable
-(a date tag no rule shifts, such as Instance Creation Date
-<code>(0008,0012)</code>, is exported as ingested, and UIDs can embed dates,</p>
-<h1 id="544-the-project-secrets-file-format-write_project_secret-is">544). The project secret's file format (<code>write_project_secret</code>) is</h1>
-<p>not a data promise.</p>
+(a date tag no rule names is exported as ingested, and UIDs can
+embed dates, #544). The project secret's file format (<code>write_project_secret</code>) is
+not a data promise.</p>
 <p><strong>Output vocabularies.</strong> These are five separate vocabularies, not one
 list. The page conflated them until 0.9.5, and the category it gave was
 wrong for four of the thirteen words: it sent a reader looking in the
