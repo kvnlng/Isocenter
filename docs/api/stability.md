@@ -253,8 +253,9 @@ audit table for strings that are never written there (#396).
   `RISK`, `SCAN_GAP`, `WARNING`; and the four a remediation writes,
   `REMEDIATION_REPLACE`, `REMEDIATION_SHIFT_DATE` and
   `REMEDIATION_REMOVE` when it acts on a proposal and
-  `REMEDIATION_DECLINED` when it declines to, leaving the value it
-  targeted in the graph.
+  `REMEDIATION_DECLINED` when it declines to, or fails to, leaving the
+  value it targeted in the graph or partly written (a remediation that
+  raises writes one since #553).
 - The **remediation-proposal `action_type` strings**, carried on
   `PhiFinding.remediation_proposal`: `REMOVE_TAG`, `REPLACE_TAG`,
   `SHIFT_DATE`. These say what a proposal *will* do and are never an
@@ -376,8 +377,11 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   sequence counts as one on its instance: the instance reads
   `REMEDIATED` after `anonymize()`, or `IDENTIFIED` if anything on it or
   inside it declined (#494). `false` means the status does not establish
-  it: a session that never scanned, an entity edited since its scan, or
-  an entity whose last pass declined a remediation on it or inside it.
+  it: a session that never scanned, an entity edited since its scan, an
+  entity whose last pass declined a remediation on it or inside it (a
+  remediation that raised included), or one a pass left with a
+  remediation the session's last `audit()` raised against it still
+  unhandled -- a partial `anonymize(findings=...)` (#553).
 - **The `.pass.lock` / `.lock` file names**, the sidecar's `_pixels.bin`
   suffix, the audit table's columns, the schema's table names.
 
