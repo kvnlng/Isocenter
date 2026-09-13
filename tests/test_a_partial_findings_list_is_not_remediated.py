@@ -6,9 +6,10 @@ proposals it was given, whatever else the audit had raised against that
 entity. Measured on ac33641:
 
 - one of a CT instance's 202 top-level findings handed in: the instance
-  read `REMEDIATED` with the other 201 identifiers still in it;
-- the nested findings only: `REMEDIATED`, with every top-level
-  identifier still in place;
+  read `REMEDIATED`, with 21 of its tags still holding their original
+  values;
+- the nested findings only: `REMEDIATED`, with the top-level identifiers
+  still in place;
 - the patient ID finding only: the patient `REMEDIATED`, its name still
   the original.
 
