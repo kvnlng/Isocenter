@@ -192,6 +192,53 @@ def test_a_pixel_representation_edit_over_a_written_resident_array_reads_as_decl
     _same(_reopened_read(db), declared)
 
 
+def test_a_read_in_flight_at_the_edit_is_re_read_under_the_new_declaration(
+        ingested, monkeypatch):
+    """A frame read under a capture the edit has since left is not published.
+
+    The edit reconciles what is resident *at the edit*, and an empty slot
+    is a plain write. A read that has already passed `describes()` and is
+    inside `loader()` then publishes the frame it read under the old
+    declaration into the empty slot, and it sticks: every later read
+    returns it, and a save dedups the same bytes under the new
+    descriptors, so the reopened store disagrees with the live session.
+    Measured on 5244480 with four reader threads and a writer flipping
+    PixelRepresentation: 92 of 200 trials ended with the resident dtype
+    against the declaration on 3.14t (review of #628). The window is the
+    written arm's own hand-off -- `unload_pixel_data()` empties the slot
+    so that the next read rebuilds -- so it opens on every edit over
+    written pixels.
+
+    Driven with no race: the loader's `__call__` makes the edit just
+    before it returns, which is the interleaving a second thread
+    produces. The publish must see the capture it read through go stale
+    and re-read, so the first read already answers as the declaration
+    reads, and so do the saved and the reopened store.
+    """
+    session, inst, db = ingested
+    real = SidecarPixelLoader.__call__
+    fired = []
+
+    def edit_in_flight(loader):
+        arr = real(loader)
+        if not fired:
+            fired.append(1)
+            inst.set_attr(PR, 1)
+        return arr
+
+    monkeypatch.setattr(SidecarPixelLoader, "__call__", edit_in_flight)
+
+    got = inst.get_pixel_data()
+
+    assert fired == [1], "the edit never landed inside the read"
+    assert inst.attributes[PR] == 1
+    _same(got, ORIGINAL.view(np.int16))
+    assert inst.pixel_array is got
+    _same(inst.get_pixel_data(), ORIGINAL.view(np.int16))
+    session.save(sync=True)
+    _same(_reopened_read(db), ORIGINAL.view(np.int16))
+
+
 def test_a_rows_edit_republishes_the_same_bytes_in_the_declared_shape(ingested):
     """The reshape half of the republish, from a descriptor a bypass wrote.
 
@@ -242,8 +289,9 @@ def test_a_bits_allocated_edit_the_unsaved_array_cannot_satisfy_is_refused_and_l
     """M26, M27: refused, in these words, with nothing written.
 
     Written, the edit saves a frame no later read, export or reopen can
-    load (#531's third row). The message names tags, dtypes, shapes and
-    byte counts, and nothing a patient's file carried.
+    load (#531's third row). The message names the tag, the dtypes and
+    the byte counts, and neither the value nor anything a patient's file
+    carried.
     """
     session, inst, db = ingested
     inst.set_pixel_data(UNSIGNED.copy())
@@ -255,10 +303,10 @@ def test_a_bits_allocated_edit_the_unsaved_array_cannot_satisfy_is_refused_and_l
         inst.set_attr(BITS, 8)
 
     assert str(refused.value) == (
-        "BitsAllocated 8 would read the unsaved uint16 (4, 4) array set by "
-        "set_pixel_data() as (4, 4) uint8: 16 1-byte samples, 16 bytes, and "
-        "the array holds 32. Pass the array you mean to set_pixel_data(), "
-        "which writes its own descriptors.")
+        "BitsAllocated would read the unsaved uint16 (4, 4) array set by "
+        "set_pixel_data() as 16 1-byte uint8 samples, 16 bytes, and the "
+        "array holds 32. Pass the array you mean to set_pixel_data(), which "
+        "writes its own descriptors.")
     assert inst.attributes == attributes
     assert inst._revision == revision
     assert inst.pixel_array is resident
@@ -291,29 +339,34 @@ def test_every_described_descriptor_is_reconciled(ingested, tag, value,
         inst.set_attr(tag, value)
 
     assert str(refused.value) == (
-        f"{keyword} {value} would read the unsaved uint16 (4, 4) array set "
-        f"by set_pixel_data() as {shape} {dtype}: {samples} {itemsize}-byte "
-        f"samples, {samples * itemsize} bytes, and the array holds 32. Pass "
-        f"the array you mean to set_pixel_data(), which writes its own "
+        f"{keyword} would read the unsaved uint16 (4, 4) array set by "
+        f"set_pixel_data() as {samples} {itemsize}-byte {dtype} samples, "
+        f"{samples * itemsize} bytes, and the array holds 32. Pass the "
+        f"array you mean to set_pixel_data(), which writes its own "
         f"descriptors.")
     assert inst.attributes == attributes
+    assert f"as {shape}" not in str(refused.value), "the target shape repeats the value"
 
 
+@pytest.mark.parametrize("value", [PATIENT_NAME, [4], {"a": 1}],
+                         ids=["a name", "a list", "a mapping"])
 def test_an_unparseable_descriptor_over_an_unsaved_array_is_refused_without_its_text(
-        ingested):
+        ingested, value):
     """No reading, no write, and the refused value is not echoed.
 
     A descriptor that does not parse as an integer gives the loader
     nothing to read by, so a save would store a frame nothing can load.
     The value is left out of the message: it came from a caller and may
-    be anything, and this text reaches audit rows.
+    be anything, and this text reaches audit rows. A list is what a
+    pydicom MultiValue arrives as, and `int()` of one is a `TypeError`,
+    not a `ValueError`; both are the same refusal.
     """
     _session, inst, _db = ingested
     inst.set_pixel_data(UNSIGNED.copy())
     attributes = dict(inst.attributes)
 
     with pytest.raises(ValueError) as refused:
-        inst.set_attr(ROWS, PATIENT_NAME)
+        inst.set_attr(ROWS, value)
 
     assert str(refused.value) == (
         "Rows does not parse as an integer, so the unsaved uint16 (4, 4) "
@@ -323,15 +376,98 @@ def test_an_unparseable_descriptor_over_an_unsaved_array_is_refused_without_its_
     assert inst.attributes == attributes
 
 
+def test_an_edit_beside_a_descriptor_a_bypass_left_unparseable_names_that_descriptor(
+        ingested):
+    """The refusal blames the descriptor that does not parse, not the edit.
+
+    A writer that goes straight to `attributes` can leave Rows holding
+    text. An edit to PixelRepresentation then has no reading before or
+    after it, and is refused -- not written, which would be a descriptor
+    edit over unsaved pixels with no reconciliation at all -- and the
+    refusal names Rows, which failed, rather than the tag that parsed.
+    Review of #628, P1 and P5.
+    """
+    _session, inst, _db = ingested
+    inst.set_pixel_data(UNSIGNED.copy())
+    inst.attributes[ROWS] = PATIENT_NAME
+    attributes = dict(inst.attributes)
+
+    with pytest.raises(ValueError) as refused:
+        inst.set_attr(PR, 1)
+
+    assert str(refused.value) == (
+        "Rows does not parse as an integer as it stands, so the unsaved "
+        "uint16 (4, 4) array set by set_pixel_data() has no reading under "
+        "the PixelRepresentation edit. Pass the array you mean to "
+        "set_pixel_data(), which writes its own descriptors.")
+    assert PATIENT_NAME not in str(refused.value)
+    assert inst.attributes == attributes
+
+
+_EMPTY_READS_AS = {ROWS: 0, COLS: 0, SAMPLES: 1, FRAMES: 0, BITS: 8, PR: 0}
+
+
+@pytest.mark.parametrize("tag", list(_EMPTY_READS_AS))
+def test_an_empty_descriptor_reads_as_the_loader_reads_it(tag):
+    """The defaults the refusal names for an empty value are the loader's."""
+    base = {ROWS: 4, COLS: 4, SAMPLES: 1, FRAMES: 1, BITS: 16, PR: 0}
+    for empty in ("", b"", None):
+        assert (SidecarPixelLoader.reading_of({**base, tag: empty})
+                == SidecarPixelLoader.reading_of(
+                    {**base, tag: _EMPTY_READS_AS[tag]}))
+
+
+@pytest.mark.parametrize("value", ["", b"", None], ids=["str", "bytes", "None"])
+def test_an_empty_descriptor_over_an_unsaved_array_is_refused_as_what_it_reads_as(
+        ingested, value):
+    """An `EMPTY` on Rows is told the loader reads an empty value as 0.
+
+    The size arithmetic was already the loader's own; a caller who wrote
+    `""` was told about a `0` they never passed. Review of #628, P2.
+    """
+    _session, inst, _db = ingested
+    inst.set_pixel_data(UNSIGNED.copy())
+    attributes = dict(inst.attributes)
+
+    with pytest.raises(ValueError) as refused:
+        inst.set_attr(ROWS, value)
+
+    assert str(refused.value) == (
+        "An empty Rows reads as 0, and would read the unsaved uint16 (4, 4) "
+        "array set by set_pixel_data() as 0 2-byte uint16 samples, 0 bytes, "
+        "and the array holds 32. Pass the array you mean to "
+        "set_pixel_data(), which writes its own descriptors.")
+    assert inst.attributes == attributes
+
+
+@pytest.mark.parametrize("value", [1965, "1965"], ids=["int", "digits"])
+def test_a_parsed_value_is_not_echoed_either(ingested, value):
+    """The integer branch names sizes, and never the value.
+
+    A `REPLACE` rule can carry a config- or patient-derived integer to a
+    descriptor, and #560's VR check admits digits a US tag can hold, so
+    this text reaches an audit row through `apply_remediation`. Neither
+    branch echoes the value. Review of #628, P3.
+    """
+    _session, inst, _db = ingested
+    inst.set_pixel_data(UNSIGNED.copy())
+
+    with pytest.raises(ValueError) as refused:
+        inst.set_attr(ROWS, value)
+
+    assert "1965" not in str(refused.value), str(refused.value)
+    assert str(refused.value).startswith("Rows would read the unsaved ")
+
+
 def test_a_float_rows_edit_the_unsaved_array_cannot_satisfy_is_refused(ingested):
     """The carrier fixes the dtype; it does not exempt the geometry."""
     _session, inst, _db = ingested
     inst.set_pixel_data(np.zeros((4, 4), np.float32))
     attributes = dict(inst.attributes)
 
-    with pytest.raises(ValueError, match=r"^Rows 2 would read the unsaved "
-                       r"float32 \(4, 4\) array .* as \(2, 4\) float32: 8 "
-                       r"4-byte samples, 32 bytes, and the array holds 64\."):
+    with pytest.raises(ValueError, match=r"^Rows would read the unsaved "
+                       r"float32 \(4, 4\) array .* as 8 4-byte float32 "
+                       r"samples, 32 bytes, and the array holds 64\."):
         inst.set_attr(ROWS, 2)
     assert inst.attributes == attributes
 
@@ -357,37 +493,47 @@ def test_a_two_step_geometry_edit_on_unsaved_pixels_is_refused_at_step_one(
     _same(_reopened_read(db), meant)
 
 
+@pytest.mark.parametrize("tag, new_value, expected, absent", [
+    (BITS, 8, "BitsAllocated would read the unsaved uint16", "BitsAllocated 8"),
+    (ROWS, 1965, "Rows would read the unsaved uint16", "1965"),
+], ids=["BitsAllocated 8", "Rows 1965"])
 def test_a_remediation_replace_on_a_descriptor_over_an_unsaved_array_is_declined(
-        tmp_path):
+        tmp_path, tag, new_value, expected, absent):
     """The refusal reaches a rule-driven write as a decline, with no patient text.
 
     `apply_remediation` catches a raising proposal and records it (#553);
     the decline names the action, the tag and the refusal, and the value
-    stays. Nothing a patient's file carried is in the row.
+    stays. Nothing a patient's file carried is in the row, and neither is
+    the value the rule carried: an integer a US tag can hold passes
+    #560's VR check, so the second case is the one that reaches the row
+    through the parsed branch.
     """
     store = SqliteStore(str(tmp_path / "declines.db"))
     try:
         inst = Instance("1.2.3.531", INSTANCE_SOP_CLASS, 1)
         inst.attributes["0010,0010"] = PATIENT_NAME
         inst.set_pixel_data(UNSIGNED.copy())
+        original = inst.attributes[tag]
         finding = PhiFinding(
             entity_uid=inst.sop_instance_uid, entity_type="Instance",
-            field_name=BITS, value=16, reason="test", tag=BITS, entity=inst,
+            field_name=tag, value=original, reason="test", tag=tag,
+            entity=inst,
             remediation_proposal=PhiRemediation(
-                action_type="REPLACE_TAG", target_attr=BITS, new_value=8,
-                original_value=16, metadata={}))
+                action_type="REPLACE_TAG", target_attr=tag,
+                new_value=new_value, original_value=original, metadata={}))
 
         RemediationService(store_backend=store).apply_remediation([finding])
         declines = store.get_audit_declines()
     finally:
         store.stop()
 
-    assert inst.attributes[BITS] == 16
+    assert inst.attributes[tag] == original
     assert len(declines) == 1, declines
     details = declines[0][2]
-    assert "REPLACE_TAG on 0028,0100 raised ValueError" in details, details
-    assert "BitsAllocated 8 would read the unsaved uint16" in details, details
+    assert f"REPLACE_TAG on {tag} raised ValueError" in details, details
+    assert expected in details, details
     assert PATIENT_NAME not in details and "DOE" not in details, details
+    assert absent not in details.split("raised ValueError")[1], details
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +613,57 @@ def test_the_reinterpretation_publishes_under_the_pixel_state_lock(
     assert lock.fired
     assert inst.pixel_array is newer
     assert inst.attributes[PR] == 0
+
+
+def test_the_capture_is_judged_under_the_lock_the_publish_holds(
+        ingested, monkeypatch):
+    """`describes()` is asked inside the publish's hold, not before it.
+
+    The edit lands as the publish asks for the lock -- after the read,
+    after any answer taken outside the hold. Judged inside, the capture
+    is stale, nothing is published, and the read is made again under
+    PixelRepresentation 1. Judged outside, the answer was current a
+    moment ago, and the frame read unsigned is published under a
+    declaration that reads it signed.
+    """
+    _session, inst, _db = ingested
+    lock = _ActOnAcquire(lambda: inst.set_attr(PR, 1), "_publish_loaded_frame")
+    monkeypatch.setattr(entities_module, "PIXEL_STATE_LOCK", lock)
+
+    got = inst.get_pixel_data()
+
+    assert lock.fired
+    assert inst.attributes[PR] == 1
+    _same(got, ORIGINAL.view(np.int16))
+    assert inst.pixel_array is got
+
+
+def test_the_written_arm_writes_inside_its_hold(ingested, monkeypatch):
+    """The written arm's write is in the hold, and only the release is outside.
+
+    A set of a uint8 array lands the moment the edit lets go of the lock.
+    Written inside the hold, PixelRepresentation 1 is already there when
+    the set writes its own descriptors over it, the release then refuses
+    the set's unsaved array, and what is resident agrees with what is
+    declared. Written after the hold, the stale edit overwrites the set's
+    PixelRepresentation, the release still refuses, and the uint8 array
+    stays resident under a declaration that reads it signed -- exactly
+    the unrefused mismatch this override exists to remove. Review of
+    #628, P6.
+    """
+    _session, inst, _db = ingested
+    inst.get_pixel_data()
+    assert not inst._pixel_array_unwritten
+    newer = np.full((4, 4), 200, np.uint8)
+    lock = _ActOnRelease(lambda: inst.set_pixel_data(newer), "set_attr")
+    monkeypatch.setattr(entities_module, "PIXEL_STATE_LOCK", lock)
+
+    inst.set_attr(PR, 1)
+
+    assert lock.fired
+    assert inst.pixel_array is newer
+    assert inst._pixel_array_unwritten
+    assert (inst.attributes[PR], inst.attributes[BITS]) == (0, 8)
 
 
 def test_a_set_landing_as_the_edit_asks_for_the_lock_is_the_array_judged(

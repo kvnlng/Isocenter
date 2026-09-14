@@ -725,7 +725,7 @@ def test_a_descriptor_edit_between_the_set_and_the_discard_is_reverted_too(
     bits_stored = inst.attributes["0028,0101"]
     inst.set_pixel_data(np.full((8, 8), 200, np.uint8))
     attributes, revision = dict(inst.attributes), inst._revision
-    with pytest.raises(ValueError, match=r"^Rows 99 would read the unsaved "):
+    with pytest.raises(ValueError, match=r"^Rows would read the unsaved "):
         inst.set_attr(ROWS, 99)
     assert inst.attributes == attributes and inst._revision == revision
     inst.set_attr(PR, 1)
