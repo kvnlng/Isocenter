@@ -35,6 +35,7 @@ syntax with no row in the table passes rather than guessing.
 """
 import itertools
 from datetime import date
+from unittest.mock import patch
 
 import numpy as np
 import pydicom
@@ -233,33 +234,33 @@ def test_an_admitted_native_label_still_passes(tmp_path, label):
     assert outcome.warnings == [], outcome.warnings
 
 
-@pytest.mark.parametrize("declared", [" ybr_ict ", "ybr_ict", " YBR_ICT"],
+@pytest.mark.parametrize("declared", [" ybr_ict", "ybr_ict", " YBR_ICT"],
                          ids=["padded-lower", "lower", "padded"])
 def test_an_oddly_spelled_inadmissible_label_gets_its_own_remedy(
         tmp_path, declared):
     """Normalization is what makes the reason actionable (#507).
 
-    A declaration is not normalized on the way in (measured for #502),
-    and a CS is space-padded to even length in the file and read back
-    stripped on the *right* only -- so what the readback sees is
-    `' ybr_ict'`, leading space and lower case intact. Normalized, it
-    keys `_PHOTOMETRIC_INADMISSIBLE` and the reason names the JPEG 2000
-    codestream and tells the caller to export with
-    `use_compression=True`. Unnormalized it falls to the `None` row,
-    and the caller is told only that "no value of that name is defined"
-    -- true, unhelpful, and pointing at a spelling rather than at the
-    syntax.
+    What the readback sees in a file is right-stripped only, so a
+    hand-built `' ybr_ict'` keeps its leading space and its case.
+    Normalized, it keys `_PHOTOMETRIC_INADMISSIBLE` and the reason names
+    the JPEG 2000 codestream and tells the caller to export with
+    `use_compression=True`. Unnormalized it falls to the `None` row, and
+    the caller is told only that "no value of that name is defined".
+
+    **A hand-built file, since #532.** The export worker now writes the
+    label upper-cased and stripped, so its own output can no longer
+    carry this spelling; the readback still reads files it did not
+    write, and this is one.
 
     Killing mutation: `_written_photometric` replaced by `str(label)` in
-    `_readback_label_mismatch`. The writer's own use of it is covered by
-    `test_an_oddly_spelled_admitted_label_does_not_warn` in
-    `tests/test_export_photometric_admissibility.py`; the two call sites
-    fail separately.
+    `_readback_label_mismatch`.
     """
-    outcome = _export(tmp_path, _image(declared), verify_readback=True)
+    path, ds = _hand_built(tmp_path, declared)
 
-    assert not outcome.ok
-    message = str(outcome.error)
+    with pytest.raises(RuntimeError) as raised:
+        io_handlers._verify_readback(path, ds)
+
+    message = str(raised.value)
     assert "reads back as 'YBR_ICT'" in message, message
     assert "use_compression=True" in message, message
     assert "no value of that name is defined" not in message, message
@@ -267,27 +268,33 @@ def test_an_oddly_spelled_inadmissible_label_gets_its_own_remedy(
 
 def test_an_oddly_spelled_admitted_label_is_not_the_label_checks_refusal(
         tmp_path):
-    """Where `' rgb '` fails, and it is not here (#507).
+    """Where a `' rgb'` file fails, and it is not here (#507, #532).
 
-    The label check normalizes and admits it, exactly as the writer's
-    warning does -- and then the **pixel decode** refuses the file:
-    `ValueError: Unknown (0028,0004) 'Photometric Interpretation' value
-    ' rgb'`, measured. That refusal predates this branch (#449 added the
-    decode) and is pydicom reading a CS value the standard says is
-    upper case, so it is neither introduced nor fixed here; asserting
-    the *reason* is how this test stays true either way.
+    The label check normalizes and admits it -- and then the **pixel
+    decode** refuses a hand-built file carrying it: `ValueError: Unknown
+    (0028,0004) 'Photometric Interpretation' value ' rgb'`, measured.
+    That is pydicom reading a CS value the standard says is upper case,
+    and the readback's contract for such a file is unchanged.
 
-    It is also the control for the mutation above: under `str(label)`
-    the same file is refused by the label check instead, with a reason
-    naming a label no conformant reader would have taken as anything
-    else.
+    **The export of the same declaration now passes**, because since #532
+    the worker writes `RGB` and the delivered file decodes. Before, the
+    export's own file failed here at the decode.
+
+    The control for the mutation above: under `str(label)` the hand-built
+    file is refused by the label check instead.
     """
-    outcome = _export(tmp_path, _image(" rgb "), verify_readback=True)
+    path, ds = _hand_built(tmp_path, " rgb")
+    written = np.full((8, 8, 3), YBR, np.uint8)
 
-    assert not outcome.ok
-    message = str(outcome.error)
+    with pytest.raises(RuntimeError) as raised:
+        io_handlers._verify_readback(path, ds, written_pixels=written)
+
+    message = str(raised.value)
     assert "could not be decoded" in message, message
     assert "does not admit" not in message, message
+
+    outcome = _export(tmp_path, _image(" rgb "), verify_readback=True)
+    assert outcome.ok, outcome.error
 
 
 @pytest.mark.parametrize("declared, expected", [
@@ -402,15 +409,14 @@ def test_a_pixel_less_file_is_judged_and_offered_a_remedy_that_applies(
     branch, an SR-shaped instance declaring `YBR_ICT` exports `ok=True`
     with `warnings == []` (#502's defect, one branch over) and one
     declaring `['YBR_ICT', 'RGB']` exports `ok=True` with the file
-    reading back `MultiValue` of length 2. That gap is **filed for
-    v0.9.7 and deliberately not closed here** -- routing that arm
-    through the writer's check is new behaviour, and the reachability is
-    a malformed source or a hand-built graph.
+    reading back `MultiValue` of length 2. #534 has since routed that
+    arm through a writer-side judgement too (a `WARNING`, written as
+    declared); the readback still refuses both files for a caller who
+    asked for `verify_readback=True`.
 
-    What *is* fixed here is what this check says when it meets such a
-    file, because it does meet them -- it reads the delivered file and
-    does not care which arm wrote it, and both reason strings were
-    false of this arm. The inadmissible label was told to `Export with
+    What this test pins is what this check says when it meets such a
+    file -- it reads the delivered file and does not care which arm
+    wrote it, and both reason strings were false of this arm. The inadmissible label was told to `Export with
     use_compression=True`, which cannot help an instance with nothing
     to compress; the multi-valued one was told the file was one "this
     library cannot re-ingest", when in fact
@@ -580,3 +586,265 @@ def test_the_written_syntax_is_read_from_the_file_not_assumed(tmp_path):
     assert not native.ok
     assert compressed.ok, compressed.error
     assert str(ImplicitVRLittleEndian) == IMPLICIT_VR_LE
+
+
+# ---------------------------------------------------------------------------
+# #525: YBR_PARTIAL_* under JPEG 2000 fails the strict contract too.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("label", ("YBR_PARTIAL_422", "YBR_PARTIAL_420"))
+def test_ybr_partial_under_j2k_fails_the_readback(tmp_path, label):
+    """One answer under both syntaxes the exporter writes (#525).
+
+    Natively this file already failed `verify_readback=True` (#507); under
+    JPEG 2000 it passed, because the J2K row admitted both subsampled
+    labels pending this issue. Breaking by ruling (Q5): a verified
+    compressed export of such an instance is now not delivered.
+
+    Killing mutation (M1, the readback half): `YBR_PARTIAL_*` restored to
+    the J2K row.
+    """
+    outcome = _export(tmp_path, _image(label), compression="j2k",
+                      verify_readback=True)
+
+    assert not outcome.ok
+    message = str(outcome.error)
+    assert "Readback verification failed" in message, message
+    assert f"reads back as '{label}'" in message, message
+    assert f"does not admit ({J2K_LOSSLESS})" in message, message
+
+
+# ---------------------------------------------------------------------------
+# #596: the readback reads what ingest reads, colour space included.
+# ---------------------------------------------------------------------------
+
+def _ramp(dtype):
+    """Eight by eight by three samples no 8-bit reader could hold."""
+    return np.arange(8 * 8 * 3, dtype=dtype).reshape(8, 8, 3) * 100
+
+
+@pytest.mark.parametrize("declared", ["YBR_FULL", "YBR_FULL_422"])
+@pytest.mark.parametrize("dtype", [np.uint16, np.int16])
+def test_native_16_bit_ybr_full_fails_the_readback(tmp_path, dtype,
+                                                   declared):
+    """A file `ingest()` refuses is not one the readback may pass (#596).
+
+    The readback decodes the stored samples (`as_rgb=False`), because
+    those are what it compares; `ingest()` decodes with pydicom's
+    default, which converts `YBR_FULL` to RGB and refuses anything but
+    8-bit samples (`ValueError: Invalid ndarray.dtype 'uint16' for color
+    space conversion`). Measured before: the native 16-bit `YBR_FULL`
+    export with `verify_readback=True` passed, and neither `ingest()` nor
+    `pixel_array` could read the file; the JPEG 2000 one already failed.
+    `YBR_FULL_422` is declared here too, and the writer turns it into
+    `YBR_FULL` (#470) before the readback sees it.
+
+    Killing mutation (M14): the second decode removed.
+    """
+    outcome = _export(tmp_path, _image(declared, arr=_ramp(dtype)),
+                      verify_readback=True)
+
+    assert not outcome.ok
+    message = str(outcome.error)
+    assert message.startswith(
+        "Readback verification failed: the written file cannot be "
+        "ingested by this library"), message
+    assert str(tmp_path) not in message, message
+    assert "Subject_" not in message, message
+    assert not list((tmp_path / "out").glob("*.dcm"))
+
+
+def _signed_8_bit():
+    """Eight by eight by three int8 samples, both halves of the domain."""
+    return (np.arange(8 * 8 * 3) % 200 - 100).astype(np.int8).reshape(8, 8, 3)
+
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+@pytest.mark.parametrize("declared", ["YBR_FULL", "YBR_FULL_422"])
+def test_signed_8_bit_ybr_full_fails_the_readback(tmp_path, declared,
+                                                  compression):
+    """8 bits is not the line pydicom draws; *unsigned* 8 bits is (#596).
+
+    pydicom 3.0.2's `convert_color_space` refuses on
+    `arr.dtype != np.dtype("u1")`, so an int8 `YBR_FULL` image --
+    BitsAllocated 8, PixelRepresentation 1 -- decodes as stored samples
+    and fails the conversion `ingest()` asks for (`ValueError: Invalid
+    ndarray.dtype 'int8' for color space conversion`), natively and under
+    JPEG 2000. The readback must fail it too.
+
+    Killing mutation (M16): the second decode gated on `BitsAllocated > 8`
+    instead of the decoded dtype -- this file has BitsAllocated 8, and
+    that gate passes it. The review of #609 measured M16 surviving every
+    label test before this one existed.
+    """
+    outcome = _export(tmp_path, _image(declared, arr=_signed_8_bit()),
+                      compression=compression, verify_readback=True)
+
+    assert not outcome.ok
+    message = str(outcome.error)
+    assert message.startswith(
+        "Readback verification failed: the written file cannot be "
+        "ingested by this library"), message
+    assert "int8" in message, message
+    assert not list((tmp_path / "out").glob("*.dcm"))
+
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+def test_unsigned_8_bit_ybr_full_is_decoded_once(tmp_path, compression):
+    """The one input pydicom always converts is not decoded twice (#596, Q6).
+
+    Q6's ruling: the second, converting decode runs only for a decoded
+    array that is not unsigned 8-bit, because that is the whole of what
+    `convert_color_space` refuses. Measured on the review of #609, for a
+    100-frame 512x512x3 JPEG 2000 file, the second decode took
+    `_verify_readback` from 20.3 s to 41.1 s and its peak memory from
+    0.26 to 0.91 GiB (a float32 copy of the array) -- for a decode that
+    cannot fail. The characterisation below is what makes skipping it
+    safe.
+
+    Killing mutation (Mq6): the dtype half of the gate dropped, so an
+    unsigned 8-bit file is decoded twice.
+    """
+    calls = []
+    real = io_handlers._decode_pixels
+
+    def spy(ds, *args, **kwargs):
+        calls.append(kwargs.get("as_rgb", True))
+        return real(ds, *args, **kwargs)
+
+    inst = _image("YBR_FULL", arr=np.full((8, 8, 3), YBR, np.uint8))
+    with patch.object(io_handlers, "_decode_pixels", spy):
+        outcome = _export(tmp_path, inst, compression=compression,
+                          verify_readback=True)
+
+    assert outcome.ok, outcome.error
+    assert calls == [False], calls
+
+
+def _unsigned_8_bit_files(tmp_path):
+    """Every unsigned 8-bit YBR_FULL shape the readback skips, on disk."""
+    files = []
+    for compression in (None, "j2k"):
+        for frames in (1, 2):
+            for planar in (0, 1):
+                shape = (8, 8, 3) if frames == 1 else (frames, 8, 8, 3)
+                arr = (np.arange(int(np.prod(shape))) % 251).astype(
+                    np.uint8).reshape(shape)
+                inst = _image("YBR_FULL", arr=arr)
+                if frames > 1:
+                    inst.set_attr("0028,0008", frames)
+                inst.set_attr("0028,0006", planar)
+                out = tmp_path / f"{compression}-{frames}-{planar}"
+                outcome = _export_instance_worker(ExportContext(
+                    instance=inst,
+                    output_path=str(out / f"{inst.sop_instance_uid}.dcm"),
+                    patient_attributes={"0010,0010": "ANON",
+                                        "0010,0020": "PAT1"},
+                    study_attributes={"0020,000d": "1.2.826.0.2.1"},
+                    series_attributes={"0020,000e": "1.2.826.0.3.1"},
+                    compression=compression, verify_readback=True))
+                assert outcome.ok, (compression, frames, planar,
+                                    outcome.error)
+                files.append(outcome.output_path)
+    path, ds = _hand_built(tmp_path, "YBR_FULL_422", name="u422.dcm")
+    ds.PixelData = (np.arange(8 * 8 * 2) % 251).astype(np.uint8).tobytes()
+    ds.save_as(path, enforce_file_format=True)
+    files.append(path)
+    # The exporter writes PlanarConfiguration 0 whatever was declared, so
+    # the other layout only exists by hand; pydicom's conversion reads it
+    # through a different reshape.
+    path, ds = _hand_built(tmp_path, "YBR_FULL", name="planar1.dcm")
+    ds.PlanarConfiguration = 1
+    ds.PixelData = (np.arange(8 * 8 * 3) % 251).astype(np.uint8).tobytes()
+    ds.save_as(path, enforce_file_format=True)
+    files.append(path)
+    return files
+
+
+def test_unsigned_8_bit_ybr_full_converts_whenever_it_decodes(tmp_path):
+    """The assumption the skip rests on, held against pydicom (#596, Q6).
+
+    For each unsigned 8-bit `YBR_FULL` file -- exported at 1 and 2
+    frames, native and JPEG 2000, declaring PlanarConfiguration 0 and 1
+    (written 0 either way), plus hand-built native `YBR_FULL_422` and
+    PlanarConfiguration 1 files -- the export verified without the second
+    decode, and the decode `ingest()` makes (pydicom's default, with the
+    colour conversion) succeeds on the same file the stored-sample decode
+    reads, at the same sample count. So the verdict with the second
+    decode is the verdict without it. Red if a pydicom inside `<4.0`
+    starts refusing unsigned 8-bit for some other reason, which is when
+    the gate has to widen again.
+    """
+    from isocenter.io_handlers import _decode_pixels
+
+    files = _unsigned_8_bit_files(tmp_path)
+    assert len(files) == 10, files
+    shapes = set()
+    for path in files:
+        readback = pydicom.dcmread(path)
+        shapes.add((str(readback.file_meta.TransferSyntaxUID),
+                    int(getattr(readback, "NumberOfFrames", 1) or 1),
+                    int(readback.PlanarConfiguration),
+                    str(readback.PhotometricInterpretation)))
+        stored, _ = _decode_pixels(readback, as_rgb=False)
+        converted, _ = _decode_pixels(readback)
+        assert stored.dtype == np.uint8, (path, stored.dtype)
+        assert converted.size == stored.size, (path, converted.shape,
+                                               stored.shape)
+    # The grid was really built: a helper that silently wrote one shape
+    # nine times would make this a test of one file.
+    assert shapes == {
+        (s, f, 0, "YBR_FULL") for s in (IMPLICIT_VR_LE, J2K_LOSSLESS)
+        for f in (1, 2)} | {(IMPLICIT_VR_LE, 1, 0, "YBR_FULL_422"),
+                            (IMPLICIT_VR_LE, 1, 1, "YBR_FULL")}, shapes
+
+
+def test_a_hand_built_16_bit_ybr_full_422_file_fails_the_readback(tmp_path):
+    """The `_422` spelling is gated by name, not only by the writer (#596).
+
+    The export writer rewrites `YBR_FULL_422` to `YBR_FULL`, so the
+    export-driven test above cannot tell a gate on `YBR_FULL` alone from
+    the right one. A hand-built native file carries the `_422` label and
+    the 4:2:2 byte count pydicom expects, and the "what was meant" array
+    is the stored-sample decode itself, so the first decode and the exact
+    compare pass and only the second decode is under test.
+
+    Killing mutation (M15): the gate spelled `== "YBR_FULL"`.
+    """
+    from isocenter.io_handlers import _decode_pixels
+
+    path, ds = _hand_built(tmp_path, "YBR_FULL_422", name="h422.dcm")
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 16, 16, 15
+    ds.PixelData = np.arange(8 * 8 * 2, dtype=np.uint16).tobytes()
+    ds.save_as(path, enforce_file_format=True)
+    stored, _ = _decode_pixels(pydicom.dcmread(path), as_rgb=False)
+
+    with pytest.raises(RuntimeError) as raised:
+        io_handlers._verify_readback(path, ds, written_pixels=stored)
+
+    assert "cannot be ingested by this library" in str(raised.value), \
+        str(raised.value)
+
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+@pytest.mark.parametrize("declared, dtype", [
+    ("RGB", np.uint16), ("YBR_FULL", np.uint8)],
+    ids=["16-bit-rgb", "8-bit-ybr-full"])
+def test_16_bit_rgb_and_8_bit_ybr_full_pass(tmp_path, compression, declared,
+                                            dtype):
+    """The controls: what `ingest()` reads, the readback still passes (#596).
+
+    16-bit `RGB` needs no colour conversion, and an unsigned 8-bit
+    `YBR_FULL` converts. Killing mutation (M16'): the second decode
+    replaced by a refusal keyed on `BitsAllocated > 8`, which refuses the
+    16-bit `RGB` file `ingest()` reads. (M16, the decode gated on
+    `BitsAllocated > 8` instead of the label, is *not* equivalent: int8
+    `YBR_FULL` has BitsAllocated 8, and
+    `test_signed_8_bit_ybr_full_fails_the_readback` kills it.)
+    """
+    arr = _ramp(np.uint16) if dtype == np.uint16 else \
+        np.full((8, 8, 3), YBR, np.uint8)
+    outcome = _export(tmp_path, _image(declared, arr=arr),
+                      compression=compression, verify_readback=True)
+
+    assert outcome.ok, outcome.error

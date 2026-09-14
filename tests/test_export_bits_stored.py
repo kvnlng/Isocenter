@@ -357,12 +357,16 @@ def test_high_bit_is_one_less_than_the_written_bits_stored(
     used to go to disk as declared, beside samples that are not
     left-aligned. Killing mutation (the converse of the review's O5): the
     declared HighBit read back onto the file.
+
+    Since #597 the rewrite is not silent: one INFO correction names the
+    declared and the written HighBit. It was `corrections == []` here.
     """
     outcome = _export(tmp_path, _image(arr, declared), compression=compression)
 
     assert _width(outcome.output_path)[:3] == written
     _assert_exact(outcome, arr)
-    assert outcome.corrections == []
+    assert len(outcome.corrections) == 1, outcome.corrections
+    assert "HighBit" in outcome.corrections[0], outcome.corrections
 
 
 @pytest.mark.parametrize("value", ["12", " 12 "], ids=["'12'", "' 12 '"])
@@ -553,3 +557,80 @@ def test_a_correction_is_logged_only_for_a_file_that_was_written(caplog):
     lines = [r.getMessage() for r in caplog.records if r.name == "isocenter"]
     assert logged == 1
     assert lines == ["A: written note"], lines
+
+
+# ---------------------------------------------------------------------------
+# #597: a declared HighBit the export does not write is noted.
+# ---------------------------------------------------------------------------
+
+_FITS_12 = np.array([[0, 4095], [100, 2000]] * 2, np.uint16)
+
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+@pytest.mark.parametrize("arr, declared, high_bit, written", [
+    (_FITS_12, (("0028,0101", 12), ("0028,0102", 15)), 15, (16, 12, 11)),
+    (_FITS_12, (("0028,0101", 12), ("0028,0102", 10)), 10, (16, 12, 11)),
+    (_FITS_12, (("0028,0102", 11),), 11, (16, 16, 15)),
+    (np.array([[-2048, 2047], [0, -1]] * 2, np.int16),
+     (("0028,0101", 12), ("0028,0102", 15)), 15, (16, 12, 11)),
+], ids=["BS12/HB15", "BS12/HB10", "HB11 alone", "int16 BS12/HB15"])
+def test_a_declared_high_bit_the_export_does_not_write_is_noted(
+        tmp_path, arr, declared, high_bit, written, compression):
+    """HighBit is rewritten to BitsStored - 1, and now it says so (#597).
+
+    The export writes `HighBit = BitsStored - 1` (PS3.5 8.1.1), because
+    the array holds right-aligned samples. A graph built by hand, or
+    edited with `set_attr` after ingest, that declares another HighBit
+    had it rewritten in silence. INFO on `corrections`, by ruling (Q7):
+    the written file is conformant, the samples are unchanged, and an
+    ingested file already carries ingest's own row for the declaration.
+    The note says "written with" and names the written BitsStored, which
+    for "HB11 alone" is one the caller never declared.
+
+    Killing mutation (M21): the note block deleted.
+    """
+    outcome = _export(tmp_path, _image(arr, declared),
+                      compression=compression, verify_readback=True)
+
+    assert outcome.ok, outcome.error
+    assert _width(outcome.output_path)[:3] == written
+    assert outcome.warnings == [], outcome.warnings
+    notes = [c for c in outcome.corrections if "HighBit" in c]
+    assert len(notes) == 1, outcome.corrections
+    assert f"HighBit {high_bit} " in notes[0], notes
+    assert (f"written with BitsStored {written[1]} and HighBit "
+            f"{written[2]}") in notes[0], notes
+
+
+def test_a_widened_declaration_is_noted_once(tmp_path):
+    """The widening note already names the written HighBit (#597).
+
+    Values that overflow a coherent declared 12/11 are widened to 16/15
+    with #468's note, which already says "written with BitsStored 16 and
+    HighBit 15". The declared HighBit 11 is not the written one, so
+    without the guard a second note would say the same thing twice.
+    A declared 12/15 would not do: its HighBit is the widened one, and
+    the guard is invisible there (measured: the mutant survived it).
+    Killing mutation (M22): the `widened is None` guard dropped.
+    """
+    arr = np.array([[0, 65520], [1600, 32000]] * 2, np.uint16)
+    outcome = _export(tmp_path, _image(
+        arr, (("0028,0101", 12), ("0028,0102", 11))))
+
+    assert outcome.ok, outcome.error
+    assert _width(outcome.output_path)[:3] == (16, 16, 15)
+    assert len(outcome.corrections) == 1, outcome.corrections
+    assert "BitsStored 12 " in outcome.corrections[0], outcome.corrections
+
+
+@pytest.mark.parametrize("declared", [
+    (("0028,0101", 16), ("0028,0102", 15)),
+    (("0028,0101", 12), ("0028,0102", 11)),
+    (),
+], ids=["BS16/HB15", "BS12/HB11", "nothing declared"])
+def test_an_agreeing_high_bit_is_not_noted(tmp_path, declared):
+    """The control (#597). Killing mutation (M23): the `!=` guard dropped."""
+    outcome = _export(tmp_path, _image(_FITS_12, declared))
+
+    assert outcome.ok, outcome.error
+    assert outcome.corrections == [], outcome.corrections

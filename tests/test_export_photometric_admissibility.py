@@ -38,20 +38,17 @@ exception: no single value can be chosen without inventing one, and such
 a file -- carrying pixel data -- cannot be read back by this library at
 all, so no output here would be honest.
 
-**Scope, and it is narrower than "every export": the two arms that write
-a pixel element.** Everything here goes through `_write_pixel_geometry`,
-which both the integer and the float pixel arms call. An instance with
-**no pixel element** never reaches that function and carries its declared
-`0028,0004` to disk unexamined -- measured, an SR-shaped instance
-declaring `YBR_ICT` still exports `ok=True` with no warning, and one
-declaring `['YBR_ICT', 'RGB']` still exports a two-valued file.
-`export(verify_readback=True)` catches both, because #507's check reads
-the delivered file; see
-`tests/test_readback_label_admissibility.py::test_a_pixel_less_file_is_judged_and_offered_a_remedy_that_applies`.
-That third arm is filed for v0.9.7 and deliberately not closed here.
+**Scope: every arm.** The two arms that write a pixel element go through
+`_write_pixel_geometry`. An instance with **no pixel element** never
+reaches that function, and until #534 carried its declared `0028,0004`
+to disk unexamined; the worker now judges that arm too, against the
+syntax the file carries, with a remedy true of a file with no pixels,
+and a multi-valued label there is warned about rather than refused
+because such a file re-ingests. See the #534 section at the end.
 """
 import itertools
 import logging
+import sqlite3
 from datetime import date
 
 import numpy as np
@@ -61,7 +58,8 @@ import pytest
 from isocenter.entities import Instance, Patient, Series, Study
 from isocenter.io_handlers import (DicomExporter, ExportContext,
                                    ExportOutcome, _export_instance_worker,
-                                   _PhotometricRefusal)
+                                   _photometric_warning, _PhotometricRefusal,
+                                   _written_photometric)
 from isocenter.session import DicomSession
 
 SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
@@ -317,46 +315,62 @@ def test_a_compressed_rgb_export_is_relabelled_and_warns_about_nothing(
     assert outcome.warnings == [], outcome.warnings
 
 
-@pytest.mark.parametrize("declared, written", [
-    (" ybr_ict ", " ybr_ict"), (["YBR_ICT"], "YBR_ICT")],
+@pytest.mark.parametrize("declared, notes", [
+    (" ybr_ict ", 1), (["YBR_ICT"], 0)],
     ids=["padded-lowercase", "one-element-list"])
-def test_a_padded_or_list_spelling_warns_too(tmp_path, declared, written):
+def test_a_padded_or_list_spelling_warns_too(tmp_path, declared, notes):
     """An odd spelling of an inadmissible label is still inadmissible (#502).
 
-    A CS is space-padded to even length in the file and read back
-    stripped on the right, and pydicom unwraps a one-element value on
-    assignment, so both of these reach a reader as `YBR_ICT`. The
-    one-element arm is a **characterisation**: pydicom's unwrap is what
-    makes it work, so `_written_photometric` deliberately does not
-    unwrap anything itself.
+    Both of these reach the file as `YBR_ICT` and are warned about once.
+    Until #532 the padded one was written as `' ybr_ict'` -- a CS
+    right-stripped on read keeps its leading space and its case, so
+    pydicom and `ingest()` refused the file -- and this test pinned that.
+    It is written as the Code String it spells now, with one INFO
+    correction saying so. The one-element list is a **characterisation**:
+    pydicom unwraps it on assignment, the spelling is already defined,
+    and there is no correction to note.
     """
     outcome = _export(tmp_path, _image(declared))
 
     assert outcome.ok, outcome.error
     assert pydicom.dcmread(
-        outcome.output_path).PhotometricInterpretation == written
+        outcome.output_path).PhotometricInterpretation == "YBR_ICT"
     assert len(outcome.warnings) == 1, outcome.warnings
+    assert len(outcome.corrections) == notes, outcome.corrections
 
 
 @pytest.mark.parametrize("declared", [" rgb ", "rgb", " RGB", ["RGB"]],
                          ids=["padded-lower", "lower", "padded", "list"])
 def test_an_oddly_spelled_admitted_label_does_not_warn(tmp_path, declared):
-    """This is what the normalization is for, and the other half of it (#502).
+    """An admitted label is not warned about for its spelling (#502).
 
-    An instance declaring `' rgb '` puts `' rgb '` on the dataset --
-    measured, pydicom does not normalize a declaration on the way in --
-    and writes a label every conformant reader takes as `RGB`. Comparing
-    it unnormalized would raise a `WARNING` and grade the run
-    `REVIEW_REQUIRED` over a file that is perfectly admissible, which is
-    worse than the silence this issue is about: a false alarm in a
-    compliance report costs the reader their trust in the true ones.
-    Killing mutation: `.strip().upper()` dropped from
-    `_written_photometric` (all four arms warn).
+    A false alarm in a compliance report costs the reader their trust in
+    the true ones. Since #532 the worker writes the label upper-cased
+    and stripped before the judgement, so this test no longer sees
+    `_written_photometric`'s own normalization -- that killer is
+    `test_the_judgement_normalizes_what_it_is_given` below.
     """
     outcome = _export(tmp_path, _image(declared))
 
     assert outcome.ok, outcome.error
     assert outcome.warnings == [], outcome.warnings
+
+
+@pytest.mark.parametrize("declared", [" rgb ", "rgb", " RGB", "Rgb"])
+def test_the_judgement_normalizes_what_it_is_given(declared):
+    """`_written_photometric` is still the comparison's normalization (#502).
+
+    The readback reads hand-built files, which the worker's #532
+    normalization never touches, so the judgement keeps its own. Unit
+    level because the worker no longer hands it an odd spelling.
+
+    Killing mutation: `.strip().upper()` dropped from
+    `_written_photometric` (every arm warns, naming a label that is not
+    in the row).
+    """
+    assert _photometric_warning(
+        _written_photometric(declared), IMPLICIT_VR_LE,
+        has_pixels=True) is None
 
 
 # ---------------------------------------------------------------------------
@@ -584,3 +598,500 @@ def test_the_exported_file_re_ingests_with_the_same_label(tmp_path):
 
     assert pydicom.dcmread(
         next(out2.rglob("*.dcm"))).PhotometricInterpretation == "YBR_RCT"
+
+
+# ---------------------------------------------------------------------------
+# #525: YBR_PARTIAL_* under JPEG 2000 -- the same judgement as native.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("label", ("YBR_PARTIAL_422", "YBR_PARTIAL_420"))
+def test_ybr_partial_under_j2k_warns(tmp_path, label):
+    """A subsampled label is inadmissible under JPEG 2000 too (#525).
+
+    A JPEG 2000 codestream holds full-sample components, and PS3.5 A.4.4
+    gives it no subsampled label, so the compressed file is exactly as
+    inadmissible as the native one #502 already warns about. Measured
+    before the fix: `ok=True`, `warnings == []`, `verify_readback=True`
+    passed -- the answer depended on `use_compression`. The label is
+    still written as declared, because `YBR_FULL` would misstate the
+    value range (PS3.3 C.7.6.3.1.2) and there is no bare `YBR_PARTIAL`.
+
+    Killing mutation (M1): `YBR_PARTIAL_*` restored to the J2K row of
+    `_ADMISSIBLE_PHOTOMETRICS`.
+    """
+    outcome = _export(tmp_path, _image(label), compression="j2k")
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert written.file_meta.TransferSyntaxUID == J2K_LOSSLESS
+    assert written.PhotometricInterpretation == label
+    assert len(outcome.warnings) == 1, outcome.warnings
+    assert f"({J2K_LOSSLESS})" in outcome.warnings[0], outcome.warnings
+    assert "no transfer syntax this exporter writes admits it" in \
+        outcome.warnings[0], outcome.warnings
+
+
+@pytest.mark.parametrize("threads", [False, True])
+def test_a_parent_row_for_ybr_partial_under_j2k(tmp_path, monkeypatch,
+                                                threads):
+    """The compressed case reaches the audit log and the grade (#525).
+
+    Through `session.export()` with compression on, the default: one
+    `WARNING` row keyed on the SOP Instance UID and naming no output
+    path, and the run reads `REVIEW_REQUIRED`. Killing mutation (M2): the
+    worker's `written_syntax` forced to Implicit VR LE. A native judgement
+    of this label warns too, so the row count alone would not see it; the
+    row naming the JPEG 2000 syntax does.
+    """
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    if threads:
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    inst = _image("YBR_PARTIAL_422")
+    report = tmp_path / "report.md"
+    db = tmp_path / "p.db"
+
+    with DicomSession(str(db)) as session:
+        session.store.patients.append(_graph([inst]))
+        session.save()
+        session.export(str(tmp_path / "out"), use_compression=True,
+                       show_progress=False)
+        session.generate_report(str(report))
+
+    with sqlite3.connect(str(db)) as conn:
+        rows = conn.execute(
+            "SELECT entity_uid, details FROM audit_log "
+            "WHERE action_type='WARNING'").fetchall()
+    labelled = [r for r in rows if "PhotometricInterpretation" in r[1]]
+    assert len(labelled) == 1, rows
+    assert labelled[0][0] == inst.sop_instance_uid, labelled
+    assert f"({J2K_LOSSLESS})" in labelled[0][1], labelled
+    assert "Subject_" not in labelled[0][0] + labelled[0][1], labelled
+    assert "REVIEW_REQUIRED" in _grade(report), _grade(report)
+
+
+# ---------------------------------------------------------------------------
+# #532: the label is written as the Code String it spells.
+# ---------------------------------------------------------------------------
+
+def _mono(label):
+    """A 1-sample instance declaring `label`, with a 16-bit ramp."""
+    inst = _image(label, samples=1,
+                  arr=np.arange(64, dtype=np.uint16).reshape(8, 8))
+    return inst
+
+
+@pytest.mark.parametrize("declared, expected, build", [
+    (" rgb ", "RGB", _image), ("rgb", "RGB", _image),
+    ("Rgb", "RGB", _image), (" RGB", "RGB", _image),
+    ("monochrome2", "MONOCHROME2", _mono),
+    (" ybr_full ", "YBR_FULL", _image),
+    ([" rgb "], "RGB", _image), ((" rgb ",), "RGB", _image)],
+    ids=["padded-lower", "lower", "mixed", "leading-space", "mono-lower",
+         "ybr-padded-lower", "one-element-list", "one-element-tuple"])
+@pytest.mark.parametrize("compression", [None, "j2k"])
+def test_a_label_is_written_as_a_code_string(tmp_path, declared, expected,
+                                             build, compression):
+    """Upper case, no leading space: what PS3.5 6.2 defines a CS to be (#532).
+
+    Measured before: `' rgb '` was written `' rgb'`, `'monochrome2'` as
+    itself, and pydicom and `ingest()` refused the delivered file with
+    `ValueError: Unknown (0028,0004) 'Photometric Interpretation' value`.
+    The export succeeded and its file was unreadable by the most likely
+    reader. Now the file carries the defined spelling, decodes, and the
+    change is one INFO correction -- an exact, conformant rewrite, #506's
+    class, so no row.
+
+    Under JPEG 2000 an `RGB` spelling is then transformed and labelled
+    `YBR_RCT` like any other (#516 case 1), which is why the expected
+    label differs there.
+
+    A one-element list or tuple is a label too -- it is how a VM-1 value
+    can arrive through `set_attr` -- and each element is respelled.
+
+    Killing mutations: (M4) `_label_as_written` returns the attributes
+    unchanged; (R5, from the review of #609) the list/tuple/MultiValue
+    arm of `_label_as_written` disabled, so `[' rgb ']` reaches `_merge`
+    raw (`one-element-list`, `one-element-tuple`).
+    """
+    outcome = _export(tmp_path, build(declared), compression=compression)
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    if compression == "j2k" and expected == "RGB":
+        expected = "YBR_RCT"
+    assert written.PhotometricInterpretation == expected
+    written.pixel_array  # decodes: the spelling is one pydicom knows
+    assert outcome.warnings == [], outcome.warnings
+    assert len(outcome.corrections) == 1, outcome.corrections
+    note = outcome.corrections[0]
+    for value in ([declared] if isinstance(declared, str) else declared):
+        assert repr(value) in note, note
+    assert "(PS3.5 6.2" in note, note
+
+
+def test_normalised_before_merge_and_before_geometry(tmp_path):
+    """Both readers of the declaration get the normalized copy (#532).
+
+    `_merge` assigns `0028,0004` and pydicom warns on the caller's stream
+    about an invalid CS value as it does; `_write_pixel_geometry` falls
+    back to the declared value when the resolver answers None and writes
+    it again. Normalizing for one of them only is silently undone by the
+    other.
+
+    Killing mutations: the copy passed to `_merge` only (M5: the geometry
+    fallback writes `' rgb '` back, and the file reads `' rgb'`); to
+    `_write_pixel_geometry` only (M5b: the `UserWarning` returns).
+    """
+    import warnings as _warnings
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        outcome = _export(tmp_path, _image(" rgb "))
+
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(
+        outcome.output_path).PhotometricInterpretation == "RGB"
+    assert [str(w.message) for w in caught
+            if "0028,0004" in str(w.message) or "CS" in str(w.message)] \
+        == [], [str(w.message) for w in caught]
+
+
+def test_a_trailing_pad_is_not_a_correction(tmp_path):
+    """`'RGB '` is `RGB` to every reader; there is nothing to note (#532).
+
+    A CS is space-padded to even length in the file and right-stripped
+    on read, so a trailing pad is not a change anyone sees. Killing
+    mutation (M6): the note guarded on the raw value differing from the
+    normalized one, instead of its right-stripped form.
+    """
+    outcome = _export(tmp_path, _image("RGB "))
+
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(
+        outcome.output_path).PhotometricInterpretation == "RGB"
+    assert outcome.corrections == [], outcome.corrections
+
+
+@pytest.mark.parametrize("threads", [False, True])
+def test_export_leaves_the_graph_label_alone(tmp_path, monkeypatch, threads):
+    """Only the file changes; the graph keeps the declared spelling (#532).
+
+    Driven through `write_tree()`, whose workers run in this process
+    under threads, so an in-place normalization would be visible here.
+    Killing mutation (M7): the label normalized in place on
+    `inst.attributes` (the value changes and the revision advances).
+    """
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    if threads:
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    inst = _image(" rgb ")
+    revision = inst._revision
+
+    DicomExporter.write_tree(_graph([inst]), str(tmp_path / "out"),
+                             compression=None, show_progress=False)
+    # And the worker directly, in this thread, whatever the executor did.
+    outcome = _export(tmp_path, inst)
+
+    assert outcome.ok, outcome.error
+    assert inst.attributes["0028,0004"] == " rgb "
+    assert inst._revision == revision
+
+
+# ---------------------------------------------------------------------------
+# #534: the pixel-less arm gets the same judgement.
+# ---------------------------------------------------------------------------
+
+SR_STORAGE = "1.2.840.10008.5.1.4.1.1.88.11"
+
+
+def _pixel_less(label):
+    """An SR-shaped instance with no pixels, declaring `label`."""
+    inst = Instance(f"1.2.826.0.1.534.{next(_serial)}", SR_STORAGE, 1)
+    inst.file_path = None
+    for tag, value in (("0008,0020", "20230101"), ("0008,0030", "120000"),
+                       ("0008,0060", "SR")):
+        inst.set_attr(tag, value)
+    inst.set_attr("0028,0004", label)
+    return inst
+
+
+@pytest.mark.parametrize("label", ["YBR_ICT", "NONSENSE"])
+def test_a_pixel_less_label_is_judged(tmp_path, label):
+    """An instance with no pixel element is not a way around #502 (#534).
+
+    Measured before: an SR-shaped instance declaring `YBR_ICT` or an
+    undefined value exported `ok=True` with `warnings == []`, because
+    only the two pixel-writing arms call `_write_pixel_geometry`. The
+    label is still written as declared -- it is the source's own -- and
+    the warning's remedy is the one true of a file with no pixels:
+    "export with use_compression=True" cannot help an instance with
+    nothing to compress, and there are no samples to have been written
+    "over".
+
+    Killing mutations: the pixel-less judgement deleted (M8);
+    `has_pixels=True` passed there (M9, the pixel remedy returns).
+    """
+    outcome = _export(tmp_path, _pixel_less(label))
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert written.PhotometricInterpretation == label
+    assert not any(kw in written for kw in (
+        "PixelData", "FloatPixelData", "DoubleFloatPixelData"))
+    assert len(outcome.warnings) == 1, outcome.warnings
+    warning = outcome.warnings[0]
+    assert f"'{label}'" in warning, warning
+    assert "no pixel element" in warning, warning
+    assert "use_compression=True" not in warning, warning
+    assert "over the samples" not in warning, warning
+
+
+def test_a_pixel_less_label_is_judged_under_the_written_syntax(tmp_path):
+    """Against the syntax the file carries, which is never JPEG 2000 (#534).
+
+    A file with no pixel data is written natively whatever `compression`
+    says -- `_compress_j2k` has nothing to encode and leaves the syntax
+    alone -- while the worker's `written_syntax` reads `j2k` as JPEG 2000.
+    `YBR_ICT` is admitted by the J2K row and not by the native one, so
+    judging the wrong syntax is silent.
+
+    Killing mutation (M10): the pixel-less judgement reads
+    `written_syntax` instead of `ds.file_meta.TransferSyntaxUID`.
+    """
+    outcome = _export(tmp_path, _pixel_less("YBR_ICT"), compression="j2k")
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert written.file_meta.TransferSyntaxUID == IMPLICIT_VR_LE
+    assert len(outcome.warnings) == 1, outcome.warnings
+    assert f"({IMPLICIT_VR_LE})" in outcome.warnings[0], outcome.warnings
+
+
+@pytest.mark.parametrize("declared, respelled", [
+    (["YBR_ICT", "RGB"], 0), ([" ybr_ict", "rgb"], 1)],
+    ids=["defined-spellings", "respelled-each"])
+def test_a_multi_valued_pixel_less_label_warns_and_writes(tmp_path, declared,
+                                                         respelled):
+    """Two labels on a file with no pixels: written, and warned about (#534).
+
+    The pixel arms refuse this (#502) because such a file cannot be read
+    back. A pixel-less one can -- measured, it re-ingests with both values
+    -- so the refusal's own reason is false here, and the write-path
+    ruling (warn and write) applies instead. `verify_readback=True` still
+    fails it on the arity.
+
+    Each value is a Code String (#532): `[' ybr_ict', 'rgb']` is written
+    and warned about as `['YBR_ICT', 'RGB']`, with one correction.
+
+    Killing mutations: (M11) `_PhotometricRefusal` raised on the
+    pixel-less arm; (R5) the multi-value arm of `_label_as_written`
+    disabled (`respelled-each`).
+    """
+    outcome = _export(tmp_path, _pixel_less(declared))
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert list(written.PhotometricInterpretation) == ["YBR_ICT", "RGB"]
+    assert len(outcome.warnings) == 1, outcome.warnings
+    warning = outcome.warnings[0]
+    assert "is VM 1" in warning, warning
+    assert "declares 2 values" in warning, warning
+    assert "'YBR_ICT', 'RGB'" in warning, warning
+    assert "no pixel element" in warning, warning
+    assert len(outcome.corrections) == respelled, outcome.corrections
+
+    with DicomSession(str(tmp_path / "re.db")) as session:
+        assert session.ingest(
+            str(tmp_path / "out")).ingested == 1
+
+    strict = _export(tmp_path, _pixel_less(declared),
+                     verify_readback=True)
+    assert not strict.ok
+    assert "is VM 1" in str(strict.error)
+
+
+def _hand_built_element(label, element):
+    """No pixel array, and a pixel element put in `attributes` by hand."""
+    inst = _pixel_less(label)
+    for tag, value in (("0028,0010", 4), ("0028,0011", 4), ("0028,0002", 1),
+                       ("0028,0100", 8), ("0028,0101", 8), ("0028,0102", 7),
+                       ("0028,0103", 0), (element, bytes(16))):
+        inst.set_attr(tag, value)
+    return inst
+
+
+@pytest.mark.parametrize("element", ["7fe0,0010", "7fe0,0008"])
+def test_a_hand_built_pixel_element_is_not_called_pixel_less(tmp_path,
+                                                             element):
+    """A file that carries a pixel element is not told it has none (#534).
+
+    `set_attr("7fe0,0010", ...)` on an instance with no pixel array puts
+    the element in the file through `_merge`, and no pixel arm runs, so
+    the label is judged on the third arm -- rightly, since
+    `_write_pixel_geometry` never saw it. But the file *has* a pixel
+    element, and the review of #609 measured the warning saying "this
+    instance, which has no pixel element" and the remedy "This file
+    carries no pixel element at all" over a file carrying `PixelData`: a
+    false reason, #194's class. The sentence is now the one for a file
+    with pixels.
+
+    Killing mutation (P1): `has_pixels=False` passed unconditionally on
+    the third arm.
+    """
+    outcome = _export(tmp_path, _hand_built_element("YBR_ICT", element))
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert any(kw in written for kw in ("PixelData", "FloatPixelData"))
+    assert len(outcome.warnings) == 1, outcome.warnings
+    warning = outcome.warnings[0]
+    assert "no pixel element" not in warning, warning
+    assert ("The label was written as declared, over the samples the "
+            "instance held, and neither was changed.") in warning, warning
+
+
+def test_a_multi_valued_label_over_a_hand_built_pixel_element_is_refused(
+        tmp_path):
+    """Two labels over a pixel element: the pixel arms' refusal (#502, #534).
+
+    The pixel-less arm writes a multi-valued label because a file with no
+    pixels re-ingests; that reason is false for a file carrying a pixel
+    element, which is the file `_PhotometricRefusal` exists for. Measured
+    on the review of #609: written, with a warning claiming the file had
+    no pixel element.
+
+    Killing mutation (P1b): the refusal skipped when a pixel element is
+    present on the third arm.
+    """
+    outcome = _export(tmp_path,
+                      _hand_built_element(["YBR_ICT", "RGB"], "7fe0,0010"))
+
+    assert not outcome.ok
+    assert "PhotometricInterpretation (0028,0004) is a single value" in str(
+        outcome.error), outcome.error
+    assert not list((tmp_path / "out").glob("*.dcm"))
+
+
+@pytest.mark.parametrize("label", ["MONOCHROME2", "RGB"])
+def test_a_pixel_less_admitted_label_is_silent(tmp_path, label):
+    """The control: an admitted label on a pixel-less file warns nothing (#534).
+
+    Killing mutation (M12): a warning for any label present on the
+    pixel-less arm.
+    """
+    outcome = _export(tmp_path, _pixel_less(label))
+
+    assert outcome.ok, outcome.error
+    assert outcome.warnings == [], outcome.warnings
+
+
+def test_a_pixel_less_file_with_no_label_is_silent(tmp_path):
+    """No `0028,0004`, no claim, no warning (#534)."""
+    inst = _pixel_less("RGB")
+    del inst.attributes["0028,0004"]
+
+    outcome = _export(tmp_path, inst)
+
+    assert outcome.ok, outcome.error
+    assert outcome.warnings == [], outcome.warnings
+
+
+def test_photometric_warning_requires_has_pixels():
+    """A caller must say which kind of file it is judging (#534).
+
+    Keyword-only and without a default, the `float_element`/`syntax_uid`
+    precedent: the sentence and the remedy differ for a file with no
+    pixels, and inheriting the pixel wording by omission is how the
+    pixel-less arm's remedy was false before. Killing mutation (M13): a
+    default added.
+    """
+    import inspect
+
+    parameter = inspect.signature(_photometric_warning).parameters[
+        "has_pixels"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+
+
+# ---------------------------------------------------------------------------
+# #596: the default export says what this library cannot read back.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+@pytest.mark.parametrize("dtype", [np.uint16, np.int16, np.int8])
+def test_16_bit_ybr_full_default_export_notes_the_limit(tmp_path,
+                                                        compression, dtype):
+    """Written, conformant, and noted as a limit of ours (#596, #461).
+
+    A 16-bit or signed 8-bit `YBR_FULL` file is valid DICOM, so the
+    default export writes it. This library cannot read it back --
+    pydicom's colour conversion takes unsigned 8-bit samples only -- so
+    the export says so at INFO. A capability, not a defect in the user's
+    data: no `WARNING`, no row, the grade unmoved.
+
+    Killing mutations: (M17) the note routed to `warnings` (a row
+    appears); (Mnote8) the note keyed on `BitsAllocated > 8` rather than
+    the samples' dtype, which leaves the int8 file -- BitsAllocated 8,
+    and refused by `ingest()` -- silent, as it was when #609 was first
+    reviewed.
+    """
+    if dtype == np.int8:
+        arr = (np.arange(8 * 8 * 3) % 200 - 100).astype(np.int8).reshape(
+            8, 8, 3)
+    else:
+        arr = np.arange(8 * 8 * 3, dtype=dtype).reshape(8, 8, 3) * 100
+    outcome = _export(tmp_path, _image("YBR_FULL", arr=arr),
+                      compression=compression)
+
+    assert outcome.ok, outcome.error
+    assert outcome.warnings == [], outcome.warnings
+    notes = [c for c in outcome.corrections if "#461" in c]
+    assert len(notes) == 1, outcome.corrections
+    bits = np.dtype(dtype).itemsize * 8
+    representation = 1 if np.dtype(dtype).kind == "i" else 0
+    assert "YBR_FULL" in notes[0], notes
+    assert (f"BitsAllocated {bits} and PixelRepresentation "
+            f"{representation}") in notes[0], notes
+    assert "unsigned 8-bit samples only" in notes[0], notes
+
+
+@pytest.mark.parametrize("declared, arr", [
+    ("RGB", np.arange(8 * 8 * 3, dtype=np.uint16).reshape(8, 8, 3)),
+    ("YBR_FULL", np.full((8, 8, 3), YBR, np.uint8)),
+    ("YBR_FULL", np.indices((8, 8, 3)).sum(axis=0) % 2 == 0)],
+    ids=["16-bit-rgb", "8-bit-ybr-full", "bool-ybr-full"])
+def test_a_readable_colour_export_notes_no_limit(tmp_path, declared, arr):
+    """The control for the note above (#596).
+
+    Each file here reads back through `ingest()`'s decode, which the
+    `verify_readback=True` run asserts. A bool mask is written at
+    BitsAllocated 8 and reads back `uint8`, so it converts.
+
+    Killing mutations: the note's label or dtype guard dropped
+    (`16-bit-rgb`, `8-bit-ybr-full`); the `bool` half of
+    `_pydicom_converts_samples_of` dropped (`bool-ybr-full`).
+    """
+    outcome = _export(tmp_path, _image(declared, arr=arr))
+
+    assert outcome.ok, outcome.error
+    assert outcome.corrections == [], outcome.corrections
+    verified = _export(tmp_path / "verified", _image(declared, arr=arr),
+                       verify_readback=True)
+    assert verified.ok, verified.error
+
+
+def test_the_16_bit_ybr_note_writes_no_row(tmp_path):
+    """INFO only: a session export of such an instance grades PASS (#596).
+
+    Killing mutation (M17, the parent half): the note routed to
+    `warnings`.
+    """
+    arr = np.arange(8 * 8 * 3, dtype=np.uint16).reshape(8, 8, 3) * 100
+    with DicomSession(str(tmp_path / "n.db")) as session:
+        session.store.patients.append(_graph([_image("YBR_FULL", arr=arr)]))
+        session.save()
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       show_progress=False)
+        assert session.store_backend.get_audit_errors() == []

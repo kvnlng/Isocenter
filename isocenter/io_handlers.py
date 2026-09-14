@@ -127,7 +127,8 @@ import os
 import sys
 import hashlib
 import struct
-from typing import List, Dict, Any, Optional, Tuple, Iterable
+from math import ceil
+from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
 from datetime import datetime, date
 from dataclasses import dataclass, field
 
@@ -529,11 +530,14 @@ class _PhotometricRefusal(RuntimeError):
     on.
 
     That measurement is of a file **with pixel data**, which is the only
-    kind this exception is raised for -- `_write_pixel_geometry` runs
-    only on the two pixel-writing arms. A pixel-less file with two
-    labels has no decompression step to trip over and re-ingests
-    cleanly; it is `_readback_label_mismatch` that refuses that one, on
-    the arity alone.
+    kind this exception is raised for -- the pixel arms, through
+    `_write_pixel_geometry`, and a pixel element built into `attributes`
+    by hand, through `_pixel_less_label_warning`. A
+    pixel-less file carrying two labels has no decompression step to trip
+    over and re-ingests cleanly (measured), so the writer warns about it
+    and writes it (`_pixel_less_label_warning`, #534), and it is
+    `_readback_label_mismatch` that refuses it, on the arity alone, for a
+    caller who asked for `verify_readback=True`.
 
     **Raised on what the file would carry, not on what was declared.**
     At one sample the geometry resolver has already answered
@@ -560,9 +564,8 @@ class _PhotometricRefusal(RuntimeError):
 #: readback at the decode (`ValueError: Unknown (0028,0004) ...
 #: 'NONSENSE'`) while the default export writes it in silence.
 #:
-#: **Two deliberate widenings, each with its reason, because a strict
-#: table would fail this library's own output or take work this issue
-#: did not ask for:**
+#: **One deliberate widening, with its reason, because a strict table
+#: would fail this library's own output:**
 #:
 #: - `YBR_ICT` is admitted under JPEG 2000 *lossless* alongside
 #:   `YBR_RCT`, though `level=0` is the reversible transform. The owner's
@@ -570,13 +573,17 @@ class _PhotometricRefusal(RuntimeError):
 #:   is encoded with the transform and **keeps its label**, and #516
 #:   ships that, so a table admitting only `YBR_RCT` would warn about,
 #:   and refuse, files this exporter writes on purpose.
-#: - `YBR_PARTIAL_422`/`YBR_PARTIAL_420` are admitted under JPEG 2000,
-#:   though it admits neither. #502 is the *native*-syntax question and
-#:   the compressed half is filed separately; judging it here would make
-#:   the default export warn about a case nobody has ruled on yet.
-#:   **When that issue lands, remove these two from the J2K row** -- the
-#:   writer and the readback both tighten at once, which is why one
-#:   table serves both.
+#:
+#: **And one that is gone (#525).** `YBR_PARTIAL_422`/`YBR_PARTIAL_420`
+#: stood on the J2K row while only the native half had been ruled on, so
+#: the same instance warned natively and passed compressed. They are not
+#: admitted under JPEG 2000: the codestream holds full-sample components
+#: and PS3.5 A.4.4 gives no subsampled label to a J2K codestream. Such a
+#: label is written as declared with a WARNING, because `YBR_FULL` would
+#: misstate the value range (PS3.3 C.7.6.3.1.2) and there is no bare
+#: `YBR_PARTIAL`. `_compress_j2k` still encodes it `mct=False` (its case
+#: 3): the judgement moved, the encoder did not. The writer and the
+#: readback tightened at once, which is why one table serves both.
 #:
 #: Retired labels (`HSV`, `ARGB`, `CMYK`) are admitted everywhere. The
 #: question here is what a *syntax* can carry, not whether a label is
@@ -594,7 +601,7 @@ _ADMISSIBLE_PHOTOMETRICS = {
     "1.2.840.10008.1.2.1": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.2": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.4.90": _PHOTOMETRIC_ANY_SYNTAX | {
-        "YBR_ICT", "YBR_RCT", "YBR_PARTIAL_422", "YBR_PARTIAL_420"},
+        "YBR_ICT", "YBR_RCT"},
 }
 
 #: Why a label the written syntax does not admit is inadmissible, and
@@ -628,6 +635,29 @@ _PHOTOMETRIC_INADMISSIBLE = {
 _PHOTOMETRIC_INADMISSIBLE["YBR_RCT"] = _PHOTOMETRIC_INADMISSIBLE["YBR_ICT"]
 _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_420"] = \
     _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_422"]
+
+
+#: The labels pydicom converts to RGB on a default decode -- pydicom 3.0.2
+#: `_process_color_space`'s own set -- which is the decode `ingest()`
+#: makes and the readback's stored-sample decode does not (#596). Its
+#: conversion refuses any samples but unsigned 8-bit
+#: (`convert_color_space`: `arr.dtype != np.dtype("u1")`), so a file
+#: carrying one of these over 16-bit or int8 samples is conformant and
+#: cannot be ingested.
+_PYDICOM_CONVERTS = frozenset({"YBR_FULL", "YBR_FULL_422"})
+
+
+def _pydicom_converts_samples_of(dtype) -> bool:
+    """Whether pydicom's colour conversion takes samples of `dtype` (#596).
+
+    pydicom 3.0.2 `convert_color_space` refuses any array whose dtype is
+    not `u1`. A `bool` mask is written at BitsAllocated 8 and
+    reads back as `uint8`, so it counts as the samples it becomes. One
+    predicate for the readback's second decode and the export's note, so
+    the two cannot answer differently.
+    """
+    dtype = np.dtype(dtype)
+    return dtype == np.uint8 or dtype == np.bool_
 
 
 #: The three elements a Photometric Interpretation can describe: the
@@ -691,7 +721,111 @@ def _written_photometric(value) -> Optional[str]:
     return text or None
 
 
-def _photometric_warning(label, syntax_uid) -> Optional[str]:
+#: The longest value a Code String may hold (PS3.5 6.2), and how much of a
+#: declared label a correction note repeats. A label is a header value,
+#: not patient-derived text, but a hand-built graph can hold any string
+#: there, and a note must not become a vehicle for one.
+_CS_MAX_CHARS = 16
+
+
+def _cs_spelling(value):
+    """`value` as a Code String is spelled, when it is text; else itself."""
+    return value.strip().upper() if isinstance(value, str) else value
+
+
+def _cs_quoted(value) -> str:
+    """`value` quoted for a note, at most a Code String's length of it."""
+    if not isinstance(value, str):
+        return repr(value)
+    if len(value) > _CS_MAX_CHARS:
+        return f"{value[:_CS_MAX_CHARS]!r} (cut at {_CS_MAX_CHARS} characters)"
+    return repr(value)
+
+
+def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
+    """The attributes the worker writes from, with (0028,0004) spelled as a
+    CS value is defined, and the correction note when that changed what a
+    reader sees (#532).
+
+    A declared `' rgb '` used to reach the file as `' rgb'` -- a CS is
+    right-stripped on read, not left-stripped, and never case-folded --
+    and pydicom and `ingest()` refuse that file (`Unknown (0028,0004)
+    'Photometric Interpretation' value ' rgb'`), so the export delivered
+    a file this library could not read, with `ok=True`. PS3.5 6.2 defines
+    a Code String as upper case with insignificant leading and trailing
+    spaces, so writing `RGB` is the same label, spelled as defined, and
+    the samples are untouched: an exact correction, #506's class, INFO
+    and no row.
+
+    **A copy, never the graph.** The returned mapping is a shallow copy
+    of `attributes` holding a *new* value for the one key, and `attributes`
+    itself is returned unchanged when there is nothing to respell. The
+    worker runs in the caller's process under threads, so writing the
+    spelling back onto `inst.attributes` would edit the live graph from an
+    export (`tests/test_export_worker_graph_purity.py`).
+
+    **Both readers of the declaration take the copy**: `_merge`, because
+    pydicom emits `UserWarning: Invalid value for VR CS` on the caller's
+    stream when the raw value is assigned, and `_write_pixel_geometry`,
+    because it falls back to the declared value when the resolver answers
+    None and would write the raw spelling back over the corrected one.
+    Nothing else reads `0028,0004` from the worker's attributes.
+
+    **The note fires only when a reader would see a difference** --
+    compared against the right-stripped declaration, so `'RGB '` is
+    respelled silently: its trailing pad is what the file does anyway.
+
+    A multi-valued declaration has each text value respelled, so the
+    pixel arms' refusal and the pixel-less arm's warning name clean
+    values; the note is still one. Anything that is not text (`bytes`, a
+    number) is left as it is: there is no CS spelling to restore.
+
+    Only `0028,0004`, by ruling: it is the element a decoder keys on and
+    the one that made this library's own file unreadable. Other Code
+    String elements are written as held (#603).
+    """
+    value = attributes.get("0028,0004")
+    if isinstance(value, str):
+        declared = [value]
+        respelled = value.strip().upper()
+        if respelled == value:
+            return attributes, None
+        written_value = respelled
+    elif isinstance(value, (list, tuple, MultiValue)) and any(
+            isinstance(v, str) for v in value):
+        declared = list(value)
+        written_value = [_cs_spelling(v) for v in value]
+        if written_value == declared:
+            return attributes, None
+    else:
+        return attributes, None
+    copy = dict(attributes)
+    copy["0028,0004"] = written_value
+    written = [written_value] if isinstance(written_value, str) \
+        else written_value
+    if all(not isinstance(d, str) or d.rstrip() == w
+           for d, w in zip(declared, written)):
+        return copy, None
+    # One of the two is always true here: a value with no leading
+    # whitespace and no lower case has a right-strip equal to its CS
+    # spelling, and returned above.
+    changes = []
+    if any(isinstance(d, str) and d.upper() != d for d in declared):
+        changes.append("its letters upper-cased")
+    if any(isinstance(d, str) and d.lstrip() != d for d in declared):
+        changes.append("its leading spaces removed")
+    spelled = ", ".join(_cs_quoted(d) for d in declared)
+    as_written = ", ".join(_cs_quoted(w) for w in written)
+    return copy, (
+        f"PhotometricInterpretation {spelled} is not a defined Code String "
+        f"spelling; written as {as_written}, the same label with "
+        f"{' and '.join(changes)} "
+        f"(PS3.5 6.2: a CS value is upper case, and its leading and "
+        f"trailing spaces are not significant). The samples are unchanged.")
+
+
+def _photometric_warning(label, syntax_uid, *,
+                         has_pixels: bool) -> Optional[str]:
     """One sentence for a label the written syntax does not admit (#502).
 
     Returns None when the syntax has no row (measured rows only, the
@@ -699,17 +833,102 @@ def _photometric_warning(label, syntax_uid) -> Optional[str]:
     or when the label is admitted. The sentence names what was declared,
     what the file was written under, and which one the code used --
     everything the row in the compliance report has to carry.
+
+    `has_pixels` is keyword-only and **has no default** (#534), the
+    `float_element`/`syntax_uid` precedent: a file with no pixel element
+    has no samples the label was written "over", and every remedy in
+    `_PHOTOMETRIC_INADMISSIBLE` talks about the pixels -- "export with
+    use_compression=True" cannot help an instance with nothing to
+    compress. So a caller has to say which kind of file it is judging,
+    and the pixel-less one gets `_PHOTOMETRIC_NO_PIXELS`.
     """
     admitted = _ADMISSIBLE_PHOTOMETRICS.get(str(syntax_uid))
     if admitted is None or label is None or label in admitted:
         return None
     clause, remedy = _PHOTOMETRIC_INADMISSIBLE.get(
         label, _PHOTOMETRIC_INADMISSIBLE[None])
-    return (f"PhotometricInterpretation '{label}' is not a label the "
-            f"transfer syntax this file was written under admits "
-            f"({syntax_uid}): {clause} The label was written as declared, "
-            f"over the samples the instance held, and neither was changed. "
-            f"{remedy}")
+    if has_pixels:
+        kept = ("The label was written as declared, over the samples the "
+                "instance held, and neither was changed.")
+    else:
+        kept = "The label was written as declared."
+        remedy = _PHOTOMETRIC_NO_PIXELS
+    return (f"PhotometricInterpretation {_cs_quoted(label)} is not a label "
+            f"the transfer syntax this file was written under admits "
+            f"({syntax_uid}): {clause} {kept} {remedy}")
+
+
+def _pixel_less_label_warning(ds) -> Optional[str]:
+    """The label judgement for a file with no pixel element (#534).
+
+    `_write_pixel_geometry` judges the label on the two arms that write a
+    pixel element. The third arm -- an instance with none, an SR or a
+    waveform-only file carrying a pixel descriptor it has no use for --
+    never calls it, and `_merge` had already put whatever `0028,0004` the
+    graph declared on `ds`, so the file carried it unexamined: measured,
+    `YBR_ICT` and an undefined label exported `ok=True` with no warning.
+
+    **Read off `ds` after `_finalize_dataset`, never off the worker's
+    `written_syntax`.** A file with no pixel data is written natively
+    even under `compression="j2k"` -- `_compress_j2k` has nothing to
+    encode and leaves `file_meta` alone -- while `written_syntax` says
+    JPEG 2000 for it, and the J2K row admits `YBR_ICT`. The syntax is the
+    one the file will carry.
+
+    **A multi-valued label is warned about, not refused.** The pixel arms
+    refuse it (`_PhotometricRefusal`) because such a file cannot be read
+    back; a pixel-less one can -- measured, `ingest()` returns
+    `ingested=1` with the graph carrying both values -- so the refusal's
+    reason is false here, and the write-path ruling applies: written as
+    declared, with a WARNING. `verify_readback=True` still fails it on
+    the arity (`_readback_label_mismatch`). The exception is a pixel
+    element put into `attributes` by hand, which reaches this arm too:
+    that file has pixels, so it gets the pixel sentences and, for a
+    multi-valued label, the pixel arms' refusal.
+    """
+    label = ds.get("PhotometricInterpretation")
+    if label is None:
+        return None
+    # A pixel element can still reach this arm: `set_attr("7fe0,0010",
+    # ...)` on an instance with no pixel array is written by `_merge`,
+    # and no pixel arm runs. Such a file is judged here -- nothing else
+    # judges it -- but with the sentences true of a file that has pixels,
+    # and a multi-valued label on it gets the pixel arms' refusal, whose
+    # reason holds for it. Measured on the review of #609: the warning
+    # said "which has no pixel element" over a file carrying `PixelData`.
+    has_pixels = any(kw in ds for kw in _PIXEL_ELEMENTS)
+    if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
+        if has_pixels:
+            raise _multi_valued_refusal(label)
+        return (f"PhotometricInterpretation (0028,0004) is VM 1; this "
+                f"instance, which has no pixel element, declares "
+                f"{len(label)} values "
+                f"({', '.join(_cs_quoted(str(v)) for v in label)}). "
+                f"Written as declared: a file with no pixels re-ingests "
+                f"carrying all of them. {_PHOTOMETRIC_NO_PIXELS}")
+    return _photometric_warning(
+        _written_photometric(label),
+        str(getattr(ds.file_meta, "TransferSyntaxUID", "") or ""),
+        has_pixels=has_pixels)
+
+
+def _multi_valued_refusal(written) -> "_PhotometricRefusal":
+    """The refusal for a file with pixels declaring several labels (#502).
+
+    One sentence for both places that raise it: the pixel arms
+    (`_write_pixel_geometry`) and a pixel element built into `attributes`
+    by hand, which reaches the third arm (#534).
+    """
+    return _PhotometricRefusal(
+        f"PhotometricInterpretation (0028,0004) is a single value; "
+        f"this instance declares {len(written)} "
+        f"({', '.join(repr(str(v)) for v in written)}). A file "
+        f"carrying more than one cannot be read back by this library "
+        f"at all -- ingest refuses it before any label is examined -- "
+        f"so no output here would be honest, which is why this one "
+        f"case is refused where an inadmissible label is written with "
+        f"a warning. Declare one label with "
+        f"set_attr(\"0028,0004\", ...).")
 
 
 #: PixelRepresentation (0028,0103) in the words PS3.5 6.2 uses, for the
@@ -3592,7 +3811,9 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
         geom (PixelGeometry): The one resolved geometry.
         attributes (dict): The instance's attributes, read only to decide
             whether a frame count was declared and for the photometric
-            fallback.
+            fallback -- the worker's copy with (0028,0004) spelled as a
+            Code String (`_label_as_written`, #532), so the fallback
+            cannot write a raw spelling back over the corrected one.
         float_element (bool): Whether the pixel element just written was
             (7fe0,0008) or (7fe0,0009). Keyword-only and **without a
             default**, so a third call site has to decide which module's
@@ -3679,23 +3900,18 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # way a check inside the integer arm would be bypassed by the float
     # path.
     #
-    # **There is a third arm, and it does not come through here (#507
-    # review; filed for v0.9.7).** An instance with no pixel element
-    # never calls this function, and `_merge` has already put whatever
-    # `0028,0004` the graph declared onto `ds`, so the file carries it
-    # unexamined. Measured on this branch, over an SR-shaped instance
-    # with no pixels: a declared `YBR_ICT` exports `ok=True` with
-    # `warnings == []` -- #502's defect, intact, one branch over -- and
-    # a declared `['YBR_ICT', 'RGB']` exports `ok=True` on the default
-    # path with the file reading back `MultiValue(['YBR_ICT', 'RGB'])`.
-    # `verify_readback=True` does catch both, because
-    # `_readback_label_mismatch` reads the delivered file and does not
-    # care which arm wrote it. Deliberately not closed here: routing the
-    # pixel-less arm through this check is new behaviour needing its own
-    # tests, the reachability is a malformed source or a hand-built
-    # graph (a pixel descriptor on an instance with no pixels), and this
-    # is the last PR of the milestone. Do not read the paragraphs below
-    # as covering that arm.
+    # **The third arm does not come through here, and is judged
+    # elsewhere (#534).** An instance with no pixel element never calls
+    # this function, and `_merge` has already put whatever `0028,0004`
+    # the graph declared onto `ds`. Until #534 that file carried the label
+    # unexamined -- measured, an SR-shaped instance declaring `YBR_ICT`
+    # exported `ok=True` with no warning. The worker now judges that arm
+    # itself, after `_finalize_dataset`, with `_pixel_less_label_warning`:
+    # the same table, a remedy true of a file with no pixels, and the
+    # syntax read from `file_meta` because a pixel-less file stays native
+    # under compression. Do not move that judgement in here: this
+    # function is the pixel arms' contract, and its refusal of a
+    # multi-valued label is true only of a file with pixels.
     #
     # It runs *after* the corrections above rather than on
     # `attributes`, so it judges what the file will carry: a declared
@@ -3739,20 +3955,11 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # form silently never fires. See `_fallback_multivalue`.
     written = ds.get("PhotometricInterpretation")
     if isinstance(written, (list, tuple, MultiValue)) and len(written) > 1:
-        raise _PhotometricRefusal(
-            f"PhotometricInterpretation (0028,0004) is a single value; "
-            f"this instance declares {len(written)} "
-            f"({', '.join(repr(str(v)) for v in written)}). A file "
-            f"carrying more than one cannot be read back by this library "
-            f"at all -- ingest refuses it before any label is examined -- "
-            f"so no output here would be honest, which is why this one "
-            f"case is refused where an inadmissible label is written with "
-            f"a warning. Declare one label with "
-            f"set_attr(\"0028,0004\", ...).")
+        raise _multi_valued_refusal(written)
     if warnings is not None:
         warning = _photometric_warning(
             _written_photometric(ds.get("PhotometricInterpretation")),
-            syntax_uid)
+            syntax_uid, has_pixels=True)
         if warning is not None:
             warnings.append(warning)
 
@@ -3975,14 +4182,13 @@ def _readback_label_mismatch(readback) -> Optional[str]:
     design and not by omission. The check is structural: could a
     conformant reader take this label under this syntax at all.
 
-    **It reaches a file the writer's own check does not.**
-    `_write_pixel_geometry` runs only on the two pixel-writing arms, so
-    an instance with no pixel element carries whatever `0028,0004` the
-    graph declared onto disk unexamined and unwarned (measured; filed
-    for v0.9.7). This function reads the delivered file and does not
-    care which arm wrote it, so it catches that one too -- which is why
-    the reason has to check for a pixel element before offering a remedy
-    about the pixels.
+    **It reads every file, whichever arm wrote it.** The writer judges
+    the pixel arms in `_write_pixel_geometry` and the pixel-less arm in
+    `_pixel_less_label_warning` (#534), and both write an inadmissible
+    label as declared with a warning; this function reads the delivered
+    file and refuses it, which is why the reason has to check for a pixel
+    element before offering a remedy about the pixels. A hand-built file
+    reaches it too.
     """
     if "PhotometricInterpretation" not in readback:
         return None
@@ -4080,7 +4286,13 @@ def _verify_readback(path: str, ds, written_pixels=None,
        compared bit for bit (`_bit_patterns`). A native sample outside
        the declared BitsStored therefore fails: every conformant reader
        masks it, so the file does not hold what was meant (-3024 at
-       BitsStored 12 reads back as 1072).
+       BitsStored 12 reads back as 1072). A file labelled with a colour
+       space pydicom converts (`_PYDICOM_CONVERTS`), over samples that
+       are not unsigned 8-bit, is then decoded a second time the way
+       `ingest()` decodes it, with the conversion, so a 16-bit or int8
+       `YBR_FULL` file this library cannot ingest fails here too (#596).
+       Unsigned 8-bit samples are the ones that conversion accepts, and
+       are not decoded twice.
     4. **Waveform bytes**, when `written_waveform` is given: the file's
        `WaveformData` against the bytes written, allowing exactly the
        one pad byte `save_as` adds to an odd-length value
@@ -4187,6 +4399,36 @@ def _verify_readback(path: str, ds, written_pixels=None,
             getattr(readback, "PixelRepresentation", None))
         if reason is not None:
             raise RuntimeError(f"Readback verification failed: {reason}")
+
+        # **And the decode `ingest()` makes, where it differs (#596).**
+        # The decode above asks for the stored samples, because those are
+        # what was written; `ingest()` asks pydicom's default, which
+        # converts a YBR_FULL family to RGB and refuses anything but
+        # unsigned 8-bit samples doing it. Measured before this: a native
+        # 16-bit `YBR_FULL` file passed here while `ingest()` and
+        # `pixel_array` both refused it, and the JPEG 2000 one failed --
+        # two answers from one contract, which is "this library can read
+        # it back". After the exact compare, so a sample mismatch keeps
+        # its more specific reason.
+        #
+        # Gated on the label **and** the decoded dtype (Q6, the review of
+        # #609). Unsigned 8-bit is exactly what the conversion accepts, so
+        # the second decode cannot change that verdict -- pinned against
+        # pydicom by `test_unsigned_8_bit_ybr_full_converts_whenever_it_
+        # decodes` -- and it cost a 100-frame JPEG 2000 file 20 s more and
+        # a float32 copy of the array. **Not** on BitsAllocated: int8 is
+        # BitsAllocated 8 and the conversion refuses it.
+        if _written_photometric(getattr(
+                readback, "PhotometricInterpretation", None)) \
+                in _PYDICOM_CONVERTS \
+                and not _pydicom_converts_samples_of(decoded.dtype):
+            try:
+                _decode_pixels(readback)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Readback verification failed: the written file "
+                    f"cannot be ingested by this library "
+                    f"({describe_exception_without_paths(exc)})") from exc
 
     if written_waveform is not None:
         reason = _readback_waveform_mismatch(readback, written_waveform)
@@ -4516,6 +4758,15 @@ def _nested_loader_metadata(geometry, ref, inst) -> dict:
     }
 
 
+#: How every export line and row names an instance that carries no SOP
+#: Instance UID. Never its output path: that is
+#: `<folder>/Subject_<Patient ID>/...`, and these lines reach the log, the
+#: audit table and the compliance report (bunch E). One spelling, because
+#: the worker's failure line and the parent's three report helpers name the
+#: same outcome.
+_NO_SOP_UID = "an instance with no SOP Instance UID"
+
+
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
@@ -4564,7 +4815,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         written_waveform = None
 
         # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes, losses,
+        #
+        # `attributes` is `inst.attributes` with (0028,0004) spelled as a
+        # Code String is defined (#532), and it is a copy whenever that
+        # changed anything. It is what `_merge` and both
+        # `_write_pixel_geometry` calls read, and nothing else: every
+        # other reader below stays on `inst.attributes`, the graph.
+        attributes, respelled = _label_as_written(inst.attributes)
+        if respelled is not None:
+            corrections.append(respelled)
+        DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None))
         DicomExporter._merge_sequences(ds, inst.sequences, losses)
 
@@ -4944,7 +5204,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                         "data held elsewhere; the exported file carries "
                         "its own."))
 
-                _write_pixel_geometry(ds, geom, inst.attributes,
+                _write_pixel_geometry(ds, geom, attributes,
                                       float_element=True,
                                       syntax_uid=written_syntax,
                                       warnings=warnings)
@@ -5014,7 +5274,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                     "The URL named pixel data held elsewhere; the "
                     "exported file carries its own."))
 
-            _write_pixel_geometry(ds, geom, inst.attributes,
+            _write_pixel_geometry(ds, geom, attributes,
                                   float_element=False,
                                   syntax_uid=written_syntax,
                                   warnings=warnings)
@@ -5087,6 +5347,24 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 corrections.append(
                     f"{widened}; written with BitsStored {ds.BitsStored} "
                     f"and HighBit {ds.HighBit}, the array's own width")
+            # A declared HighBit the file does not carry is said out loud
+            # too (#597). INFO, by ruling: the written file is conformant,
+            # the samples are unchanged, and an ingested file's declaration
+            # already has ingest's own row -- nothing in the graph marks
+            # which instances those are, so a WARNING here would write a
+            # second row per instance of every legacy cohort re-exported.
+            # `declared_int` for #506's reason, and not after a widening,
+            # whose note already names the written HighBit. "Written with",
+            # because the BitsStored named may be one nobody declared.
+            declared_high_bit = declared_int(inst.attributes, "0028,0102")
+            if (widened is None and declared_high_bit is not None
+                    and declared_high_bit != ds.HighBit):
+                corrections.append(
+                    f"HighBit {declared_high_bit} was declared; written "
+                    f"with BitsStored {ds.BitsStored} and HighBit "
+                    f"{ds.HighBit}, because the samples are right-aligned "
+                    f"and PS3.5 8.1.1 puts their most significant bit at "
+                    f"BitsStored - 1. The samples are unchanged.")
             ds.PixelRepresentation = 1 if arr.dtype.kind == "i" else 0
             declared_representation = declared_int(inst.attributes,
                                                    "0028,0103")
@@ -5189,6 +5467,56 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # Validate & Save
         ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
 
+        # A limit of ours, not a defect in the data (#596, #461): a
+        # 16-bit or signed 8-bit YBR_FULL file is conformant and is
+        # written, and this library cannot read it back -- pydicom's
+        # colour conversion takes unsigned 8-bit samples only. Keyed on
+        # the samples' dtype, the predicate pydicom itself applies and the
+        # one the readback's second decode is gated on, not on
+        # BitsAllocated: int8 is BitsAllocated 8, and a `> 8` key left it
+        # silent. INFO on `corrections`, no row. After
+        # `_finalize_dataset` and off `ds`, so the label is the written
+        # one (`YBR_FULL_422` is already `YBR_FULL`) and a JPEG 2000 file,
+        # which keeps `YBR_FULL` (`_compress_j2k` case 3), is covered in
+        # the same words. Keyed on the integer arm having written, rather
+        # than on `"PixelData" in ds`: a float arm cannot carry a colour
+        # label at all (#222).
+        if (written_pixels is not None and written_pixels.dtype.kind != "f"
+                and _written_photometric(ds.get("PhotometricInterpretation"))
+                in _PYDICOM_CONVERTS
+                and not _pydicom_converts_samples_of(written_pixels.dtype)):
+            corrections.append(
+                f"PhotometricInterpretation "
+                f"{_written_photometric(ds.PhotometricInterpretation)} at "
+                f"BitsAllocated {ds.BitsAllocated} and PixelRepresentation "
+                f"{ds.get('PixelRepresentation', 0)} is written as declared, "
+                f"and this library cannot read such a file back (#461): "
+                f"pydicom's colour conversion takes unsigned 8-bit samples "
+                f"only.")
+
+        # The third arm's label judgement (#534): a file with no pixel
+        # element never reaches `_write_pixel_geometry`, which judges the
+        # other two. After `_finalize_dataset`, because the syntax judged
+        # has to be the one in `ds.file_meta` -- a pixel-less file stays
+        # native under `compression="j2k"`, where `written_syntax` says
+        # JPEG 2000 -- and before `save_as`, so the sentence rides the
+        # outcome of the file it describes. An `IODValidator` refusal
+        # raises first and the instance fails with its own ERROR, which is
+        # the right order: a warning describes a file that was written.
+        #
+        # Keyed on the arm -- no pixel arm set `written_pixels`, which is
+        # exactly "`_write_pixel_geometry` was not called" -- and not on
+        # `_PIXEL_ELEMENTS` membership in `ds`. The two differ for one
+        # input: a truthy `compression` other than `"j2k"` makes the
+        # integer arm skip `ds.PixelData` while `_finalize_dataset`
+        # encodes nothing, so a file judged by the pixel arm already
+        # would be judged a second time here (measured with
+        # `compression="rle"`, two warnings for one label).
+        if written_pixels is None:
+            warning = _pixel_less_label_warning(ds)
+            if warning is not None:
+                warnings.append(warning)
+
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
 
@@ -5240,7 +5568,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # `Subject_<Patient ID>/...`, and an OSError's text repeats it
         # (P8, bunch E; the WFDB half is #588). The parent's `ERROR` row,
         # `_report_export_failures`', has the same shape.
-        named = f"instance {uid}" if uid else "an instance with no SOP Instance UID"
+        named = f"instance {uid}" if uid else _NO_SOP_UID
         print(f"ERROR: Export failed for {named}: "
               f"{describe_exception_without_paths(e)}", file=sys.stderr)
         return ExportOutcome(ok=False, output_path=ctx.output_path,
@@ -5317,10 +5645,55 @@ _J2K_ENCODABLE_FRAMES = frozenset({
 #: the codestream. PS3.5 8.2.4 is symmetric about this: a transformed
 #: codestream must carry one of these labels, and an untransformed one
 #: must carry components matching its Photometric Interpretation. Every
-#: other 3-sample label -- `YBR_FULL`, `YBR_FULL_422`,
-#: `YBR_PARTIAL_420`, `PALETTE COLOR` -- is already decorrelated and
-#: encodes `mct=False`.
+#: other label -- `YBR_FULL`, `YBR_PARTIAL_420`, `YBR_PARTIAL_422`, and
+#: every 1-sample label including `PALETTE COLOR` -- encodes `mct=False`.
+#:
+#: **That list is this function's, not the worker's (#528).** Through the
+#: export worker, a 3-sample `PALETTE COLOR` has already become `RGB`
+#: (case 1) and a 3-sample `YBR_FULL_422` has become `YBR_FULL` (#470),
+#: because `_write_pixel_geometry` runs before the encoder; neither
+#: reaches this function under its own name. A direct caller can still
+#: pass either, which is what the unit tests do.
 _J2K_MCT_SOURCES = frozenset({"RGB", "YBR_RCT", "YBR_ICT"})
+
+
+def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
+    """The encapsulated lengths pydicom mistakes for uncompressed data (#473).
+
+    pydicom 3.0.2 `DecodeRunner._validate_buffer` warns for
+    `actual in (expected, expected + expected % 2)`, where `expected` is
+    `frame_length(unit="bytes") * number_of_frames` under the file's own
+    transfer syntax. The runner computes it here rather than a formula
+    beside it, so a pydicom that changes the arithmetic changes this
+    too. `DecodeRunner` is imported from its module because `pydicom.pixels`
+    does not re-export it; the `<4.0` cap in `setup.py` is what keeps the
+    path stable.
+
+    Two of `frame_length`'s branches cannot be reached from the encoder:
+    BitsAllocated 1 (a bool mask is written at 8, see the `view` above
+    the frame guard) and the native `YBR_FULL_422` correction (the
+    runner is told the syntax is JPEG 2000, and the worker has rewritten
+    that label to `YBR_FULL` before the encoder). `ds.file_meta` still
+    says Implicit VR LE at this point, which is why the syntax is given,
+    not read.
+
+    The import is the module-scope one `_validate_like_pydicom` uses
+    (#453): one site to fix if pydicom ever moves the class.
+    """
+    runner = DecodeRunner(JPEG2000Lossless)
+    runner.set_options(rows=int(getattr(ds, "Rows", 0) or 0),
+                       columns=int(getattr(ds, "Columns", 0) or 0),
+                       samples_per_pixel=int(samples),
+                       bits_allocated=int(getattr(ds, "BitsAllocated", 0) or 0),
+                       number_of_frames=int(frames),
+                       # Read by `frame_length` before it asks whether
+                       # the syntax is encapsulated; the value cannot
+                       # change the answer under JPEG 2000.
+                       photometric_interpretation=str(getattr(
+                           ds, "PhotometricInterpretation", "") or ""))
+    expected = ceil(runner.frame_length(unit="bytes")
+                    * runner.number_of_frames)
+    return (expected, expected + expected % 2)
 
 
 def _refuse_unencodable_j2k_frame(arr, ds, samples):
@@ -5557,12 +5930,18 @@ def _compress_j2k(ds, pixel_array=None):
         #    mirrored. Not relabelled to `RGB`, which would discard the
         #    source's stated colour space against #482's work, and not
         #    refused, which no ingested file would reach.
-        # 3. **Every other 3-sample source** -- `YBR_FULL`,
-        #    `YBR_FULL_422`, `YBR_PARTIAL_420`, `PALETTE COLOR` -- and
-        #    every 1-sample one is encoded `mct=False` and keeps its
-        #    label. A luma/chroma source is already decorrelated, so MCT
-        #    over it is both unnameable and larger: measured on a
-        #    `YBR_FULL` frame, `mct=True` is 66482 bytes against
+        # 3. **Every other label** -- `YBR_FULL`, `YBR_PARTIAL_420`,
+        #    `YBR_PARTIAL_422`, and every 1-sample label including
+        #    `PALETTE COLOR` -- is encoded `mct=False` and keeps its
+        #    label. Through the export worker, a 3-sample `PALETTE COLOR`
+        #    has already become `RGB` (case 1) and a 3-sample
+        #    `YBR_FULL_422` has become `YBR_FULL` (#470), so neither
+        #    reaches this function under its own name; a direct caller
+        #    can still pass either (#528). `YBR_PARTIAL_*` is a label the
+        #    export also warns about (#525): the encoder does not decide
+        #    admissibility. A luma/chroma source is already
+        #    decorrelated, so MCT over it is both unnameable and larger:
+        #    measured on a `YBR_FULL` frame, `mct=True` is 66482 bytes against
         #    `mct=False`'s 48819, a 36% loss for a file that would also
         #    be mislabelled.
         #
@@ -5591,7 +5970,30 @@ def _compress_j2k(ds, pixel_array=None):
         else:
             frames_data.append(encode_frame(arr))
 
-        ds.PixelData = encapsulate(frames_data)
+        # **An offset table, unless it makes the length a lie (#473).**
+        # pydicom's decoder warns "the number of bytes of compressed pixel
+        # data matches the expected number for uncompressed data" when an
+        # encapsulated value's length falls in its window, and small
+        # low-entropy frames land there by chance -- about 1 in 5 random
+        # 16x16 bool masks, measured -- so `verify_readback=True`, and
+        # every later reader, put a false "check the transfer syntax"
+        # warning on the caller's stream about a correct file. An empty
+        # Basic Offset Table is PS3.5 A.4-legal and shortens the value by
+        # 4 bytes per frame; the window is `expected`, or `expected + 1`
+        # when that is odd, so the two encapsulations cannot both fall in
+        # it. Suppressing the warning instead was ruled out in #472: on
+        # 3.12 `catch_warnings` mutates the process-global filters, and
+        # this runs on threads.
+        #
+        # The trade, for exactly these files: no table, so the table-based
+        # frame check reads nothing (`offset_table_frame_count` answers
+        # None) and a reader falls back to one fragment per frame, which is
+        # what this encoder writes. The readback still compares every
+        # frame's samples.
+        encapsulated = encapsulate(frames_data)
+        if len(encapsulated) in _heuristic_lengths(ds, frames, samples):
+            encapsulated = encapsulate(frames_data, has_bot=False)
+        ds.PixelData = encapsulated
         # ds.TransferSyntaxUID = JPEG2000Lossless # REMOVE: Group 2 tags must be in file_meta only
         # The transfer syntax is the encoding. `is_implicit_VR` and
         # `is_little_endian` are not set alongside it: pydicom derives
@@ -6254,12 +6656,15 @@ class DicomExporter:
             # `ERROR` row saying the file does not exist (#240).
             failed = not getattr(r, "ok", False)
             for scope, loss in getattr(r, "losses", ()):  # Exceptions have none
-                uid = r.sop_instance_uid or r.output_path
+                # Never `r.output_path`: it is `Subject_<Patient ID>/...`
+                # (D10). The row's key is `UNKNOWN`, as
+                # `_report_export_failures` keys it.
+                uid = r.sop_instance_uid or "UNKNOWN"
                 if failed:
                     loss = (f"{loss} The file itself was not written: this "
                             "instance's export failed after the element was "
                             "dropped.")
-                logger.warning(f"{uid}: {loss}")
+                logger.warning(f"{r.sop_instance_uid or _NO_SOP_UID}: {loss}")
                 count += 1
                 if store_backend is not None:
                     # `log_audit`, not `log_audit_batch`: the batch method
@@ -6298,7 +6703,8 @@ class DicomExporter:
             if not getattr(r, "ok", False):
                 continue  # A lost worker or a failed write: no file.
             for note in r.corrections:
-                logger.info("%s: %s", r.sop_instance_uid or r.output_path,
+                # The instance, never `r.output_path` (D10).
+                logger.info("%s: %s", r.sop_instance_uid or _NO_SOP_UID,
                             note)
                 count += 1
         return count
@@ -6337,9 +6743,13 @@ class DicomExporter:
         for r in results:
             if not getattr(r, "ok", False):
                 continue  # A lost worker or a failed write: no file.
-            uid = r.sop_instance_uid or r.output_path
+            # Never `r.output_path` (D10): the key is `UNKNOWN`, as
+            # `_report_export_failures` keys it, and the line names the
+            # instance in the worker's own words.
+            uid = r.sop_instance_uid or "UNKNOWN"
             for warning in r.warnings:
-                logger.warning("%s: %s", uid, warning)
+                logger.warning("%s: %s", r.sop_instance_uid or _NO_SOP_UID,
+                               warning)
                 count += 1
                 if store_backend is not None:
                     # `log_audit`, not `log_audit_batch` -- see the note
@@ -6395,7 +6805,7 @@ class DicomExporter:
                 # records it, and nothing below it is the report's.
                 uid = r.sop_instance_uid or "UNKNOWN"
                 named = (f"instance {r.sop_instance_uid}" if r.sop_instance_uid
-                         else "an instance with no SOP Instance UID")
+                         else _NO_SOP_UID)
                 # `error` is the exception the worker caught, not prose,
                 # so it is described here; `str()` of a message-less one
                 # was `''` and the row ended in a colon (#435). A string
@@ -6610,6 +7020,11 @@ class DicomExporter:
         # caller say how many of the requested instances exist (#181).
         failures = DicomExporter._report_export_failures(results, store_backend)
         summary = ExportSummary(
+            # The path fallback stays here, unlike the report helpers
+            # above (D10): `written_uids` is a frozen public field that is
+            # counted (`written` de-duplicates it) and matched against the
+            # plan's UIDs, and no line or row is built from it. A shared
+            # placeholder would count every UID-less instance as one file.
             written_uids=[r.sop_instance_uid or r.output_path
                           for r in results
                           if isinstance(r, ExportOutcome) and r.ok],

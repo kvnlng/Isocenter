@@ -154,3 +154,261 @@ def test_the_frame_refusal_is_not_rewrapped_by_the_generic_handler(
     assert message.count("Compression failed") == 1, message
     assert "int32" in message
     assert "use_compression=False" in message
+
+
+# ---------------------------------------------------------------------------
+# #473: a compressed length pydicom would mistake for an uncompressed one
+# ---------------------------------------------------------------------------
+
+import itertools
+import warnings
+
+import pydicom
+from imagecodecs import jpeg2k_encode
+from pydicom.encaps import encapsulate
+
+from isocenter import io_handlers
+from isocenter.entities import Instance
+from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+#: pydicom 3.0.2 `pixels/decoders/base.py`, `_validate_buffer`: the warning
+#: this is about, matched on its own words.
+HEURISTIC = "matches the expected number for uncompressed data"
+
+_serial = itertools.count(1)
+
+
+def _codestream(frame):
+    """What `_compress_j2k` encodes a 1-sample frame to."""
+    return jpeg2k_encode(frame, level=0, codecformat="J2K", mct=False)
+
+
+def _window(frame):
+    """pydicom 3.0.2's window for one 8-bit 1-sample frame, by hand.
+
+    Spelled here rather than read from `_heuristic_lengths`, so a mutant
+    of that function cannot also move the target the search aims at;
+    `test_the_window_is_pydicoms_own` holds the two together.
+    """
+    expected = frame.size
+    return (expected, expected + expected % 2)
+
+
+def _search(candidates, limit):
+    """Frames whose BOT encapsulation lands in pydicom's window.
+
+    Searched at test time rather than hard-coded: the encoder's output
+    is a property of the installed `imagecodecs`, and a seed list measured
+    on one release is not a collision on another. The search failing is a
+    failure, not a skip -- a silent skip would read as a pass. `limit`
+    bounds the candidates tried; each search stops at its third hit.
+    """
+    hits = []
+    for tried, frame in enumerate(candidates):
+        if tried == limit:
+            break
+        if len(encapsulate([_codestream(frame)])) in _window(frame):
+            hits.append(frame)
+            if len(hits) == 3:
+                break
+    assert hits, f"no colliding frame in {limit} candidates; re-measure #473"
+    return hits
+
+
+def _bool_mask(seed, shape=(16, 16)):
+    return np.random.default_rng(seed).integers(0, 2, shape, np.uint8) \
+        .astype(bool)
+
+
+def _even_candidates():
+    """16x16 bool masks, as the uint8 frames they are written as.
+
+    About 1 in 6 collide (335 of the first 2000, measured on imagecodecs
+    2026.8.16).
+    """
+    for seed in itertools.count():
+        yield _bool_mask(seed).view(np.uint8)
+
+
+def _odd_candidates():
+    """Sparse 8-bit frames over many odd shapes: `expected + 1` (#473).
+
+    An odd `rows x cols` puts the window's second value, `expected + 1`,
+    in play, and an encapsulated stream is always even, so only that
+    value can collide. A near-empty codestream is roughly 150 bytes
+    whatever the shape, so a collision needs a shape whose area sits just
+    under the stream's length -- which one frame shape and one density
+    hit 3 times in 2000 seeds (review of #609): one encoder release
+    moving those lengths by a byte would have turned the gate red. The
+    grid crosses 317 odd shapes of area 60 to 600 with four densities
+    and eight seeds, 10144 candidates; measured on imagecodecs 2026.8.16,
+    identically on 3.12 and 3.14t, it holds 59 collisions over 46
+    distinct shapes and every density, so a release has to move many
+    independent lengths at once to empty it.
+    """
+    shapes = [(r, c) for r in range(3, 40, 2) for c in range(3, 80, 2)
+              if 60 <= r * c <= 600]
+    for (rows, cols), density, seed in itertools.product(
+            shapes, (0.02, 0.05, 0.08, 0.12), range(8)):
+        yield (np.random.default_rng(seed).random((rows, cols)) < density) \
+            .astype(np.uint8)
+
+
+def _instance(arr, frames=None):
+    inst = Instance(f"1.2.826.0.1.473.{next(_serial)}",
+                    "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.file_path = None
+    for tag, value in (("0008,0020", "20230101"), ("0008,0030", "120000"),
+                       ("0008,0060", "OT"), ("0028,0002", 1),
+                       ("0028,0004", "MONOCHROME2")):
+        inst.set_attr(tag, value)
+    if frames is not None:
+        inst.set_attr("0028,0008", frames)
+    inst.set_pixel_data(arr)
+    return inst
+
+
+def _export_recording(tmp_path, inst):
+    """The worker, with every warning recorded (3.12 has no context-aware
+    warnings, so this runs on the test's own thread)."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        outcome = _export_instance_worker(ExportContext(
+            instance=inst,
+            output_path=str(tmp_path / "out" / f"{inst.sop_instance_uid}.dcm"),
+            patient_attributes={"0010,0010": "ANON", "0010,0020": "PAT1"},
+            study_attributes={"0020,000d": "1.2.826.0.2.1"},
+            series_attributes={"0020,000e": "1.2.826.0.3.1"},
+            compression="j2k", verify_readback=True))
+    return outcome, [str(w.message) for w in caught]
+
+
+def _bot_length(pixel_data):
+    """The Basic Offset Table item's value length (PS3.5 A.4)."""
+    assert pixel_data[:4] == b"\xfe\xff\x00\xe0", "no BOT item"
+    return int.from_bytes(pixel_data[4:8], "little")
+
+
+def test_the_window_is_pydicoms_own():
+    """`expected`, and `expected + 1` only when `expected` is odd (#473).
+
+    pydicom 3.0.2 warns for `actual in (expected, expected + expected %
+    2)`. Killing mutation (M19, unit half): the window computed as
+    `expected` alone.
+    """
+    ds = Dataset()
+    ds.Rows, ds.Columns, ds.BitsAllocated = 9, 19, 8
+    assert set(io_handlers._heuristic_lengths(ds, 1, 1)) == {171, 172}
+    ds.Rows, ds.Columns = 16, 16
+    assert set(io_handlers._heuristic_lengths(ds, 2, 1)) == {512}
+    # And the tests' hand-spelled window agrees with the function's, over
+    # the shapes the collision search tries.
+    for rows, cols in ((3, 61), (9, 21), (16, 16), (39, 15)):
+        ds.Rows, ds.Columns = rows, cols
+        assert io_handlers._heuristic_lengths(ds, 1, 1) == _window(
+            np.zeros((rows, cols), np.uint8))
+
+
+def test_the_window_asks_nothing_the_encoder_did_not():
+    """A dataset with no Rows, Columns or BitsAllocated has no window (#473).
+
+    `_compress_j2k` reads its geometry with `getattr(ds, "Rows", 0)`, so a
+    direct caller without it was never an AttributeError before the #473
+    check; the window must not make it one. An empty window of `0` matches
+    no encapsulated stream, which is never shorter than its item tags.
+    Killing mutation: `int(ds.Rows)` for the `getattr` reads.
+    """
+    assert io_handlers._heuristic_lengths(Dataset(), 1, 1) == (0, 0)
+
+
+@pytest.mark.parametrize("candidates, as_bool, limit", [
+    (_even_candidates, True, 2000),
+    (_odd_candidates, False, 10144),
+], ids=["even-expected", "odd-expected"])
+def test_a_colliding_length_is_written_without_an_offset_table(
+        tmp_path, candidates, as_bool, limit):
+    """No false "check the transfer syntax" warning on our own file (#473).
+
+    About 1 in 5 random 16x16 bool masks encode to exactly 256 bytes of
+    encapsulated Pixel Data -- the uncompressed length -- and pydicom's
+    decoder then warns on the caller's stream that the transfer syntax may
+    be wrong, during `verify_readback=True` and at every later read. An
+    empty Basic Offset Table is PS3.5 A.4-legal and moves the length by 4
+    bytes per frame, out of the window, so the file is written with one
+    in exactly that case. The odd-expected case is the window's second
+    value, `expected + 1`.
+
+    Killing mutations: the `has_bot=False` branch deleted (M18, the
+    warning returns); the window computed as `expected` only (M19, the
+    odd case warns).
+    """
+    hits = _search(candidates(), limit)
+    if not as_bool:
+        # The odd case is the second value of the window, or it tests
+        # nothing M19 changes.
+        assert all(f.size % 2 == 1 for f in hits), [f.shape for f in hits]
+    for frame in hits:
+        arr = frame.astype(bool) if as_bool else frame
+        outcome, caught = _export_recording(tmp_path, _instance(arr))
+
+        assert outcome.ok, outcome.error
+        assert [m for m in caught if HEURISTIC in m] == [], caught
+        written = pydicom.dcmread(outcome.output_path)
+        assert len(written.PixelData) not in _window(frame)
+        assert _bot_length(written.PixelData) == 0
+        assert np.array_equal(written.pixel_array, frame.astype(np.uint8))
+
+
+def test_a_non_colliding_length_keeps_its_offset_table(tmp_path):
+    """The table stays wherever the length is not in the window (#473).
+
+    Killing mutation (M20): `has_bot=False` unconditional.
+    """
+    for seed in range(40):
+        mask = _bool_mask(seed)
+        if len(encapsulate([_codestream(mask.view(np.uint8))])) != 256:
+            break
+    outcome, caught = _export_recording(tmp_path, _instance(mask))
+
+    assert outcome.ok, outcome.error
+    assert _bot_length(pydicom.dcmread(outcome.output_path).PixelData) == 4
+
+
+def test_a_two_frame_colliding_export_reingests(tmp_path):
+    """Multi-frame, with no table: pydicom, the fallback and ingest agree (#473).
+
+    An empty table still leaves one fragment per frame, and the readers
+    here split frames by fragment. What the file loses is the table-based
+    frame check (`offset_table_frame_count` answers None for it), which
+    the readback does not need: it compares every frame's samples.
+    """
+    from isocenter.io_handlers import DicomImporter
+    from isocenter.store import DicomStore
+
+    lengths = {}
+    for seed in range(400):
+        lengths.setdefault(
+            len(_codestream(_bool_mask(seed).view(np.uint8))), seed)
+    pair = next(((a, lengths[512 - 32 - n]) for n, a in lengths.items()
+                 if 512 - 32 - n in lengths), None)
+    assert pair is not None, "no colliding 2-frame pair; re-measure #473"
+    arr = np.stack([_bool_mask(pair[0]), _bool_mask(pair[1])])
+    assert len(encapsulate([_codestream(f.view(np.uint8)) for f in arr])) \
+        == 512
+
+    outcome, caught = _export_recording(tmp_path, _instance(arr, frames=2))
+
+    assert outcome.ok, outcome.error
+    assert [m for m in caught if HEURISTIC in m] == [], caught
+    written = pydicom.dcmread(outcome.output_path)
+    assert _bot_length(written.PixelData) == 0
+    expected = arr.astype(np.uint8)
+    assert np.array_equal(written.pixel_array, expected)
+    fallback, _ = io_handlers._decode_with_imagecodecs(
+        written, None, RuntimeError("forced to the fallback"))
+    assert np.array_equal(fallback, expected)
+    store = DicomStore()
+    summary = DicomImporter.import_files([outcome.output_path], store)
+    assert summary.ingested == 1, summary.failures
+    reread = store.patients[0].studies[0].series[0].instances[0]
+    assert np.array_equal(reread.get_pixel_data().astype(np.uint8), expected)

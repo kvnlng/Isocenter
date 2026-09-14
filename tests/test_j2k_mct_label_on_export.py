@@ -408,3 +408,98 @@ def test_an_exported_colour_file_declares_the_transform_it_carries(tmp_path):
         instance = session.store.patients[0].studies[0].series[0].instances[0]
         assert instance.attributes.get("0028,0004") == "RGB"
         assert instance.get_pixel_data().tolist() == arr.tolist()
+
+
+# ---------------------------------------------------------------------------
+# #532: a lower-case RGB is RGB to the encoder too
+# ---------------------------------------------------------------------------
+
+def test_lower_case_rgb_is_transformed_under_j2k(tmp_path):
+    """`'rgb'` gets case 1: the transform, and `YBR_RCT` (#532).
+
+    `_compress_j2k` compares the label case-sensitively, so a declared
+    `rgb` used to be encoded `mct=False` and written `rgb` -- neither the
+    transform nor a label a reader accepts. The worker now writes the
+    label as the Code String it spells before the encoder reads it, so
+    the encoder is unchanged and sees `RGB`.
+
+    Killing mutation (M4, the J2K half): the worker's normalization
+    removed (transform byte 0, label `rgb`).
+    """
+    from isocenter.entities import Instance
+    from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+    inst = Instance("1.2.826.0.1.532.1", "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.file_path = None
+    for tag, value in (("0008,0020", "20230101"), ("0008,0030", "120000"),
+                       ("0008,0060", "OT"), ("0028,0002", 3)):
+        inst.set_attr(tag, value)
+    arr = _rng_rgb()
+    inst.set_pixel_data(arr)
+    inst.set_attr("0028,0004", "rgb")
+
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst, output_path=str(tmp_path / "out" / "rgb.dcm"),
+        patient_attributes={"0010,0010": "ANON", "0010,0020": "PAT1"},
+        study_attributes={"0020,000d": "1.2.826.0.2.1"},
+        series_attributes={"0020,000e": "1.2.826.0.3.1"},
+        compression="j2k", verify_readback=True))
+
+    assert outcome.ok, outcome.error
+    exported = pydicom.dcmread(outcome.output_path)
+    assert _cod_transform(_frame(exported)) == 1
+    assert str(exported.PhotometricInterpretation) == "YBR_RCT"
+    assert exported.pixel_array.tolist() == arr.tolist()
+
+
+# ---------------------------------------------------------------------------
+# #528: which of the three cases the export worker can reach, by label
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("declared, samples, expected, transform", [
+    ("PALETTE COLOR", 3, "YBR_RCT", 1),
+    ("YBR_FULL_422", 3, "YBR_FULL", 0),
+    ("PALETTE COLOR", 1, "PALETTE COLOR", 0),
+], ids=["palette-3-sample", "ybr-full-422-3-sample", "palette-1-sample"])
+def test_worker_reachability_of_case_three(tmp_path, declared, samples,
+                                           expected, transform):
+    """What reaches `_compress_j2k` through the worker, under its own name (#528).
+
+    `_compress_j2k`'s comments listed `PALETTE COLOR` and `YBR_FULL_422`
+    under case 3 (`mct=False`, label kept). At the unit layer that is true,
+    and the direct-call tests above drive exactly that. Through the export
+    worker it is not, because the pixel geometry is written before the
+    encoder runs: a 3-sample `PALETTE COLOR` has become `RGB` and takes
+    case 1, and a 3-sample `YBR_FULL_422` has become `YBR_FULL` (#470)
+    and reaches case 3 under that name. A 1-sample `PALETTE COLOR` is kept
+    and reaches case 3 as "every 1-sample one".
+
+    **A characterisation: the comment is the deliverable.** Killing
+    mutation (M3): `YBR_FULL` added to `_J2K_MCT_SOURCES`, after which the
+    `YBR_FULL_422` case is transformed.
+    """
+    from isocenter.entities import Instance
+    from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+    inst = Instance(f"1.2.826.0.1.528.{samples}{len(declared)}",
+                    "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.file_path = None
+    for tag, value in (("0008,0020", "20230101"), ("0008,0030", "120000"),
+                       ("0008,0060", "OT"), ("0028,0002", samples)):
+        inst.set_attr(tag, value)
+    arr = _rng_rgb() if samples == 3 else _rng_rgb()[..., 0].copy()
+    inst.set_pixel_data(arr)
+    inst.set_attr("0028,0004", declared)
+
+    outcome = _export_instance_worker(ExportContext(
+        instance=inst, output_path=str(tmp_path / "out" / "c.dcm"),
+        patient_attributes={"0010,0010": "ANON", "0010,0020": "PAT1"},
+        study_attributes={"0020,000d": "1.2.826.0.2.1"},
+        series_attributes={"0020,000e": "1.2.826.0.3.1"},
+        compression="j2k"))
+
+    assert outcome.ok, outcome.error
+    exported = pydicom.dcmread(outcome.output_path)
+    assert exported.file_meta.TransferSyntaxUID == JPEG2000Lossless
+    assert str(exported.PhotometricInterpretation) == expected
+    assert _cod_transform(_frame(exported)) == transform

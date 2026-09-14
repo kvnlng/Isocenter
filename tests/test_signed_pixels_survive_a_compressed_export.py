@@ -634,8 +634,9 @@ def test_compress_j2k_without_an_array_writes_nothing_and_raises_nothing():
     unreachable: `_compress_j2k`'s only caller is `_finalize_dataset`,
     whose only caller is the export worker, which always passes
     `pixel_array=arr`; and when compression is on the worker never assigns
-    `ds.PixelData` at all, which the comment at io_handlers.py:3715-3717
-    already says. `pixel_array is None` therefore means "nothing to
+    `ds.PixelData` at all, which the worker's own comment already says:
+    `# Only set PixelData if NOT compressing.` at io_handlers.py line 5218.
+    `pixel_array is None` therefore means "nothing to
     compress" and nothing else.
 
     *Red when:* the reconstruct-from-bytes arm is restored.
