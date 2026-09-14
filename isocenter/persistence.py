@@ -2864,6 +2864,24 @@ class SqliteStore:
                     items_list.append(self._serialize_dicom_item(seq_item))
                 seq_data[tag] = items_list
             data['__sequences__'] = seq_data
+        # The digest of the identity token this store embedded (#607),
+        # the root only, and read **after** the sequences above, which is
+        # where the token itself lives. The lock stamps and then embeds;
+        # a save that read the stamp first could read None, then the
+        # sequences with the new token, and store a token without its
+        # stamp -- this store's own token, refused as foreign on the next
+        # changed-value re-lock. Read last, the save stores either the
+        # old token with the old stamp, the new token with the new stamp,
+        # or the old token with the new stamp, which is harmless: the
+        # stamp is keyed on the token, and an old token under a new stamp
+        # reads as unvouched-for only until the next save. The order is
+        # pinned, not only argued:
+        # `test_a_relock_between_the_two_reads_of_a_save_stores_the_token_with_its_stamp`
+        # runs a re-lock between the two reads and goes red with this
+        # read moved above `attributes.copy()` (review of #633, F-1).
+        locked = getattr(item, "_locked_token", None)
+        if locked:
+            data['__locked__'] = locked
         return data
 
     def _serialize_dicom_item(self, item) -> Dict[str, Any]:
@@ -2913,6 +2931,9 @@ class SqliteStore:
         # The same, at every depth though only the root writes it: a
         # hand-edited nested key must not become a tag either (#537).
         remediated_data = data.pop('__remediated__', None)
+        # And the lock's stamp (#607), popped at every depth for the
+        # same reason and assigned only where there is a slot for it.
+        locked_data = data.pop('__locked__', None)
 
         # 1. Attributes
         target_item.attributes.update(data)
@@ -2929,6 +2950,10 @@ class SqliteStore:
             # Assigned, not recorded, for the same reason.
             target_item._remediated_values = dict(remediated_data.get('values') or {}) or None
             target_item._remediated_blank = remediated_data.get('blank') or None
+        if isinstance(locked_data, str) and locked_data \
+                and hasattr(target_item, 'record_identity_token'):
+            # Assigned, not recorded, for the same reason (#154).
+            target_item._locked_token = locked_data
 
         # 2. Sequences
         if sequences_data:

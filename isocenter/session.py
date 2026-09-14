@@ -34,7 +34,7 @@ from .manifest import Manifest, ManifestItem, generate_manifest_file
 from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore
 from .crypto import KeyManager
-from .reversibility import ReversibilityService
+from .reversibility import ReversibilityService, _TokenHoldsNoRecord
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
                        resolve_max_workers, resolve_worker_initializer,
@@ -830,6 +830,17 @@ def _report_processes_lever_on_a_memory_store(db_path, strategy):
         f'instance_blobs". Unset {lever} for this session, or use a '
         f'file-backed store -- Session("session.db") -- where processes are '
         f'the default.')
+
+
+def _same_stashed_value(new_value, kept) -> bool:
+    """Whether `new_value` would stash exactly what a token already holds
+    (#607): equality of the JSON the token is built from, so a value the
+    token cannot hold is "not the same" (and is refused by the token build
+    anyway)."""
+    try:
+        return json.dumps(new_value, sort_keys=True) == json.dumps(kept, sort_keys=True)
+    except (TypeError, ValueError):
+        return False
 
 
 class DicomSession:
@@ -3391,17 +3402,32 @@ class DicomSession:
                 shifted date); a tag it names was emptied or removed by
                 `anonymize()`, and the message names the `tags_to_lock`
                 that works without it; a re-lock would lose a value the
-                existing token holds; a value it would stash is one no
-                token can hold (`bytes`), naming the tag; or Patient's
-                Name is blank under a rule of EMPTY or REMOVE on it. Given
-                a list or a report, the batch form checks every patient
-                first and, if any is refused, raises once listing each and
-                locks no patient. No message carries a Patient ID (P6): a
-                message says "this patient", its advice spells the ID
-                `<its Patient ID>`, and a replaced Patient ID is described,
-                not quoted. When the lock creates the key file (the first
-                lock under a path with none, #539), it is created exclusively
-                with mode 0600; a malformed key raises `ValueError`.
+                existing token holds; the patient carries an identity
+                token this library wrote that the key at the path given
+                to `enable_reversible_anonymization()` does not decrypt,
+                or opens to no identity record (#617); a re-lock over a
+                token this store did not write -- one that arrived inside
+                a file, or one a release before 0.9.8 wrote -- would
+                change a value it holds, naming the tag, which need not be
+                one `tags_to_lock` names (#607; `recover_patient_identity(...,
+                restore=True)` and a lock after it is the way through); a
+                value it would stash is one no token can hold (`bytes`),
+                naming the tag; or Patient's Name is blank under a rule of
+                EMPTY or REMOVE on it. Also, before any patient is planned,
+                when no key file exists at the path and an instance in the
+                session carries a token this library wrote: no key is
+                created (Q8 of #617). Given a list or a report, the batch
+                form checks every patient first and, if any is refused,
+                raises once listing each and locks no patient. No message
+                carries a Patient ID (P6): a message says "this patient",
+                its advice spells the ID `<its Patient ID>`, and a
+                replaced Patient ID is described, not quoted. When the
+                lock creates the key file (the first lock under a path
+                with none, #539), it is created already written, with
+                mode 0600 (#618).
+            ValueError: The key file at the path is empty (the message
+                names the path) or is not a Fernet key (#618). Neither is
+                cached: a later call reads the file again.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3424,8 +3450,9 @@ class DicomSession:
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
 
     def _key_for_locking(self) -> None:
-        """Load the key, creating it when none exists, and build its engine
-        -- before any patient's lock is planned (#539).
+        """Load the key, creating it when none exists and nothing in the
+        session was locked, and build its engine -- before any patient's
+        lock is planned (#539, #617).
 
         The engine is built here and not left to the plan: the plan builds
         the token inside `except (TypeError, ValueError)` and reports that
@@ -3433,13 +3460,45 @@ class DicomSession:
         `RuntimeError` as a refusal. A malformed key (`ValueError`) or a
         key never loaded (`RuntimeError`) would be misreported as either.
 
+        **Loaded first; created only when no instance in the session
+        carries a token this library wrote (Q8 of #617).** A key created
+        under a path with no file opens nothing that was locked before it
+        existed, so where a token of ours is in the session the lock
+        refuses instead, names the path, and creates nothing: until now
+        the refusal that said "wrong key" left a freshly minted key at
+        the path it named -- a valid key that opened nothing, the #539
+        debris shape. The sniff (`token_of_ours`) reads the token's
+        format and needs no key. Session scope, not the patient's: a key
+        minted here would be the session's key from then on.
+
         Called by the single lock only once its patient is found, so a lock
         of an ID no patient holds creates no key file. The batch calls it
         before it plans, found or not, because it cannot plan without the
         engine; a batch of IDs that match no patient therefore creates the
-        key, as does a lock that is then refused. Neither writes a token.
+        key, as does a lock that is then refused for any other reason.
+        Neither writes a token.
+
+        Raises:
+            RuntimeError: No key file at the path, and an instance in the
+                session carries a token this library wrote. No key is
+                created. The message names the key path (the caller's own
+                argument) and no patient.
         """
-        self.key_manager.load_or_generate_key()
+        try:
+            self.key_manager.load_key()
+        except FileNotFoundError:
+            if any(self.reversibility_service.token_of_ours(inst) is not None
+                   for p in self.store.patients for st in p.studies
+                   for se in st.series for inst in se.instances):
+                raise RuntimeError(
+                    "lock_identities: there is no key file at "
+                    f"{self.key_manager.key_path}, and this session holds an "
+                    "identity token this library wrote, which a key created "
+                    "here could not open and a lock would replace. Enable "
+                    "reversible anonymization with the key the identities "
+                    "were locked with; no key was created, and the token this "
+                    "call would have written is unchanged.") from None
+            self.key_manager.load_or_generate_key()
         self.reversibility_service.engine  # pylint: disable=pointless-statement
 
     def _lock_patient_identity(self, patient: "Patient", persist: bool,
@@ -3603,28 +3662,126 @@ class DicomSession:
         # blank, absent, or a replacement -- so a narrower re-lock of
         # still-original values stays #399's rule, and a wider re-lock
         # (a tag the token never held) loses nothing.
+        #
+        # **Every distinct token on the patient is read, not the first
+        # instance's (#617)**, because the write embeds the new token on
+        # every instance: a token on a second study -- a pair merged by
+        # `audit()` (#563), a study ingested after the lock -- was
+        # replaced unexamined. Read through the strict `held_identity`,
+        # so a token of ours this key cannot open is a refusal rather
+        # than "no token" (the tolerant read answered None for both, and
+        # a re-lock under a mistyped key path replaced a token the real
+        # key opened). A foreign `(0400,0500)` is still "no token" and
+        # is replaced, as #399 released. The instances are grouped by
+        # token bytes first and each distinct token is decrypted once: a
+        # patient's instances normally share one, and a 100k-instance
+        # patient must not pay 100k decrypts.
         if first_instance is not None:
-            held = self.reversibility_service.recover_original_data(first_instance) or {}
-            for tag, kept in held.items():
-                if not str(kept or "").strip():
-                    continue
-                named = tag in tags_to_lock
-                if named:
-                    new = original_attrs.get(tag)
-                else:
-                    new, from_patient = captured(tag)
-                    if new is not None and str(new).strip() \
-                            and is_replacement(tag, new, from_patient):
-                        new = None
-                if new is None or not str(new).strip():
-                    lost = ("nothing" if new is None else "an empty value") if named \
-                        else "nothing (tags_to_lock does not name it)"
+            carrying: Dict[bytes, List["Instance"]] = {}
+            for inst in instances:
+                content = self.reversibility_service.token_of_ours(inst)
+                if content is not None:
+                    carrying.setdefault(content, []).append(inst)
+            tokens = []
+            for content, holders in carrying.items():
+                try:
+                    values = self.reversibility_service.open_token(content)
+                except _TokenHoldsNoRecord:
+                    # The key *opens* this one, so the wrong-key text
+                    # below would be false. Refused all the same: what it
+                    # holds cannot be read, so nothing says what a
+                    # replacement would lose (review of #633, P-2). No
+                    # advice that works: a key that opens it is already
+                    # in hand, and there is no way to replace a token
+                    # the lock cannot read (#629 is the request for one).
                     raise RuntimeError(
-                        "lock_identities: this patient already has a "
-                        f"locked identity holding {tag}, and this lock would "
-                        f"replace it with {lost}; lock identities before "
-                        "anonymize(), and do not re-lock a patient after it; "
-                        "the token this call would have written is unchanged.")
+                        "lock_identities: this patient carries an identity "
+                        f"token that the key at {self.key_manager.key_path} "
+                        "opens but that holds no identity record this "
+                        "library writes, so what it holds cannot be "
+                        "recovered, and this lock would replace it unread. "
+                        "Nothing replaces a token the lock cannot read; the "
+                        "token this call would have written is unchanged.") from None
+                except RuntimeError:
+                    raise RuntimeError(
+                        "lock_identities: this patient carries an identity "
+                        f"token that the key at {self.key_manager.key_path} "
+                        "does not decrypt, and this lock would replace it. "
+                        "Enable reversible anonymization with the key the "
+                        "identity was locked with; the token this call would "
+                        "have written is unchanged.") from None
+                # `all`, not `any`: an instance carrying the same bytes
+                # without a stamp is a file that arrived carrying it.
+                stamped = all(inst.identity_token_is_this_stores(content)
+                              for inst in holders)
+                tokens.append((values, stamped))
+
+            for held, _ in tokens:
+                for tag, kept in held.items():
+                    if not str(kept or "").strip():
+                        continue
+                    named = tag in tags_to_lock
+                    if named:
+                        new = original_attrs.get(tag)
+                    else:
+                        new, from_patient = captured(tag)
+                        if new is not None and str(new).strip() \
+                                and is_replacement(tag, new, from_patient):
+                            new = None
+                    if new is None or not str(new).strip():
+                        lost = ("nothing" if new is None else "an empty value") if named \
+                            else "nothing (tags_to_lock does not name it)"
+                        raise RuntimeError(
+                            "lock_identities: this patient already has a "
+                            f"locked identity holding {tag}, and this lock would "
+                            f"replace it with {lost}; lock identities before "
+                            "anonymize(), and do not re-lock a patient after it; "
+                            "the token this call would have written is unchanged.")
+
+            # A token this store did not write may not be replaced with a
+            # value that differs from what it holds (#607). A file
+            # exported with a locked identity carries the token and the
+            # pass's values but no record -- a record is never a written
+            # byte -- so on a store that ingested it nothing says whether
+            # a `value:` or `KEEP` rule's output is an original, and the
+            # re-lock stashed `Project-X`, or a shifted birth date, over
+            # the held one. The lock stamps every token it embeds
+            # (`Instance.record_identity_token`, persisted as
+            # `__locked__`), and a token nothing vouches for is judged by
+            # what it holds: each non-blank value must be exactly what
+            # this lock would stash. A token this store wrote keeps
+            # #399's rule -- a deliberate `set_attr` then a re-lock
+            # stashes the new value -- and a tag the token never held is
+            # not protected (Q4). After the loss check above, so
+            # `floor_birth_only`'s message stays what it was: a blank is
+            # a loss, not a different value. The message names no value:
+            # the held one is an original, and the current one may be.
+            for held, stamped in tokens:
+                if stamped:
+                    continue
+                for tag, kept in held.items():
+                    if not str(kept or "").strip():
+                        continue
+                    named = tag in tags_to_lock
+                    new = original_attrs.get(tag) if named else captured(tag)[0]
+                    if not _same_stashed_value(new, kept):
+                        # A tag this lock does not name leaves the token
+                        # altogether, and the instance keeps whatever the
+                        # pass left there: "nothing", 2(a)'s word for it,
+                        # not "a different one". So the tag named is the
+                        # token's own, which the caller need not have
+                        # named (review of #633, F-2 and P-4).
+                        lost = "a different one" if named \
+                            else "nothing (tags_to_lock does not name it)"
+                        raise RuntimeError(
+                            "lock_identities: this patient's identity token did "
+                            "not come from this store, so the value it holds in "
+                            f"{tag} cannot be told from what anonymize() left, and "
+                            f"this lock would replace it with {lost}. "
+                            "recover_patient_identity(<its Patient ID>, "
+                            "restore=True) puts the held values back, and a lock "
+                            "after that is accepted; the token this call would "
+                            "have written is unchanged.")
 
             # A first lock of a tag the pass emptied or removed has no
             # token to lose, but would report success over a token without
@@ -3798,7 +3955,13 @@ class DicomSession:
                 names a patient (P6): each refusal is prefixed `[n of m]`,
                 its place among the `m` patients found, in Patient ID
                 order, so the refused patient is
-                `sorted(ids that matched a patient)[n - 1]`.
+                `sorted(ids that matched a patient)[n - 1]`. The #607
+                and #617 refusals are numbered the same way; the one
+                raised before any plan -- no key file, and a token this
+                library wrote somewhere in the session (Q8) -- is one
+                message with no number, and creates no key.
+            ValueError: The key file is empty or is not a Fernet key
+                (#618), as for `lock_identities()`.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
@@ -3950,13 +4113,18 @@ class DicomSession:
             FileNotFoundError: No key file at the path given to
                 `enable_reversible_anonymization()`. Checked first, before
                 the patient is looked up, and no key is created.
-            ValueError: No patient in this session holds `patient_id`.
+            ValueError: No patient in this session holds `patient_id`; or
+                the key file is empty or is not a Fernet key (#618), which
+                is read before the patient is looked up and is not cached.
             RuntimeError: When reversibility is not enabled; the patient
-                has no instances, or no identity token; the key does not
-                decrypt the token; or, with `restore=True`, a patient
-                holding the restored Patient ID was de-identified under a
-                different date-offset scheme (raised before anything is
-                restored).
+                has no instances, or no identity token -- an Encrypted
+                Attributes Sequence that did not come from this library
+                (no Fernet token in it) counts as no token, not as the
+                wrong key (#617); the key does not decrypt the token, or
+                opens it to no identity record this library writes; or,
+                with `restore=True`, a patient holding the restored
+                Patient ID was de-identified under a different date-offset
+                scheme (raised before anything is restored).
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversibility not enabled.")
@@ -4076,10 +4244,12 @@ class DicomSession:
             key_path (str): Path to the key file.
 
         Raises:
-            ValueError: The file at `key_path` is not a Fernet key. An
-                existing key is loaded and its engine built here, so a
-                malformed one fails at enable, as it always has, and not
-                inside a later lock's plan.
+            ValueError: The file at `key_path` is not a Fernet key, or is
+                empty (#618; the message names the path). An existing key
+                is loaded and its engine built here, so a malformed one
+                fails at enable, as it always has, and not inside a later
+                lock's plan. Nothing is cached by a failed enable: fix the
+                file and enable again.
         """
         key_manager = KeyManager(key_path)
         service = ReversibilityService(key_manager)

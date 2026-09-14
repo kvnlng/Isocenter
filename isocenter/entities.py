@@ -1,3 +1,4 @@
+import hashlib
 import os
 import threading
 from datetime import date, datetime
@@ -1082,6 +1083,23 @@ class Instance(DicomItem):
         default=None, init=False, repr=False)
     _remediated_blank: Optional[str] = field(default=None, init=False, repr=False)
 
+    # The sha256 hex digest of the identity token this store embedded
+    # here, or None (#607). The record's sibling for the lock: the two
+    # above say what a *pass* left, this says which *token* the lock
+    # wrote. A token that arrived inside a file -- an export of a locked
+    # patient, ingested by another store -- carries no record of what
+    # its pass wrote (a record is never a written byte), so a re-lock
+    # over it cannot tell a pass's output from an original and must not
+    # replace a value the token holds. A token this store wrote keeps
+    # #399's rule. Keyed on the token bytes, so a different token is a
+    # different digest and nothing needs clearing; persisted as
+    # `__locked__` in `attributes_json` beside `__remediated__`, popped
+    # at hydration, never a tag. Assigned directly, never through
+    # `set_attr`. **Not copied into the scan clones**
+    # (`_make_lightweight_copy`, `clone_sequences`), like the record
+    # above and unlike `_shifted_dates`: nothing in a scan reads it.
+    _locked_token: Optional[str] = field(default=None, init=False, repr=False)
+
     @staticmethod
     def _as_recorded(value) -> Optional[str]:
         """The string a record keeps for `value`: None for a removal, hex
@@ -1130,6 +1148,35 @@ class Instance(DicomItem):
         if word not in words:
             # Reassigned, never mutated: a background save reads it whole.
             self._remediated_blank = " ".join(words + [word])
+
+    @staticmethod
+    def _token_digest(token) -> str:
+        """The stamp's spelling of `token`: sha256 hex of its bytes, a
+        `str` token encoded as UTF-8 first."""
+        if isinstance(token, str):
+            token = token.encode("utf-8")
+        return hashlib.sha256(bytes(token)).hexdigest()
+
+    def record_identity_token(self, token) -> None:
+        """Records that this store is about to embed `token` here (#607).
+
+        Called **immediately before** the embed, and deliberately does
+        **not** `mark_modified()`, as `record_remediation` does not: the
+        embed that follows advances the revision for both halves.
+        Before and not after, because a stamp stored without its token
+        is harmless (it is keyed on the token) while a token stored
+        without its stamp reads as one that arrived in a file, and the
+        next changed-value re-lock of this store's own token is refused.
+
+        A single string, assigned and never mutated, so a background
+        save reads one value or the other.
+        """
+        self._locked_token = self._token_digest(token)
+
+    def identity_token_is_this_stores(self, token) -> bool:
+        """Whether `token` is the identity token this store embedded here:
+        False before any record, and for any other token."""
+        return bool(self._locked_token) and self._locked_token == self._token_digest(token)
 
     def remediation_vouches_for(self, tag: str, value) -> bool:
         """Whether a remediation left `value` at `tag`: for a non-blank

@@ -196,6 +196,37 @@ def test_a_wrong_key_raises(store, tmp_path, capsys, caplog):
         assert sorted(p.patient_id for p in session.store.patients) == sorted(store[2:])
 
 
+def test_recovery_tells_a_foreign_sequence_from_a_wrong_key(store, tmp_path, capsys, caplog):
+    """T17 (#617). An Encrypted Attributes Sequence that did not come from
+    this library raises the *no token* message; a token of ours under the
+    wrong key raises the *wrong key* one. Until #617 both were "does not
+    decrypt": the strict read handed a foreign blob to the engine. Kills
+    `recover_or_raise` keeping its own read (M20)."""
+    from isocenter.entities import DicomItem
+    db, key, locked, _ = store
+    with Session(db) as session:
+        session.enable_reversible_anonymization(key)
+        patient = next(p for p in session.store.patients if p.patient_id == locked)
+        inst = patient.studies[0].series[0].instances[0]
+        foreign = DicomItem()
+        foreign.set_attr("0400,0510", b"NOT-OUR-TOKEN")
+        foreign.set_attr("0400,0520", "1.2.840.10008.1.2")
+        inst.sequences["0400,0500"].items[:] = [foreign]
+        with pytest.raises(RuntimeError, match="no encrypted identity token") as caught:
+            _recover(session, capsys, caplog, locked, restore=False)
+        assert "does not decrypt" not in str(caught.value)
+        _assert_quiet(capsys, caplog, str(caught.value), store)
+    other = tmp_path / "other.key"
+    other.write_bytes(Fernet.generate_key())
+    with Session(db) as session:
+        session.enable_reversible_anonymization(str(other))
+        with pytest.raises(RuntimeError, match="does not decrypt") as caught:
+            _recover(session, capsys, caplog, locked, restore=False)
+        assert "no encrypted identity token" not in str(caught.value)
+        assert caught.value.__cause__ is None and caught.value.__suppress_context__
+        _assert_quiet(capsys, caplog, str(caught.value), store)
+
+
 def test_a_patient_never_locked_raises(store, capsys, caplog):
     """(f) Kills the strict read swallowed back to None."""
     db, key, _, unlocked = store

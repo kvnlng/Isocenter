@@ -238,11 +238,14 @@ validated and before a project secret is created (#563).
 exists at the path `enable_reversible_anonymization()` was given, before
 it looks the patient up and without creating one; `ValueError` when no
 patient holds the ID; and `RuntimeError` when the patient has no
-instances or no identity token, or the key does not decrypt it (#539).
+instances or no identity token, the key does not decrypt it (#539), or
+the key opens it but it holds no identity record this library writes (#617).
 It prints nothing, and no message names a Patient ID (#550).
 `enable_reversible_anonymization()` raises `ValueError` for a malformed
 key file and creates none; the first `lock_identities()` creates the key,
-exclusively and with mode 0600. `lock_identities()` refusals name no
+exclusively and with mode 0600, unless the session holds an identity token
+this library wrote that no key here opens, in which case it raises
+`RuntimeError` and creates none (#617). `lock_identities()` refusals name no
 patient: a batch refusal numbers each refused patient by its place among
 the patients found, in Patient ID order.
 
