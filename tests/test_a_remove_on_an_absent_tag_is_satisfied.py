@@ -287,6 +287,15 @@ def _bare():
     return bare, "REMOVE_TAG", "patient_id", lambda: vars(bare) == {}
 
 
+def _bare_with_a_tag():
+    # The same entity under a well-formed tag. `patient_id` above now
+    # declines at the well-formed check before the `attributes` guard is
+    # read, so without this the guard is pinned by nothing: dropped, a
+    # well-formed tag reaches `tag not in None`.
+    bare = _Bare()
+    return bare, "REMOVE_TAG", "0010,0020", lambda: vars(bare) == {}
+
+
 def _unknown_action():
     # An absent tag, so a predicate that forgot to read the action type
     # would call this satisfied.
@@ -312,6 +321,7 @@ def _misspelled(spelling, held_tag=ABSENT):
 
 @pytest.mark.parametrize("build", [
     pytest.param(_bare, id="bare"),
+    pytest.param(_bare_with_a_tag, id="bare_with_a_tag"),
     pytest.param(_unknown_action, id="unknown_action"),
     pytest.param(_uppercase_attribute, id="uppercase_attribute"),
     pytest.param(_uppercase_sequence, id="uppercase_sequence"),
@@ -319,6 +329,9 @@ def _misspelled(spelling, held_tag=ABSENT):
     pytest.param(_misspelled("(0008,0080)"), id="parenthesised"),
     pytest.param(_misspelled("0008, 0080"), id="inner_space"),
     pytest.param(_misspelled(" 0008,0080"), id="leading_space"),
+    # Nine characters, so a check that only measured the length would
+    # pass it; every other spelling here has a length of its own.
+    pytest.param(_misspelled("0008.0080"), id="nine_characters"),
     pytest.param(_misspelled("InstitutionName"), id="keyword"),
     pytest.param(_misspelled("patient_id", held_tag="0010,0020"), id="python_name"),
 ])
@@ -338,9 +351,10 @@ def test_a_remove_that_matched_no_arm_still_declines(build):
     from `attributes` says nothing about whether the item holds the
     element they name.
 
-    Kills: the action-type check dropped; the canonical key read raw; the
-    sequences half of the predicate dropped; the well-formed-tag check
-    dropped."""
+    Kills: the action-type check dropped; the `attributes` guard dropped
+    (`bare_with_a_tag`); the canonical key read raw; the sequences half
+    of the predicate dropped; the well-formed-tag check dropped, or
+    weakened to a comma or to a length of nine (`nine_characters`)."""
     entity, action, tag, still_there = build()
     before = getattr(entity, "phi_status", None)
     rows = _Rows()
