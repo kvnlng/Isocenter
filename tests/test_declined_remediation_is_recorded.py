@@ -423,3 +423,152 @@ def test_a_pass_that_only_declined_leaves_the_status_alone(store):
 
     assert len(store.get_audit_declines()) == 1
     assert inst.phi_status is before
+
+
+# ---------------------------------------------------------------------------
+# #553: a proposal that raised is a decline
+# ---------------------------------------------------------------------------
+
+class _ExplodesWithAPipe:
+    """A setter whose exception text would break a markdown table row."""
+
+    def set_attr(self, *_args, **_kwargs):
+        raise RuntimeError("a\n|b")
+
+
+def test_a_proposal_that_raised_writes_a_declined_row(store):
+    """The `except` arm used to count and log, and write nothing durable.
+
+    A raise may have left the value unchanged or partly written, and
+    either way the pipeline was told to remove it and cannot say it did:
+    the same claim a decline makes, so the same row (owner ruling Q2).
+    The details are flattened and pipe-escaped because section 3.3 of the
+    report renders them into a table cell.
+
+    Kills: the `except` arm without `_record_decline`; the flattening
+    dropped.
+    """
+    inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
+    inst.attributes["0008,0080"] = "St Elsewhere"
+    findings = [_finding(_ExplodesWithAPipe(), "REPLACE_TAG", "0010,0010",
+                         new_value="ANON", uid="1.2.4"),
+                _finding(inst, "REMOVE_TAG", "0008,0080")]
+
+    applied = RemediationService(store_backend=store).apply_remediation(
+        findings)
+    declines = store.get_audit_declines()
+
+    assert applied == 1
+    assert len(declines) == 1, declines
+    _ts, uid, details = declines[0]
+    assert uid == "1.2.4"
+    assert "REPLACE_TAG on 0010,0010 raised" in details, details
+    assert "RuntimeError" in details, details
+    assert "unchanged or partly written" in details, details
+    assert "\n" not in details, details
+    assert "|" not in details.replace("\\|", ""), details
+
+
+@pytest.mark.parametrize("mode", ["threads", "processes"])
+def test_a_proposal_that_raised_demotes_its_entity(tmp_path, monkeypatch,
+                                                   mode):
+    """s3: one finding of a full report raises; the instance is not REMEDIATED.
+
+    Measured on ac33641: the instance read REMEDIATED with the raised
+    tag still holding its value, zero rows of any kind, and PASS.
+
+    Kills: the raised entity not named for the pass-end demotion.
+    """
+    import json
+
+    from isocenter.entities import PhiStatus
+    from isocenter.session import DicomSession
+    from support.ct_small_files import write_ct
+
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+    if mode == "threads":
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
+    else:
+        monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+
+    src = tmp_path / "src"
+    write_ct(str(src / "ct.dcm"), "PAT-553", "1")
+    session = DicomSession(persistence_file=str(tmp_path / "raise.db"))
+    try:
+        session.ingest(str(src))
+        report = session.audit()
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        value = instance.attributes["0008,0080"]
+
+        real = RemediationService._apply_single_remediation
+
+        def _raise_on_one(self, finding, audit_buffer=None):
+            if finding.entity is instance and finding.tag == "0008,0080":
+                raise RuntimeError("disk full")
+            return real(self, finding, audit_buffer)
+
+        monkeypatch.setattr(RemediationService, "_apply_single_remediation",
+                            _raise_on_one)
+        session.anonymize(report)
+
+        manifest = tmp_path / "manifest.json"
+        session.generate_manifest(str(manifest), format="json")
+        items = json.loads(manifest.read_text(encoding="utf-8"))["items"]
+        out = tmp_path / "report.md"
+        session.generate_report(str(out))
+        content = out.read_text(encoding="utf-8")
+    finally:
+        session.close()
+
+    assert instance.attributes["0008,0080"] == value, "setup: it raised"
+    assert instance.phi_status is PhiStatus.IDENTIFIED
+    assert [item["anonymized"] for item in items] == [False], items
+    assert "**REVIEW_REQUIRED**" in content, content
+    declined = content.split("Declined Remediations", 1)[1]
+    assert "raised RuntimeError" in declined, declined
+
+
+def test_a_proposal_that_raised_demotes_its_entity_with_no_audit(store):
+    """The same without a session: no scan tally, so the decline alone
+    has to take the instance back from REMEDIATED.
+
+    Kills: the raised entity not named for the pass-end demotion (with an
+    audit behind the pass, the tally would demote it anyway).
+    """
+    from isocenter.entities import PhiStatus
+
+    class _RaisesOnName(Instance):
+        __slots__ = ()
+
+        def set_attr(self, tag, value):
+            if tag == "0008,0080":
+                raise RuntimeError("disk full")
+            super().set_attr(tag, value)
+
+    inst = _RaisesOnName("1.2.3", INSTANCE_SOP_CLASS, 1)
+    inst.attributes["0008,0080"] = "St Elsewhere"
+    inst.attributes["0008,0090"] = "Dr Who"
+    findings = [_finding(inst, "REPLACE_TAG", "0008,0090", new_value=""),
+                _finding(inst, "REPLACE_TAG", "0008,0080", new_value="")]
+
+    applied = RemediationService(store_backend=store).apply_remediation(
+        findings)
+
+    assert applied == 1
+    assert inst.attributes["0008,0080"] == "St Elsewhere", "setup: it raised"
+    assert inst.phi_status is PhiStatus.IDENTIFIED
+
+
+def test_a_raise_on_an_entity_without_status_does_not_crash_the_pass(store):
+    """`_Explodes` has no `phi_status`; naming it for demotion must not raise.
+
+    Kills: the settle reading `entity.phi_status` without a guard.
+    """
+    applied = RemediationService(store_backend=store).apply_remediation(
+        [_finding(_Explodes(), "REPLACE_TAG", "0010,0010", new_value="ANON")])
+
+    assert applied == 0
+    assert len(store.get_audit_declines()) == 1

@@ -323,6 +323,7 @@ TARGETS = {
                                 "tests/test_report_export_boundary.py",
                                 "tests/test_export_delivery_counters.py"], 30),
     "isocenter/privacy.py": (["tests/test_analysis.py", "tests/test_analysis_persistence.py",
+                              "tests/test_a_partial_findings_list_is_not_remediated.py",
                               "tests/test_a_pre_096_store_is_not_reshifted.py",
                               "tests/test_a_replaced_study_date_is_raised.py",
                               "tests/test_an_unshifted_date_is_raised.py",
@@ -352,6 +353,7 @@ TARGETS = {
                               "tests/test_the_project_secret_lives_in_the_store.py",
                               "tests/test_nested_remediation_reaches_the_instance.py"], 30),
     "isocenter/remediation.py": (["tests/test_audit_suppression.py",
+                                  "tests/test_a_partial_findings_list_is_not_remediated.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
                                   "tests/test_an_unshifted_date_is_raised.py",
                                   "tests/test_declined_date_recurs.py",
@@ -547,6 +549,7 @@ TARGETS = {
                                   "tests/test_save_all_contract.py",
                                   "tests/test_save_redact_race.py",
                                   "tests/test_save_reparenting.py",
+                                  "tests/test_sequence_rules.py",
                                   "tests/test_services.py",
                                   "tests/test_sidecar_gate_crosses_processes.py",
                                   "tests/test_sidecar_gate_order.py",
@@ -622,6 +625,7 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_analysis.py",
+                              "tests/test_a_partial_findings_list_is_not_remediated.py",
                               "tests/test_a_pre_096_store_is_not_reshifted.py",
                               "tests/test_a_replaced_study_date_is_raised.py",
                               "tests/test_an_unshifted_date_is_raised.py",
@@ -843,6 +847,7 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_analysis.py",
+                               "tests/test_a_partial_findings_list_is_not_remediated.py",
                                "tests/test_a_pre_096_store_is_not_reshifted.py",
                                "tests/test_a_replaced_study_date_is_raised.py",
                                "tests/test_an_unshifted_date_is_raised.py",

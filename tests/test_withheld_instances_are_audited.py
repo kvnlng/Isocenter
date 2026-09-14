@@ -198,11 +198,12 @@ def test_a_withheld_row_is_one_table_row_whatever_the_folder_holds(tmp_path):
     Section 4 renders `details` into a markdown table cell, so the row is
     flattened and pipe-escaped as `_audit_unread_instances` does. A folder
     name is the realistic carrier: a `|` is legal on POSIX, and so is a
-    newline.
+    line break. `\\r\\n`, so a flattening that replaced `\\n` alone would
+    leave a `\\r` to split the section-4 row.
     """
     session, withheld, _kept, _value = _two_patients_one_identified(
         tmp_path, "instance")
-    folder = str(tmp_path / "out|a\nb")
+    folder = str(tmp_path / "out|a\r\nb")
     try:
         session.export(folder, check_burned_in=True, use_compression=False,
                        show_progress=False)
@@ -211,14 +212,23 @@ def test_a_withheld_row_is_one_table_row_whatever_the_folder_holds(tmp_path):
     finally:
         session.close()
 
-    flat = folder.replace("\n", " ").replace("|", "\\|")
-    assert warnings == [(withheld, (
-        f"DICOM export to {flat} withheld instance {withheld}: its "
+    # The whitespace join the code uses, not a `.replace` of the newline:
+    # the join also collapses any run of spaces a temporary directory's
+    # own path may hold, and a `.replace` would then expect them intact.
+    def flattened(text):
+        return " ".join(text.split()).replace("|", "\\|")
+
+    [(uid, details)] = warnings
+    assert uid == withheld
+    assert details == flattened(
+        f"DICOM export to {folder} withheld instance {withheld}: its "
         f"instance still carries an identifier the pre-export scan raised "
-        f"(check_burned_in=True)."))], warnings
+        f"(check_burned_in=True)."), details
+    assert "\n" not in details and "\r" not in details, details
+    assert "out\\|a b withheld" in details, details
     section_4 = text.split("## 4.", 1)[1].split("## 5.", 1)[0]
     rows = [line for line in section_4.splitlines() if withheld in line]
-    assert len(rows) == 1 and flat in rows[0], section_4
+    assert len(rows) == 1 and flattened(folder) in rows[0], section_4
 
 
 def test_the_counters_count_withheld_as_requested(tmp_path):

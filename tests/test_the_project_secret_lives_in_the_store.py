@@ -421,6 +421,60 @@ def test_the_log_file_names_no_patient_and_no_offset(tmp_path, monkeypatch,
         assert not leaked, f"{name} carries:\n" + "\n".join(leaked)
 
 
+def test_a_patient_remediation_that_raised_names_no_patient_in_the_log(
+        tmp_path, monkeypatch, capfd):
+    """T8b's sweep over the `ERROR` line a raised remediation writes (#553).
+
+    `RemediationService._raised` logs "Failed to apply remediation for
+    <subject>", and for a patient finding the finding's `entity_uid` is
+    the original Patient ID. The subject is `_log_subject`'s "a patient".
+    Forced here on both patient fields, with an exception whose own text
+    names nothing, so what is swept is the line this package composes.
+
+    Red on: the subject spelled `{finding.entity_uid}`.
+    """
+    log_file = str(tmp_path / "isocenter.log")
+    monkeypatch.setenv("ISOCENTER_LOG_FILE", log_file)
+    monkeypatch.setenv("ISOCENTER_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("ISOCENTER_SHOW_PROGRESS", "0")
+    monkeypatch.setenv("TQDM_DISABLE", "1")
+    write = RemediationService._write_to_instances
+
+    def refuse(self, entity, field):
+        if field in ("patient_id", "patient_name"):
+            raise RuntimeError("the store refused the write")
+        return write(self, entity, field)
+
+    monkeypatch.setattr(RemediationService, "_write_to_instances", refuse)
+    source = str(tmp_path / "in")
+    original_id = "MRN0012345"
+    original_date = date(2004, 1, 19)
+    _synthetic_ct(source, original_id, original_date.strftime("%Y%m%d"))
+    capfd.readouterr()
+    with DicomSession(str(tmp_path / "raised.db")) as session:
+        session.ingest(source)
+        load_fixed_secret(session, tmp_path, FIXED_A)
+        session.anonymize(session.audit())
+        [patient] = session.store.patients
+        offset = (patient.studies[0].study_date - original_date).days
+        declines = session.store_backend.get_audit_declines()
+    captured = capfd.readouterr()
+
+    log = open(log_file, encoding="utf-8").read()
+    console = captured.out + captured.err
+    # Not vacuous: both raises happened and were logged and recorded.
+    assert log.count("Failed to apply remediation for a patient") == 2, log
+    assert sum("the store refused the write" in d
+               for _t, _u, d in declines) == 2, declines
+    assert offset != 0
+
+    for name, text in (("isocenter.log", log), ("console", console)):
+        leaked = _leaks(_sweepable(text, tmp_path),
+                        identities=(original_id,),
+                        original=original_date, offset=offset)
+        assert not leaked, f"{name} carries:\n" + "\n".join(leaked)
+
+
 def test_the_leak_sweep_flags_leaks_and_nothing_legitimate(tmp_path):
     """T8b's matcher, on its own. Its green is only worth something if it
     flags every spelling above and if what it passes over is exactly the

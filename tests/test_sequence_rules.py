@@ -518,27 +518,149 @@ def test_empty_on_a_sequence_gone_before_anonymize_declines(tmp_path):
                 if REFERENCED_STUDY in d]
 
 
-def test_empty_on_a_sequence_already_emptied_writes_no_row():
+def test_empty_on_a_sequence_already_emptied_writes_no_row(tmp_path):
     """The items went between audit and anonymize, and the sequence is
     still there. Nothing is left behind -- a zero-item sequence is what
-    the rule asks for -- so, as for an empty date, no decline row; and
-    nothing changed, so no `Emptied Sequence` row either. Red before: the
-    ignored return of `clear_sequence_items` filed a `REMEDIATION_REPLACE`
-    for a no-op and stamped the instance REMEDIATED.
+    the rule asks for -- so no decline row; and nothing changed, so no
+    `Emptied Sequence` row either and nothing counted as applied. Red
+    before #547: the ignored return of `clear_sequence_items` filed a
+    `REMEDIATION_REPLACE` for a no-op.
 
-    Kills: `clear_sequence_items`' return value ignored."""
+    **Stamped REMEDIATED since #567.** The rule's end state is in the
+    graph, so the status says so; before, the instance kept the status
+    the audit gave it -- IDENTIFIED over an instance with nothing left
+    in it, beside a PASS grade. The stamp is a status change, and a
+    status change advances the revision (CLAUDE.md, "Object graph and
+    dirty tracking": a new status is a change the store should hold), so
+    the instance now has something to save, and the save writes the
+    zero-item sequence. No `mark_modified()` is involved: nothing else
+    changed.
+
+    Kills: `clear_sequence_items`' return value ignored (a success row);
+    `_satisfied` not called (the status stays UNSCANNED)."""
+    from isocenter.persistence import SqliteStore
+
     inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.7", 1)
     inst.add_sequence(REFERENCED_STUDY)
     inst.mark_persisted()
+    store = SqliteStore(str(tmp_path / "rows.db"))
+    buffer = []
+    try:
+        changed = RemediationService(
+            store_backend=store)._apply_single_remediation(
+                _empty_finding(inst, REFERENCED_STUDY), buffer)
+    finally:
+        store.stop()
 
-    changed = RemediationService()._apply_single_remediation(
+    assert changed is False
+    assert buffer == [], buffer
+    assert inst.phi_status is PhiStatus.REMEDIATED
+    assert inst.sequences[REFERENCED_STUDY].items == []
+    assert REFERENCED_STUDY not in inst.attributes
+    assert inst.has_unsaved_changes, (
+        "the REMEDIATED stamp is a status change and must move the revision")
+
+
+@pytest.mark.parametrize("mode", ["threads", "processes"])
+def test_a_sequence_cleared_between_audit_and_anonymize_reads_remediated(
+        tmp_path, monkeypatch, mode):
+    """#567, end to end: the audit raised `EMPTY` on a sequence whose items
+    were then cleared by hand before `anonymize()`.
+
+    Measured on ac33641: the instance read IDENTIFIED, with no row for
+    the tag, a PASS grade and a manifest reading `anonymized: false` --
+    three records of one run disagreeing. The rule's end state is in the
+    graph, so the instance is REMEDIATED, and the scan tally (#553)
+    counts the satisfied key as handled rather than demoting it.
+
+    Kills: `_satisfied_keys` not in the handled set the tally settles
+    against."""
+    import json
+
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+    if mode == "threads":
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
+    else:
+        monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+
+    def add(ds):
+        ds.add_new(0x00081110, "SQ", Sequence([Dataset()]))
+    _ct_small_with(str(tmp_path / "in"), add)
+    db = str(tmp_path / "s.db")
+
+    with Session(db) as session:
+        session.configuration.remove_private_tags = False
+        session.configuration.phi_tags[REFERENCED_STUDY] = _rule("EMPTY")
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        assert _findings_for(report, REFERENCED_STUDY), "setup: raised"
+        instance.sequences[REFERENCED_STUDY].items.clear()
+
+        session.anonymize(report)
+
+        manifest = tmp_path / "manifest.json"
+        session.generate_manifest(str(manifest), format="json")
+        items = json.loads(manifest.read_text(encoding="utf-8"))["items"]
+        out = tmp_path / "report.md"
+        session.generate_report(str(out))
+        content = out.read_text(encoding="utf-8")
+        status = instance.phi_status
+
+    assert status is PhiStatus.REMEDIATED
+    assert [item["anonymized"] for item in items] == [True], items
+    assert "| **Validation Status** | **PASS** |" in content, content
+    rows = [d for action in ("REMEDIATION_REPLACE", "REMEDIATION_DECLINED")
+            for d in _rows(db, action) if REFERENCED_STUDY in d]
+    assert rows == [], rows
+
+
+def test_a_nested_satisfied_empty_stamps_its_owner():
+    """An `EMPTY` on a sequence inside an item, already at zero items: the
+    instance holding the item reads REMEDIATED too, as a nested success
+    stamps it (#494).
+
+    Kills: the owner stamp dropped from `_satisfied`."""
+    inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.7", 1)
+    observer = DicomItem()
+    observer.add_sequence(VERIFYING_OBSERVER_CODE)
+    inst.add_sequence_item(VERIFYING_OBSERVER, observer)
+    finding = _empty_finding(inst, VERIFYING_OBSERVER_CODE)
+    finding.entity = observer
+    finding.entity_path = ((VERIFYING_OBSERVER, 0),)
+    service = RemediationService()
+    service._use_instance_owners({id(observer): inst})
+
+    changed = service._apply_single_remediation(finding)
+
+    assert changed is False
+    assert observer.sequences[VERIFYING_OBSERVER_CODE].items == []
+    assert observer.phi_status is PhiStatus.REMEDIATED
+    assert inst.phi_status is PhiStatus.REMEDIATED
+
+
+def test_a_declined_empty_is_not_stamped_as_satisfied():
+    """The sequence is gone, so the `EMPTY` declines: `_satisfied` must
+    not stamp REMEDIATED or count the key as handled on a decline.
+
+    Driven through `_apply_single_remediation` directly, because through
+    a pass the pass-end demotion takes a wrongly stamped instance back to
+    IDENTIFIED and would hide the stamp.
+
+    Kills: `_satisfied` stamping whatever `declined` says."""
+    inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.7", 1)
+    service = RemediationService()
+
+    changed = service._apply_single_remediation(
         _empty_finding(inst, REFERENCED_STUDY))
 
     assert changed is False
     assert inst.phi_status is not PhiStatus.REMEDIATED
-    assert inst.sequences[REFERENCED_STUDY].items == []
-    assert REFERENCED_STUDY not in inst.attributes
-    assert not inst.has_unsaved_changes
+    assert not service._satisfied_keys
+    assert service._declined_entities == [inst]
 
 
 def test_a_zeroed_sequence_is_clear_on_re_audit(tmp_path):
