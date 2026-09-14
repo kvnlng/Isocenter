@@ -113,13 +113,16 @@ def _unavailable() -> RuntimeError:
     shared object file" is the whole clue to the fix. Read at call time,
     not bound at import, so the module global is what it describes.
     Callers raise it `from IMPORT_ERROR`, so the cause is chained as well
-    as quoted.
+    as quoted. Spelled by `describe_exception`, as every recorded reason
+    is (#519): a hand-spelled `f"{type(e).__name__}: {e}"` was the same
+    behaviour under a second spelling, and differed from the helper
+    exactly where the helper earns its place -- a message-less
+    `ImportError()` rendered as `ImportError: ` with nothing after it.
     """
     if IMPORT_ERROR is None:
         return RuntimeError("imagecodecs is not available")
     return RuntimeError(
-        f"imagecodecs is not available: "
-        f"{type(IMPORT_ERROR).__name__}: {IMPORT_ERROR}")
+        f"imagecodecs is not available: {describe_exception(IMPORT_ERROR)}")
 
 
 # UID Constants
@@ -525,10 +528,12 @@ def _j2k_sample_layout(codestream) -> Optional[Tuple[bool, int]]:
     cap is counting down to), and because this handler exists precisely
     for the files pydicom cannot decode: taking the rule that decides
     whether to refuse from the library being worked around is a
-    dependency this module should not have. One arm is ours and not
+    dependency this module should not have. Two arms are ours and not
     pydicom's: `get_j2k_parameters` has no guard for a JP2 box declaring
     length 0, and this returns None where that walk would not terminate
-    (`test_a_jp2_box_of_zero_length_is_refused_rather_than_walked_forever`).
+    (`test_a_jp2_box_of_zero_length_is_refused_rather_than_walked_forever`);
+    and it reads LBox alone, so an XLBox `jp2c` hides from it as it hid
+    from this walk until #610 (`test_an_xlbox_jp2c_is_read`).
 
     None when neither form parses, which no stream `jpeg2k_decode`
     accepted can reach -- the SIZ is what tells a decoder the image's
@@ -539,16 +544,34 @@ def _j2k_sample_layout(codestream) -> Optional[Tuple[bool, int]]:
     offset = 0
     if data.startswith(b"\x00\x00\x00\x0c\x6a\x50\x20\x20"):
         # A JP2 file: 12-byte signature box, then boxes until `jp2c`,
-        # whose payload is the codestream.
+        # whose payload is the codestream. A box is LBox (4 bytes), TBox
+        # (4), then its payload -- unless LBox is 1, when the length is
+        # the 8-byte XLBox that follows TBox and the header is 16 bytes
+        # (15444-1 I.4). The walk read LBox alone until #610, so an
+        # XLBox `jp2c` was stepped over by 1 byte into its own
+        # codestream and never found: the frame passed this gate
+        # unjudged, and a signed codestream under PixelRepresentation 0
+        # decoded at every door as Pillow's flipped reading.
         offset = 12
         while offset + 8 <= len(data):
             length = int.from_bytes(data[offset:offset + 4], "big")
+            header = 8
+            if length == 1:
+                # A file that ends inside the XLBox declares no length;
+                # 0 fails the header check below, or on a `jp2c` box
+                # steps past the end and fails the SOC check.
+                length = (int.from_bytes(data[offset + 8:offset + 16], "big")
+                          if offset + 16 <= len(data) else 0)
+                header = 16
             if data[offset + 4:offset + 8] == b"\x6a\x70\x32\x63":
-                offset += 8
+                # LBox 0 means "to the end of the file", which for the
+                # codestream box is exactly where the codestream runs.
+                offset += header
                 break
-            if length <= 0:
-                # A box claiming the rest of the file (0) or a corrupt
-                # length: stepping by it would loop or run backwards.
+            if length < header:
+                # A box claiming the rest of the file (0) that is not the
+                # codestream, or a length shorter than its own header:
+                # stepping by it would loop or land inside the header.
                 return None
             offset += length
         else:

@@ -621,9 +621,9 @@ def test_annotation_text_is_absent_from_exported_json_by_default(tmp_path):
         # Positive precondition: prove the secret genuinely reached the
         # ingested object graph before asserting it is absent from the
         # export. Without this, a fixture that never carried the secret in
-        # the first place (e.g. build_ecg_dataset's own default field
-        # values, see scripts/generate_waveform_test_data.py:96) would make
-        # the negative assertion below pass vacuously.
+        # the first place (e.g. the default field values of
+        # `build_ecg_dataset` (`scripts/generate_waveform_test_data.py:51`))
+        # would make the negative assertion below pass vacuously.
         instance = session.store.patients[0].studies[0].series[0].instances[0]
         ann_seq = instance.sequences.get("0040,b020")  # Waveform Annotation Sequence
         assert ann_seq is not None and ann_seq.items, (

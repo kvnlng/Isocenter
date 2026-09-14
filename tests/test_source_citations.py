@@ -14,7 +14,7 @@ written: `isocenter/configuration.py` cited line 523 of
 on purpose: spelled in this file's own citation grammar it would be
 swept, and this guard would be red on its own docstring.)
 
-Three rules, and the reason each stops where it does.
+Four rules, and the reason each stops where it does.
 
 **Rule 1 -- a citation naming a repository file must be in range.**
 Grammar: `` `path.py:N` `` and `path.py line N`, with an optional `-M`
@@ -63,13 +63,30 @@ followed by "line N" starting the next now reads as a citation even
 across a sentence boundary. If that ever fires on prose that is right,
 reword the prose -- a sentence shaped like a citation deserves to be one.
 
+**Rule 2b -- a bare citation names the symbol on its line (#535).**
+Grammar: `` `symbol` (`path.py:N`) `` -- a backticked span, an opening
+parenthesis, then a Rule 1 citation in either spelling. The symbol must
+appear on line N of the file, as a substring. This is what closes the
+gap Rule 1 left: a citation quoting no code could only be range-checked,
+and #535 found one naming lines inside a function it had nothing to do
+with, graded clean. A bare citation with neither Rule 2's quoted code nor a
+symbol before it is an offender outright, in the ordinary prose form
+(`` the teardown is at path.py:N ``): there is nothing to compare its
+line against, so it cannot be told from a stale one, and every such
+citation in the tree at the time this rule was added had either a
+natural symbol or a natural line of code to carry. Ranges (`:N-M`) are
+exempt, because a range names a block and a block has no one symbol.
+
 The grammar is deliberately narrow, and the boundary was checked against
 the prose that already exists. `tests/test_redaction_attestation.py`
-writes `` `scan_burned_in_annotations` (`services.py:211`) `` and
-``at `services.py:207` `` -- the `:N` spelling, no "line", and the
-backticked span names a *symbol* rather than a line of code. Those get
-Rule 1 only. Getting this boundary wrong would make the guard red on
-correct prose, which is how a guard gets deleted.
+writes `` `scan_burned_in_annotations` (`services.py:N`) `` -- the `:N`
+spelling, no "line", and the backticked span names a *symbol* rather
+than a line of code. That gets Rule 1 and Rule 2b, never Rule 2: the
+symbol is looked for *on* the line, not held equal to it. (The example
+spells its number as `N` so that this docstring does not itself cite
+line N of `services.py`; the same trick as the comment above `_GAP`.)
+Getting this boundary wrong would make the guard red on correct prose,
+which is how a guard gets deleted.
 
 **Rule 3 -- the count.** Inserting a *sixth* `entity.mark_modified()`
 below line 324 leaves all five existing citations true and only a
@@ -91,32 +108,37 @@ and `dist/` are excluded as build artefacts: they are stale copies of the
 package, so grading them reports every defect twice.
 
 **Stated deferral: a bare `line <N>` citation naming no file is not
-checked.** `tests/test_remediation_dates.py:86` is one -- it refers to
-"a shape worse than the one at line 392" with no file named. Which file
-line 392 belongs to could not be determined: the test file itself, the
-module under test and `git log -S` all fail to settle it. It is left
-exactly as written rather than guessed at, and the gap is recorded here
-rather than in a comment nobody would find. A future rule could require
-every `line N` to name a file; it would need that citation rewritten
-first, by someone who knows what it meant.
+checked.** The phrase `than the one at line 392`
+(`tests/test_remediation_dates.py:73`) is one -- it refers to "a shape
+worse than the one at line 392" with no file named. Which file line 392
+belongs to could not be determined: the test file itself, the module
+under test and `git log -S` all fail to settle it. It is left exactly
+as written rather than guessed at, and the gap is recorded here rather
+than in a comment nobody would find. A future rule could require every
+`line N` to name a file; it would need that citation rewritten first,
+by someone who knows what it meant.
 
-**Stated deferral: Rule 1 is a range check and nothing more.** A
-citation naming a file and a line but quoting no code can only be
-graded against the file's length -- there is nothing to compare the
-line *against*. So it catches the gross failure and nothing else: the
-line-523 citation of a 272-line `config_manager.py` described at the
-top of this docstring is the shape it does catch, and #329 found two
-that it did not -- 361 lines adrift, on code that had nothing to do
+**Stated deferral, narrowed by Rule 2b: Rule 1 is a range check and
+nothing more.** A citation naming a file and a line but quoting no code
+can only be graded against the file's length -- there is nothing to
+compare the line *against*. So it catches the gross failure and nothing
+else: the line-523 citation of a 272-line `config_manager.py` described
+at the top of this docstring is the shape it does catch, and #329 found
+two that it did not -- 361 lines adrift, on code that had nothing to do
 with what they claimed, and graded as fine because the numbers were
 still in range. (Both spelled here without the grammar, for the reason
-given up there.)
+given up there.) Rule 1 still does exactly that and no more --
+`test_an_in_range_citation_of_the_wrong_line_is_not_caught` pins it --
+but since #535 a citation that stops there is an offender under Rule
+2b, so the shape #329 found cannot be written without also writing the
+symbol Rule 2b will hold it to.
 
-Rule 2's quoted code is the only thing that closes that gap, and it
-cannot be required of every citation: two legitimate shapes have no
-line of code to quote -- a range citation, which names a block, and a
-citation naming where a symbol is defined. Widening any grammar to
-accept a bare `:N` is rejected outright; it would match every ratio,
-timeout and port number in the tree.
+Rule 2's quoted code and Rule 2b's symbol are what close that gap
+between them, and neither can be required of every citation alone: a
+range citation names a block, which has no one line of code and no one
+symbol, and is exempt from both. Widening any grammar to accept a bare
+`:N` is rejected outright; it would match every ratio, timeout and port
+number in the tree.
 
 No `scripts/mutation_probe.py` `TARGETS` entry -- and #310 suggests the
 opposite, so the reason matters. #310 proposes putting this in a file
@@ -190,6 +212,17 @@ _FILE_CITATION = re.compile(
 _CONTENT_CITATION = re.compile(
     r"`(?P<code>[^`\n]+)`" + _GAP + r"at" + _GAP + _CITED_PATH
     + _GAP + r"line" + _GAP + r"(?P<number>\d+)")
+
+# Rule 2b: the symbol a bare citation stands beside. `` `sym` (`path.py:N`)
+# `` -- a backticked span, an opening parenthesis, then the citation.
+# Matched against the text *ending* where Rule 1's match starts, so the
+# `(` must be the last thing before it: no gap is admitted there, on
+# purpose, because a stray `(` a sentence earlier must not lend its
+# symbol to a citation it does not enclose. The optional backtick is the
+# one that wraps a whole `` `path.py:N` `` citation (#325): Rule 1's
+# `tick` group takes only a backtick that closes right after the path,
+# so for the whole-citation wrap the match starts *inside* it.
+_SYMBOL_PREFIX = re.compile(r"`(?P<symbol>[^`\n]+)`" + _GAP + r"\(`?$")
 
 MARK_MODIFIED = "entity.mark_modified()"
 
@@ -391,6 +424,57 @@ def check_content_citations(root=None):
     return offenders, checked
 
 
+def check_symbol_citations(root=None):
+    """Rule 2b over the tree. Returns `(offenders, checked)`.
+
+    `checked` lists the symbol-form citations that were held to their
+    line; a bare citation with no symbol is an offender and is not in
+    it. Ranges are skipped, and so is anything inside a Rule 2 span --
+    a content pin's `path.py line N` is Rule 1's and Rule 2's business.
+    """
+    root = root or REPO
+    index = _source_index(root)
+    offenders = []
+    checked = []
+    for path in _prose_files(root):
+        where = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8")
+        pinned = [(m.start(), m.end())
+                  for m in _CONTENT_CITATION.finditer(text)]
+        for lineno, match in _citations(path, _FILE_CITATION):
+            if match.group("end") is not None:
+                continue
+            if any(start <= match.start() < end for start, end in pinned):
+                continue
+            target = _resolve(root, index, match.group("path"))
+            if target is None:
+                continue
+            if isinstance(target, list):
+                if len(target) != 1:
+                    continue        # Rule 1 reports the ambiguity
+                target = target[0]
+            cited_name = target.relative_to(root).as_posix()
+            number = int(match.group("start"))
+            prefix = _SYMBOL_PREFIX.search(text, 0, match.start())
+            if prefix is None:
+                offenders.append(
+                    f"{where}:{lineno}: {match.group(0)!r} quotes no code "
+                    "and names no symbol, so nothing can tell it from a "
+                    "stale one; write `code` at file line N, or "
+                    "`symbol` (file:N) with the symbol on that line (#535)")
+                continue
+            symbol = prefix.group("symbol")
+            lines = _lines(target)
+            actual = lines[number - 1] if 1 <= number <= len(lines) else None
+            checked.append((where, lineno, symbol, cited_name, number))
+            if actual is None or symbol not in actual:
+                offenders.append(
+                    f"{where}:{lineno}: says `{symbol}` is on "
+                    f"{cited_name} line {number}, but that line holds "
+                    f"{actual.strip() if actual is not None else None!r}")
+    return offenders, checked
+
+
 def _mark_modified_lines(root=None):
     root = root or REPO
     path = root / "isocenter" / "remediation.py"
@@ -464,6 +548,26 @@ def test_the_number_of_citations_matches_the_number_of_calls():
         "with no citation is one no test says it defends, and a "
         f"citation with no call is stale (#310). Cited: {sorted(cited)}; "
         f"actual: {sorted(_mark_modified_lines())}")
+
+
+def test_every_bare_citation_names_its_symbol():
+    """Rule 2b over the tree: no citation is left with only a range check.
+
+    Red when added, on eleven bare citations, six of them stale (#535):
+    every one had either a line of code to quote or a symbol to name,
+    and now does. The count floor is the same vacuity guard as Rule 2's.
+    """
+    offenders, checked = check_symbol_citations()
+
+    assert len(checked) >= 3, (
+        f"only {len(checked)} symbol citations found; the grammar has "
+        "stopped matching the prose that uses it and this test would "
+        "otherwise pass vacuously (#535)")
+
+    assert not offenders, (
+        "these citations quote no code and name no symbol, or name a "
+        "symbol that is no longer on the line they cite (#535):\n    "
+        + "\n    ".join(offenders))
 
 
 # --- The checkers' own negative cases ------------------------------------
@@ -680,8 +784,11 @@ def test_an_in_range_citation_of_the_wrong_line_is_not_caught(tmp_path):
     citations were exactly this: a number in range, on a line holding
     something else entirely, reported as clean.
 
-    Closing it needs Rule 2's quoted code, and the module docstring
-    records why that cannot be required of every citation.
+    Closing it needs Rule 2's quoted code or Rule 2b's symbol, and the
+    module docstring records why neither can be required of every
+    citation. This is scoped to `check_file_citations` on purpose: the
+    same fixture is an offender under Rule 2b (the test below), which
+    is exactly the division of labour.
     """
     _tree(tmp_path,
           ["def f():", "    first()", "    second()"],
@@ -693,6 +800,80 @@ def test_an_in_range_citation_of_the_wrong_line_is_not_caught(tmp_path):
     assert offenders == [], (
         "Rule 1 has started grading content; if that is deliberate, the "
         "module docstring's stated deferral is now wrong")
+
+
+# --- Rule 2b: the symbol beside a bare citation (#535) ---------------------
+
+
+def test_a_bare_citation_without_a_symbol_is_an_offender(tmp_path):
+    """The shape #535 found: in range, quoting nothing, naming nothing."""
+    _tree(tmp_path,
+          ["def f():", "    first()", "    second()"],
+          "The teardown is at zzz_fixture_mod.py:2.\n")
+
+    offenders, checked = check_symbol_citations(tmp_path)
+
+    assert checked == [], checked
+    assert len(offenders) == 1, offenders
+    assert "quotes no code and names no symbol" in offenders[0]
+    assert offenders[0].startswith("notes.md:1:"), offenders[0]
+
+
+def test_a_symbol_citation_whose_symbol_is_on_the_line_passes(tmp_path):
+    """`` `sym` (`file.py:N`) `` in both Rule 1 spellings, held and clean."""
+    _tree(tmp_path,
+          ["def helper():", "    return 1"],
+          "`helper` (`zzz_fixture_mod.py:1`) and "
+          "`return 1` (zzz_fixture_mod.py line 2).\n")
+
+    offenders, checked = check_symbol_citations(tmp_path)
+
+    assert offenders == [], offenders
+    assert [c[2:] for c in checked] == [
+        ("helper", "zzz_fixture_mod.py", 1),
+        ("return 1", "zzz_fixture_mod.py", 2)], checked
+
+
+def test_a_symbol_citation_whose_symbol_moved_is_caught(tmp_path):
+    """The mutant that skips the symbol check is what this kills."""
+    _tree(tmp_path,
+          ["def helper():", "    return 1", ""],
+          "`helper` (`zzz_fixture_mod.py:2`) and "
+          "`helper` (`zzz_fixture_mod.py:9`).\n")
+
+    offenders, checked = check_symbol_citations(tmp_path)
+
+    assert len(checked) == 2, checked
+    assert len(offenders) == 2, offenders
+    assert "says `helper` is on zzz_fixture_mod.py line 2, but that line " \
+           "holds 'return 1'" in offenders[0], offenders[0]
+    assert "line 9, but that line holds None" in offenders[1], offenders[1]
+
+
+def test_a_range_citation_is_not_read_by_rule_2b(tmp_path):
+    """A range names a block; a content pin is Rule 2's; neither is graded.
+
+    The mutant that treats a range as bare reports the first citation
+    here; the one that ignores Rule 2's spans reports the second.
+    """
+    _tree(tmp_path,
+          ["one", "two", "three"],
+          "The block at zzz_fixture_mod.py:1-3, and "
+          "`two` at zzz_fixture_mod.py line 2.\n")
+
+    assert check_symbol_citations(tmp_path) == ([], [])
+
+
+def test_a_symbol_a_sentence_earlier_does_not_vouch_for_a_citation(tmp_path):
+    """`` `sym` (see also foo) zzz.py:N `` is bare: the `(` must touch it."""
+    _tree(tmp_path,
+          ["def helper():", "    return 1"],
+          "`helper` (defined early) is at zzz_fixture_mod.py:1.\n")
+
+    offenders, checked = check_symbol_citations(tmp_path)
+
+    assert checked == [], checked
+    assert len(offenders) == 1 and "names no symbol" in offenders[0], offenders
 
 
 # --- Citations written across a line break (#346) -------------------------

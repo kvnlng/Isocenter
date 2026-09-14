@@ -1888,10 +1888,10 @@ class DicomSession:
 
         Returns:
             int: `instance_attributes` rows deleted -- rows, not tags
-            (a VM=3 value is three rows, and a tag holding an empty
-            value is the one placeholder row that carries its zero
-            length -- #328). 0 means the tier already agreed with the
-            core and nothing changed.
+                (a VM=3 value is three rows, and a tag holding an empty
+                value is the one placeholder row that carries its zero
+                length -- #328). 0 means the tier already agreed with the
+                core and nothing changed.
         """
         rows_deleted, dropped = self.store_backend.reconcile_private_tags()
         if not dropped:
@@ -2501,7 +2501,7 @@ class DicomSession:
 
         Returns:
             Dict[str, Counter]: Keyed "patients", "studies", "instances";
-            each a Counter of PhiStatus to how many carry it.
+                each a Counter of PhiStatus to how many carry it.
         """
         summary = {"patients": Counter(), "studies": Counter(),
                    "instances": Counter()}
@@ -2752,15 +2752,17 @@ class DicomSession:
 
         Returns:
             DiscoveryResult: Object containing all detected text candidates.
-            Call .to_zones() on the result to get grouped redaction zones.
+                Call `to_zones()` on the result to get grouped redaction
+                zones.
 
-            `n_sources` counts only the sampled instances that were read
-            (at least one frame through OCR), so an instance that could
-            not be read does not dilute a zone's occurrence rate. Each one
-            that failed is logged at ERROR and counted in a WARNING (#423),
-            and written as one `WARNING` audit row naming the instance and
-            the reason, which grades the run `REVIEW_REQUIRED` (#479). A
-            worker process runs the caller's `tesseract_cmd` (#458).
+                `n_sources` counts only the sampled instances that were
+                read (at least one frame through OCR), so an instance
+                that could not be read does not dilute a zone's
+                occurrence rate. Each one that failed is logged at ERROR
+                and counted in a WARNING (#423), and written as one
+                `WARNING` audit row naming the instance and the reason,
+                which grades the run `REVIEW_REQUIRED` (#479). A worker
+                process runs the caller's `tesseract_cmd` (#458).
 
         Raises:
             RuntimeError: `pixel_analysis.OcrUnavailableError` when the `ocr`
@@ -5021,23 +5023,24 @@ class DicomSession:
             folder (str): Output directory.
             format (str): Registered format name. "dicom" (default) writes
                 cleaned DICOM files; "wfdb" writes PhysioNet WFDB records.
-            **options: Passed through to the selected exporter. See
+            **options (dict): Passed through to the selected exporter. See
                 `_export_dicom` for the DICOM format's options.
 
         Returns:
-            The selected format's own result object. The DICOM exporter
-            returns an `io_handlers.ExportSummary`, whose `written`
-            counts the files that reached disk and whose `failures`
-            names the instances that did not. `written` is counted over
-            *de-duplicated* UIDs, because the UID names the output file:
-            two instances sharing one are two successful write
-            operations and one file, the second having overwritten the
-            first (#197). The WFDB exporter returns its own
-            `List[str]` of paths (#191 scopes the summary type out); an
-            empty list means nothing was attempted, because since #541 an
-            export that attempted records and wrote none raises instead.
-            Every format's result must let a caller detect that nothing
-            was written.
+            Any: The selected format's own result object. The DICOM
+                exporter returns an `io_handlers.ExportSummary`, whose
+                `written` counts the files that reached disk and whose
+                `failures` names the instances that did not. `written`
+                is counted over *de-duplicated* UIDs, because the UID
+                names the output file: two instances sharing one are
+                two successful write operations and one file, the
+                second having overwritten the first (#197). The WFDB
+                exporter returns its own `List[str]` of paths (#191
+                scopes the summary type out); an empty list means
+                nothing was attempted, because since #541 an export
+                that attempted records and wrote none raises instead.
+                Every format's result must let a caller detect that
+                nothing was written.
 
         Raises:
             ValueError: If `format` is not a registered export format.

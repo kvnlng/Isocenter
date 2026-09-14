@@ -216,6 +216,39 @@ def test_a_nested_only_remediation_after_a_reload_reaches_the_store(
         assert value != NESTED_PHI, "the store kept the nested identifier"
 
 
+def test_a_nested_item_status_is_session_scoped(tmp_path, config):
+    """Characterization (#564, v1.0.0): a reopened store hydrates the item
+    UNSCANNED and the instance REMEDIATED.
+
+    The store keeps a status per patient, study and instance and none per
+    sequence item, so the item's status lives only in the session that
+    recorded it, while the value, the instance's status and the #561
+    owner survive the reopen -- which is why nothing the session says
+    (grade, report, manifest, audit rows) is false afterwards. Through
+    the public save/reopen path and nothing else. If the item ever reads
+    REMEDIATED after the reopen, #564 has been fixed: update the
+    `phi_status` docstring and retire this test with it.
+    """
+    _write_nested_only_ct(tmp_path / "in" / "a.dcm")
+    db = str(tmp_path / "store.db")
+    with DicomSession(db) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.anonymize(session.audit(config))
+        inst, value = _nested_value(session)
+        assert value != NESTED_PHI
+        assert inst.sequences[SEQ].items[0].phi_status is PhiStatus.REMEDIATED
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        session.save(sync=True)
+
+    with DicomSession(db) as session:
+        inst, value = _nested_value(session)
+        assert value != NESTED_PHI, "the value itself survives the reopen"
+        assert inst.phi_status is PhiStatus.REMEDIATED, "and so does the owner"
+        assert inst.sequences[SEQ].items[0].phi_status is PhiStatus.UNSCANNED, (
+            "the nested item's status survived a reopen: #564 is fixed, "
+            "so retire this characterization and its docstring sentence")
+
+
 def test_a_nested_remediation_on_an_instance_already_remediated_is_saved(
         tmp_path):
     """Pins the owner's `mark_modified()` in the success block: #173, nested.

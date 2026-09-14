@@ -211,10 +211,10 @@ class TrackedEntity:
     def phi_status(self) -> 'PhiStatus':
         """What the last scan concluded, if it still applies.
 
-        Returns UNSCANNED when the entity has changed since the scan ran.
-        The check is structural rather than a convention someone has to
-        remember: there is no way to read a status that describes content
-        the entity no longer holds.
+        UNSCANNED once the entity has changed since the scan ran -- structural,
+        not a convention: no status can describe content the entity no longer
+        holds. Session-scoped for a nested `DicomItem`: a reopened store hydrates
+        items UNSCANNED; the owning instance's status and owner survive (#564).
         """
         if self._phi_status is None or self._phi_status_revision != self._revision:
             return PhiStatus.UNSCANNED
@@ -569,7 +569,7 @@ class Equipment:
 
         Returns:
             Optional[Equipment]: the equipment, or `None` when neither
-            identifying field is present.
+                identifying field is present.
         """
         if not (manufacturer or model_name):
             return None
@@ -1571,8 +1571,8 @@ class Instance(DicomItem):
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
-            when the instance genuinely carries no pixel element. "Could
-            not decode" is *not* None -- it raises (#226).
+                when the instance genuinely carries no pixel element. "Could
+                not decode" is *not* None -- it raises (#226).
 
         A read whose decoder returns RGB from a YBR-labelled file says so.
         An 8-bit `YBR_FULL` JPEG-LS file read through the imagecodecs
@@ -1910,7 +1910,7 @@ class Instance(DicomItem):
 
         Returns:
             bool: True if unloaded (or already absent), False if unsafe --
-            i.e. the samples are in memory only and nothing could reload them.
+                i.e. the samples are in memory only and nothing could reload them.
         """
         if self.waveform_array is None:
             return True
@@ -1931,7 +1931,7 @@ class Instance(DicomItem):
 
         Returns:
             Optional[bytes]: Raw sample bytes, or None when this instance
-            has no waveform or its samples are not backed by the sidecar.
+                has no waveform or its samples are not backed by the sidecar.
         """
         loader = self._waveform_loader
         if loader is None or not hasattr(loader, "read_raw"):
@@ -1943,8 +1943,8 @@ class Instance(DicomItem):
 
         Returns:
             Optional[np.ndarray]: int16 array of shape
-            (num_samples, num_channels), or None if this instance has no
-            waveform.
+                (num_samples, num_channels), or None if this instance has no
+                waveform.
         """
         if self.waveform_array is not None:
             return self.waveform_array

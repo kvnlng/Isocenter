@@ -26,6 +26,7 @@ for.
 """
 import ast
 import doctest
+import json
 import pathlib
 import re
 import textwrap
@@ -33,31 +34,43 @@ import textwrap
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = REPO / "isocenter"
 
-# `.name(` inside a string literal or a doc fence.
-_CALL_IN_TEXT = re.compile(r"\.([A-Za-z_]\w*)\(")
+# `.name(` inside a string literal or a doc fence, with the word touching
+# the dot on its left when there is one. The receiver decides whether
+# the mention is a claim (#533): `str.strip()` in a docstring is a
+# sentence about the standard library, `session.strip()` or a bare
+# `.strip()` is a promise about ours. No whitespace is admitted between
+# the receiver and the dot, so `call .date() on it` is the bare form.
+_CALL_IN_TEXT = re.compile(
+    r"(?:(?P<recv>[A-Za-z_]\w*))?\.(?P<name>[A-Za-z_]\w*)\(")
 
 # ```python fences, captured with their offset so a failure can name a
 # line rather than a fence ordinal.
 _PYTHON_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)
 
+# Receivers, beyond the class names the package defines and `ROOTS`
+# below, whose `.name(` in a package string is a claim about our API:
+# the spellings the package's own strings use for a session, an
+# instance, a store or an exporter. A receiver outside this set and the
+# class names is another library's object, and its method is not looked
+# for here.
+_RECEIVERS = frozenset({"self", "inst", "instance", "store_backend",
+                        "persistence_manager", "configuration", "exporter"})
+
 # Methods named correctly in prose that belong to the standard library
-# or a third-party package, not to Isocenter. Each entry is a CLAIM that
-# the name is not an Isocenter method and never should be looked for as
-# one -- adding to this set to silence a failure is how the defect class
-# this file exists for gets back in.
-# Note that `_defined_names()` also picks up every name the package
-# imports at module scope, so a third-party name imported anywhere is
-# already resolvable and never reaches this set -- `date` below is in
-# fact redundant for that reason (`from datetime import date` appears in
-# two modules). Test A is therefore looser than "the package defines
-# it"; that looseness is priced in on the test itself.
+# or a third-party package, not to Isocenter, and that a string spells
+# with no receiver at all. Each entry is a CLAIM that the name is not an
+# Isocenter method and never should be looked for as one -- adding to
+# this set to silence a failure is how the defect class this file
+# exists for gets back in. Since #533 a receiver'd mention (`str.lower()`,
+# `Record.wrheader()`, `pixel_array.tobytes()`) is not read as a claim,
+# so the set shrank from six to one: `date` is the `.date()` a user is
+# told to call in the `TypeError` `set_attr` raises for a `datetime`
+# study date, a runtime message that keeps its wording. It is also
+# redundant -- `_defined_names()` picks up every name the package imports
+# at module scope, and `from datetime import date` appears in two
+# modules -- and stays as the record of why it is bare.
 NOT_OURS = frozenset({
-    "date",       # datetime.datetime.date() -- redundant, see above
-    "wrheader",   # wfdb.Record.wrheader()
-    "lower",      # str.lower()
-    "upper",      # str.upper()
-    "get",        # queue.Queue.get()
-    "tobytes",    # numpy.ndarray.tobytes()
+    "date",       # datetime.datetime.date(), bare in a runtime TypeError
 })
 
 
@@ -128,6 +141,37 @@ def _defined_names():
     return names
 
 
+def _class_names():
+    """Every class the package defines, at any nesting depth."""
+    names = set()
+    for path in _package_sources():
+        tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+        names.update(node.name for node in ast.walk(tree)
+                     if isinstance(node, ast.ClassDef))
+    return names
+
+
+def _offenders_in_text(text, defined, ours):
+    """The method names `text` claims for our API and `defined` lacks.
+
+    A `.name(` is a claim when it has no receiver, or when its receiver
+    is one of `ours` (a class name, a `ROOTS` entry or a `_RECEIVERS`
+    spelling). Any other receiver is another library's object -- a
+    docstring saying `str.strip()` is describing `str` -- and the name
+    is not looked for (#533). A claim is an offender when neither
+    `defined` nor `NOT_OURS` carries it.
+    """
+    offenders = []
+    for match in _CALL_IN_TEXT.finditer(text):
+        receiver, name = match.group("recv"), match.group("name")
+        if receiver is not None and receiver not in ours:
+            continue
+        if name in defined or name in NOT_OURS:
+            continue
+        offenders.append(name)
+    return offenders
+
+
 def test_every_method_named_in_a_package_string_exists():
     """A method named in a string the package emits must be real.
 
@@ -137,17 +181,24 @@ def test_every_method_named_in_a_package_string_exists():
     (#227) and a `.save_config()` that has never existed under any name
     this package has had.
 
-    Resolution is by NAME ONLY, deliberately. A string saying
-    `.wrong_receiver.save()` passes because `save` is defined somewhere
-    in the package. Receiver-aware resolution is possible but needs the
-    thirteen-entry third-party allowlist that the doc-fence half of
+    Resolution is by NAME, with the receiver deciding only whether the
+    name is *ours to check* (#533). A string saying
+    `wrong_receiver.save()` passes because `wrong_receiver` is not a
+    spelling this file knows for our objects; `session.save()` and a
+    bare `.save()` are checked and pass because `save` is defined
+    somewhere in the package. Full receiver-aware resolution would need
+    the thirteen-entry third-party allowlist that the doc-fence half of
     this file avoids by restricting itself to known receivers, and a
-    maintained allowlist is a fresh instance of the defect this file
-    is about. The looser check still caught every real defect at the
-    time it was written; do not "strengthen" it into the wider variant
-    without pricing that in.
+    maintained allowlist is a fresh instance of the defect this file is
+    about. Before #533 every `.name(` was a claim whatever preceded it,
+    and a docstring naming `str`'s own method failed the suite twice;
+    `NOT_OURS` carried the exceptions by hand, which is that allowlist
+    under another name. The looser check still caught every real
+    defect at the time it was written; do not "strengthen" it into the
+    wider variant without pricing that in.
     """
     defined = _defined_names()
+    ours = _class_names() | ROOTS | _RECEIVERS
     sources = _package_sources()
     # The walk must find something, or this passes while checking
     # nothing -- a package rename or a move under `src/` would empty it
@@ -163,9 +214,7 @@ def test_every_method_named_in_a_package_string_exists():
                 continue
             if not isinstance(node.value, str):
                 continue
-            for name in _CALL_IN_TEXT.findall(node.value):
-                if name in defined or name in NOT_OURS:
-                    continue
+            for name in _offenders_in_text(node.value, defined, ours):
                 offenders.append((
                     path.relative_to(REPO).as_posix(), node.lineno, name,
                     node.value.strip()[:120]))
@@ -371,3 +420,195 @@ def test_a_doctest_fence_is_still_read_for_method_names(tmp_path):
         "a doctest fence is not being read for method names, so any "
         "fence converted to `>>>` drops out of this guard silently "
         f"(#304); offenders={offenders}")
+
+
+# --- The package-string predicate on its own (#533) ------------------------
+#
+# Fixture-driven, so each rule is pinned without depending on which
+# strings the package happens to carry today. `defined` and `ours` are
+# passed in rather than read from the tree, for the same reason.
+
+_FIXTURE_DEFINED = frozenset({"audit", "save"})
+_FIXTURE_OURS = frozenset({"session", "Session"})
+
+
+def test_a_bare_call_that_does_not_exist_is_an_offender():
+    """`.no_such()` with no receiver is a claim about our API."""
+    assert _offenders_in_text("Tip: run `.no_such()` next.",
+                              _FIXTURE_DEFINED, _FIXTURE_OURS) == ["no_such"]
+    assert _offenders_in_text("Tip: run `.audit()` next.",
+                              _FIXTURE_DEFINED, _FIXTURE_OURS) == []
+
+
+def test_a_stdlib_receiver_is_not_a_claim():
+    """`str.strip()` is a sentence about another library (#533).
+
+    The mutant that treats every receiver as ours reports `strip` here.
+    """
+    assert _offenders_in_text("normalised as str.strip() does, then "
+                              "queue.get() and Record.wrheader().",
+                              _FIXTURE_DEFINED, _FIXTURE_OURS) == []
+
+
+def test_an_ours_receiver_is_a_claim():
+    """`session.no_such()` names one of our objects, so it is checked."""
+    assert _offenders_in_text("then session.no_such() and Session.audit()",
+                              _FIXTURE_DEFINED, _FIXTURE_OURS) == ["no_such"]
+
+
+def test_a_runtime_message_is_read_too():
+    """A constant outside a docstring is a string the package emits."""
+    source = ('MSG = "call session.no_such() first"\n'
+              'def f():\n    """Docs mention .audit()."""\n')
+    tree = ast.parse(source)
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            found.extend(_offenders_in_text(node.value, _FIXTURE_DEFINED,
+                                            _FIXTURE_OURS))
+    assert found == ["no_such"]
+
+
+# --- GettingStarted.ipynb (#634) -------------------------------------------
+#
+# The notebook is the third place this project puts calls in front of a
+# user, and until #634 nothing read it: its export cell passed
+# `safe=True, compression="j2k"` to a `session.export()` that has never
+# accepted either, so the last runnable cell of the getting-started walk
+# raised `TypeError`. The name check above would not have seen it -- the
+# method exists -- so this checks the *keywords* too, against the
+# signature read by AST from `session.py`, never by importing it (the
+# module docstring's reason).
+#
+# `export(folder, format, **options)` forwards its options to the
+# format's door, so its accepted keywords are the union of its own and
+# the DICOM door's (`_export_dicom`); the WFDB door is not walked because
+# the notebook exports DICOM. A method that takes `**kwargs` and is not
+# in that table accepts anything, which is the honest reading of a
+# signature this test cannot see through.
+NOTEBOOK = REPO / "GettingStarted.ipynb"
+SESSION_CLASS = "DicomSession"
+_FORWARDS_OPTIONS_TO = {"export": "_export_dicom"}
+
+
+def _session_signatures(source=None):
+    """`{method: (accepted keywords, takes **kwargs)}` for the session class."""
+    source = source or (PACKAGE / "session.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    cls = next(node for node in tree.body
+               if isinstance(node, ast.ClassDef) and node.name == SESSION_CLASS)
+    signatures = {}
+    for node in cls.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        args = node.args
+        names = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+        names.discard("self")
+        signatures[node.name] = (names, args.kwarg is not None)
+    for method, door in _FORWARDS_OPTIONS_TO.items():
+        if method in signatures and door in signatures:
+            own, _ = signatures[method]
+            forwarded, variadic = signatures[door]
+            signatures[method] = (own | forwarded, variadic)
+    return signatures
+
+
+def _notebook_code(path):
+    """The notebook's code cells as one module, magics and shell lines dropped."""
+    cells = json.loads(path.read_text(encoding="utf-8"))["cells"]
+    lines = []
+    for cell in cells:
+        if cell["cell_type"] != "code":
+            continue
+        for line in "".join(cell["source"]).splitlines():
+            lines.append("" if line.lstrip().startswith(("%", "!")) else line)
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _notebook_offenders(path, signatures, receiver="session"):
+    """`(line, method, keyword or None)` per call the session cannot take."""
+    tree = ast.parse(_notebook_code(path))
+    offenders = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and _receiver_root(node.func) == receiver
+                and isinstance(node.func.value, ast.Name)):
+            continue
+        method = node.func.attr
+        if method not in signatures:
+            offenders.append((node.lineno, method, None))
+            continue
+        accepted, variadic = signatures[method]
+        for keyword in node.keywords:
+            if keyword.arg is None or variadic and method not in _FORWARDS_OPTIONS_TO:
+                continue
+            if keyword.arg not in accepted:
+                offenders.append((node.lineno, method, keyword.arg))
+    return offenders
+
+
+def test_the_getting_started_notebook_calls_methods_with_keywords_they_accept():
+    """Every `session.<m>(k=...)` in the notebook must be a call `m` takes (#634).
+
+    Red on the notebook as it stood: `export(..., safe=True,
+    compression="j2k")`, two keywords the DICOM door never had.
+    """
+    signatures = _session_signatures()
+    assert "export" in signatures and "ingest" in signatures, signatures.keys()
+    offenders = _notebook_offenders(NOTEBOOK, signatures)
+    assert not offenders, (
+        "GettingStarted.ipynb calls the session with a method or keyword "
+        "it does not accept, so the notebook raises for anyone who runs "
+        "it (#634):\n" + "\n".join(
+            f"    line {line}: session.{method}("
+            + (f"{keyword}=...)" if keyword else ") does not exist")
+            for line, method, keyword in offenders))
+
+
+def _notebook(tmp_path, *code_cells):
+    path = tmp_path / "nb.ipynb"
+    path.write_text(json.dumps({"cells": [
+        {"cell_type": "markdown", "source": ["# Not code\n"]},
+        *({"cell_type": "code", "source": [code]} for code in code_cells)]}),
+        encoding="utf-8")
+    return path
+
+
+_FIXTURE_SESSION = (
+    f"class {SESSION_CLASS}:\n"
+    "    def ingest(self, directory): pass\n"
+    "    def export(self, folder, format='dicom', **options): pass\n"
+    "    def _export_dicom(self, folder, subset=None, verify_readback=False): pass\n"
+    "    def anything(self, **kwargs): pass\n")
+
+
+def test_the_notebook_check_resolves_export_through_its_dicom_door(tmp_path):
+    """`export(subset=...)` is accepted because `_export_dicom` takes it.
+
+    The mutant that drops the forwarding table reports `subset` unknown
+    on a correct notebook -- a wrong-reason red that this fixture is
+    green against.
+    """
+    signatures = _session_signatures(_FIXTURE_SESSION)
+    path = _notebook(tmp_path,
+                     "%pip install something\n"
+                     "session.ingest('in')\n"
+                     "session.export('out', subset=df, verify_readback=True)\n",
+                     "!ls\nsession.anything(whatever=1)\n")
+
+    assert _notebook_offenders(path, signatures) == []
+
+
+def test_a_keyword_the_dicom_door_does_not_take_is_flagged(tmp_path):
+    """`safe=` and a misspelt method are the two shapes #634 found."""
+    signatures = _session_signatures(_FIXTURE_SESSION)
+    path = _notebook(tmp_path,
+                     "session.export('out', safe=True, compression='j2k')\n"
+                     "session.ingets('in')\n"
+                     "other.export('out', safe=True)\n")
+
+    assert _notebook_offenders(path, signatures) == [
+        (1, "export", "safe"), (1, "export", "compression"),
+        (2, "ingets", None)]

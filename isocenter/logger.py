@@ -38,9 +38,15 @@ def configure_logger(log_file=None):
 
     logger.setLevel(default_level)
 
-    # Reset handlers to prevent duplicates on reload
-    if logger.handlers:
-        logger.handlers = []
+    # Reset handlers to prevent duplicates on reload. Close them first:
+    # assigning `[]` over the list dropped each `FileHandler` with its
+    # file still open, so N sessions in one process held N descriptors
+    # on the log, a `ResourceWarning` at GC on 3.14t (#611). `close()`
+    # on the console `StreamHandler` flushes and leaves `sys.stdout`
+    # open -- only a `FileHandler` owns its stream.
+    for handler in list(logger.handlers):
+        handler.close()
+    logger.handlers = []
 
     # 1. File Handler
     fh = logging.FileHandler(log_file, mode='w')  # Overwrite mode for now per session

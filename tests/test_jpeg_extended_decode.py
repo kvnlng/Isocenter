@@ -23,12 +23,14 @@ import os
 
 import imagecodecs
 import numpy as np
+import pydicom
 import pytest
 from pydicom.data import get_testdata_file
 
 from support.decode_doors import (at_decode_pixels, at_ingest, at_instance,
                                   dataset, pydicom_answer, pydicom_cannot,
-                                  same, write)  # noqa: F401 pylint: disable=unused-import
+                                  same, through_the_fallback,
+                                  write)  # noqa: F401 pylint: disable=unused-import
 
 JPEG_BASELINE = "1.2.840.10008.1.2.4.50"
 JPEG_EXTENDED = "1.2.840.10008.1.2.4.51"
@@ -126,24 +128,60 @@ def test_the_fallback_returns_pillows_array_for_an_8_bit_grey_stream(
     assert pydicom_cannot["n"] > 0
 
 
-def test_a_colour_jpeg_stream_is_refused_by_the_fallback(tmp_path,
-                                                         pydicom_cannot):
+@pytest.mark.parametrize("ts,photometric", [
+    (JPEG_BASELINE, "RGB"), (JPEG_EXTENDED, "YBR_FULL_422"),
+], ids=[".50-RGB", ".51-YBR_FULL_422"])
+def test_a_colour_jpeg_stream_is_refused_by_the_fallback(
+        tmp_path, pydicom_cannot, ts, photometric):
     """Colour is not a fallback row under `.50`/`.51`: unmeasured, and once wrong.
 
     The decoder's colour answer for a stream with no Adobe marker is not
     pydicom's (measured, 137 apart), so an RGB declaration is refused in
     the allow-list's words rather than stored under a label that may be
-    false.
+    false. The YBR row under `.51` is the same refusal through a door
+    (#623 P6): until then only the table literal pinned it, and a
+    `YBR_FULL_422` row added to `_FALLBACK_JPEG` was killed by nothing
+    that decodes a file.
     """
     rgb = np.stack([GREY8, GREY8[::-1], GREY8.T], -1)
-    path = _file(tmp_path, rgb, ts=JPEG_BASELINE, bits_stored=8,
-                 photometric="RGB")
+    path = _file(tmp_path, rgb, ts=ts, bits_stored=8, photometric=photometric)
     decoded = at_decode_pixels(path)
     assert isinstance(decoded, RuntimeError), decoded
     assert ("imagecodecs could not decode it either: its declared colour "
-            "space 'RGB' is not one this fallback labels under"
+            f"space {photometric!r} is not one this fallback labels under"
             in str(decoded)), str(decoded)
     assert pydicom_cannot["n"] > 0
+
+
+def test_a_monochrome1_jpeg_extended_file_keeps_its_label_at_every_door(
+        tmp_path, monkeypatch):
+    """MONOCHROME1 under `.51` decodes and is stored under its own label (#623 P6).
+
+    The row is the identity map, and until this test only the table
+    literal said so: dropping `MONOCHROME1` from `_FALLBACK_JPEG`, or
+    relabelling it `MONOCHROME2`, was killed by no door. Pillow refuses
+    12-bit JPEG Extended, so the fallback answers at every door without
+    a fixture forcing it; `through_the_fallback` is asked as well so the
+    `_decode_pixels` answer is measured as the fallback's own.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    path = _file(tmp_path, GREY12, photometric="MONOCHROME1")
+    decoded = at_decode_pixels(path)
+    assert isinstance(decoded, tuple), decoded
+    assert same(decoded[0], GREY12) and decoded[1] == "MONOCHROME1", decoded
+    fallback = through_the_fallback(pydicom.dcmread(path))
+    assert same(fallback[0], GREY12) and fallback[1] == "MONOCHROME1", fallback
+    # A bare file-backed Instance carries no attributes, so its label is
+    # not observable at that door; the array is (as the MONOCHROME2 test
+    # above asserts it), and the stored label is read at ingest.
+    read = at_instance(path)
+    assert isinstance(read, tuple), read
+    assert same(read[0], GREY12), read
+    got = at_ingest(tmp_path, path)
+    assert got["failure"] is None, got["failure"]
+    assert same(got["array"], GREY12), got["array"]
+    assert got["label"] == "MONOCHROME1", got["label"]
+    assert got["rows"] == [], got["rows"]
 
 
 def test_a_signed_12_bit_jpeg_extended_file_is_refused_in_the_dtype_words(
