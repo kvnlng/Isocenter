@@ -1796,7 +1796,11 @@ cannot name protection that never ran.</p>
 <span class="normal"><a href="#__codelineno-0-255">255</a></span>
 <span class="normal"><a href="#__codelineno-0-256">256</a></span>
 <span class="normal"><a href="#__codelineno-0-257">257</a></span>
-<span class="normal"><a href="#__codelineno-0-258">258</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-37" name="__codelineno-0-37"></a><span class="nd">@dataclass</span>
+<span class="normal"><a href="#__codelineno-0-258">258</a></span>
+<span class="normal"><a href="#__codelineno-0-259">259</a></span>
+<span class="normal"><a href="#__codelineno-0-260">260</a></span>
+<span class="normal"><a href="#__codelineno-0-261">261</a></span>
+<span class="normal"><a href="#__codelineno-0-262">262</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-37" name="__codelineno-0-37"></a><span class="nd">@dataclass</span>
 <a id="__codelineno-0-38" name="__codelineno-0-38"></a><span class="k">class</span><span class="w"> </span><span class="nc">IsocenterConfiguration</span><span class="p">:</span>
 <a id="__codelineno-0-39" name="__codelineno-0-39"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-40" name="__codelineno-0-40"></a><span class="sd">    Encapsulates the runtime configuration for a DicomSession.</span>
@@ -2008,16 +2012,20 @@ cannot name protection that never ran.</p>
 <a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="w">        </span><span class="sd">"""</span>
 <a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="sd">        Retrieves a specific rule dictionary (reference).</span>
 <a id="__codelineno-0-248" name="__codelineno-0-248"></a>
-<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">        Args:</span>
-<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">            serial_number (str): The serial number to find.</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">        Returns:</span>
-<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">            Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">        """</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a>        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
-<a id="__codelineno-0-256" name="__codelineno-0-256"></a>            <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
-<a id="__codelineno-0-257" name="__codelineno-0-257"></a>                <span class="k">return</span> <span class="n">r</span>
-<a id="__codelineno-0-258" name="__codelineno-0-258"></a>        <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">        Exact spelling, first match. Redaction does not use this: `redact()`</span>
+<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">        and the export apply every matching rule, `"*"` included, through</span>
+<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">        `rules_matching` in `services.py` (#580).</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a>
+<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">        Args:</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">            serial_number (str): The serial number to find.</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a>
+<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">        Returns:</span>
+<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">            Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
+<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">        """</span>
+<a id="__codelineno-0-259" name="__codelineno-0-259"></a>        <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a>            <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
+<a id="__codelineno-0-261" name="__codelineno-0-261"></a>                <span class="k">return</span> <span class="n">r</span>
+<a id="__codelineno-0-262" name="__codelineno-0-262"></a>        <span class="k">return</span> <span class="kc">None</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
@@ -2800,6 +2808,9 @@ Raised before the policy or its file is changed.</p>
     <div class="doc doc-contents ">
 
         <p>Retrieves a specific rule dictionary (reference).</p>
+<p>Exact spelling, first match. Redaction does not use this: <code>redact()</code>
+and the export apply every matching rule, <code>"*"</code> included, through
+<code>rules_matching</code> in <code>services.py</code> (#580).</p>
 
 
 <p><span class="doc-section-title">Parameters:</span></p>
@@ -2871,20 +2882,28 @@ Raised before the policy or its file is changed.</p>
 <span class="normal"><a href="#__codelineno-0-255">255</a></span>
 <span class="normal"><a href="#__codelineno-0-256">256</a></span>
 <span class="normal"><a href="#__codelineno-0-257">257</a></span>
-<span class="normal"><a href="#__codelineno-0-258">258</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-245" name="__codelineno-0-245"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<span class="normal"><a href="#__codelineno-0-258">258</a></span>
+<span class="normal"><a href="#__codelineno-0-259">259</a></span>
+<span class="normal"><a href="#__codelineno-0-260">260</a></span>
+<span class="normal"><a href="#__codelineno-0-261">261</a></span>
+<span class="normal"><a href="#__codelineno-0-262">262</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-245" name="__codelineno-0-245"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_rule</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">serial_number</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
 <a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="w">    </span><span class="sd">"""</span>
 <a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="sd">    Retrieves a specific rule dictionary (reference).</span>
 <a id="__codelineno-0-248" name="__codelineno-0-248"></a>
-<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">        serial_number (str): The serial number to find.</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">        Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">    """</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a>    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
-<a id="__codelineno-0-256" name="__codelineno-0-256"></a>        <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
-<a id="__codelineno-0-257" name="__codelineno-0-257"></a>            <span class="k">return</span> <span class="n">r</span>
-<a id="__codelineno-0-258" name="__codelineno-0-258"></a>    <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">    Exact spelling, first match. Redaction does not use this: `redact()`</span>
+<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">    and the export apply every matching rule, `"*"` included, through</span>
+<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">    `rules_matching` in `services.py` (#580).</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a>
+<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">        serial_number (str): The serial number to find.</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a>
+<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">        Optional[Dict[str, Any]]: The rule dictionary if found, else None.</span>
+<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">    """</span>
+<a id="__codelineno-0-259" name="__codelineno-0-259"></a>    <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">rules</span><span class="p">:</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a>        <span class="k">if</span> <span class="n">r</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"serial_number"</span><span class="p">)</span> <span class="o">==</span> <span class="n">serial_number</span><span class="p">:</span>
+<a id="__codelineno-0-261" name="__codelineno-0-261"></a>            <span class="k">return</span> <span class="n">r</span>
+<a id="__codelineno-0-262" name="__codelineno-0-262"></a>    <span class="k">return</span> <span class="kc">None</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

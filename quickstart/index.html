@@ -1586,6 +1586,16 @@ with no record that it was lossy
 because pydicom and <code>ingest()</code> refuse the declared spelling
 (<a href="https://github.com/kvnlng/Isocenter/issues/532">#532</a>). The graph keeps
 what it declared.</p>
+<p>The patient, study and series tags written over each instance's own are
+the same on both write paths, <code>session.export()</code> and
+<code>DicomExporter.write_tree()</code>
+(<a href="https://github.com/kvnlng/Isocenter/issues/570">#570</a>): equipment comes
+from the instance, which is what <code>anonymize()</code> edits, and a study with no
+Study Time is written with an empty one, which is what the standard means
+by unknown. A private element whose value no longer fits the VR recorded
+for it at ingest -- after a <code>REPLACE</code>, typically -- is written under a VR
+that holds it, with one <code>WARNING</code> row per instance naming the tags and
+both VRs (<a href="https://github.com/kvnlng/Isocenter/issues/571">#571</a>).</p>
 <p><strong><code>verify_readback=True</code></strong> decodes every file it writes through the same
 decoder <code>ingest()</code> uses and compares every pixel sample with what it meant
 to write. It also refuses a Photometric Interpretation the file's transfer
@@ -1613,7 +1623,8 @@ redacted or has redaction zones applied by this export. Every other nested
 icon -- one under Referenced Image Sequence, for instance, which is a
 thumbnail of a different image -- is removed from every file once any
 instance in the store was redacted or a loaded rule's zones match a series
-in the store; a rule for a scanner the store does not hold removes
+in the store (a <code>"*"</code> rule matches every series with a Device Serial
+Number); a rule for a scanner the store does not hold removes
 nothing. Each removal is a <code>SIGNAL</code> <code>DATA_LOSS</code> row and grades the run
 <code>REVIEW_REQUIRED</code>.</p>
 <div class="admonition warning">

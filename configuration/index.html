@@ -2052,9 +2052,10 @@ section but does not change the grade
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">100</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">500</span><span class="p p-Indicator">]</span>
 </code></pre></div>
 <ul>
-<li><strong><code>serial_number</code></strong> (Required): Exact match for <code>0018,1000</code>.</li>
+<li><strong><code>serial_number</code></strong> (Required): Exact match for <code>0018,1000</code>, or <code>"*"</code> for every series that has one. A series with no Device Serial Number matches no rule.</li>
+<li><strong>Every matching rule applies</strong>, in <code>redact()</code> and at export alike: an exact rule and a <code>"*"</code> rule, or two rules for one serial, each zero their zones (<a href="https://github.com/kvnlng/Isocenter/issues/580">#580</a>). The export applies them whether or not <code>redact()</code> has run.</li>
 <li><strong><code>redaction_zones</code></strong>: List of regions to zero out.</li>
-<li>Format: <code>[y1, y2, x1, x2]</code> (Row Start, Row End, Col Start, Col End).</li>
+<li>Format: <code>[y1, y2, x1, x2]</code> (Row Start, Row End, Col Start, Col End), or <code>{"roi": [y1, y2, x1, x2]}</code>, the shape the shipped knowledge base uses and <code>create_config()</code> copies for a machine it recognises.</li>
 <li>Coordinates are 0-indexed.</li>
 <li>End must be strictly greater than start on both axes. <code>load_config()</code> accepts a zone whose start equals its end, but it selects no pixels, and <code>redact()</code> fails every instance it applies to with <code>RedactionError</code>.</li>
 </ul>
