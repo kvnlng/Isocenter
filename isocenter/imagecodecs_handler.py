@@ -846,4 +846,3 @@ def decode_declared_frames(ds, number_of_frames):
                                   number_of_frames=number_of_frames),
                   number_of_frames)]
     return frames[0] if number_of_frames == 1 else np.stack(frames)
-

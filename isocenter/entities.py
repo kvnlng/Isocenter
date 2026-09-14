@@ -1693,8 +1693,9 @@ class Instance(DicomItem):
         """Cache the frame a read arm loaded, unless a set got there first (#465).
 
         The two read arms -- the sidecar loader and the file (a third,
-        the file arm's imagecodecs fallback, went with #453) -- load with no lock held, since a decode
-        can take seconds and `PIXEL_STATE_LOCK` is a leaf held for
+        the file arm's imagecodecs fallback, went with #453) -- load with
+        no lock held, since a decode can take seconds and
+        `PIXEL_STATE_LOCK` is a leaf held for
         microseconds, and then publish here. They used to assign the
         frame and clear the unwritten flag unconditionally: a
         `set_pixel_data()` that landed during the load was overwritten by
