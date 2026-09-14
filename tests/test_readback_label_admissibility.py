@@ -408,15 +408,14 @@ def test_a_pixel_less_file_is_judged_and_offered_a_remedy_that_applies(
     branch, an SR-shaped instance declaring `YBR_ICT` exports `ok=True`
     with `warnings == []` (#502's defect, one branch over) and one
     declaring `['YBR_ICT', 'RGB']` exports `ok=True` with the file
-    reading back `MultiValue` of length 2. That gap is **filed for
-    v0.9.7 and deliberately not closed here** -- routing that arm
-    through the writer's check is new behaviour, and the reachability is
-    a malformed source or a hand-built graph.
+    reading back `MultiValue` of length 2. #534 has since routed that
+    arm through a writer-side judgement too (a `WARNING`, written as
+    declared); the readback still refuses both files for a caller who
+    asked for `verify_readback=True`.
 
-    What *is* fixed here is what this check says when it meets such a
-    file, because it does meet them -- it reads the delivered file and
-    does not care which arm wrote it, and both reason strings were
-    false of this arm. The inadmissible label was told to `Export with
+    What this test pins is what this check says when it meets such a
+    file -- it reads the delivered file and does not care which arm
+    wrote it, and both reason strings were false of this arm. The inadmissible label was told to `Export with
     use_compression=True`, which cannot help an instance with nothing
     to compress; the multi-valued one was told the file was one "this
     library cannot re-ingest", when in fact

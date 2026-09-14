@@ -38,17 +38,13 @@ exception: no single value can be chosen without inventing one, and such
 a file -- carrying pixel data -- cannot be read back by this library at
 all, so no output here would be honest.
 
-**Scope, and it is narrower than "every export": the two arms that write
-a pixel element.** Everything here goes through `_write_pixel_geometry`,
-which both the integer and the float pixel arms call. An instance with
-**no pixel element** never reaches that function and carries its declared
-`0028,0004` to disk unexamined -- measured, an SR-shaped instance
-declaring `YBR_ICT` still exports `ok=True` with no warning, and one
-declaring `['YBR_ICT', 'RGB']` still exports a two-valued file.
-`export(verify_readback=True)` catches both, because #507's check reads
-the delivered file; see
-`tests/test_readback_label_admissibility.py::test_a_pixel_less_file_is_judged_and_offered_a_remedy_that_applies`.
-That third arm is filed for v0.9.7 and deliberately not closed here.
+**Scope: every arm.** The two arms that write a pixel element go through
+`_write_pixel_geometry`. An instance with **no pixel element** never
+reaches that function, and until #534 carried its declared `0028,0004`
+to disk unexamined; the worker now judges that arm too, against the
+syntax the file carries, with a remedy true of a file with no pixels,
+and a multi-valued label there is warned about rather than refused
+because such a file re-ingests. See the #534 section at the end.
 """
 import itertools
 import logging
@@ -373,7 +369,8 @@ def test_the_judgement_normalizes_what_it_is_given(declared):
     in the row).
     """
     assert _photometric_warning(
-        _written_photometric(declared), IMPLICIT_VR_LE) is None
+        _written_photometric(declared), IMPLICIT_VR_LE,
+        has_pixels=True) is None
 
 
 # ---------------------------------------------------------------------------
@@ -793,3 +790,147 @@ def test_export_leaves_the_graph_label_alone(tmp_path, monkeypatch, threads):
     assert outcome.ok, outcome.error
     assert inst.attributes["0028,0004"] == " rgb "
     assert inst._revision == revision
+
+
+# ---------------------------------------------------------------------------
+# #534: the pixel-less arm gets the same judgement.
+# ---------------------------------------------------------------------------
+
+SR_STORAGE = "1.2.840.10008.5.1.4.1.1.88.11"
+
+
+def _pixel_less(label):
+    """An SR-shaped instance with no pixels, declaring `label`."""
+    inst = Instance(f"1.2.826.0.1.534.{next(_serial)}", SR_STORAGE, 1)
+    inst.file_path = None
+    for tag, value in (("0008,0020", "20230101"), ("0008,0030", "120000"),
+                       ("0008,0060", "SR")):
+        inst.set_attr(tag, value)
+    inst.set_attr("0028,0004", label)
+    return inst
+
+
+@pytest.mark.parametrize("label", ["YBR_ICT", "NONSENSE"])
+def test_a_pixel_less_label_is_judged(tmp_path, label):
+    """An instance with no pixel element is not a way around #502 (#534).
+
+    Measured before: an SR-shaped instance declaring `YBR_ICT` or an
+    undefined value exported `ok=True` with `warnings == []`, because
+    only the two pixel-writing arms call `_write_pixel_geometry`. The
+    label is still written as declared -- it is the source's own -- and
+    the warning's remedy is the one true of a file with no pixels:
+    "export with use_compression=True" cannot help an instance with
+    nothing to compress, and there are no samples to have been written
+    "over".
+
+    Killing mutations: the pixel-less judgement deleted (M8);
+    `has_pixels=True` passed there (M9, the pixel remedy returns).
+    """
+    outcome = _export(tmp_path, _pixel_less(label))
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert written.PhotometricInterpretation == label
+    assert not any(kw in written for kw in (
+        "PixelData", "FloatPixelData", "DoubleFloatPixelData"))
+    assert len(outcome.warnings) == 1, outcome.warnings
+    warning = outcome.warnings[0]
+    assert f"'{label}'" in warning, warning
+    assert "no pixel element" in warning, warning
+    assert "use_compression=True" not in warning, warning
+    assert "over the samples" not in warning, warning
+
+
+def test_a_pixel_less_label_is_judged_under_the_written_syntax(tmp_path):
+    """Against the syntax the file carries, which is never JPEG 2000 (#534).
+
+    A file with no pixel data is written natively whatever `compression`
+    says -- `_compress_j2k` has nothing to encode and leaves the syntax
+    alone -- while the worker's `written_syntax` reads `j2k` as JPEG 2000.
+    `YBR_ICT` is admitted by the J2K row and not by the native one, so
+    judging the wrong syntax is silent.
+
+    Killing mutation (M10): the pixel-less judgement reads
+    `written_syntax` instead of `ds.file_meta.TransferSyntaxUID`.
+    """
+    outcome = _export(tmp_path, _pixel_less("YBR_ICT"), compression="j2k")
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert written.file_meta.TransferSyntaxUID == IMPLICIT_VR_LE
+    assert len(outcome.warnings) == 1, outcome.warnings
+    assert f"({IMPLICIT_VR_LE})" in outcome.warnings[0], outcome.warnings
+
+
+def test_a_multi_valued_pixel_less_label_warns_and_writes(tmp_path):
+    """Two labels on a file with no pixels: written, and warned about (#534).
+
+    The pixel arms refuse this (#502) because such a file cannot be read
+    back. A pixel-less one can -- measured, it re-ingests with both values
+    -- so the refusal's own reason is false here, and the write-path
+    ruling (warn and write) applies instead. `verify_readback=True` still
+    fails it on the arity.
+
+    Killing mutation (M11): `_PhotometricRefusal` raised on the
+    pixel-less arm.
+    """
+    outcome = _export(tmp_path, _pixel_less(["YBR_ICT", "RGB"]))
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert list(written.PhotometricInterpretation) == ["YBR_ICT", "RGB"]
+    assert len(outcome.warnings) == 1, outcome.warnings
+    warning = outcome.warnings[0]
+    assert "is VM 1" in warning, warning
+    assert "declares 2 values" in warning, warning
+    assert "no pixel element" in warning, warning
+
+    with DicomSession(str(tmp_path / "re.db")) as session:
+        assert session.ingest(
+            str(tmp_path / "out")).ingested == 1
+
+    strict = _export(tmp_path, _pixel_less(["YBR_ICT", "RGB"]),
+                     verify_readback=True)
+    assert not strict.ok
+    assert "is VM 1" in str(strict.error)
+
+
+@pytest.mark.parametrize("label", ["MONOCHROME2", "RGB"])
+def test_a_pixel_less_admitted_label_is_silent(tmp_path, label):
+    """The control: an admitted label on a pixel-less file warns nothing (#534).
+
+    Killing mutation (M12): a warning for any label present on the
+    pixel-less arm.
+    """
+    outcome = _export(tmp_path, _pixel_less(label))
+
+    assert outcome.ok, outcome.error
+    assert outcome.warnings == [], outcome.warnings
+
+
+def test_a_pixel_less_file_with_no_label_is_silent(tmp_path):
+    """No `0028,0004`, no claim, no warning (#534)."""
+    inst = _pixel_less("RGB")
+    del inst.attributes["0028,0004"]
+
+    outcome = _export(tmp_path, inst)
+
+    assert outcome.ok, outcome.error
+    assert outcome.warnings == [], outcome.warnings
+
+
+def test_photometric_warning_requires_has_pixels():
+    """A caller must say which kind of file it is judging (#534).
+
+    Keyword-only and without a default, the `float_element`/`syntax_uid`
+    precedent: the sentence and the remedy differ for a file with no
+    pixels, and inheriting the pixel wording by omission is how the
+    pixel-less arm's remedy was false before. Killing mutation (M13): a
+    default added.
+    """
+    import inspect
+
+    parameter = inspect.signature(_photometric_warning).parameters[
+        "has_pixels"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty

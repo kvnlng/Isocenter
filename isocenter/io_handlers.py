@@ -529,11 +529,13 @@ class _PhotometricRefusal(RuntimeError):
     on.
 
     That measurement is of a file **with pixel data**, which is the only
-    kind this exception is raised for -- `_write_pixel_geometry` runs
-    only on the two pixel-writing arms. A pixel-less file with two
-    labels has no decompression step to trip over and re-ingests
-    cleanly; it is `_readback_label_mismatch` that refuses that one, on
-    the arity alone.
+    kind this exception is raised for -- pixel arms only;
+    `_write_pixel_geometry` runs only on the two pixel-writing arms. A
+    pixel-less file carrying two labels has no decompression step to trip
+    over and re-ingests cleanly (measured), so the writer warns about it
+    and writes it (`_pixel_less_label_warning`, #534), and it is
+    `_readback_label_mismatch` that refuses it, on the arity alone, for a
+    caller who asked for `verify_readback=True`.
 
     **Raised on what the file would carry, not on what was declared.**
     At one sample the geometry resolver has already answered
@@ -797,7 +799,8 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
         f"trailing spaces are not significant). The samples are unchanged.")
 
 
-def _photometric_warning(label, syntax_uid) -> Optional[str]:
+def _photometric_warning(label, syntax_uid, *,
+                         has_pixels: bool) -> Optional[str]:
     """One sentence for a label the written syntax does not admit (#502).
 
     Returns None when the syntax has no row (measured rows only, the
@@ -805,17 +808,70 @@ def _photometric_warning(label, syntax_uid) -> Optional[str]:
     or when the label is admitted. The sentence names what was declared,
     what the file was written under, and which one the code used --
     everything the row in the compliance report has to carry.
+
+    `has_pixels` is keyword-only and **has no default** (#534), the
+    `float_element`/`syntax_uid` precedent: a file with no pixel element
+    has no samples the label was written "over", and every remedy in
+    `_PHOTOMETRIC_INADMISSIBLE` talks about the pixels -- "export with
+    use_compression=True" cannot help an instance with nothing to
+    compress. So a caller has to say which kind of file it is judging,
+    and the pixel-less one gets `_PHOTOMETRIC_NO_PIXELS`.
     """
     admitted = _ADMISSIBLE_PHOTOMETRICS.get(str(syntax_uid))
     if admitted is None or label is None or label in admitted:
         return None
     clause, remedy = _PHOTOMETRIC_INADMISSIBLE.get(
         label, _PHOTOMETRIC_INADMISSIBLE[None])
-    return (f"PhotometricInterpretation '{label}' is not a label the "
-            f"transfer syntax this file was written under admits "
-            f"({syntax_uid}): {clause} The label was written as declared, "
-            f"over the samples the instance held, and neither was changed. "
-            f"{remedy}")
+    if has_pixels:
+        kept = ("The label was written as declared, over the samples the "
+                "instance held, and neither was changed.")
+    else:
+        kept = "The label was written as declared."
+        remedy = _PHOTOMETRIC_NO_PIXELS
+    return (f"PhotometricInterpretation {_cs_quoted(label)} is not a label "
+            f"the transfer syntax this file was written under admits "
+            f"({syntax_uid}): {clause} {kept} {remedy}")
+
+
+def _pixel_less_label_warning(ds) -> Optional[str]:
+    """The label judgement for a file with no pixel element (#534).
+
+    `_write_pixel_geometry` judges the label on the two arms that write a
+    pixel element. The third arm -- an instance with none, an SR or a
+    waveform-only file carrying a pixel descriptor it has no use for --
+    never calls it, and `_merge` had already put whatever `0028,0004` the
+    graph declared on `ds`, so the file carried it unexamined: measured,
+    `YBR_ICT` and an undefined label exported `ok=True` with no warning.
+
+    **Read off `ds` after `_finalize_dataset`, never off the worker's
+    `written_syntax`.** A file with no pixel data is written natively
+    even under `compression="j2k"` -- `_compress_j2k` has nothing to
+    encode and leaves `file_meta` alone -- while `written_syntax` says
+    JPEG 2000 for it, and the J2K row admits `YBR_ICT`. The syntax is the
+    one the file will carry.
+
+    **A multi-valued label is warned about, not refused.** The pixel arms
+    refuse it (`_PhotometricRefusal`) because such a file cannot be read
+    back; a pixel-less one can -- measured, `ingest()` returns
+    `ingested=1` with the graph carrying both values -- so the refusal's
+    reason is false here, and the write-path ruling applies: written as
+    declared, with a WARNING. `verify_readback=True` still fails it on
+    the arity (`_readback_label_mismatch`).
+    """
+    label = ds.get("PhotometricInterpretation")
+    if label is None:
+        return None
+    if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
+        return (f"PhotometricInterpretation (0028,0004) is VM 1; this "
+                f"instance, which has no pixel element, declares "
+                f"{len(label)} values "
+                f"({', '.join(_cs_quoted(str(v)) for v in label)}). "
+                f"Written as declared: a file with no pixels re-ingests "
+                f"carrying all of them. {_PHOTOMETRIC_NO_PIXELS}")
+    return _photometric_warning(
+        _written_photometric(label),
+        str(getattr(ds.file_meta, "TransferSyntaxUID", "") or ""),
+        has_pixels=False)
 
 
 #: PixelRepresentation (0028,0103) in the words PS3.5 6.2 uses, for the
@@ -3787,23 +3843,18 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # way a check inside the integer arm would be bypassed by the float
     # path.
     #
-    # **There is a third arm, and it does not come through here (#507
-    # review; filed for v0.9.7).** An instance with no pixel element
-    # never calls this function, and `_merge` has already put whatever
-    # `0028,0004` the graph declared onto `ds`, so the file carries it
-    # unexamined. Measured on this branch, over an SR-shaped instance
-    # with no pixels: a declared `YBR_ICT` exports `ok=True` with
-    # `warnings == []` -- #502's defect, intact, one branch over -- and
-    # a declared `['YBR_ICT', 'RGB']` exports `ok=True` on the default
-    # path with the file reading back `MultiValue(['YBR_ICT', 'RGB'])`.
-    # `verify_readback=True` does catch both, because
-    # `_readback_label_mismatch` reads the delivered file and does not
-    # care which arm wrote it. Deliberately not closed here: routing the
-    # pixel-less arm through this check is new behaviour needing its own
-    # tests, the reachability is a malformed source or a hand-built
-    # graph (a pixel descriptor on an instance with no pixels), and this
-    # is the last PR of the milestone. Do not read the paragraphs below
-    # as covering that arm.
+    # **The third arm does not come through here, and is judged
+    # elsewhere (#534).** An instance with no pixel element never calls
+    # this function, and `_merge` has already put whatever `0028,0004`
+    # the graph declared onto `ds`. Until #534 that file carried the label
+    # unexamined -- measured, an SR-shaped instance declaring `YBR_ICT`
+    # exported `ok=True` with no warning. The worker now judges that arm
+    # itself, after `_finalize_dataset`, with `_pixel_less_label_warning`:
+    # the same table, a remedy true of a file with no pixels, and the
+    # syntax read from `file_meta` because a pixel-less file stays native
+    # under compression. Do not move that judgement in here: this
+    # function is the pixel arms' contract, and its refusal of a
+    # multi-valued label is true only of a file with pixels.
     #
     # It runs *after* the corrections above rather than on
     # `attributes`, so it judges what the file will carry: a declared
@@ -3860,7 +3911,7 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     if warnings is not None:
         warning = _photometric_warning(
             _written_photometric(ds.get("PhotometricInterpretation")),
-            syntax_uid)
+            syntax_uid, has_pixels=True)
         if warning is not None:
             warnings.append(warning)
 
@@ -4083,14 +4134,13 @@ def _readback_label_mismatch(readback) -> Optional[str]:
     design and not by omission. The check is structural: could a
     conformant reader take this label under this syntax at all.
 
-    **It reaches a file the writer's own check does not.**
-    `_write_pixel_geometry` runs only on the two pixel-writing arms, so
-    an instance with no pixel element carries whatever `0028,0004` the
-    graph declared onto disk unexamined and unwarned (measured; filed
-    for v0.9.7). This function reads the delivered file and does not
-    care which arm wrote it, so it catches that one too -- which is why
-    the reason has to check for a pixel element before offering a remedy
-    about the pixels.
+    **It reads every file, whichever arm wrote it.** The writer judges
+    the pixel arms in `_write_pixel_geometry` and the pixel-less arm in
+    `_pixel_less_label_warning` (#534), and both write an inadmissible
+    label as declared with a warning; this function reads the delivered
+    file and refuses it, which is why the reason has to check for a pixel
+    element before offering a remedy about the pixels. A hand-built file
+    reaches it too.
     """
     if "PhotometricInterpretation" not in readback:
         return None
@@ -5305,6 +5355,29 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # Validate & Save
         ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
+
+        # The third arm's label judgement (#534): a file with no pixel
+        # element never reaches `_write_pixel_geometry`, which judges the
+        # other two. After `_finalize_dataset`, because the syntax judged
+        # has to be the one in `ds.file_meta` -- a pixel-less file stays
+        # native under `compression="j2k"`, where `written_syntax` says
+        # JPEG 2000 -- and before `save_as`, so the sentence rides the
+        # outcome of the file it describes. An `IODValidator` refusal
+        # raises first and the instance fails with its own ERROR, which is
+        # the right order: a warning describes a file that was written.
+        #
+        # Keyed on the arm -- no pixel arm set `written_pixels`, which is
+        # exactly "`_write_pixel_geometry` was not called" -- and not on
+        # `_PIXEL_ELEMENTS` membership in `ds`. The two differ for one
+        # input: a truthy `compression` other than `"j2k"` makes the
+        # integer arm skip `ds.PixelData` while `_finalize_dataset`
+        # encodes nothing, so a file judged by the pixel arm already
+        # would be judged a second time here (measured with
+        # `compression="rle"`, two warnings for one label).
+        if written_pixels is None:
+            warning = _pixel_less_label_warning(ds)
+            if warning is not None:
+                warnings.append(warning)
 
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
