@@ -576,13 +576,19 @@ def test_an_xlbox_box_before_jp2c_is_stepped_over():
 
 def test_a_truncated_xlbox_is_none():
     """The file ends inside the XLBox, or the XLBox is shorter than itself."""
-    head, _ = _jp2_split(SIGNED_16)
+    head, payload = _jp2_split(SIGNED_16)
     cut = head + (1).to_bytes(4, "big") + b"jp2c" + b"\x00\x00\x00"
     assert imagecodecs_handler._j2k_sample_layout(cut) is None
-    # An XLBox declaring 8 bytes, fewer than its own 16-byte header:
-    # stepping by it would land inside the header it just read.
+    # A `uuid` XLBox declaring 12 bytes, fewer than its own 16-byte
+    # header, followed by `jp2c` and a real codestream. Stepping by 12
+    # lands inside the header just read: the XLBox's low four bytes
+    # (`00 00 00 0c`) read as an LBox, the next four as the TBox `jp2c`,
+    # and the walk judges a codestream box the file never declared --
+    # `(True, 16)` under the pre-#610 `length <= 0` check. Declaring 8
+    # would not show it: the step lands on the XLBox's high bytes, an
+    # LBox of 0 on a non-`jp2c` box, None for a different reason.
     short = (head + (1).to_bytes(4, "big") + b"uuid"
-             + (8).to_bytes(8, "big") + b"\x00" * 16)
+             + (12).to_bytes(8, "big") + b"jp2c" + payload)
     assert imagecodecs_handler._j2k_sample_layout(short) is None
 
 

@@ -557,11 +557,12 @@ def _j2k_sample_layout(codestream) -> Optional[Tuple[bool, int]]:
             length = int.from_bytes(data[offset:offset + 4], "big")
             header = 8
             if length == 1:
-                # A file that ends inside the XLBox declares no length;
-                # 0 fails the header check below, or on a `jp2c` box
-                # steps past the end and fails the SOC check.
-                length = (int.from_bytes(data[offset + 8:offset + 16], "big")
-                          if offset + 16 <= len(data) else 0)
+                # A file that ends inside the XLBox reads a short slice,
+                # which `int.from_bytes` takes without raising. No guard:
+                # on a `jp2c` box the 16-byte step overruns the end and
+                # fails the SOC check; on any other box the number fails
+                # the header check, or is 16 or more and steps past the end.
+                length = int.from_bytes(data[offset + 8:offset + 16], "big")
                 header = 16
             if data[offset + 4:offset + 8] == b"\x6a\x70\x32\x63":
                 # LBox 0 means "to the end of the file", which for the
