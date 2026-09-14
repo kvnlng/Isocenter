@@ -27,8 +27,9 @@ value**, which after a REPLACE of user text or before it is
 patient-derived. The collapse joins the same sentence and leaves the
 worker's log.
 
-A consequence to know: a *source* private DA or UI that was already
-non-conformant (never replaced) now also falls back and draws the row.
+A consequence to know: a *source* private DA, TM or UI that was already
+non-conformant (never replaced) -- a DA `20231345`, the ACR-NEMA time
+`07:27:30` -- now also falls back and draws the row.
 An empty value is conformant under all five and is untouched.
 """
 import itertools
@@ -62,6 +63,9 @@ RE_VR = [
 ]
 COLLAPSE = ("0029,101b", "LO", ["y" * 70, "z"])
 FITS = ("0029,1014", "DA", "20230515")
+#: Does not fit its recorded LO (an `int` is no LO value), and the fallback
+#: writes it LO anyway: stringified, the same VR, so nothing to report.
+SAME_VR = ("0029,101c", "LO", 5)
 
 
 def _image(extra=(), vrs=()):
@@ -83,7 +87,8 @@ def _image(extra=(), vrs=()):
 
 def _every_case():
     cases = RE_VR + [(COLLAPSE[0], COLLAPSE[1], COLLAPSE[2], "UT"),
-                     (FITS[0], FITS[1], FITS[2], FITS[1])]
+                     (FITS[0], FITS[1], FITS[2], FITS[1]),
+                     (SAME_VR[0], SAME_VR[1], SAME_VR[2], SAME_VR[1])]
     return _image(extra=[(t, v) for t, _, v, _ in cases],
                   vrs=[(t, vr) for t, vr, _, _ in cases])
 
@@ -117,11 +122,13 @@ def _no_value_text(sentence):
 def test_a_re_vr_writes_one_warning_naming_each_tag(tmp_path, compression):
     """Every re-VR on the instance in one sentence: each tag with its
     recorded and written VR, the collapse with its multiplicity, the
-    fitting tag absent, and no value text. Under JPEG 2000 the file's
-    own VRs agree with the sentence. Killing mutations: `revrs` not passed
-    from the worker (no sentence); the sentence built only for an explicit
-    syntax (the native case is silent); a record for every recorded VR
-    (the fitting DA is named)."""
+    fitting tag and the one the fallback writes under its recorded VR
+    absent, and no value text. Under JPEG 2000 the file's own VRs agree
+    with the sentence. Killing mutations: `revrs` not passed from the
+    worker (no sentence); the sentence built only for an explicit syntax
+    (the native case is silent); a record for every recorded VR (the
+    fitting DA is named); a record for every fallback, whatever VR it
+    writes (the int under LO is named)."""
     outcome = _export(tmp_path, _every_case(), compression=compression)
 
     assert outcome.ok, outcome.error
@@ -134,6 +141,7 @@ def test_a_re_vr_writes_one_warning_naming_each_tag(tmp_path, compression):
     assert f"({COLLAPSE[0]}) recorded LO VM 2, written as one UT value" \
         in sentence, sentence
     assert f"({FITS[0]})" not in sentence, sentence
+    assert f"({SAME_VR[0]})" not in sentence, sentence
     _no_value_text(sentence)
 
     if compression == "j2k":
