@@ -139,6 +139,36 @@ def at_decode_pixels(path, **kwargs):
                                           **kwargs))
 
 
+def through_the_fallback(ds, **kwargs):
+    """`_decode_pixels(ds)` with pydicom unable to decode: `(array, label)`.
+
+    What a test asked `imagecodecs_handler.get_pixel_data(ds)` for until
+    #453 deleted that door (Q10): the imagecodecs answer, now given by
+    `_decode_with_imagecodecs` behind `_decode_pixels`' own checks. It
+    raises what `_decode_pixels` raises. It returns only if pydicom was
+    asked and refused, so a returned array is the fallback's, never
+    Pillow's a second time.
+
+    `_decode_pixels` does not relabel `ds`: the label a decode is in is
+    the second element returned.
+    """
+    from unittest import mock  # pylint: disable=import-outside-toplevel
+    from isocenter.io_handlers import (  # pylint: disable=import-outside-toplevel
+        _IMAGECODECS_FALLBACK_SYNTAXES, _decode_pixels)
+    calls = []
+
+    def cannot(self, src, **options):
+        if str(self.UID) not in _IMAGECODECS_FALLBACK_SYNTAXES:
+            return _REAL_AS_ARRAY(self, src, **options)
+        calls.append(str(self.UID))
+        raise RuntimeError(FORCED)
+
+    with mock.patch.object(Decoder, "as_array", cannot):
+        out = _decode_pixels(ds, **kwargs)
+    assert calls, "pydicom was never asked, so the fallback measured nothing"
+    return out
+
+
 def at_instance(path):
     """`(array, label)` from a bare file-backed Instance, or its exception."""
     from isocenter.entities import Instance  # pylint: disable=import-outside-toplevel

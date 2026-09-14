@@ -50,6 +50,7 @@ from isocenter.entities import Instance
 from isocenter.io_handlers import (LOSS_SCOPE_SIGNAL, LOSS_SCOPE_STANDARD,
                                    _decode_pixels)
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 #: Two distinguishable 4x4 8-bit frames. Frame 1 is not frame 0 shifted
 #: into an overlapping range, so "frame 0" and "frame 1" cannot be
@@ -260,7 +261,7 @@ def test_a_private_transfer_syntax_is_still_refused_in_the_decoders_words(
 def test_an_explicit_zero_number_of_frames_is_reported_as_zero():
     """The message says what the file says, not the 1 it is read as."""
     with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(_dataset(2, 0))
+        through_the_fallback(_dataset(2, 0))
     msg = str(exc.value)
     assert "names 2 frames" in msg
     assert "NumberOfFrames is 0 (read as 1)" in msg
@@ -272,10 +273,13 @@ def test_a_negative_number_of_frames_is_reported_as_invalid():
 
     Measured on pydicom 3.0.2: "must be greater than or equal to 1". So
     "(read as 1)" would describe a reading no decoder makes.
+
+    Asked of `frame_count_mismatch`, the words the Instance door raises
+    before it decodes. `_decode_pixels` never reaches them for this file:
+    since #453 it runs pydicom's validation first, which refuses the
+    count in the words quoted above.
     """
-    with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(_dataset(2, -1))
-    msg = str(exc.value)
+    msg = imagecodecs_handler.frame_count_mismatch(_dataset(2, -1))
     assert "names 2 frames" in msg
     assert "NumberOfFrames is -1 (invalid)" in msg
     assert "read as" not in msg
@@ -291,13 +295,15 @@ def test_an_empty_number_of_frames_is_reported_as_empty_not_absent(empty):
     the same element written and read back from a file is `None` -- still
     present (`"NumberOfFrames" in ds`), so presence cannot be read off
     the value.
+
+    Asked of `frame_count_mismatch`, as the negative count above is, and
+    for the same reason: pydicom's validation refuses `""` first at
+    `_decode_pixels`.
     """
     ds = _dataset(2, 1)
     ds.NumberOfFrames = empty
     assert "NumberOfFrames" in ds
-    with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(ds)
-    msg = str(exc.value)
+    msg = imagecodecs_handler.frame_count_mismatch(ds)
     assert "names 2 frames" in msg
     assert "NumberOfFrames is empty" in msg
     assert "absent" not in msg
@@ -305,13 +311,14 @@ def test_an_empty_number_of_frames_is_reported_as_empty_not_absent(empty):
 
 
 # ---------------------------------------------------------------------------
-# T1-T8 -- imagecodecs_handler.get_pixel_data
+# T1-T8 -- the imagecodecs route (`imagecodecs_handler.get_pixel_data` until
+# #453 deleted it; `_decode_pixels` with pydicom unable to decode since)
 # ---------------------------------------------------------------------------
 
 def test_the_handler_refuses_a_two_frame_table_under_one_declared_frame():
     """T1, the issue's case: frame 0 came back and nothing said why."""
     with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(_dataset(2, 1))
+        through_the_fallback(_dataset(2, 1))
     msg = str(exc.value)
     assert "Basic Offset Table names 2 frames" in msg
     assert "NumberOfFrames declares 1" in msg
@@ -320,16 +327,16 @@ def test_the_handler_refuses_a_two_frame_table_under_one_declared_frame():
 def test_the_handler_says_when_number_of_frames_is_absent():
     """T2: absent is read as 1, and the message says that is what happened."""
     with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(_dataset(2, None))
+        through_the_fallback(_dataset(2, None))
     msg = str(exc.value)
     assert "names 2 frames" in msg
     assert "NumberOfFrames is absent (read as 1)" in msg
 
 
 def test_the_handler_refuses_in_the_multi_frame_arm_too():
-    """T3: three offsets under a two-frame header, the arm with num_frames > 1."""
+    """T3: three offsets under a two-frame header (the old multi-frame arm)."""
     with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(_dataset(3, 2))
+        through_the_fallback(_dataset(3, 2))
     msg = str(exc.value)
     assert "names 3 frames" in msg
     assert "NumberOfFrames declares 2" in msg
@@ -338,7 +345,7 @@ def test_the_handler_refuses_in_the_multi_frame_arm_too():
 def test_the_handler_refuses_a_table_naming_fewer_frames_than_declared():
     """T4, the reverse direction: this was a silent short read of (2,4,4)."""
     with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(_dataset(2, 3))
+        through_the_fallback(_dataset(2, 3))
     msg = str(exc.value)
     assert "names 2 frames" in msg
     assert "NumberOfFrames declares 3" in msg
@@ -347,7 +354,7 @@ def test_the_handler_refuses_a_table_naming_fewer_frames_than_declared():
 def test_the_handler_reads_the_extended_offset_table():
     """T5: with an EOT the BOT is empty, so a BOT-only check sees nothing."""
     with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(_dataset(2, 1, table="eot"))
+        through_the_fallback(_dataset(2, 1, table="eot"))
     msg = str(exc.value)
     assert "Extended Offset Table names 2 frames" in msg
     assert "NumberOfFrames declares 1" in msg
@@ -359,23 +366,23 @@ def test_an_empty_offset_table_is_the_documented_limit_and_decodes_as_before():
     Pinned so that a check which refused every multi-fragment empty-BOT
     file -- one frame may legally span several fragments -- goes red.
     """
-    out = imagecodecs_handler.get_pixel_data(_dataset(2, 1, table="empty"))
+    out, _label = through_the_fallback(_dataset(2, 1, table="empty"))
     assert out.shape == (4, 4)
     assert np.array_equal(out, FRAMES[0])
 
 
 def test_a_consistent_basic_offset_table_decodes_unchanged():
     """T7: no false positive, single- and multi-frame."""
-    out = imagecodecs_handler.get_pixel_data(_dataset(1, 1))
+    out, _label = through_the_fallback(_dataset(1, 1))
     assert np.array_equal(out.reshape(4, 4), FRAMES[0])
-    out = imagecodecs_handler.get_pixel_data(_dataset(2, 2))
+    out, _label = through_the_fallback(_dataset(2, 2))
     assert out.shape == (2, 4, 4)
     assert np.array_equal(out[1], FRAMES[1])
 
 
 def test_a_consistent_extended_offset_table_decodes_unchanged():
     """T8: an EOT that agrees with NumberOfFrames is not a mismatch."""
-    out = imagecodecs_handler.get_pixel_data(_dataset(2, 2, table="eot"))
+    out, _label = through_the_fallback(_dataset(2, 2, table="eot"))
     assert out.shape == (2, 4, 4)
     assert np.array_equal(out[0], FRAMES[0])
     assert np.array_equal(out[1], FRAMES[1])

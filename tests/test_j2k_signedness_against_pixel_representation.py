@@ -59,6 +59,7 @@ from pydicom.uid import generate_uid
 from isocenter import imagecodecs_handler
 from isocenter.entities import Instance
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
 
@@ -177,10 +178,14 @@ def test_the_handler_refuses_a_signed_codestream_under_pixel_representation_0(
 
     Mutant: `_decode_frame`'s JPEG 2000 branch without the check. Every
     case goes red, returning the signed array.
+
+    Asked of `decode_declared_frames`, the handler's decode, directly:
+    every door refuses this file at #524's gate before any decoder runs,
+    so this is the one call that still reaches the handler's own raise.
     """
     ds = _dataset(_REFUSED_AT_THE_HANDLER[name], 0)
     with pytest.raises(RuntimeError) as caught:
-        imagecodecs_handler.get_pixel_data(ds)
+        imagecodecs_handler.decode_declared_frames(ds, 1)
     words = str(caught.value)
     assert REFUSAL in words, words
     assert "PixelRepresentation 0" in words, words
@@ -208,7 +213,7 @@ def test_a_signed_16_bit_colour_codestream_under_pixel_representation_0_is_refus
             ("instance", lambda: Instance(
                 generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
                 file_path=path).get_pixel_data()),
-            ("handler", lambda: imagecodecs_handler.get_pixel_data(
+            ("decode_pixels", lambda: through_the_fallback(
                 pydicom.dcmread(path)))):
         with pytest.raises(RuntimeError) as caught:
             read()
@@ -267,7 +272,7 @@ def test_every_door_refuses_a_signed_codestream_under_pixel_representation_0(
             ("instance", lambda: Instance(
                 generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
                 file_path=path).get_pixel_data()),
-            ("handler", lambda: imagecodecs_handler.get_pixel_data(
+            ("decode_pixels", lambda: through_the_fallback(
                 pydicom.dcmread(path)))):
         with pytest.raises(RuntimeError, match=REFUSAL):
             read()
@@ -296,7 +301,7 @@ def test_the_handler_reinterprets_an_unsigned_codestream_under_pixel_representat
     raises).
     """
     codestream, want = _REINTERPRETED[name]
-    got = imagecodecs_handler.get_pixel_data(_dataset(codestream, 1))
+    got, _label = through_the_fallback(_dataset(codestream, 1))
     assert got.dtype == want.dtype, f"{name}: {got.dtype}"
     assert got.tolist() == want.tolist(), name
 
@@ -321,8 +326,8 @@ def test_an_unsigned_16_bit_colour_codestream_under_pixel_representation_1_reads
             ("instance", Instance(generate_uid(),
                                   "1.2.840.10008.5.1.4.1.1.7", 1,
                                   file_path=path).get_pixel_data()),
-            ("handler", imagecodecs_handler.get_pixel_data(
-                pydicom.dcmread(path)))):
+            ("decode_pixels", through_the_fallback(
+                pydicom.dcmread(path))[0])):
         assert arr.dtype == want.dtype, f"{door}: {arr.dtype}"
         assert arr.tolist() == want.tolist(), door
 
@@ -355,7 +360,7 @@ def test_the_reinterpretation_is_by_the_codestream_precision_not_bits_stored(
     assert reference.dtype == np.int16
     assert reference.tolist() == WIDE_12_AS_SIGNED.tolist()
 
-    got = imagecodecs_handler.get_pixel_data(pydicom.dcmread(path))
+    got, _label = through_the_fallback(pydicom.dcmread(path))
     assert got.dtype == np.int16, got.dtype
     assert got.tolist() == WIDE_12_AS_SIGNED.tolist()
     # And not the BitsStored reading, which returns the patterns.
@@ -372,7 +377,7 @@ def test_pydicoms_own_mismatched_file_reads_minus_2000_at_every_door(tmp_path):
     returned `uint16 [0, 8191]`, the codestream's patterns -- one file,
     two answers. Now all three say -2000.
 
-    Mutant: the reinterpretation removed. The handler row goes red at
+    Mutant: the reinterpretation removed. The `_decode_pixels` row goes red at
     `uint16 [0, 8191]` while the other two stay green, which is the
     disagreement this closes.
     """
@@ -400,7 +405,7 @@ def test_pydicoms_own_mismatched_file_reads_minus_2000_at_every_door(tmp_path):
         "ingest": ingested,
         "instance": Instance(generate_uid(), str(ds.SOPClassUID), 1,
                              file_path=path).get_pixel_data(),
-        "handler": imagecodecs_handler.get_pixel_data(pydicom.dcmread(path)),
+        "decode_pixels": through_the_fallback(pydicom.dcmread(path))[0],
         "pydicom": pydicom.dcmread(path).pixel_array,
     }
     for door, arr in doors.items():
@@ -429,7 +434,7 @@ def test_a_codestream_whose_signedness_agrees_with_its_header_still_reads(
     reinterpretation reaching a signed codestream under 1 raises in
     `_sign_extend`'s dtype check, which turns the first case red.
     """
-    got = imagecodecs_handler.get_pixel_data(_dataset(arr, pixel_representation))
+    got, _label = through_the_fallback(_dataset(arr, pixel_representation))
     assert got.dtype == want.dtype, f"{name}: {got.dtype}"
     assert got.tolist() == want.tolist(), name
 
@@ -451,7 +456,7 @@ def test_a_jp2_wrapped_codestream_reaches_the_same_rule(tmp_path):
         ds.PixelData, number_of_frames=1))
     assert bytes(codestream).startswith(b"\x00\x00\x00\x0c\x6a\x50\x20\x20")
     assert imagecodecs_handler._j2k_sample_layout(codestream) == (False, 16)
-    got = imagecodecs_handler.get_pixel_data(ds)
+    got, _label = through_the_fallback(ds)
     assert got.dtype == want.dtype, got.dtype
     assert got.tolist() == want.tolist()
 

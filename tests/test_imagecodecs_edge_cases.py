@@ -1,4 +1,16 @@
 
+"""`imagecodecs_handler`'s codec dispatch, on datasets built to reach it.
+
+These asked `imagecodecs_handler.get_pixel_data` until #453 deleted it
+(Q10). The dispatch they pin -- `_decode_frame`, one codec per syntax --
+is reached now through `decode_declared_frames`, which is what
+`io_handlers._decode_with_imagecodecs` calls. A `MagicMock` dataset
+cannot pass `_decode_pixels`' own checks (pydicom's validation, the
+photometric allow-list), so these call the decode directly; the
+checks have their own tests in `test_one_decode_answer_per_file.py`.
+`decode_declared_frames` does not wrap a codec's exception: the fallback
+does, as "imagecodecs could not decode it either: <type>: <words>".
+"""
 import pytest
 from unittest.mock import MagicMock, patch
 import numpy as np
@@ -26,14 +38,16 @@ def test_imagecodecs_not_available(mock_dataset):
     """Test behavior when imagecodecs is reported as not available."""
     with patch('isocenter.imagecodecs_handler.is_available', return_value=False):
         with pytest.raises(RuntimeError, match="imagecodecs is not available"):
-            imagecodecs_handler.get_pixel_data(mock_dataset)
+            imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
 
 def test_unsupported_transfer_syntax(mock_dataset):
     """Test behavior when an unsupported transfer syntax is encountered."""
     mock_dataset.file_meta.TransferSyntaxUID = UnsupportedUID
+    mock_dataset.PixelData = encapsulate([CHUNK])
     with patch('isocenter.imagecodecs_handler.is_available', return_value=True):
-        with pytest.raises(RuntimeError, match="imagecodecs failed to decode"):
-            imagecodecs_handler.get_pixel_data(mock_dataset)
+        with pytest.raises(RuntimeError,
+                           match=f"Unsupported syntax: {UnsupportedUID}"):
+            imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
 
 
 # Even-length on purpose: `encapsulate` pads an odd-length fragment with a
@@ -43,7 +57,7 @@ CHUNK = b"ljpeg_chunk!"
 
 
 def test_decode_error_handling(mock_dataset):
-    """A codec exception is wrapped as a RuntimeError, on real bytes.
+    """A codec exception reaches the caller, on real bytes.
 
     The encapsulated `PixelData` is built with `encapsulate()` rather than
     mocked, because the version of this test that patched
@@ -57,8 +71,8 @@ def test_decode_error_handling(mock_dataset):
     # Unconditionally patch the local reference to imagecodecs in the handler
     with patch('isocenter.imagecodecs_handler.imagecodecs') as mock_ic:
         mock_ic.ljpeg_decode.side_effect = ValueError("Bad data")
-        with pytest.raises(RuntimeError, match="imagecodecs failed to decode"):
-            imagecodecs_handler.get_pixel_data(mock_dataset)
+        with pytest.raises(ValueError, match="Bad data"):
+            imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
         # The codec saw the fragment alone: had the Basic Offset Table been
         # joined in front of it, this would be four zero bytes longer.
         assert mock_ic.ljpeg_decode.call_args[0][0] == CHUNK
@@ -92,7 +106,7 @@ def test_the_handler_does_not_claim_rle():
 
     assert imagecodecs_handler.supports_transfer_syntax(RLELossless) is False
     with pytest.raises(RuntimeError) as exc:
-        imagecodecs_handler.get_pixel_data(ds)
+        imagecodecs_handler.decode_declared_frames(ds, 1)
     assert f"Unsupported syntax: {RLELossless}" in str(exc.value), \
         str(exc.value)
 
@@ -113,7 +127,8 @@ def test_multi_frame_handling(mock_dataset):
     with patch('isocenter.imagecodecs_handler.generate_frames', return_value=[b"f1", b"f2"]):
         with patch('isocenter.imagecodecs_handler.imagecodecs') as mock_ic:
             mock_ic.ljpeg_decode.side_effect = [frame1, frame2]
-            result = imagecodecs_handler.get_pixel_data(mock_dataset)
+            result = imagecodecs_handler.decode_declared_frames(
+                mock_dataset, 2)
             assert result.shape == (2, 10, 10)
             np.testing.assert_array_equal(result[0], frame1)
             np.testing.assert_array_equal(result[1], frame2)
@@ -172,7 +187,7 @@ def test_each_syntax_reaches_its_own_codec_and_returns_its_result(syntax):
     with patch('isocenter.imagecodecs_handler.imagecodecs') as mock_ic:
         for name in _CODECS:
             getattr(mock_ic, name).return_value = sentinels[name]
-        result = imagecodecs_handler.get_pixel_data(ds)
+        result = imagecodecs_handler.decode_declared_frames(ds, 1)
 
         expected = _CODEC_FOR[syntax]
         assert result is sentinels[expected]
@@ -204,9 +219,8 @@ _BROKEN_IMPORT = ImportError(
     "libjpeg.so.8: cannot open shared object file: No such file or directory")
 
 
-@pytest.mark.parametrize("door", ["get_pixel_data", "decode_declared_frames"])
-def test_unavailable_imagecodecs_names_why(monkeypatch, mock_dataset, door):
-    """I1: both raise sites carry the import failure, and chain it (#444).
+def test_unavailable_imagecodecs_names_why(monkeypatch, mock_dataset):
+    """I1: the raise site carries the import failure, and chains it (#444).
 
     Each raised a bare "imagecodecs is not available", and the cause
     reached only a stderr print in `is_available()`, which a worker, a
@@ -214,9 +228,8 @@ def test_unavailable_imagecodecs_names_why(monkeypatch, mock_dataset, door):
     """
     monkeypatch.setattr(imagecodecs_handler, "imagecodecs", None)
     monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR", _BROKEN_IMPORT)
-    args = (mock_dataset,) if door == "get_pixel_data" else (mock_dataset, 1)
     with pytest.raises(RuntimeError) as exc:
-        getattr(imagecodecs_handler, door)(*args)
+        imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
     msg = str(exc.value)
     assert "imagecodecs is not available" in msg, msg
     assert "ImportError" in msg, msg

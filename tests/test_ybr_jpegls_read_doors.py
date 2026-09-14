@@ -8,8 +8,9 @@ The two read doors -- `Instance.get_pixel_data()` from a file and
 samples. So one file had two answers.
 
 The owner's ruling (2026-09-11) is to **convert and relabel**. The
-handler converts, as ingest does, and rewrites the dataset's
-PhotometricInterpretation to RGB. `Instance.get_pixel_data()` rewrites
+handler converts, as ingest does, and the decode says RGB (the handler
+rewrote the dataset's PhotometricInterpretation until #453 deleted its
+`get_pixel_data`; `_decode_pixels` returns the label instead). `Instance.get_pixel_data()` rewrites
 the instance's label to match. Converting without relabelling is #372's
 defect: RGB bytes under a YBR label. That must not ship at a new door,
 so every conversion assertion here sits beside a label assertion.
@@ -45,6 +46,7 @@ from isocenter.entities import Instance
 from isocenter.io_handlers import (_FALLBACK_DECODER_CONVERTS,
                                    _FALLBACK_PHOTOMETRICS)
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 JPEGLS = "1.2.840.10008.1.2.4.80"
 JPEGLS_NEAR = "1.2.840.10008.1.2.4.81"
@@ -113,9 +115,9 @@ def doors(tmp_path):
 
     `ingest` is `(ingested, failures, stored, label)`. `stored` is the
     store's array after `unload_pixel_data()` -- the sidecar's answer --
-    and `label` is the instance's PhotometricInterpretation. For the
-    handler, the array (or the exception) and the dataset's label
-    afterwards. For the Instance door, twice: a bare instance, which
+    and `label` is the instance's PhotometricInterpretation. For
+    `_decode_pixels`, `(array, label)` or the exception: the column the
+    handler's `get_pixel_data` held until #453 deleted it (Q10). For the Instance door, twice: a bare instance, which
     carries no label, and one labelled as the file is, as a hand-built
     graph would be. Each comes with its label and how far its revision
     moved.
@@ -140,10 +142,8 @@ def doors(tmp_path):
             stored = inst.get_pixel_data()
             label = inst.attributes.get("0028,0004")
         out = {"ingest": (summary.ingested, summary.failures, stored, label)}
-        handler_ds = pydicom.dcmread(path)
-        out["handler"] = (
-            _read(lambda: imagecodecs_handler.get_pixel_data(handler_ds)),
-            str(handler_ds.PhotometricInterpretation))
+        out["decode_pixels"] = _read(
+            lambda: through_the_fallback(pydicom.dcmread(path)))
         for door, label in (("bare", None),
                             ("labelled", str(ds.PhotometricInterpretation))):
             inst = _instance(path, label)
@@ -192,9 +192,9 @@ def test_an_8_bit_ybr_full_jpeg_ls_file_reads_as_rgb_at_every_door(
     assert (ingested, failures) == (1, [])
     assert _same(stored, want), stored
     assert label == "RGB"
-    arr, ds_label = got["handler"]
+    arr, decoded_label = got["decode_pixels"]
     assert _same(arr, want), arr
-    assert ds_label == "RGB"
+    assert decoded_label == "RGB"
     arr, inst_label, moved = got["labelled"]
     assert _same(arr, want), arr
     assert (inst_label, moved) == ("RGB", 1)
@@ -250,12 +250,10 @@ def test_a_signed_8_bit_ybr_full_jpeg_ls_file_is_refused_at_every_door(doors):
     # it either, not as a bare error escaping `_decode_with_imagecodecs`.
     assert f"imagecodecs could not decode it either: {words}" \
         in failures[0][1], failures
-    arr, ds_label = got["handler"]
-    assert isinstance(arr, RuntimeError), arr
-    # Its own words, not "imagecodecs failed to decode ...": the refusal
-    # is made before the decode, outside the handler's `try`.
-    assert str(arr).startswith(words), str(arr)
-    assert ds_label == "YBR_FULL"
+    exc = got["decode_pixels"]
+    assert isinstance(exc, RuntimeError), exc
+    assert f"imagecodecs could not decode it either: {words}" in str(exc), \
+        str(exc)
     for door, label in (("bare", None), ("labelled", "YBR_FULL")):
         exc, inst_label, moved = got[door]
         assert isinstance(exc, RuntimeError), f"{door}: {exc!r}"
@@ -275,9 +273,11 @@ def test_a_truncated_8_bit_ybr_full_jpeg_ls_file_changes_no_label(doors):
 
     #372's defect was a label without its conversion. Here the stream is
     cut two bytes short, so CharLS reads the header and then fails the
-    decode. A handler that relabelled `ds` before decoding would leave
-    `RGB` on a dataset whose samples were never converted. The dataset's
-    label, the labelled instance's label and its revision all stay put.
+    decode. A door that relabelled before decoding would leave `RGB` on
+    an instance whose samples were never converted. The labelled
+    instance's label and its revision stay put. (`_decode_pixels` never
+    writes to the dataset it is given, so the handler's dataset-label
+    half of this test went with the handler's `get_pixel_data`, #453.)
     """
     ds = _dataset(JPEGLS, [YBR8])
     whole = imagecodecs.jpegls_encode(YBR8)
@@ -285,10 +285,9 @@ def test_a_truncated_8_bit_ybr_full_jpeg_ls_file_changes_no_label(doors):
     ds["PixelData"].is_undefined_length = True
     got = doors(ds)
     assert got["ingest"][0] == 0, got["ingest"]
-    arr, ds_label = got["handler"]
-    assert isinstance(arr, RuntimeError), arr
-    assert "imagecodecs failed to decode" in str(arr), str(arr)
-    assert ds_label == "YBR_FULL"
+    exc = got["decode_pixels"]
+    assert isinstance(exc, RuntimeError), exc
+    assert "imagecodecs could not decode it either" in str(exc), str(exc)
     for door, label in (("bare", None), ("labelled", "YBR_FULL")):
         exc, inst_label, moved = got[door]
         assert isinstance(exc, RuntimeError), f"{door}: {exc!r}"

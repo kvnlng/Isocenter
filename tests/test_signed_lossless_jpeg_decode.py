@@ -10,12 +10,13 @@ from `Instance.get_pixel_data()` as `uint16` 3296, with no error, while
 The ruling: decode correctly. The handler sign-extends from BitsStored,
 the rule pydicom applies with its own plugins, measured bit-exact against
 pydicom with pylibjpeg-libjpeg and pyjpegls at 8, 12 and 16 bits. It
-lives in the handler's `_decode_frame`, which both doors reach -- ingest
-through `decode_declared_frames`, the read door through `get_pixel_data`
--- so there is one rule, not a guard at one door and a fix at the other.
-Every case here is asserted at all three: `ingest()`, the store's
-answer after it; `Instance(file_path).get_pixel_data()`; and the
-handler's own `get_pixel_data`.
+lives in the handler's `_decode_frame`, which every door reaches through
+`io_handlers._decode_pixels` and `decode_declared_frames` -- so there is
+one rule, not a guard at one door and a fix at the other. Every case here
+is asserted at all three: `ingest()`, the store's answer after it;
+`Instance(file_path).get_pixel_data()`; and `_decode_pixels` itself, with
+pydicom made unable to decode, which is the column the handler's own
+`get_pixel_data` held until #453 deleted it (Q10).
 
 JPEG 2000 is not touched by *this* rule: `jpeg2k_decode` returns signed
 samples already. It has a rule of its own, keyed on the codestream's SIZ
@@ -38,9 +39,9 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.encaps import encapsulate
 from pydicom.uid import generate_uid
 
-from isocenter import imagecodecs_handler
 from isocenter.entities import Instance
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 LJPEG = "1.2.840.10008.1.2.4.57"
 LJPEG_SV1 = "1.2.840.10008.1.2.4.70"
@@ -161,8 +162,8 @@ def doors(tmp_path):
                 ("instance", lambda: Instance(
                     generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
                     file_path=path).get_pixel_data()),
-                ("handler", lambda: imagecodecs_handler.get_pixel_data(
-                    pydicom.dcmread(path)))):
+                ("decode_pixels", lambda: through_the_fallback(
+                    pydicom.dcmread(path))[0])):
             try:
                 out[door] = read()
             except Exception as exc:  # pylint: disable=broad-except
@@ -179,7 +180,7 @@ def _assert_reads(got, want):
     ingested, failures, stored = got["ingest"]
     assert (ingested, failures) == (1, []), failures
     for door, arr in (("ingest", stored), ("instance", got["instance"]),
-                      ("handler", got["handler"])):
+                      ("decode_pixels", got["decode_pixels"])):
         assert isinstance(arr, np.ndarray), f"{door}: {arr!r}"
         assert arr.dtype == want.dtype, f"{door}: {arr.dtype}"
         assert arr.tolist() == want.tolist(), f"{door}: {arr[0].tolist()}"
@@ -209,7 +210,7 @@ _S1_CASES = [
          for ts, bs, enc in _S1_CASES])
 def test_a_signed_lossless_jpeg_frame_reads_its_values_at_both_doors(
         doors, ts, bits_stored, encode):
-    """S1: ingest, the Instance door and the handler agree, on the values.
+    """S1: ingest, the Instance door and `_decode_pixels` agree, on the values.
 
     Before: ingest refused (`decoded to uint16 ... declare int16`) and
     both read doors returned the unsigned pattern -- 3296 for -800 at
