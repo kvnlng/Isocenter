@@ -101,3 +101,24 @@ def test_the_batch_number_names_the_refused_patient(tmp_path):
         for pid in refused:
             session.lock_identities(pid, tags_to_lock=ast.literal_eval(advice.group(1)))
         session.lock_identities("P2")
+
+
+def test_a_name_that_is_the_patient_id_is_described_not_quoted(tmp_path):
+    """A source pseudonymised upstream as `PatientName == PatientID ==
+    'ANON_123'`: the name reads as a replacement, and quoting it would quote
+    the Patient ID. So any replacement equal to the Patient ID is described,
+    on any tag. Kills dropping `or str(val) == patient_id` (review of #615,
+    P-5)."""
+    write_ct(tmp_path / "in" / "a.dcm", "ANON_123", "6081", name="ANON_123")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities("ANON_123", tags_to_lock=["0010,0010"])
+        assert "0400,0500" not in session.store.patients[0].studies[0].series[0] \
+            .instances[0].sequences
+    message = str(caught.value)
+    assert message.startswith(
+        "lock_identities: this patient already carries a replacement in 0010,0010 "
+        "(a replacement Patient ID), so there is no original identity left to stash."), message
+    assert "ANON_123" not in message
