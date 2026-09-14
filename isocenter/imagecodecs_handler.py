@@ -123,6 +123,14 @@ JPEGExtended = UID("1.2.840.10008.1.2.4.51")
 JPEGLSLossless = UID("1.2.840.10008.1.2.4.80")
 JPEGLSLossy = UID("1.2.840.10008.1.2.4.81")
 
+#: The syntaxes whose frames are JPEG 2000 codestreams, and so carry a
+#: SIZ marker `_j2k_sample_layout` reads, and the JPEG-LS ones, whose
+#: frame header `_jpegls_precision` reads. One set each, so the decode,
+#: the signedness gate and ingest's HighBit row cannot disagree about
+#: which files have a stream precision.
+J2K_SYNTAXES = frozenset({JPEG2000Lossless, JPEG2000})
+JPEGLS_SYNTAXES = frozenset({JPEGLSLossless, JPEGLSLossy})
+
 HANDLER_NAME = "isocenter_imagecodecs_handler"
 
 DEPENDENCIES = {
@@ -532,21 +540,17 @@ def _sign_extend(arr, ds, precision=None):
         return arr
     bits = arr.dtype.itemsize * 8
     bits_stored = int(getattr(ds, "BitsStored", bits) or bits)
-    # Owner question Q1, answered with the recommendation pending
-    # confirmation: refuse. A JPEG decoder returns right-aligned
-    # BitsStored-bit samples, so HighBit other than BitsStored - 1
-    # describes a layout no decode produces, and each other reading
-    # (ignore it as pydicom does, or shift from HighBit) can return a
-    # wrong value. Inside the signed branch only: an unsigned frame is
-    # returned untouched, as pydicom returns it. Skipped when HighBit is
-    # absent. This block is the whole of Q1; delete it to reverse it.
-    high_bit = getattr(ds, "HighBit", None)
-    if high_bit is not None and int(high_bit) != bits_stored - 1:
-        raise RuntimeError(
-            f"HighBit {int(high_bit)} with BitsStored {bits_stored}: a JPEG "
-            f"decode returns right-aligned {bits_stored}-bit samples, so a "
-            f"signed sample is sign-extended from BitsStored only when "
-            f"HighBit is BitsStored - 1")
+    # No HighBit check here, deliberately (#455, #523; owner rulings Q2
+    # and Q3). There was one, #446's Q1: a signed frame whose HighBit was
+    # not BitsStored - 1 was refused, in words claiming a sign extension
+    # "from BitsStored" -- false on the JPEG-LS and JPEG 2000 routes,
+    # which extend from the stream's precision. HighBit is an input to no
+    # decoder here, and whether the refusal fired depended on the sign
+    # bit, while the same header over an unsigned frame was read in
+    # silence. A header rule now asks the question for every route, and
+    # answers it with a WARNING row at ingest:
+    # `io_handlers._high_bit_mismatch`. Do not put a refusal back here: it
+    # would refuse on one route what every other route reads.
     # The stream's precision where it has one, not BitsStored (#478, the
     # owner's ruling, reversing the BitsStored reading #463 shipped). The
     # two agree for every conformant encoder. `imagecodecs.jpegls_encode`

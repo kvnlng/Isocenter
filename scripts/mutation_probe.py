@@ -505,7 +505,8 @@ TARGETS = {
                                   "tests/test_the_project_secret_lives_in_the_store.py",
                                   "tests/test_one_decode_answer_per_file.py",
                                   "tests/test_compression_deps.py",
-                                  "tests/test_entities.py"], 30),
+                                  "tests/test_entities.py",
+                                  "tests/test_high_bit_is_a_header_warning.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -826,7 +827,8 @@ TARGETS = {
                               # the restore's `p.mark_modified()` by
                               # test_a_restored_patient_is_saved.py (#552).
                               "tests/test_a_restored_patient_is_saved.py",
-                              "tests/test_patients_sharing_an_id_are_merged.py"],
+                              "tests/test_patients_sharing_an_id_are_merged.py",
+                              "tests/test_high_bit_is_a_header_warning.py"],
                              30),
     # 196 sites. Until #419 this module had no row, so the persistence
     # bookkeeping every CLAUDE.md trap is about -- `mark_modified`,
@@ -1103,7 +1105,8 @@ TARGETS = {
                                           "tests/test_single_frame_encapsulated_decode.py",
                                           "tests/test_ybr_jpegls_read_doors.py",
                                           "tests/test_ybr_read_door_labels.py",
-                                          "tests/test_one_decode_answer_per_file.py"],
+                                          "tests/test_one_decode_answer_per_file.py",
+                                          "tests/test_high_bit_is_a_header_warning.py"],
                                          60),
 }
 

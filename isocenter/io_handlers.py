@@ -164,6 +164,7 @@ try:
     from pydicom.encapsulate import encapsulate
 except ImportError:
     from pydicom.encaps import encapsulate
+from pydicom.encaps import generate_frames
 from pydicom.multival import MultiValue
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
@@ -189,7 +190,9 @@ from .pixel_geometry import (
     resolve_pixel_geometry,
 )
 from .blob_kind import serialize_blob_kind
-from .imagecodecs_handler import (colour_conversion, convert_colour,
+from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
+                                  _j2k_sample_layout, _jpegls_precision,
+                                  colour_conversion, convert_colour,
                                   decode_declared_frames,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count)
@@ -1914,6 +1917,103 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
     return np.ascontiguousarray(arr), stored_label
 
 
+def _high_bit_mismatch(ds) -> Optional[dict]:
+    """The facts for ingest's HighBit row, or None when HighBit is BitsStored - 1.
+
+    PS3.5 8.1.1 requires HighBit to be BitsStored - 1. No decoder here
+    reads HighBit: JPEG Lossless returns right-aligned samples by
+    BitsStored, JPEG-LS and JPEG 2000 by the stream's own precision, and
+    pydicom masks a native sample to its low BitsStored bits. So a file
+    that says otherwise is read exactly as a conformant one would be, and
+    the one thing that changes is that the session says so (#455, #523;
+    owner rulings Q2 and Q3): `import_files` writes a `WARNING` row from
+    what this returns.
+
+    **A header rule, asked before the decode and of no decoder.** It
+    reads the Image Pixel module and, for a stream that carries its own
+    precision, frame 0's first bytes. So a file decoded by Pillow and one
+    decoded by imagecodecs get one answer -- which is what the refusal
+    this replaces could not give: it lived in `_sign_extend`, fired only
+    on the imagecodecs route, and only for a signed frame.
+
+    None, too, when either element is absent or not an integer: a header
+    that cannot be compared makes no claim to compare. The caller attaches
+    the facts only once the decode has succeeded; a refused file has its
+    own `ERROR` row.
+
+    Returns:
+        ``{bits_allocated, bits_stored, high_bit, pixel_representation,
+        encapsulated, stream, precision, width_read}``: `stream` is "JPEG
+        2000 codestream" or "JPEG-LS stream" where `precision` was read
+        from one, else None; `width_read` is that precision, or
+        BitsStored.
+    """
+    try:
+        bits_stored = int(ds.BitsStored)
+        high_bit = int(ds.HighBit)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if high_bit == bits_stored - 1:
+        return None
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    try:
+        encapsulated = bool(ts is not None and ts.is_encapsulated)
+    except (AttributeError, ValueError):
+        encapsulated = False
+    stream = precision = None
+    if encapsulated and (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES):
+        try:
+            frame = next(generate_frames(ds.PixelData, number_of_frames=1))
+        except Exception:  # pylint: disable=broad-except
+            # A buffer the decode below will refuse on its own terms.
+            frame = b""
+        if ts in J2K_SYNTAXES:
+            layout = _j2k_sample_layout(frame)
+            if layout is not None:
+                stream, precision = "JPEG 2000 codestream", layout[1]
+        else:
+            precision = _jpegls_precision(frame) if frame else None
+            if precision is not None:
+                stream = "JPEG-LS stream"
+    return {
+        "bits_allocated": getattr(ds, "BitsAllocated", None),
+        "bits_stored": bits_stored,
+        "high_bit": high_bit,
+        "pixel_representation": getattr(ds, "PixelRepresentation", None),
+        "encapsulated": encapsulated,
+        "stream": stream,
+        "precision": precision,
+        "width_read": precision if precision is not None else bits_stored,
+    }
+
+
+def _high_bit_words(facts) -> str:
+    """The HighBit row, from `_high_bit_mismatch`'s facts.
+
+    Names no file: the row's entity is the SOP Instance UID, and a source
+    folder may be named for the patient.
+    """
+    bits_stored = facts["bits_stored"]
+    head = (f"HighBit {facts['high_bit']} with BitsStored {bits_stored} "
+            f"and BitsAllocated {facts['bits_allocated']}: PS3.5 8.1.1 "
+            f"requires HighBit to be BitsStored - 1. ")
+    if not facts["encapsulated"]:
+        # Q3: pydicom's mask stays. Samples genuinely stored in bits
+        # 4..15 come back wrapped; they cannot be told apart from a
+        # right-aligned frame with overlay bits above BitsStored.
+        read = f"Read as pydicom reads it: the low {bits_stored} bits of each sample"
+        if facts["pixel_representation"] == 1:
+            read += ", sign-extended"
+    elif facts["stream"] is not None:
+        read = (f"Read as right-aligned {facts['width_read']}-bit samples "
+                f"(the {facts['stream']}'s precision {facts['precision']})")
+    else:
+        read = (f"Read as right-aligned {bits_stored}-bit samples "
+                f"(BitsStored {bits_stored})")
+    return (head + read + "; HighBit is not an input to this decode, and an "
+            "export writes HighBit as BitsStored - 1.").replace("|", "\\|")
+
+
 def _item_path_words(path) -> str:
     """A nested item's path as a row reads it: `0008,1140[3] > 0088,0200[0]`."""
     return " > ".join(f"{tag}[{index}]" for tag, index in path)
@@ -2171,6 +2271,9 @@ def ingest_worker(fp: str) -> Tuple:
                             frame_count_mismatch_words(counted))
                 decode_kwargs['allow_excess_frames'] = False
                 meta['offset_table_excess'] = counted
+            # Asked of the header before the decode, so both decoders'
+            # files get it; attached only once the decode succeeds (#455).
+            high_bit_mismatch = _high_bit_mismatch(ds)
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
@@ -2197,6 +2300,11 @@ def ingest_worker(fp: str) -> Tuple:
                 # meta is the one place the colour space is stated.
                 if inst.attributes.get("0028,0004") != decoded_pi:
                     inst.set_attr("0028,0004", decoded_pi)
+                if high_bit_mismatch is not None:
+                    # Rides `meta` like `offset_table_excess`: this may be
+                    # a subprocess with no store handle, so `import_files`
+                    # writes the row.
+                    meta['high_bit_mismatch'] = high_bit_mismatch
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
                 # The path rides the meta slot, as in the blanket except
@@ -2604,6 +2712,7 @@ class DicomImporter:
         # which one happened; `IngestSummary.declined` is their sum.
         declined_superseded = 0
         declined_duplicate = 0
+        high_bit_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -2789,6 +2898,32 @@ class DicomImporter:
                     # PASS. SIGNAL rather than a new scope word, because
                     # the scope vocabulary is frozen
                     # (tests/test_frozen_surface.py).
+                    # HighBit other than BitsStored - 1 (#455, #523). A
+                    # `WARNING`, the frozen action type (#411): the file's
+                    # own header is non-conformant (PS3.5 8.1.1), which is
+                    # a fact about the user's data, so it bars PASS
+                    # (#479). One row per instance, as the declined rows
+                    # above are; the log is capped the same way, so a
+                    # 2,000-instance legacy cohort prints five lines and a
+                    # suppression line rather than 2,000. After both
+                    # declined `continue`s: a file not linked gets no row.
+                    high_bit = meta.get('high_bit_mismatch')
+                    if high_bit:
+                        detail = _high_bit_words(high_bit)
+                        high_bit_rows += 1
+                        if high_bit_rows <= 5:
+                            logger.warning(f"{inst.sop_instance_uid}: {detail}")
+                        elif high_bit_rows == 6:
+                            logger.warning(
+                                "... (suppressing further per-instance "
+                                "messages for HighBit other than BitsStored "
+                                "- 1) ...")
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="WARNING",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail)
+
                     excess = meta.get('offset_table_excess')
                     if excess:
                         table_frames, declared, _declared_raw, _table = excess
