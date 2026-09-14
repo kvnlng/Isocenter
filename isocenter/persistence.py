@@ -4826,11 +4826,15 @@ class SqliteStore:
             # durable half and is best-effort: `except Exception`, so a
             # store too broken to take a row still hands the caller the
             # error that failed the write. A count and sqlite's own text
-            # (bound values never reach it); no SOP UID, no patient.
+            # (bound values never reach it); no SOP UID, no patient. "This
+            # write stored none of them", and not "held in memory only":
+            # `lock_identities(persist=True, auto_persist_chunk_size=N)`
+            # writes each instance twice, and where only the second write
+            # fails the store already holds the token (review of #640,
+            # P-1). The row speaks for this transaction, not for the store.
             message = (f"update_attributes could not write {len(instances)} "
-                       "instance(s) to the store, so none of them was written "
-                       "and their changes are held in memory only: "
-                       f"{describe_exception(e)}")
+                       "instance(s) to the store, so this write stored none "
+                       f"of them: {describe_exception(e)}")
             self.logger.error(message)
             try:
                 self.log_audit(action_type="ERROR", entity_uid="SESSION",

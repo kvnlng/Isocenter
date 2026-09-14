@@ -37,10 +37,13 @@ REFUSAL = "refused by the #599 test"
 
 
 def row_text(count, error):
-    """The ERROR row's details, and the log line's text."""
+    """The ERROR row's details, and the log line's text. "This write stored
+    none of them", not "held in memory only": under `persist=True` with
+    `auto_persist_chunk_size` each instance is written twice, and where
+    only the chunk write fails the store already holds what the row would
+    have called memory-only (review of #640, P-1)."""
     return (f"update_attributes could not write {count} instance(s) to the "
-            "store, so none of them was written and their changes are held in "
-            f"memory only: {error}")
+            f"store, so this write stored none of them: {error}")
 
 
 @pytest.fixture(autouse=True)
@@ -118,32 +121,44 @@ def test_a_single_lock_whose_write_fails_raises_and_records_it(tmp_path):
 
 SHAPES = {
     # how the batch writes: (stored tokens after, instances in the failed write)
-    "persist_per_patient": ({_uid(1): True, _uid(2): False}, 1),
-    "chunks_of_one": ({_uid(1): True, _uid(2): False}, 1),
-    "one_chunk_of_two": ({_uid(1): False, _uid(2): False}, 2),
+    "persist_per_patient": ({_uid(1): True, _uid(2): False, _uid(3): False}, 1),
+    "chunks_of_one": ({_uid(1): True, _uid(2): False, _uid(3): False}, 1),
+    "one_chunk_of_two": ({_uid(1): False, _uid(2): False, _uid(3): False}, 2),
 }
+
+BATCH = ["PAT-599-A", "PAT-599-B", "PAT-599-C"]
 
 
 @pytest.mark.parametrize("shape", SHAPES)
 def test_a_batch_whose_write_fails_part_way_keeps_what_was_written(tmp_path, shape):
-    """Two patients, the store refusing the second one's row only: the
+    """Three patients, the store refusing the middle one's row only: the
     error leaves the batch. `persist=True` writes per patient and
     `auto_persist_chunk_size=1` per chunk, so the first patient's token is
     in the store and the second's is not -- written stays written, nothing
     is rolled back across writes. One write is one transaction, so a chunk
     of two that fails on its second row writes neither, which is what the
-    row's "none of them was written" says."""
+    row's "this write stored none of them" says. The error leaves at the
+    failed write, so the third patient, after it in Patient ID order, is
+    not locked at all: no token in memory and none in the store. With two
+    patients the refused one was last and nothing came after it, so R2
+    and R3 of the review of #640 (the store error caught and raised at the
+    end of the batch, in the chunk arm and in the per-patient arm) locked
+    and wrote a patient after the failure and passed (F-2)."""
     stored, failed = SHAPES[shape]
-    db, session = _ingested(tmp_path, "PAT-599-A", "PAT-599-B")
+    db, session = _ingested(tmp_path, *BATCH)
     with session:
         _refuse_updates(db, _uid(2))
         with pytest.raises(sqlite3.Error):
             if shape == "persist_per_patient":
-                session.lock_identities(["PAT-599-A", "PAT-599-B"], persist=True)
+                session.lock_identities(BATCH, persist=True)
             else:
                 session.lock_identities_batch(
-                    ["PAT-599-A", "PAT-599-B"],
-                    auto_persist_chunk_size=1 if shape == "chunks_of_one" else 2)
+                    BATCH, auto_persist_chunk_size=1 if shape == "chunks_of_one" else 2)
+        memory = {pid: [SEQ in i.sequences for st in p.studies
+                        for se in st.series for i in se.instances]
+                  for p in session.store.patients for pid in [p.patient_id]}
+        assert memory == {"PAT-599-A": [True], "PAT-599-B": [True],
+                          "PAT-599-C": [False]}
         assert _stored_tokens(db) == stored
         assert _errors(session) == [row_text(failed, f"IntegrityError: {REFUSAL}")]
 
