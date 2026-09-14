@@ -125,7 +125,8 @@ def _jpeg_icon_item():
 
 
 def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
-               transfer_syntax=ExplicitVRLittleEndian, top_level_pixels=True):
+               transfer_syntax=ExplicitVRLittleEndian, top_level_pixels=True,
+               patient_id="PAT1"):
     """A CT instance carrying icons at depth 1 and/or depth 2.
 
     `icons` go under Icon Image Sequence directly. `referenced_icons` go
@@ -137,6 +138,10 @@ def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
     its own, and a raw one would fail the *whole* ingest at the top-level
     decode and never reach the nested candidate at all. Keeping the top
     level pixel-free makes the nested decode the only one under test.
+
+    `patient_id` puts an instance under a second patient, for the tests
+    that hold the foreign-icon gate to the store rather than the export's
+    `patient_ids`.
     """
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = CT_IMAGE
@@ -144,7 +149,7 @@ def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
     meta.TransferSyntaxUID = transfer_syntax
 
     ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
-    ds.PatientID, ds.PatientName = "PAT1", "DOE^JOHN"
+    ds.PatientID, ds.PatientName = patient_id, "DOE^JOHN"
     ds.StudyInstanceUID, ds.SeriesInstanceUID = generate_uid(), generate_uid()
     ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
     ds.SOPClassUID = CT_IMAGE
@@ -869,6 +874,41 @@ def test_a_subset_does_not_turn_the_foreign_gate_off(tmp_path, how):
     assert _ref_icons(exported["SN-CARRIER"]) == []
 
 
+@pytest.mark.parametrize("how", ["attestation", "zones"])
+def test_patient_ids_do_not_turn_the_foreign_gate_off(tmp_path, how):
+    """The same gate with the redacted series under a **second** patient.
+
+    The subset test above narrows inside one patient, so a gate computed
+    over the export's `patient_ids` still sees the redaction there. Here
+    `patient_ids` leaves the redacted (or zoned) patient out entirely, and
+    the carrier's referenced icon may still be a thumbnail of it.
+    """
+    src = _multi_src(tmp_path, [
+        ("SN-CARRIER", dict(referenced_icons=[_icon_item()])),
+        ("SN-OTHER", dict(patient_id="PAT2"))])
+    db = str(tmp_path / f"patients_{how}.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        assert sorted(p.patient_id for p in session.store.patients) == [
+            "PAT1", "PAT2"]
+        if how == "attestation":
+            session.redact_by_machine("SN-OTHER", WHOLE_FRAME)
+        else:
+            session.configuration.rules = [
+                {"serial_number": "SN-OTHER",
+                 "redaction_zones": [WHOLE_FRAME]}]
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False, patient_ids=["PAT1"])
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert set(exported) == {"SN-CARRIER"}, exported
+    assert _ref_icons(exported["SN-CARRIER"]) == []
+
+
 def test_an_icon_drop_grades_review_required(tmp_path):
     """r1's report: the drop is a graded loss in section 3.1, by name."""
     src = _multi_src(tmp_path, [("SN-1", dict(icons=[_icon_item()])),
@@ -1349,6 +1389,40 @@ def test_write_tree_keeps_an_unattested_instances_own_icon(tmp_path):
     exported = _exported_by_serial(out)
     assert "IconImageSequence" not in exported["SN-1"]
     assert exported["SN-2"].IconImageSequence[0].PixelData == ICON_BYTES
+
+
+def test_write_tree_drops_a_referenced_icon_under_a_redaction_elsewhere(
+        tmp_path):
+    """The serializer's store-wide tier: attestation anywhere in the tree.
+
+    `test_write_tree_honours_the_redaction_attestation` uses the carrier's
+    own icon, which the worker decides from that instance's attestation, so
+    it stays green with `write_tree`'s foreign flag wired off. This one is
+    a referenced icon on an unredacted carrier, beside a redacted series
+    under the same patient: only the foreign flag can drop it.
+    """
+    src = _carrier_and_other(tmp_path)
+    db = str(tmp_path / "wtforeign.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        assert len(session.store.patients) == 1
+        carrier_uid = _by_serial(session)["SN-CARRIER"].sop_instance_uid
+        session.redact_by_machine("SN-OTHER", WHOLE_FRAME)
+        patient = session.store.patients[0]
+        DicomExporter.write_tree(patient, str(out), studies=patient.studies,
+                                 show_progress=False,
+                                 store_backend=session.store_backend)
+        session.store_backend.flush_audit_queue()
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert set(exported) == {"SN-CARRIER", "SN-OTHER"}, exported
+    assert _ref_icons(exported["SN-CARRIER"]) == []
+    assert [(uid, scope) for uid, scope, _d in _icon_loss_rows(db)] == [
+        (carrier_uid, LOSS_SCOPE_SIGNAL)], _icon_loss_rows(db)
 
 
 def test_a_nested_restore_failure_with_no_message_names_its_type(
