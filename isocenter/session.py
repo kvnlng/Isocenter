@@ -12,8 +12,6 @@ from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
 import yaml
-from tqdm import tqdm
-
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportError, ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
@@ -36,7 +34,8 @@ from .crypto import KeyManager
 from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
-                       resolve_max_workers, resolve_worker_initializer)
+                       resolve_max_workers, resolve_worker_initializer,
+                       progress_bar)
 from .configuration import IsocenterConfiguration, FlowList
 from .entities import (Patient, PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree)
@@ -1468,6 +1467,18 @@ class DicomSession:
         Waveforms matter here as much as pixels: samples are cached as
         int16 of shape (num_samples, num_channels), which is ~80 KB for a
         10-second 12-lead but ~104 MB for a 24-hour 3-channel Holter.
+
+        Its progress bar follows `ISOCENTER_SHOW_PROGRESS` (#540).
+        """
+        self._release_memory(show_progress=True)
+
+    def _release_memory(self, show_progress: bool):
+        """`release_memory()`, with the caller's `show_progress`.
+
+        Private so the public method keeps its frozen, parameterless
+        signature. `_export_dicom` calls this with its own `show_progress`:
+        until #540 the sweep took no argument, so `export(show_progress=
+        False)` still drew "Releasing Memory".
         """
         get_logger().info("Releasing memory (RAM cleanup)...")
         count = 0
@@ -1482,7 +1493,8 @@ class DicomSession:
         if total_instances == 0:
             return
 
-        with tqdm(total=total_instances, desc="Releasing Memory", unit="inst") as pbar:
+        with progress_bar(total=total_instances, show=show_progress,
+                          desc="Releasing Memory", unit="inst") as pbar:
             for p in self.store.patients:
                 for st in p.studies:
                     for se in st.series:
@@ -3510,12 +3522,11 @@ class DicomSession:
         count_instances_chunked = 0
         missing_ids = 0
 
-        from tqdm import tqdm
-
         # Optimization: Create a lookup map for O(1) access
         patient_map = {p.patient_id: p for p in self.store.patients}
 
-        with tqdm(start_ids, desc="Locking Identities", unit="patient") as pbar:
+        with progress_bar(start_ids, desc="Locking Identities",
+                          unit="patient") as pbar:
             for pid in pbar:
                 p_obj = patient_map.get(pid)
                 if p_obj:
@@ -4631,7 +4642,7 @@ class DicomSession:
         # order.
         print("Saving pending changes to free memory...")
         self.save(sync=True)
-        self.release_memory()
+        self._release_memory(show_progress)
 
         tasks, patient_count, withheld = self._build_export_plan(
             _ExportOptions(folder, identifying_uids, allowed_uids,

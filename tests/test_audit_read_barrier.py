@@ -230,7 +230,7 @@ def test_store_still_pickles_and_the_copy_logs_and_reads(tmp_path):
       `RedactionService.store_backend` into every worker. Dropping the
       two entries turns eight other tests red as well as this one.
     - **On the free-threaded build (3.14t)**
-      `def _resolve_execution_choice(` at parallel.py line 382 returns a
+      `def _resolve_execution_choice(` at parallel.py line 406 returns a
       choice whose `use_threads` is True, `redact()` runs in threads,
       and nothing is pickled. Those eight tests pass with the entries
       missing. **This test is the only thing that fails.**
