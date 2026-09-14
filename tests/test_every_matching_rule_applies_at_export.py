@@ -229,15 +229,18 @@ def test_the_zone_parser_takes_both_shapes_and_keeps_the_values():
     """A list zone and a `{"roi": ...}` zone both parse; anything without
     four values is reported and dropped. The values pass through as given
     (a tuple, no `int()`), because `prepare_redaction_tasks` hashes them
-    into the attestation. Killing mutations: list-only; `len >= 4`;
-    coercion to `int`; the invalid callback not called."""
+    into the attestation. A tuple *zone* is not a shape: `load_config`
+    refuses one and nothing builds one, so the parser reports it as it
+    reports any other non-list, non-dict zone. Killing mutations:
+    list-only; a tuple zone accepted; `len >= 4`; coercion to `int`; the
+    invalid callback not called."""
     invalid = []
     rois = zone_rois(
         [[1, 2, 3, 4], {"roi": [5, 6, 7, 8], "note": "banner"},
          [1, 2, 3], {"roi": [1, 2, 3, 4, 5]}, {"note": "no roi"},
-         ["1", "2", "3", "4"]],
+         (9, 9, 9, 9), ["1", "2", "3", "4"]],
         on_invalid=invalid.append)
 
     assert rois == [(1, 2, 3, 4), (5, 6, 7, 8), ("1", "2", "3", "4")]
-    assert invalid == [[1, 2, 3], [1, 2, 3, 4, 5], None]
+    assert invalid == [[1, 2, 3], [1, 2, 3, 4, 5], None, None]
     assert zone_rois([]) == [] and zone_rois(None) == []

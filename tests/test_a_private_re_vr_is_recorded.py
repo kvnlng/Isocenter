@@ -105,7 +105,12 @@ def _export(tmp_path, inst, **kwargs):
 
 
 def _re_vr_sentences(outcome):
-    return [w for w in outcome.warnings if "Private element" in w]
+    # The two exact prefixes, not the bare substring: "Private element"
+    # matches the plural too, which let a sentence pluralised for one
+    # element pass every test here (review R1).
+    return [w for w in outcome.warnings
+            if w.startswith("Private element (")
+            or w.startswith("Private elements (")]
 
 
 def _no_value_text(sentence):
@@ -196,14 +201,23 @@ def test_a_private_binary_value_draws_no_sentence(tmp_path):
 
 def test_a_nested_re_vr_shares_the_instance_sentence(tmp_path):
     """A private element inside a sequence item is named in the same one
-    sentence, with the sequence it sits in. Killing mutations: `revrs` not
-    threaded through `_merge_sequences` (the nested tag is missing); a
-    sentence per merge (two sentences)."""
+    sentence, with the sequence it sits in; two sequences deep, with both,
+    outer first, joined by `>`. Killing mutations: `revrs` not threaded
+    through `_merge_sequences` (the nested tag is missing); a sentence per
+    merge (two sentences); the `within` path flattened to the innermost
+    sequence (the depth-2 element reads `in (0040,a730)` alone); the plural
+    prefix wrong for three elements."""
+    inner = DicomItem()
+    inner.set_attr("0029,0010", "PROBE 571")
+    inner.record_attr_vr("0029,0010", "LO")
+    inner.set_attr("0029,101d", "ANONYMIZED")
+    inner.record_attr_vr("0029,101d", "TM")
     item = DicomItem()
     item.set_attr("0029,0010", "PROBE 571")
     item.record_attr_vr("0029,0010", "LO")
     item.set_attr("0029,1013", "ANONYMIZED")
     item.record_attr_vr("0029,1013", "DA")
+    item.add_sequence_item("0040,a730", inner)
     inst = _image(extra=[("0029,1015", "ANONYMIZED")],
                   vrs=[("0029,1015", "US")])
     inst.add_sequence_item("0008,1140", item)
@@ -213,11 +227,17 @@ def test_a_nested_re_vr_shares_the_instance_sentence(tmp_path):
     assert outcome.ok, outcome.error
     sentences = _re_vr_sentences(outcome)
     assert len(sentences) == 1, outcome.warnings
+    assert sentences[0].startswith("Private elements ("), sentences
     assert "(0029,1015) recorded US, written LO" in sentences[0], sentences
     assert "(0029,1013) in (0008,1140) recorded DA, written LO" \
         in sentences[0], sentences
+    assert "(0029,101d) in (0008,1140) > (0040,a730) recorded TM, written LO" \
+        in sentences[0], sentences
     written = pydicom.dcmread(outcome.output_path)
-    assert written.ReferencedImageSequence[0][Tag(0x0029, 0x1013)].VR == "LO"
+    outer_item = written.ReferencedImageSequence[0]
+    assert outer_item[Tag(0x0029, 0x1013)].VR == "LO"
+    inner_item = outer_item[Tag(0x0040, 0xa730)][0]
+    assert inner_item[Tag(0x0029, 0x101d)].VR == "LO"
 
 
 def test_the_sentence_names_ten_tags_and_counts_the_rest(tmp_path):
@@ -303,6 +323,10 @@ def test_the_collapse_is_not_logged_in_the_worker(tmp_path, caplog):
             if COLLAPSE[0] in r.getMessage()] == [], caplog.records
     sentences = [_re_vr_sentences(o) for o in outcomes]
     assert [len(s) for s in sentences] == [1, 1], sentences
+    # One element: the singular prefix, exactly (review R1 -- the plural
+    # for one element survived every substring match here).
+    assert all(s[0].startswith("Private element (") for s in sentences), \
+        sentences
     assert f"({COLLAPSE[0]}) recorded LO VM 2, written as one UT value" \
         in sentences[0][0], sentences
     assert f"({COLLAPSE[0]}) VM 2, written as one UT value" \

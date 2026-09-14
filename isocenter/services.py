@@ -447,7 +447,9 @@ def zone_rois(zones, on_invalid=None) -> List[tuple]:
     every export of a matching instance with `ValueError: invalid literal
     for int() with base 10: 'roi'` because the export passed the raw zone
     through. Anything without exactly four values is dropped, and handed
-    to `on_invalid` when one is given.
+    to `on_invalid` when one is given. A tuple zone is not a third shape:
+    `load_config` refuses one ("must be list or dict") and nothing builds
+    one, so accepting it here would be a spelling no door produces.
 
     **The values are passed through as given, as a tuple -- no `int()`.**
     `prepare_redaction_tasks` hashes `sorted()` of these tuples into the
@@ -458,7 +460,7 @@ def zone_rois(zones, on_invalid=None) -> List[tuple]:
     """
     rois = []
     for zone in zones or ():
-        if isinstance(zone, (list, tuple)):
+        if isinstance(zone, list):
             roi = zone
         elif isinstance(zone, dict):
             roi = zone.get("roi")
