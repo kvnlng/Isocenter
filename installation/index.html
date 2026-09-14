@@ -670,6 +670,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#decode-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decode limits
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1315,6 +1326,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#decode-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decode limits
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1452,8 +1474,18 @@ it raises <code>PixelScanError</code>, also a <code>RuntimeError</code> (#423). 
 did not import; it does not check the binary.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-<p><code>imagecodecs</code> is a required dependency and installs with Isocenter. It is the JPEG 2000 encoder the default compressed export uses, and it decodes JPEG Lossless, JPEG-LS and JPEG 2000 files that pydicom's installed plugins cannot.</p>
+<p><code>imagecodecs</code> is a required dependency and installs with Isocenter. It is the JPEG 2000 encoder the default compressed export uses, and it decodes JPEG Lossless, JPEG-LS, JPEG 2000 and High-Throughput JPEG 2000 files that pydicom's installed plugins cannot, and monochrome JPEG Baseline and Extended files that Pillow cannot, such as 12-bit JPEG Extended.</p>
 </div>
+<h3 id="decode-limits">Decode limits</h3>
+<p>Every read of a compressed frame -- <code>ingest()</code>, <code>Instance.get_pixel_data()</code>, an icon, and the export's readback -- goes through one decode, so a file gets one answer everywhere. That answer has limits:</p>
+<ul>
+<li><strong>A stream corrupted mid-stream can decode to plausible wrong values with no error.</strong> openjpeg, which decodes JPEG 2000 through Pillow and through <code>imagecodecs</code>, and lj92, which decodes JPEG Lossless, report nothing for a stream with bytes damaged in the middle, and the second decoder a cross-check would use returns the same wrong array. Every door reads such a file without an error. libjpeg-turbo, which decodes JPEG Baseline and Extended, reads a stream that lost data from its middle and still ends in its EOI marker with the missing rows filled with mid-grey. A truncated stream is refused, a JPEG one because it does not end in EOI, and JPEG-LS (CharLS) refuses mid-stream damage too (<a href="https://github.com/kvnlng/Isocenter/issues/452">#452</a>).</li>
+<li><strong>16-bit <code>YBR_FULL</code> JPEG-LS and JPEG 2000 files are refused at every door.</strong> The conversion to RGB that 8-bit <code>YBR_FULL</code> gets takes 8-bit samples only (<a href="https://github.com/kvnlng/Isocenter/issues/461">#461</a>).</li>
+<li><strong>High-Throughput JPEG 2000</strong> (<code>1.2.840.10008.1.2.4.201</code>, <code>.202</code>, <code>.203</code>) is decoded by openjpeg through <code>imagecodecs.jpeg2k_decode</code>, under JPEG 2000's rules for colour, signedness and sample width. Nothing writes it: an HTJ2K source exports uncompressed or as JPEG 2000 (<a href="https://github.com/kvnlng/Isocenter/issues/459">#459</a>).</li>
+<li><strong>JPEG Baseline and Extended files Pillow cannot decode are read only when monochrome and unsigned.</strong> 12-bit JPEG Extended decodes through <code>imagecodecs.jpeg_decode</code>, value for value as DCMTK decodes pydicom's <code>JPEG-lossy.dcm</code>. A colour one is refused, because that decoder's colour answer was measured to differ from pydicom's, and so is a signed one, because nothing here re-signs a lossy JPEG decode (<a href="https://github.com/kvnlng/Isocenter/issues/604">#604</a>).</li>
+<li><strong>A JPEG 2000 codestream that is signed where PixelRepresentation 0 declares unsigned samples is refused.</strong> No decoder here returns those samples unsigned (<a href="https://github.com/kvnlng/Isocenter/issues/524">#524</a>).</li>
+<li><strong>HighBit other than BitsStored − 1 is read, and says so.</strong> No decoder reads HighBit: samples are read right-aligned, by BitsStored or by the stream's own precision. Ingest writes one <code>WARNING</code> row per such instance, which grades the run <code>REVIEW_REQUIRED</code>, and an export writes HighBit as BitsStored − 1 (<a href="https://github.com/kvnlng/Isocenter/issues/455">#455</a>).</li>
+</ul>
 <h2 id="dependencies">Dependencies</h2>
 <p>Dependencies are declared in one place, <code>setup.py</code>. There is deliberately
 no <code>requirements.txt</code>: two lists drift apart, and only <code>install_requires</code>
