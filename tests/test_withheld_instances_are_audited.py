@@ -192,6 +192,35 @@ def test_a_withheld_export_grades_review_required(tmp_path):
     assert withheld in section_4 and "withheld" in section_4, section_4
 
 
+def test_a_withheld_row_is_one_table_row_whatever_the_folder_holds(tmp_path):
+    """The folder is the caller's, and may hold a pipe or a newline.
+
+    Section 4 renders `details` into a markdown table cell, so the row is
+    flattened and pipe-escaped as `_audit_unread_instances` does. A folder
+    name is the realistic carrier: a `|` is legal on POSIX, and so is a
+    newline.
+    """
+    session, withheld, _kept, _value = _two_patients_one_identified(
+        tmp_path, "instance")
+    folder = str(tmp_path / "out|a\nb")
+    try:
+        session.export(folder, check_burned_in=True, use_compression=False,
+                       show_progress=False)
+        warnings = _rows(session, "WARNING")
+        text = _report(session, tmp_path)
+    finally:
+        session.close()
+
+    flat = folder.replace("\n", " ").replace("|", "\\|")
+    assert warnings == [(withheld, (
+        f"DICOM export to {flat} withheld instance {withheld}: its "
+        f"instance still carries an identifier the pre-export scan raised "
+        f"(check_burned_in=True)."))], warnings
+    section_4 = text.split("## 4.", 1)[1].split("## 5.", 1)[0]
+    rows = [line for line in section_4.splitlines() if withheld in line]
+    assert len(rows) == 1 and flat in rows[0], section_4
+
+
 def test_the_counters_count_withheld_as_requested(tmp_path):
     """"1 of 1 requested" answered for the plan, not for the cohort asked for."""
     session, _withheld, _kept, _value = _two_patients_one_identified(

@@ -294,8 +294,10 @@ def test_export_error_failures_name_each_instance(tmp_path, monkeypatch):
     try:
         uids = sorted(i.sop_instance_uid for i in _instances(session))
 
+        # A newline and a pipe, so the flattening has something to do: a
+        # one-line message is "flattened" whether or not anything ran.
         def failing(self, *args, **kwargs):
-            raise RuntimeError("waveform channel table is malformed")
+            raise RuntimeError("waveform channel table\nis | malformed")
 
         monkeypatch.setattr(WfdbExporter, "_write_instance", failing)
         with pytest.raises(ExportError) as raised:
@@ -304,9 +306,11 @@ def test_export_error_failures_name_each_instance(tmp_path, monkeypatch):
         session.close()
 
     failures = raised.value.failures
-    assert sorted(uid for uid, _detail in failures) == uids, failures
-    assert all("malformed" in detail and "\n" not in detail
-               for _uid, detail in failures), failures
+    assert sorted(failures) == [
+        (uid, f"WFDB export failed for instance {uid}: "
+              f"waveform channel table is \\| malformed")
+        for uid in uids], failures
+    assert "\n" not in str(raised.value), str(raised.value)
     assert raised.value.attempted == 2
 
 
