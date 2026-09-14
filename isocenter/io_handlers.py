@@ -5507,9 +5507,15 @@ _J2K_ENCODABLE_FRAMES = frozenset({
 #: the codestream. PS3.5 8.2.4 is symmetric about this: a transformed
 #: codestream must carry one of these labels, and an untransformed one
 #: must carry components matching its Photometric Interpretation. Every
-#: other 3-sample label -- `YBR_FULL`, `YBR_FULL_422`,
-#: `YBR_PARTIAL_420`, `PALETTE COLOR` -- is already decorrelated and
-#: encodes `mct=False`.
+#: other label -- `YBR_FULL`, `YBR_PARTIAL_420`, `YBR_PARTIAL_422`, and
+#: every 1-sample label including `PALETTE COLOR` -- encodes `mct=False`.
+#:
+#: **That list is this function's, not the worker's (#528).** Through the
+#: export worker, a 3-sample `PALETTE COLOR` has already become `RGB`
+#: (case 1) and a 3-sample `YBR_FULL_422` has become `YBR_FULL` (#470),
+#: because `_write_pixel_geometry` runs before the encoder; neither
+#: reaches this function under its own name. A direct caller can still
+#: pass either, which is what the unit tests do.
 _J2K_MCT_SOURCES = frozenset({"RGB", "YBR_RCT", "YBR_ICT"})
 
 
@@ -5747,12 +5753,18 @@ def _compress_j2k(ds, pixel_array=None):
         #    mirrored. Not relabelled to `RGB`, which would discard the
         #    source's stated colour space against #482's work, and not
         #    refused, which no ingested file would reach.
-        # 3. **Every other 3-sample source** -- `YBR_FULL`,
-        #    `YBR_FULL_422`, `YBR_PARTIAL_420`, `PALETTE COLOR` -- and
-        #    every 1-sample one is encoded `mct=False` and keeps its
-        #    label. A luma/chroma source is already decorrelated, so MCT
-        #    over it is both unnameable and larger: measured on a
-        #    `YBR_FULL` frame, `mct=True` is 66482 bytes against
+        # 3. **Every other label** -- `YBR_FULL`, `YBR_PARTIAL_420`,
+        #    `YBR_PARTIAL_422`, and every 1-sample label including
+        #    `PALETTE COLOR` -- is encoded `mct=False` and keeps its
+        #    label. Through the export worker, a 3-sample `PALETTE COLOR`
+        #    has already become `RGB` (case 1) and a 3-sample
+        #    `YBR_FULL_422` has become `YBR_FULL` (#470), so neither
+        #    reaches this function under its own name; a direct caller
+        #    can still pass either (#528). `YBR_PARTIAL_*` is a label the
+        #    export also warns about (#525): the encoder does not decide
+        #    admissibility. A luma/chroma source is already
+        #    decorrelated, so MCT over it is both unnameable and larger:
+        #    measured on a `YBR_FULL` frame, `mct=True` is 66482 bytes against
         #    `mct=False`'s 48819, a 36% loss for a file that would also
         #    be mislabelled.
         #
