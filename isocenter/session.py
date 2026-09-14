@@ -4407,7 +4407,7 @@ class DicomSession:
         count = 0
         if findings:
             remediator._use_instance_owners(self._nested_finding_owners(findings))
-            remediator._use_scan_tally(self._scan_tally)
+            remediator._use_scan_tally(self._scan_tally, findings)
             count = remediator.apply_remediation(findings)
 
         # A patient ingested under its original ID after that patient was

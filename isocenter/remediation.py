@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 from tqdm import tqdm
-from .entities import JITTER_SCHEME_KEYED, Instance, PhiStatus, Study
+from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Study
 from .privacy import PhiFinding, PhiRemediation, canonical_patient_key
 from .logger import describe_exception, get_logger
 
@@ -821,9 +821,11 @@ class RemediationService:
         the keys handled under it. For a scan finding the two are the
         same string and it is settled once. A UID the audit did not raise
         under -- one `redact()` regenerated since -- gets no opinion, as
-        before. **Not a patient**: by the pass end its live `patient_id`
-        is the pseudonym, so a patient finding filed under a wrong uid
-        still keeps pass accounting.
+        before. A patient is settled under the `patient_id` it held when
+        the pass began, snapshotted at the tally handover: the pass may
+        replace it, so reading it at the settle would give the pseudonym
+        for a pass that handled the ID, and the original only for one
+        that did not.
 
         Only an entity that ends the pass REMEDIATED is touched: one that
         only declined keeps whatever status it had, which
@@ -854,14 +856,15 @@ class RemediationService:
             if getattr(entity, "phi_status", None) is PhiStatus.REMEDIATED:
                 entity.record_phi_status(PhiStatus.IDENTIFIED)
 
-    @staticmethod
-    def _live_uid(entity) -> Optional[str]:
-        """The UID the scan files `entity`'s findings under, read now.
+    def _live_uid(self, entity) -> Optional[str]:
+        """The UID the scan files `entity`'s findings under.
 
-        An instance's SOP Instance UID or a study's Study Instance UID --
-        the uids `PhiInspector` writes into `entity_uid`. None for a
-        patient, whose `patient_id` the pass has replaced by the time it
-        settles, and for a nested item. The item's owner is not consulted
+        An instance's SOP Instance UID or a study's Study Instance UID,
+        read now -- the uids `PhiInspector` writes into `entity_uid`. A
+        patient's is its `patient_id` as the pass began
+        (`_pass_start_ids`), because the pass may already have replaced
+        it with the pseudonym; None for a patient the snapshot does not
+        hold. None for a nested item. The item's owner is not consulted
         because it could add nothing: `Session._nested_finding_owners`
         finds an owner *through* the finding's `entity_uid`, so an item
         has one only when that name is already its instance's UID, and a
@@ -872,6 +875,8 @@ class RemediationService:
             return entity.sop_instance_uid
         if isinstance(entity, Study):
             return entity.study_instance_uid
+        if isinstance(entity, Patient):
+            return self._pass_start_ids.get(id(entity))
         return None
 
     #: The `Patient`/`Study` fields the exporter stamps onto every exported
@@ -946,15 +951,30 @@ class RemediationService:
     #: pass (#567), counted as handled by the tally. Rebound, never
     #: mutated, so the class default is safe to share.
     _satisfied_keys = frozenset()
+    #: `id(Patient) -> patient_id` as the pass began, for `_live_uid`.
+    #: Set with the tally; read-only for `_instance_owners`' reason.
+    _pass_start_ids = _MappingProxyType({})
 
-    def _use_scan_tally(self, tally) -> None:
+    def _use_scan_tally(self, tally, findings=()) -> None:
         """Settle this service's passes against `tally` (#553).
 
         The session's own tally, not a copy: a partial pass leaves the
         keys it handled in it, so the next pass over the same audit
         completes what this one did not.
+
+        `findings` are the pass's, and each patient they resolve to has
+        its `patient_id` snapshotted here, before the pass can replace
+        it, so a patient finding filed under a wrong uid or none is still
+        settled under the patient's real one. Here and not at the top of
+        `apply_remediation`, which would move the five pinned
+        `mark_modified()` lines (#310). A patient whose ID an earlier pass
+        already replaced is snapshotted as its pseudonym, which the tally
+        does not hold, so a mis-named finding on it has no opinion.
         """
         self._scan_tally = tally
+        self._pass_start_ids = self._MappingProxyType({
+            id(f.entity): f.entity.patient_id for f in findings
+            if isinstance(f.entity, Patient)})
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each
@@ -1468,7 +1488,10 @@ class _ScanTally:
       pass accounts for itself, as a pass with no audit behind it does.
       Asked about a finding's named uid *and* its entity's own UID
       (`RemediationService._settle_statuses`), so a wrong or missing name
-      reaches None only for a patient finding.
+      reaches None only when that own UID is not one the audit raised
+      under either: an instance `redact()` gave a new UID since, a
+      patient whose ID an earlier pass already replaced, or a nested
+      item.
     - **True**: the handled keys, merged with those earlier passes since
       the same audit handled, are exactly the raised set. The uid is dropped,
       so a later pass over it has no opinion either.

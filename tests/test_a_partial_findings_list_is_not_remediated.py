@@ -345,8 +345,18 @@ def test_a_hand_built_extra_key_cannot_complete_an_entity(tmp_path):
 
 
 def _misnamed_setup(session, report, level):
-    """The entity at `level`, its uid, and the one report finding to re-file."""
+    """The entity at `level`, its uid, and the one report finding to re-file.
+
+    `patient_name` and `patient_id` both re-file a patient finding: the
+    first leaves the patient's live ID the original through the pass, the
+    second replaces it, so the patient is settled under the ID it held
+    when the pass began, not the one it ends with.
+    """
     instance = _instances(session)[0]
+    if level in ("patient_name", "patient_id"):
+        patient = session.store.patients[0]
+        return patient, patient.patient_id, next(
+            f for f in report if f.entity is patient and f.field_name == level)
     if level == "study":
         study = session.store.patients[0].studies[0]
         return study, study.study_instance_uid, next(
@@ -356,7 +366,8 @@ def _misnamed_setup(session, report, level):
 
 
 @pytest.mark.parametrize("uid", [None, "not-a-scanned-uid"])
-@pytest.mark.parametrize("level", ["instance", "study"])
+@pytest.mark.parametrize("level", ["instance", "study", "patient_name",
+                                   "patient_id"])
 def test_a_misnamed_finding_does_not_vouch_for_its_entity(
         tmp_path, level, uid):
     """The report less every finding under the entity's UID, plus one of
@@ -386,7 +397,8 @@ def test_a_misnamed_finding_does_not_vouch_for_its_entity(
         session.close()
 
 
-@pytest.mark.parametrize("level", ["instance", "study"])
+@pytest.mark.parametrize("level", ["instance", "study", "patient_name",
+                                   "patient_id"])
 def test_a_misnamed_finding_beside_the_full_report_stays_remediated(
         tmp_path, level):
     """The same re-filed finding, handed with the whole report.
