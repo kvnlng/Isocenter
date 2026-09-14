@@ -23,13 +23,6 @@ def _is_replacement_id(value) -> bool:
     return str(value).startswith("ANON_")
 
 
-#: The tags a `Patient` or a `Study` owns, and the field each is held in.
-#: The exporter stamps the owner's value on every file, so the rule on
-#: one of these governs the owner, not only the instance's copy (#537).
-OWNED_TAGS = {"0010,0010": "patient_name", "0010,0020": "patient_id",
-              "0008,0020": "study_date"}
-
-
 def _owned_rule(phi_tags, tag) -> Tuple[str, Optional[str]]:
     """`(action, value)` under which the owner of `tag` is remediated (#537).
 
@@ -520,23 +513,31 @@ class PhiInspector:
         written for. On a standard tag whose VR cannot hold `ANONYMIZED`
         -- `{"0008,0012": "SHIFT"}` -- the string form is refused at
         construction (#560), before this runs. On Study Date the string
-        form means the shift (#537), so `{"0008,0020": "SHIFT"}` does what
-        it says and is not warned about. The warning remains for a tag
-        where REPLACE is what happens.
+        form means the shift (#537), so `{"0008,0020": "SHIFT"}` and
+        `"JITTER"` do what they say and are not warned about. `"REMOVE"`
+        and `"EMPTY"` there still are, naming the shift as what happens:
+        the caller asked for removal and gets a retained, shifted date
+        (review of #574). The warning remains for a tag where REPLACE is
+        what happens.
         """
         offenders = sorted(
             tag for tag, val in self.phi_tags.items()
             if isinstance(val, str) and val.strip().upper() in self._ACTION_WORDS
-            and _owned_rule(self.phi_tags, tag)[0] == "REPLACE")
+            and not (_owned_rule(self.phi_tags, tag)[0] == "SHIFT"
+                     and val.strip().upper() in ("SHIFT", "JITTER")))
         if not offenders:
             return
 
         for tag in offenders:
+            effect = ("on Study Date that is the shift"
+                      if _owned_rule(self.phi_tags, tag)[0] == "SHIFT"
+                      else "the action stays REPLACE")
             get_logger().warning(
                 "config_tags[%r] is %r, which is read as the tag's display "
-                "name, not its action -- the action stays REPLACE. To %s "
+                "name, not its action -- %s. To %s "
                 "this tag, write {'action': %r, 'name': ...}.",
-                tag, self.phi_tags[tag], self.phi_tags[tag].strip().lower(),
+                tag, self.phi_tags[tag], effect,
+                self.phi_tags[tag].strip().lower(),
                 self.phi_tags[tag].strip().upper())
 
     @staticmethod

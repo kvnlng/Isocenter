@@ -25,7 +25,7 @@ from .services import (RedactionService, RedactionOutcome, RedactionError,
 from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
 from .privacy import (PhiInspector, PhiFinding, PhiReport, _holds_owned_replacement,
-                      _is_replacement_id, _is_replacement_name)
+                      _is_replacement_id, _is_replacement_name, _owned_rule)
 from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_REMOVED,
                         GAP_RETAINED, GAP_UNRESOLVED)
@@ -938,6 +938,11 @@ class DicomSession:
         # Reversibility
         self.key_manager = None
         self.reversibility_service = None
+        # The policy the last `audit()` resolved, whichever door it came
+        # by. `audit(config_path=)` does not assign
+        # `configuration.phi_tags`, and the lock judges a name or ID by the
+        # rule that wrote it (review of #574). None until an audit runs.
+        self._audited_phi_tags = None
 
         # What the last DICOM export delivered, so the compliance report
         # can say how many instances were written beside how many are
@@ -2422,6 +2427,7 @@ class DicomSession:
             # loader sees. The same refusal the loader raises (#537, #560),
             # and before the project secret below, for #456's reason.
             validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
+        self._audited_phi_tags = tags_to_use
 
         # The project secret, once, in the parent, before any work: a
         # store holding dates shifted under a secret it no longer has
@@ -3496,12 +3502,27 @@ class DicomSession:
         # also judged by the rule in force (`_holds_owned_replacement`, the
         # scan's own test), and the constants stay ORed in for every tag,
         # which is the lock's business and not the scan's. A blank is not
-        # judged here: it is the check below.
-        phi_tags = self.configuration.phi_tags
+        # judged here: it is the checks below.
+        #
+        # "The rule in force" is every policy that can have written the
+        # value: the one the last `audit()` resolved, and
+        # `configuration.phi_tags`. `audit(config_path=)` assigns only the
+        # first, so reading only the second let a re-lock after a
+        # `value: Project-X` pass through that door stash `Project-X` over
+        # the held name (review of #574). A value either would write is
+        # refused; the audited policy is named first.
+        policies = [policy for policy in (self._audited_phi_tags,
+                                          self.configuration.phi_tags)
+                    if policy is not None]
+
+        def is_replacement(tag, val):
+            return (_is_replacement_name(val) or _is_replacement_id(val)
+                    or (tag in ("0010,0010", "0010,0020") and bool(str(val).strip())
+                        and any(_holds_owned_replacement(policy, tag, val)
+                                for policy in policies)))
+
         for tag, val in original_attrs.items():
-            if (_is_replacement_name(val) or _is_replacement_id(val)
-                    or (tag in ("0010,0010", "0010,0020") and str(val).strip()
-                        and _holds_owned_replacement(phi_tags, tag, val))):
+            if is_replacement(tag, val):
                 raise RuntimeError(
                     f"lock_identities: patient {patient_id!r} already "
                     f"carries a replacement in {tag} ({val!r}), so there "
@@ -3514,22 +3535,57 @@ class DicomSession:
         # Under an EMPTY or REMOVE rule on the name, `anonymize()` leaves
         # `""` or nothing, which no replacement test catches, and a lock
         # taken after it would write a token without the name over one
-        # that held it. The existing token is read, not `tags_to_lock`: a
-        # tag it never held loses nothing, so a wider re-lock is allowed.
+        # that held it. Every tag the existing token holds non-blank is
+        # checked, whether or not `tags_to_lock` names it: a narrower
+        # re-lock after `anonymize()` drops the held name just as a blank
+        # does (review of #574, F-7). A tag this lock does not name is lost
+        # only where the instance no longer carries an original for it --
+        # blank, absent, or a replacement -- so a narrower re-lock of
+        # still-original values stays #399's rule, and a wider re-lock
+        # (a tag the token never held) loses nothing.
         if first_instance is not None:
             held = self.reversibility_service.recover_original_data(first_instance) or {}
-            for tag in tags_to_lock:
-                if not str(held.get(tag) or "").strip():
+            for tag, kept in held.items():
+                if not str(kept or "").strip():
                     continue
-                new = original_attrs.get(tag)
+                named = tag in tags_to_lock
+                if named:
+                    new = original_attrs.get(tag)
+                else:
+                    new = first_instance.attributes.get(tag)
+                    if new is None:
+                        new = entity_fallback.get(tag)
+                    if new is not None and is_replacement(tag, new):
+                        new = None
                 if new is None or not str(new).strip():
-                    lost = "nothing" if new is None else "an empty value"
+                    lost = ("nothing" if new is None else "an empty value") if named \
+                        else "nothing (tags_to_lock does not name it)"
                     raise RuntimeError(
                         f"lock_identities: patient {patient_id!r} already has a "
                         f"locked identity holding {tag}, and this lock would "
                         f"replace it with {lost}; lock identities before "
                         "anonymize(), and do not re-lock a patient after it; "
                         "the token this call would have written is unchanged.")
+
+        # A first lock after `anonymize()` under an EMPTY or REMOVE rule on
+        # the name has no token to lose, but would report success over a
+        # token without the name it exists to hold: #399's "a lock that
+        # silently kept nothing" (review of #574, F-1). On 0.9.7 the name
+        # read `ANONYMIZED` here whatever the rule, and the check above
+        # refused it. A blank name under such a rule is refused whether or
+        # not `anonymize()` ran, because nothing tells the two apart; a
+        # source with no name loses nothing by leaving the name out.
+        if "0010,0010" in tags_to_lock and not str(original_attrs.get("0010,0010") or "").strip():
+            emptying = [_owned_rule(policy, "0010,0010")[0] for policy in policies]
+            emptying = [action for action in emptying if action in ("EMPTY", "REMOVE")]
+            if emptying:
+                raise RuntimeError(
+                    f"lock_identities: patient {patient_id!r} holds no value in "
+                    f"0010,0010, which its rule ({emptying[0]}) leaves after "
+                    "anonymize(), so there is no original identity left to "
+                    "stash. Lock identities before anonymize(), or leave "
+                    "0010,0010 out of tags_to_lock; the token this call would "
+                    "have written is unchanged.")
 
         # Optimization: Encrypt once per patient
         token = self.reversibility_service.generate_identity_token(

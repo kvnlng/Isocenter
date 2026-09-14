@@ -146,6 +146,9 @@ NAME_CASES = {
                       "Project-X", "Project-X", "Project-X"),
     "string-form": ("Patient's Name", "ANONYMIZED", "ANONYMIZED", "ANONYMIZED"),
     "no-rule": (None, "ANONYMIZED", "ANONYMIZED", "ANONYMIZED"),
+    # An empty `value:` is no value, as it is on every other tag.
+    "replace-empty-value": ({"action": "REPLACE", "value": ""},
+                            "ANONYMIZED", "ANONYMIZED", "ANONYMIZED"),
 }
 
 
@@ -228,6 +231,11 @@ DATE_CASES = {
     "string-form": ("Study Date", "shifted", "shifted", "shifted"),
     "jitter": ({"action": "JITTER"}, "shifted", "shifted", "shifted"),
     "no-rule": (None, "shifted", "shifted", "shifted"),
+    # An empty `value:` is no value, so under Q3 it is the shift and not
+    # an empty date (review of #574: `or None` removed from `_owned_rule`
+    # emptied it).
+    "replace-empty-value": ({"action": "REPLACE", "value": ""},
+                            "shifted", "shifted", "shifted"),
 }
 
 
@@ -284,6 +292,31 @@ def test_a_replace_value_does_not_give_a_dateless_study_a_date(tmp_path, source_
         assert [f for f in report if f.tag == "0008,0020"] == []
         session.anonymize(report)
         assert not session.store.patients[0].studies[0].study_date
+
+
+def test_remove_on_an_owner_already_blank_leaves_it_absent(tmp_path):
+    """REMOVE means the owner holds nothing (None), not an empty string,
+    even when the source value was already `""`: the export is the same
+    zero-length element either way, so only the in-memory owner tells
+    them apart (review of #574, F-6). Kills the name and the date REMOVE
+    arms each gated on the value being truthy rather than not None."""
+    from isocenter.entities import Instance, Patient, Series, Study
+    patient = Patient(PID, "")
+    study = Study("1.2.826.0.1.537.9", "")
+    series = Series("1.2.826.0.1.537.9.1", "OT", 1)
+    instance = Instance("1.2.826.0.1.537.9.1.1", "1.2.840.10008.5.1.4.1.1.7", 1)
+    series.instances.append(instance)
+    study.series.append(series)
+    patient.studies.append(study)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.store.patients.append(patient)
+        session.configuration.phi_tags = {
+            "0010,0010": {"action": "REMOVE"}, "0010,0020": {"action": "KEEP"},
+            "0008,0020": {"action": "REMOVE"}}
+        session.anonymize(session.audit())
+        assert patient.patient_name is None
+        assert study.study_date is None
+        assert [f for f in session.audit() if f.tag in OWNED] == []
 
 
 def test_a_date_shifted_in_an_earlier_pass_is_emptied_when_the_rule_becomes_empty(run):

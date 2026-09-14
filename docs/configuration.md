@@ -241,7 +241,7 @@ Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex stri
 | **`REPLACE`** | Replaces the value with its `value:`, or with `ANONYMIZED` when there is none ([#538](https://github.com/kvnlng/Isocenter/issues/538)). A tag's string form (`"0008,0080": "Institution Name"`) is `REPLACE` with no value. | `action: "REPLACE"`, `value: "Project-X"` |
 | **`REMOVE`** | Completely deletes the tag from the dataset. Patient's Name and Study Date are the exception: they are written at zero length (see the note above). | `action: "REMOVE"` |
 | **`EMPTY`** | Sets the tag value to an empty string (zero-length bytes for a binary VR). | `action: "EMPTY"` |
-| **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range) is left unchanged and recorded as declined ([#559](https://github.com/kvnlng/Isocenter/issues/559)). | `action: "SHIFT"` |
+| **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range, a DateTime at hour or minute precision) is left unchanged and recorded as declined ([#559](https://github.com/kvnlng/Isocenter/issues/559)). | `action: "SHIFT"` |
 | **`JITTER`** | Same as `SHIFT`. The generated scaffold and the floor policy use it for Study Date. | `action: "JITTER"` |
 | **`KEEP`** | Explicitly retains the original value (Exception to profile). | `action: "KEEP"` |
 
@@ -251,6 +251,7 @@ Any other action makes `load_config()` raise `ValueError` naming the tag. So doe
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
 * `SHIFT` or `JITTER` on a standard tag that is not DA or DT ([#559](https://github.com/kvnlng/Isocenter/issues/559));
 * `REPLACE` on a standard tag whose VR cannot hold what it writes -- `ANONYMIZED` in a DA, TM, DT, UI, AS, DS or IS, or any text in a binary or numeric VR ([#560](https://github.com/kvnlng/Isocenter/issues/560)). Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
+* a `REPLACE` `value:` holding a `-` in a DA or TM (a range, not a date or time), or a `\` on a standard tag that holds one value (a second value). On a tag that holds several, each `\`-separated value is checked on its own.
 
 Private tags are not checked against a VR: the exporter writes a private value its VR cannot hold as `LO`.
 

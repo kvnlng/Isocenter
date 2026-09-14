@@ -30,33 +30,51 @@ def _threads(monkeypatch):
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
 
 
-def _session(tmp_path, tags):
+def _session(tmp_path, tags, load=True):
+    """A reversible session over one CT. With `load` the rules go through
+    `load_config`; without, the caller passes `_audit(session, ...)` the
+    file, which is `audit(config_path=)`: the door that never assigns
+    `configuration.phi_tags` (review of #574)."""
     write_ct(tmp_path / "in" / "a.dcm", PID, "5371", name=NAME)
     cfg = tmp_path / "cfg.yaml"
     cfg.write_text(yaml.safe_dump({"phi_tags": tags}), encoding="utf-8")
     session = DicomSession(str(tmp_path / "s.db"))
     session.enable_reversible_anonymization(str(tmp_path / "k.key"))
     session.ingest(str(tmp_path / "in"))
-    session.load_config(str(cfg))
+    session.cfg_path = None if load else str(cfg)
+    if load:
+        session.load_config(str(cfg))
     return session
+
+
+def _audit(session):
+    return session.audit(config_path=session.cfg_path) if session.cfg_path else session.audit()
 
 
 def _token(instance):
     return instance.sequences["0400,0500"].items[0].attributes["0400,0510"]
 
 
-def test_a_relock_after_a_custom_name_replacement_is_refused(tmp_path):
+DOORS = pytest.mark.parametrize("load", [True, False], ids=["load_config", "audit_config_path"])
+
+
+@DOORS
+def test_a_relock_after_a_custom_name_replacement_is_refused(tmp_path, load):
     """Kills the refusal left constant-only: `Project-X` is not
-    `ANONYMIZED`, so the re-lock stashed it."""
+    `ANONYMIZED`, so the re-lock stashed it. Through both doors: the rule
+    that wrote the name is the one the last `audit()` resolved, and
+    `audit(config_path=)` never assigns `configuration.phi_tags`, so a
+    refusal reading only that let the re-lock stash `Project-X` (review
+    of #574, M-2)."""
     with _session(tmp_path, {"0010,0010": {"action": "REPLACE", "value": "Project-X"},
-                             "0010,0020": {"action": "KEEP"}}) as session:
+                             "0010,0020": {"action": "KEEP"}}, load=load) as session:
         instance = session.store.patients[0].studies[0].series[0].instances[0]
         session.lock_identities(PID, tags_to_lock=TAGS)
         held = session.reversibility_service.recover_original_data(instance)
         assert held == {"0010,0010": NAME, "0010,0020": PID}
         token = _token(instance)
 
-        session.anonymize(session.audit())
+        session.anonymize(_audit(session))
         assert instance.attributes["0010,0010"] == "Project-X"
         with pytest.raises(RuntimeError, match=r"0010,0010 \('Project-X'\)"):
             session.lock_identities(PID, tags_to_lock=TAGS)
@@ -66,18 +84,19 @@ def test_a_relock_after_a_custom_name_replacement_is_refused(tmp_path):
 
 @pytest.mark.parametrize("action,said", [("EMPTY", "an empty value"),
                                          ("REMOVE", "nothing")])
-def test_a_relock_that_would_blank_a_held_value_is_refused(tmp_path, action, said):
+@DOORS
+def test_a_relock_that_would_blank_a_held_value_is_refused(tmp_path, action, said, load):
     """EMPTY leaves `""` on the copy and the patient; REMOVE leaves no copy
     and None on the patient, so nothing is stashed for the name. Either
     way the held name would be lost. Kills the held-value check deleted."""
     with _session(tmp_path, {"0010,0010": {"action": action},
-                             "0010,0020": {"action": "KEEP"}}) as session:
+                             "0010,0020": {"action": "KEEP"}}, load=load) as session:
         instance = session.store.patients[0].studies[0].series[0].instances[0]
         session.lock_identities(PID, tags_to_lock=TAGS)
         held = session.reversibility_service.recover_original_data(instance)
         token = _token(instance)
 
-        session.anonymize(session.audit())
+        session.anonymize(_audit(session))
         with pytest.raises(RuntimeError) as caught:
             session.lock_identities(PID, tags_to_lock=TAGS)
         assert str(caught.value) == (
@@ -89,16 +108,94 @@ def test_a_relock_that_would_blank_a_held_value_is_refused(tmp_path, action, sai
         assert session.reversibility_service.recover_original_data(instance) == held
 
 
+def test_a_narrower_relock_after_anonymize_cannot_drop_a_held_name(tmp_path):
+    """A re-lock that does not name the held name, after `anonymize()`
+    emptied it, writes a token holding only the ID over one that held
+    both (review of #574, F-7). The held token is read, not
+    `tags_to_lock`. Kills the loss check looping over `tags_to_lock`."""
+    with _session(tmp_path, {"0010,0010": {"action": "EMPTY"},
+                             "0010,0020": {"action": "KEEP"}}) as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        held = session.reversibility_service.recover_original_data(instance)
+        token = _token(instance)
+        session.anonymize(session.audit())
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities(PID, tags_to_lock=["0010,0020"])
+        assert str(caught.value) == (
+            f"lock_identities: patient {PID!r} already has a locked identity "
+            "holding 0010,0010, and this lock would replace it with nothing "
+            "(tags_to_lock does not name it); lock identities before "
+            "anonymize(), and do not re-lock a patient after it; the token "
+            "this call would have written is unchanged.")
+        assert _token(instance) == token
+        assert session.reversibility_service.recover_original_data(instance) == held
+
+
+@DOORS
+def test_a_narrower_relock_cannot_drop_a_held_name_now_replaced(tmp_path, load):
+    """The same drop where the name now reads as its rule's replacement
+    rather than blank: not named, not blank, and no original left. Kills
+    the loss check judging an unnamed tag's blankness only."""
+    with _session(tmp_path, {"0010,0010": {"action": "REPLACE", "value": "Project-X"},
+                             "0010,0020": {"action": "KEEP"}}, load=load) as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        held = session.reversibility_service.recover_original_data(instance)
+        session.anonymize(_audit(session))
+        with pytest.raises(RuntimeError, match=r"holding 0010,0010, and this lock would "
+                                               r"replace it with nothing \(tags_to_lock"):
+            session.lock_identities(PID, tags_to_lock=["0010,0020"])
+        assert session.reversibility_service.recover_original_data(instance) == held
+
+
+def test_a_narrower_relock_before_anonymize_is_unchanged(tmp_path):
+    """#399's rule: a re-lock of still-original values replaces the token,
+    narrower or not (`test_relock_identity_token.py` pins it on a
+    hand-built graph). The held name still reads as the original, so
+    nothing is lost that the file does not still carry."""
+    with _session(tmp_path, {"0010,0010": {"action": "EMPTY"},
+                             "0010,0020": {"action": "KEEP"}}) as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        session.lock_identities(PID, tags_to_lock=["0010,0020"])
+        assert session.reversibility_service.recover_original_data(instance) == {
+            "0010,0020": PID}
+
+
+@pytest.mark.parametrize("action", ["EMPTY", "REMOVE"])
+@DOORS
+def test_a_first_lock_after_anonymize_of_an_emptied_name_is_refused(tmp_path, action, load):
+    """No token yet, so there is nothing held to lose, but the lock would
+    report success over a token without the identity it exists to hold:
+    #399's "a lock that silently kept nothing" (review of #574, F-1). On
+    ac33641 the name read `ANONYMIZED` here and the lock was refused.
+    A blank or absent name under an EMPTY or REMOVE rule is refused, and
+    no token is written."""
+    with _session(tmp_path, {"0010,0010": {"action": action},
+                             "0010,0020": {"action": "KEEP"}}, load=load) as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        session.anonymize(_audit(session))
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities(PID, tags_to_lock=TAGS)
+        assert str(caught.value) == (
+            f"lock_identities: patient {PID!r} holds no value in 0010,0010, "
+            f"which its rule ({action}) leaves after anonymize(), so there is "
+            "no original identity left to stash. Lock identities before "
+            "anonymize(), or leave 0010,0010 out of tags_to_lock; the token "
+            "this call would have written is unchanged.")
+        assert "0400,0500" not in instance.sequences
+
+
 def test_a_tag_the_held_token_does_not_carry_never_refuses(tmp_path):
-    """The check reads what the existing token holds: a first lock of the
-    ID alone holds no name, so a later lock whose name is empty loses
-    nothing and is not refused. Kills the check reading `tags_to_lock`
-    rather than the held token."""
+    """The loss check reads what the existing token holds: a first lock of
+    the ID alone holds no name, so re-locking the ID after the name was
+    emptied loses nothing and is not refused."""
     with _session(tmp_path, {"0010,0010": {"action": "EMPTY"},
                              "0010,0020": {"action": "KEEP"}}) as session:
         instance = session.store.patients[0].studies[0].series[0].instances[0]
         session.lock_identities(PID, tags_to_lock=["0010,0020"])
         session.anonymize(session.audit())
-        session.lock_identities(PID, tags_to_lock=TAGS)
+        session.lock_identities(PID, tags_to_lock=["0010,0020"])
         assert session.reversibility_service.recover_original_data(instance) == {
-            "0010,0010": "", "0010,0020": PID}
+            "0010,0020": PID}

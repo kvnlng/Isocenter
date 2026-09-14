@@ -297,6 +297,50 @@ def test_a_declined_date_on_a_legacy_instance_is_still_raised(tmp_path):
     assert len(_declines(db_path)) == len(declines_before) + 1
 
 
+@pytest.mark.parametrize("value", ["2023060510", "202306051048"])
+def test_an_hour_or_minute_precision_datetime_on_a_legacy_instance_is_raised(tmp_path, value):
+    """#559's parser must not widen, and this is the store it would harm
+    (review of #574). The pre-0.9.6 parser declined `2023060510` (and
+    shifted a `...1048` only by misreading it), so a legacy instance
+    holding one after its study was shifted still holds it unshifted.
+    The legacy branch reads "would shift" as "already shifted"; a parser
+    that shifts hour- and minute-precision DateTimes therefore grades this
+    instance CLEARED with the value retained. Both precisions decline, so
+    the value is raised, the decline recurs, and the instance stays
+    IDENTIFIED."""
+    dt_tag = "0008,002a"
+    tags = {dt_tag: {"name": "AcquisitionDateTime", "action": "JITTER"}}
+    db_path = str(tmp_path / "legacy_dt.db")
+    session = DicomSession(db_path)
+    patient = Patient("P1", "Orig^Name")
+    study = Study("1.2.826.0.1.510T", "20230601")
+    series = Series("1.2.826.0.1.510T.1", "OT", 1)
+    instance = Instance("1.2.826.0.1.510T.1.0", SC_SOP_CLASS, 1)
+    series.instances.append(instance)
+    study.series.append(series)
+    patient.studies.append(study)
+    session.store.patients.append(patient)
+    session.configuration.phi_tags = dict(tags)
+    with session:
+        session.anonymize(session.audit())
+        assert study.date_shifted
+        # What a pre-0.9.6 pass left: the value its parser declined.
+        instance.set_attr(dt_tag, value)
+        session.save(sync=True)
+    _age_the_store(db_path)
+
+    reopened = DicomSession(db_path)
+    with reopened:
+        reopened.configuration.phi_tags = dict(tags)
+        loaded = _instances(reopened)[0]
+        assert loaded._legacy_shift_provenance
+        report = reopened.audit()
+        assert [f.tag for f in report.findings if f.tag == dt_tag] == [dt_tag]
+        reopened.anonymize(report)
+        assert loaded.attributes[dt_tag] == value
+        assert loaded.phi_status.name == "IDENTIFIED", loaded.phi_status
+
+
 def test_a_pre_096_study_date_is_not_raised_either(tmp_path):
     """The study half of the same ruling (#518). `date_shifted` set with
     no record means "shifted before 0.9.6, value unknowable", so the

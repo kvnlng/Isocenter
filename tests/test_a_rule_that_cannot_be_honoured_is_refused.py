@@ -69,6 +69,13 @@ REFUSED = {
                         "the key is 'value'", None),
     "value-not-a-string": ("0008,0080", {"action": "REPLACE", "value": 7},
                            "value must be a string, got int", None),
+    # validate_value passes both of these, and both reached the file
+    # (review of #574, F-4): a DA range as the Study Date, and a
+    # two-valued Patient's Name.
+    "date-range": ("0008,0020", {"action": "REPLACE", "value": "19000101-19010101"},
+                   "a '-' in a DA is a range", ("REPLACE", "19000101-19010101")),
+    "name-multi-valued": ("0010,0010", {"action": "REPLACE", "value": "A\\B"},
+                          "0010,0010 holds one value", ("REPLACE", "A\\B")),
 }
 
 DOORS = ("load_config", "audit_config_path", "set_phi_tag",
@@ -148,8 +155,53 @@ def test_a_compound_dictionary_vr_is_refused_when_no_arm_holds_the_value(tag):
     pydicom's `validate_value` has no validator under those names, so it
     passes any value. Kills the compound VR handed to `validate_value`
     whole: the rule loads and the export fails on the value."""
-    with pytest.raises(ValueError, match=tag):
+    with pytest.raises(ValueError, match=tag) as caught:
         validate_phi_policy({tag: {"action": "REPLACE"}}, "cfg.yaml")
+    # Every arm is numeric or binary, so no text value fits and the advice
+    # stops at EMPTY or REMOVE, as it does for US and OB alone (review of
+    # #574, F-3: it offered "give a value: that is a valid US or SS").
+    assert str(caught.value).endswith("which cannot hold it; use EMPTY or REMOVE (#560)"), \
+        str(caught.value)
+
+
+def test_the_range_and_multi_value_messages():
+    """The exact text of the two refusals F-4 added."""
+    with pytest.raises(ValueError) as caught:
+        validate_phi_policy({"0008,0020": {"action": "REPLACE", "value": "19000101-19010101"}},
+                            "cfg.yaml")
+    assert str(caught.value) == (
+        "cfg.yaml: phi_tags['0008,0020'] is REPLACE, which writes "
+        "'19000101-19010101', and a '-' in a DA is a range, which 0008,0020 "
+        "cannot hold; give one DA value (#560)")
+    with pytest.raises(ValueError) as caught:
+        validate_phi_policy({"0010,0010": {"action": "REPLACE", "value": "A\\B"}}, "cfg.yaml")
+    assert str(caught.value) == (
+        "cfg.yaml: phi_tags['0010,0010'] is REPLACE, which writes 'A\\\\B', "
+        "and 0010,0010 holds one value, which a '\\' would make two; give a "
+        "value without one (#560)")
+
+
+@pytest.mark.parametrize("tag,value", [
+    ("0008,002a", "20230515104822-0500"),     # a DT's UTC offset is not a range
+    ("0008,0012", "19000101"),
+    ("0008,1030", "A-B"),                     # LO: a hyphen is text
+    ("0020,0020", "A\\P"),                    # CS, VM 2
+    ("0029,1013", "A\\B-C"),                  # private: no dictionary entry
+], ids=["dt-offset", "da", "lo-hyphen", "cs-vm2", "private"])
+def test_what_the_range_and_multi_value_checks_let_through(tag, value):
+    """Kills over-refusal: every '-' refused, a '\\' refused on a tag whose
+    VM allows several values, and a private tag judged."""
+    validate_phi_policy({tag: {"action": "REPLACE", "value": value}}, "cfg.yaml")
+
+
+@pytest.mark.parametrize("key", ["10000,0010", "ffff,ffff0"])
+def test_an_oversized_tag_key_is_a_value_error(key):
+    """The loader refuses such a key by shape; the in-code doors reached
+    pydicom's `Tag` with it and raised `OverflowError` (review of #574,
+    F-5). The same refusal, as `ValueError`, at the inspector door."""
+    with pytest.raises(ValueError) as caught:
+        PhiInspector(config_tags={key: {"action": "REPLACE", "value": "x"}})
+    assert f"phi_tags key {key!r} is not a 'gggg,eeee' tag" in str(caught.value)
 
 
 def test_a_refused_audit_mints_no_secret(tmp_path):

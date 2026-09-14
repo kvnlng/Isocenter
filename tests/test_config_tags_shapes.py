@@ -51,17 +51,36 @@ def test_a_bare_action_name_as_a_value_is_reported(action, caplog):
     assert any(action in m for m in msgs), msgs
 
 
-def test_study_dates_string_form_is_the_shift_and_is_not_reported(caplog):
+@pytest.mark.parametrize("word", ["SHIFT", "JITTER"])
+def test_study_dates_string_form_is_the_shift_and_is_not_reported(caplog, word):
     """#537, Q3: on Study Date the string form is REPLACE with no value,
-    which is the shift, so a bare `SHIFT` there is no gap between what was
-    asked and what happens. Kills the warning left unexempted."""
+    which is the shift, so a bare `SHIFT` or `JITTER` there is no gap
+    between what was asked and what happens. Kills the warning left
+    unexempted."""
     with caplog.at_level(logging.WARNING):
-        inspector = PhiInspector(config_tags={"0008,0020": "SHIFT"})
+        inspector = PhiInspector(config_tags={"0008,0020": word})
 
     assert not _warnings(caplog)
     dated = [f for f in inspector._scan_instance(_instance_with_date(), "P1", None)
              if f.tag == "0008,0020"]
     assert [f.remediation_proposal.action_type for f in dated] == ["SHIFT_DATE"]
+
+
+@pytest.mark.parametrize("word", ["REMOVE", "EMPTY"])
+def test_study_date_described_as_remove_or_empty_is_reported(caplog, word):
+    """The shift is exempt, not every action word (review of #574, F-2).
+    A caller who wrote `"REMOVE"` asked for removal and gets a retained,
+    shifted date: #111's gap exactly, so it is warned about, and the
+    warning names the shift as what happens. Kills the exemption keyed
+    on the tag alone."""
+    with caplog.at_level(logging.WARNING):
+        PhiInspector(config_tags={"0008,0020": word})
+
+    msgs = [m for m in _warnings(caplog) if "0008,0020" in m]
+    assert msgs == [
+        f"config_tags['0008,0020'] is {word!r}, which is read as the tag's "
+        f"display name, not its action -- on Study Date that is the shift. "
+        f"To {word.lower()} this tag, write {{'action': {word!r}, 'name': ...}}."], msgs
 
 
 def test_a_string_form_on_a_date_tag_is_refused():

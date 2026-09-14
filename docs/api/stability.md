@@ -218,8 +218,9 @@ unknown `privacy_profile`, an unknown `action`, a `phi_tags`,
 a Patient ID rule other than `KEEP` or `REPLACE` with no value, a
 `value:` under an action other than `REPLACE` or of a non-string type,
 a `replacement:` key, `SHIFT`/`JITTER` on a standard tag that is not DA
-or DT, or `REPLACE` on a standard tag whose VR cannot hold the value it
-would write -- #537, #538, #559, #560) and `FileNotFoundError` when it
+or DT, `REPLACE` on a standard tag whose VR cannot hold the value it
+would write, a `value:` holding a range in a DA or TM or a `\` in a tag
+of multiplicity 1 -- #537, #538, #559, #560) and `FileNotFoundError` when it
 does not exist; after either, the configuration is exactly what it was
 before the call (#456). `audit()` without `config_path` raises the
 same `ValueError` for such a rule in `session.configuration.phi_tags`,

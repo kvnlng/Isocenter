@@ -146,8 +146,13 @@ SHIFT_TABLE = [
     # DT: the date moves, the time is re-attached as written.
     ("20230515104822", -10, "20230505104822"),
     ("20230515104822.123456", -10, "20230505104822.123456"),
-    ("2023051510", -10, "2023050510"),         # was '20230421050100'
-    ("202305151048", -10, "202305051048"),     # was '20230505100408'
+    # Hour- and minute-precision DT decline: the old parser declined some
+    # (`2023060510`) and misread the rest (`2023051510` became
+    # '20230421050100'), and shifting them widens the accept set, which a
+    # pre-0.9.6 store's legacy branch reads as "already shifted" (#574).
+    ("2023051510", -10, None),
+    ("202305151048", -10, None),
+    ("2023060510", -10, None),
     ("20230515104822.1", -10, "20230505104822.1"),  # was '.100000'
     ("20230515.104822", -10, "20230505.104822"),
     ("20230515.104822.677", -10, "20230505.104822.677"),  # was '.677000'
@@ -155,6 +160,9 @@ SHIFT_TABLE = [
     ("20230515.1048", -10, None),
     ("2023-05-11 10:48:22", -10, "2023-05-01 10:48:22"),
     ("2023-05-11T10:48:22", -10, "2023-05-01T10:48:22"),
+    # strptime read one-digit ISO time fields and rendered them padded.
+    ("2023-05-11T1:2:3", -10, "2023-05-01T01:02:03"),
+    ("2023-05-11 9:08:7", -10, "2023-05-01 09:08:07"),
     ("2023-05-11T25:48:22", -10, None),
 ]
 
@@ -197,10 +205,8 @@ def _old_parser(value, days):
 
 def test_accepted_after_is_a_subset_of_accepted_before(service):
     """The accept set only narrows (#559): every value the new parser
-    shifts, the old one shifted too -- but for DT at hour or minute
-    precision, which it shifted only when it could misread -- and the new
-    date part is the value's
-    own date moved by the offset. Generated over every prefix of a few
+    shifts, the old one shifted too, with no exception, and the new date
+    part is the value's own date moved by the offset. Generated over every prefix of a few
     digit runs (the real DT and the TM shapes that fabricated), each with
     the dotted, fractional and ISO spellings. Kills a widened accept set,
     which the legacy scan branch would read as "already shifted" and skip
@@ -224,11 +230,7 @@ def test_accepted_after_is_a_subset_of_accepted_before(service):
         new = service._shift_date_string(value, -10)
         if new is None:
             continue
-        # A DT at hour or minute precision is the one widening: the old
-        # loop accepted such a value only when `%H%M%S` could misread its
-        # digits (`2023051510` -> `...050100`), and now shifts it right.
-        assert (_old_parser(value, -10) is not None
-                or (value.isdigit() and len(value) in (10, 12))), value
+        assert _old_parser(value, -10) is not None, value
         if "-" in value[:10]:
             y, m, d = (int(x) for x in value.split(" ")[0].split("T")[0].split("-"))
             assert new[:10] == (_dt.date(y, m, d) - _dt.timedelta(days=10)).isoformat(), value

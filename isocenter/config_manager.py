@@ -241,6 +241,26 @@ def _standard_dictionary_vr(tag: str) -> Optional[str]:
         return None
 
 
+def _dictionary_vm(tag: str) -> Optional[str]:
+    """The dictionary value multiplicity of a standard tag (`'1'`,
+    `'1-n'`, ...), or None where `_standard_dictionary_vr` is None."""
+    from pydicom.datadict import dictionary_VM  # pylint: disable=import-outside-toplevel
+    if _standard_dictionary_vr(tag) is None:
+        return None
+    return str(dictionary_VM(int(tag.replace(",", ""), 16)))
+
+
+def _is_oversized_tag_key(tag: str) -> bool:
+    """True for a key that reads as hex but names no 32-bit tag, such as
+    `'10000,0010'`. pydicom's `Tag` raises `OverflowError` for it, which
+    is not the `ValueError` every other refusal is (review of #574)."""
+    try:
+        number = int(tag.replace(",", ""), 16)
+    except ValueError:
+        return False
+    return not 0 <= number <= 0xFFFFFFFF
+
+
 def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
     """The dictionary VR of a **standard** tag when that VR cannot hold
     `value`, else None (#560).
@@ -259,6 +279,12 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
     dictionary VR (`US or SS`, `OB or OW`) is split, because pydicom has
     no validator under that name and passes anything. It is refused when
     no arm holds the value.
+
+    On a tag whose multiplicity allows several values, a string is judged
+    one `\\`-separated value at a time: `validate_value` reads the whole
+    string as one value, so `A\\P` on Patient Orientation (CS, VM 2) was
+    refused for the backslash CS's repertoire lacks. One value on a VM-1
+    tag holding a backslash is `_refused_phi_rule`'s to refuse.
     """
     from pydicom import config as pydicom_config  # pylint: disable=import-outside-toplevel
     from pydicom.valuerep import validate_value  # pylint: disable=import-outside-toplevel
@@ -269,12 +295,16 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
     # A sequence needs no arm of its own: pydicom has no validator for SQ
     # and passes any value, and the scan warns about a value on one.
     arms = [arm.strip() for arm in vr.split(" or ")]
+    parts = [value]
+    if isinstance(value, str) and _dictionary_vm(tag) != "1":
+        parts = value.split("\\")
 
     def holds(arm):
         if arm == "AT":
             return False
         try:
-            validate_value(arm, value, pydicom_config.RAISE)
+            for part in parts:
+                validate_value(arm, part, pydicom_config.RAISE)
         except (ValueError, TypeError):
             return False
         return True
@@ -304,7 +334,19 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
     6. REPLACE on a standard tag whose VR cannot hold what it writes
        (#560). Study Date's REPLACE with no value is the shift (#537, Q3)
        and is not judged as a literal.
+    7. A REPLACE `value:` pydicom's `validate_value` passes and the tag
+       still cannot hold (review of #574): a `-` in a DA or TM, which is
+       a range, and a `\\` on a tag of multiplicity 1, which is a second
+       value. Not in a DT, where `-` also opens a UTC offset.
+
+    Before all of them, a key naming no 32-bit tag is refused as the
+    loader refuses a key that is not `gggg,eeee`; on the in-code doors it
+    raised pydicom's `OverflowError` (review of #574).
     """
+    if isinstance(tag, str) and _is_oversized_tag_key(tag):
+        return (f"phi_tags key {tag!r} is not a 'gggg,eeee' tag (four hex "
+                f"digits, a comma, four hex digits, such as '0010,0010'); the "
+                f"scan reads no tag by that key, so the rule would never run")
     if isinstance(rule, dict):
         action = rule.get("action", "REPLACE")
         if not isinstance(action, str) or action.upper() not in _PHI_ACTIONS:
@@ -351,11 +393,22 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
             advice = "EMPTY or REMOVE"
             if vr in ("DA", "DT"):
                 advice += ", or JITTER to shift it"
-            if vr not in _NON_STRING_VRS:
+            # By arm: `US or SS` is as numeric as `US` (review of #574).
+            if not set(vr.split(" or ")) <= _NON_STRING_VRS:
                 advice += f", or give a value: that is a valid {vr}"
             return (f"phi_tags['{tag}'] is REPLACE, which writes {written!r}, "
                     f"and {tag} is {vr}, which cannot hold it; use {advice} "
                     f"(#560)")
+        if value:
+            vr = _standard_dictionary_vr(tag)
+            if vr in ("DA", "TM") and "-" in value:
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and a '-' in a {vr} is a range, which "
+                        f"{tag} cannot hold; give one {vr} value (#560)")
+            if "\\" in value and _dictionary_vm(tag) == "1":
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and {tag} holds one value, which a '\\' "
+                        f"would make two; give a value without one (#560)")
     return None
 
 

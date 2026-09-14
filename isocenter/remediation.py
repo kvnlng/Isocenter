@@ -1247,11 +1247,13 @@ class RemediationService:
         return offset
 
     #: The shapes `_shift_date_string` shifts (#559), matched whole and
-    #: ASCII-only. A DA, or a DT whose first eight digits are its date,
-    #: at any of DT's precisions; the non-standard dotted DT this parser
-    #: always accepted; and the ISO date and date-time.
+    #: ASCII-only. A DA, or a DT at second precision (optionally with a
+    #: fraction) whose first eight digits are its date; the non-standard
+    #: dotted DT this parser always accepted; and the ISO date and
+    #: date-time. Hour- and minute-precision DT are deliberately absent:
+    #: see the docstring's "The accept set only narrows".
     _DA_OR_DT = (r"([0-9]{4})([0-9]{2})([0-9]{2})"
-                 r"(?:([0-9]{2})(?:([0-9]{2})(?:([0-9]{2})(?:\.[0-9]{1,6})?)?)?)?")
+                 r"(?:([0-9]{2})([0-9]{2})([0-9]{2})(?:\.[0-9]{1,6})?)?")
     _DOTTED_DT = (r"([0-9]{4})([0-9]{2})([0-9]{2})"
                   r"\.([0-9]{2})([0-9]{2})([0-9]{2})(?:\.[0-9]+)?")
     _ISO = (r"([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})"
@@ -1267,10 +1269,10 @@ class RemediationService:
         A `date` or `datetime` is shifted as itself. A string is read by
         shape, and only these shapes shift:
 
-        - `YYYYMMDD` (DA), and a DT that begins with one --
-          `YYYYMMDDHH`, `...HHMM`, `...HHMMSS`, `...HHMMSS.F` to six
-          fraction digits. The date moves; everything after it is
-          re-attached exactly as written.
+        - `YYYYMMDD` (DA), and a DT that begins with one at second
+          precision -- `...HHMMSS`, `...HHMMSS.F` to six fraction digits.
+          The date moves; everything after it is re-attached exactly as
+          written.
         - The dotted DT `YYYYMMDD.HHMMSS[.F...]` this parser has always
           accepted, the same way.
         - ISO `YYYY-MM-DD`, optionally with ` HH:MM:SS` or `THH:MM:SS`,
@@ -1294,10 +1296,16 @@ class RemediationService:
         and shifted correctly is still shifted, to the same result but for
         the two fraction spellings above; only the fabricating shapes
         (TM-shaped, six- and seven-digit dates, a dotted time that is not
-        six digits) now decline. Widening it is not safe:
-        `_date_shift_declines` answers "would this shift" for the legacy
-        scan branch, which skips what would shift as already shifted, so
-        a wider parser silently skips PHI on a pre-0.9.6 store.
+        six digits, and hour- and minute-precision DT) now decline.
+        Widening it is not safe: `_date_shift_declines` answers "would
+        this shift" for the legacy scan branch, which skips what would
+        shift as already shifted, so a wider parser silently skips PHI on
+        a pre-0.9.6 store. That is why a 10- or 12-digit DT declines
+        rather than shifting correctly: the old loop declined
+        `2023060510`, a legacy instance can still hold it unshifted, and
+        shifting it here graded that instance CLEARED with the value
+        retained (review of #574; the misread ones, `2023051510`, it
+        accepted, and they now decline visibly instead).
 
         Args:
             date_val (Union[str, date, datetime]): The original date value.
