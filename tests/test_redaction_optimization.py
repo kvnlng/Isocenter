@@ -52,9 +52,13 @@ def test_process_valid_zones(mock_store):
     service.redact_machine_instances.assert_called_once()
 
 
-@patch("isocenter.services.tqdm")
-def test_redact_feedback_tqdm(mock_tqdm, mock_store):
+# `isocenter.parallel.tqdm`: the bar is drawn through
+# `parallel.progress_bar` since #540, the one door that reads
+# ISOCENTER_SHOW_PROGRESS.
+@patch("isocenter.parallel.tqdm")
+def test_redact_feedback_tqdm(mock_tqdm, mock_store, monkeypatch):
     """Verify tqdm is initialized during redaction."""
+    monkeypatch.delenv("ISOCENTER_SHOW_PROGRESS", raising=False)
     service = RedactionService(mock_store)
 
     # Actual logic calls tqdm(targets, ...)
@@ -67,3 +71,31 @@ def test_redact_feedback_tqdm(mock_tqdm, mock_store):
     args, kwargs = mock_tqdm.call_args
     assert "desc" in kwargs
     assert "Redacting M1" in kwargs["desc"]
+    # Drawn: the bar is on by default. Without this, a bar that was never
+    # enabled passes the test above just as well.
+    assert kwargs["disable"] is False, kwargs
+
+
+# The two halves of the rule `parallel.progress_bar` applies (#540): the
+# caller's `show_progress`, and the environment. Deleting
+# `show=show_progress` from the redaction loop survived every test that
+# existed (review of #589), because nothing asked this bar to be off.
+@pytest.mark.parametrize("show_progress, env", [
+    (False, None),
+    (True, "0"),
+])
+@patch("isocenter.parallel.tqdm")
+def test_redact_feedback_tqdm_can_be_silenced(mock_tqdm, mock_store,
+                                              monkeypatch, show_progress, env):
+    if env is None:
+        monkeypatch.delenv("ISOCENTER_SHOW_PROGRESS", raising=False)
+    else:
+        monkeypatch.setenv("ISOCENTER_SHOW_PROGRESS", env)
+    service = RedactionService(mock_store)
+
+    service.redact_machine_instances("M1", [(0, 10, 0, 10)],
+                                     show_progress=show_progress)
+
+    assert mock_tqdm.called
+    _args, kwargs = mock_tqdm.call_args
+    assert kwargs["disable"] is True, kwargs

@@ -12,7 +12,6 @@ import traceback
 import gc
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-from tqdm import tqdm
 import numpy as np
 
 from .entities import (Instance, DicomItem, DicomSequence, PhiStatus,
@@ -21,6 +20,7 @@ from .entities import (Instance, DicomItem, DicomSequence, PhiStatus,
 from .pixel_geometry import PixelGeometry, resolve_pixel_geometry
 from .store import DicomStore
 from .logger import describe_exception, get_logger
+from .parallel import progress_bar
 
 
 # Define standard codes for the Sequence
@@ -999,11 +999,11 @@ class RedactionService:
         failures = []
         applied = 0
 
-        for inst in tqdm(
+        for inst in progress_bar(
                 targets,
+                show=show_progress,
                 desc=f"Redacting {machine_sn}",
-                unit="img",
-                disable=not show_progress):
+                unit="img"):
             original_uid = inst.sop_instance_uid  # Capture before mutation
             # Before the pass touches it, as `_apply_redaction_rules`
             # does for the parallel path (#486; confirmed by the owner).

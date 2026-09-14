@@ -263,8 +263,10 @@ def test_a_failed_outcome_names_its_exception_type():
 
     failures = DicomExporter._report_export_failures(results, store)
 
-    assert failures == [("1.2", "Export failed for /o/x.dcm: KeyError"),
-                        ("1.3", "Export failed for /o/y.dcm: KeyError: 'x'")]
+    # Named by instance, not by `/o/x.dcm`: the row carries no output
+    # path since bunch E (`test_export_failure_text_carries_no_path.py`).
+    assert failures == [("1.2", "Export failed for instance 1.2: KeyError"),
+                        ("1.3", "Export failed for instance 1.3: KeyError: 'x'")]
     assert [r[2] for r in store.rows] == [d for _u, d in failures]
 
 

@@ -30,7 +30,6 @@ PACKAGE = REPO / "isocenter"
 
 # Import name -> distribution name, where they differ.
 DISTRIBUTION_NAMES = {
-    "dotenv": "python-dotenv",
     "yaml": "PyYAML",
     "PIL": "pillow",
     "dateutil": "python-dateutil",

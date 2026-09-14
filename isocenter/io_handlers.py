@@ -174,7 +174,8 @@ from pydicom.filewriter import write_sequence
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path)
-from .logger import describe_exception, get_logger
+from .logger import (describe_exception, describe_exception_without_paths,
+                     get_logger)
 from .pixel_geometry import (
     FLOAT_DTYPE_BY_ELEMENT,
     SIDECAR_DTYPE_NAMES,
@@ -3891,9 +3892,12 @@ def _verify_readback(path: str, ds, written_pixels=None,
     try:
         readback = pydicom.dcmread(path)
     except Exception as exc:
+        # Without paths: `path` is `<output path>.<pid>.tmp`, under
+        # `Subject_<Patient ID>/`, and this message becomes the export's
+        # `ERROR` row, where the outer spelling cannot strip it (bunch E).
         raise RuntimeError(
             f"Readback verification failed: the written file could not be "
-            f"read back ({describe_exception(exc)})") from exc
+            f"read back ({describe_exception_without_paths(exc)})") from exc
 
     mismatches = [
         f"{kw} reads back as {getattr(readback, kw, None)!r} where "
@@ -4439,8 +4443,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # here can change `geom`: the redaction block copies the array
         # (always, since #469), which does not change its shape.
         if arr is not None and geom.evidence is GeometryEvidence.GUESSED:
+            # The instance, never `ctx.output_path`: this message is the
+            # export's `ERROR` row, the report and `ExportError` whole,
+            # and the output path is `Subject_<Patient ID>/...` (review
+            # of #589). The same for the float refusal below.
             raise RuntimeError(
-                f"Refusing to write {ctx.output_path}: the pixel "
+                f"Refusing to write instance {uid}: the pixel "
                 f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
                 f"equally a multi-frame grayscale image and a "
                 f"single-frame image with {arr.shape[-1]} samples per "
@@ -4514,7 +4522,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # bar, it merely stopped inventing the value.
             if arr.itemsize in (4, 8) and geom.samples > 1:
                 raise RuntimeError(
-                    f"Refusing to write {ctx.output_path}: the pixels "
+                    f"Refusing to write instance {uid}: the pixels "
                     f"are {arr.dtype} and the geometry resolves to "
                     f"{geom.samples} samples per pixel, and there is no "
                     f"conformant way to write a multi-sample float pixel "
@@ -4978,7 +4986,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     except Exception as e:
         # Do not raise, as it aborts the entire parallel batch.
         # Report the failure back for the parent to count and raise on.
-        print(f"ERROR: Export failed for {ctx.output_path}: {describe_exception(e)}", file=sys.stderr)
+        #
+        # The console line names the instance, not `ctx.output_path`, and
+        # spells the exception without its path: the output path is
+        # `Subject_<Patient ID>/...`, and an OSError's text repeats it
+        # (P8, bunch E; the WFDB half is #588). The parent's `ERROR` row,
+        # `_report_export_failures`', has the same shape.
+        named = f"instance {uid}" if uid else "an instance with no SOP Instance UID"
+        print(f"ERROR: Export failed for {named}: "
+              f"{describe_exception_without_paths(e)}", file=sys.stderr)
         return ExportOutcome(ok=False, output_path=ctx.output_path,
                              sop_instance_uid=uid, losses=losses,
                              corrections=corrections,
@@ -6116,22 +6132,39 @@ class DicomExporter:
             if isinstance(r, ExportOutcome):
                 if r.ok:
                     continue
-                uid = r.sop_instance_uid or r.output_path
+                # The row names the instance and never `r.output_path`,
+                # in the key or the text: that path is
+                # `<folder>/Subject_<Patient ID>/...`, and this row is
+                # persisted, rendered into the compliance report and
+                # carried by `ExportError.failures`. It was
+                # `Export failed for <output path>: <exception>` until
+                # bunch E, and the exception repeated the path -- an
+                # `OSError`'s `str()` appends its filename -- which is
+                # why the reason goes through
+                # `describe_exception_without_paths`. The same shape as
+                # the WFDB row (#588) and the worker's console line (P8).
+                # The caller already holds the folder; the `EXPORT` row
+                # records it, and nothing below it is the report's.
+                uid = r.sop_instance_uid or "UNKNOWN"
+                named = (f"instance {r.sop_instance_uid}" if r.sop_instance_uid
+                         else "an instance with no SOP Instance UID")
                 # `error` is the exception the worker caught, not prose,
                 # so it is described here; `str()` of a message-less one
-                # was `''` and the row ended `Export failed for <path>:`
-                # (#435).
+                # was `''` and the row ended in a colon (#435). A string
+                # is kept as given: no worker writes one, and prose
+                # cannot be told apart from a path inside it.
                 if isinstance(r.error, BaseException):
-                    reason = describe_exception(r.error)
+                    reason = describe_exception_without_paths(r.error)
                 else:
                     reason = r.error if r.error is not None else "unknown error"
-                detail = f"Export failed for {r.output_path}: {reason}"
+                detail = f"Export failed for {named}: {reason}"
             else:
                 # `run_parallel` returns its own exception when a worker
                 # dies before it can answer. There is no outcome to name
                 # the instance with, and the row still has to exist.
                 uid = "UNKNOWN"
-                died = describe_exception(r) if isinstance(r, BaseException) else r
+                died = (describe_exception_without_paths(r)
+                        if isinstance(r, BaseException) else r)
                 detail = f"Export worker failed: {died}"
 
             detail = " ".join(str(detail).split()).replace("|", "\\|")

@@ -281,6 +281,31 @@ def _env_is(name: str, values) -> bool:
     return os.environ.get(name, "").lower() in values
 
 
+def progress_enabled(show: bool = True) -> bool:
+    """Whether a progress bar is drawn: the caller's `show`, unless
+    `ISOCENTER_SHOW_PROGRESS` switches it off.
+
+    The one spelling of that rule (#540). It was written once, inside
+    `_resolve_strategy`, so it reached the bars `run_parallel` draws and
+    no other: `anonymize()`, `release_memory()` and `lock_identities()`
+    each imported `tqdm` themselves and drew with the variable at `0`.
+    Read per call, not cached, so a variable set after import applies.
+    """
+    return bool(show) and not _env_is("ISOCENTER_SHOW_PROGRESS", _FALSEY)
+
+
+def progress_bar(iterable=None, *, show: bool = True, **kwargs):
+    """`tqdm`, drawn only when `progress_enabled(show)`.
+
+    Every bar outside `run_parallel` goes through here, and
+    `tests/test_progress_bars_honour_the_environment.py` fails if a module
+    other than this one imports `tqdm`: a second import is a bar the
+    variable does not reach. It calls this module's `tqdm` global, so a
+    test that patches `isocenter.parallel.tqdm` sees these bars too.
+    """
+    return tqdm(iterable, disable=not progress_enabled(show), **kwargs)
+
+
 def resolve_max_workers() -> int:
     """The default worker count: `ISOCENTER_MAX_WORKERS`, else one per CPU.
 
@@ -360,8 +385,7 @@ def _resolve_strategy(max_workers, chunksize, maxtasksperchild, disable_gc,
 
     disable_gc = disable_gc or _env_is("ISOCENTER_DISABLE_GC", ("1",))
 
-    if show_progress and _env_is("ISOCENTER_SHOW_PROGRESS", _FALSEY):
-        show_progress = False
+    show_progress = progress_enabled(show_progress)
 
     choice = _resolve_execution_choice(force_threads, maxtasksperchild,
                                        recycling_lever)

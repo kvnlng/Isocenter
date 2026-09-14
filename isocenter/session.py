@@ -12,7 +12,6 @@ from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
 import yaml
-from tqdm import tqdm
 
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportError, ExportSummary, SidecarPixelLoader,
@@ -23,7 +22,8 @@ from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
                        carry_phi_status_across_redaction,
                        _report_redaction_failures)
-from .config_manager import ConfigLoader, require_package_resource
+from .config_manager import (ConfigLoader, _is_tag_key,
+                             require_package_resource)
 from .privacy import (PhiInspector, PhiFinding, PhiReport, _is_replacement_id,
                       _is_replacement_name)
 from .logger import configure_logger, describe_exception, get_logger
@@ -36,7 +36,8 @@ from .crypto import KeyManager
 from .reversibility import ReversibilityService
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
-                       resolve_max_workers, resolve_worker_initializer)
+                       resolve_max_workers, resolve_worker_initializer,
+                       progress_bar)
 from .configuration import IsocenterConfiguration, FlowList
 from .entities import (Patient, PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree)
@@ -629,27 +630,33 @@ def _uids_from_frame(frame) -> Set[str]:
 
 
 def _report_phi_findings(findings) -> None:
-    """Prints what the pre-export scan found, and how to configure it away."""
-    counts, examples, descriptions = Counter(), {}, {}
+    """Prints what the pre-export scan found, and how to configure it away.
+
+    Never a value. The table had an Examples column, the first flagged
+    value per tag, so a patient's name went to the console and into any CI
+    log capturing it (#578). The tag, the reason and the count say what to
+    fix; the value adds only the identifier. `finding.reason` is safe to
+    print: every reason the inspector writes is a literal or names the tag
+    and the config's own description.
+    """
+    counts, descriptions = Counter(), {}
     for finding in findings:
         tag = finding.tag or finding.field_name
         counts[tag] += 1
-        examples.setdefault(tag, str(finding.value))
         descriptions[tag] = finding.reason
 
     print("\nSafety Scan Found Issues")
     print("The following tags still carry identifiers:")
-    print(f"{'Tag':<15} {'Description':<30} {'Count':<10} {'Examples'}")
-    print("-" * 80)
+    print(f"{'Tag':<15} {'Description':<30} {'Count'}")
+    print("-" * 56)
     for tag, count in counts.items():
-        print(f"{tag:<15} {descriptions[tag][:28]:<30} {count:<10} "
-              f"{examples[tag][:30]}")
+        print(f"{tag:<15} {descriptions[tag][:28]:<30} {count}")
 
     _print_suggested_config(counts)
 
 
 def _print_suggested_config(counts) -> None:
-    """Prints a config fragment removing every tag the scan flagged.
+    """Prints a config fragment resolving every tag the scan flagged.
 
     YAML, and specifically the shape `create_config()` writes, so the
     output can be pasted into the file the user already has. This is the
@@ -658,13 +665,38 @@ def _print_suggested_config(counts) -> None:
     the format `ConfigLoader` reads, since user-facing configs are YAML
     only. Both defects came from the same place: JSON has no comments, so
     the counts had to be smuggled in as `//`.
+
+    `counts` is keyed the way the table labels a finding, `tag or
+    field_name`. Only a `gggg,eeee` key becomes a rule (#587): a finding
+    with no tag -- burned-in text from `verification.py`, or one reloaded
+    from the store's `phi_findings` table, which keeps no tag -- was
+    suggested as a rule keyed on its field name, and `load_config`
+    refuses that key, so the pasted fragment did not load. Those are
+    counted in a comment instead; no rule removes them.
+
+    Every rule is `REMOVE` except Patient ID's, which is `REPLACE` with no
+    `value:` -- the keyed pseudonym. The ID is what keeps two patients
+    apart and `anonymize()` merges patients sharing one (#548), so a
+    removed or emptied ID would collapse them, and the tag-policy rules
+    (#537) refuse any Patient ID rule but `KEEP` and that one. A fragment
+    that suggests a refused rule is the #20 defect again, one level up.
     """
+    rules = {}
+    untagged = 0
+    for key, count in counts.items():
+        if isinstance(key, str) and _is_tag_key(key):
+            rules[key] = count
+        else:
+            untagged += count
+
     print("\nSuggested Config Update:")
-    print("Add the following rules to your config to resolve these:")
-    print()
-    print("phi_tags:")
-    for tag, count in counts.items():
-        rule = {tag: {"name": _suggested_tag_name(tag), "action": "REMOVE"}}
+    if rules:
+        print("Add the following rules to your config to resolve these:")
+        print()
+        print("phi_tags:")
+    for tag, count in rules.items():
+        action = "REPLACE" if tag == _PATIENT_ID_TAG else "REMOVE"
+        rule = {tag: {"name": _suggested_tag_name(tag), "action": action}}
         # Dumped per tag rather than as one mapping so the count can sit
         # above its own entry. yaml.dump owns the quoting -- a tag key
         # contains a comma, and hand-rolling that is how the previous
@@ -673,6 +705,13 @@ def _print_suggested_config(counts) -> None:
         print(f"  # Found {count} times")
         for line in block.splitlines():
             print(f"  {line}")
+    if untagged:
+        print(f"# {untagged} finding(s) above carry no DICOM tag, so no "
+              f"phi_tags rule can resolve them; review them by hand.")
+
+
+#: The one tag whose suggested rule is not `REMOVE` (#587).
+_PATIENT_ID_TAG = "0010,0020"
 
 
 def _suggested_tag_name(tag: str) -> str:
@@ -1468,6 +1507,18 @@ class DicomSession:
         Waveforms matter here as much as pixels: samples are cached as
         int16 of shape (num_samples, num_channels), which is ~80 KB for a
         10-second 12-lead but ~104 MB for a 24-hour 3-channel Holter.
+
+        Its progress bar follows `ISOCENTER_SHOW_PROGRESS` (#540).
+        """
+        self._release_memory(show_progress=True)
+
+    def _release_memory(self, show_progress: bool):
+        """`release_memory()`, with the caller's `show_progress`.
+
+        Private so the public method keeps its frozen, parameterless
+        signature. `_export_dicom` calls this with its own `show_progress`:
+        until #540 the sweep took no argument, so `export(show_progress=
+        False)` still drew "Releasing Memory".
         """
         get_logger().info("Releasing memory (RAM cleanup)...")
         count = 0
@@ -1482,7 +1533,8 @@ class DicomSession:
         if total_instances == 0:
             return
 
-        with tqdm(total=total_instances, desc="Releasing Memory", unit="inst") as pbar:
+        with progress_bar(total=total_instances, show=show_progress,
+                          desc="Releasing Memory", unit="inst") as pbar:
             for p in self.store.patients:
                 for st in p.studies:
                     for se in st.series:
@@ -3510,12 +3562,11 @@ class DicomSession:
         count_instances_chunked = 0
         missing_ids = 0
 
-        from tqdm import tqdm
-
         # Optimization: Create a lookup map for O(1) access
         patient_map = {p.patient_id: p for p in self.store.patients}
 
-        with tqdm(start_ids, desc="Locking Identities", unit="patient") as pbar:
+        with progress_bar(start_ids, desc="Locking Identities",
+                          unit="patient") as pbar:
             for pid in pbar:
                 p_obj = patient_map.get(pid)
                 if p_obj:
@@ -4484,6 +4535,27 @@ class DicomSession:
                 withheld (#536): nothing was attempted, and its `WARNING`
                 rows grade the run.
         """
+        # Cleared first, before the exporter is even resolved. These are
+        # session-scoped, and assigning them only on success let an
+        # export with an empty plan -- or one whose batch died at the
+        # pool -- leave a *previous* export's numbers standing: the
+        # report read "3 of 3 requested" under a PASS beside an empty
+        # folder (#196). None makes the report omit the row, and an
+        # absent row says "not answered here" -- which is the truth
+        # about an export that never completed, where a zero would say
+        # "nothing was written" and a stale pair answers for the wrong
+        # export.
+        #
+        # Here and not in `_export_dicom`, where #196 put it: a call that
+        # raises before any exporter runs (an unknown format), inside one
+        # (an option it does not take), or that goes through an exporter
+        # which does not report delivery (`wfdb`) answers nothing about
+        # DICOM delivery either, and left the last DICOM export's pair
+        # answering for it (#579). `_export_dicom` is private; a caller
+        # reaching it directly bypasses this and inherits the pair.
+        self._last_export_written = None
+        self._last_export_requested = None
+
         from . import exporters
 
         exporter = exporters.get_exporter(format)
@@ -4580,19 +4652,6 @@ class DicomSession:
                 (x1.06). Each worker holds one more decoded array while
                 it checks.
         """
-        # Cleared before anything can return early or raise. These are
-        # session-scoped, and assigning them only on success let an
-        # export with an empty plan -- or one whose batch died at the
-        # pool -- leave a *previous* export's numbers standing: the
-        # report read "3 of 3 requested" under a PASS beside an empty
-        # folder (#196). None makes the report omit the row, and an
-        # absent row says "not answered here" -- which is the truth
-        # about an export that never completed, where a zero would say
-        # "nothing was written" and a stale pair answers for the wrong
-        # export.
-        self._last_export_written = None
-        self._last_export_requested = None
-
         target_ids = (patient_ids if patient_ids is not None
                       else [p.patient_id for p in self.store.patients])
 
@@ -4631,7 +4690,7 @@ class DicomSession:
         # order.
         print("Saving pending changes to free memory...")
         self.save(sync=True)
-        self.release_memory()
+        self._release_memory(show_progress)
 
         tasks, patient_count, withheld = self._build_export_plan(
             _ExportOptions(folder, identifying_uids, allowed_uids,
@@ -4901,10 +4960,12 @@ class DicomSession:
                 continue
             # Flattened and pipe-escaped for the same reason as
             # `_report_export_failures`: the detail is rendered straight
-            # into a markdown table row.
+            # into a markdown table row. No `path`: it is
+            # `<folder>/Subject_<Patient ID>/...`, and the UID already
+            # names the file (review of #589).
             detail = " ".join(
                 f"{len(group)} exported instances share SOP Instance UID "
-                f"{uid} and were written to the same path ({path}): each "
+                f"{uid} and were written to one file: each "
                 f"successful write overwrote the previous one, and the "
                 f"folder holds one file for all {len(group)} of "
                 f"them.".split()).replace("|", "\\|")

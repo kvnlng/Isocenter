@@ -132,8 +132,6 @@ setup(
         "pyarrow>=14.0.0",
         "cryptography>=41.0.0",
         "tqdm>=4.65.0",
-        # Imported unguarded by isocenter/config_manager.py.
-        "python-dotenv>=1.0.0",
     ],
     # dataclass(slots=True) needs 3.10, and the dependency set above
     # resolves only on 3.12+. Every PR is gated on this floor and on

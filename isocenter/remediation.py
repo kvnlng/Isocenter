@@ -1,6 +1,6 @@
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
-from tqdm import tqdm
+from .parallel import progress_bar
 from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Study
 from .privacy import PhiFinding, PhiRemediation, canonical_patient_key
 from .logger import describe_exception, get_logger
@@ -125,7 +125,7 @@ class RemediationService:
         # attempted count has to be counted.
         attempted = 0
 
-        for finding in tqdm(findings, desc="Anonymizing Metadata", unit="finding"):
+        for finding in progress_bar(findings, desc="Anonymizing Metadata", unit="finding"):
             if not finding.remediation_proposal:
                 continue
 

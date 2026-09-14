@@ -117,18 +117,21 @@ def test_the_export_save_has_landed_before_release_memory_runs(
         patient.studies.append(study)
         session.store.patients.append(patient)
 
-        real_release = session.release_memory
+        # `_release_memory`, the sweep with the export's `show_progress`
+        # (#540); `release_memory()` is its parameterless public face, and
+        # the export no longer goes through it.
+        real_release = session._release_memory
 
-        def observing_release():
+        def observing_release(show_progress):
             events.append(("release_memory", threading.current_thread().name))
-            real_release()
+            real_release(show_progress)
             events.append((
                 "after sweep",
                 inst._pixel_loader is not None,
                 inst.pixel_array is None,
                 session.persistence_manager.queue.unfinished_tasks))
 
-        monkeypatch.setattr(session, "release_memory", observing_release)
+        monkeypatch.setattr(session, "_release_memory", observing_release)
 
         with patch("isocenter.io_handlers.run_parallel",
                    side_effect=lambda func, items, *a, **k: [func(i) for i in items]):
