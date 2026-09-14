@@ -1104,8 +1104,14 @@ TARGETS = {
     # `DECODER_RELABELS` -- the decode-error print above and #482's two
     # relabel sites with them -- and #523/#455/#524 moved and added sites
     # in `_sign_extend`, `_in_declared_container` and the signed-codestream
-    # gate, so the counts above no longer describe this file; the
-    # re-measurement is the line below.
+    # gate, so the counts above no longer describe this file. Re-measured
+    # at stride 1 on 4658b19 (3.12.14, in a copy of the tree while the
+    # full suite ran beside it): 91 of 93 killed. The two survivors were
+    # both in `signed_codestream_refusal`'s frame count when no offset
+    # table names one (`is not None` -> `is`, `or 1` -> `and 1`), a shape
+    # no test had; `test_the_signedness_gate_counts_frames_with_no_offset_table`
+    # now pins it and kills both by a real edit. The decode-error print is
+    # gone with `get_pixel_data`, and `is_available()`'s print is killed.
     "isocenter/imagecodecs_handler.py": (["tests/test_codecs_strict.py",
                                           "tests/test_imagecodecs_edge_cases.py",
                                           "tests/test_ingest_imagecodecs_fallback.py",

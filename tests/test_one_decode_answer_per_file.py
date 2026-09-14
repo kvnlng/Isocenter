@@ -422,6 +422,27 @@ def test_the_signedness_gate_reads_every_frame(tmp_path):
         bits_allocated=16, frames=2), SIGNED_REFUSAL.format(16), None)
 
 
+def test_the_signedness_gate_counts_frames_with_no_offset_table(tmp_path):
+    """The gate's frame count when no table names one: NumberOfFrames.
+
+    An empty Basic Offset Table and no Extended one, so
+    `offset_table_frame_count` has nothing to count and the gate falls
+    back to NumberOfFrames 2; frame 1 is the signed one. Found by the
+    stride-1 probe: with the table's count read when there is *no* table
+    (`is not None` flipped), or NumberOfFrames read as 1 (`or` to
+    `and`), the gate reads frame 0 alone, or raises inside its own
+    `try` and says nothing, and Pillow shifts frame 1 again.
+    """
+    from pydicom.encaps import encapsulate  # pylint: disable=import-outside-toplevel
+    unsigned = SIGNED16.view(np.uint16)
+    ds = dataset(J2K_LOSSLESS, [_j2k(unsigned)], rows=4, cols=4,
+                 bits_allocated=16, frames=2)
+    ds.PixelData = encapsulate([_j2k(unsigned), _j2k(SIGNED16)],
+                               has_bot=False)
+    ds["PixelData"].is_undefined_length = True
+    _refused_everywhere(tmp_path, ds, SIGNED_REFUSAL.format(16), None)
+
+
 def test_the_gate_reads_only_the_declared_frames(tmp_path, monkeypatch):
     """Attack A13: an excess frame's sign does not refuse a file ingest truncates.
 
