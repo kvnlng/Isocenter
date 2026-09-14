@@ -288,8 +288,8 @@ TARGETS = {
     # deleted `instance.mark_modified()` (its
     # test_a_re_lock_reaches_the_store); the four demanded files alone
     # leave exactly those 2. tests/test_reversibility.py was measured
-    # as a candidate too, and stays off: before #439's tests it killed
-    # six mutants, and after them it kills nothing these three miss.
+    # as a candidate in #489, and stays off: before #439's tests it killed
+    # six mutants, and after them nothing the row's three files then missed.
     #
     # Three more were gaps until #439 and are killed since by
     # tests/test_relock_identity_token.py and
