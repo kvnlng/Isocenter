@@ -580,3 +580,29 @@ def test_the_written_syntax_is_read_from_the_file_not_assumed(tmp_path):
     assert not native.ok
     assert compressed.ok, compressed.error
     assert str(ImplicitVRLittleEndian) == IMPLICIT_VR_LE
+
+
+# ---------------------------------------------------------------------------
+# #525: YBR_PARTIAL_* under JPEG 2000 fails the strict contract too.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("label", ("YBR_PARTIAL_422", "YBR_PARTIAL_420"))
+def test_ybr_partial_under_j2k_fails_the_readback(tmp_path, label):
+    """One answer under both syntaxes the exporter writes (#525).
+
+    Natively this file already failed `verify_readback=True` (#507); under
+    JPEG 2000 it passed, because the J2K row admitted both subsampled
+    labels pending this issue. Breaking by ruling (Q5): a verified
+    compressed export of such an instance is now not delivered.
+
+    Killing mutation (M1, the readback half): `YBR_PARTIAL_*` restored to
+    the J2K row.
+    """
+    outcome = _export(tmp_path, _image(label), compression="j2k",
+                      verify_readback=True)
+
+    assert not outcome.ok
+    message = str(outcome.error)
+    assert "Readback verification failed" in message, message
+    assert f"reads back as '{label}'" in message, message
+    assert f"does not admit ({J2K_LOSSLESS})" in message, message

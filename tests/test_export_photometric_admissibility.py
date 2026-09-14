@@ -52,6 +52,7 @@ That third arm is filed for v0.9.7 and deliberately not closed here.
 """
 import itertools
 import logging
+import sqlite3
 from datetime import date
 
 import numpy as np
@@ -584,3 +585,73 @@ def test_the_exported_file_re_ingests_with_the_same_label(tmp_path):
 
     assert pydicom.dcmread(
         next(out2.rglob("*.dcm"))).PhotometricInterpretation == "YBR_RCT"
+
+
+# ---------------------------------------------------------------------------
+# #525: YBR_PARTIAL_* under JPEG 2000 -- the same judgement as native.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("label", ("YBR_PARTIAL_422", "YBR_PARTIAL_420"))
+def test_ybr_partial_under_j2k_warns(tmp_path, label):
+    """A subsampled label is inadmissible under JPEG 2000 too (#525).
+
+    A JPEG 2000 codestream holds full-sample components, and PS3.5 A.4.4
+    gives it no subsampled label, so the compressed file is exactly as
+    inadmissible as the native one #502 already warns about. Measured
+    before the fix: `ok=True`, `warnings == []`, `verify_readback=True`
+    passed -- the answer depended on `use_compression`. The label is
+    still written as declared, because `YBR_FULL` would misstate the
+    value range (PS3.3 C.7.6.3.1.2) and there is no bare `YBR_PARTIAL`.
+
+    Killing mutation (M1): `YBR_PARTIAL_*` restored to the J2K row of
+    `_ADMISSIBLE_PHOTOMETRICS`.
+    """
+    outcome = _export(tmp_path, _image(label), compression="j2k")
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert written.file_meta.TransferSyntaxUID == J2K_LOSSLESS
+    assert written.PhotometricInterpretation == label
+    assert len(outcome.warnings) == 1, outcome.warnings
+    assert f"({J2K_LOSSLESS})" in outcome.warnings[0], outcome.warnings
+    assert "no transfer syntax this exporter writes admits it" in \
+        outcome.warnings[0], outcome.warnings
+
+
+@pytest.mark.parametrize("threads", [False, True])
+def test_a_parent_row_for_ybr_partial_under_j2k(tmp_path, monkeypatch,
+                                                threads):
+    """The compressed case reaches the audit log and the grade (#525).
+
+    Through `session.export()` with compression on, the default: one
+    `WARNING` row keyed on the SOP Instance UID and naming no output
+    path, and the run reads `REVIEW_REQUIRED`. Killing mutation (M2): the
+    worker's `written_syntax` forced to Implicit VR LE. A native judgement
+    of this label warns too, so the row count alone would not see it; the
+    row naming the JPEG 2000 syntax does.
+    """
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    if threads:
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    inst = _image("YBR_PARTIAL_422")
+    report = tmp_path / "report.md"
+    db = tmp_path / "p.db"
+
+    with DicomSession(str(db)) as session:
+        session.store.patients.append(_graph([inst]))
+        session.save()
+        session.export(str(tmp_path / "out"), use_compression=True,
+                       show_progress=False)
+        session.generate_report(str(report))
+
+    with sqlite3.connect(str(db)) as conn:
+        rows = conn.execute(
+            "SELECT entity_uid, details FROM audit_log "
+            "WHERE action_type='WARNING'").fetchall()
+    labelled = [r for r in rows if "PhotometricInterpretation" in r[1]]
+    assert len(labelled) == 1, rows
+    assert labelled[0][0] == inst.sop_instance_uid, labelled
+    assert f"({J2K_LOSSLESS})" in labelled[0][1], labelled
+    assert "Subject_" not in labelled[0][0] + labelled[0][1], labelled
+    assert "REVIEW_REQUIRED" in _grade(report), _grade(report)

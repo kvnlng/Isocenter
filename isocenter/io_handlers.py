@@ -560,9 +560,8 @@ class _PhotometricRefusal(RuntimeError):
 #: readback at the decode (`ValueError: Unknown (0028,0004) ...
 #: 'NONSENSE'`) while the default export writes it in silence.
 #:
-#: **Two deliberate widenings, each with its reason, because a strict
-#: table would fail this library's own output or take work this issue
-#: did not ask for:**
+#: **One deliberate widening, with its reason, because a strict table
+#: would fail this library's own output:**
 #:
 #: - `YBR_ICT` is admitted under JPEG 2000 *lossless* alongside
 #:   `YBR_RCT`, though `level=0` is the reversible transform. The owner's
@@ -570,13 +569,17 @@ class _PhotometricRefusal(RuntimeError):
 #:   is encoded with the transform and **keeps its label**, and #516
 #:   ships that, so a table admitting only `YBR_RCT` would warn about,
 #:   and refuse, files this exporter writes on purpose.
-#: - `YBR_PARTIAL_422`/`YBR_PARTIAL_420` are admitted under JPEG 2000,
-#:   though it admits neither. #502 is the *native*-syntax question and
-#:   the compressed half is filed separately; judging it here would make
-#:   the default export warn about a case nobody has ruled on yet.
-#:   **When that issue lands, remove these two from the J2K row** -- the
-#:   writer and the readback both tighten at once, which is why one
-#:   table serves both.
+#:
+#: **And one that is gone (#525).** `YBR_PARTIAL_422`/`YBR_PARTIAL_420`
+#: stood on the J2K row while only the native half had been ruled on, so
+#: the same instance warned natively and passed compressed. They are not
+#: admitted under JPEG 2000: the codestream holds full-sample components
+#: and PS3.5 A.4.4 gives no subsampled label to a J2K codestream. Such a
+#: label is written as declared with a WARNING, because `YBR_FULL` would
+#: misstate the value range (PS3.3 C.7.6.3.1.2) and there is no bare
+#: `YBR_PARTIAL`. `_compress_j2k` still encodes it `mct=False` (its case
+#: 3): the judgement moved, the encoder did not. The writer and the
+#: readback tightened at once, which is why one table serves both.
 #:
 #: Retired labels (`HSV`, `ARGB`, `CMYK`) are admitted everywhere. The
 #: question here is what a *syntax* can carry, not whether a label is
@@ -594,7 +597,7 @@ _ADMISSIBLE_PHOTOMETRICS = {
     "1.2.840.10008.1.2.1": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.2": _PHOTOMETRIC_ANY_SYNTAX,
     "1.2.840.10008.1.2.4.90": _PHOTOMETRIC_ANY_SYNTAX | {
-        "YBR_ICT", "YBR_RCT", "YBR_PARTIAL_422", "YBR_PARTIAL_420"},
+        "YBR_ICT", "YBR_RCT"},
 }
 
 #: Why a label the written syntax does not admit is inadmissible, and
