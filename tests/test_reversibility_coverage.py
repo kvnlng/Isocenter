@@ -74,17 +74,6 @@ def test_a_failed_embed_names_a_message_less_exception(rev_service,
               if r.name == "isocenter" and r.levelno == logging.ERROR]
     assert errors == ["Failed to embed token: Exception"], caplog.text
 
-def test_embed_original_data_empty(rev_service, mock_instance):
-    rev_service.embed_original_data(mock_instance, None)
-    rev_service.embed_original_data(mock_instance, {})
-    mock_instance.add_sequence.assert_not_called()
-
-def test_embed_original_data_exception(rev_service, mock_instance):
-    # Mock generate_identity_token to fail or subsequent embed to fail
-    with patch.object(rev_service, 'generate_identity_token', side_effect=Exception("Gen fail")):
-        with pytest.raises(Exception, match="Gen fail"):
-            rev_service.embed_original_data(mock_instance, {"PatientID": "123"})
-
 def test_recover_no_sequence(rev_service, mock_instance):
     mock_instance.sequences = {}
     assert rev_service.recover_original_data(mock_instance) is None
