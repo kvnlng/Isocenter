@@ -1096,7 +1096,12 @@ TARGETS = {
     # by tests/test_ybr_read_door_labels.py. That is 79 of 81, with the
     # same two known-equivalent survivors named above and no new one.
     # The RLE arm, which no mutant could reach through a real decode, is
-    # gone (#447).
+    # gone (#447). #453 then deleted `get_pixel_data` and
+    # `DECODER_RELABELS` -- the decode-error print above and #482's two
+    # relabel sites with them -- and #523/#455/#524 moved and added sites
+    # in `_sign_extend`, `_in_declared_container` and the signed-codestream
+    # gate, so the counts above no longer describe this file; the
+    # re-measurement is the line below.
     "isocenter/imagecodecs_handler.py": (["tests/test_codecs_strict.py",
                                           "tests/test_imagecodecs_edge_cases.py",
                                           "tests/test_ingest_imagecodecs_fallback.py",

@@ -231,29 +231,6 @@ def test_a_j2k_decode_that_fails_changes_no_label(tmp_path):
     assert (label, moved) == ("YBR_RCT", 0)
 
 
-def test_the_handler_relabels_exactly_the_rows_ingest_relabels_without_converting():
-    """J4: one table of label-only relabels, held to ingest's.
-
-    `_FALLBACK_PHOTOMETRICS` says which declared label ingest stores
-    under which, and `_FALLBACK_DECODER_CONVERTS` names the syntaxes
-    whose decoder has already converted, so a relabel there changes the
-    label only. The handler's `DECODER_RELABELS` must hold exactly those
-    rows. A row in one table alone is a label one door gives and the
-    other does not, which is this issue again. (#464's R5 holds the
-    conversion rows the same way.)
-    """
-    from_table = {ts: {declared: stored
-                       for declared, stored in labels.items()
-                       if declared != stored}
-                  for ts, labels in _FALLBACK_PHOTOMETRICS.items()
-                  if ts in _FALLBACK_DECODER_CONVERTS}
-    assert from_table == {
-        ts: dict(rows)
-        for ts, rows in imagecodecs_handler.DECODER_RELABELS.items()}
-    assert not set(imagecodecs_handler.DECODER_RELABELS) & set(
-        imagecodecs_handler.CONVERTS_TO)
-
-
 # ---------------------------------------------------------------------------
 # P1 -- the pydicom arm relabels from the decoder's own answer
 # ---------------------------------------------------------------------------
@@ -654,7 +631,8 @@ def test_a_j2k_stream_with_no_colour_transform_keeps_its_label(
         tmp_path, ts, photometric, source):
     """J5, P2's twin at the handler: no transform undone, no label written.
 
-    `DECODER_RELABELS` names the labels whose transform the codec undoes.
+    `_FALLBACK_DECODER_CONVERTS` names the syntaxes whose codec undoes a
+    colour transform, and `_FALLBACK_PHOTOMETRICS` the labels it undoes.
     A J2K stream under any other label -- MONOCHROME2, or RGB written
     without the multiple component transform -- decodes to exactly what
     was encoded, so the handler has converted nothing and says nothing:
