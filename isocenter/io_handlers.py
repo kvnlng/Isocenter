@@ -2234,6 +2234,9 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
     the facts only once the decode has succeeded; a refused file has its
     own `ERROR` row.
 
+    An icon item is asked the same, by `_decode_nested_pixels`, with the
+    file's `file_meta` borrowed (#598).
+
     Returns:
         ``{bits_allocated, bits_stored, high_bit, pixel_representation,
         encapsulated, stream, precision, width_read}``: `stream` is "JPEG
@@ -2314,8 +2317,17 @@ def _item_path_words(path) -> str:
     return " > ".join(f"{tag}[{index}]" for tag, index in path)
 
 
+def _nested_row_prefix(tag, vr, path) -> str:
+    """How every ingest row about a nested pixel element begins.
+
+    One spelling for the offset-table row (#433) and the HighBit row
+    (#598), so the two rows about one icon name it the same way.
+    """
+    return f"Standard tag {tag} ({vr}) at {_item_path_words(path)}: "
+
+
 def _decode_nested_pixels(ds, candidates, dropped, instance, *,
-                          offset_tables) -> list:
+                          offset_tables, high_bits) -> list:
     """Decode every nested (7fe0,0010) `populate_attrs` collected (#183).
 
     Runs in `ingest_worker`, immediately after the walk that produced
@@ -2359,6 +2371,13 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             `import_files` writes the row for each; a "fewer" candidate is
             deliberately *not* also appended to `dropped`, whose row would
             give the wrong reason for the same loss.
+        high_bits (list): Appended to with `(path, tag, vr, facts)` for
+            every **carried** candidate whose HighBit is not BitsStored - 1,
+            `facts` being `_high_bit_mismatch`'s (#598). `import_files`
+            writes the top level's `WARNING` row for each. A candidate
+            that is not carried appends nothing: its loss row is the one
+            it is owed, and a HighBit row beside it would describe a
+            decode that never reached the store.
 
     Returns:
         list: `(path, terminal_tag, vr, raw_bytes, sha256)` per carried
@@ -2406,6 +2425,11 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                                           "fewer"))
                     continue
                 decode_kwargs["allow_excess_frames"] = False
+            # The top level's #455 header rule, at this depth (#598).
+            # After the borrow, because it reads the transfer syntax off
+            # `file_meta`; asked before the decode, as at the top level,
+            # and kept below only once the decode has succeeded.
+            facts = _high_bit_mismatch(item_ds)
             arr, decoded_pi = _decode_pixels(item_ds, **decode_kwargs)
             if decode_kwargs:
                 offset_tables.append((path, tag_str, vr, counted, "excess"))
@@ -2430,6 +2454,8 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
         raw = arr.tobytes()
         carried.append(
             (path, tag_str, vr, raw, hashlib.sha256(raw).hexdigest()))
+        if facts is not None:
+            high_bits.append((path, tag_str, vr, facts))
 
         # The same correction the top-level arm makes just below, for the
         # same reason: pydicom de-planarises on read, so the bytes are
@@ -2517,9 +2543,14 @@ def ingest_worker(fp: str) -> Tuple:
         # handed over. `_decode_nested_pixels` appends them itself: it is
         # the code that knows (#183, #194).
         nested_offset_tables = []
+        nested_high_bits = []
         meta['nested_pixels'] = _decode_nested_pixels(
-            ds, nested, dropped, inst, offset_tables=nested_offset_tables)
+            ds, nested, dropped, inst, offset_tables=nested_offset_tables,
+            high_bits=nested_high_bits)
         meta['nested_offset_table'] = nested_offset_tables
+        # Ints, bools, strs and None only, so it pickles from a spawned
+        # worker like the rest of `meta` (#598).
+        meta['nested_high_bit'] = nested_high_bits
         meta['dropped_private_binary'] = dropped
         # Rides `meta` for the same reason as `dropped_private_binary`
         # above: this worker may be in a subprocess with no store
@@ -3037,6 +3068,27 @@ class DicomImporter:
                 store_backend.log_audit(
                     action_type="ERROR", entity_uid=path, details=detail)
 
+        def _record_high_bit(uid, detail):
+            """One HighBit row, at the top level or on a carried icon.
+
+            One counter and one suppression line for both depths (#598):
+            it is one fact about the header, and a cohort whose every
+            instance carries a mismatched icon as well as a mismatched
+            frame must not print twice the lines the cap promises.
+            """
+            nonlocal high_bit_rows
+            high_bit_rows += 1
+            if high_bit_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif high_bit_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance "
+                    "messages for HighBit other than BitsStored "
+                    "- 1) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
         for meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, err in results:
             # Clear result components from scope as soon as possible after use to help GC
             # But the loop variable holds them. Next iteration clears them.
@@ -3195,20 +3247,8 @@ class DicomImporter:
                     # declined `continue`s: a file not linked gets no row.
                     high_bit = meta.get('high_bit_mismatch')
                     if high_bit:
-                        detail = _high_bit_words(high_bit)
-                        high_bit_rows += 1
-                        if high_bit_rows <= 5:
-                            logger.warning(f"{inst.sop_instance_uid}: {detail}")
-                        elif high_bit_rows == 6:
-                            logger.warning(
-                                "... (suppressing further per-instance "
-                                "messages for HighBit other than BitsStored "
-                                "- 1) ...")
-                        if store_backend is not None:
-                            store_backend.log_audit(
-                                action_type="WARNING",
-                                entity_uid=inst.sop_instance_uid,
-                                details=detail)
+                        _record_high_bit(inst.sop_instance_uid,
+                                         _high_bit_words(high_bit))
 
                     # The frames `ingest_worker` dropped because the
                     # offset table named more than NumberOfFrames
@@ -3339,6 +3379,10 @@ class DicomImporter:
                         (t_path, t_tag): (t_vr, t_counted, t_kind)
                         for t_path, t_tag, t_vr, t_counted, t_kind
                         in meta.get('nested_offset_table', ())}
+                    nested_high = {
+                        (h_path, h_tag): (h_vr, h_facts)
+                        for h_path, h_tag, h_vr, h_facts
+                        in meta.get('nested_high_bit', ())}
                     for n_path, n_tag, n_vr, n_raw, n_hash in meta.get(
                             'nested_pixels', ()):
                         if not sidecar_manager:
@@ -3366,8 +3410,7 @@ class DicomImporter:
                         if n_table is not None:
                             t_vr, t_counted, _t_kind = n_table
                             detail = (
-                                f"Standard tag {n_tag} ({t_vr}) at "
-                                f"{_item_path_words(n_path)}: "
+                                f"{_nested_row_prefix(n_tag, t_vr, n_path)}"
                                 f"{frame_count_mismatch_words(t_counted)}. "
                                 f"Kept the first {t_counted[1]} and "
                                 f"discarded {t_counted[0] - t_counted[1]}.")
@@ -3378,6 +3421,20 @@ class DicomImporter:
                                     entity_uid=inst.sop_instance_uid,
                                     details=detail,
                                     loss_scope=LOSS_SCOPE_STANDARD)
+                        # The top level's HighBit row, for a carried icon
+                        # (#598). Below the no-sidecar branch for the
+                        # offset-table row's reason: only an icon that is
+                        # carried has a decode to describe. The words are
+                        # the top level's, tail included, and it is true
+                        # here because `_write_back_nested_pixels` writes an
+                        # icon's HighBit as BitsStored - 1 too.
+                        n_high = nested_high.get((n_path, n_tag))
+                        if n_high is not None:
+                            h_vr, h_facts = n_high
+                            _record_high_bit(
+                                inst.sop_instance_uid,
+                                f"{_nested_row_prefix(n_tag, h_vr, n_path)}"
+                                f"{_high_bit_words(h_facts)}")
                         kind = serialize_blob_kind('pixels', n_path, n_tag)
                         # Site 2 of six (#368): append and row commit under
                         # one hold, per icon, for the reason at site 1.
@@ -4126,6 +4183,36 @@ def _stored_width(arr: np.ndarray, attributes) -> Tuple[int, Optional[str]]:
         f"span {lo}..{hi}")
 
 
+def _width_notes(widened, declared_high_bit, bits_stored, high_bit) -> list:
+    """The INFO notes for a BitsStored/HighBit written other than declared.
+
+    One spelling for the top-level pixel element and an icon's (#598),
+    each of which writes `_stored_width`'s BitsStored and HighBit =
+    BitsStored - 1 and hands these back on `ExportOutcome.corrections`.
+
+    `widened` is `_stored_width`'s reason, or None. A declared HighBit the
+    file does not carry is said out loud too (#597). INFO, by ruling: the
+    written file is conformant, the samples are unchanged, and an ingested
+    file's declaration already has ingest's own row -- nothing in the
+    graph marks which instances those are, so a WARNING here would write a
+    second row per instance of every legacy cohort re-exported.
+    `declared_high_bit` is read with `declared_int` for #506's reason, and
+    gets no note after a widening, whose note already names the written
+    HighBit. "Written with", because the BitsStored named may be one
+    nobody declared.
+    """
+    if widened is not None:
+        return [f"{widened}; written with BitsStored {bits_stored} "
+                f"and HighBit {high_bit}, the array's own width"]
+    if declared_high_bit is not None and declared_high_bit != high_bit:
+        return [f"HighBit {declared_high_bit} was declared; written "
+                f"with BitsStored {bits_stored} and HighBit "
+                f"{high_bit}, because the samples are right-aligned "
+                f"and PS3.5 8.1.1 puts their most significant bit at "
+                f"BitsStored - 1. The samples are unchanged."]
+    return []
+
+
 #: The descriptors the readback compares first, by pydicom keyword. The
 #: four geometry descriptors are the ones #186/#205 showed can describe
 #: a different image than the pixels beside them; BitsAllocated is the
@@ -4655,7 +4742,7 @@ def _resolve_ds_item(ds, path):
     return cur, parent, seq_tag
 
 
-def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
+def _write_back_nested_pixels(ds, inst, ctx, losses, *, corrections) -> None:
     """Put each carried nested payload back into its sequence item (#183).
 
     A post-pass over the dataset `_merge_sequences` has already built,
@@ -4683,6 +4770,16 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
     interleaving the two would file a "gone" row for it while leaving it in
     the file. Removal is then by object identity rather than by the index
     that was recorded, because two identical icon `Dataset`s compare equal.
+
+    **An icon's BitsStored and HighBit follow the top level's rule (#598).**
+    `_stored_width` over the array being written, and HighBit =
+    BitsStored - 1, with the same INFO notes (`_width_notes`) handed back
+    on `corrections`, prefixed with the item's path. Ingest's HighBit row
+    says an export writes HighBit as BitsStored - 1, and that is now true
+    of an icon; and a JPEG-LS icon whose samples overflowed its declared
+    BitsStored is no longer masked by every conformant reader (measured:
+    `40000` read back as `3136`). `corrections` is keyword-only with no
+    default, the `offset_tables` precedent.
     """
     refs = getattr(inst, "_nested_pixel_refs", None)
     if not refs:
@@ -4760,9 +4857,10 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
                 f"pixel data.")))
             continue
 
-        writes.append((item, terminal_tag, decoded, geometry[4]))
+        writes.append((path, graph_item, item, terminal_tag, decoded,
+                       geometry[4]))
 
-    for item, terminal_tag, decoded, bits in writes:
+    for path, graph_item, item, terminal_tag, decoded, bits in writes:
         group, element = (int(x, 16) for x in terminal_tag.split(','))
         # PS3.5: `OW` above 8 bits allocated, `OB` at or below. Derived from
         # the item's own BitsAllocated rather than carried on the blob,
@@ -4777,6 +4875,20 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
         # it is deliberate. An icon is a thumbnail, the saving is nil, and
         # a second encoder call per instance is not.
         item.add_new(Tag(group, element), vr, decoded.tobytes())
+        # BitsStored and HighBit, by the top level's rule (#598). Only
+        # where the item declares a BitsStored: a hand-built item with
+        # none is not given one. BitsAllocated and PixelRepresentation
+        # are left as declared -- the loader's dtype was built from them
+        # (`_nested_loader_metadata`), so the array already agrees.
+        if declared_int(graph_item.attributes, "0028,0101") is not None:
+            item.BitsStored, widened = _stored_width(
+                decoded, graph_item.attributes)
+            item.HighBit = item.BitsStored - 1
+            corrections.extend(
+                f"At {_item_path_words(path)}: {note}"
+                for note in _width_notes(
+                    widened, declared_int(graph_item.attributes, "0028,0102"),
+                    item.BitsStored, item.HighBit))
 
     for parent, seq_tag, item in removals:
         sequence = parent[seq_tag].value
@@ -4957,7 +5069,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # the merge just built; here rather than inside `_merge_sequences`
         # so it cannot be reached by an `export_batch` caller separately,
         # and so both export paths get it from the one worker they share.
-        _write_back_nested_pixels(ds, inst, ctx, losses)
+        _write_back_nested_pixels(ds, inst, ctx, losses,
+                                  corrections=corrections)
 
         # 1. Patient Level
         DicomExporter._merge(ds, ctx.patient_attributes, losses)
@@ -5478,28 +5591,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             ds.BitsAllocated = arr.itemsize * 8
             ds.BitsStored, widened = _stored_width(arr, inst.attributes)
             ds.HighBit = ds.BitsStored - 1
-            if widened is not None:
-                corrections.append(
-                    f"{widened}; written with BitsStored {ds.BitsStored} "
-                    f"and HighBit {ds.HighBit}, the array's own width")
-            # A declared HighBit the file does not carry is said out loud
-            # too (#597). INFO, by ruling: the written file is conformant,
-            # the samples are unchanged, and an ingested file's declaration
-            # already has ingest's own row -- nothing in the graph marks
-            # which instances those are, so a WARNING here would write a
-            # second row per instance of every legacy cohort re-exported.
-            # `declared_int` for #506's reason, and not after a widening,
-            # whose note already names the written HighBit. "Written with",
-            # because the BitsStored named may be one nobody declared.
-            declared_high_bit = declared_int(inst.attributes, "0028,0102")
-            if (widened is None and declared_high_bit is not None
-                    and declared_high_bit != ds.HighBit):
-                corrections.append(
-                    f"HighBit {declared_high_bit} was declared; written "
-                    f"with BitsStored {ds.BitsStored} and HighBit "
-                    f"{ds.HighBit}, because the samples are right-aligned "
-                    f"and PS3.5 8.1.1 puts their most significant bit at "
-                    f"BitsStored - 1. The samples are unchanged.")
+            corrections.extend(_width_notes(
+                widened, declared_int(inst.attributes, "0028,0102"),
+                ds.BitsStored, ds.HighBit))
             ds.PixelRepresentation = 1 if arr.dtype.kind == "i" else 0
             declared_representation = declared_int(inst.attributes,
                                                    "0028,0103")
