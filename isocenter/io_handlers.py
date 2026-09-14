@@ -7273,7 +7273,7 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs, losses=None, vrs=None, revrs=None, within=""):
+    def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within=""):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
         `losses` is an optional list that collects `(scope, detail)` for
@@ -7667,7 +7667,7 @@ class DicomExporter:
         return 'UT', '\\'.join(atoms)
 
     @staticmethod
-    def _merge_sequences(ds, sequences: Dict[str, Any], losses=None,
+    def _merge_sequences(ds, sequences: Dict[str, Any], losses=None, *,
                          revrs=None, within=""):
         """
         Recursively populates sequences into the dataset.

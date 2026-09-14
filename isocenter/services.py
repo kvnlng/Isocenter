@@ -419,7 +419,7 @@ def rule_applies_to(rule_serial, serial) -> bool:
     """
     if not serial:
         return False
-    return rule_serial == "*" or rule_serial == serial
+    return rule_serial in ("*", serial)
 
 
 def rules_matching(rules, serial) -> List[dict]:
