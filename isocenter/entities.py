@@ -1217,6 +1217,7 @@ class Instance(DicomItem):
         # leaf takes nothing.
         from .io_handlers import SidecarPixelLoader  # pylint: disable=import-outside-toplevel
         reading_of = SidecarPixelLoader.reading_of
+        written, refusal = False, None
         while True:
             array = self.pixel_array
             # The one step that can copy, so outside the leaf: a view

@@ -6264,12 +6264,16 @@ class SidecarPixelLoader:
         parse as an integer.
         """
         return SidecarPixelLoader._reading(
-            *SidecarPixelLoader._descriptors_of(attrs))
+            SidecarPixelLoader._descriptors_of(attrs))
 
     @staticmethod
-    def _reading(rows, cols, samples, frames, bits, pixel_representation,
-                 pixel_dtype) -> tuple:
-        """`reading_of`, from descriptors already parsed."""
+    def _reading(descriptors) -> tuple:
+        """`reading_of`, from descriptors already parsed.
+
+        `descriptors` is `_descriptors_of`'s tuple, in its order.
+        """
+        (rows, cols, samples, frames, bits, pixel_representation,
+         pixel_dtype) = descriptors
         # A recorded carrier dtype first: no DICOM descriptor says
         # "float" -- a 32-bit float frame and a 32-bit integer frame both
         # declare BitsAllocated 32 -- and none says "bool" either, since
@@ -6379,9 +6383,9 @@ class SidecarPixelLoader:
 
         # Reconstruct based on the capture, by the one reading rule
         # (`_reading`): the dtype and the shape it names.
-        dt, target_shape = self._reading(
+        dt, target_shape = self._reading((
             self.rows, self.cols, self.samples, self.frames, self.bits,
-            self.pixel_representation, self.pixel_dtype)
+            self.pixel_representation, self.pixel_dtype))
 
         # Before `np.frombuffer`, which raises a bare `ValueError: buffer
         # size must be a multiple of element size` for a byte count that
