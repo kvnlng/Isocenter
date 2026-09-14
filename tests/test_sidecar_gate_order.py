@@ -977,7 +977,26 @@ def test_nothing_logs_while_the_pixel_state_lock_is_held(tmp_path):
     `relabel=None` and the pydicom one that relabels, parallel to the
     two loads the `recorded` fixture adds for the lock half of the same
     invariant. A log call added inside the publish is now red here.
+
+    **The capture guard is a third branch (#531), and neither of those
+    two reaches it.** The bare lambda carries no `describes`, and the file
+    arm passes no capture, so a log call inside `if describes is not
+    None:` executed under the hold with both loads green (review of #628
+    round 2, F1). The third load is an ingested instance read back
+    through its own sidecar loader, which carries `describes`; ingested,
+    saved and unloaded before the probe is armed, so the only lines the
+    probe sees from it are the read's own.
     """
+    folder = str(tmp_path / "guard")
+    os.makedirs(folder)
+    _write_ct_with_icon(folder)
+    session = DicomSession(persistence_file=str(tmp_path / "guard.db"))
+    session.ingest(folder)
+    session.save(sync=True)
+    guarded = next(inst for pt in session.store.patients for st in pt.studies
+                   for se in st.series for inst in se.instances)
+    assert guarded.unload_pixel_data() is True
+    assert hasattr(guarded._pixel_loader, "describes")
     logger = get_logger()
     probe = _LockProbe()
     level = logger.level
@@ -1011,9 +1030,12 @@ def test_nothing_logs_while_the_pixel_state_lock_is_held(tmp_path):
         relabelling = _relabelling_instance(str(tmp_path))     # relabel RGB
         assert relabelling.get_pixel_data().shape == (4, 4, 3)
         assert relabelling.attributes["0028,0004"] == "RGB"
+        got = guarded.get_pixel_data()                         # capture guard
+        assert guarded.pixel_array is got
     finally:
         logger.removeHandler(probe)
         logger.setLevel(level)
+        session.close()
     corrected = [held for msg, held in probe.seen if "BitsAllocated" in msg]
     refused = [held for msg, held in probe.seen if "held in memory only" in msg]
     assert corrected and len(refused) == 2, probe.seen

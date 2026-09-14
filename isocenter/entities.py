@@ -813,19 +813,6 @@ _DESCRIBED_TAG_KEYWORDS = {
 }
 
 
-# What the loader reads an empty descriptor as (`int(value or default)`
-# in `SidecarPixelLoader._descriptors_of`), so a refusal can say so
-# rather than report a number the caller never passed. Pinned against
-# the loader by `test_an_empty_descriptor_reads_as_the_loader_reads_it`.
-_EMPTY_DESCRIPTOR_READS_AS = {
-    "0028,0010": 0,
-    "0028,0011": 0,
-    "0028,0002": 1,
-    "0028,0008": 0,
-    "0028,0100": 8,
-    "0028,0103": 0,
-}
-
 # The frame a read loaded was read through a capture the instance has
 # since left: `_publish_loaded_frame` returns this instead of publishing,
 # and the loader arm of `get_pixel_data` re-reads (#531).
@@ -865,7 +852,8 @@ def _element_count(shape) -> int:
     return count
 
 
-def _unsatisfiable_edit_message(tag, value, array, reading, unparseable):
+def _unsatisfiable_edit_message(tag, value, array, reading, unparseable,
+                                descriptors_of):
     """Why an edit over an unsaved array was refused, in tags and sizes only.
 
     **No value a caller passed is echoed, on either branch.** This text
@@ -878,12 +866,22 @@ def _unsatisfiable_edit_message(tag, value, array, reading, unparseable):
     by what it would read the bytes as -- the sample count, the itemsize
     and the byte total -- never by the value or a shape that repeats it.
     An empty value is said to read as the loader's default, so a caller
-    who wrote `""` is not told about a `0` they never passed.
+    who wrote `""` is not told about a `0` they never passed; so is a
+    zero where the default is not zero (`int(0 or 8)` is 8), which is
+    falsy without being empty.
 
     `unparseable` names the described tags that do not parse with the
     edit applied. When the edit's own tag is not among them, a writer
     that bypassed `set_attr` left another descriptor unreadable, and the
     refusal names that one rather than blaming the edit.
+
+    `descriptors_of` is `SidecarPixelLoader._descriptors_of`, passed in
+    because `io_handlers` imports this module. The defaults the "reads
+    as" clause names are read from it -- `descriptors_of({})` is the six
+    descriptors with nothing set, in the order `_DESCRIBED_TAG_KEYWORDS`
+    lists them -- rather than kept as a table here: a table was a second
+    statement of the loader's rule, and it drifted unpinned (review of
+    #628 round 2, F2).
     """
     keyword = _DESCRIBED_TAG_KEYWORDS[tag]
     held = (f"the unsaved {array.dtype.name} {tuple(array.shape)} array "
@@ -900,10 +898,12 @@ def _unsatisfiable_edit_message(tag, value, array, reading, unparseable):
                 f"the {keyword} edit. {way_out}")
     dtype, shape = reading
     samples = _element_count(shape)
+    reads_as = dict(zip(_DESCRIBED_TAG_KEYWORDS, descriptors_of({})))
     subject = keyword
     if value is None or (isinstance(value, (str, bytes)) and not value):
-        subject = (f"An empty {keyword} reads as "
-                   f"{_EMPTY_DESCRIPTOR_READS_AS[tag]}, and")
+        subject = f"An empty {keyword} reads as {reads_as[tag]}, and"
+    elif not value and reads_as[tag]:
+        subject = f"A zero {keyword} reads as {reads_as[tag]}, and"
     return (f"{subject} would read {held} as {samples} {dtype.itemsize}-byte "
             f"{dtype.name} samples, {samples * dtype.itemsize} bytes, and "
             f"the array holds {array.nbytes}. {way_out}")
@@ -1330,10 +1330,10 @@ class Instance(DicomItem):
             self.unload_pixel_data()
             return
         edited, after = refused
+        descriptors_of = SidecarPixelLoader._descriptors_of  # pylint: disable=protected-access
         raise ValueError(_unsatisfiable_edit_message(
             tag, value, array, after,
-            _unparseable_descriptors(SidecarPixelLoader._descriptors_of,  # pylint: disable=protected-access
-                                     edited)))
+            _unparseable_descriptors(descriptors_of, edited), descriptors_of))
 
     def unload_pixel_data(self) -> bool:
         """
@@ -2049,7 +2049,11 @@ class Instance(DicomItem):
                 # whether the six descriptors the frame was read by are
                 # still the instance's, which nothing but a descriptor
                 # edit moves; that is why it is not the revision guard
-                # the docstring rejects.
+                # the docstring rejects. `describes()` can raise here --
+                # a bypass wrote a descriptor that does not parse -- and
+                # that is the #417 refusal, surfaced by the caller's
+                # `RuntimeError` with the slot still empty and the lock
+                # released by the `with`.
                 describes = getattr(capture, "describes", None)
                 if describes is not None and not describes(self):  # pylint: disable=not-callable
                     return _STALE_CAPTURE

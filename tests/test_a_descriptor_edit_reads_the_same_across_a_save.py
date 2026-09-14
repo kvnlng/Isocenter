@@ -239,6 +239,38 @@ def test_a_read_in_flight_at_the_edit_is_re_read_under_the_new_declaration(
     _same(_reopened_read(db), ORIGINAL.view(np.int16))
 
 
+def test_a_stale_pass_re_reads_through_the_slot(ingested, monkeypatch):
+    """The re-read after a stale publish goes through `_pixel_loader` as it is now.
+
+    A redaction pass rebinds the slot (`_apply_redaction_outcomes`) to the
+    redacted frame's loader. A read whose capture went stale re-reads
+    through the slot rather than the loader it read through, or the
+    rebound frame is published one pass late (review of #628 round 2, P1).
+    Driven with no race: the in-flight hook makes the edit and rebinds
+    the slot before returning, and the rebound loader's array is what
+    publishes.
+    """
+    _session, inst, _db = ingested
+    real = SidecarPixelLoader.__call__
+    rebound = np.full((4, 4), 7, dtype=np.int16)
+    fired = []
+
+    def edit_and_rebind_in_flight(loader):
+        arr = real(loader)
+        if not fired:
+            fired.append(1)
+            inst.set_attr(PR, 1)
+            inst._pixel_loader = lambda: rebound
+        return arr
+
+    monkeypatch.setattr(SidecarPixelLoader, "__call__", edit_and_rebind_in_flight)
+
+    got = inst.get_pixel_data()
+
+    assert fired == [1], "the edit never landed inside the read"
+    assert got is rebound and inst.pixel_array is rebound
+
+
 def test_a_rows_edit_republishes_the_same_bytes_in_the_declared_shape(ingested):
     """The reshape half of the republish, from a descriptor a bypass wrote.
 
@@ -404,39 +436,86 @@ def test_an_edit_beside_a_descriptor_a_bypass_left_unparseable_names_that_descri
     assert inst.attributes == attributes
 
 
-_EMPTY_READS_AS = {ROWS: 0, COLS: 0, SAMPLES: 1, FRAMES: 0, BITS: 8, PR: 0}
+# The loader's defaults, read from the loader: `_descriptors_of({})` is the
+# six descriptors with nothing set, in the order `_descriptors_from` reads
+# them. Not a second copy of a table -- a literal here pinned nothing
+# (review of #628 round 2, F2: a table with BitsAllocated 0 passed).
+_LOADER_READS_NOTHING_AS = dict(zip(
+    (ROWS, COLS, SAMPLES, FRAMES, BITS, PR),
+    SidecarPixelLoader._descriptors_of({})))
 
 
-@pytest.mark.parametrize("tag", list(_EMPTY_READS_AS))
-def test_an_empty_descriptor_reads_as_the_loader_reads_it(tag):
-    """The defaults the refusal names for an empty value are the loader's."""
+@pytest.mark.parametrize("tag", list(_LOADER_READS_NOTHING_AS))
+def test_an_empty_descriptor_reads_as_the_loader_reads_nothing(tag):
+    """An empty value reads as the loader's default for an absent one.
+
+    Pins the `int(value or default)` rule the refusal's "reads as" clause
+    relies on: the number it names is `_descriptors_of({})`'s, and this
+    is what makes that the number an empty value is read as.
+    """
     base = {ROWS: 4, COLS: 4, SAMPLES: 1, FRAMES: 1, BITS: 16, PR: 0}
     for empty in ("", b"", None):
         assert (SidecarPixelLoader.reading_of({**base, tag: empty})
                 == SidecarPixelLoader.reading_of(
-                    {**base, tag: _EMPTY_READS_AS[tag]}))
+                    {**base, tag: _LOADER_READS_NOTHING_AS[tag]}))
 
 
+@pytest.mark.parametrize("tag, keyword, reads", [
+    (ROWS, "Rows", "0 2-byte uint16 samples, 0 bytes"),
+    (COLS, "Columns", "0 2-byte uint16 samples, 0 bytes"),
+    (BITS, "BitsAllocated", "16 1-byte uint8 samples, 16 bytes"),
+], ids=["Rows", "Columns", "BitsAllocated"])
 @pytest.mark.parametrize("value", ["", b"", None], ids=["str", "bytes", "None"])
 def test_an_empty_descriptor_over_an_unsaved_array_is_refused_as_what_it_reads_as(
-        ingested, value):
-    """An `EMPTY` on Rows is told the loader reads an empty value as 0.
+        ingested, tag, keyword, reads, value):
+    """An `EMPTY` is told what the loader reads an empty value as.
 
     The size arithmetic was already the loader's own; a caller who wrote
-    `""` was told about a `0` they never passed. Review of #628, P2.
+    `""` was told about a `0` they never passed (review of #628, P2). The
+    number named is the loader's own default, read from the loader, so a
+    BitsAllocated row saying "reads as 0" over a reading of 8 is red here
+    (round 2, F2). SamplesPerPixel, NumberOfFrames and PixelRepresentation
+    read the same empty over this array and are plain writes.
     """
     _session, inst, _db = ingested
     inst.set_pixel_data(UNSIGNED.copy())
     attributes = dict(inst.attributes)
 
     with pytest.raises(ValueError) as refused:
-        inst.set_attr(ROWS, value)
+        inst.set_attr(tag, value)
 
     assert str(refused.value) == (
-        "An empty Rows reads as 0, and would read the unsaved uint16 (4, 4) "
-        "array set by set_pixel_data() as 0 2-byte uint16 samples, 0 bytes, "
-        "and the array holds 32. Pass the array you mean to "
+        f"An empty {keyword} reads as {_LOADER_READS_NOTHING_AS[tag]}, and "
+        "would read the unsaved uint16 (4, 4) array set by set_pixel_data() "
+        f"as {reads}, and the array holds 32. Pass the array you mean to "
         "set_pixel_data(), which writes its own descriptors.")
+    assert inst.attributes == attributes
+
+
+@pytest.mark.parametrize("value", [0, False], ids=["0", "False"])
+def test_a_zero_bits_allocated_over_an_unsaved_array_is_refused_as_what_it_reads_as(
+        ingested, value):
+    """A falsy `0` is not empty, and the loader reads it as the default too.
+
+    `int(attrs.get(tag, 8) or 8)` takes `0` and `False` to 8, so the
+    reading is uint8 and the refusal was true about the reading and silent
+    about the mapping (review of #628 round 2, P2). The clause names the
+    mapping; the value is still not echoed -- "zero" is the class, and
+    `"0"` (a string) reads as 0 and takes the plain branch.
+    """
+    _session, inst, _db = ingested
+    inst.set_pixel_data(UNSIGNED.copy())
+    attributes = dict(inst.attributes)
+
+    with pytest.raises(ValueError) as refused:
+        inst.set_attr(BITS, value)
+
+    assert str(refused.value) == (
+        f"A zero BitsAllocated reads as {_LOADER_READS_NOTHING_AS[BITS]}, "
+        "and would read the unsaved uint16 (4, 4) array set by "
+        "set_pixel_data() as 16 1-byte uint8 samples, 16 bytes, and the "
+        "array holds 32. Pass the array you mean to set_pixel_data(), "
+        "which writes its own descriptors.")
     assert inst.attributes == attributes
 
 
