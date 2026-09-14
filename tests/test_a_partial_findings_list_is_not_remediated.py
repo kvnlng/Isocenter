@@ -30,6 +30,7 @@ What this does **not** do (owner ruling Q7, #573): move the grade. The
 report grades audit rows, and a finding the caller did not hand in writes
 none.
 """
+import dataclasses
 import json
 
 import pydicom
@@ -343,6 +344,72 @@ def test_a_hand_built_extra_key_cannot_complete_an_entity(tmp_path):
         session.close()
 
 
+def _misnamed_setup(session, report, level):
+    """The entity at `level`, its uid, and the one report finding to re-file."""
+    instance = _instances(session)[0]
+    if level == "study":
+        study = session.store.patients[0].studies[0]
+        return study, study.study_instance_uid, next(
+            f for f in report if f.entity is study)
+    return instance, instance.sop_instance_uid, next(
+        f for f in _top_level(report, instance) if f.tag == "0008,0080")
+
+
+@pytest.mark.parametrize("uid", [None, "not-a-scanned-uid"])
+@pytest.mark.parametrize("level", ["instance", "study"])
+def test_a_misnamed_finding_does_not_vouch_for_its_entity(
+        tmp_path, level, uid):
+    """The report less every finding under the entity's UID, plus one of
+    those findings re-filed under a uid the audit never raised under --
+    or none.
+
+    The tally is asked about the uid a finding *names*, so a wrong or
+    missing one got no opinion, and the success stamped the entity
+    REMEDIATED over everything the pass was never handed: manifest
+    `true`, PASS, 18 of the instance's identifiers still original. The
+    entity's own UID is settled as well, and nothing was handled under
+    it.
+    """
+    session = _session(tmp_path)
+    try:
+        report = session.audit()
+        entity, real_uid, original = _misnamed_setup(session, report, level)
+        rest = [f for f in report if f.entity_uid != real_uid]
+        assert len(rest) < len(report), "setup"
+
+        session.anonymize(findings=rest + [
+            dataclasses.replace(original, entity_uid=uid)])
+
+        assert entity.phi_status is PhiStatus.IDENTIFIED
+        assert _manifest(session, tmp_path) == [False]
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize("level", ["instance", "study"])
+def test_a_misnamed_finding_beside_the_full_report_stays_remediated(
+        tmp_path, level):
+    """The same re-filed finding, handed with the whole report.
+
+    Every key the audit raised under the entity's UID is handled, so
+    settling that UID completes it; a stray name on one extra finding
+    demotes nothing.
+    """
+    session = _session(tmp_path)
+    try:
+        report = session.audit()
+        _entity, _uid, original = _misnamed_setup(session, report, level)
+
+        session.anonymize(findings=list(report) + [
+            dataclasses.replace(original, entity_uid="not-a-scanned-uid")])
+
+        assert {e.phi_status for e in _entities(session)} == {
+            PhiStatus.REMEDIATED}
+        assert set(_manifest(session, tmp_path)) == {True}
+    finally:
+        session.close()
+
+
 def test_hand_built_findings_without_an_audit_keep_pass_accounting(tmp_path):
     """No audit, no tally: the pass speaks for the findings it was given."""
     session = _session(tmp_path)
@@ -389,6 +456,61 @@ def test_a_pass_after_the_audit_is_settled_keeps_pass_accounting(tmp_path):
         assert session.anonymize(findings=[finding]) == 1
 
         assert instance.phi_status is PhiStatus.REMEDIATED
+    finally:
+        session.close()
+
+
+NARROW_CONFIG = (
+    "privacy_profile: none\n"
+    "remove_private_tags: false\n"
+    "phi_tags:\n"
+    "  '0008,0080':\n"
+    "    name: Institution Name\n"
+    "    action: EMPTY\n")
+
+
+@pytest.mark.parametrize("between", ["narrower_config", "partial_then_audit"])
+def test_an_earlier_report_is_settled_against_the_latest_audit(
+        tmp_path, between):
+    """Pinned as it stands, and a known cost of the design (#582).
+
+    The tally is the **most recent** `audit()`'s. A report from an earlier
+    audit -- or from one run under another config -- carries keys the
+    latest one did not raise, so the instance's handled set is a strict
+    superset of the raised one, and count plus hash-sum cannot tell a
+    superset from a set with a key missing without holding the keys.
+    The instance reads IDENTIFIED with nothing left on it, until the next
+    `audit()` scans it clean. The safe direction: the manifest says
+    `false` for a clean instance, never `true` for one with identifiers.
+
+    - `narrower_config`: `r1 = audit()`, `audit(config_path=narrow)`,
+      `anonymize(r1)`.
+    - `partial_then_audit`: `r1 = audit()`, a `REPLACE_TAG`-only pass
+      over r1, `audit()`, `anonymize(r1)`.
+
+    If #582 changes this, this test is the one to change with it.
+    """
+    session = _session(tmp_path)
+    try:
+        first = session.audit()
+        instance = _instances(session)[0]
+        if between == "narrower_config":
+            narrow = tmp_path / "narrow.yaml"
+            narrow.write_text(NARROW_CONFIG, encoding="utf-8")
+            assert 0 < len(session.audit(config_path=str(narrow))) < len(first)
+        else:
+            session.anonymize(findings=[
+                f for f in first
+                if f.remediation_proposal.action_type == "REPLACE_TAG"])
+            assert 0 < len(session.audit()) < len(first)
+
+        session.anonymize(first)
+
+        assert instance.phi_status is PhiStatus.IDENTIFIED
+        assert _manifest(session, tmp_path) == [False]
+
+        assert len(session.audit()) == 0
+        assert instance.phi_status is PhiStatus.CLEARED
     finally:
         session.close()
 

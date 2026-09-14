@@ -381,7 +381,10 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   entity whose last pass declined a remediation on it or inside it (a
   remediation that raised included), or one a pass left with a
   remediation the session's last `audit()` raised against it still
-  unhandled -- a partial `anonymize(findings=...)` (#553).
+  unhandled -- a partial `anonymize(findings=...)` (#553). It can also
+  read `false` over an entity with nothing left on it, when the report a
+  pass was handed came from an earlier `audit()` than the last, until
+  the next `audit()` (#582).
 - **The `.pass.lock` / `.lock` file names**, the sidecar's `_pixels.bin`
   suffix, the audit table's columns, the schema's table names.
 

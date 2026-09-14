@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 from tqdm import tqdm
-from .entities import JITTER_SCHEME_KEYED, PhiStatus
+from .entities import JITTER_SCHEME_KEYED, Instance, PhiStatus, Study
 from .privacy import PhiFinding, PhiRemediation, canonical_patient_key
 from .logger import describe_exception, get_logger
 
@@ -812,6 +812,19 @@ class RemediationService:
           scan-time `entity_uid` strings, not live entities: a patient's
           `patient_id` changes during the pass.
 
+        **The entity's own UID is settled too.** A finding names its uid,
+        and a hand-built one can name the wrong one or none: asked only
+        about that name, the tally had no opinion, and the success stamped
+        the instance REMEDIATED over everything the audit raised under
+        its real UID that the pass was never handed. So each resolved
+        finding's live UID (`_live_uid`) is settled beside the name, with
+        the keys handled under it. For a scan finding the two are the
+        same string and it is settled once. A UID the audit did not raise
+        under -- one `redact()` regenerated since -- gets no opinion, as
+        before. **Not a patient**: by the pass end its live `patient_id`
+        is the pseudonym, so a patient finding filed under a wrong uid
+        still keeps pass accounting.
+
         Only an entity that ends the pass REMEDIATED is touched: one that
         only declined keeps whatever status it had, which
         `test_a_pass_that_only_declined_leaves_the_status_alone` pins.
@@ -822,13 +835,17 @@ class RemediationService:
             by_uid.setdefault(key[0], set()).add(key)
         demote = list(self._declined_entities)
         if self._scan_tally is not None:
+            live = {id(f): self._live_uid(f.entity) for f in findings
+                    if f.remediation_proposal and f.entity is not None}
             incomplete = {
-                uid for uid in {f.entity_uid for f in findings
-                                if f.remediation_proposal}
+                uid for uid in ({f.entity_uid for f in findings
+                                 if f.remediation_proposal}
+                                | set(live.values()))
                 if self._scan_tally.settle(uid, by_uid.get(uid, ())) is False}
             for finding in findings:
-                if (finding.entity_uid in incomplete
-                        and finding.entity is not None):
+                if finding.entity is not None and (
+                        finding.entity_uid in incomplete
+                        or live.get(id(finding)) in incomplete):
                     demote.append(finding.entity)
                     owner = self._instance_owners.get(id(finding.entity))
                     if owner is not None:
@@ -836,6 +853,26 @@ class RemediationService:
         for entity in demote:
             if getattr(entity, "phi_status", None) is PhiStatus.REMEDIATED:
                 entity.record_phi_status(PhiStatus.IDENTIFIED)
+
+    @staticmethod
+    def _live_uid(entity) -> Optional[str]:
+        """The UID the scan files `entity`'s findings under, read now.
+
+        An instance's SOP Instance UID or a study's Study Instance UID --
+        the uids `PhiInspector` writes into `entity_uid`. None for a
+        patient, whose `patient_id` the pass has replaced by the time it
+        settles, and for a nested item. The item's owner is not consulted
+        because it could add nothing: `Session._nested_finding_owners`
+        finds an owner *through* the finding's `entity_uid`, so an item
+        has one only when that name is already its instance's UID, and a
+        mis-named nested finding stamps the item alone, never the
+        instance.
+        """
+        if isinstance(entity, Instance):
+            return entity.sop_instance_uid
+        if isinstance(entity, Study):
+            return entity.study_instance_uid
+        return None
 
     #: The `Patient`/`Study` fields the exporter stamps onto every exported
     #: instance from the entity, with the tag each is the value of
@@ -1408,7 +1445,7 @@ def _key_digest(keys) -> int:
 
 
 class _ScanTally:
-    """What the last `audit()` raised, per scan-time `entity_uid` (#553).
+    """What the most recent `audit()` raised, per scan-time `entity_uid` (#553).
 
     `anonymize(findings=...)` applies what it is handed, and each success
     stamps its entity REMEDIATED. Without this, one of an instance's 202
@@ -1429,8 +1466,11 @@ class _ScanTally:
 
     - **None**: the audit raised nothing under that uid. No opinion; the
       pass accounts for itself, as a pass with no audit behind it does.
-    - **True**: the handled keys, merged with those earlier passes on the
-      same audit handled, are exactly the raised set. The uid is dropped,
+      Asked about a finding's named uid *and* its entity's own UID
+      (`RemediationService._settle_statuses`), so a wrong or missing name
+      reaches None only for a patient finding.
+    - **True**: the handled keys, merged with those earlier passes since
+      the same audit handled, are exactly the raised set. The uid is dropped,
       so a later pass over it has no opinion either.
     - **False**: they are not. The merged set is kept in `_partial` until
       a later pass completes it, so two complementary partial passes end
@@ -1439,9 +1479,17 @@ class _ScanTally:
 
     **What is compared.** The merged set's size and its hash-sum against
     the raised pair. A merged set *larger* than the raised count holds a
-    key the audit did not raise under that uid -- a hand-built finding --
-    and is incomplete: fail-closed, a hand-built finding can demote an
-    entity and never complete one. The hash-sum only stops such a key
+    key the audit did not raise under that uid and is incomplete:
+    fail-closed, such a key can demote an entity and never complete one.
+    Such a key is a hand-built finding, **or a finding from an earlier
+    audit**: the tally is the most recent `audit()`'s only, so a report
+    from before it, or from an audit under another config, carries keys
+    it does not hold, and an instance with nothing left on it reads
+    IDENTIFIED until the next `audit()`. Count and hash-sum cannot test
+    containment without holding the keys; whether a superset should
+    complete is #582, and
+    `test_an_earlier_report_is_settled_against_the_latest_audit` pins
+    today's answer. The hash-sum only stops such a key
     from making up the count in place of a raised key that was not
     handled; two distinct sets of equal size colliding is about 2^-64.
     It is not a secret and not an integrity check. `hash()` of a str is
