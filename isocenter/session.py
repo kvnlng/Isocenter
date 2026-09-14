@@ -2557,7 +2557,12 @@ class DicomSession:
         """
         from .remediation import _ScanTally
 
-        identified = {f.entity_uid for f in findings if f.entity_uid}
+        # `is not None`, not truthiness: `''` is a Patient ID ingest keeps
+        # (an empty element; an absent one is `UnknownPatient`), and a
+        # falsy filter stamped such a patient CLEARED with its name finding
+        # outstanding and let its instances through the safe export
+        # (#581). The same test in `_scan_before_export` and `_ScanTally`.
+        identified = {f.entity_uid for f in findings if f.entity_uid is not None}
         # Keyed on the same scan-time uids as `identified`, and replaced
         # by every audit, so a new report settles against its own scan.
         self._scan_tally = _ScanTally(findings)
@@ -5351,7 +5356,8 @@ class DicomSession:
         get_logger().warning(
             "Safe export: identifiers detected. Exporting only the instances "
             "that carry none, and skipping the rest.")
-        return {f.entity_uid for f in findings if f.entity_uid}
+        # `''` is a uid: an empty Patient ID (#581, `_record_scan_results`).
+        return {f.entity_uid for f in findings if f.entity_uid is not None}
 
     def _resolve_subset(self, subset) -> Optional[Set[str]]:
         """Turns a subset argument into the UIDs allowed through the walk.
