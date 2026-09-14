@@ -3396,10 +3396,12 @@ class DicomSession:
                 shifted date); a tag it names was emptied or removed by
                 `anonymize()`, and the message names the `tags_to_lock`
                 that works without it; a re-lock would lose a value the
-                existing token holds; or Patient's Name is blank under a
-                rule of EMPTY or REMOVE on it. Given a list or a report, the
-                batch form checks every patient first and, if any is
-                refused, raises once naming each and locks no patient.
+                existing token holds; a value it would stash is one no
+                token can hold (`bytes`), naming the tag; or Patient's
+                Name is blank under a rule of EMPTY or REMOVE on it. Given
+                a list or a report, the batch form checks every patient
+                first and, if any is refused, raises once naming each and
+                locks no patient.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3436,16 +3438,16 @@ class DicomSession:
 
     def _planned_identity_lock(self, patient: "Patient",
                                tags_to_lock: Optional[List[str]]
-                               ) -> Tuple[Optional["Instance"], Dict[str, Any]]:
-        """Every refusal of one patient's lock, and the values it would
-        stash: `(first_instance, original_attrs)`. Reads the graph and the
-        existing token; writes nothing, so the batch can plan every
-        patient before it locks any (#537).
+                               ) -> Tuple[Optional["Instance"], Dict[str, Any], bytes]:
+        """Every refusal of one patient's lock, the values it would stash
+        and the token that holds them: `(first_instance, original_attrs,
+        token)`. Reads the graph and the existing token; writes nothing, so
+        the batch can plan every patient before it locks any (#537).
 
         Raises:
             RuntimeError: When the lock would stash what `anonymize()`
-                left, or lose what the existing token holds (the messages
-                below).
+                left, lose what the existing token holds, or stash a value
+                no token can hold (the messages below).
         """
         patient_id = patient.patient_id
         if tags_to_lock is None:
@@ -3652,10 +3654,44 @@ class DicomSession:
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
 
-        return first_instance, original_attrs
+        # The token is built here, in the plan, and not where it is
+        # embedded: it is `json.dumps` of the values, and a value JSON
+        # cannot hold (an OB element is ingested as `bytes`) raised
+        # `TypeError` from the write, after every earlier patient of a
+        # batch was locked and persisted (measured on the round-3 review
+        # of #574: one of two). Building it reads and writes nothing, so
+        # the plan still locks no one, and the failure is a refusal like
+        # any other, naming the tag.
+        try:
+            token = self.reversibility_service.generate_identity_token(
+                original_attributes=original_attrs)
+        except (TypeError, ValueError):
+            unheld = []
+            for tag, val in original_attrs.items():
+                try:
+                    json.dumps(val)
+                except (TypeError, ValueError):
+                    unheld.append(tag)
+            unheld = unheld or list(original_attrs)
+            rest = [tag for tag in tags_to_lock if tag not in unheld]
+            kinds = sorted({type(original_attrs[tag]).__name__ for tag in unheld})
+            advice = (f"To lock this patient without "
+                      f"{'it' if len(unheld) == 1 else 'them'}, call "
+                      f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                      if rest else
+                      "tags_to_lock names no other tag, so there is nothing "
+                      "else to lock")
+            raise RuntimeError(
+                f"lock_identities: patient {patient_id!r} holds a value in "
+                f"{', '.join(unheld)} that no token can hold ({', '.join(kinds)}), "
+                "so there is nothing to stash for it. "
+                f"{advice}; the token this call would have written is unchanged."
+            ) from None
+
+        return first_instance, original_attrs, token
 
     def _write_identity_lock(self, patient: "Patient",
-                             plan: Tuple[Optional["Instance"], Dict[str, Any]],
+                             plan: Tuple[Optional["Instance"], Dict[str, Any], bytes],
                              persist: bool, verbose: bool) -> LockingResult:
         """Embeds the token a plan from `_planned_identity_lock` holds into
         every instance of the patient, and persists it when asked."""
@@ -3665,12 +3701,9 @@ class DicomSession:
             get_logger().debug(
                 f"Preserving identity for a patient of {len(patient.studies)} "
                 f"stud{'y' if len(patient.studies) == 1 else 'ies'}...")
-        _, original_attrs = plan
+        # Encrypted once per patient, in the plan (see its end).
+        _, original_attrs, token = plan
         modified_instances = []
-
-        # Optimization: Encrypt once per patient
-        token = self.reversibility_service.generate_identity_token(
-            original_attributes=original_attrs)
 
         # Iterate deep
         for st in patient.studies:
@@ -3727,7 +3760,10 @@ class DicomSession:
                 refused patient with its own message, in Patient ID order,
                 and no patient is locked, whatever `persist` or
                 `auto_persist_chunk_size` says. A Patient ID that matches
-                no patient is logged, not raised.
+                no patient is logged, not raised. The promise is about
+                refusals: a store write that fails while tokens are
+                persisted is logged by `update_attributes`, not raised,
+                and leaves memory and the store disagreeing.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")

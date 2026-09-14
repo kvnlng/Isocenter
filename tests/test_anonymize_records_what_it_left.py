@@ -133,6 +133,43 @@ def test_a_removal_is_recorded_before_the_revision_moves(tmp_path, monkeypatch):
         assert calls and all(calls), (tag, calls)
 
 
+class _DelSpy(dict):
+    """An instance's `attributes` that notes, at each `del`, whether the
+    record already vouches for the removal."""
+
+    def __init__(self, owner, *args):
+        super().__init__(*args)
+        self.owner, self.seen = owner, []
+
+    def __delitem__(self, tag):
+        self.seen.append((tag, self.owner.remediation_vouches_for(tag, None)))
+        super().__delitem__(tag)
+
+
+def test_a_removal_is_recorded_before_the_del(tmp_path):
+    """The record must already vouch at the `del`, not only at the
+    `mark_modified()` after it: a background save that serializes the
+    instance between the two stores the removal, and the revision that
+    follows is not guaranteed to reach the store before the process ends
+    (`close()` does not flush). Both removal routes: the instance arm
+    (accession) and the patient write's copy (the name). Kills either
+    record moved between its `del` and its `mark_modified()` (review of
+    #574, round 3, P-2)."""
+    rules = {"0010,0010": {"action": "REMOVE"}, "0010,0020": {"action": "KEEP"},
+             "0008,0050": {"action": "REMOVE"}}
+    with _session(tmp_path, rules) as session:
+        report = session.audit()
+        instance = _instance(session)
+        assert {"0010,0010", "0008,0050"} <= set(instance.attributes)
+        spy = _DelSpy(instance, instance.attributes)
+        instance.attributes = spy
+        session.anonymize(report)
+        assert instance.attributes is spy, "the pass replaced the attributes dict"
+    for tag in ("0010,0010", "0008,0050"):
+        vouched = [ok for seen, ok in spy.seen if seen == tag]
+        assert vouched and all(vouched), (tag, spy.seen)
+
+
 def test_the_record_survives_a_reopen_and_is_never_a_tag(tmp_path):
     """Stored as `__remediated__` beside `__shifted__`, popped before
     hydration. Kills the key not written, not popped (it lands in

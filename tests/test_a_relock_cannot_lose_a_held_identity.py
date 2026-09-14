@@ -650,7 +650,13 @@ def test_a_store_written_without_the_record_locks_as_before(tmp_path, rules, con
     blank-name refusal stands; with no rules nothing on the store says a
     pass wrote the blank, and the lock stashes `""` exactly as 0.9.5 did
     over its own store. That last case is the residual the CHANGELOG
-    names, pinned so a change to it is seen."""
+    names, pinned so a change to it is seen. One field differs from a
+    real 0.9.5 store: the patient's own name reads `""` here (this
+    release honours the rule on the patient) where 0.9.5 left
+    `ANONYMIZED`; each copy and the ID match. The outcome is the same
+    because the lock stashes the first instance's copy and reads the
+    patient only where that copy is absent (measured on a v0.9.5 store,
+    review of #574 round 3, P-4)."""
     with _session(tmp_path, rules) as session:
         session.anonymize(session.audit())
         session.save(sync=True)
@@ -676,3 +682,49 @@ def test_a_store_written_without_the_record_locks_as_before(tmp_path, rules, con
         session.lock_identities(PID, tags_to_lock=TAGS)
         assert session.reversibility_service.recover_original_data(instance) == {
             "0010,0010": "", "0010,0020": PID}
+
+
+@pytest.mark.parametrize("rules,tags,refused", [
+    (None, None, r"already carries a replacement in 0010,0010 \('ANONYMIZED'\)"),
+    (None, [BIRTH], r"already has a locked identity holding 0010,0030, and this lock "
+                    r"would replace it with an empty value"),
+    (PROJECT_X, TAGS, None),
+    ({**KEEP_BOTH, BIRTH: {"action": "SHIFT"}}, TAGS + [BIRTH], None),
+], ids=["floor", "floor_birth_only", "project_x", "keep_shift"])
+def test_a_relock_of_a_patient_reingested_from_its_own_export(tmp_path, rules, tags, refused):
+    """Lock, `anonymize()`, `export()`; a new store with the same key
+    ingests the export and locks again. The file carries the token and the
+    pass's values but no record, which is never a written byte (review of
+    #574, round 3, F-2).
+
+    The floor's constants refuse (`floor`), and the held birth date is not
+    lost to the blank the floor left (`floor_birth_only`; e475ab7 stashed
+    `""` over it). Under a `value:` or a `KEEP` rule nothing on the file
+    says a pass wrote what it holds, and the re-lock stashes it over the
+    held original (`project_x`, `keep_shift`): the residual the CHANGELOG
+    names (#607), pinned so a fix is seen. It is not refused on a held value that
+    differs from the current one, because #399's
+    `test_a_re_lock_is_what_recovery_answers_with` requires exactly that
+    re-lock to stash the new value."""
+    with _session(tmp_path, rules or {}, load=rules is not None,
+                  PatientBirthDate="19700101") as session:
+        session.lock_identities(PID, tags_to_lock=tags)
+        held = session.reversibility_service.recover_original_data(_instance(session))
+        session.anonymize(session.audit())
+        session.export(str(tmp_path / "out"))
+    with DicomSession(str(tmp_path / "again.db")) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        session.ingest(str(tmp_path / "out"))
+        instance = _instance(session)
+        assert instance._remediated_values is None and instance._remediated_blank is None
+        assert session.reversibility_service.recover_original_data(instance) == held
+        pid = session.store.patients[0].patient_id
+        if refused:
+            with pytest.raises(RuntimeError, match=refused):
+                session.lock_identities(pid, tags_to_lock=tags)
+            assert session.reversibility_service.recover_original_data(instance) == held
+            return
+        session.lock_identities(pid, tags_to_lock=tags)
+        stashed = session.reversibility_service.recover_original_data(instance)
+    assert stashed != held
+    assert stashed == {tag: instance.attributes[tag] for tag in tags}

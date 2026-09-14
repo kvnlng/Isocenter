@@ -116,3 +116,65 @@ def test_the_batch_still_logs_missing_ids_when_it_refuses(tmp_path, monkeypatch)
             session.lock_identities(PATIENTS + ["NO-SUCH-ID"])
     errors = [str(call) for call in fake.error.call_args_list]
     assert [e for e in errors if "1 Patient ID given matched no patient" in e], errors
+
+
+# A value no token can hold (review of #574, round 3, F-1). The token is
+# `json.dumps` of the values, and an OB element is ingested as `bytes`, so
+# the lock raised `TypeError` from inside the write, after every patient
+# before it in the batch was locked and persisted: measured, one of two.
+PRIVATE = "0029,1110"
+
+
+def _bytes_session(tmp_path):
+    """PA and PB, one CT each; PB's file carries an OB private element."""
+    write_ct(tmp_path / "in" / "a.dcm", "PA", "6001", name="A^A")
+    path = write_ct(tmp_path / "in" / "b.dcm", "PB", "6002", name="B^B")
+    ds = pydicom.dcmread(path)
+    ds.private_block(0x0029, "R3PROBE", create=True).add_new(0x10, "OB", b"\x01\x02\x03\x04")
+    ds.save_as(path)
+    session = DicomSession(str(tmp_path / "s.db"))
+    session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+    session.ingest(str(tmp_path / "in"))
+    pb = next(p for p in session.store.patients if p.patient_id == "PB")
+    assert pb.studies[0].series[0].instances[0].attributes[PRIVATE] == b"\x01\x02\x03\x04"
+    return session
+
+
+def _unstashable(pid="PB"):
+    return (f"lock_identities: patient {pid!r} holds a value in {PRIVATE} that no "
+            "token can hold (bytes), so there is nothing to stash for it. To lock "
+            f"this patient without it, call lock_identities({pid!r}, "
+            "tags_to_lock=['0010,0020']); the token this call would have written "
+            "is unchanged.")
+
+
+@pytest.mark.parametrize("chunk", [0, 1], ids=["per_patient", "chunked"])
+def test_a_value_no_token_can_hold_leaves_every_patient_unlocked(tmp_path, chunk):
+    """PB's bytes refuse the batch before PA is locked, in memory and in the
+    store, with PB's own message. Kills the token built in the write half,
+    and the planning loop not catching the token's failure."""
+    with _bytes_session(tmp_path) as session:
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities_batch(["PA", "PB"], auto_persist_chunk_size=chunk,
+                                          tags_to_lock=["0010,0020", PRIVATE],
+                                          persist=True)
+        assert str(caught.value) == (
+            "lock_identities: 1 of 2 patients cannot be locked as asked, so no "
+            "patient was locked. Lock the others without these, and each of these "
+            "as its message says:\n" + _unstashable())
+        assert _stored_tokens(tmp_path) == 0
+        assert _locked(session) == []
+        session.save(sync=True)
+    assert _stored_tokens(tmp_path) == 0
+
+
+def test_a_single_lock_of_a_value_no_token_can_hold_says_the_same(tmp_path):
+    """One patient gets the refusal the batch names, not `json`'s
+    `TypeError`, and the lock the message gives then succeeds."""
+    with _bytes_session(tmp_path) as session:
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities("PB", tags_to_lock=["0010,0020", PRIVATE])
+        assert str(caught.value) == _unstashable()
+        assert _locked(session) == []
+        session.lock_identities("PB", tags_to_lock=["0010,0020"])
+        assert _locked(session) == ["PB"]
