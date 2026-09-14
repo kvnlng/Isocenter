@@ -167,6 +167,7 @@ except ImportError:
     from pydicom.encaps import encapsulate
 from pydicom.encaps import generate_frames
 from pydicom.multival import MultiValue
+from pydicom.valuerep import validate_value
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
 from pydicom.charset import default_encoding
@@ -1174,6 +1175,15 @@ _TEXT_VR_UNCAPPED = frozenset({'UT', 'UR', 'UC'})
 #: one uncapped VR that is 1-n, which is why the two sets are not one.
 _VM_ONE_TEXT_VRS = frozenset({'ST', 'LT', 'UT', 'UR'})
 
+#: The text VRs whose value has a *format*, not only a length: a date, a
+#: time, a datetime, a UID, an age. For these a value inside the cap can
+#: still be no value of the VR -- `ANONYMIZED` is 10 characters, inside
+#: TM's 16, and is no time -- and `_value_fits_vr` asks pydicom's own
+#: `validate_value` about it (#571). Without that, a TM, DT or UI a REPLACE
+#: had emptied of meaning kept its recorded VR with an invalid value and a
+#: pydicom `UserWarning`, while a DA (cap 8) happened to fall back.
+_FORMAT_CHECKED_VRS = frozenset({'DA', 'DT', 'TM', 'UI', 'AS'})
+
 
 def _value_fits_vr(value, vr: str) -> bool:
     """Can `value` be written under `vr` without changing what it says?
@@ -1207,6 +1217,13 @@ def _value_fits_vr(value, vr: str) -> bool:
     cap applies to a number's rendered text too (`_TEXT_VR_MAX` bounds
     `IS` at 12 characters and `DS` at 16), because pydicom writes an
     over-long one without a word.
+
+    For the VRs whose value has a format -- DA, DT, TM, UI and AS
+    (`_FORMAT_CHECKED_VRS`) -- it asks pydicom's `validate_value` too
+    (#571): a value inside the cap that names no date, time or UID is not
+    a value of the VR, and writing it under that VR is the
+    conformant-looking and wrong element this gate exists to refuse. An
+    empty value passes; it is conformant under all five.
 
     What it deliberately does **not** ask is the character *repertoire*:
     a private `CS` whose value an anonymisation rule replaced with
@@ -1327,6 +1344,11 @@ def _value_fits_vr(value, vr: str) -> bool:
                 else:
                     float(value)
             except (TypeError, ValueError, OverflowError):
+                return False
+        if vr in _FORMAT_CHECKED_VRS:
+            try:
+                validate_value(vr, value, pydicom.config.RAISE)
+            except ValueError:
                 return False
         return True
 
@@ -3596,8 +3618,41 @@ class DicomImporter:
             skipped=skipped_count)
 
 
+#: The refusal every door raises for a `compression` it cannot write
+#: (#605). One constant because the CHANGELOG quotes it.
+_COMPRESSION_REFUSAL = (
+    "compression must be None (Implicit VR Little Endian) or 'j2k' "
+    "(JPEG 2000 Lossless); got {!r}")
+
+
+def _compresses(compression) -> bool:
+    """Does this `compression` encode the pixels? The one spelling (#605).
+
+    True for `"j2k"`, False for None, and `ValueError` for anything else.
+    Every reader of `compression` asks this -- `ExportContext`'s
+    construction, `write_tree`'s entry, the export worker and
+    `_finalize_dataset` -- because the worker once asked three ways: two
+    sites compared `== "j2k"` and the integer arm tested truthiness, so
+    `"rle"` or `"J2K"` skipped both the raw write and the encoder and
+    delivered an image with no Pixel Data as `ok`. A refusal rather than
+    a native fallback: a caller who typed a codec name asked for a file
+    this exporter does not write, and quietly writing a different one is
+    the #605 outcome with its pixels put back. `""`, `False` and `0` are
+    refused too; they meant "native" only by accident of the truthiness
+    test.
+    """
+    if compression is None:
+        return False
+    if isinstance(compression, str) and compression == "j2k":
+        return True
+    raise ValueError(_COMPRESSION_REFUSAL.format(compression))
+
+
 @dataclass
 class ExportContext:
+    """One instance to write, and how. Validates `compression` on
+    construction (#605); the worker asks again, because a dataclass can
+    be edited after this runs."""
     instance: Instance
     output_path: str
     patient_attributes: Dict[str, Any]
@@ -3627,6 +3682,9 @@ class ExportContext:
     #: (#449). Carried here because the check runs in the worker -- the
     #: file is local to it and the cost parallelizes.
     verify_readback: bool = False
+
+    def __post_init__(self):
+        _compresses(self.compression)
 
 
 @dataclass
@@ -4767,6 +4825,60 @@ def _nested_loader_metadata(geometry, ref, inst) -> dict:
 _NO_SOP_UID = "an instance with no SOP Instance UID"
 
 
+@dataclass(frozen=True)
+class _ReVr:
+    """One private element written under a VR other than its recorded one,
+    or collapsed to one value (#571). Tags and VRs only: never the value,
+    which after a REPLACE of user text, and before it, is patient-derived.
+    """
+    tag: str
+    within: str
+    recorded: Optional[str]
+    written: str
+    #: The multiplicity collapsed from, for the VM n -> one `UT` case.
+    values: Optional[int] = None
+
+
+#: How many elements `_re_vr_warning` names before counting the rest: a
+#: vendor block re-VR'd whole would otherwise be one audit row the length
+#: of the block.
+_RE_VR_NAMED = 10
+
+
+def _re_vr_warning(revrs) -> Optional[str]:
+    """The one `WARNING` sentence for an instance's re-VR'd private
+    elements, or None when there are none (#571).
+
+    One per instance, whatever the syntax: under Implicit VR Little Endian
+    no VR is on the wire, but the value is still encoded as the new VR
+    (a US written LO is text, not two bytes), and an explicit-VR file
+    names it and re-ingest records it permanently. The words say
+    "written", never that the file names the VR.
+    """
+    if not revrs:
+        return None
+    named = []
+    for r in revrs[:_RE_VR_NAMED]:
+        where = f"({r.tag})" + (f" in {r.within}" if r.within else "")
+        recorded = f" recorded {r.recorded}" if r.recorded else ""
+        if r.values:
+            named.append(f"{where}{recorded} VM {r.values}, written as one "
+                         f"{r.written} value")
+        else:
+            named.append(f"{where}{recorded}, written {r.written}")
+    rest = len(revrs) - len(named)
+    listed = "; ".join(named) + (f"; and {rest} more" if rest else "")
+    return (f"Private element{'s' if len(revrs) > 1 else ''} {listed}. "
+            f"Each value is written under a VR that holds it, unchanged: the "
+            f"VR recorded at ingest no longer does -- typically after a "
+            f"REPLACE -- or a value over 64 characters cannot stay "
+            f"multi-valued, and the values are joined with backslashes into "
+            f"one, recoverable by splitting. A file written with an explicit "
+            f"VR transfer "
+            f"syntax names the new VR, and a re-ingest of it records that "
+            f"VR in place of the source's.")
+
+
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
@@ -4785,25 +4897,26 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     corrections: List[str] = []
     warnings: List[str] = []
     uid = getattr(ctx.instance, "sop_instance_uid", None)
-    # The syntax the file will be written under, decided here so the
-    # label check judges what is actually being written (#502) rather
-    # than re-deriving it beside each call. `_create_ds` starts every
-    # file at Implicit VR Little Endian and only the compressed path
-    # moves it.
-    #
-    # **`== "j2k"`, not truthiness, and that is the same predicate
-    # `_finalize_dataset` keys on** -- it runs `_compress_j2k` for
-    # `compression == 'j2k'` and for nothing else. Read as truthiness
-    # here, any other truthy string (`compression="rle"`) would have the
-    # label judged against the JPEG 2000 row while the file was written
-    # natively, so an inadmissible label went out unwarned. `compression`
-    # is not a documented open enum, so that was latitude rather than a
-    # live defect; two spellings of one predicate is the thing this
-    # repo's "one spelling per behaviour" convention is about.
-    written_syntax = (str(JPEG2000Lossless) if ctx.compression == "j2k"
-                      else str(ImplicitVRLittleEndian))
 
     try:
+        # Whether the pixels are encoded, asked once and of the one
+        # predicate every other reader of `compression` asks (#605).
+        # Inside the `try`: `ExportContext` refuses an unknown value on
+        # construction, but a dataclass can be edited afterwards, and
+        # that context must fail as its own instance, not take the batch
+        # down. The worker used to ask three ways -- `== "j2k"` here and
+        # in `_finalize_dataset`, truthiness in the integer arm -- so
+        # `compression="rle"` skipped both the raw write and the encoder
+        # and delivered an image with no Pixel Data as `ok`.
+        compressed = _compresses(ctx.compression)
+        # The syntax the file will be written under, decided here so the
+        # label check judges what is actually being written (#502) rather
+        # than re-deriving it beside each call. `_create_ds` starts every
+        # file at Implicit VR Little Endian and only the compressed path
+        # moves it.
+        written_syntax = (str(JPEG2000Lossless) if compressed
+                          else str(ImplicitVRLittleEndian))
+
         inst = ctx.instance
         ds = DicomExporter._create_ds(inst)
 
@@ -4824,9 +4937,20 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         attributes, respelled = _label_as_written(inst.attributes)
         if respelled is not None:
             corrections.append(respelled)
+        #
+        # `revrs` gathers every private element written under a VR other
+        # than its recorded one, here and in every sequence item, for one
+        # sentence per instance after the merges (#571). The three stamp
+        # merges below are standard tags and pass none.
+        revrs: List[_ReVr] = []
         DicomExporter._merge(ds, attributes, losses,
-                             vrs=getattr(inst, 'attribute_vrs', None))
-        DicomExporter._merge_sequences(ds, inst.sequences, losses)
+                             vrs=getattr(inst, 'attribute_vrs', None),
+                             revrs=revrs)
+        DicomExporter._merge_sequences(ds, inst.sequences, losses,
+                                       revrs=revrs)
+        re_vr = _re_vr_warning(revrs)
+        if re_vr is not None:
+            warnings.append(re_vr)
 
         # 0b. Nested sidecar payloads, back into the items they came out
         # of (#183). After the merge, because it needs the sequence items
@@ -4843,6 +4967,17 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # 3. Series Level
         DicomExporter._merge(ds, ctx.series_attributes, losses)
+
+        # Study Time is Type 2 (PS3.3 C.7.2.1): present, and empty when
+        # unknown. `IODValidator` refuses it **absent**, so a study with
+        # no time and an instance with none failed `session.export()`
+        # outright, and `write_tree` hid the same gap by writing the
+        # literal `120000` -- a fabricated clinical time (#570). Filled
+        # here, after every merge, and not in `export_stamp_attributes`:
+        # only here is it known whether the instance or the study
+        # supplied one, and a stamp of `""` would overwrite a real value.
+        if "StudyTime" not in ds:
+            ds.StudyTime = ""
 
         # There is deliberately no `populate_attrs(ds, inst)` here, and
         # there must never be again (#184). It was the ingest reader
@@ -5217,7 +5352,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # Pass the numpy array to _finalize_dataset -> _compress_j2k directly.
             # Only set PixelData if NOT compressing.
 
-            if not ctx.compression:
+            if not compressed:
                 ds.PixelData = arr.tobytes()
 
             # The second of PS3.5 Section 8.2's three reachable
@@ -5256,7 +5391,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # itself move `validation_status`.
             #
             # The gate is this `arr is not None` block, not
-            # `"PixelData" in ds`: with `ctx.compression` set the worker
+            # `"PixelData" in ds`: when `compressed` the worker
             # never assigns `ds.PixelData` at all -- `_finalize_dataset`
             # compresses from the array -- so a membership test would let
             # the URL survive every compressed export. Measured. Do not
@@ -5505,13 +5640,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # the right order: a warning describes a file that was written.
         #
         # Keyed on the arm -- no pixel arm set `written_pixels`, which is
-        # exactly "`_write_pixel_geometry` was not called" -- and not on
-        # `_PIXEL_ELEMENTS` membership in `ds`. The two differ for one
-        # input: a truthy `compression` other than `"j2k"` makes the
-        # integer arm skip `ds.PixelData` while `_finalize_dataset`
-        # encodes nothing, so a file judged by the pixel arm already
-        # would be judged a second time here (measured with
-        # `compression="rle"`, two warnings for one label).
+        # exactly "`_write_pixel_geometry` was not called". Since #605 that
+        # is also exactly "no pixel element is in the file": only None and
+        # `"j2k"` reach the integer arm, and each writes the element (the
+        # raw bytes, or the encoder), so the arm that set `written_pixels`
+        # always wrote one. It was not before -- `compression="rle"` set it
+        # and wrote nothing, so this judgement was skipped for a file with
+        # no pixels and the #596 note above described pixels the file did
+        # not carry. Keep the key on the arm regardless: the arm is what
+        # decides which of the two label judgements ran.
         if written_pixels is None:
             warning = _pixel_less_label_warning(ds)
             if warning is not None:
@@ -5785,7 +5922,7 @@ def _compress_j2k(ds, pixel_array=None):
             # Deleted rather than corrected, because it is unreachable:
             # `_compress_j2k`'s only caller is `_finalize_dataset`, whose
             # only caller is the export worker, which always passes
-            # `pixel_array=arr`; and with `ctx.compression` set the worker
+            # `pixel_array=arr`; and when compressing the worker
             # never assigns `ds.PixelData` at all, which the comment at
             # the `arr is not None` block above already says in those
             # words. The one path that arrives here with `arr is None` is
@@ -6487,6 +6624,72 @@ def export_folder_names(patient, study, series):
     return subj_name, study_folder, series_folder
 
 
+def export_stamp_attributes(patient, study, series):
+    """The patient, study and series tags stamped onto every exported
+    instance, for both write doors (#570).
+
+    The one answer to "what does the export write over the instance's own
+    attributes", as `export_folder_names` is the one answer to "where".
+    `session.export()` and `DicomExporter.write_tree()` each built their
+    own set until #570, and they disagreed: `write_tree` wrote the literal
+    Study Time `120000` over a real one, and re-stamped Manufacturer, Model
+    Name and Device Serial Number from `Series.equipment` -- which, after
+    `anonymize()` had emptied the instance's `(0018,1000)`, put the
+    scanner's real serial back into a de-identified file. Do not add
+    either back here:
+
+    * **No Study Time unless the study has one.** The worker writes a
+      zero-length Study Time when nothing supplied one (Type 2
+      "unknown"); a literal is a fabricated clinical time, and a `""`
+      here would overwrite the instance's real value.
+    * **No equipment.** It comes from the instance, which is what
+      `anonymize()` edits; `Series.equipment` keeps the source serial on
+      purpose, because `redact()` matches rules on it. A hand-built graph
+      gets its equipment onto the instances from `SeriesBuilder`.
+
+    Args:
+        patient (Patient): The patient root.
+        study (Study): The study the instance belongs to.
+        series (Series): The series the instance belongs to.
+
+    Returns:
+        Tuple[dict, dict, dict]: `(patient_attributes, study_attributes,
+            series_attributes)`, keyed by `"gggg,eeee"`.
+    """
+    patient_attributes = {
+        "0010,0010": patient.patient_name,
+        "0010,0020": patient.patient_id,
+    }
+    if getattr(patient, 'birth_date', None):
+        patient_attributes["0010,0030"] = patient.birth_date
+    if getattr(patient, 'sex', None):
+        patient_attributes["0010,0040"] = patient.sex
+
+    study_attributes = {
+        "0020,000d": study.study_instance_uid,
+        # Formatted, so one string reaches `_merge` whether the entity
+        # holds a `date`, a string or None.
+        "0008,0020": format_study_date(study.study_date),
+    }
+    if getattr(study, 'study_time', None):
+        study_attributes["0008,0030"] = study.study_time
+    if getattr(study, 'accession_number', None):
+        study_attributes["0008,0050"] = study.accession_number
+
+    series_attributes = {
+        "0020,000e": series.series_instance_uid,
+        "0008,0060": series.modality,
+        # None stays None, a zero-length Series Number (Type 2). The
+        # session stamped `str(None)`, which IS refuses, so the element
+        # was dropped with a DATA_LOSS row (#570).
+        "0020,0011": (None if series.series_number is None
+                      else str(series.series_number)),
+    }
+    if getattr(series, 'series_description', None):
+        series_attributes["0008,103e"] = series.series_description
+    return patient_attributes, study_attributes, series_attributes
+
+
 class DicomExporter:
     """
     Handles writing the Object Graph back to standard DICOM files.
@@ -6527,33 +6730,12 @@ class DicomExporter:
         for st in studies:
             for se in st.series:
                 for inst in se.instances:
-                    # Prepare Metadata used for directory structure AND overrides
-
-                    # Patient Attributes
-                    pat_attrs = {
-                        "0010,0010": patient.patient_name,
-                        "0010,0020": patient.patient_id
-                    }
-
-                    # Study Attributes
-                    s_date_str = format_study_date(st.study_date)
-
-                    study_attrs = {
-                        "0020,000d": st.study_instance_uid,
-                        "0008,0020": s_date_str,
-                        "0008,0030": "120000"
-                    }
-
-                    # Series Attributes
-                    series_attrs = {
-                        "0020,000e": se.series_instance_uid,
-                        "0008,0060": se.modality,
-                        "0020,0011": se.series_number
-                    }
-                    if se.equipment:
-                        series_attrs["0008,0070"] = se.equipment.manufacturer
-                        series_attrs["0008,1090"] = se.equipment.model_name
-                        series_attrs["0018,1000"] = se.equipment.device_serial_number
+                    # The session's stamps, from the one helper both
+                    # doors call (#570). This used to be its own set, with
+                    # a literal Study Time and equipment re-stamped from
+                    # the series -- see `export_stamp_attributes`.
+                    pat_attrs, study_attrs, series_attrs = \
+                        export_stamp_attributes(patient, st, se)
 
                     # Calculate Output Path
                     # 1-3. Subject/Study/Series folders, via the shared
@@ -6871,7 +7053,8 @@ class DicomExporter:
             out_dir (str): Destination directory.
             studies (List[Study], optional): Write only these studies.
                 Defaults to every study under `patient`.
-            compression (str, optional): Compression format ('j2k' or None).
+            compression (str, optional): `'j2k'` for JPEG 2000 Lossless, or
+                None for Implicit VR Little Endian. Nothing else (#605).
             show_progress (bool): If True, shows a progress bar.
             executor (ProcessPoolExecutor, optional): Shared executor for parallelism.
             store_backend (SqliteStore, optional): Where to write a
@@ -6880,8 +7063,13 @@ class DicomExporter:
                 so pass nothing; the losses are logged either way (#126).
 
         Raises:
+            ValueError: If `compression` is neither None nor `'j2k'`,
+                before anything is written (#605).
             RuntimeError: If any instance failed to write.
         """
+        # First, so an empty tree refuses too: the value is wrong whether
+        # or not there is anything to write with it (#605).
+        _compresses(compression)
         if studies is None:
             studies = patient.studies
         if not os.path.exists(out_dir):
@@ -7051,7 +7239,9 @@ class DicomExporter:
         Raises:
             ValueError: If validation fails.
         """
-        if compression == 'j2k':
+        # `_compresses`, the one predicate (#605): anything but None or
+        # `"j2k"` raises rather than writing natively in silence.
+        if _compresses(compression):
             _compress_j2k(ds, pixel_array)
 
         errs = IODValidator.validate(ds)
@@ -7083,7 +7273,7 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs, losses=None, vrs=None):
+    def _merge(ds, attrs, losses=None, vrs=None, *, revrs=None, within=""):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
         `losses` is an optional list that collects `(scope, detail)` for
@@ -7100,6 +7290,16 @@ class DicomExporter:
         for every reader of it. Only the patient/study/series merges
         pass nothing, because those mappings are standard tags whose VRs
         the dictionary already knows.
+
+        `revrs` is the third accumulator (#571): one `_ReVr` per private
+        element written under a VR other than the one recorded for it, or
+        collapsed from several values to one. An accumulator for the
+        reason `losses` is -- the change belongs to the instance, and the
+        worker turns the whole list into **one** `WARNING` sentence
+        (`_re_vr_warning`), which a sentence per call would not be:
+        `_merge` also runs once per sequence item. `within` names the
+        sequence an item's element sits in, for that sentence. With no
+        accumulator the collapse is logged here instead, as a loss is.
         """
         for t, v in attrs.items():
             # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
@@ -7135,7 +7335,7 @@ class DicomExporter:
             if g == 0x0000:
                 continue
 
-            vr, encoded = None, None
+            vr, encoded, re_vr = None, None, None
             try:
                 vr = dictionary_VR(Tag(g, e))
             except Exception:
@@ -7217,20 +7417,35 @@ class DicomExporter:
                     # all present and recoverable, so a DATA_LOSS row
                     # would overstate it. But VM n -> 1 must not be
                     # discovered by reading the file (#190), so it is
-                    # said here, where the tag is still a tag. The
+                    # said, where the tag is still a tag: onto `revrs`
+                    # for the instance's one sentence (#571), or to the
+                    # log when there is nowhere to put it. The
                     # backslash-bearing case never reaches this: the
                     # encoder returns None for it before the collapse.
-                    if (encoded[0] == 'UT'
-                            and isinstance(v, (list, tuple, MultiValue))
-                            and len(v) > 1):
+                    collapsed = (encoded[0] == 'UT'
+                                 and isinstance(v, (list, tuple, MultiValue))
+                                 and len(v) > 1)
+                    if collapsed and revrs is None:
                         get_logger().warning(
                             "Tag %s written as a single UT value: one of "
                             "its %d values exceeds LO's 64-character cap, "
                             "so the multiplicity collapses from %d to 1. "
                             "The values are backslash-joined and "
                             "recoverable by splitting.", t, len(v), len(v))
+                    # A VR other than the recorded one, or a collapse:
+                    # what re-ingest of an explicit-VR file records
+                    # changes, so it is reported under any syntax (#571).
+                    # Kept until `add_new` has accepted the element; a
+                    # refusal there is a loss, not a re-VR.
+                    if collapsed or (recorded is not None
+                                     and encoded[0] != recorded):
+                        re_vr = _ReVr(tag=t, within=within,
+                                      recorded=recorded, written=encoded[0],
+                                      values=len(v) if collapsed else None)
                     vr, v = encoded
                 ds.add_new(Tag(g, e), vr, v)
+                if re_vr is not None and revrs is not None:
+                    revrs.append(re_vr)
             except Exception as exc:
                 # Say "not exported". "Failed to merge" reads like an
                 # internal hiccup; this is an element the caller asked
@@ -7452,13 +7667,19 @@ class DicomExporter:
         return 'UT', '\\'.join(atoms)
 
     @staticmethod
-    def _merge_sequences(ds, sequences: Dict[str, Any], losses=None):
+    def _merge_sequences(ds, sequences: Dict[str, Any], losses=None, *,
+                         revrs=None, within=""):
         """
         Recursively populates sequences into the dataset.
 
         Args:
             ds (pydicom.Dataset): The dataset to modify.
             sequences (Dict[str, DicomSequence]): Dictionary mapping tags to Sequence objects.
+            losses (list, optional): `_merge`'s loss accumulator.
+            revrs (list, optional): `_merge`'s re-VR accumulator (#571),
+                threaded to every item so a nested element joins its
+                instance's one sentence.
+            within (str): The enclosing sequence path, for that sentence.
         """
         for tag_str, dicom_seq in sequences.items():
             g, e = map(lambda x: int(x, 16), tag_str.split(','))
@@ -7472,9 +7693,13 @@ class DicomExporter:
                 ds_item = Dataset()
 
                 # Recursively merge item attributes and sub-sequences
+                path = (f"{within} > ({tag_str})" if within
+                        else f"({tag_str})")
                 DicomExporter._merge(ds_item, item.attributes, losses,
-                                     vrs=getattr(item, 'attribute_vrs', None))
-                DicomExporter._merge_sequences(ds_item, item.sequences, losses)
+                                     vrs=getattr(item, 'attribute_vrs', None),
+                                     revrs=revrs, within=path)
+                DicomExporter._merge_sequences(ds_item, item.sequences, losses,
+                                               revrs=revrs, within=path)
 
                 pydicom_seq.append(ds_item)
 

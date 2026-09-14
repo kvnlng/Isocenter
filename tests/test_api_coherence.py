@@ -92,6 +92,98 @@ def test_both_public_export_paths_produce_the_same_tree(tmp_path):
         f"  write_tree():   {exporter_tree}")
 
 
+def _headers(path):
+    """Every element of a written file but the pixel bytes, as comparable
+    `(tag path, VR, value)` rows, file meta included."""
+    import pydicom
+
+    ds = pydicom.dcmread(str(path))
+    rows = [("meta", str(e.tag), e.VR, repr(e.value)) for e in ds.file_meta]
+
+    def walk(dataset, prefix):
+        for element in dataset:
+            if element.tag == 0x7FE00010:
+                continue
+            path_ = f"{prefix}{element.tag}"
+            if element.VR == "SQ":
+                rows.append((path_, "SQ", len(element.value)))
+                for index, item in enumerate(element.value):
+                    walk(item, f"{path_}[{index}]")
+            else:
+                rows.append((path_, element.VR, repr(element.value)))
+
+    walk(ds, "")
+    return rows
+
+
+def test_both_public_export_paths_write_the_same_headers(tmp_path):
+    """The two doors agree on what is *in* each file, not only where it
+    goes (#570).
+
+    Same tree, same filenames, and every element but the pixel bytes
+    equal, file by file: over an ingested CT carrying a device serial,
+    over the same graph after `anonymize()`, and over a hand-built graph
+    whose study has no time and whose equipment came from the builder.
+    Until #570 `write_tree` stamped its own set -- the literal Study Time
+    `120000`, and the equipment from `Series.equipment`, which after
+    `anonymize()` put the real serial back. Killing mutations: the
+    literal restored; the equipment block restored (the ingested graph
+    gains a zero-length Device Serial Number, the anonymized one the
+    serial itself).
+    """
+    import numpy as np
+    import pydicom
+    from pydicom.data import get_testdata_file
+    from isocenter import Builder
+    from isocenter.io_handlers import DicomExporter
+    from isocenter.session import DicomSession
+
+    source = tmp_path / "src"
+    source.mkdir()
+    ct = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ct.DeviceSerialNumber = "SN-570"
+    ct.save_as(str(source / "ct.dcm"))
+
+    def compare(session, stage):
+        via_session = tmp_path / f"{stage}_session"
+        via_tree = tmp_path / f"{stage}_tree"
+        session.export(str(via_session), use_compression=False,
+                       show_progress=False)
+        for patient in session.store.patients:
+            DicomExporter.write_tree(patient, str(via_tree),
+                                     show_progress=False)
+        session_files = sorted(p.relative_to(via_session)
+                               for p in via_session.rglob("*.dcm"))
+        tree_files = sorted(p.relative_to(via_tree)
+                            for p in via_tree.rglob("*.dcm"))
+        assert session_files and session_files == tree_files, stage
+        for name in session_files:
+            assert _headers(via_session / name) == _headers(
+                via_tree / name), (stage, str(name))
+
+    with DicomSession(str(tmp_path / "ingested.db")) as session:
+        session.ingest(str(source))
+        compare(session, "ingested")
+        session.anonymize()
+        compare(session, "anonymized")
+
+    series = (Builder.start_patient("PAT570", "Doe^Jane")
+              .add_study("1.2.826.0.2.570", "20230102")
+              .add_series("1.2.826.0.3.570", "OT", 2)
+              .set_equipment("ACME", "Model-9", "SN-9"))
+    context = series.add_instance("1.2.826.0.1.570.1",
+                                  "1.2.840.10008.5.1.4.1.1.7", 1)
+    for tag, value in (("0008,0020", "20230102"), ("0028,0002", 1),
+                       ("0028,0004", "MONOCHROME2")):
+        context.set_attribute(tag, value)
+    context.set_pixel_data(np.zeros((4, 4), np.uint8))
+    patient = series.end_series().end_study().build()
+    with DicomSession(str(tmp_path / "built.db")) as session:
+        session.store.patients.append(patient)
+        session.save()
+        compare(session, "hand_built")
+
+
 def test_export_folder_naming_is_case_insensitive_to_description_tag_keys():
     """Series/Study Description keys may be spelled with either hex-letter
     casing depending on how the object graph was built.

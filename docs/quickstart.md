@@ -134,6 +134,17 @@ because pydicom and `ingest()` refuse the declared spelling
 ([#532](https://github.com/kvnlng/Isocenter/issues/532)). The graph keeps
 what it declared.
 
+The patient, study and series tags written over each instance's own are
+the same on both write paths, `session.export()` and
+`DicomExporter.write_tree()`
+([#570](https://github.com/kvnlng/Isocenter/issues/570)): equipment comes
+from the instance, which is what `anonymize()` edits, and a study with no
+Study Time is written with an empty one, which is what the standard means
+by unknown. A private element whose value no longer fits the VR recorded
+for it at ingest -- after a `REPLACE`, typically -- is written under a VR
+that holds it, with one `WARNING` row per instance naming the tags and
+both VRs ([#571](https://github.com/kvnlng/Isocenter/issues/571)).
+
 **`verify_readback=True`** decodes every file it writes through the same
 decoder `ingest()` uses and compares every pixel sample with what it meant
 to write. It also refuses a Photometric Interpretation the file's transfer
@@ -162,7 +173,8 @@ redacted or has redaction zones applied by this export. Every other nested
 icon -- one under Referenced Image Sequence, for instance, which is a
 thumbnail of a different image -- is removed from every file once any
 instance in the store was redacted or a loaded rule's zones match a series
-in the store; a rule for a scanner the store does not hold removes
+in the store (a `"*"` rule matches every series with a Device Serial
+Number); a rule for a scanner the store does not hold removes
 nothing. Each removal is a `SIGNAL` `DATA_LOSS` row and grades the run
 `REVIEW_REQUIRED`.
 

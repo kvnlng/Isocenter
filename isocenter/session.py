@@ -16,12 +16,13 @@ import yaml
 from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportError, ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
-                          GRADED_LOSS_SCOPES, redaction_in_effect)
+                          export_stamp_attributes, GRADED_LOSS_SCOPES,
+                          redaction_in_effect)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
                        carry_phi_status_across_redaction,
-                       _report_redaction_failures)
+                       _report_redaction_failures, rules_matching, zone_rois)
 from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
 from .privacy import (PhiInspector, PhiFinding, PhiReport,
@@ -574,44 +575,6 @@ def _uid_path(patient, study, series, instance) -> Tuple[str, str, str, str]:
     """
     return (patient.patient_id, study.study_instance_uid,
             series.series_instance_uid, instance.sop_instance_uid)
-
-
-def _patient_attributes(patient) -> Dict[str, Any]:
-    """Patient-level tags stamped onto every exported instance."""
-    attributes = {
-        "0010,0010": patient.patient_name,
-        "0010,0020": patient.patient_id,
-    }
-    if getattr(patient, 'birth_date', None):
-        attributes["0010,0030"] = patient.birth_date
-    if getattr(patient, 'sex', None):
-        attributes["0010,0040"] = patient.sex
-    return attributes
-
-
-def _study_attributes(study) -> Dict[str, Any]:
-    """Study-level tags stamped onto every exported instance."""
-    attributes = {
-        "0020,000d": study.study_instance_uid,
-        "0008,0020": study.study_date,
-    }
-    if getattr(study, 'study_time', None):
-        attributes["0008,0030"] = study.study_time
-    if getattr(study, 'accession_number', None):
-        attributes["0008,0050"] = study.accession_number
-    return attributes
-
-
-def _series_attributes(series) -> Dict[str, Any]:
-    """Series-level tags stamped onto every exported instance."""
-    attributes = {
-        "0020,000e": series.series_instance_uid,
-        "0008,0060": series.modality,
-        "0020,0011": str(series.series_number),
-    }
-    if getattr(series, 'series_description', None):
-        attributes["0008,103e"] = series.series_description
-    return attributes
 
 
 def _uids_from_frame(frame) -> Set[str]:
@@ -4062,7 +4025,7 @@ class DicomSession:
                 if (p.patient_name, p.patient_id) != before:
                     p.mark_modified()
                 # Study Date is written onto the instances above, but the
-                # exporter stamps it from the `Study` (`_study_attributes`),
+                # exporter stamps it from the `Study` (`export_stamp_attributes`),
                 # so an instance-only restore never reached the file (#566).
                 # One study only: the token is the patient's first
                 # instance's, so on a patient with several it holds one
@@ -5465,11 +5428,8 @@ class DicomSession:
             if patient.patient_id not in target_ids:
                 continue
             patient_count += 1
-            patient_attrs = _patient_attributes(patient)
 
             for study in patient.studies:
-                study_attrs = _study_attributes(study)
-
                 for series in study.series:
                     # Hybrid naming: shared with every other export format
                     # (see `export_folder_names` in io_handlers.py) so trees
@@ -5477,7 +5437,10 @@ class DicomSession:
                     series_path = os.path.join(
                         options.folder,
                         *export_folder_names(patient, study, series))
-                    series_attrs = _series_attributes(series)
+                    # The one stamping helper both write doors call
+                    # (#570): `write_tree` gets exactly these.
+                    patient_attrs, study_attrs, series_attrs = \
+                        export_stamp_attributes(patient, study, series)
                     zones = self._redaction_zones_for(series)
 
                     for instance in series.instances:
@@ -5532,12 +5495,28 @@ class DicomSession:
                 self._redaction_zones_for(series) for series in every_series)
 
     def _redaction_zones_for(self, series) -> list:
-        """The configured pixel-redaction zones for this series' scanner."""
-        if not (series.equipment and series.equipment.device_serial_number):
-            return []
-        rule = self.configuration.get_rule(
-            series.equipment.device_serial_number)
-        return rule.get("redaction_zones", []) if rule else []
+        """The configured pixel-redaction zones for this series' scanner.
+
+        Every matching rule's zones, exact or `"*"`, in rule order, each
+        parsed to a 4-tuple -- the matcher and the parser `redact()` uses
+        (#580). This used to ask `Configuration.get_rule`, which is exact
+        and first-match, and pass the raw zones on: a `"*"` rule not yet
+        run through `redact()` exported unredacted pixels, a second rule on
+        the same serial exported its zones unredacted, and a `{"roi": ...}`
+        zone failed the export. No per-series log for an invalid zone:
+        `load_config` validated them, and `redact()` warns.
+
+        A series with no equipment, or equipment with no serial, is
+        handed a `None` rather than answered here: "no serial matches
+        nothing, not even `"*"`" is `rule_applies_to`'s answer, and a
+        second copy of it here is a second answer that can drift from
+        the one `redact()` reads.
+        """
+        serial = (series.equipment.device_serial_number
+                  if series.equipment else None)
+        return [roi
+                for rule in rules_matching(self.configuration.rules, serial)
+                for roi in zone_rois(rule.get("redaction_zones", []))]
 
     @staticmethod
     def _run_export_batch(tasks, show_progress,

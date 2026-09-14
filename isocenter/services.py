@@ -403,6 +403,76 @@ def _withdraw_attestation(inst: Instance, attested_from: tuple) -> None:
     inst.mark_modified()
 
 
+def rule_applies_to(rule_serial, serial) -> bool:
+    """Does a redaction rule written for `rule_serial` cover a series whose
+    Device Serial Number is `serial`? (#580)
+
+    The one spelling of the predicate. Exact spelling, or `"*"` for every
+    series; a series with no serial matches nothing, and neither does a
+    rule with none. That last half is not a choice made here:
+    `MachinePixelIndex` indexes only series with equipment and a serial,
+    so `redact()` has never reached a serial-less series under any rule,
+    and the export has to agree with it. `redact()`'s target walk and the
+    export's zones both ask this, which is what #580 was: the export
+    asked `Configuration.get_rule`, exact and first-match, while
+    `redact()` honoured `"*"` and every rule.
+    """
+    if not serial:
+        return False
+    return rule_serial in ("*", serial)
+
+
+def rules_matching(rules, serial) -> List[dict]:
+    """Every rule that covers a series with this serial, in rule order
+    (#580).
+
+    Every one, not the first: `redact()` runs each loaded rule as its own
+    pass, so an exact rule and a `"*"` rule, or two rules on one serial,
+    both redact that series, and an export that took the first match
+    exported the second rule's zones unredacted. The session's
+    `_redaction_zones_for` and, through it, the store-wide icon gate read
+    this.
+    """
+    return [rule for rule in (rules or ())
+            if rule_applies_to(rule.get("serial_number"), serial)]
+
+
+def zone_rois(zones, on_invalid=None) -> List[tuple]:
+    """The ROIs a rule's `redaction_zones` names, each as a 4-tuple (#580).
+
+    Two shapes are accepted, because both are in use: a bare
+    `[y1, y2, x1, x2]`, and `{"roi": [y1, y2, x1, x2], ...}` -- the shape
+    the shipped knowledge base and `create_config`'s scaffolder write,
+    which `load_config` accepts and `redact()` applied, and which failed
+    every export of a matching instance with `ValueError: invalid literal
+    for int() with base 10: 'roi'` because the export passed the raw zone
+    through. Anything without exactly four values is dropped, and handed
+    to `on_invalid` when one is given. A tuple zone is not a third shape:
+    `load_config` refuses one ("must be list or dict") and nothing builds
+    one, so accepting it here would be a spelling no door produces.
+
+    **The values are passed through as given, as a tuple -- no `int()`.**
+    `prepare_redaction_tasks` hashes `sorted()` of these tuples into the
+    redaction attestation, so coercing here would change every
+    attestation hash and turn an already-redacted instance back into a
+    candidate. `apply_redaction_to_array` does the coercion, where the
+    pixels are addressed.
+    """
+    rois = []
+    for zone in zones or ():
+        if isinstance(zone, list):
+            roi = zone
+        elif isinstance(zone, dict):
+            roi = zone.get("roi")
+        else:
+            roi = None
+        if roi and len(roi) == 4:
+            rois.append(tuple(roi))
+        elif on_invalid is not None:
+            on_invalid(roi)
+    return rois
+
+
 class RedactionService:
     """
     Applies pixel redaction to DICOM instances based on configuration rules.
@@ -503,6 +573,15 @@ class RedactionService:
             details=(f"Applied {applied} of {targeted} candidate images "
                      f"with {zone_count} zones"))
 
+    def _targets_for(self, rule_serial) -> List[Instance]:
+        """Every indexed instance a rule for `rule_serial` covers (#580):
+        the index-side half of `rule_applies_to`, in index order."""
+        targets = []
+        for serial in self.index._index:
+            if rule_applies_to(rule_serial, serial):
+                targets.extend(self.index.get_by_machine(serial))
+        return targets
+
     def prepare_redaction_tasks(self, machine_rules: dict, verbose: bool = False,
                                 force: bool = False) -> List[dict]:
         """
@@ -536,15 +615,10 @@ class RedactionService:
                 self.logger.info(f"Machine {serial} has no redaction zones configured. Skipping.")
             return []
 
-        # Check matches in store
-        targets = []
-        if serial == "*":
-            # Wildcard: Apply to ALL machines
-            for sn_key in self.index._index:
-                targets.extend(self.index.get_by_machine(sn_key))
-        else:
-            # Exact Match
-            targets = self.index.get_by_machine(serial)
+        # Every indexed serial this rule covers, by the one predicate the
+        # export's zones also ask (#580). The index holds only series with
+        # a serial, so this is exact or "*" over those.
+        targets = self._targets_for(serial)
 
         if not targets:
             if verbose and serial != "*":
@@ -552,18 +626,10 @@ class RedactionService:
                     f"Config rule exists for {serial}, but no matching images found in Session.")
             return []
 
-        # Parse ROIs
-        valid_rois = []
-        for zone in zones:
-            if isinstance(zone, list):
-                roi = zone
-            else:
-                roi = zone.get("roi")
-
-            if roi and len(roi) == 4:
-                valid_rois.append(tuple(roi))
-            else:
-                self.logger.warning(f"Invalid ROI format in config: {roi}")
+        valid_rois = zone_rois(
+            zones,
+            on_invalid=lambda roi: self.logger.warning(
+                f"Invalid ROI format in config: {roi}"))
 
         if not valid_rois:
             return []
@@ -883,15 +949,7 @@ class RedactionService:
                 self.logger.info(f"Machine {serial} has no redaction zones configured. Skipping.")
             return
 
-        # Check matches in store
-        targets = []
-        if serial == "*":
-            # Wildcard: Apply to ALL machines
-            for sn_key in self.index._index:
-                targets.extend(self.index.get_by_machine(sn_key))
-        else:
-            # Exact Match
-            targets = self.index.get_by_machine(serial)
+        targets = self._targets_for(serial)
 
         if not targets:
             # Only warn if not wildcard (wildcard yielding 0 means empty store, which is fine)
@@ -905,18 +963,10 @@ class RedactionService:
                 f"Applying config rules for Machine: {serial} ({
                     len(targets)} images)...")
 
-        valid_rois = []
-        for zone in zones:
-            if isinstance(zone, list):
-                # Legacy/Simplified format: zone IS the ROI
-                roi = zone
-            else:
-                roi = zone.get("roi")  # Expected [r1, r2, c1, c2]
-
-            if roi and len(roi) == 4:
-                valid_rois.append(tuple(roi))
-            else:
-                self.logger.warning(f"Invalid ROI format in config: {roi}")
+        valid_rois = zone_rois(
+            zones,
+            on_invalid=lambda roi: self.logger.warning(
+                f"Invalid ROI format in config: {roi}"))
 
         if valid_rois:
             self.redact_machine_instances(

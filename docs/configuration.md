@@ -277,9 +277,10 @@ machines:
       - [0, 100, 0, 500]
 ```
 
-* **`serial_number`** (Required): Exact match for `0018,1000`.
+* **`serial_number`** (Required): Exact match for `0018,1000`, or `"*"` for every series that has one. A series with no Device Serial Number matches no rule.
+* **Every matching rule applies**, in `redact()` and at export alike: an exact rule and a `"*"` rule, or two rules for one serial, each zero their zones ([#580](https://github.com/kvnlng/Isocenter/issues/580)). The export applies them whether or not `redact()` has run.
 * **`redaction_zones`**: List of regions to zero out.
-  * Format: `[y1, y2, x1, x2]` (Row Start, Row End, Col Start, Col End).
+  * Format: `[y1, y2, x1, x2]` (Row Start, Row End, Col Start, Col End), or `{"roi": [y1, y2, x1, x2]}`, the shape the shipped knowledge base uses and `create_config()` copies for a machine it recognises.
   * Coordinates are 0-indexed.
   * End must be strictly greater than start on both axes. `load_config()` accepts a zone whose start equals its end, but it selects no pixels, and `redact()` fails every instance it applies to with `RedactionError`.
 

@@ -996,8 +996,8 @@ class RemediationService:
 
     #: The `Patient`/`Study` fields the exporter stamps onto every exported
     #: instance from the entity, with the tag each is the value of
-    #: (`session._patient_attributes`, `_study_attributes`). Exactly these
-    #: four: those helpers also read `birth_date`, `sex` and
+    #: (`io_handlers.export_stamp_attributes`, #570). Exactly these
+    #: four: that helper also reads `birth_date`, `sex` and
     #: `accession_number` through `getattr`, and neither slots dataclass
     #: has such a field, so those arms never fire.
     #:
@@ -1017,7 +1017,7 @@ class RemediationService:
         # Unreachable by any shipped scan: `Study.study_time` is never
         # populated by ingest, and no inspector raises a finding on it.
         # Kept deliberately, because the exporter stamps it from the
-        # entity (`_study_attributes`) and the rule of this table is
+        # entity (`export_stamp_attributes`) and the rule of this table is
         # "the fields the exporter stamps", not "the fields a scan
         # reaches today" -- a hand-built finding on it gets the same
         # one-truth treatment (#497 review, R7).
@@ -1107,7 +1107,7 @@ class RemediationService:
 
         The value is read back off the entity, after the arm wrote it,
         rather than passed in from the arm: that is the one source the
-        exporter reads too (`_patient_attributes`, `_study_attributes`),
+        exporter reads too (`export_stamp_attributes`, both doors, #570),
         and it makes the three actions one case. REPLACE_TAG left the
         replacement; SHIFT_DATE left the shifted date, rendered here as
         the exporter renders it (`format_study_date`, "YYYYMMDD"), so an

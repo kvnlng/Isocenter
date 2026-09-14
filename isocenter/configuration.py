@@ -246,6 +246,10 @@ class IsocenterConfiguration:
         """
         Retrieves a specific rule dictionary (reference).
 
+        Exact spelling, first match. Redaction does not use this: `redact()`
+        and the export apply every matching rule, `"*"` included, through
+        `rules_matching` in `services.py` (#580).
+
         Args:
             serial_number (str): The serial number to find.
 

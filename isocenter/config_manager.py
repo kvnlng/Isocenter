@@ -305,13 +305,14 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
 
     None as well for a private (odd-group) tag, an unknown tag, and a
     sequence: the exporter writes a private value its recorded VR cannot
-    hold as a valid LO, so a refusal there would keep an identifier the
-    write removes; an unknown tag has no VR to judge by; and a value on a
-    sequence is warned about by the scan, not written.
+    hold under one that holds it, with a WARNING row (#571), so a refusal
+    there would keep an identifier the write removes; an unknown tag has
+    no VR to judge by; and a value on a sequence is warned about by the
+    scan, not written.
 
-    The verdict is pydicom's `validate_value`, not
-    `io_handlers._value_fits_vr`, which skips repertoire by design and so
-    passes `ANONYMIZED` for TM, DT and UI. Two things `validate_value`
+    The verdict is pydicom's `validate_value`, not `io_handlers._value_fits_vr`,
+    which skips repertoire by design (a lower-case CS fits) and checks
+    format only for DA, DT, TM, UI and AS. Two things `validate_value`
     does not do are done here: AT is refused outright (pydicom does not
     validate an AT string, and the value is a tag), and a compound
     dictionary VR (`US or SS`, `OB or OW`) is split, because pydicom has

@@ -266,24 +266,30 @@ def test_ict_and_rct_under_jpeg_2000_warn_about_nothing(tmp_path, label):
 
 def test_the_label_is_judged_against_the_syntax_the_file_actually_carries(
         tmp_path):
-    """One predicate for "is this file compressed", not two (#502 review).
+    """One predicate for "is this file compressed", not two (#502 review,
+    #605).
 
-    `_finalize_dataset` runs `_compress_j2k` for `compression == 'j2k'`
-    and for nothing else, so any *other* truthy value writes a native
-    Implicit VR Little Endian file. The worker's `written_syntax` has to
-    key on the same comparison: read as truthiness it judged the label
-    against the JPEG 2000 row while the file went out native, and
-    `YBR_ICT` was written with no warning at all -- measured with
-    `compression="rle"`.
+    `_finalize_dataset` ran `_compress_j2k` for `compression == 'j2k'`
+    and for nothing else, and the worker's `written_syntax` had to key on
+    the same comparison: read as truthiness it judged the label against
+    the JPEG 2000 row while the file went out native, and `YBR_ICT` was
+    written with no warning at all -- measured with `compression="rle"`.
 
-    The assertion is on the *file's own* transfer syntax rather than on
-    `"rle"` meaning anything, because it does not: `compression` is not
-    a documented open enum and this test promises nothing about that
-    value. What it pins is the invariant -- the label is judged against
-    the syntax the file ends up carrying. Killing mutation:
-    `written_syntax` back to `if ctx.compression`.
+    This test used to export with `"rle"` and assert the native warning.
+    Since #605 there is no such export: every reader of `compression`
+    asks `_compresses`, which refuses anything but None and `"j2k"`, so
+    the invariant "judged against the syntax the file carries" is
+    enforced by the predicate having one spelling, and the value that
+    used to split the two is refused where the context is built. What
+    is left to pin here is that refusal and the native half of the
+    judgement. Killing mutations: `ExportContext` accepting `"rle"`;
+    `written_syntax` fixed at JPEG 2000 (the native `YBR_ICT` goes
+    silent).
     """
-    outcome = _export(tmp_path, _image("YBR_ICT"), compression="rle")
+    with pytest.raises(ValueError, match="'j2k'"):
+        _export(tmp_path, _image("YBR_ICT"), compression="rle")
+
+    outcome = _export(tmp_path, _image("YBR_ICT"), compression=None)
 
     assert outcome.ok, outcome.error
     written = pydicom.dcmread(outcome.output_path)
