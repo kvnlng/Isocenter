@@ -3414,6 +3414,7 @@ class DicomSession:
                 value it would stash is one no token can hold (`bytes`),
                 naming the tag; Patient's Name is blank under a rule of
                 EMPTY or REMOVE on it; or the patient has instances and
+                its first instance, which the record is captured from,
                 holds no value in any tag `tags_to_lock` names (or it names
                 none), so there is nothing to stash and a lock would secure
                 nothing (#638; a tag held blank is a value, and a patient
@@ -3863,18 +3864,22 @@ class DicomSession:
         # instances, whose `0 instances secured` is already true; and not
         # for a record holding a blank, which is not empty (blanks are the
         # loss checks' concern above). The tags are the caller's own
-        # argument; no patient, no value.
+        # argument; no patient, no value. "This patient's first instance",
+        # because the record above is captured from it alone: a patient
+        # whose later study carries the tag was told it held none, and
+        # advised to name a tag its instances carry -- the one it named
+        # (review of #640, P-2). Per-instance capture is #583.
         if first_instance is not None and not original_attrs:
             if tags_to_lock:
-                nothing = (f"this patient holds no value in {', '.join(tags_to_lock)}, "
-                           "every tag tags_to_lock names")
+                nothing = ("this patient's first instance holds no value in "
+                           f"{', '.join(tags_to_lock)}, every tag tags_to_lock names")
             else:
                 nothing = "tags_to_lock names no tag"
             raise RuntimeError(
                 f"lock_identities: {nothing}, so there is nothing to stash and "
                 "the lock would secure nothing. Name a tag this patient's "
-                "instances carry; the token this call would have written is "
-                "unchanged.")
+                "first instance carries; the token this call would have "
+                "written is unchanged.")
 
         # The token is built here, in the plan, and not where it is
         # embedded: it is `json.dumps` of the values, and a value JSON

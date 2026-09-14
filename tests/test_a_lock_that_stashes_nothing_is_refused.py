@@ -42,17 +42,21 @@ ABSENT = "0010,1000"   # Other Patient IDs: no hand-built instance here carries 
 
 
 def nothing_to_stash(tags):
-    """The #638 refusal for `tags_to_lock`."""
+    """The #638 refusal for `tags_to_lock`. "This patient's first
+    instance", not "this patient": the plan captures from the first
+    instance only, so a patient whose later study carries the tag was told
+    it held none, and advised to name a tag its instances carry -- the tag
+    it had named (review of #640, P-2)."""
     if not tags:
         return ("lock_identities: tags_to_lock names no tag, so there is nothing "
                 "to stash and the lock would secure nothing. Name a tag this "
-                "patient's instances carry; the token this call would have written "
-                "is unchanged.")
-    return ("lock_identities: this patient holds no value in "
+                "patient's first instance carries; the token this call would have "
+                "written is unchanged.")
+    return ("lock_identities: this patient's first instance holds no value in "
             f"{', '.join(tags)}, every tag tags_to_lock names, so there is "
             "nothing to stash and the lock would secure nothing. Name a tag this "
-            "patient's instances carry; the token this call would have written "
-            "is unchanged.")
+            "patient's first instance carries; the token this call would have "
+            "written is unchanged.")
 
 
 @pytest.fixture(autouse=True)
@@ -107,6 +111,25 @@ def test_a_lock_with_nothing_to_stash_is_refused_and_writes_nothing(tmp_path, ta
         assert all(SEQ not in inst.sequences for inst in _instances(patient))
         for secret in (PID_A, NAME_A):
             assert secret not in str(raised.value)
+
+
+def test_a_patient_whose_later_study_carries_the_tag_is_told_of_its_first_instance(
+        tmp_path):
+    """The shape P-2 of the review of #640 measured: study 1's instance
+    lacks the tag and study 2's carries it. The plan reads the first
+    instance, so the lock is refused, and the refusal says what it read --
+    the first instance -- rather than that the patient holds no value.
+    Nothing is written. Per-instance capture is #583."""
+    with _session(tmp_path) as session:
+        patient = _hand_patient(session)
+        later = _hand_patient(session, pid="PAT-638-LATER", extra={ABSENT: "OTHER-A"})
+        session.store.patients.remove(later)
+        patient.studies.extend(later.studies)
+        with pytest.raises(RuntimeError) as raised:
+            session.lock_identities(PID_A, tags_to_lock=[ABSENT])
+        assert str(raised.value) == nothing_to_stash([ABSENT])
+        assert all(SEQ not in inst.sequences for inst in _instances(patient))
+        assert "OTHER-A" not in str(raised.value)
 
 
 def test_a_relock_with_nothing_to_stash_leaves_the_earlier_token(tmp_path):

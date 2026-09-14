@@ -247,8 +247,9 @@ exclusively and with mode 0600, unless the session holds an identity token
 this library wrote that no key here opens, in which case it raises
 `RuntimeError` and creates none (#617). `lock_identities()` refusals name no
 patient: a batch refusal numbers each refused patient by its place among
-the patients found, in Patient ID order. A lock of a patient with instances
-and no value in any tag `tags_to_lock` names is such a refusal (#638).
+the patients found, in Patient ID order. A lock of a patient whose first
+instance holds no value in any tag `tags_to_lock` names is such a refusal
+(#638).
 `lock_identities(persist=True)` and `lock_identities_batch()` raise the
 `sqlite3.Error` of a store write that fails, after one `ERROR` audit row;
 writes before it are not rolled back (#599).
