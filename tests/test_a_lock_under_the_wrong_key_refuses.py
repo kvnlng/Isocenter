@@ -275,7 +275,7 @@ def test_a_truncated_token_of_ours_is_refused_not_replaced(tmp_path):
     (b"gAAAAAB/xxxxxxxx", False),               # ours-shaped, but `/` is not base64url
     (None, False), (7, False),
     ("\ud800gAAAAABxxxxxxxxx", False),          # a str UTF-8 cannot encode: not ours
-    ("gAAAAABxxxxx\ud800", False),              # ...even ours-shaped in front of it
+    ("gAAAAABxxxxx\udcff", False),              # ...even ours-shaped in front of it
 ], ids=["foreign", "empty", "short", "ours", "str", "bytearray", "der", "v81",
         "version_byte_ff", "not_urlsafe", "none", "int", "lone_surrogate",
         "lone_surrogate_after_our_head"])
@@ -291,7 +291,11 @@ def test_the_sniff_reads_the_fernet_version_byte(content, ours):
     the surrogate sits -- no token of ours is spelled outside base64url
     -- rather than a `UnicodeEncodeError` out of the encode; the second
     spelling is where "not ours" and a `surrogateescape` encode would
-    disagree (review of #633 round 2, P-4)."""
+    disagree (review of #633 round 2, P-4): `surrogateescape` maps
+    U+DC80..U+DCFF to bytes, so it spells `\\udcff` as `b"\\xff"` behind
+    twelve alphabet characters and calls the value ours. (A surrogate
+    outside that range, `\\ud800`, makes `surrogateescape` raise as well,
+    which is why this row uses `\\udcff`; review of #633 round 3, P-2.)"""
     assert ReversibilityService.is_one_of_ours(content) is ours
 
 
@@ -421,9 +425,11 @@ def test_a_token_of_ours_the_key_opens_to_no_record_is_refused_not_a_json_error(
     "Nothing chained behind the refusal" is pinned at every door by the
     attribute that carries it there, not by `__cause__` alone, which is
     None whether or not `from None` was written: `__suppress_context__`
-    where the read's exception is re-raised `from None` (the single lock
-    and recovery), `__context__ is None` at the batch, which raises its
-    own outside any `except`. Mutant N6 -- `from None` dropped on
+    where the refusal is raised `from None` -- re-raised as the plan's
+    own `RuntimeError` at the single lock, and raised by `open_token`
+    itself at recovery, which calls it with no `try` in between (review
+    of #633 round 3, P-1) -- and `__context__ is None` at the batch,
+    which raises its own outside any `except`. Mutant N6 -- `from None` dropped on
     `open_token`'s no-record raise -- survived this test until the
     recovery door asserted `__suppress_context__`, and under it the
     recovery traceback carried "During handling of the above exception"

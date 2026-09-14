@@ -4776,8 +4776,21 @@ class SqliteStore:
         Used when only attributes have changed (e.g., after locking identities)
         to avoid full graph traversal.
 
+        One call is one transaction: a failure writes none of `instances`.
+        Nothing marks them persisted either way (#398), so an instance
+        whose write failed still reads as holding unsaved changes and a
+        later `save()` writes it.
+
         Args:
             instances (List[Instance]): The list of instances to update.
+
+        Raises:
+            sqlite3.Error: The write failed. Logged, recorded as one
+                `ERROR` audit row (best-effort: a row that cannot be
+                recorded does not replace this exception), and re-raised
+                as sqlite raised it (#599). Until 0.9.8 it was logged and
+                swallowed, so `lock_identities(persist=True)` reported
+                instances secured whose tokens only memory held.
         """
         if not instances:
             return
@@ -4805,7 +4818,28 @@ class SqliteStore:
                 self.logger.info("Update complete.")
 
         except sqlite3.Error as e:
-            self.logger.error(f"Failed to update attributes: {describe_exception(e)}")
+            # Raised, not swallowed (#599). The caller is a lock that has
+            # already embedded the token in memory; a log line alone let
+            # `lock_identities(persist=True)` return success while the
+            # store held no token, and a reopen lost the way back with
+            # nothing in the session's story to say so. The row is the
+            # durable half and is best-effort: `except Exception`, so a
+            # store too broken to take a row still hands the caller the
+            # error that failed the write. A count and sqlite's own text
+            # (bound values never reach it); no SOP UID, no patient.
+            message = (f"update_attributes could not write {len(instances)} "
+                       "instance(s) to the store, so none of them was written "
+                       "and their changes are held in memory only: "
+                       f"{describe_exception(e)}")
+            self.logger.error(message)
+            try:
+                self.log_audit(action_type="ERROR", entity_uid="SESSION",
+                               details=message)
+            except Exception as row_error:  # pylint: disable=broad-except
+                self.logger.error(
+                    "update_attributes could not record its failure in the "
+                    f"audit log: {describe_exception(row_error)}")
+            raise
 
     def save_findings(self, findings: List[PhiFinding]):
         """

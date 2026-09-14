@@ -3412,8 +3412,13 @@ class DicomSession:
                 one `tags_to_lock` names (#607; `recover_patient_identity(...,
                 restore=True)` and a lock after it is the way through); a
                 value it would stash is one no token can hold (`bytes`),
-                naming the tag; or Patient's Name is blank under a rule of
-                EMPTY or REMOVE on it. Also, before any patient is planned,
+                naming the tag; Patient's Name is blank under a rule of
+                EMPTY or REMOVE on it; or the patient has instances and
+                holds no value in any tag `tags_to_lock` names (or it names
+                none), so there is nothing to stash and a lock would secure
+                nothing (#638; a tag held blank is a value, and a patient
+                with no instances locks as 0 instances). Also, before any
+                patient is planned,
                 when no key file exists at the path and an instance in the
                 session carries a token this library wrote: no key is
                 created (Q8 of #617). Given a list or a report, the batch
@@ -3428,6 +3433,12 @@ class DicomSession:
             ValueError: The key file at the path is empty (the message
                 names the path) or is not a Fernet key (#618). Neither is
                 cached: a later call reads the file again.
+            sqlite3.Error: With `persist=True`, the store refused the
+                write (#599). The instances already carry the new token in
+                memory, marked modified, so a later `save()` writes them;
+                the store holds none of them, and one `ERROR` audit row
+                says so. Until 0.9.8 this was logged and the lock returned
+                as if the tokens had been stored.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3842,6 +3853,29 @@ class DicomSession:
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
 
+        # Instances to secure and nothing to stash (#638). An empty record
+        # builds no token (`generate_identity_token` returns `b""`) and
+        # `embed_identity_token` embeds nothing for it, so the lock
+        # touched no instance -- a re-lock left the earlier token in place
+        # -- and still returned `N instances secured` and logged the
+        # identity as secured. Last among the refusals, so every more
+        # specific one keeps its message. Not for a patient with no
+        # instances, whose `0 instances secured` is already true; and not
+        # for a record holding a blank, which is not empty (blanks are the
+        # loss checks' concern above). The tags are the caller's own
+        # argument; no patient, no value.
+        if first_instance is not None and not original_attrs:
+            if tags_to_lock:
+                nothing = (f"this patient holds no value in {', '.join(tags_to_lock)}, "
+                           "every tag tags_to_lock names")
+            else:
+                nothing = "tags_to_lock names no tag"
+            raise RuntimeError(
+                f"lock_identities: {nothing}, so there is nothing to stash and "
+                "the lock would secure nothing. Name a tag this patient's "
+                "instances carry; the token this call would have written is "
+                "unchanged.")
+
         # The token is built here, in the plan, and not where it is
         # embedded: it is `json.dumps` of the values, and a value JSON
         # cannot hold (an OB element is ingested as `bytes`) raised
@@ -3949,9 +3983,7 @@ class DicomSession:
                 and no patient is locked, whatever `persist` or
                 `auto_persist_chunk_size` says. A Patient ID that matches
                 no patient is logged, not raised. The promise is about
-                refusals: a store write that fails while tokens are
-                persisted is logged by `update_attributes`, not raised,
-                and leaves memory and the store disagreeing. No message
+                refusals, not the store: see `sqlite3.Error`. No message
                 names a patient (P6): each refusal is prefixed `[n of m]`,
                 its place among the `m` patients found, in Patient ID
                 order, so the refused patient is
@@ -3962,6 +3994,16 @@ class DicomSession:
                 message with no number, and creates no key.
             ValueError: The key file is empty or is not a Fernet key
                 (#618), as for `lock_identities()`.
+            sqlite3.Error: A store write failed while tokens were being
+                persisted (`persist=True` writes per patient,
+                `auto_persist_chunk_size` per chunk), after one `ERROR`
+                audit row (#599). **Nothing is rolled back across writes**:
+                patients written before the failure stay locked in the
+                store, the failed write's patients hold their tokens in
+                memory only (a later `save()` writes them), and the
+                patients after it in Patient ID order are not locked. One
+                write is one transaction, so the failed chunk stores none
+                of its instances.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
@@ -4098,10 +4140,23 @@ class DicomSession:
                             `audit()` raises it again. A restored Study Date
                             is also put back on the `Study`, which is where
                             `export()` reads it, when the patient has one
-                            study (#566). The token holds one study's
+                            study (#566), and when the restored value reads
+                            as a date: a blank or unreadable one leaves the
+                            `Study` as it is, with one WARNING that carries
+                            no date (#619). The token holds one study's
                             values, so for a patient with several each
                             study keeps its de-identified date and one
-                            WARNING gives the count (#583).
+                            WARNING gives the count (#583); the restored
+                            values are nonetheless written onto every
+                            instance, including instances of a study that
+                            carries no token.
+
+        The token read is the first one **of ours** in study, series and
+        instance order (#616): a study without a token, or with an
+        Encrypted Attributes Sequence this library did not write, is
+        walked past. Until 0.9.8 the walk read the first instance of the
+        last study that had one, so a patient whose token sat on an
+        earlier study raised the "no token" message.
 
         Every failure raises and nothing is printed (#539, #550). So
         `restore=False` checks that the patient is recoverable under this
@@ -4117,11 +4172,12 @@ class DicomSession:
                 the key file is empty or is not a Fernet key (#618), which
                 is read before the patient is looked up and is not cached.
             RuntimeError: When reversibility is not enabled; the patient
-                has no instances, or no identity token -- an Encrypted
-                Attributes Sequence that did not come from this library
-                (no Fernet token in it) counts as no token, not as the
-                wrong key (#617); the key does not decrypt the token, or
-                opens it to no identity record this library writes; or,
+                has no instances, or no instance carrying an identity token
+                -- an Encrypted Attributes Sequence that did not come from
+                this library (no Fernet token in it) counts as no token,
+                not as the wrong key (#617); the key does not decrypt the
+                token, or the key opens it but it holds no identity record
+                this library writes; or,
                 with `restore=True`, a patient holding the restored
                 Patient ID was de-identified under a different date-offset
                 scheme (raised before anything is restored).
@@ -4138,19 +4194,36 @@ class DicomSession:
             raise ValueError("recover_patient_identity: no patient in this "
                              "session holds the Patient ID given")
 
-        # Locate first instance to get the token
+        # The first instance carrying a token of ours, else the first
+        # instance at all (#616). The walk used to `break` out of the
+        # series loop only, so it ended on the first instance of the
+        # *last* study with instances, and a patient whose token sits on
+        # an earlier study -- a pair merged by `audit()` (#563), a study
+        # ingested after the lock -- was told it had never been locked.
+        # `token_of_ours`, not "any Encrypted Attributes Sequence": a
+        # foreign sequence is "no token" since #617, so stopping on one
+        # would never reach the token behind it. The fallback keeps both
+        # messages: a patient with instances and no token of ours gets
+        # `recover_or_raise`'s "no token", one with none gets the raise
+        # below. The first token found is the one read, so a token this
+        # key cannot open on study 1 raises the wrong-key text even where
+        # study 2 carries another -- one token per patient until #583.
         first_inst = None
-        for st in p.studies:
-            for se in st.series:
-                if se.instances:
-                    first_inst = se.instances[0]
-                    break
+        token_inst = None
+        for one in (inst for st in p.studies for se in st.series
+                    for inst in se.instances):
+            if first_inst is None:
+                first_inst = one
+            if self.reversibility_service.token_of_ours(one) is not None:
+                token_inst = one
+                break
 
         if not first_inst:
             raise RuntimeError("recover_patient_identity: the patient has no "
                                "instances to recover an identity from")
 
-        original_attrs = self.reversibility_service.recover_or_raise(first_inst)
+        original_attrs = self.reversibility_service.recover_or_raise(
+            token_inst or first_inst)
 
         if original_attrs:
             if restore:
@@ -4207,9 +4280,27 @@ class DicomSession:
                     if len(p.studies) == 1:
                         study = p.studies[0]
                         restored = original_attrs["0008,0020"]
-                        # Compared as `Study` would hold it; a restore
-                        # onto a date that never moved records no change.
-                        if study.study_date != entities.normalize_study_date(restored):
+                        # Read as `Study` would hold it, through the one
+                        # parser its setter and hydration share: ingest
+                        # maps a blank or unreadable Study Date to `None`,
+                        # and this wrote the token's `''` or `'20041399'`
+                        # over it -- dirty, saved, exported, and raised by
+                        # the next `audit()` as a date to shift (#619). A
+                        # value that is not a date is not written; the
+                        # instances above still take it, which is what the
+                        # source held. `isinstance`, not truthiness:
+                        # `'20041399'` is truthy. Inside the one-study arm,
+                        # so a multi-study patient keeps the one WARNING
+                        # below. No date in the text, and no ID.
+                        restored_date = entities.normalize_study_date(restored)
+                        if not isinstance(restored_date, datetime.date):
+                            get_logger().warning(
+                                "The restored Study Date could not be read as "
+                                "a date, so the Study keeps the date it holds "
+                                "(#619).")
+                        # A restore onto a date that never moved records
+                        # no change.
+                        elif study.study_date != restored_date:
                             study.study_date = restored
                             study.mark_modified()
                     else:
