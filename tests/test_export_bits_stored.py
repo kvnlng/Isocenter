@@ -605,16 +605,20 @@ def test_a_declared_high_bit_the_export_does_not_write_is_noted(
 def test_a_widened_declaration_is_noted_once(tmp_path):
     """The widening note already names the written HighBit (#597).
 
-    Left-aligned values under a declared BitsStored 12 / HighBit 15 are
-    widened to 16/15 with #468's note. A second note about the HighBit
-    would say the same thing twice. Killing mutation (M22): the
-    `widened is None` guard dropped.
+    Values that overflow a coherent declared 12/11 are widened to 16/15
+    with #468's note, which already says "written with BitsStored 16 and
+    HighBit 15". The declared HighBit 11 is not the written one, so
+    without the guard a second note would say the same thing twice.
+    A declared 12/15 would not do: its HighBit is the widened one, and
+    the guard is invisible there (measured: the mutant survived it).
+    Killing mutation (M22): the `widened is None` guard dropped.
     """
     arr = np.array([[0, 65520], [1600, 32000]] * 2, np.uint16)
     outcome = _export(tmp_path, _image(
-        arr, (("0028,0101", 12), ("0028,0102", 15))))
+        arr, (("0028,0101", 12), ("0028,0102", 11))))
 
     assert outcome.ok, outcome.error
+    assert _width(outcome.output_path)[:3] == (16, 16, 15)
     assert len(outcome.corrections) == 1, outcome.corrections
     assert "BitsStored 12 " in outcome.corrections[0], outcome.corrections
 

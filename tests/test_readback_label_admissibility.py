@@ -689,8 +689,16 @@ def test_16_bit_rgb_and_8_bit_ybr_full_pass(tmp_path, compression, declared,
     """The controls: what `ingest()` reads, the readback still passes (#596).
 
     16-bit `RGB` needs no colour conversion, and an 8-bit `YBR_FULL`
-    converts. Killing mutation (M16): the gate on `BitsAllocated > 8`
-    alone, which refuses the 16-bit `RGB` file `ingest()` reads.
+    converts. Killing mutation (M16'): the second decode replaced by a
+    refusal keyed on `BitsAllocated > 8`, which refuses the 16-bit `RGB`
+    file `ingest()` reads.
+
+    **Classified survivor (M16):** the decode gated on `BitsAllocated > 8`
+    instead of the label is equivalent from the outside. A default decode
+    of a file the stored-sample decode already read differs only by the
+    colour conversion, which succeeds for every label on 8-bit samples
+    and is a no-op for `RGB`, so the gate decides what the check costs,
+    not what it answers.
     """
     arr = _ramp(np.uint16) if dtype == np.uint16 else \
         np.full((8, 8, 3), YBR, np.uint8)
