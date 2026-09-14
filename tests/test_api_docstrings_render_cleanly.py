@@ -53,6 +53,7 @@ import ast
 import inspect
 import pathlib
 import re
+import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 PACKAGE = REPO / "isocenter"
@@ -76,8 +77,17 @@ _ARGS = re.compile(r"^(?:Args|Arguments|Params|Parameters):\s*$",
 # A sentence is none of these, and neither is `np.ndarray or None`:
 # `or` is English, and admitting a bare word between two names would
 # re-admit the `Note that this is prose:` case below.
+#
+# Each atom is an atomic group, `(?>...)` (3.11+; the floor is 3.12).
+# The bracket class admits `]`, ` ` and `|`, which the separator uses
+# too, so `a[b] | a[b] | ... x` parses as one atom or many at every
+# `]`, and a near-miss backtracked through all of them: 0.3 s at 22
+# atoms, x4 per two more. Committing each atom to its longest match
+# drops no string the old pattern admitted -- exhaustively over a
+# ten-character alphabet up to length 8, 0 of 111,111,110 differ
+# (review of #637) -- and makes the near-miss linear.
 _TYPE_ATOM = r"'?[A-Za-z_][\w.]*'?(?:\[[\w.,'\[\] |]+\])?"
-_TYPE_SHAPE = re.compile(rf"^{_TYPE_ATOM}(?:\s*\|\s*{_TYPE_ATOM})*$")
+_TYPE_SHAPE = re.compile(rf"^(?>{_TYPE_ATOM})(?:\s*\|\s*(?>{_TYPE_ATOM}))*$")
 
 # `name (type): description` / `name: description`, first line of an
 # Args entry.
@@ -424,6 +434,25 @@ def test_a_pep_604_union_before_the_colon_is_a_type():
     assert len(offenders) == 1, offenders
     assert ("'np.ndarray or None' is read as the returned type and is not "
             "one") in offenders[0], offenders
+
+
+def test_a_near_miss_union_is_rejected_in_linear_time():
+    """A malformed union fails fast, not by backtracking every parse.
+
+    `_TYPE_SHAPE`'s comment has the ambiguity. The 22-atom string comes
+    first because it is the one a regression can finish: without the
+    atomic groups it takes about 340 ms, where the 10k-character one
+    would not return at all. 50 ms is a budget a loaded CI box meets
+    with room; the fixed pattern takes microseconds on both.
+    """
+    for atoms in (22, 1430):
+        text = " | ".join(["a[b]"] * atoms) + " x"
+        start = time.perf_counter()
+        matched = _TYPE_SHAPE.match(text)
+        elapsed = time.perf_counter() - start
+        assert matched is None, text[:80]
+        assert elapsed < 0.05, (
+            f"{len(text)} characters took {elapsed * 1e3:.0f} ms to reject")
 
 
 def test_an_untyped_args_entry_needs_a_parameter_annotation():
