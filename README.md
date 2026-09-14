@@ -156,7 +156,7 @@ print(f"Found {len(report)} potential PHI issues.")
 To enable reversible anonymization, generate a key and lock the original patient identities into an encrypted private tag. This must be done *before* anonymization: locking after `anonymize()` raises `RuntimeError`, because there is no original value left to stash, and so does locking before `enable_reversible_anonymization()`. Locking again before anonymizing replaces the stored token. Encryption is Fernet (AES-128-CBC with HMAC-SHA256) from the `cryptography` package.
 
 ```python
-# Enable encryption (generates 'isocenter.key')
+# Enable encryption; the first lock creates 'isocenter.key' (mode 0600) if it does not exist
 session.enable_reversible_anonymization()
 
 # cryptographically lock identities for all patients found in the audit
@@ -298,7 +298,7 @@ session.generate_report("compliance_report.md")
 
 ### 7. Recover Identity (Optional)
 
-If you have the key (`isocenter.key`) and need the original identity of an anonymized patient, load the session under that key. `enable_reversible_anonymization()` **creates a new key** when none exists at the path you give it, so point it at the key the data was locked with; under any other key recovery finds nothing and prints `No encrypted identity token found or decryption failed.` ([#539](https://github.com/kvnlng/Isocenter/issues/539)):
+If you have the key (`isocenter.key`) and need the original identity of an anonymized patient, load the session under the key the data was locked with. `enable_reversible_anonymization()` never creates a key; the first `lock_identities()` does. The call prints nothing and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path (checked first, and no key is created), `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token or the key does not decrypt it. No message names the Patient ID ([#539](https://github.com/kvnlng/Isocenter/issues/539), [#550](https://github.com/kvnlng/Isocenter/issues/550)). With `restore=False` it only checks that the patient is recoverable under the key.:
 
 ```python
 # Load the session containing anonymized data

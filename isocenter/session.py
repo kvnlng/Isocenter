@@ -3965,10 +3965,13 @@ class DicomSession:
                             intact and a later `audit()` does not shift it
                             again. A date among the locked tags is put back
                             on the instances like any locked tag, and a later
-                            `audit()` raises it again -- except that Study
-                            Date stays shifted on the `Study`, and `export()`
-                            writes the study's value over the instance's, so
-                            the exported file carries it shifted (#566).
+                            `audit()` raises it again. A restored Study Date
+                            is also put back on the `Study`, which is where
+                            `export()` reads it, when the patient has one
+                            study (#566). The token holds one study's
+                            values, so for a patient with several each
+                            study keeps its de-identified date and one
+                            WARNING gives the count (#583).
 
         Every failure raises and nothing is printed (#539, #550). So
         `restore=False` checks that the patient is recoverable under this

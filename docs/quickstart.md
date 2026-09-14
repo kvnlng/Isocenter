@@ -54,7 +54,7 @@ print(f"Found {len(report)} potential PHI issues.")
 To enable reversible anonymization, generate a cryptographic key and "lock" the original patient identities into a secure, encrypted DICOM tag. This must be done *before* anonymization: locking after `anonymize()` raises `RuntimeError`, because there is no original value left to stash, and so does locking before `enable_reversible_anonymization()`. Locking again before anonymizing replaces the stored token, and the lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried.
 
 ```python
-# Enable encryption (generates 'isocenter.key')
+# Enable encryption; the first lock creates 'isocenter.key' (mode 0600) if it does not exist
 session.enable_reversible_anonymization()
 
 # cryptographically lock identities for all patients found in the audit
@@ -183,7 +183,7 @@ See [Analytics & Reporting](analytics.md) for what each section means and how th
 
 ## 7. Recover Identity (Optional)
 
-If you have a valid key (`isocenter.key`) and need to retrieve the original identity of an anonymized patient, load the session under that key. `enable_reversible_anonymization()` **creates a new key** when none exists at the path you give it, so point it at the key the data was locked with. Under any other key recovery finds nothing: `recover_patient_identity()` prints `No encrypted identity token found or decryption failed.` and returns `None` ([#539](https://github.com/kvnlng/Isocenter/issues/539)):
+If you have a valid key (`isocenter.key`) and need to retrieve the original identity of an anonymized patient, load the session under the key the data was locked with. `enable_reversible_anonymization()` never creates a key; the first `lock_identities()` does, exclusively and with mode 0600. `recover_patient_identity()` returns `None`. The call prints nothing and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path (checked first, and no key is created), `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token or the key does not decrypt it. No message names the Patient ID ([#539](https://github.com/kvnlng/Isocenter/issues/539), [#550](https://github.com/kvnlng/Isocenter/issues/550)). With `restore=False` it only checks that the patient is recoverable under the key.:
 
 ```python
 # Load the session containing anonymized data
@@ -200,4 +200,4 @@ session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=True)
 print(f"Restored: {session.store.patients[0].patient_name}")
 ```
 
-Restore puts back the locked identity tags only: every other date stays shifted by the patient's offset, so intervals are intact and a later `audit()` does not shift it again. A date you listed in `tags_to_lock` is put back on the instances like any locked tag, and a later `audit()` raises it again -- except Study Date, which stays shifted on the study, and `export()` writes the study's value, so the exported file still carries it shifted ([#566](https://github.com/kvnlng/Isocenter/issues/566)). A restored patient reads `phi_status` `UNSCANNED`, not `REMEDIATED`: it holds its original identifiers again. If another patient in the session already holds the restored Patient ID (raw files for that patient ingested before the restore), the two are merged into the patient that was loaded first ([#548](https://github.com/kvnlng/Isocenter/issues/548), [#552](https://github.com/kvnlng/Isocenter/issues/552)).
+Restore puts back the locked identity tags only: every other date stays shifted by the patient's offset, so intervals are intact and a later `audit()` does not shift it again. A date you listed in `tags_to_lock` is put back on the instances like any locked tag, and a later `audit()` raises it again. For a patient with one study, a restored Study Date is also put back on the study, which is where `export()` reads it ([#566](https://github.com/kvnlng/Isocenter/issues/566)). The identity token is taken from the patient's first instance, so for a patient with several studies it holds one study's values: the restore writes them onto every study's instances ([#583](https://github.com/kvnlng/Isocenter/issues/583)), each study keeps its de-identified Study Date, and one `WARNING` gives the study count. A restored patient reads `phi_status` `UNSCANNED`, not `REMEDIATED`: it holds its original identifiers again. If another patient in the session already holds the restored Patient ID (raw files for that patient ingested before the restore), the two are merged into the patient that was loaded first ([#548](https://github.com/kvnlng/Isocenter/issues/548), [#552](https://github.com/kvnlng/Isocenter/issues/552)).
