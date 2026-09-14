@@ -102,7 +102,9 @@ def test_the_safety_scan_names_what_it_found_without_borrowing_the_word_dirty(
     stdout = capsys.readouterr().out
 
     assert "Safety Scan Found Issues" in stdout
-    assert "0010,0010" in stdout and "John Doe" in stdout
+    # The tag, never the value: the table's Examples column printed the
+    # name, and this line pinned that it did (#578).
+    assert "0010,0010" in stdout and "John Doe" not in stdout
     assert "dirty" not in stdout.lower(), (
         "the PHI report uses the vocabulary of the persistence layer")
 

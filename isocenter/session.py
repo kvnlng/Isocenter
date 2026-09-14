@@ -628,21 +628,27 @@ def _uids_from_frame(frame) -> Set[str]:
 
 
 def _report_phi_findings(findings) -> None:
-    """Prints what the pre-export scan found, and how to configure it away."""
-    counts, examples, descriptions = Counter(), {}, {}
+    """Prints what the pre-export scan found, and how to configure it away.
+
+    Never a value. The table had an Examples column, the first flagged
+    value per tag, so a patient's name went to the console and into any CI
+    log capturing it (#578). The tag, the reason and the count say what to
+    fix; the value adds only the identifier. `finding.reason` is safe to
+    print: every reason the inspector writes is a literal or names the tag
+    and the config's own description.
+    """
+    counts, descriptions = Counter(), {}
     for finding in findings:
         tag = finding.tag or finding.field_name
         counts[tag] += 1
-        examples.setdefault(tag, str(finding.value))
         descriptions[tag] = finding.reason
 
     print("\nSafety Scan Found Issues")
     print("The following tags still carry identifiers:")
-    print(f"{'Tag':<15} {'Description':<30} {'Count':<10} {'Examples'}")
-    print("-" * 80)
+    print(f"{'Tag':<15} {'Description':<30} {'Count'}")
+    print("-" * 56)
     for tag, count in counts.items():
-        print(f"{tag:<15} {descriptions[tag][:28]:<30} {count:<10} "
-              f"{examples[tag][:30]}")
+        print(f"{tag:<15} {descriptions[tag][:28]:<30} {count}")
 
     _print_suggested_config(counts)
 
