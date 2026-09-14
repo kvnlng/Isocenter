@@ -5575,6 +5575,45 @@ _J2K_ENCODABLE_FRAMES = frozenset({
 _J2K_MCT_SOURCES = frozenset({"RGB", "YBR_RCT", "YBR_ICT"})
 
 
+def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
+    """The encapsulated lengths pydicom mistakes for uncompressed data (#473).
+
+    pydicom 3.0.2 `DecodeRunner._validate_buffer` warns for
+    `actual in (expected, expected + expected % 2)`, where `expected` is
+    `frame_length(unit="bytes") * number_of_frames` under the file's own
+    transfer syntax. The runner computes it here rather than a formula
+    beside it, so a pydicom that changes the arithmetic changes this
+    too. `DecodeRunner` is imported from its module because `pydicom.pixels`
+    does not re-export it; the `<4.0` cap in `setup.py` is what keeps the
+    path stable.
+
+    Two of `frame_length`'s branches cannot be reached from the encoder:
+    BitsAllocated 1 (a bool mask is written at 8, see the `view` above
+    the frame guard) and the native `YBR_FULL_422` correction (the
+    runner is told the syntax is JPEG 2000, and the worker has rewritten
+    that label to `YBR_FULL` before the encoder). `ds.file_meta` still
+    says Implicit VR LE at this point, which is why the syntax is given,
+    not read.
+    """
+    from math import ceil
+
+    from pydicom.pixels.decoders.base import DecodeRunner
+
+    runner = DecodeRunner(JPEG2000Lossless)
+    runner.set_options(rows=int(ds.Rows), columns=int(ds.Columns),
+                       samples_per_pixel=int(samples),
+                       bits_allocated=int(ds.BitsAllocated),
+                       number_of_frames=int(frames),
+                       # Read by `frame_length` before it asks whether
+                       # the syntax is encapsulated; the value cannot
+                       # change the answer under JPEG 2000.
+                       photometric_interpretation=str(getattr(
+                           ds, "PhotometricInterpretation", "") or ""))
+    expected = ceil(runner.frame_length(unit="bytes")
+                    * runner.number_of_frames)
+    return (expected, expected + expected % 2)
+
+
 def _refuse_unencodable_j2k_frame(arr, ds, samples):
     """Raise before the encode, naming what the codec will not say.
 
@@ -5849,7 +5888,30 @@ def _compress_j2k(ds, pixel_array=None):
         else:
             frames_data.append(encode_frame(arr))
 
-        ds.PixelData = encapsulate(frames_data)
+        # **An offset table, unless it makes the length a lie (#473).**
+        # pydicom's decoder warns "the number of bytes of compressed pixel
+        # data matches the expected number for uncompressed data" when an
+        # encapsulated value's length falls in its window, and small
+        # low-entropy frames land there by chance -- about 1 in 5 random
+        # 16x16 bool masks, measured -- so `verify_readback=True`, and
+        # every later reader, put a false "check the transfer syntax"
+        # warning on the caller's stream about a correct file. An empty
+        # Basic Offset Table is PS3.5 A.4-legal and shortens the value by
+        # 4 bytes per frame; the window is `expected`, or `expected + 1`
+        # when that is odd, so the two encapsulations cannot both fall in
+        # it. Suppressing the warning instead was ruled out in #472: on
+        # 3.12 `catch_warnings` mutates the process-global filters, and
+        # this runs on threads.
+        #
+        # The trade, for exactly these files: no table, so the table-based
+        # frame check reads nothing (`offset_table_frame_count` answers
+        # None) and a reader falls back to one fragment per frame, which is
+        # what this encoder writes. The readback still compares every
+        # frame's samples.
+        encapsulated = encapsulate(frames_data)
+        if len(encapsulated) in _heuristic_lengths(ds, frames, samples):
+            encapsulated = encapsulate(frames_data, has_bot=False)
+        ds.PixelData = encapsulated
         # ds.TransferSyntaxUID = JPEG2000Lossless # REMOVE: Group 2 tags must be in file_meta only
         # The transfer syntax is the encoding. `is_implicit_VR` and
         # `is_little_endian` are not set alongside it: pydicom derives

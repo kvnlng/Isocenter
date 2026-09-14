@@ -154,3 +154,199 @@ def test_the_frame_refusal_is_not_rewrapped_by_the_generic_handler(
     assert message.count("Compression failed") == 1, message
     assert "int32" in message
     assert "use_compression=False" in message
+
+
+# ---------------------------------------------------------------------------
+# #473: a compressed length pydicom would mistake for an uncompressed one
+# ---------------------------------------------------------------------------
+
+import itertools
+import warnings
+
+import pydicom
+from imagecodecs import jpeg2k_encode
+from pydicom.encaps import encapsulate
+
+from isocenter import io_handlers
+from isocenter.entities import Instance
+from isocenter.io_handlers import ExportContext, _export_instance_worker
+
+#: pydicom 3.0.2 `pixels/decoders/base.py`, `_validate_buffer`: the warning
+#: this is about, matched on its own words.
+HEURISTIC = "matches the expected number for uncompressed data"
+
+_serial = itertools.count(1)
+
+
+def _codestream(frame):
+    """What `_compress_j2k` encodes a 1-sample frame to."""
+    return jpeg2k_encode(frame, level=0, codecformat="J2K", mct=False)
+
+
+def _search(make, expected_window, limit=2000):
+    """Seeds whose BOT encapsulation lands in pydicom's window.
+
+    Searched at test time rather than hard-coded: the encoder's output
+    is a property of the installed `imagecodecs`, and a seed list measured
+    on one release is not a collision on another. The search failing is a
+    failure, not a skip -- a silent skip would read as a pass.
+    """
+    hits = []
+    for seed in range(limit):
+        frames = make(seed)
+        n = len(encapsulate([_codestream(f) for f in frames]))
+        if n in expected_window:
+            hits.append(seed)
+            if len(hits) == 3:
+                break
+    assert hits, f"no colliding seed in {limit}; re-measure #473"
+    return hits
+
+
+def _bool_mask(seed, shape=(16, 16)):
+    return np.random.default_rng(seed).integers(0, 2, shape, np.uint8) \
+        .astype(bool)
+
+
+def _sparse_odd(seed):
+    """A 9x19 8-bit frame: an odd expected length, 171 bytes."""
+    return (np.random.default_rng(seed).random((9, 19)) < 0.02) \
+        .astype(np.uint8)
+
+
+def _instance(arr, frames=None):
+    inst = Instance(f"1.2.826.0.1.473.{next(_serial)}",
+                    "1.2.840.10008.5.1.4.1.1.7", 1)
+    inst.file_path = None
+    for tag, value in (("0008,0020", "20230101"), ("0008,0030", "120000"),
+                       ("0008,0060", "OT"), ("0028,0002", 1),
+                       ("0028,0004", "MONOCHROME2")):
+        inst.set_attr(tag, value)
+    if frames is not None:
+        inst.set_attr("0028,0008", frames)
+    inst.set_pixel_data(arr)
+    return inst
+
+
+def _export_recording(tmp_path, inst):
+    """The worker, with every warning recorded (3.12 has no context-aware
+    warnings, so this runs on the test's own thread)."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        outcome = _export_instance_worker(ExportContext(
+            instance=inst,
+            output_path=str(tmp_path / "out" / f"{inst.sop_instance_uid}.dcm"),
+            patient_attributes={"0010,0010": "ANON", "0010,0020": "PAT1"},
+            study_attributes={"0020,000d": "1.2.826.0.2.1"},
+            series_attributes={"0020,000e": "1.2.826.0.3.1"},
+            compression="j2k", verify_readback=True))
+    return outcome, [str(w.message) for w in caught]
+
+
+def _bot_length(pixel_data):
+    """The Basic Offset Table item's value length (PS3.5 A.4)."""
+    assert pixel_data[:4] == b"\xfe\xff\x00\xe0", "no BOT item"
+    return int.from_bytes(pixel_data[4:8], "little")
+
+
+def test_the_window_is_pydicoms_own():
+    """`expected`, and `expected + 1` only when `expected` is odd (#473).
+
+    pydicom 3.0.2 warns for `actual in (expected, expected + expected %
+    2)`. Killing mutation (M19, unit half): the window computed as
+    `expected` alone.
+    """
+    ds = Dataset()
+    ds.Rows, ds.Columns, ds.BitsAllocated = 9, 19, 8
+    assert set(io_handlers._heuristic_lengths(ds, 1, 1)) == {171, 172}
+    ds.Rows, ds.Columns = 16, 16
+    assert set(io_handlers._heuristic_lengths(ds, 2, 1)) == {512}
+
+
+@pytest.mark.parametrize("make, shape, window", [
+    (lambda seed: [_bool_mask(seed).view(np.uint8)], "bool-16x16", (256,)),
+    (lambda seed: [_sparse_odd(seed)], "uint8-9x19-odd", (172,)),
+], ids=["even-expected", "odd-expected"])
+def test_a_colliding_length_is_written_without_an_offset_table(
+        tmp_path, make, shape, window):
+    """No false "check the transfer syntax" warning on our own file (#473).
+
+    About 1 in 5 random 16x16 bool masks encode to exactly 256 bytes of
+    encapsulated Pixel Data -- the uncompressed length -- and pydicom's
+    decoder then warns on the caller's stream that the transfer syntax may
+    be wrong, during `verify_readback=True` and at every later read. An
+    empty Basic Offset Table is PS3.5 A.4-legal and moves the length by 4
+    bytes per frame, out of the window, so the file is written with one
+    in exactly that case. The odd-expected case is the window's second
+    value, `expected + 1`.
+
+    Killing mutations: the `has_bot=False` branch deleted (M18, the
+    warning returns); the window computed as `expected` only (M19, the
+    odd case warns).
+    """
+    for seed in _search(make, window):
+        frame = make(seed)[0]
+        arr = frame.astype(bool) if shape.startswith("bool") else frame
+        outcome, caught = _export_recording(tmp_path, _instance(arr))
+
+        assert outcome.ok, outcome.error
+        assert [m for m in caught if HEURISTIC in m] == [], caught
+        written = pydicom.dcmread(outcome.output_path)
+        assert len(written.PixelData) not in window
+        assert _bot_length(written.PixelData) == 0
+        assert np.array_equal(written.pixel_array, frame.astype(np.uint8))
+
+
+def test_a_non_colliding_length_keeps_its_offset_table(tmp_path):
+    """The table stays wherever the length is not in the window (#473).
+
+    Killing mutation (M20): `has_bot=False` unconditional.
+    """
+    for seed in range(40):
+        mask = _bool_mask(seed)
+        if len(encapsulate([_codestream(mask.view(np.uint8))])) != 256:
+            break
+    outcome, caught = _export_recording(tmp_path, _instance(mask))
+
+    assert outcome.ok, outcome.error
+    assert _bot_length(pydicom.dcmread(outcome.output_path).PixelData) == 4
+
+
+def test_a_two_frame_colliding_export_reingests(tmp_path):
+    """Multi-frame, with no table: pydicom, the fallback and ingest agree (#473).
+
+    An empty table still leaves one fragment per frame, and the readers
+    here split frames by fragment. What the file loses is the table-based
+    frame check (`offset_table_frame_count` answers None for it), which
+    the readback does not need: it compares every frame's samples.
+    """
+    from isocenter.io_handlers import DicomImporter
+    from isocenter.store import DicomStore
+
+    lengths = {}
+    for seed in range(400):
+        lengths.setdefault(
+            len(_codestream(_bool_mask(seed).view(np.uint8))), seed)
+    pair = next(((a, lengths[512 - 32 - n]) for n, a in lengths.items()
+                 if 512 - 32 - n in lengths), None)
+    assert pair is not None, "no colliding 2-frame pair; re-measure #473"
+    arr = np.stack([_bool_mask(pair[0]), _bool_mask(pair[1])])
+    assert len(encapsulate([_codestream(f.view(np.uint8)) for f in arr])) \
+        == 512
+
+    outcome, caught = _export_recording(tmp_path, _instance(arr, frames=2))
+
+    assert outcome.ok, outcome.error
+    assert [m for m in caught if HEURISTIC in m] == [], caught
+    written = pydicom.dcmread(outcome.output_path)
+    assert _bot_length(written.PixelData) == 0
+    expected = arr.astype(np.uint8)
+    assert np.array_equal(written.pixel_array, expected)
+    fallback, _ = io_handlers._decode_with_imagecodecs(
+        written, None, RuntimeError("forced to the fallback"))
+    assert np.array_equal(fallback, expected)
+    store = DicomStore()
+    summary = DicomImporter.import_files([outcome.output_path], store)
+    assert summary.ingested == 1, summary.failures
+    reread = store.patients[0].studies[0].series[0].instances[0]
+    assert np.array_equal(reread.get_pixel_data().astype(np.uint8), expected)
