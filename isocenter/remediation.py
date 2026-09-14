@@ -547,17 +547,34 @@ class RemediationService:
             # `attributes` arm: nested, it would cover only the first of
             # the three, and it would stop covering a fourth if one were
             # ever added above.
-            if self._remove_is_satisfied(entity, proposal):
+            #
+            # Absence is read on the object the session holds at the
+            # finding's address, not on `entity` (review of #639): a
+            # report kept across a reopen points at objects its first
+            # pass cleaned, and read there every removal of an unsaved
+            # pass was satisfied while the live graph still held it. The
+            # stamp below still lands on `entity` -- the stale object in
+            # that case -- and that is harmless, because the live object
+            # was just read clean; stale REPLACE and SHIFT are #644.
+            subject = self._removal_subject(finding, entity)
+            if self._remove_is_satisfied(subject, proposal):
                 self.logger.info(
                     f"{proposal.target_attr} is not on "
                     f"{self._log_subject(finding)}; nothing to remove")
                 return self._satisfied(finding, None)
-            self._record_decline(
-                finding,
-                f"{proposal.action_type} on {proposal.target_attr} "
-                f"matched no applicable arm for "
-                f"{type(entity).__name__}",
-                audit_buffer)
+            # Named apart only where the address changed the answer: the
+            # entity reads the tag gone, and the object at its address
+            # does not, or is not there. Every other decline keeps its text.
+            if subject is not entity and self._remove_is_satisfied(entity, proposal):
+                reason = (f"{proposal.action_type} on {proposal.target_attr}: "
+                          f"the finding's {type(entity).__name__} is "
+                          f"{self._STALE_REMOVAL} its address, so the tag's "
+                          f"absence from it is no evidence the element is gone")
+            else:
+                reason = (f"{proposal.action_type} on {proposal.target_attr} "
+                          f"matched no applicable arm for "
+                          f"{type(entity).__name__}")
+            self._record_decline(finding, reason, audit_buffer)
             return False
 
     #: The VRs whose value is bytes, so whose empty value is `b""`.
@@ -999,6 +1016,14 @@ class RemediationService:
         a malformed or non-tag key reaches the decline, whether or not
         the element it seems to name is held -- the arm cannot tell.
 
+        And only on the object the finding addresses. Under a session the
+        caller passes `_removal_subject`'s answer, the live object at the
+        finding's `entity_uid` and `entity_path`, not `finding.entity`, and
+        None when nothing is there, which has no `attributes` and so
+        declines: a report kept across a reopen, or a hand-built finding
+        filed under another instance's UID, read absence on an object
+        export never writes (review of #639 r2).
+
         An entity with no `attributes` dict, and an action this method
         does not implement, are the other two ways to the bottom `else`,
         and both stay declines.
@@ -1164,6 +1189,36 @@ class RemediationService:
         nested entity belongs to.
         """
         self._instance_owners = self._MappingProxyType(dict(owners))
+
+    #: `id(finding) -> the object the session holds at its address` for
+    #: the `REMOVE_TAG` findings of this pass, None where nothing is there
+    #: (`Session._removal_targets`, review of #639). **None as the whole
+    #: map means no session**, not "resolved nothing": a service used
+    #: without one -- the direct tests, hand-built findings -- has no graph
+    #: to resolve an address in and reads `finding.entity`, as it always
+    #: did. A class attribute for `_instance_owners`' reason.
+    _removal_objects = None
+    #: The decline text for a removal read on an object other than the
+    #: finding's entity. Carries the uid only, never a value.
+    _STALE_REMOVAL = "not the object this session holds at"
+
+    def _use_removal_targets(self, targets) -> None:
+        """Name the live object each `REMOVE_TAG` finding addresses.
+
+        A removal is then satisfied only when that object lacks the tag,
+        and one whose address resolved to nothing is never satisfied: a
+        report kept across `close()` and a reopen, or a hand-built finding
+        whose `entity` is not the object at its `entity_uid` and
+        `entity_path`, reads as a decline instead of as done.
+        """
+        self._removal_objects = self._MappingProxyType(dict(targets))
+
+    def _removal_subject(self, finding: PhiFinding, entity):
+        """What a removal's absence is read on: `entity` with no session,
+        and the session's live object at the address otherwise."""
+        if self._removal_objects is None:
+            return entity
+        return self._removal_objects.get(id(finding))
 
     #: What the session's last `audit()` raised, per scan-time entity uid
     #: (#553): a `_ScanTally`, or None when there is no audit behind the

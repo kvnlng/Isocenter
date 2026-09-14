@@ -332,6 +332,9 @@ def _misspelled(spelling, held_tag=ABSENT):
     # Nine characters, so a check that only measured the length would
     # pass it; every other spelling here has a length of its own.
     pytest.param(_misspelled("0008.0080"), id="nine_characters"),
+    # Nine characters with the comma in place and a letter O for a zero,
+    # so only the hex half of the check refuses it (review of #639 r2, F2).
+    pytest.param(_misspelled("0O08,0080"), id="letter_o"),
     pytest.param(_misspelled("InstitutionName"), id="keyword"),
     pytest.param(_misspelled("patient_id", held_tag="0010,0020"), id="python_name"),
 ])
@@ -354,7 +357,8 @@ def test_a_remove_that_matched_no_arm_still_declines(build):
     Kills: the action-type check dropped; the `attributes` guard dropped
     (`bare_with_a_tag`); the canonical key read raw; the sequences half
     of the predicate dropped; the well-formed-tag check dropped, or
-    weakened to a comma or to a length of nine (`nine_characters`)."""
+    weakened to a comma or to a length of nine (`nine_characters`), or
+    to a length of nine and a comma with no hex check (`letter_o`)."""
     entity, action, tag, still_there = build()
     before = getattr(entity, "phi_status", None)
     rows = _Rows()
@@ -512,3 +516,254 @@ def test_a_satisfied_remove_logs_one_info_line_naming_the_tag_and_uid_only(caplo
     for _, message in said:
         assert "PAT-626" not in message and "DOE^JOHN" not in message
         assert "/" not in message, message
+
+
+# ---------------------------------------------------------------------------
+# Absence is read on the live object at the finding's address
+# ---------------------------------------------------------------------------
+#
+# Review of #639 r2 (M1, F1). `anonymize(findings)` does not rehydrate a
+# finding's `entity`, so a report kept across `close()` and a reopen still
+# points at the first session's objects, which its first pass cleaned. Read
+# there, every REMOVE was "already gone" while the live graph -- the one
+# `export()` writes -- still held each value: measured on 063ed59, 0
+# declines, PASS, Institution Name and Patient's Name exported. The same
+# class reaches a hand-built finding whose `entity` is not the object at its
+# `entity_uid`/`entity_path`. The session now resolves that address and the
+# satisfied test reads the object it finds; nothing found, nothing
+# satisfied. REPLACE and SHIFT on a stale report are #644.
+
+HELD_VALUES = ("JFK IMAGING CENTER", "TOSHIBA", "CompressedSamples", "CT01")
+STALE = "not the object this session holds at"
+
+
+def _exported(session, tmp_path, name="out"):
+    import pydicom  # pylint: disable=import-outside-toplevel
+    out = tmp_path / name
+    session.export(str(out), use_compression=False)
+    return [pydicom.dcmread(str(p), stop_before_pixels=True)
+            for p in sorted(out.rglob("*.dcm"))]
+
+
+def _removes(report):
+    return [f for f in report.findings if f.remediation_proposal
+            and f.remediation_proposal.action_type == "REMOVE_TAG"]
+
+
+def _first_session_passes(tmp_path, save_after_pass):
+    """Session 1 of the review's `stale_report` flow: ingest, save, audit,
+    anonymize, close -- saving the pass only when asked. Returns the
+    report, still in hand as it would be in a notebook."""
+    session = _session(tmp_path, ["CT_small.dcm", "MR_small.dcm"])
+    with session:
+        session.save(sync=True)
+        report = session.audit()
+        session.anonymize(report)
+        assert _declined(session) == []
+        if save_after_pass:
+            session.save(sync=True)
+    return report
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_a_report_kept_across_a_reopen_of_an_unsaved_pass_declines_its_removals(
+        tmp_path, mode):
+    """The review's `stale_report`: session 1's pass was never saved, so
+    the reopened graph still holds every value the report removed. Each
+    REMOVE declines, naming no value, and the run grades REVIEW_REQUIRED
+    over a file that still carries them. Red on 063ed59: 0 declines and
+    PASS, with `JFK IMAGING CENTER` exported.
+
+    Kills: absence read on `finding.entity` rather than the live object;
+    the session not handing the service its live objects."""
+    report = _first_session_passes(tmp_path, save_after_pass=False)
+    removes = _removes(report)
+    assert len(removes) > 100, len(removes)
+
+    session = DicomSession(str(tmp_path / "m.db"))
+    with session:
+        live = _instances(session)
+        # Non-vacuity: the live graph is not the one the report points at,
+        # and it still holds what the first pass removed.
+        assert not {id(f.entity) for f in removes} & {id(i) for i in live}
+        assert "JFK IMAGING CENTER" in [i.attributes.get(ABSENT) for i in live]
+
+        session.anonymize(report)
+
+        declines = _declined(session)
+        assert len(declines) == len(removes), (len(declines), len(removes))
+        for row in declines:
+            assert not any(v in row for v in HELD_VALUES), row
+        assert all(STALE in row for row in declines), declines[:3]
+        assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]
+        ct = [ds for ds in _exported(session, tmp_path) if ds.Modality == "CT"]
+        assert [ds.InstitutionName for ds in ct] == ["JFK IMAGING CENTER"]
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_a_report_kept_across_a_reopen_of_a_saved_pass_still_grades_pass(
+        tmp_path, mode):
+    """The review's `stale_report_saved`: the pass was saved, so the
+    reopened graph is clean and each REMOVE's end state holds on the live
+    object at its address -- satisfied, as #626 asks, and the exported
+    files carry none of the values. A guard, green before: reading
+    liveness as "`finding.entity` is the live object" would decline all
+    of them here (a67eb30's REVIEW_REQUIRED), where nothing is wrong."""
+    report = _first_session_passes(tmp_path, save_after_pass=True)
+    removes = _removes(report)
+    assert len(removes) > 100, len(removes)
+
+    session = DicomSession(str(tmp_path / "m.db"))
+    with session:
+        live = _instances(session)
+        assert not {id(f.entity) for f in removes} & {id(i) for i in live}
+
+        session.anonymize(report)
+
+        assert _declined(session) == [], mode
+        assert _grade(session, tmp_path) == ["PASS"]
+        exported = _exported(session, tmp_path)
+        assert len(exported) == 2
+        removed = {f.remediation_proposal.target_attr for f in removes
+                   if not f.entity_path}
+        # Per element, not a text search: MR_small's Manufacturer is
+        # `TOSHIBA_MEC`, which is not the Institution Name and stays.
+        assert sorted(ds.get("InstitutionName", "") for ds in exported) == ["", ""]
+        for ds in exported:
+            assert "CompressedSamples" not in str(ds.get("PatientName", "")), ds.PatientName
+            assert (0x0009, 0x1002) not in ds
+            for tag in removed:
+                group, element = (int(x, 16) for x in tag.split(","))
+                if group % 2:
+                    assert (group, element) not in ds, (tag, ds.Modality)
+
+
+def _ct_and_mr(session):
+    by_modality = {se.modality: se.instances[0] for p in session.store.patients
+                   for st in p.studies for se in st.series}
+    return by_modality["CT"], by_modality["MR"]
+
+
+def _wrong_uid(session):
+    """`entity` the CT instance, with Institution Name deleted from it;
+    `entity_uid` the MR's, which holds `TOSHIBA`."""
+    ct, mr = _ct_and_mr(session)
+    del ct.attributes[ABSENT]
+    finding = _finding(ct, "REMOVE_TAG", ABSENT, uid=mr.sop_instance_uid)
+    return finding, ct, lambda: mr.attributes.get(ABSENT) == "TOSHIBA"
+
+
+def _nested_mismatch(session):
+    """`entity` the CT instance, `entity_path` an item under Referenced
+    Image Sequence that holds Other Patient IDs; the top level does not.
+    The finding's key is exactly the scan's key for the nested element."""
+    ct, _ = _ct_and_mr(session)
+    item = DicomItem()
+    item.set_attr("0010,1000", "OTHER-PID-123")
+    ct.add_sequence_item("0008,1140", item)
+    assert "0010,1000" not in ct.attributes
+    finding = _finding(ct, "REMOVE_TAG", "0010,1000", uid=ct.sop_instance_uid,
+                       path=(("0008,1140", 0),))
+    return finding, ct, lambda: item.attributes.get("0010,1000") == "OTHER-PID-123"
+
+
+def _no_such_uid(session):
+    """An address no instance in the session has."""
+    ct, _ = _ct_and_mr(session)
+    del ct.attributes[ABSENT]
+    finding = _finding(ct, "REMOVE_TAG", ABSENT, uid="1.2.3.4.5.6.7.8.9")
+    return finding, ct, lambda: True
+
+
+def _no_such_item(session):
+    """The right instance, and a path to an item it does not have."""
+    ct, _ = _ct_and_mr(session)
+    finding = _finding(DicomItem(), "REMOVE_TAG", ABSENT,
+                       uid=ct.sop_instance_uid, path=(("0008,1140", 7),))
+    return finding, ct, lambda: True
+
+
+def _shared_uid(session):
+    """Two instances holding one UID (hand-built, `docs/api/stability.md`),
+    neither holding Institution Name, and a finding whose entity is
+    neither: the address is ambiguous, so it names nothing -- guessing the
+    first would read a clean instance the finding may not mean."""
+    ct, mr = _ct_and_mr(session)
+    mr.sop_instance_uid = ct.sop_instance_uid
+    for inst in (ct, mr):
+        inst.attributes.pop(ABSENT, None)
+    finding = _finding(DicomItem(), "REMOVE_TAG", ABSENT, uid=ct.sop_instance_uid)
+    return finding, ct, lambda: True
+
+
+@pytest.mark.parametrize("build", [
+    pytest.param(_wrong_uid, id="wrong_uid"),
+    pytest.param(_nested_mismatch, id="nested_mismatch"),
+    pytest.param(_no_such_uid, id="no_such_uid"),
+    pytest.param(_no_such_item, id="no_such_item"),
+    pytest.param(_shared_uid, id="shared_uid"),
+])
+def test_a_remove_whose_entity_is_not_at_its_address_declines(tmp_path, build):
+    """Hand-built, through `anonymize(findings)`, beside a real removal of
+    Patient's Birth Date on the CT so the pass has one success. Absence
+    on an object the finding does not address is no evidence the element
+    is gone. Red on 063ed59: 0 declines and PASS -- for `wrong_uid` and
+    `nested_mismatch` with `TOSHIBA` and `OTHER-PID-123` exported.
+
+    Kills: absence read on `finding.entity`; an address that resolves to
+    nothing read as satisfied; liveness by UID alone, ignoring the path;
+    an ambiguous UID resolved to its first instance (`shared_uid`)."""
+    session = _session(tmp_path, ["CT_small.dcm", "MR_small.dcm"])
+    with session:
+        finding, ct, still_there = build(session)
+        assert "0010,0030" in ct.attributes
+        companion = _finding(ct, "REMOVE_TAG", "0010,0030",
+                             uid=ct.sop_instance_uid)
+
+        assert session.anonymize([finding, companion]) == 1
+
+        assert "0010,0030" not in ct.attributes
+        assert still_there()
+        declines = _declined(session)
+        assert len(declines) == 1, declines
+        assert STALE in declines[0], declines
+        assert not any(v in declines[0] for v in ("TOSHIBA", "OTHER-PID-123")), declines
+        assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]
+
+
+def test_without_the_session_absence_is_read_on_the_finding_entity():
+    """A service used without a session has no graph to resolve an
+    address in, and reads the entity it was handed, as it always did --
+    the direct tests above rest on this. Given the session's map, the
+    object the map names is what is read: one still holding the tag, or
+    no object at all, declines; a clean one is satisfied.
+
+    Kills: the map's default meaning "resolved nothing" rather than "no
+    session"; an unresolved address read as satisfied; the map ignored."""
+    rows = _Rows()
+    alone = _instance()
+    assert _service(rows).apply_remediation(
+        [_finding(alone, "REMOVE_TAG", ABSENT)]) == 0
+    assert rows.rows == [] and alone.phi_status is PhiStatus.REMEDIATED
+
+    holding = _instance()
+    holding.set_attr(ABSENT, "HOSP")
+    for target in (holding, None):
+        entity = _instance()
+        finding = _finding(entity, "REMOVE_TAG", ABSENT)
+        rows = _Rows()
+        service = _service(rows)
+        service._use_removal_targets({id(finding): target})
+        assert service.apply_remediation([finding]) == 0
+        assert [a for a, *_ in rows.rows] == ["REMEDIATION_DECLINED"], rows.rows
+        assert STALE in rows.rows[0][2], rows.rows
+        assert "HOSP" not in rows.rows[0][2]
+        assert entity.phi_status is PhiStatus.IDENTIFIED
+    assert holding.attributes[ABSENT] == "HOSP"
+
+    finding = _finding(_instance(), "REMOVE_TAG", ABSENT)
+    rows = _Rows()
+    service = _service(rows)
+    service._use_removal_targets({id(finding): _instance()})
+    assert service.apply_remediation([finding]) == 0
+    assert rows.rows == []

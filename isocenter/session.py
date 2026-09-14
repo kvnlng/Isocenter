@@ -4984,6 +4984,7 @@ class DicomSession:
         count = 0
         if findings:
             remediator._use_instance_owners(self._nested_finding_owners(findings))
+            remediator._use_removal_targets(self._removal_targets(findings))
             remediator._use_scan_tally(self._scan_tally, findings)
             count = remediator.apply_remediation(findings)
 
@@ -5902,6 +5903,59 @@ class DicomSession:
                     owners[id(f.entity)] = inst
                     break
         return owners
+
+    def _removal_targets(self, findings) -> dict:
+        """`id(finding) -> live object at its address` for each `REMOVE_TAG`.
+
+        What `RemediationService._use_removal_targets` reads a removal's
+        "already gone" against (review of #639): the object this session
+        holds at the finding's `entity_uid` and `entity_path`, or None when
+        nothing is there. `anonymize(findings)` does not rehydrate
+        `finding.entity`, so a report kept across `close()` and a reopen
+        points at the first session's objects -- which its first pass
+        cleaned -- and read there, every removal of an unsaved pass was
+        satisfied while the graph `export()` writes still held each value.
+        The same absence on an entity a hand-built finding does not address
+        (another instance's UID, a path to an item the entity is not) says
+        nothing about the element either.
+
+        By address, never by identity alone: an entity that is itself live
+        but filed under another instance's UID is misaddressed. Where two
+        instances share a UID (a hand-built graph, `docs/api/stability.md`)
+        the one whose path leads to the finding's own entity wins, as in
+        `_nested_finding_owners`; failing that, a UID only one instance
+        holds is followed, and an ambiguous one resolves to nothing. Only
+        `Instance` findings resolve: no other entity type has the
+        `attributes` dict a removal is satisfied against, so the rest map
+        to None and decline as they did.
+
+        The entity itself is not replaced: REPLACE and SHIFT on a stale
+        report still act on the dead objects, which is #644.
+        """
+        removes = [f for f in findings
+                   if f.remediation_proposal is not None and f.entity is not None
+                   and f.remediation_proposal.action_type == "REMOVE_TAG"]
+        if not removes:
+            return {}
+        by_uid = {}
+        for p in self.store.patients:
+            for st in p.studies:
+                for se in st.series:
+                    for inst in se.instances:
+                        by_uid.setdefault(inst.sop_instance_uid, []).append(inst)
+        targets = {}
+        for f in removes:
+            target = None
+            candidates = by_uid.get(f.entity_uid, ()) if f.entity_type == "Instance" else ()
+            for inst in candidates:
+                if resolve_item_path(inst, f.entity_path) is f.entity:
+                    target = f.entity
+                    break
+            else:
+                if len(candidates) == 1:
+                    target = resolve_item_path(candidates[0], f.entity_path)
+            targets[id(f)] = target
+        return targets
 
     @staticmethod
     def _live_target(instance, finding):
