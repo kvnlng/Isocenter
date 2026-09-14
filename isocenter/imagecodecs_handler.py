@@ -198,6 +198,46 @@ def supports_transfer_syntax(transfer_syntax):
 FrameCount = Tuple[int, int, Optional[Union[int, str]], str]
 
 
+def extended_offsets(ds) -> Optional[Tuple[bytes, bytes]]:
+    """The Extended Offset Table exactly as pydicom's decoder walks by it.
+
+    ``(ExtendedOffsetTable, ExtendedOffsetTableLengths)``, the pair every
+    `generate_frames` call here passes as `extended_offsets=`, or None
+    when the decoder walks the fragments without one. pydicom takes the
+    table when both elements are present (`pixels.utils._as_options`)
+    and then **drops it when their lengths differ** (`DecodeRunner.
+    _validate_options`, with a warning), so both halves are asked here.
+
+    Why every walk takes it (review of #606, M1): a walk without the
+    table finds frames by searching for each codestream's end, and on a
+    file whose table and fragments disagree -- a fragment no frame names,
+    which PS3.3 C.7.6.3 does not allow under an EOT but pydicom decodes
+    by the table all the same -- that search reads different frames from
+    the ones the decoder reads. The signed-codestream gate read no sign
+    in a frame Pillow then shifted, and the fallback refused a file
+    Pillow read. A pair a mismatched table would give pydicom ignores is
+    just as much a second walk, which is why the length check is here
+    and not left to `generate_frames`.
+    """
+    # Membership first, as pydicom asks it, so a stand-in dataset that
+    # answers every attribute is not read as carrying a table. `ds.get`
+    # hands back the raw bytes rather than a DataElement (measured,
+    # pydicom 3.0.2); the `getattr` takes either. An empty table names no
+    # frame, and is read as none.
+    if ("ExtendedOffsetTable" not in ds
+            or "ExtendedOffsetTableLengths" not in ds):
+        return None
+    eot = ds.get("ExtendedOffsetTable")
+    lengths = ds.get("ExtendedOffsetTableLengths")
+    eot = getattr(eot, "value", eot)
+    lengths = getattr(lengths, "value", lengths)
+    if (not isinstance(eot, (bytes, bytearray))
+            or not isinstance(lengths, (bytes, bytearray))
+            or not eot or len(eot) != len(lengths)):
+        return None
+    return bytes(eot), bytes(lengths)
+
+
 def offset_table_frame_count(ds) -> Optional[FrameCount]:
     """The frames the offset table names, beside the frames declared (#418).
 
@@ -263,6 +303,14 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     # frame, one 64-bit offset each. `ds.get` hands back the raw bytes
     # here rather than a DataElement (measured, pydicom 3.0.2); the
     # `getattr` takes either, so neither shape reads as "no table".
+    #
+    # **Counted even when its Lengths disagree**, deliberately unlike the
+    # walks (`extended_offsets`). pydicom drops such a table and walks the
+    # fragments, and under NumberOfFrames 1 that walk returns frame 0 and
+    # never mentions frame 1; counted from the table, ingest keeps frame 0
+    # and says it discarded one (measured, dev-F1/m1_count_*.raw). Read
+    # through the walks' rule instead, the row went and frame 1 was lost
+    # in silence. The count decides whether to report; it walks nothing.
     eot = ds.get("ExtendedOffsetTable")
     if eot:
         eot_bytes = getattr(eot, "value", eot)
@@ -736,7 +784,14 @@ def signed_codestream_refusal(ds) -> Optional[str]:
     None), has no sign to read: the decoder that runs next refuses it in
     its own words, as it did before this gate.
 
-    Cost: a few bytes per frame, from a buffer `dcmread` already holds.
+    **The frames the decoder reads.** Walked with the Extended Offset
+    Table when pydicom's decoder walks with it (`extended_offsets`), so
+    a fragment no frame names cannot join a signed codestream and hide
+    its SIZ (review of #606, M1).
+
+    Cost: one transient copy of each declared frame's bytes
+    (`generate_frames` joins its fragments), and a read of its first
+    43.
     """
     ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
     if ts not in J2K_SYNTAXES:
@@ -748,7 +803,8 @@ def signed_codestream_refusal(ds) -> Optional[str]:
         declared = (counted[1] if counted is not None
                     else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
         for frame in islice(generate_frames(ds.PixelData,
-                                            number_of_frames=declared),
+                                            number_of_frames=declared,
+                                            extended_offsets=extended_offsets(ds)),
                             declared):
             layout = _j2k_sample_layout(frame)
             if layout is not None and layout[0]:
@@ -843,6 +899,7 @@ def decode_declared_frames(ds, number_of_frames):
     frames = [_decode_frame(transfer_syntax, bitstream, ds)
               for bitstream in islice(
                   generate_frames(ds.PixelData,
-                                  number_of_frames=number_of_frames),
+                                  number_of_frames=number_of_frames,
+                                  extended_offsets=extended_offsets(ds)),
                   number_of_frames)]
     return frames[0] if number_of_frames == 1 else np.stack(frames)

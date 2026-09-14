@@ -193,7 +193,7 @@ from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   _j2k_sample_layout, _jpegls_precision,
                                   colour_conversion, convert_colour,
-                                  decode_declared_frames,
+                                  decode_declared_frames, extended_offsets,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
                                   signed_codestream_refusal)
@@ -1998,7 +1998,9 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
     stream = precision = None
     if encapsulated and (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES):
         try:
-            frame = next(generate_frames(ds.PixelData, number_of_frames=1))
+            frame = next(generate_frames(
+                ds.PixelData, number_of_frames=1,
+                extended_offsets=extended_offsets(ds)))
         except Exception:  # pylint: disable=broad-except
             # A buffer the decode below will refuse on its own terms.
             frame = b""

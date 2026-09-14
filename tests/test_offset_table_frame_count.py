@@ -500,6 +500,25 @@ def test_ingest_reads_the_extended_offset_table_too(tmp_path):
         "NumberOfFrames declares 1")
 
 
+def test_an_extended_offset_table_with_short_lengths_still_reports_its_excess(
+        tmp_path):
+    """Review of #606, M1: the count reads the table the walks do not.
+
+    The Lengths hold one entry for the table's two. pydicom drops such a
+    table and walks the fragments, so the frame walks here drop it too
+    (`imagecodecs_handler.extended_offsets`). The *count* does not: under
+    NumberOfFrames 1 that fragment walk returns frame 0 and says nothing
+    of frame 1, and the table is the only thing that knows it is there.
+    Counted through the walks' rule, this row went and frame 1 was lost
+    in silence (measured, dev-F1/m1_count_helper.raw).
+    """
+    ds = _dataset(2, 1, table="eot")
+    ds.ExtendedOffsetTableLengths = ds.ExtendedOffsetTableLengths[:8]
+    assert imagecodecs_handler.extended_offsets(ds) is None
+    _assert_truncated_to_frame_0_with_one_signal_row(
+        tmp_path, ds, "Extended Offset Table", "NumberOfFrames declares 1")
+
+
 def test_ingest_refuses_a_table_naming_fewer_frames_and_says_why(tmp_path):
     """B4: the reason was an empty `Decompression Failed: `."""
     session, summary, db = _ingest(tmp_path, _dataset(2, 3))

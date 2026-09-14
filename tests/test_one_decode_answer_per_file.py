@@ -522,3 +522,110 @@ def test_a_malformed_codestream_is_left_to_the_decoder(tmp_path, name,
     assert isinstance(decoded, Exception), decoded
     assert not isinstance(decoded, IndexError), decoded
     assert "codestream is signed" not in str(decoded), str(decoded)
+
+
+# ---------------------------------------------------------------------------
+# Review of #606, M1 -- every walk of the frames takes the Extended Offset
+# Table pydicom's decoder takes, or none when pydicom drops it
+# ---------------------------------------------------------------------------
+
+def _item(fragment):
+    if len(fragment) % 2:
+        fragment += b"\x00"
+    return b"\xfe\xff\x00\xe0" + len(fragment).to_bytes(4, "little") + fragment
+
+
+def _with_eot(ds, fragments, offsets, lengths):
+    """`fragments` one item each, an empty BOT, and the EOT given."""
+    import struct  # pylint: disable=import-outside-toplevel
+    ds.PixelData = _item(b"") + b"".join(_item(f) for f in fragments)
+    ds["PixelData"].is_undefined_length = True
+    ds.ExtendedOffsetTable = struct.pack(f"<{len(offsets)}Q", *offsets)
+    ds.ExtendedOffsetTableLengths = struct.pack(f"<{len(lengths)}Q", *lengths)
+    return ds
+
+
+#: A fragment no frame's offset names: 20 bytes that are not a codestream.
+_JUNK = b"\x00" * 20
+
+
+def test_the_signedness_gate_walks_the_frames_the_extended_offset_table_names(
+        tmp_path, route):
+    """Review M1: the gate reads frame 1 where the decoder reads it.
+
+    Three fragments, `[unsigned, junk, signed]`, with an EOT naming the
+    first and the third. PS3.3 C.7.6.3 allows one fragment per frame
+    under an EOT, so this file is non-conformant; pydicom decodes it by
+    the table all the same. The gate walked it without the table: its EOI
+    search glued the junk onto the signed codestream, no SIZ parsed, and
+    the gate said nothing. Pillow then read frame 1 shifted, with no row,
+    while the fallback, also walking without the table, refused it as
+    "not a J2K or JP2 data stream": two answers, by plugin.
+    """
+    unsigned = _j2k(SIGNED16.view(np.uint16))
+    signed = _j2k(SIGNED16)
+    ds = _with_eot(
+        dataset(J2K_LOSSLESS, [unsigned], rows=4, cols=4, bits_allocated=16,
+                frames=2),
+        [unsigned, _JUNK, signed],
+        [0, len(_item(unsigned)) + len(_item(_JUNK))],
+        [len(unsigned), len(signed)])
+    words = SIGNED_REFUSAL.format(16)
+    got = _refused_everywhere(tmp_path, ds, words, None)
+    assert got["failure"].startswith(
+        f"Decompression Failed: RuntimeError: {words}"), got["failure"]
+    if route is not None:
+        assert route["n"] == 0
+
+
+def test_the_fallback_decodes_the_frames_the_extended_offset_table_names(
+        tmp_path, route):
+    """Review M1: the fallback walks the table too, so both routes agree.
+
+    The same layout with both frames unsigned. Pillow decodes it by the
+    table; the fallback glued the junk onto frame 1 and refused the file.
+    """
+    first = MONO16
+    second = (MONO16[::-1] // 2).astype(np.uint16)
+    ds = _with_eot(
+        dataset(J2K_LOSSLESS, [_j2k(first)], rows=4, cols=4,
+                bits_allocated=16, frames=2),
+        [_j2k(first), _JUNK, _j2k(second)],
+        [0, len(_item(_j2k(first))) + len(_item(_JUNK))],
+        [len(_j2k(first)), len(_j2k(second))])
+    path = write(tmp_path, ds)
+    want = np.stack([first, second])
+    decoded = at_decode_pixels(path)
+    assert isinstance(decoded, tuple), decoded
+    assert same(decoded[0], want), decoded
+    read = at_instance(path)
+    assert isinstance(read, tuple), read
+    assert same(read[0], want), read
+    got = at_ingest(tmp_path, path)
+    assert got["failure"] is None, got["failure"]
+    assert same(got["array"], want), got["array"]
+    if route is not None:
+        assert route["n"] > 0, "the fallback route was never taken"
+
+
+def test_an_extended_offset_table_pydicom_drops_is_not_walked_by_the_gate(
+        tmp_path, route):
+    """Review M1: the table is taken only when its two elements agree in length.
+
+    pydicom's `_validate_options` deletes `extended_offsets` when the
+    Extended Offset Table and its Lengths differ in item count, warns,
+    and walks the frames without it. Here the table names frame 0 twice
+    and its Lengths hold one entry, so pydicom walks by fragment: frame 1
+    is the signed codestream. A gate that took the table regardless read
+    frame 0 twice, found nothing signed, and Pillow shifted frame 1.
+    """
+    unsigned = _j2k(SIGNED16.view(np.uint16))
+    signed = _j2k(SIGNED16)
+    ds = _with_eot(
+        dataset(J2K_LOSSLESS, [unsigned], rows=4, cols=4, bits_allocated=16,
+                frames=2),
+        [unsigned, signed], [0, 0], [len(unsigned)])
+    words = SIGNED_REFUSAL.format(16)
+    got = _refused_everywhere(tmp_path, ds, words, None)
+    assert got["failure"].startswith(
+        f"Decompression Failed: RuntimeError: {words}"), got["failure"]

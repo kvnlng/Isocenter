@@ -317,3 +317,37 @@ def test_a_cohort_writes_a_row_per_instance_and_five_log_lines(
     assert len([m for m in messages if "suppressing further per-instance "
                 "messages for HighBit" in m]) == 1, messages
     assert not [m for m in lines if str(folder) in m], lines
+
+
+def test_the_row_reads_frame_0_where_the_extended_offset_table_puts_it(
+        tmp_path, monkeypatch):
+    """Review M1: the precision the row names is frame 0's, found by the table.
+
+    A fragment no frame names comes first, and the EOT points past it.
+    Walked without the table, frame 0 was the junk joined to the
+    codestream, no SIZ parsed, and the row named BitsStored as the width
+    read -- a reading nothing made, since the decoder reads the
+    codestream's 12 bits.
+    """
+    import struct  # pylint: disable=import-outside-toplevel
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    codestream = _j2k(UNSIGNED12, bitspersample=12)
+    junk = b"\x00" * 20
+
+    def item(fragment):
+        if len(fragment) % 2:
+            fragment += b"\x00"
+        return (b"\xfe\xff\x00\xe0" + len(fragment).to_bytes(4, "little")
+                + fragment)
+
+    ds = dataset(J2K_LOSSLESS, [codestream], rows=4, cols=4,
+                 bits_allocated=16, bits_stored=16, high_bit=11)
+    ds.PixelData = item(b"") + item(junk) + item(codestream)
+    ds["PixelData"].is_undefined_length = True
+    ds.ExtendedOffsetTable = struct.pack("<Q", len(item(junk)))
+    ds.ExtendedOffsetTableLengths = struct.pack("<Q", len(codestream))
+    got = at_ingest(tmp_path, write(tmp_path, ds))
+    assert same(got["array"], UNSIGNED12), got
+    _one_row(got, 11, 16, 16,
+             "Read as right-aligned 12-bit samples (the JPEG 2000 "
+             "codestream's precision 12)")
