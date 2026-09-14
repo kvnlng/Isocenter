@@ -19,6 +19,7 @@ Measured on 57400d1, 3.12 and 3.14t (`probes-E/p581.py`, `p581c.py`):
 `Secret^Name`. With the Patient ID `PID-X` instead it wrote none.
 """
 import json
+import re
 
 import pydicom
 import pytest
@@ -81,3 +82,62 @@ def test_the_safe_export_withholds_an_empty_id_patient(tmp_path, patient_id):
     names = [str(pydicom.dcmread(str(p)).PatientName) for p in (tmp_path / "out").rglob("*.dcm")]
     assert NAME not in names
     assert names == []
+
+
+def _three_patients(tmp_path, unstashable_p2=False):
+    """Patients `''`, `P1` and `P2`, each with a name the floor removes;
+    `P2` optionally carrying an OB private value no token can hold."""
+    for pid, suffix in (("", "5821"), ("P1", "5822"), ("P2", "5823")):
+        path = write_ct(tmp_path / "in" / f"{pid or 'empty'}.dcm", "TMP", suffix,
+                        name=f"Secret^{pid or 'Empty'}")
+        ds = pydicom.dcmread(path)
+        ds.PatientID = pid
+        if unstashable_p2 and pid == "P2":
+            ds.add_new(0x00291010, "LO", "PRIVCREATOR")
+            ds.add_new(0x00291110, "OB", b"\x01\x02\x03\x04")
+        ds.save_as(path)
+    session = Session(str(tmp_path / "s.db"))
+    session.ingest(str(tmp_path / "in"))
+    session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+    return session
+
+
+def _locked(session):
+    return sorted(p.patient_id for p in session.store.patients
+                  if "0400,0500" in p.studies[0].series[0].instances[0].sequences)
+
+
+def test_a_report_lock_locks_an_empty_id_patient(tmp_path):
+    """`lock_identities(report)` built its ID list with a truthy test, so
+    the `''` patient the report names was skipped without a word, and after
+    `anonymize()` its name was unrecoverable (review of #615, F-1). Kills
+    `and item.patient_id` in the report normalisation."""
+    with _three_patients(tmp_path) as session:
+        report = session.audit()
+        assert sorted({f.patient_id for f in report.findings}) == ["", "P1", "P2"]
+        session.lock_identities(report)
+        assert _locked(session) == ["", "P1", "P2"]
+        empty = next(p for p in session.store.patients if p.patient_id == "")
+        session.anonymize(report)
+        assert empty.patient_name != "Secret^Empty"
+        session.recover_patient_identity(empty.patient_id, restore=True)
+        assert empty.patient_name == "Secret^Empty"
+
+
+def test_a_report_lock_numbers_an_empty_id_patient_among_those_found(tmp_path):
+    """With `''` counted, the documented recipe `sorted(found)[n - 1]` names
+    the refused patient; skipped, `[2 of 2]` sent the caller to `P1`. Kills
+    `and item.patient_id` in the report normalisation."""
+    with _three_patients(tmp_path, unstashable_p2=True) as session:
+        report = session.audit()
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities(report, tags_to_lock=["0010,0010", "0010,0020", "0029,1110"])
+        message = str(caught.value)
+        assert message.startswith("lock_identities: 1 of 3 patients cannot be locked"), message
+        numbered = re.findall(r"^\[(\d+) of (\d+)\] lock_identities: this patient holds a "
+                              r"value in 0029,1110", message, flags=re.MULTILINE)
+        assert numbered == [("3", "3")], message
+        found = sorted({f.patient_id for f in report.findings}
+                       & {p.patient_id for p in session.store.patients})
+        assert found[int(numbered[0][0]) - 1] == "P2"
+        assert _locked(session) == []

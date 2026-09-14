@@ -3852,7 +3852,11 @@ class DicomSession:
         for item in iterable_data:
             if isinstance(item, str):
                 normalized_ids.add(item)
-            elif hasattr(item, 'patient_id') and item.patient_id:
+            # `is not None`, not truthiness: an empty Patient ID is a
+            # patient (#581), and a report that names one must lock it --
+            # skipped, its name was unrecoverable after `anonymize()` and
+            # the `[n of m]` numbering below named the wrong patient.
+            elif hasattr(item, 'patient_id') and item.patient_id is not None:
                 normalized_ids.add(item.patient_id)
 
         # Sorted, not a set's hash order: the refusal below names patients
