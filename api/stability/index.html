@@ -1502,10 +1502,11 @@ which until 0.9.4 it silently did not -- and are the batch method's own
 keyword-only parameters with the same defaults (#379, Q10).</p>
 <p><strong><code>Session</code> attributes.</strong> <code>store</code> (a <code>DicomStore</code> whose <code>.patients</code> is
 the <code>List[Patient]</code> the quickstart indexes), <code>configuration</code> (an
-<code>IsocenterConfiguration</code>), <code>persistence_file</code>. <code>anonymize()</code> and
-<code>recover_patient_identity()</code> merge two patients that end up with the
+<code>IsocenterConfiguration</code>), <code>persistence_file</code>. <code>audit()</code>, <code>anonymize()</code>
+and <code>recover_patient_identity()</code> merge two patients that end up with the
 same Patient ID into the one that was in the session first, removing the
-other from <code>store.patients</code> (#548).</p>
+other from <code>store.patients</code> (#548, #563); <code>audit()</code> runs inside
+<code>export(check_burned_in=True)</code>, so that merges too.</p>
 <p><strong>Shapes the frozen methods return</strong> (attribute names).
 <code>IngestSummary(ingested, failures, declined, skipped)</code> plus <code>failed</code>;
 <code>ExportSummary(written_uids, failures)</code> plus <code>written</code>, <code>failed</code>;
@@ -1609,7 +1610,23 @@ would write, a <code>value:</code> holding a range in a DA, TM or DT, or a count
 <h1 id="559-560-and-filenotfounderror-when-it-does-not-exist-after-either-the-configuration-is-exactly-what-it-was">559, #560) and <code>FileNotFoundError</code> when it does not exist; after either, the configuration is exactly what it was</h1>
 <p>before the call (#456). <code>audit()</code> without <code>config_path</code> raises the
 same <code>ValueError</code> for such a rule in <code>session.configuration.phi_tags</code>,
-before it creates a project secret.</p>
+before it creates a project secret. <code>audit()</code> (and so
+<code>export(check_burned_in=True)</code>), <code>anonymize()</code> and
+<code>recover_patient_identity(restore=True)</code> raise <code>RuntimeError</code> when
+patients sharing a Patient ID were de-identified under different
+date-offset schemes (#548); <code>audit()</code> raises it after the policy is
+validated and before a project secret is created (#563).
+<code>recover_patient_identity()</code> raises <code>FileNotFoundError</code> when no key file
+exists at the path <code>enable_reversible_anonymization()</code> was given, before
+it looks the patient up and without creating one; <code>ValueError</code> when no
+patient holds the ID; and <code>RuntimeError</code> when the patient has no
+instances or no identity token, or the key does not decrypt it (#539).
+It prints nothing, and no message names a Patient ID (#550).
+<code>enable_reversible_anonymization()</code> raises <code>ValueError</code> for a malformed
+key file and creates none; the first <code>lock_identities()</code> creates the key,
+exclusively and with mode 0600. <code>lock_identities()</code> refusals name no
+patient: a batch refusal numbers each refused patient by its place among
+the patients found, in Patient ID order.</p>
 <p><strong>Environment.</strong> Every <code>ISOCENTER_*</code> name in
 <a href="../../environment/">Environment Variables</a>, its default and its
 documented semantics — including the order the three
