@@ -1430,14 +1430,17 @@ files if you also export <code>format="dicom"</code> into the same folder:</p>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├─ &lt;record&gt;.dat               format-16 samples
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>└─ &lt;record&gt;.annotations.json  cart findings, when present
 </code></pre></div>
-<p><code>export(format="wfdb")</code> returns the list of record paths it wrote. Unlike
-a DICOM export it does <strong>not</strong> raise when records fail, even when it wrote
-nothing: each failure is logged, written to the audit log as an <code>ERROR</code>
-row naming the instance, and counted in that export's <code>EXPORT</code> row, so the
-compliance report lists it and grades the run <code>REVIEW_REQUIRED</code>. Compare
-the returned list with the waveform instances you expected, or generate
-the report, to learn that records are missing
-(<a href="https://github.com/kvnlng/Isocenter/issues/541">#541</a>).</p>
+<p><code>export(format="wfdb")</code> returns the list of record paths it wrote. Each
+record that fails is logged, written to the audit log as an <code>ERROR</code> row
+naming the instance, and counted in that export's <code>EXPORT</code> row, so the
+compliance report lists it and grades the run <code>REVIEW_REQUIRED</code>. A partial
+export returns the records that did reach disk. When at least one record
+was attempted and none was written, the call raises
+<code>io_handlers.ExportError</code> after those rows, as a DICOM export does; its
+<code>.failures</code> names each record
+(<a href="https://github.com/kvnlng/Isocenter/issues/541">#541</a>). A store with no
+waveform instances, or only waveforms with no samples (each of which gets
+its own <code>DATA_LOSS</code> row), attempted nothing and returns <code>[]</code>.</p>
 <h2 id="what-is-exported">What is exported</h2>
 <table>
 <thead>

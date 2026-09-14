@@ -1530,7 +1530,7 @@
 <ol>
 <li><strong>Anonymize</strong>: Strips or replaces metadata tags (PatientID, Names, Dates) based on your config.</li>
 <li><strong>Redact</strong>: Loads pixel data and scrubs burned-in PHI from defined regions.</li>
-<li><strong>Export</strong>: The final "Gatekeeper". Writes clean files to a new directory. With <code>check_burned_in=True</code> the export runs <code>audit()</code> first and skips every instance that still carries an identifier, on itself or a parent, under the policy in force -- so on a session that has not run <code>anonymize()</code>, that is every instance carrying a value any rule of the policy would act on. The skip is a logged warning only: it writes no audit row and is not counted in the report, so a run that withheld every instance can still grade <code>PASS</code> (<a href="https://github.com/kvnlng/Isocenter/issues/536">#536</a>). Compare the returned <code>ExportSummary</code> against the cohort to see what was held back.</li>
+<li><strong>Export</strong>: The final "Gatekeeper". Writes clean files to a new directory. With <code>check_burned_in=True</code> the export runs <code>audit()</code> first and skips every instance that still carries an identifier, on itself or a parent, under the policy in force -- so on a session that has not run <code>anonymize()</code>, that is every instance carrying a value any rule of the policy would act on. Each withheld instance writes one <code>WARNING</code> audit row naming the instance and the level (patient, study, series or instance) that carried the identifier -- never the value -- so the report grades <code>REVIEW_REQUIRED</code> and lists each one in section 4. "Instances Written" counts withheld instances as requested ("1 of 2 requested"), and the <code>EXPORT</code> row says how many were withheld (<a href="https://github.com/kvnlng/Isocenter/issues/536">#536</a>). An export that withheld everything returns an empty <code>ExportSummary</code> and does not raise: nothing failed. An instance outside <code>subset</code> is not withheld; it was never asked for.</li>
 </ol>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Apply metadata remediation (anonymization) using the findings</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">session</span><span class="o">.</span><span class="n">anonymize</span><span class="p">(</span><span class="n">report</span><span class="p">)</span>
@@ -1577,11 +1577,17 @@ verification that same inadmissible label is written as declared with a
 <code>WARNING</code> row, which also grades <code>REVIEW_REQUIRED</code> -- so turning
 verification on can cost you a file the default export would have
 delivered, by design.</p>
-<p>Once any instance in the store has been redacted, or any loaded rule has
-redaction zones, the export removes every small preview image (Icon Image
-Sequence) from every file it writes, redacted or not, because nothing
-scans or redacts icons. Each removal is a <code>DATA_LOSS</code> row and does not
-change the grade (<a href="https://github.com/kvnlng/Isocenter/issues/542">#542</a>).</p>
+<p>Nothing scans or redacts a small preview image (an Icon Image Sequence
+item), so the export removes the ones that could show redacted pixels
+(<a href="https://github.com/kvnlng/Isocenter/issues/542">#542</a>). An instance's
+own icon is removed only from that instance's file, when the instance was
+redacted or has redaction zones applied by this export. Every other nested
+icon -- one under Referenced Image Sequence, for instance, which is a
+thumbnail of a different image -- is removed from every file once any
+instance in the store was redacted or a loaded rule's zones match a series
+in the store; a rule for a scanner the store does not hold removes
+nothing. Each removal is a <code>SIGNAL</code> <code>DATA_LOSS</code> row and grades the run
+<code>REVIEW_REQUIRED</code>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Redacted on 0.9.0 or earlier with a multi-zone rule?</p>
 <p>Releases up to and including 0.9.0 applied only the last applicable
