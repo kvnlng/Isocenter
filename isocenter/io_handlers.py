@@ -1817,9 +1817,10 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
     A generic fallback would store whatever the codec returned, and a
     codec's output can disagree with the header. The signed JPEG Lossless
     and JPEG-LS case #416 measured -- -800 read as 3296 -- is now decoded
-    correctly by the handler, which sign-extends from BitsStored (#446);
-    the dtype check below stays for what it still refuses, a JPEG 2000
-    codestream whose signedness contradicts PixelRepresentation. So the
+    correctly by the handler, which sign-extends from BitsStored (#446),
+    and a JPEG 2000 codestream whose signedness contradicts
+    PixelRepresentation is refused before any decoder (#524); the dtype
+    check below stays for any decode that still disagrees. So the
     decode is accepted only when it passes every check below against the
     header, and refused -- keeping pydicom's reason first, so the ingest
     row still reads `Decompression Failed: <pydicom's words>` -- when:

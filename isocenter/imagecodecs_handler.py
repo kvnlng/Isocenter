@@ -533,8 +533,9 @@ def _sign_extend(arr, ds, precision=None):
     `_against_pixel_representation` passes the codestream's own precision
     (#460). A *signed* J2K codestream never reaches here --
     `jpeg2k_decode` has already returned signed, sign-extended samples,
-    and extending them again would raise on the dtype check below. That
-    is pydicom's split too: `_apply_sign_correction` shifts a J2K decode
+    which this would return unchanged (there is no dtype refusal below
+    since #523: nothing that reaches here is signed). That is pydicom's
+    split too: `_apply_sign_correction` shifts a J2K decode
     only when the codestream's signedness and PixelRepresentation
     disagree.
 

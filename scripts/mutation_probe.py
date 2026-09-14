@@ -508,7 +508,8 @@ TARGETS = {
                                   "tests/test_entities.py",
                                   "tests/test_high_bit_is_a_header_warning.py",
                                   "tests/test_j2k_signedness_against_pixel_representation.py",
-                                  "tests/test_htj2k_decode.py"], 30),
+                                  "tests/test_htj2k_decode.py",
+                                  "tests/test_mid_stream_corruption_is_a_documented_limit.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -1116,7 +1117,8 @@ TARGETS = {
                                           "tests/test_ybr_read_door_labels.py",
                                           "tests/test_one_decode_answer_per_file.py",
                                           "tests/test_high_bit_is_a_header_warning.py",
-                                          "tests/test_htj2k_decode.py"],
+                                          "tests/test_htj2k_decode.py",
+                                          "tests/test_mid_stream_corruption_is_a_documented_limit.py"],
                                          60),
 }
 

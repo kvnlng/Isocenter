@@ -430,9 +430,10 @@ def test_a_codestream_whose_signedness_agrees_with_its_header_still_reads(
 
     Mutants: the refusal keyed on PixelRepresentation 0 alone (refusing an
     unsigned codestream under 0), or on the codestream's sign alone
-    (refusing a signed one under 1). Each turns one case red. And the
-    reinterpretation reaching a signed codestream under 1 raises in
-    `_sign_extend`'s dtype check, which turns the first case red.
+    (refusing a signed one under 1). Each turns one case red. The
+    reinterpretation reaching a signed codestream under 1 is equivalent
+    since #523 merged `_sign_extend`'s guards: extending samples already
+    signed at their precision returns them unchanged.
     """
     got, _label = through_the_fallback(_dataset(arr, pixel_representation))
     assert got.dtype == want.dtype, f"{name}: {got.dtype}"

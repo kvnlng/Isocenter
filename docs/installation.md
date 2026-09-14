@@ -60,7 +60,17 @@ it raises `PixelScanError`, also a `RuntimeError` (#423). `isocenter.pixel_analy
 did not import; it does not check the binary.
 
 !!! note
-    `imagecodecs` is a required dependency and installs with Isocenter. It is the JPEG 2000 encoder the default compressed export uses, and it decodes JPEG Lossless, JPEG-LS and JPEG 2000 files that pydicom's installed plugins cannot.
+    `imagecodecs` is a required dependency and installs with Isocenter. It is the JPEG 2000 encoder the default compressed export uses, and it decodes JPEG Lossless, JPEG-LS, JPEG 2000 and High-Throughput JPEG 2000 files that pydicom's installed plugins cannot.
+
+### Decode limits
+
+Every read of a compressed frame -- `ingest()`, `Instance.get_pixel_data()`, an icon, and the export's readback -- goes through one decode, so a file gets one answer everywhere. That answer has limits:
+
+- **A stream corrupted mid-stream can decode to plausible wrong values with no error.** openjpeg, which decodes JPEG 2000 through Pillow and through `imagecodecs`, and lj92, which decodes JPEG Lossless, report nothing for a stream with bytes damaged in the middle, and the second decoder a cross-check would use returns the same wrong array. Every door reads such a file without an error. A truncated stream is refused, and JPEG-LS (CharLS) refuses mid-stream damage too ([#452](https://github.com/kvnlng/Isocenter/issues/452)).
+- **16-bit `YBR_FULL` JPEG-LS and JPEG 2000 files are refused at every door.** The conversion to RGB that 8-bit `YBR_FULL` gets takes 8-bit samples only ([#461](https://github.com/kvnlng/Isocenter/issues/461)).
+- **High-Throughput JPEG 2000** (`1.2.840.10008.1.2.4.201`, `.202`, `.203`) is decoded by openjpeg through `imagecodecs.jpeg2k_decode`, under JPEG 2000's rules for colour, signedness and sample width. Nothing writes it: an HTJ2K source exports uncompressed or as JPEG 2000 ([#459](https://github.com/kvnlng/Isocenter/issues/459)).
+- **A JPEG 2000 codestream that is signed where PixelRepresentation 0 declares unsigned samples is refused.** No decoder here returns those samples unsigned ([#524](https://github.com/kvnlng/Isocenter/issues/524)).
+- **HighBit other than BitsStored − 1 is read, and says so.** No decoder reads HighBit: samples are read right-aligned, by BitsStored or by the stream's own precision. Ingest writes one `WARNING` row per such instance, which grades the run `REVIEW_REQUIRED`, and an export writes HighBit as BitsStored − 1 ([#455](https://github.com/kvnlng/Isocenter/issues/455)).
 
 ## Dependencies
 
