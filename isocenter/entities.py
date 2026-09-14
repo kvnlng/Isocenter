@@ -780,6 +780,78 @@ _SET_PIXEL_DATA_TAGS = (
     PIXEL_DTYPE_ATTR,   # the float/bool dtype carrier
 )
 
+# Every attribute `SidecarPixelLoader` reads a stored frame by, which is
+# every one whose edit can change how a resident array's bytes read back
+# after a save (#531). `Instance.set_attr` reconciles a resident array on
+# an edit to any of these. A tag the loader reads and this set misses is
+# written without a word over pixels a save then reloads another way, or
+# cannot reload at all; `tests/test_descriptor_edit_with_pixels_unloaded.py::
+# test_describes_names_every_field_the_loader_reads` holds the two
+# together by behaviour. The carrier is here for that comparison only:
+# `set_attr` lowercases its key, so an edit through it can never name the
+# uppercase carrier, and the float/bool dtype enters the reconciliation
+# through the loader's reading of the attributes instead.
+_LOADER_DESCRIBED_TAGS = frozenset({
+    "0028,0010",        # Rows
+    "0028,0011",        # Columns
+    "0028,0002",        # SamplesPerPixel
+    "0028,0008",        # NumberOfFrames
+    "0028,0100",        # BitsAllocated
+    "0028,0103",        # PixelRepresentation
+    PIXEL_DTYPE_ATTR,   # the float/bool dtype carrier
+})
+
+# The keyword a refusal names each described tag by: a tag number alone
+# tells a caller nothing they can act on.
+_DESCRIBED_TAG_KEYWORDS = {
+    "0028,0010": "Rows",
+    "0028,0011": "Columns",
+    "0028,0002": "SamplesPerPixel",
+    "0028,0008": "NumberOfFrames",
+    "0028,0100": "BitsAllocated",
+    "0028,0103": "PixelRepresentation",
+}
+
+
+def _reading_or_none(reading_of, attributes):
+    """The loader's `(dtype, shape)` for `attributes`, or None if it has none."""
+    try:
+        return reading_of(attributes)
+    except (TypeError, ValueError):
+        return None
+
+
+def _element_count(shape) -> int:
+    """How many samples a shape holds, as a Python int."""
+    count = 1
+    for axis in shape:
+        count *= axis
+    return count
+
+
+def _unsatisfiable_edit_message(tag, parsed, array, reading):
+    """Why an edit over an unsaved array was refused, in tags and sizes only.
+
+    No value a caller passed is echoed as text: an unparseable one is
+    named only as unparseable, because this reaches audit rows through a
+    raising remediation (#553) and the value can be anything. A parsed
+    one is an integer, and is named.
+    """
+    keyword = _DESCRIBED_TAG_KEYWORDS[tag]
+    held = (f"the unsaved {array.dtype.name} {tuple(array.shape)} array "
+            f"set by set_pixel_data()")
+    way_out = ("Pass the array you mean to set_pixel_data(), which writes "
+               "its own descriptors.")
+    if reading is None:
+        return (f"{keyword} does not parse as an integer, so {held} has no "
+                f"reading under it. {way_out}")
+    dtype, shape = reading
+    samples = _element_count(shape)
+    return (f"{keyword} {parsed} would read {held} as {shape} {dtype.name}: "
+            f"{samples} {dtype.itemsize}-byte samples, "
+            f"{samples * dtype.itemsize} bytes, and the array holds "
+            f"{array.nbytes}. {way_out}")
+
 
 @dataclass(slots=True, eq=False)
 class Instance(DicomItem):
@@ -1088,6 +1160,109 @@ class Instance(DicomItem):
         self.file_path = None
 
         get_logger().debug(f"  -> Identity regenerated: {new_uid}")
+
+    def set_attr(self, tag: str, value: Any):
+        """
+        Sets an attribute, and keeps resident pixels reading as it declares.
+
+        Every tag is written as `DicomItem.set_attr` writes it. An edit to
+        a descriptor the sidecar loader reads a frame by -- Rows, Columns,
+        SamplesPerPixel, NumberOfFrames, BitsAllocated,
+        PixelRepresentation -- while pixels are resident also settles the
+        resident array, because a save writes the array's bytes and every
+        later read takes them under the edit. Without this the live
+        session read a set int16 array as int16 while the save, the
+        export and the reopened store all read uint16 after
+        `set_attr(PixelRepresentation, 0)` (#531). **The declaration
+        wins** (Q9):
+
+        - An edit under which the bytes read as they read now -- the same
+          dtype and shape -- is a plain write.
+        - An array a save has written is released after the write, so the
+          next read rebuilds it from the store under the edit (#417).
+          Its bytes are stored; nothing is lost. A memory-only array has
+          nowhere to be reloaded from and stays, as `unload_pixel_data`
+          refuses to drop it.
+        - An array set through `set_pixel_data()` and not yet written is
+          republished as the edit reads its bytes: a view under the new
+          dtype, in the new shape, with the write in the same hold of
+          `PIXEL_STATE_LOCK`, so no read sees the new declaration beside
+          the old array. It stays unwritten, and `discard_pixel_data()`
+          still restores what the set replaced.
+
+        Each edit is judged alone. Changing a geometry in two steps whose
+        end state the bytes fit -- BitsAllocated 8, then Columns 8, over a
+        4x4 uint16 set -- is refused at the first step; set the array you
+        mean instead, which writes its own descriptors.
+
+        Raises:
+            ValueError: If the edit is to a described tag, the resident
+                array was set through `set_pixel_data()` and not written
+                since, and the edit reads its bytes as a different number
+                of bytes, or does not parse as an integer -- "BitsAllocated
+                8 would read the unsaved uint16 (4, 4) array set by
+                set_pixel_data() as (4, 4) uint8: 16 1-byte samples, 16
+                bytes, and the array holds 32. Pass the array you mean to
+                set_pixel_data(), which writes its own descriptors." Raised
+                before anything is written: the attribute and the revision
+                are unchanged. Written, the edit saved a frame no read,
+                export or reopen could load.
+        """
+        tag = _canonical_tag(tag)
+        if tag not in _LOADER_DESCRIBED_TAGS:
+            DicomItem.set_attr(self, tag, value)
+            return
+        # Local: `io_handlers` imports this module. Taken before the lock,
+        # never under it -- an import can take the import lock, and the
+        # leaf takes nothing.
+        from .io_handlers import SidecarPixelLoader  # pylint: disable=import-outside-toplevel
+        reading_of = SidecarPixelLoader.reading_of
+        while True:
+            array = self.pixel_array
+            # The one step that can copy, so outside the leaf: a view
+            # under another itemsize needs contiguous bytes.
+            contiguous = None if array is None else np.ascontiguousarray(array)
+            with PIXEL_STATE_LOCK:
+                # The slot is judged as it is under the lock. A set, a
+                # discard or a read publish that landed since the read
+                # above is a different array, and the edit is judged
+                # against that one on the next pass. Not the revision:
+                # it moves on every PHI status and every other edit, none
+                # of which changes what is resident.
+                if self.pixel_array is not array:
+                    continue
+                if array is None:
+                    DicomItem.set_attr(self, tag, value)
+                    return
+                edited = dict(self.attributes)
+                before = _reading_or_none(reading_of, edited)
+                edited[tag] = value
+                after = _reading_or_none(reading_of, edited)
+                if before is not None and before == after:
+                    DicomItem.set_attr(self, tag, value)
+                    return
+                written = not self._pixel_array_unwritten
+                if written:
+                    DicomItem.set_attr(self, tag, value)
+                elif after is None or array.nbytes != (
+                        _element_count(after[1]) * after[0].itemsize):
+                    refusal = _unsatisfiable_edit_message(
+                        tag, None if after is None else int(value or 0),
+                        array, after)
+                else:
+                    DicomItem.set_attr(self, tag, value)
+                    self.pixel_array = (contiguous.reshape(-1)
+                                        .view(after[0]).reshape(after[1]))
+                    return
+            break
+        if written:
+            # Written first, released second, and outside the leaf, which
+            # `unload_pixel_data` takes itself. Released first, a read
+            # landing before the write loads under the old declaration and
+            # publishes that, and the edit then leaves it resident.
+            self.unload_pixel_data()
+            return
+        raise ValueError(refusal)
 
     def unload_pixel_data(self) -> bool:
         """
@@ -1650,7 +1825,14 @@ class Instance(DicomItem):
         """
         if declared_int(self.attributes, tag) == value:
             return False
-        self.set_attr(tag, value)
+        # `DicomItem.set_attr`, never `self.set_attr`. Both helpers run
+        # under `PIXEL_STATE_LOCK` -- `set_pixel_data` holds it across its
+        # descriptor writes, `_publish_loaded_frame` across the relabel --
+        # and `Instance.set_attr` takes that plain lock for a described
+        # tag, so reaching it here deadlocks on our own hold (#531). The
+        # descriptors a set writes describe the array it is setting;
+        # there is nothing to reconcile.
+        DicomItem.set_attr(self, tag, value)
         return True
 
     def _write_str_if_changed(self, tag: str, value: str) -> bool:
@@ -1658,7 +1840,8 @@ class Instance(DicomItem):
         raw = self.attributes.get(tag)
         if raw is not None and str(raw).strip().upper() == str(value).strip().upper():
             return False
-        self.set_attr(tag, value)
+        # `DicomItem.set_attr`: see `_write_int_if_changed` (#531).
+        DicomItem.set_attr(self, tag, value)
         return True
 
     def _relabel_to_decoded_colour(self, label: str) -> None:

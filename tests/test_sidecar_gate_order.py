@@ -356,6 +356,14 @@ def recorded(tmp_path, monkeypatch):
         relabelling = _relabelling_instance(str(tmp_path))
         assert relabelling.get_pixel_data().shape == (4, 4, 3)
         assert relabelling.attributes["0028,0004"] == "RGB"
+        # A descriptor edit over unsaved resident pixels: the write and
+        # the republish in one hold (#531, leaf). Discarded and reloaded
+        # after, so everything below sees `first` as it did before.
+        first.set_pixel_data(np.full((8, 8), 200, dtype=np.uint8))
+        first.set_attr("0028,0103", 1)
+        assert first.pixel_array.dtype == np.int8
+        assert first.discard_pixel_data() is True
+        first.get_pixel_data()
         # The dedup arm: the same bytes under a new dtype (leaf).
         second.set_pixel_data(second.get_pixel_data().view(np.int8))
         session.save(sync=True)
@@ -545,6 +553,8 @@ def test_there_are_exactly_six_write_frame_sites_and_they_are_these():
 #: Everything that takes the pixel-state leaf, by function name (#434, Q6).
 _LEAF_TAKERS = {"set_pixel_data", "discard_pixel_data", "unload_pixel_data",
                 "_publish_loaded_frame",
+                # `Instance.set_attr`, for a tag the loader reads (#531).
+                "set_attr",
                 "_swap_pixels_under_gate", "_persist_pixels",
                 "_apply_redaction_outcomes"}
 
@@ -978,6 +988,18 @@ def test_nothing_logs_while_the_pixel_state_lock_is_held(tmp_path):
         inst.set_attr("0028,0100", 16)
         inst.set_pixel_data(np.zeros((4, 4), dtype=np.uint8))   # BitsAllocated 16 -> 8
         assert inst.discard_pixel_data() is False              # memory only
+        # A descriptor edit over those unsaved pixels (#531): republished
+        # in the write's hold, and refused before it. Then one over a
+        # memory-only array a save never set, whose release is refused
+        # with a line -- emitted after the hold, not inside it.
+        inst.set_attr("0028,0103", 1)
+        assert inst.pixel_array.dtype == np.int8
+        with pytest.raises(ValueError, match="would read the unsaved"):
+            inst.set_attr("0028,0010", 99)
+        assigned = Instance("1.2.3.LOG.ASSIGNED", CT_IMAGE, 1, file_path=None)
+        assigned.pixel_array = np.zeros((4, 4), dtype=np.uint8)
+        assigned.set_attr("0028,0103", 1)
+        assert assigned.pixel_array is not None
         # The read publish, both branches. Asserted to have published --
         # the loader's own array back, and the relabel written -- so a
         # refactor that stops loading cannot leave this probe passing
@@ -994,5 +1016,5 @@ def test_nothing_logs_while_the_pixel_state_lock_is_held(tmp_path):
         logger.setLevel(level)
     corrected = [held for msg, held in probe.seen if "BitsAllocated" in msg]
     refused = [held for msg, held in probe.seen if "held in memory only" in msg]
-    assert corrected and refused, probe.seen
+    assert corrected and len(refused) == 2, probe.seen
     assert not any(held for _msg, held in probe.seen), probe.seen

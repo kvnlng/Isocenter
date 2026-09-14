@@ -6228,15 +6228,99 @@ class SidecarPixelLoader:
         # without calling `.get`, so the capture is one layout or the
         # other. Pinned by tests/test_descriptor_edit_with_pixels_unloaded.py::
         # test_the_descriptors_are_read_from_one_snapshot.
-        attrs = dict(instance.attributes)
-        return (instance.sop_instance_uid,
-                int(attrs.get("0028,0010", 0) or 0),
+        return ((instance.sop_instance_uid,)
+                + SidecarPixelLoader._descriptors_of(dict(instance.attributes)))
+
+    @staticmethod
+    def _descriptors_of(attrs) -> tuple:
+        """`_descriptors_from` without the UID, from a mapping the caller owns.
+
+        Takes a snapshot, not an instance: `Instance.set_attr` asks what an
+        edit *would* read as before it writes it (#531), so it passes the
+        attributes with the edit applied to a copy. Raises `ValueError` or
+        `TypeError` for a descriptor that does not parse as an integer, as
+        the constructor always has.
+        """
+        return (int(attrs.get("0028,0010", 0) or 0),
                 int(attrs.get("0028,0011", 0) or 0),
                 int(attrs.get("0028,0002", 1) or 1),
                 int(attrs.get("0028,0008", 0) or 0),
                 int(attrs.get("0028,0100", 8) or 8),
                 int(attrs.get("0028,0103", 0) or 0),
                 attrs.get(PIXEL_DTYPE_ATTR))
+
+    @staticmethod
+    def reading_of(attrs) -> tuple:
+        """The `(dtype, shape)` a frame stored under `attrs` is read as.
+
+        **The one statement of the loader's reading rule**, used by
+        `__call__` and by `Instance.set_attr` (#531). A pixel-descriptor
+        edit on an instance whose pixels are resident has to know whether
+        a save and reload would read those bytes differently, and a second
+        copy of this rule in `entities.py` would be a reading the loader
+        does not make -- the drift #417 closed for the capture.
+
+        Raises `ValueError` or `TypeError` when a descriptor does not
+        parse as an integer.
+        """
+        return SidecarPixelLoader._reading(
+            *SidecarPixelLoader._descriptors_of(attrs))
+
+    @staticmethod
+    def _reading(rows, cols, samples, frames, bits, pixel_representation,
+                 pixel_dtype) -> tuple:
+        """`reading_of`, from descriptors already parsed."""
+        # A recorded carrier dtype first: no DICOM descriptor says
+        # "float" -- a 32-bit float frame and a 32-bit integer frame both
+        # declare BitsAllocated 32 -- and none says "bool" either, since
+        # numpy `bool_` and `uint8` both declare BitsAllocated 8 with
+        # PixelRepresentation 0. A frame whose dtype is one of those can
+        # only be rebuilt from a dtype that was carried, never from one
+        # that was inferred (#183, #386). Checked against the allow-list,
+        # because this string comes back out of the store and
+        # `np.dtype(anything)` is not a thing a loader should do.
+        if pixel_dtype in SIDECAR_DTYPE_NAMES:
+            dt = np.dtype(pixel_dtype)
+        else:
+            # BitsAllocated crossed with PixelRepresentation, which
+            # between them name every integer dtype the sidecar can hold
+            # -- and the legacy bucketing as the fallback, because
+            # `BitsAllocated` 1 and 12 are real ingested populations that
+            # this table has no row for and must keep decoding as they do
+            # (#386). Do not subscript `_INTEGER_DTYPE_BY_BITS` here.
+            dt = np.dtype(_integer_dtype(bits, pixel_representation))
+
+        # **Isocenter holds and stores pixels interleaved, always.** The
+        # sidecar can hold nothing else: pydicom de-planarises on read,
+        # so `ingest_worker` extracts an interleaved `ds.pixel_array`
+        # from a planar source too, `set_pixel_data()` is handed an
+        # interleaved-shaped array (`resolve_pixel_geometry` reads
+        # `(rows, cols, samples)`), and `persist_pixel_data` writes
+        # `arr.tobytes()` of that. Measured on pydicom 3.0.2: a 2-frame
+        # 3x3 RGB file with PlanarConfiguration 1 and planar bytes
+        # 0..53 gives `pixel_array.shape == (2, 3, 3, 3)` and
+        # `ravel() == [0 9 18 1 10 19 ...]` -- interleaved.
+        #
+        # So there is no planar branch here and there must not be one. A
+        # (0028,0006) of 1 in `attributes` describes the *source file*,
+        # never the frame this reads, and reshaping as
+        # `(samples, rows, cols)` plus a transpose -- which is what
+        # stood here -- returned a transposed image for every
+        # single-frame colour instance carrying a declared 1. The
+        # multi-frame arm never had the branch, which is why it was the
+        # correct one; #210's issue text has that inverted and its
+        # Option 1 would have made both arms wrong. `self.planar_conf`
+        # went with the branch: a field nothing reads is a second
+        # answer waiting to disagree with this one. (#210)
+        if frames > 1:
+            target_shape = (frames, rows, cols, samples)
+            if samples == 1:
+                target_shape = (frames, rows, cols)
+        elif samples > 1:
+            target_shape = (rows, cols, samples)
+        else:
+            target_shape = (rows, cols)
+        return dt, target_shape
 
     def describes(self, instance) -> bool:
         """Whether this loader's capture still matches `instance` (#417).
@@ -6293,26 +6377,11 @@ class SidecarPixelLoader:
                     f"Loader(offset={self.offset}, length={self.length}, alg={self.alg})"
                 )
 
-        # Reconstruct based on attributes. A recorded carrier dtype
-        # first: no DICOM descriptor says "float" -- a 32-bit float
-        # frame and a 32-bit integer frame both declare BitsAllocated
-        # 32 -- and none says "bool" either, since numpy `bool_` and
-        # `uint8` both declare BitsAllocated 8 with PixelRepresentation
-        # 0. A frame whose dtype is one of those can only be rebuilt
-        # from a dtype that was carried, never from one that was
-        # inferred (#183, #386). Checked against the allow-list, because
-        # this string comes back out of the store and
-        # `np.dtype(anything)` is not a thing a loader should do.
-        if self.pixel_dtype in SIDECAR_DTYPE_NAMES:
-            dt = np.dtype(self.pixel_dtype)
-        else:
-            # BitsAllocated crossed with PixelRepresentation, which
-            # between them name every integer dtype the sidecar can hold
-            # -- and the legacy bucketing as the fallback, because
-            # `BitsAllocated` 1 and 12 are real ingested populations that
-            # this table has no row for and must keep decoding as they do
-            # (#386). Do not subscript `_INTEGER_DTYPE_BY_BITS` here.
-            dt = _integer_dtype(self.bits, self.pixel_representation)
+        # Reconstruct based on the capture, by the one reading rule
+        # (`_reading`): the dtype and the shape it names.
+        dt, target_shape = self._reading(
+            self.rows, self.cols, self.samples, self.frames, self.bits,
+            self.pixel_representation, self.pixel_dtype)
 
         # Before `np.frombuffer`, which raises a bare `ValueError: buffer
         # size must be a multiple of element size` for a byte count that
@@ -6334,40 +6403,7 @@ class SidecarPixelLoader:
 
         rows = self.rows
         cols = self.cols
-        samples = self.samples
         frames = self.frames
-
-        # **Isocenter holds and stores pixels interleaved, always.** The
-        # sidecar can hold nothing else: pydicom de-planarises on read,
-        # so `ingest_worker` extracts an interleaved `ds.pixel_array`
-        # from a planar source too, `set_pixel_data()` is handed an
-        # interleaved-shaped array (`resolve_pixel_geometry` reads
-        # `(rows, cols, samples)`), and `persist_pixel_data` writes
-        # `arr.tobytes()` of that. Measured on pydicom 3.0.2: a 2-frame
-        # 3x3 RGB file with PlanarConfiguration 1 and planar bytes
-        # 0..53 gives `pixel_array.shape == (2, 3, 3, 3)` and
-        # `ravel() == [0 9 18 1 10 19 ...]` -- interleaved.
-        #
-        # So there is no planar branch here and there must not be one. A
-        # (0028,0006) of 1 in `attributes` describes the *source file*,
-        # never the frame this reads, and reshaping as
-        # `(samples, rows, cols)` plus a transpose -- which is what
-        # stood here -- returned a transposed image for every
-        # single-frame colour instance carrying a declared 1. The
-        # multi-frame arm never had the branch, which is why it was the
-        # correct one; #210's issue text has that inverted and its
-        # Option 1 would have made both arms wrong. `self.planar_conf`
-        # went with the branch: a field nothing reads is a second
-        # answer waiting to disagree with this one. (#210)
-        target_shape = None
-        if frames > 1:
-            target_shape = (frames, rows, cols, samples)
-            if samples == 1:
-                target_shape = (frames, rows, cols)
-        elif samples > 1:
-            target_shape = (rows, cols, samples)
-        else:
-            target_shape = (rows, cols)
 
         # The element count the bound below compares `arr.size` against.
         target_size = 1

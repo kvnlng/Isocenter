@@ -518,7 +518,8 @@ TARGETS = {
                                   "tests/test_j2k_signedness_against_pixel_representation.py",
                                   "tests/test_htj2k_decode.py",
                                   "tests/test_mid_stream_corruption_is_a_documented_limit.py",
-                                  "tests/test_jpeg_extended_decode.py"], 30),
+                                  "tests/test_jpeg_extended_decode.py",
+                                  "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -1077,7 +1078,8 @@ TARGETS = {
                                "tests/test_one_decode_answer_per_file.py",
                                "tests/test_htj2k_decode.py",
                                "tests/test_a_shift_date_declines_a_target_that_moved.py",
-                               "tests/test_the_fold_count_is_what_folded.py"],
+                               "tests/test_the_fold_count_is_what_folded.py",
+                               "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"],
                               30),
     # 81 sites; budget 60 is stride 1 (81 // 60), so every site is
     # probed, exhaustive because it is cheap, like parallel.py's 80. It

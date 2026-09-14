@@ -166,7 +166,10 @@ instance_number, file_path, source_path` (`pixel_array` and
 `discard` throws it away, with the descriptors `set_pixel_data()`
 wrote for it -- and a `set_attr()` edit to any of those descriptors
 made since the set, which described the replacement (#434)). On
-`DicomItem`: `set_attr()`.
+`DicomItem`: `set_attr()`. On `Instance` it also keeps resident pixels
+reading as a pixel-descriptor edit declares, and raises `ValueError`
+for an edit that pixels set through `set_pixel_data()` and not yet
+saved cannot be read under (#531).
 
 **`Builder`.** The name, `Builder.start_patient()`, and `Equipment`'s
 three fields. The rest of the fluent chain is tier 2.
