@@ -152,9 +152,11 @@ def test_a_series_with_no_serial_matches_no_rule(tmp_path):
     """A `"*"` rule over a series with no Device Serial Number: `redact()`
     applies nothing, the export applies nothing, and the icon gate stays
     False -- the index `redact()` walks holds only series with a serial,
-    and the export agrees with it. Killing mutation: `"*"` matching a
-    missing serial (the export zeroes what `redact()` did not, and the
-    gate reads True)."""
+    and the export agrees with it. `_redaction_zones_for` hands a
+    serial-less series `None` rather than answering for it, so this
+    reaches the matcher: killing mutation, `"*"` matching a missing
+    serial (the export zeroes what `redact()` did not, and the gate reads
+    True)."""
     arrays, gate, applied, _ = _run(tmp_path, [
         {"serial_number": "*", "redaction_zones": [ZONE_A]}],
         serial=None, redact=True)

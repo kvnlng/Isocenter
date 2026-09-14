@@ -44,7 +44,8 @@ from pydicom.tag import Tag
 
 from isocenter.entities import DicomItem, Instance, Patient, Series, Study
 from isocenter.io_handlers import (DicomExporter, ExportContext,
-                                   _export_instance_worker, _value_fits_vr)
+                                   _export_instance_worker,
+                                   _record_private_vr, _value_fits_vr)
 from isocenter.session import DicomSession
 
 SC = "1.2.840.10008.5.1.4.1.1.7"
@@ -161,6 +162,36 @@ def test_a_fitting_private_value_writes_no_sentence(tmp_path):
 
     assert outcome.ok, outcome.error
     assert _re_vr_sentences(outcome) == [], outcome.warnings
+
+
+def test_a_private_binary_value_draws_no_sentence(tmp_path):
+    """The other control, and the one that decides how loud this is in
+    practice: a `bytes` value is written `UN`, and that is not a re-VR.
+
+    `_record_private_vr` refuses a bytes value at ingest -- PS3.5 §6.2.2
+    makes `UN` the right VR for raw bytes and `_fallback_encoding`
+    already writes it -- so there is no recorded VR for the written one
+    to differ from. Measured on 3.12.14 over an ingested explicit-VR
+    file carrying private `OB` and `OW` elements: all three record
+    `None` (an empty `OB` arrives as `b""`, bytes like the rest) and the
+    export writes no `WARNING` row. Killing mutation: the bytes
+    condition dropped from `_record_private_vr`, which records `OB`,
+    sees `UN` written, and grades every export of a vendor binary block
+    `REVIEW_REQUIRED`.
+    """
+    elem = pydicom.DataElement(Tag(0x0029, 0x101d), 'OB', b"\x01\x02")
+    item = DicomItem()
+    _record_private_vr(item, "0029,101d", elem)
+    assert item.attribute_vrs.get("0029,101d") is None
+
+    inst = _image(extra=[("0029,101d", b"\x01\x02")])
+
+    outcome = _export(tmp_path, inst, compression="j2k")
+
+    assert outcome.ok, outcome.error
+    assert _re_vr_sentences(outcome) == [], outcome.warnings
+    written = pydicom.dcmread(outcome.output_path)
+    assert written[Tag(0x0029, 0x101d)].VR == 'UN'
 
 
 def test_a_nested_re_vr_shares_the_instance_sentence(tmp_path):

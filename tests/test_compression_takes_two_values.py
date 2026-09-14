@@ -130,8 +130,15 @@ def test_the_worker_refuses_a_context_edited_after_construction(tmp_path):
     """A dataclass can be edited after `__post_init__`, so the worker asks
     too, and inside its `try`: the instance fails with its own error
     rather than taking the batch down or writing a file with no pixels.
-    Killing mutation: the worker's own check removed (`ok=True`, a file
-    with no Pixel Data -- the #605 outcome)."""
+
+    What this pins is the *outcome* -- refused, by the instance, with the
+    accepted values named -- not the worker's own call, which is an
+    equivalent mutant for the refusal: restore the worker's `== "j2k"`
+    and `_finalize_dataset` raises the same `ValueError` inside the same
+    `try`, so this test stays green (measured: M605f survives). The
+    worker's call earns its place by being the one predicate
+    `written_syntax` and the integer arm both key on, which is what
+    `test_every_accepted_value_writes_the_pixels_the_arm_judged` holds."""
     inst = _image()
     ctx = _context(tmp_path, inst)
     ctx.compression = "rle"

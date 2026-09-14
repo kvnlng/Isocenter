@@ -5505,13 +5505,17 @@ class DicomSession:
         the same serial exported its zones unredacted, and a `{"roi": ...}`
         zone failed the export. No per-series log for an invalid zone:
         `load_config` validated them, and `redact()` warns.
+
+        A series with no equipment, or equipment with no serial, is
+        handed a `None` rather than answered here: "no serial matches
+        nothing, not even `\"*\"`" is `rule_applies_to`'s answer, and a
+        second copy of it here is a second answer that can drift from
+        the one `redact()` reads.
         """
-        if not (series.equipment and series.equipment.device_serial_number):
-            return []
+        serial = (series.equipment.device_serial_number
+                  if series.equipment else None)
         return [roi
-                for rule in rules_matching(
-                    self.configuration.rules,
-                    series.equipment.device_serial_number)
+                for rule in rules_matching(self.configuration.rules, serial)
                 for roi in zone_rois(rule.get("redaction_zones", []))]
 
     @staticmethod
