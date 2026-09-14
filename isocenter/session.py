@@ -21,7 +21,8 @@ from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
                        carry_phi_status_across_redaction,
                        _report_redaction_failures)
-from .config_manager import ConfigLoader, require_package_resource
+from .config_manager import (ConfigLoader, _is_tag_key,
+                             require_package_resource)
 from .privacy import (PhiInspector, PhiFinding, PhiReport, _is_replacement_id,
                       _is_replacement_name)
 from .logger import configure_logger, describe_exception, get_logger
@@ -654,7 +655,7 @@ def _report_phi_findings(findings) -> None:
 
 
 def _print_suggested_config(counts) -> None:
-    """Prints a config fragment removing every tag the scan flagged.
+    """Prints a config fragment resolving every tag the scan flagged.
 
     YAML, and specifically the shape `create_config()` writes, so the
     output can be pasted into the file the user already has. This is the
@@ -663,13 +664,38 @@ def _print_suggested_config(counts) -> None:
     the format `ConfigLoader` reads, since user-facing configs are YAML
     only. Both defects came from the same place: JSON has no comments, so
     the counts had to be smuggled in as `//`.
+
+    `counts` is keyed the way the table labels a finding, `tag or
+    field_name`. Only a `gggg,eeee` key becomes a rule (#587): a finding
+    with no tag -- burned-in text from `verification.py`, or one reloaded
+    from the store's `phi_findings` table, which keeps no tag -- was
+    suggested as a rule keyed on its field name, and `load_config`
+    refuses that key, so the pasted fragment did not load. Those are
+    counted in a comment instead; no rule removes them.
+
+    Every rule is `REMOVE` except Patient ID's, which is `REPLACE` with no
+    `value:` -- the keyed pseudonym. The ID is what keeps two patients
+    apart and `anonymize()` merges patients sharing one (#548), so a
+    removed or emptied ID would collapse them, and the tag-policy rules
+    (#537) refuse any Patient ID rule but `KEEP` and that one. A fragment
+    that suggests a refused rule is the #20 defect again, one level up.
     """
+    rules = {}
+    untagged = 0
+    for key, count in counts.items():
+        if isinstance(key, str) and _is_tag_key(key):
+            rules[key] = count
+        else:
+            untagged += count
+
     print("\nSuggested Config Update:")
-    print("Add the following rules to your config to resolve these:")
-    print()
-    print("phi_tags:")
-    for tag, count in counts.items():
-        rule = {tag: {"name": _suggested_tag_name(tag), "action": "REMOVE"}}
+    if rules:
+        print("Add the following rules to your config to resolve these:")
+        print()
+        print("phi_tags:")
+    for tag, count in rules.items():
+        action = "REPLACE" if tag == _PATIENT_ID_TAG else "REMOVE"
+        rule = {tag: {"name": _suggested_tag_name(tag), "action": action}}
         # Dumped per tag rather than as one mapping so the count can sit
         # above its own entry. yaml.dump owns the quoting -- a tag key
         # contains a comma, and hand-rolling that is how the previous
@@ -678,6 +704,13 @@ def _print_suggested_config(counts) -> None:
         print(f"  # Found {count} times")
         for line in block.splitlines():
             print(f"  {line}")
+    if untagged:
+        print(f"# {untagged} finding(s) above carry no DICOM tag, so no "
+              f"phi_tags rule can resolve them; review them by hand.")
+
+
+#: The one tag whose suggested rule is not `REMOVE` (#587).
+_PATIENT_ID_TAG = "0010,0020"
 
 
 def _suggested_tag_name(tag: str) -> str:
