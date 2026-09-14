@@ -372,8 +372,10 @@ def test_a_lock_after_anonymize_is_refused_on_the_floor_path(tmp_path):
         session.anonymize(session.audit())
         patient = session.store.patients[0]
         inst = patient.studies[0].series[0].instances[0]
-        with pytest.raises(RuntimeError, match=patient.patient_id):
+        with pytest.raises(RuntimeError, match="already carries a replacement") as caught:
             session.lock_identities(patient.patient_id)
+        # No Patient ID in the refusal (P6): this used to match on it.
+        assert patient.patient_id not in str(caught.value)
         assert "0400,0500" not in inst.sequences
 
 

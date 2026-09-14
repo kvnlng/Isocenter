@@ -3432,8 +3432,13 @@ class DicomSession:
                 token can hold (`bytes`), naming the tag; or Patient's
                 Name is blank under a rule of EMPTY or REMOVE on it. Given
                 a list or a report, the batch form checks every patient
-                first and, if any is refused, raises once naming each and
-                locks no patient.
+                first and, if any is refused, raises once listing each and
+                locks no patient. No message carries a Patient ID (P6): a
+                message says "this patient", its advice spells the ID
+                `<its Patient ID>`, and a replaced Patient ID is described,
+                not quoted. When the lock creates the key file (the first
+                lock under a path with none, #539), it is created exclusively
+                with mode 0600; a malformed key raises `ValueError`.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3601,12 +3606,23 @@ class DicomSession:
             return (_is_replacement_name(val) or _is_replacement_id(val)
                     or written_by_a_pass(tag, val, from_patient))
 
+        # **No message below names the patient (P6).** Before `anonymize()`
+        # its Patient ID is the original, and after it the pseudonym, which
+        # #550 kept off the console; so "this patient", and the advice
+        # spells the ID as a placeholder -- the caller holds the one it
+        # passed, and the batch numbers each refusal. A replaced Patient ID
+        # is described rather than quoted, because the validator refuses
+        # any literal on it: the value is always the patient's own ID.
+        # Every other replacement is quoted; it is what says which pass
+        # wrote it.
         for tag, val in original_attrs.items():
             if str(val).strip() and is_replacement(
                     tag, val, first_instance is not None and captured(tag)[1]):
+                shown = ("a replacement Patient ID"
+                         if tag == "0010,0020" or str(val) == patient_id else repr(val))
                 raise RuntimeError(
-                    f"lock_identities: patient {patient_id!r} already "
-                    f"carries a replacement in {tag} ({val!r}), so there "
+                    "lock_identities: this patient already "
+                    f"carries a replacement in {tag} ({shown}), so there "
                     "is no original identity left to stash. Lock "
                     "identities before anonymize(), and do not re-lock a "
                     "patient after it; the token this call would have "
@@ -3641,7 +3657,7 @@ class DicomSession:
                     lost = ("nothing" if new is None else "an empty value") if named \
                         else "nothing (tags_to_lock does not name it)"
                     raise RuntimeError(
-                        f"lock_identities: patient {patient_id!r} already has a "
+                        "lock_identities: this patient already has a "
                         f"locked identity holding {tag}, and this lock would "
                         f"replace it with {lost}; lock identities before "
                         "anonymize(), and do not re-lock a patient after it; "
@@ -3662,12 +3678,12 @@ class DicomSession:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 advice = (f"To lock this patient without "
                           f"{'it' if len(blanked) == 1 else 'them'}, call "
-                          f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                          f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
                           if rest else
                           "tags_to_lock names no other tag, so there is nothing "
                           "else to lock")
                 raise RuntimeError(
-                    f"lock_identities: patient {patient_id!r} holds no value in "
+                    "lock_identities: this patient holds no value in "
                     f"{', '.join(blanked)}, which anonymize() emptied or removed, "
                     "so there is no original left to stash. "
                     f"{advice}; the token this call would have written is unchanged.")
@@ -3696,12 +3712,12 @@ class DicomSession:
             if emptying:
                 rest = [tag for tag in tags_to_lock if tag != "0010,0010"]
                 advice = (f"To lock this patient without the name, call "
-                          f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                          f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
                           if rest else
                           "tags_to_lock names no other tag, so there is nothing "
                           "else to lock")
                 raise RuntimeError(
-                    f"lock_identities: patient {patient_id!r} holds no value in "
+                    "lock_identities: this patient holds no value in "
                     f"0010,0010 under a rule of {emptying[0]} on it, and a blank "
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
@@ -3729,12 +3745,12 @@ class DicomSession:
             kinds = sorted({type(original_attrs[tag]).__name__ for tag in unheld})
             advice = (f"To lock this patient without "
                       f"{'it' if len(unheld) == 1 else 'them'}, call "
-                      f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                      f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
                       if rest else
                       "tags_to_lock names no other tag, so there is nothing "
                       "else to lock")
             raise RuntimeError(
-                f"lock_identities: patient {patient_id!r} holds a value in "
+                "lock_identities: this patient holds a value in "
                 f"{', '.join(unheld)} that no token can hold ({', '.join(kinds)}), "
                 "so there is nothing to stash for it. "
                 f"{advice}; the token this call would have written is unchanged."
@@ -3808,14 +3824,18 @@ class DicomSession:
             RuntimeError: When reversible anonymization is not enabled, or
                 when any patient found cannot be locked as asked (the
                 refusals `lock_identities()` names). Every patient is
-                checked before any is locked, so the one error names each
+                checked before any is locked, so the one error lists each
                 refused patient with its own message, in Patient ID order,
                 and no patient is locked, whatever `persist` or
                 `auto_persist_chunk_size` says. A Patient ID that matches
                 no patient is logged, not raised. The promise is about
                 refusals: a store write that fails while tokens are
                 persisted is logged by `update_attributes`, not raised,
-                and leaves memory and the store disagreeing.
+                and leaves memory and the store disagreeing. No message
+                names a patient (P6): each refusal is prefixed `[n of m]`,
+                its place among the `m` patients found, in Patient ID
+                order, so the refused patient is
+                `sorted(ids that matched a patient)[n - 1]`.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
@@ -3844,7 +3864,6 @@ class DicomSession:
 
         count_patients = 0
         count_instances_chunked = 0
-        missing_ids = 0
 
         # Optimization: Create a lookup map for O(1) access
         patient_map = {p.patient_id: p for p in self.store.patients}
@@ -3855,16 +3874,20 @@ class DicomSession:
         # review of #574: one of six). A plan reads and writes nothing, so
         # a refusal leaves no token, whatever `persist` or
         # `auto_persist_chunk_size` says.
+        #
+        # A refusal names no patient (P6, `_planned_identity_lock`), so each
+        # is numbered by its place among the patients found, in Patient ID
+        # order -- the order they are planned and locked in -- and
+        # `sorted(found)[n - 1]` is the patient. An ID that matched no
+        # patient is not counted.
         plans, refusals = {}, []
-        for pid in start_ids:
-            p_obj = patient_map.get(pid)
-            if p_obj is None:
-                missing_ids += 1
-                continue
+        found = [pid for pid in start_ids if pid in patient_map]
+        missing_ids = len(start_ids) - len(found)
+        for place, pid in enumerate(found, start=1):
             try:
-                plans[pid] = self._planned_identity_lock(p_obj, tags_to_lock)
+                plans[pid] = self._planned_identity_lock(patient_map[pid], tags_to_lock)
             except RuntimeError as refusal:
-                refusals.append(str(refusal))
+                refusals.append(f"[{place} of {len(found)}] {refusal}")
 
         if missing_ids:
             # Counted, not named: see `lock_identities`. Before the refusal
@@ -3876,10 +3899,11 @@ class DicomSession:
 
         if refusals:
             raise RuntimeError(
-                f"lock_identities: {len(refusals)} of {len(plans) + len(refusals)} "
+                f"lock_identities: {len(refusals)} of {len(found)} "
                 "patients cannot be locked as asked, so no patient was locked. "
-                "Lock the others without these, and each of these as its "
-                "message says:\n" + "\n".join(refusals))
+                "Each is numbered by its place among the patients found, in "
+                "Patient ID order. Lock the others without these, and each of "
+                "these as its message says:\n" + "\n".join(refusals))
 
         with progress_bar(plans, desc="Locking Identities",
                           unit="patient") as pbar:
