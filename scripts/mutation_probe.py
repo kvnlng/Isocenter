@@ -192,7 +192,8 @@ TARGETS = {
                                     "tests/test_pixel_dtype_roundtrip.py",
                                     "tests/test_pixel_geometry.py",
                                     "tests/test_redaction_robustness.py",
-                                    "tests/test_verification_logic.py"], 30),
+                                    "tests/test_verification_logic.py",
+                                    "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     # 2 sites, exhaustive: both killed. No test names this module -- it is
     # reached through `export(format="dicom")` -- so the scan demands
     # nothing and both files are hand extras (#441). Each was measured to
@@ -366,7 +367,8 @@ TARGETS = {
                               "tests/test_the_project_secret_lives_in_the_store.py",
                               "tests/test_nested_remediation_reaches_the_instance.py",
                               "tests/test_a_shift_date_declines_a_target_that_moved.py",
-                              "tests/test_the_fold_count_is_what_folded.py"], 30),
+                              "tests/test_the_fold_count_is_what_folded.py",
+                              "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/remediation.py": (["tests/test_audit_suppression.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_partial_findings_list_is_not_remediated.py",
@@ -409,7 +411,8 @@ TARGETS = {
                                   "tests/test_the_project_secret_lives_in_the_store.py",
                                   "tests/test_nested_remediation_reaches_the_instance.py",
                                   "tests/test_a_shift_date_declines_a_target_that_moved.py",
-                                  "tests/test_the_fold_count_is_what_folded.py"], 30),
+                                  "tests/test_the_fold_count_is_what_folded.py",
+                                  "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_restored_study_date_reaches_the_file.py",
                                   "tests/test_a_private_re_vr_is_recorded.py",
                                   "tests/test_both_write_doors_stamp_one_answer.py",
@@ -518,7 +521,8 @@ TARGETS = {
                                   "tests/test_j2k_signedness_against_pixel_representation.py",
                                   "tests/test_htj2k_decode.py",
                                   "tests/test_mid_stream_corruption_is_a_documented_limit.py",
-                                  "tests/test_jpeg_extended_decode.py"], 30),
+                                  "tests/test_jpeg_extended_decode.py",
+                                  "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -600,7 +604,8 @@ TARGETS = {
                                   # Beyond the scan, by a measured kill (#441's rule): deleting the
                                   # `_reparent_studies` call in `_save_patient` is killed by
                                   # test_restore_onto_an_id_a_raw_patient_holds_merges_them (#548, #551).
-                                  "tests/test_patients_sharing_an_id_are_merged.py"], 30),
+                                  "tests/test_patients_sharing_an_id_are_merged.py",
+                                  "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     # 587 sites (e184933). Until #414 the facade had no row, so no mutant
     # of `Session` -- the ingest/audit/anonymize/redact/export ordering,
     # `_make_lightweight_copy`, `_verify_worker`, the report's boundary
@@ -845,7 +850,8 @@ TARGETS = {
                               "tests/test_patients_sharing_an_id_are_merged.py",
                               "tests/test_high_bit_is_a_header_warning.py",
                               "tests/test_htj2k_decode.py",
-                              "tests/test_a_shift_date_declines_a_target_that_moved.py"],
+                              "tests/test_a_shift_date_declines_a_target_that_moved.py",
+                              "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"],
                              30),
     # 196 sites. Until #419 this module had no row, so the persistence
     # bookkeeping every CLAUDE.md trap is about -- `mark_modified`,
@@ -1077,7 +1083,8 @@ TARGETS = {
                                "tests/test_one_decode_answer_per_file.py",
                                "tests/test_htj2k_decode.py",
                                "tests/test_a_shift_date_declines_a_target_that_moved.py",
-                               "tests/test_the_fold_count_is_what_folded.py"],
+                               "tests/test_the_fold_count_is_what_folded.py",
+                               "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"],
                               30),
     # 81 sites; budget 60 is stride 1 (81 // 60), so every site is
     # probed, exhaustive because it is cheap, like parallel.py's 80. It

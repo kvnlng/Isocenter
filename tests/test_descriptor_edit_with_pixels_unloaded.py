@@ -378,6 +378,26 @@ def test_describes_names_every_field_the_loader_reads(ingested):
     del inst.attributes[PIXEL_DTYPE_ATTR]
     assert loader.describes(inst)
 
+    # And `Instance.set_attr` reconciles a resident array on exactly the
+    # tags the capture compares (#531): one the loader reads and the
+    # reconciliation misses is written over resident pixels a save then
+    # reloads another way. Every pixel-module tag and the carrier, each
+    # asked of both. Written directly, so no reconciliation runs here.
+    candidates = {"0028,%04x" % element for element in range(0x0200)}
+    candidates |= {PIXEL_DTYPE_ATTR, "0008,0008", "7fe0,0010"}
+    compared = set()
+    for tag in sorted(candidates):
+        had, before = tag in inst.attributes, inst.attributes.get(tag)
+        inst.attributes[tag] = "float32" if tag == PIXEL_DTYPE_ATTR else 3
+        if not loader.describes(inst):
+            compared.add(tag)
+        if had:
+            inst.attributes[tag] = before
+        else:
+            del inst.attributes[tag]
+        assert loader.describes(inst), tag
+    assert compared == set(entities_module._LOADER_DESCRIBED_TAGS)
+
     original_uid = inst.sop_instance_uid
     inst.sop_instance_uid = generate_uid()
     assert not loader.describes(inst)
@@ -690,22 +710,32 @@ def test_a_descriptor_edit_between_the_set_and_the_discard_is_reverted_too(
 
     While the replacement is resident, a pixel-descriptor edit describes
     the replacement, and the discard throws the replacement away. Keeping
-    the edit would leave Rows 99 over a stored 4x4 frame -- the read
-    raises, which is #434's own shape. So the edit goes with the set.
-    A descriptor the set cannot write is not in the record and is left
-    alone: BitsStored here.
+    the edit would leave PixelRepresentation 1 over a stored unsigned
+    frame -- the read comes back signed, #434's own shape. So the edit
+    goes with the set. A descriptor the set cannot write is not in the
+    record and is left alone: BitsStored here.
+
+    Rows 99 was this test's edit until #531, and is now refused before it
+    is written: the set's 64 bytes cannot be read as 99 rows, and the
+    declaration wins. PixelRepresentation 1 reads them as int8, so it is
+    republished and recorded like any other edit.
     """
     _session, inst, _db = ingested
     before = _descriptors(inst)
     bits_stored = inst.attributes["0028,0101"]
-    inst.set_pixel_data(np.full((8, 8), 7, np.uint8))
-    inst.set_attr(ROWS, 99)
+    inst.set_pixel_data(np.full((8, 8), 200, np.uint8))
+    attributes, revision = dict(inst.attributes), inst._revision
+    with pytest.raises(ValueError, match=r"^Rows would read the unsaved "):
+        inst.set_attr(ROWS, 99)
+    assert inst.attributes == attributes and inst._revision == revision
+    inst.set_attr(PR, 1)
     inst.set_attr("0028,0101", 7)
-    assert inst.attributes[ROWS] == 99
+    assert inst.attributes[PR] == 1
+    assert inst.get_pixel_data().dtype == np.int8
 
     assert inst.discard_pixel_data() is True
     assert _descriptors(inst) == before
-    assert inst.attributes[ROWS] == 4
+    assert inst.attributes[PR] == 0
     assert inst.attributes["0028,0101"] == 7 != bits_stored
     inst.set_attr("0028,0101", bits_stored)
     got = inst.get_pixel_data()

@@ -69,6 +69,15 @@ def _image(arr, attrs=(), *, sop=CT_STORAGE, modality="CT"):
     PixelRepresentation from the array (#386) -- a declaration set first
     would be replaced, which is the order `tests/test_export_readback.py`
     already notes.
+
+    **Written into `attributes`, not through `set_attr`.** Since #531 a
+    `set_attr` on PixelRepresentation over resident pixels makes them
+    read as the edit declares -- `int16 [-1, ...]` declared 0 becomes
+    `uint16 [65535, ...]` at the edit -- or refuses a declaration that is
+    not an integer, so it can no longer build the disagreement these
+    tests hand the writer. A writer that edits `attributes` directly
+    still can (#417 lists them), and the export's correction is what
+    stands between that and the file.
     """
     inst = Instance(f"1.2.826.0.1.499.{next(_serial)}", sop, 1)
     inst.file_path = None
@@ -77,7 +86,7 @@ def _image(arr, attrs=(), *, sop=CT_STORAGE, modality="CT"):
     inst.set_attr("0008,0060", modality)
     inst.set_pixel_data(arr)
     for tag, value in attrs:
-        inst.set_attr(tag, value)
+        inst.attributes[tag] = value
     return inst
 
 
@@ -382,7 +391,9 @@ def test_a_saved_instance_reaches_the_writer_already_agreeing(tmp_path):
     `session.export()` saves and releases before it writes, so the
     pipeline always presents a reconciled instance; the writer-level
     defect is reachable through `write_tree()` on a hand-built graph, and
-    through a `set_attr` after `set_pixel_data()` on a resident array.
+    through a write to `attributes` that bypasses `set_attr` beside a
+    resident array. A `set_attr` after `set_pixel_data()` reached it
+    too, until #531 made that edit reinterpret the resident array.
     """
     inst = _image(SIGNED, (("0028,0103", 0),))
     graph = Patient("PAT1", "Original Name")

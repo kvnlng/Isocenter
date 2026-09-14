@@ -356,6 +356,14 @@ def recorded(tmp_path, monkeypatch):
         relabelling = _relabelling_instance(str(tmp_path))
         assert relabelling.get_pixel_data().shape == (4, 4, 3)
         assert relabelling.attributes["0028,0004"] == "RGB"
+        # A descriptor edit over unsaved resident pixels: the write and
+        # the republish in one hold (#531, leaf). Discarded and reloaded
+        # after, so everything below sees `first` as it did before.
+        first.set_pixel_data(np.full((8, 8), 200, dtype=np.uint8))
+        first.set_attr("0028,0103", 1)
+        assert first.pixel_array.dtype == np.int8
+        assert first.discard_pixel_data() is True
+        first.get_pixel_data()
         # The dedup arm: the same bytes under a new dtype (leaf).
         second.set_pixel_data(second.get_pixel_data().view(np.int8))
         session.save(sync=True)
@@ -545,6 +553,8 @@ def test_there_are_exactly_six_write_frame_sites_and_they_are_these():
 #: Everything that takes the pixel-state leaf, by function name (#434, Q6).
 _LEAF_TAKERS = {"set_pixel_data", "discard_pixel_data", "unload_pixel_data",
                 "_publish_loaded_frame",
+                # `Instance.set_attr`, for a tag the loader reads (#531).
+                "set_attr",
                 "_swap_pixels_under_gate", "_persist_pixels",
                 "_apply_redaction_outcomes"}
 
@@ -967,7 +977,26 @@ def test_nothing_logs_while_the_pixel_state_lock_is_held(tmp_path):
     `relabel=None` and the pydicom one that relabels, parallel to the
     two loads the `recorded` fixture adds for the lock half of the same
     invariant. A log call added inside the publish is now red here.
+
+    **The capture guard is a third branch (#531), and neither of those
+    two reaches it.** The bare lambda carries no `describes`, and the file
+    arm passes no capture, so a log call inside `if describes is not
+    None:` executed under the hold with both loads green (review of #628
+    round 2, F1). The third load is an ingested instance read back
+    through its own sidecar loader, which carries `describes`; ingested,
+    saved and unloaded before the probe is armed, so the only lines the
+    probe sees from it are the read's own.
     """
+    folder = str(tmp_path / "guard")
+    os.makedirs(folder)
+    _write_ct_with_icon(folder)
+    session = DicomSession(persistence_file=str(tmp_path / "guard.db"))
+    session.ingest(folder)
+    session.save(sync=True)
+    guarded = next(inst for pt in session.store.patients for st in pt.studies
+                   for se in st.series for inst in se.instances)
+    assert guarded.unload_pixel_data() is True
+    assert hasattr(guarded._pixel_loader, "describes")
     logger = get_logger()
     probe = _LockProbe()
     level = logger.level
@@ -978,6 +1007,18 @@ def test_nothing_logs_while_the_pixel_state_lock_is_held(tmp_path):
         inst.set_attr("0028,0100", 16)
         inst.set_pixel_data(np.zeros((4, 4), dtype=np.uint8))   # BitsAllocated 16 -> 8
         assert inst.discard_pixel_data() is False              # memory only
+        # A descriptor edit over those unsaved pixels (#531): republished
+        # in the write's hold, and refused before it. Then one over a
+        # memory-only array a save never set, whose release is refused
+        # with a line -- emitted after the hold, not inside it.
+        inst.set_attr("0028,0103", 1)
+        assert inst.pixel_array.dtype == np.int8
+        with pytest.raises(ValueError, match="would read the unsaved"):
+            inst.set_attr("0028,0010", 99)
+        assigned = Instance("1.2.3.LOG.ASSIGNED", CT_IMAGE, 1, file_path=None)
+        assigned.pixel_array = np.zeros((4, 4), dtype=np.uint8)
+        assigned.set_attr("0028,0103", 1)
+        assert assigned.pixel_array is not None
         # The read publish, both branches. Asserted to have published --
         # the loader's own array back, and the relabel written -- so a
         # refactor that stops loading cannot leave this probe passing
@@ -989,10 +1030,13 @@ def test_nothing_logs_while_the_pixel_state_lock_is_held(tmp_path):
         relabelling = _relabelling_instance(str(tmp_path))     # relabel RGB
         assert relabelling.get_pixel_data().shape == (4, 4, 3)
         assert relabelling.attributes["0028,0004"] == "RGB"
+        got = guarded.get_pixel_data()                         # capture guard
+        assert guarded.pixel_array is got
     finally:
         logger.removeHandler(probe)
         logger.setLevel(level)
+        session.close()
     corrected = [held for msg, held in probe.seen if "BitsAllocated" in msg]
     refused = [held for msg, held in probe.seen if "held in memory only" in msg]
-    assert corrected and refused, probe.seen
+    assert corrected and len(refused) == 2, probe.seen
     assert not any(held for _msg, held in probe.seen), probe.seen

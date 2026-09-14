@@ -780,6 +780,134 @@ _SET_PIXEL_DATA_TAGS = (
     PIXEL_DTYPE_ATTR,   # the float/bool dtype carrier
 )
 
+# Every attribute `SidecarPixelLoader` reads a stored frame by, which is
+# every one whose edit can change how a resident array's bytes read back
+# after a save (#531). `Instance.set_attr` reconciles a resident array on
+# an edit to any of these. A tag the loader reads and this set misses is
+# written without a word over pixels a save then reloads another way, or
+# cannot reload at all; `tests/test_descriptor_edit_with_pixels_unloaded.py::
+# test_describes_names_every_field_the_loader_reads` holds the two
+# together by behaviour. The carrier is here for that comparison only:
+# `set_attr` lowercases its key, so an edit through it can never name the
+# uppercase carrier, and the float/bool dtype enters the reconciliation
+# through the loader's reading of the attributes instead.
+_LOADER_DESCRIBED_TAGS = frozenset({
+    "0028,0010",        # Rows
+    "0028,0011",        # Columns
+    "0028,0002",        # SamplesPerPixel
+    "0028,0008",        # NumberOfFrames
+    "0028,0100",        # BitsAllocated
+    "0028,0103",        # PixelRepresentation
+    PIXEL_DTYPE_ATTR,   # the float/bool dtype carrier
+})
+
+# The keyword a refusal names each described tag by: a tag number alone
+# tells a caller nothing they can act on.
+_DESCRIBED_TAG_KEYWORDS = {
+    "0028,0010": "Rows",
+    "0028,0011": "Columns",
+    "0028,0002": "SamplesPerPixel",
+    "0028,0008": "NumberOfFrames",
+    "0028,0100": "BitsAllocated",
+    "0028,0103": "PixelRepresentation",
+}
+
+
+# The frame a read loaded was read through a capture the instance has
+# since left: `_publish_loaded_frame` returns this instead of publishing,
+# and the loader arm of `get_pixel_data` re-reads (#531).
+_STALE_CAPTURE = object()
+
+
+def _reading_or_none(reading_of, attributes):
+    """The loader's `(dtype, shape)` for `attributes`, or None if it has none."""
+    try:
+        return reading_of(attributes)
+    except (TypeError, ValueError):
+        return None
+
+
+def _unparseable_descriptors(descriptors_of, attributes) -> list:
+    """The keywords of the described tags `attributes` holds that do not parse.
+
+    Each is parsed on its own, by the loader's own rule (`descriptors_of`
+    with a one-tag mapping applies its defaults to the other five), so
+    this cannot drift from what the loader refuses.
+    """
+    failed = []
+    for tag, keyword in _DESCRIBED_TAG_KEYWORDS.items():
+        if tag in attributes:
+            try:
+                descriptors_of({tag: attributes[tag]})
+            except (TypeError, ValueError):
+                failed.append(keyword)
+    return failed
+
+
+def _element_count(shape) -> int:
+    """How many samples a shape holds, as a Python int."""
+    count = 1
+    for axis in shape:
+        count *= axis
+    return count
+
+
+def _unsatisfiable_edit_message(tag, value, array, reading, unparseable,
+                                descriptors_of):
+    """Why an edit over an unsaved array was refused, in tags and sizes only.
+
+    **No value a caller passed is echoed, on either branch.** This text
+    reaches audit rows through a raising remediation (#553), and a
+    `REPLACE` rule can carry a config- or patient-derived value to a
+    descriptor: an unparseable one can be anything, and an integer a US
+    tag can hold passes #560's VR check and reaches here parsed (measured:
+    `REPLACE_TAG` Rows 1965 declined with the value in the row). So an
+    unparseable value is named only as unparseable, and a parsed one only
+    by what it would read the bytes as -- the sample count, the itemsize
+    and the byte total -- never by the value or a shape that repeats it.
+    An empty value is said to read as the loader's default, so a caller
+    who wrote `""` is not told about a `0` they never passed; so is a
+    zero where the default is not zero (`int(0 or 8)` is 8), which is
+    falsy without being empty.
+
+    `unparseable` names the described tags that do not parse with the
+    edit applied. When the edit's own tag is not among them, a writer
+    that bypassed `set_attr` left another descriptor unreadable, and the
+    refusal names that one rather than blaming the edit.
+
+    `descriptors_of` is `SidecarPixelLoader._descriptors_of`, passed in
+    because `io_handlers` imports this module. The defaults the "reads
+    as" clause names are read from it -- `descriptors_of({})` is the six
+    descriptors with nothing set, in the order `_DESCRIBED_TAG_KEYWORDS`
+    lists them -- rather than kept as a table here: a table was a second
+    statement of the loader's rule, and it drifted unpinned (review of
+    #628 round 2, F2).
+    """
+    keyword = _DESCRIBED_TAG_KEYWORDS[tag]
+    held = (f"the unsaved {array.dtype.name} {tuple(array.shape)} array "
+            f"set by set_pixel_data()")
+    way_out = ("Pass the array you mean to set_pixel_data(), which writes "
+               "its own descriptors.")
+    if reading is None:
+        if keyword in unparseable or not unparseable:
+            return (f"{keyword} does not parse as an integer, so {held} "
+                    f"has no reading under it. {way_out}")
+        return (f"{' and '.join(unparseable)} "
+                f"{'do' if len(unparseable) > 1 else 'does'} not parse as "
+                f"an integer as it stands, so {held} has no reading under "
+                f"the {keyword} edit. {way_out}")
+    dtype, shape = reading
+    samples = _element_count(shape)
+    reads_as = dict(zip(_DESCRIBED_TAG_KEYWORDS, descriptors_of({})))
+    subject = keyword
+    if value is None or (isinstance(value, (str, bytes)) and not value):
+        subject = f"An empty {keyword} reads as {reads_as[tag]}, and"
+    elif not value and reads_as[tag]:
+        subject = f"A zero {keyword} reads as {reads_as[tag]}, and"
+    return (f"{subject} would read {held} as {samples} {dtype.itemsize}-byte "
+            f"{dtype.name} samples, {samples * dtype.itemsize} bytes, and "
+            f"the array holds {array.nbytes}. {way_out}")
+
 
 @dataclass(slots=True, eq=False)
 class Instance(DicomItem):
@@ -1089,6 +1217,124 @@ class Instance(DicomItem):
 
         get_logger().debug(f"  -> Identity regenerated: {new_uid}")
 
+    def set_attr(self, tag: str, value: Any):
+        """
+        Sets an attribute, and keeps resident pixels reading as it declares.
+
+        Every tag is written as `DicomItem.set_attr` writes it. An edit to
+        a descriptor the sidecar loader reads a frame by -- Rows, Columns,
+        SamplesPerPixel, NumberOfFrames, BitsAllocated,
+        PixelRepresentation -- while pixels are resident also settles the
+        resident array, because a save writes the array's bytes and every
+        later read takes them under the edit. Without this the live
+        session read a set int16 array as int16 while the save, the
+        export and the reopened store all read uint16 after
+        `set_attr(PixelRepresentation, 0)` (#531). **The declaration
+        wins** (Q9):
+
+        - An edit under which the bytes read as they read now -- the same
+          dtype and shape -- is a plain write.
+        - An array a save has written is released after the write, so the
+          next read rebuilds it from the store under the edit (#417).
+          Its bytes are stored; nothing is lost. A memory-only array has
+          nowhere to be reloaded from and stays, as `unload_pixel_data`
+          refuses to drop it.
+        - An array set through `set_pixel_data()` and not yet written is
+          republished as the edit reads its bytes: a view under the new
+          dtype, in the new shape, with the write in the same hold of
+          `PIXEL_STATE_LOCK`, so no read sees the new declaration beside
+          the old array. It stays unwritten, and `discard_pixel_data()`
+          still restores what the set replaced.
+
+        Each edit is judged alone. Changing a geometry in two steps whose
+        end state the bytes fit -- BitsAllocated 8, then Columns 8, over a
+        4x4 uint16 set -- is refused at the first step; set the array you
+        mean instead, which writes its own descriptors.
+
+        A read in flight at the edit -- one that captured the descriptors,
+        and is inside its sidecar read when the edit lands -- is not
+        published under the old declaration: `_publish_loaded_frame`
+        refuses a frame whose capture the instance has since left, and the
+        read arm re-reads under the new descriptors.
+
+        Raises:
+            ValueError: If the edit is to a described tag, the resident
+                array was set through `set_pixel_data()` and not written
+                since, and the edit reads its bytes as a different number
+                of bytes, or does not parse as an integer -- "BitsAllocated
+                would read the unsaved uint16 (4, 4) array set by
+                set_pixel_data() as 16 1-byte uint8 samples, 16 bytes, and
+                the array holds 32. Pass the array you mean to
+                set_pixel_data(), which writes its own descriptors." The
+                value is never in the message (see
+                `_unsatisfiable_edit_message`). Raised before anything is
+                written: the attribute and the revision are unchanged.
+                Written, the edit saved a frame no read, export or reopen
+                could load.
+        """
+        tag = _canonical_tag(tag)
+        if tag not in _LOADER_DESCRIBED_TAGS:
+            DicomItem.set_attr(self, tag, value)
+            return
+        # Local: `io_handlers` imports this module. Taken before the lock,
+        # never under it -- an import can take the import lock, and the
+        # leaf takes nothing.
+        from .io_handlers import SidecarPixelLoader  # pylint: disable=import-outside-toplevel
+        reading_of = SidecarPixelLoader.reading_of
+        written, refused = False, None
+        while True:
+            array = self.pixel_array
+            # The one step that can copy, so outside the leaf: a view
+            # under another itemsize needs contiguous bytes.
+            contiguous = None if array is None else np.ascontiguousarray(array)
+            with PIXEL_STATE_LOCK:
+                # The slot is judged as it is under the lock. A set, a
+                # discard or a read publish that landed since the read
+                # above is a different array, and the edit is judged
+                # against that one on the next pass. Not the revision:
+                # it moves on every PHI status and every other edit, none
+                # of which changes what is resident.
+                if self.pixel_array is not array:
+                    continue
+                if array is None:
+                    DicomItem.set_attr(self, tag, value)
+                    return
+                edited = dict(self.attributes)
+                before = _reading_or_none(reading_of, edited)
+                edited[tag] = value
+                after = _reading_or_none(reading_of, edited)
+                if before is not None and before == after:
+                    DicomItem.set_attr(self, tag, value)
+                    return
+                written = not self._pixel_array_unwritten
+                if written:
+                    DicomItem.set_attr(self, tag, value)
+                elif after is None or array.nbytes != (
+                        _element_count(after[1]) * after[0].itemsize):
+                    # Judged here; worded after the hold. The message
+                    # parses the six descriptors again to name the one
+                    # that failed, and nothing that can wait belongs
+                    # under the leaf.
+                    refused = (edited, after)
+                else:
+                    DicomItem.set_attr(self, tag, value)
+                    self.pixel_array = (contiguous.reshape(-1)
+                                        .view(after[0]).reshape(after[1]))
+                    return
+            break
+        if written:
+            # Written first, released second, and outside the leaf, which
+            # `unload_pixel_data` takes itself. Released first, a read
+            # landing before the write loads under the old declaration and
+            # publishes that, and the edit then leaves it resident.
+            self.unload_pixel_data()
+            return
+        edited, after = refused
+        descriptors_of = SidecarPixelLoader._descriptors_of  # pylint: disable=protected-access
+        raise ValueError(_unsatisfiable_edit_message(
+            tag, value, array, after,
+            _unparseable_descriptors(descriptors_of, edited), descriptors_of))
+
     def unload_pixel_data(self) -> bool:
         """
         Frees the cached pixel_array, but only when it can be brought back.
@@ -1366,11 +1612,37 @@ class Instance(DicomItem):
                 # Duck-typed: tests install a bare lambda as the loader,
                 # and a loader with no `describes` has no capture to go
                 # stale.
-                describes = getattr(loader, "describes", None)
-                if describes is not None and not describes(self):
-                    loader = loader.for_instance(self)
-                # Invoke callback (e.g. sidecar read)
-                arr = loader()
+                #
+                # **Read, then publish only if the capture still holds.**
+                # A descriptor edit landing while this read is inside
+                # `loader()` -- after `describes()` said the capture was
+                # current -- used to publish the frame read the old way
+                # into the slot the edit found empty, and it stuck: every
+                # later read returned it and a save dedup'd the same bytes
+                # under the new descriptors, so the reopened store read
+                # them the other way (#531's split, entered from the
+                # unloaded side; 92 of 200 trials on 3.14t with four
+                # readers and one writer). `set_attr` over written pixels
+                # opens exactly this window on purpose, by releasing the
+                # array so the next read rebuilds. So the publish is
+                # handed the capture this read went through, refuses a
+                # frame whose capture the instance has since left, and
+                # this arm reads again under the descriptors as they are
+                # now. Each pass costs one sidecar read; it ends when a
+                # read and no edit overlap, as `set_attr`'s own retry does.
+                while True:
+                    describes = getattr(loader, "describes", None)
+                    if describes is not None and not describes(self):
+                        loader = loader.for_instance(self)
+                    # Invoke callback (e.g. sidecar read)
+                    arr = loader()
+                    published = self._publish_loaded_frame(arr, capture=loader)
+                    if published is not _STALE_CAPTURE:
+                        break
+                    # From the slot again, in case a redaction rebound it
+                    # meanwhile; the same loader otherwise, which the next
+                    # pass rebuilds from the instance as it is now.
+                    loader = self._pixel_loader or loader
                 # A read must not write. This used to call set_pixel_data
                 # "to ensure attributes (rows, cols) are synced", and the
                 # sync could only ever disagree: SidecarPixelLoader reshaped
@@ -1383,7 +1655,7 @@ class Instance(DicomItem):
                 # mark_modified(), the next save() wrote it to SQLite (#186).
                 # Published only into an empty slot: a set that landed
                 # during the load keeps its pixels (#465).
-                return self._publish_loaded_frame(arr)
+                return published
             except Exception as e:
                 raise RuntimeError(f"Pixel Loader failed for {self.sop_instance_uid}: {e}") from e
 
@@ -1650,7 +1922,14 @@ class Instance(DicomItem):
         """
         if declared_int(self.attributes, tag) == value:
             return False
-        self.set_attr(tag, value)
+        # `DicomItem.set_attr`, never `self.set_attr`. Both helpers run
+        # under `PIXEL_STATE_LOCK` -- `set_pixel_data` holds it across its
+        # descriptor writes, `_publish_loaded_frame` across the relabel --
+        # and `Instance.set_attr` takes that plain lock for a described
+        # tag, so reaching it here deadlocks on our own hold (#531). The
+        # descriptors a set writes describe the array it is setting;
+        # there is nothing to reconcile.
+        DicomItem.set_attr(self, tag, value)
         return True
 
     def _write_str_if_changed(self, tag: str, value: str) -> bool:
@@ -1658,7 +1937,8 @@ class Instance(DicomItem):
         raw = self.attributes.get(tag)
         if raw is not None and str(raw).strip().upper() == str(value).strip().upper():
             return False
-        self.set_attr(tag, value)
+        # `DicomItem.set_attr`: see `_write_int_if_changed` (#531).
+        DicomItem.set_attr(self, tag, value)
         return True
 
     def _relabel_to_decoded_colour(self, label: str) -> None:
@@ -1701,7 +1981,8 @@ class Instance(DicomItem):
             self._write_str_if_changed("0028,0004", label)
 
     def _publish_loaded_frame(self, arr: np.ndarray,
-                              relabel: Optional[str] = None) -> np.ndarray:
+                              relabel: Optional[str] = None,
+                              capture=None) -> np.ndarray:
         """Cache the frame a read arm loaded, unless a set got there first (#465).
 
         The two read arms -- the sidecar loader and the file (a third,
@@ -1728,6 +2009,27 @@ class Instance(DicomItem):
         revision guard would refuse to cache under an audit running on
         another thread.
 
+        **The one other predicate is the capture, and it is not the
+        revision guard rejected above.** `capture` is the loader the
+        sidecar arm read `arr` through, and its `describes(self)` asks
+        one question: are the six descriptors the frame was shaped and
+        typed by still the instance's? A descriptor edit that lands while
+        the read is inside its sidecar read is the one change that makes
+        the loaded frame wrong -- published, it sits under a declaration
+        the store reads the other way, and it sticks (#531; measured in
+        the review of PR #628's first push: 92 of 200 trials on 3.14t)
+        -- and it is the only change this asks about. A PHI status, a
+        name edit, the relabel below: none moves the capture. So the
+        guard cannot false-trigger the way a revision guard would, and
+        on a stale capture it returns
+        `_STALE_CAPTURE` without publishing, and the sidecar arm reads
+        again. Asked under the leaf, as it must be: asked outside it, an
+        edit between the answer and the publish is the same window. It
+        keeps the leaf a leaf -- `describes()` is one `dict()` copy of the
+        attributes and six `int()`s: no log call, no sqlite, no frame
+        write, and no lock. The file arm passes no capture; pydicom
+        shaped its frame from the file's own descriptors.
+
         `relabel` is the colour space the decode converted to (#464,
         #482), written only when this read publishes.
 
@@ -1741,6 +2043,20 @@ class Instance(DicomItem):
         """
         with PIXEL_STATE_LOCK:
             if self.pixel_array is None:
+                # The capture guard, under the leaf (#531): one `dict()`
+                # copy and six `int()`s -- no log, no sqlite, no frame
+                # write, no lock -- so the leaf stays a leaf. It asks
+                # whether the six descriptors the frame was read by are
+                # still the instance's, which nothing but a descriptor
+                # edit moves; that is why it is not the revision guard
+                # the docstring rejects. `describes()` can raise here --
+                # a bypass wrote a descriptor that does not parse -- and
+                # that is the #417 refusal, surfaced by the caller's
+                # `RuntimeError` with the slot still empty and the lock
+                # released by the `with`.
+                describes = getattr(capture, "describes", None)
+                if describes is not None and not describes(self):  # pylint: disable=not-callable
+                    return _STALE_CAPTURE
                 if relabel is not None:
                     self._relabel_to_decoded_colour(relabel)
                 self.pixel_array = arr
