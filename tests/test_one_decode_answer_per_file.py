@@ -71,6 +71,7 @@ def _refused_everywhere(tmp_path, ds, words, counter):
     assert got["failure"].startswith("Decompression Failed:"), got
     if counter is not None:
         assert counter["n"] > 0, "the fallback route was never taken"
+        assert got["pydicom_calls"] > 0, "ingest never took the fallback"
     return got
 
 
@@ -212,6 +213,7 @@ def test_a_conformant_file_reads_the_same_array_at_every_door(
     assert same(got["array"], want) and got["label"] == label, got
     if route is not None:
         assert route["n"] > 0
+        assert got["pydicom_calls"] > 0, "ingest never took the fallback"
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +337,7 @@ def test_a_precision_8_codestream_under_bits_allocated_16_ingests_in_16_bits(
     assert same(arr, want), arr
     if route is not None:
         assert route["n"] > 0
+        assert got["pydicom_calls"] > 0, "ingest never took the fallback"
 
 
 def test_a_jpeg_lossless_stream_narrower_than_bits_stored_is_refused_not_shifted(
@@ -406,8 +409,10 @@ def test_a_signed_codestream_under_pixel_representation_0_is_refused_at_every_do
     assert got["failure"].startswith(
         f"Decompression Failed: RuntimeError: {words}"), got["failure"]
     if route is not None:
-        # Refused before pydicom: the fallback route is never taken.
+        # Refused before pydicom: the fallback route is never taken, by
+        # the ingest either.
         assert route["n"] == 0
+        assert got["pydicom_calls"] == 0
 
 
 def test_the_signedness_gate_reads_every_frame(tmp_path):
@@ -576,6 +581,7 @@ def test_the_signedness_gate_walks_the_frames_the_extended_offset_table_names(
         f"Decompression Failed: RuntimeError: {words}"), got["failure"]
     if route is not None:
         assert route["n"] == 0
+        assert got["pydicom_calls"] == 0
 
 
 def test_the_fallback_decodes_the_frames_the_extended_offset_table_names(
@@ -606,6 +612,7 @@ def test_the_fallback_decodes_the_frames_the_extended_offset_table_names(
     assert same(got["array"], want), got["array"]
     if route is not None:
         assert route["n"] > 0, "the fallback route was never taken"
+        assert got["pydicom_calls"] > 0, "ingest never took the fallback"
 
 
 def test_an_extended_offset_table_pydicom_drops_is_not_walked_by_the_gate(

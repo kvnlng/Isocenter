@@ -13,11 +13,17 @@ imagecodecs fallback takes, so a shape Pillow decodes is also answered by
 the fallback. A differential test runs with and without it: the fallback
 must return Pillow's array on every shape Pillow decodes.
 
-It is a monkeypatch, and a monkeypatch does not reach a spawned ingest
-worker. So the fixture also sets `ISOCENTER_FORCE_THREADS=1`, and it
-counts its own calls: `calls["n"]` stays 0 when nothing in this process
-asked pydicom, which is how a test proves its ingest half measured the
-fallback and not Pillow a second time (brief F §5.1, attack A20b).
+It is a monkeypatch, and a monkeypatch does not reach a spawned worker.
+`ingest()` always runs on the session's own process pool --
+`ISOCENTER_FORCE_THREADS` does not change that, and until the review of
+#606 (F-r2-1) this fixture's ingest half measured Pillow a second time
+while its docstring said otherwise. So the fixture also swaps the
+session's ingest pool for a one-thread pool in this process
+(`DicomSession._ingest_executor`), where the patch is, and `at_ingest`
+asserts that swap was used. It counts pydicom's refusals: `calls["n"]`
+over the whole test, and `at_ingest`'s `got["pydicom_calls"]` for the
+ingest alone, which is how a test proves its ingest half measured the
+fallback (brief F §5.1, attack A20b).
 
 In `tests/support/` for the reason `project_secret.py` gives. Every
 `isocenter` import is inside a function, so the mutation probe charges
@@ -49,6 +55,10 @@ SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7"
 #: before any test patches it: `pydicom_answer` reads the reference
 #: array through it even while `pydicom_cannot` is in effect.
 _REAL_AS_ARRAY = Decoder.as_array
+
+#: The `pydicom_cannot` counter in effect for this test, or None. Read by
+#: `at_ingest`, which cannot take the fixture as an argument.
+_ACTIVE = {"calls": None}
 
 #: The words the fixture's refusal carries, so a test can tell it from a
 #: real plugin failure.
@@ -186,14 +196,25 @@ def at_ingest(tmp_path, path, name="s"):
     array after `unload_pixel_data()` (the sidecar's answer), its label
     and pixel descriptors, the failure reason when the file was refused,
     and every `WARNING` and `DATA_LOSS` row as `(action, entity, details)`.
+
+    Under `pydicom_cannot`, also `"pydicom_calls"`: how many times this
+    ingest asked pydicom and was refused. It asserts the ingest ran on the
+    fixture's in-process pool, so the patch reached it.
     """
     import sqlite3  # pylint: disable=import-outside-toplevel
     from isocenter.session import DicomSession  # pylint: disable=import-outside-toplevel
     db = os.path.join(str(tmp_path), f"{name}.db")
     got = {"array": None, "label": None, "attributes": None,
            "failure": None, "rows": []}
+    calls = _ACTIVE["calls"]
+    before = dict(calls) if calls is not None else None
     with DicomSession(persistence_file=db) as session:
         summary = session.ingest(os.path.dirname(path))
+        if calls is not None:
+            assert calls["ingests"] > before["ingests"], (
+                "the ingest ran on the session's process pool, where "
+                "pydicom_cannot's patch does not reach")
+            got["pydicom_calls"] = calls["n"] - before["n"]
         if summary.failures:
             got["failure"] = summary.failures[0][1]
         instances = [i for p in session.store.patients for st in p.studies
@@ -223,13 +244,26 @@ def same(arr, want):
 def pydicom_cannot(monkeypatch):
     """pydicom has no plugin for any imagecodecs fallback syntax, here.
 
-    Yields `{"n": calls}`. Syntaxes outside the fallback set decode as
-    they always do. `ISOCENTER_FORCE_THREADS=1` so an ingest in this
-    test runs its worker in this process, where the patch is.
+    Yields `{"n": refusals, "ingests": in-process ingests}`. Syntaxes
+    outside the fallback set decode as they always do. An `ingest()` in
+    this test runs on a one-thread pool in this process, where the patch
+    is: `DicomSession._ingest_executor` is swapped for one, because the
+    session's own pool spawns processes whatever `ISOCENTER_FORCE_THREADS`
+    says. `ISOCENTER_FORCE_THREADS=1` is still set, for `run_parallel`
+    callers other than ingest.
     """
+    import concurrent.futures  # pylint: disable=import-outside-toplevel
+    from contextlib import contextmanager  # pylint: disable=import-outside-toplevel
     from isocenter.io_handlers import _IMAGECODECS_FALLBACK_SYNTAXES  # pylint: disable=import-outside-toplevel
+    from isocenter.session import DicomSession  # pylint: disable=import-outside-toplevel
     real = Decoder.as_array
-    calls = {"n": 0}
+    calls = {"n": 0, "ingests": 0}
+
+    @contextmanager
+    def in_process(_session):
+        calls["ingests"] += 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            yield pool
 
     def cannot(self, src, **kwargs):
         if str(self.UID) not in _IMAGECODECS_FALLBACK_SYNTAXES:
@@ -238,6 +272,8 @@ def pydicom_cannot(monkeypatch):
         raise RuntimeError(FORCED)
 
     monkeypatch.setattr(Decoder, "as_array", cannot)
+    monkeypatch.setattr(DicomSession, "_ingest_executor", in_process)
+    monkeypatch.setitem(_ACTIVE, "calls", calls)
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
     yield calls
 
@@ -247,7 +283,8 @@ def route(request, monkeypatch):
     """Both routes a fallback syntax can take; yields the call counter.
 
     `None` on the pydicom-first route. On the other, the counter a test
-    asserts moved, so it knows the fallback was what answered.
+    asserts moved, so it knows the fallback was what answered; for the
+    ingest half, `at_ingest`'s `got["pydicom_calls"]`.
     """
     if request.param == "pydicom-first":
         monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
