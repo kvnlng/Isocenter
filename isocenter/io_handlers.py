@@ -617,8 +617,8 @@ _ADMISSIBLE_PHOTOMETRICS = {
 _PHOTOMETRIC_INADMISSIBLE = {
     "YBR_ICT": (
         "these two labels name the irreversible and reversible "
-        "multiple-component transforms of a JPEG 2000 codestream, and an "
-        "uncompressed file has no codestream to carry one.",
+        "multiple-component transforms of a JPEG 2000 codestream, and "
+        "uncompressed pixel data has no codestream to carry one.",
         "Export with use_compression=True, where the transform is applied "
         "and the label is true of the codestream, or declare the label "
         "these bytes have with set_attr(\"0028,0004\", ...)."),
@@ -680,6 +680,18 @@ _PHOTOMETRIC_NO_PIXELS = (
     "remedy involving the pixels applies. An instance with no pixels "
     "should carry no (0028,0004); the value reaching the file is the one "
     "the graph declared.")
+
+#: The remedy for an inadmissible label on an Icon Image Sequence item
+#: (#602). A property of the door, as `_PHOTOMETRIC_NO_PIXELS` is of the
+#: file: the table's ICT/RCT remedy says "export with
+#: use_compression=True", which is false for an icon, since
+#: `_write_back_nested_pixels` writes every icon raw.
+_PHOTOMETRIC_ICON = (
+    "An icon is written uncompressed whatever transfer syntax the file "
+    "carries (PS3.5 A.4 allows either, and this exporter never compresses "
+    "one), so compressing the export does not change this. Declare the "
+    "label these bytes have with set_attr(\"0028,0004\", ...) on that "
+    "sequence item.")
 
 
 def _written_photometric(value) -> Optional[str]:
@@ -784,6 +796,14 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     Only `0028,0004`, by ruling: it is the element a decoder keys on and
     the one that made this library's own file unreadable. Other Code
     String elements are written as held (#603).
+
+    **Every sequence item takes the same copy** (#602):
+    `DicomExporter._merge_sequences` respells each item's `0028,0004`
+    through this before its `_merge`, for the same two reasons one depth
+    down -- pydicom's `UserWarning` fires on the item's assignment, and an
+    icon labelled `' rgb'` was dropped by this library's own re-ingest.
+    Its note names the item. At the top level the two readers above are
+    still the only ones.
     """
     value = attributes.get("0028,0004")
     if isinstance(value, str):
@@ -825,6 +845,27 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
         f"trailing spaces are not significant). The samples are unchanged.")
 
 
+def _label_inadmissibility(label, syntax_uid) -> Optional[Tuple[str, str]]:
+    """The table's `(clause, remedy)` for a label `syntax_uid` does not admit.
+
+    None when the syntax has no row (measured rows only, the discipline
+    `_FALLBACK_PHOTOMETRICS` keeps), when there is no label, or when the
+    label is admitted. `label` is already normalized
+    (`_written_photometric`).
+
+    **The one judgement.** The writer's sentence (`_photometric_warning`),
+    the readback's (`_readback_label_mismatch`) and the icon's
+    (`_icon_label_warning`, #602) each call this and keep only their own
+    sentence and remedy override, so an icon is judged by the top level's
+    rule and not by a copy of it.
+    """
+    admitted = _ADMISSIBLE_PHOTOMETRICS.get(str(syntax_uid))
+    if admitted is None or label is None or label in admitted:
+        return None
+    return _PHOTOMETRIC_INADMISSIBLE.get(label,
+                                         _PHOTOMETRIC_INADMISSIBLE[None])
+
+
 def _photometric_warning(label, syntax_uid, *,
                          has_pixels: bool) -> Optional[str]:
     """One sentence for a label the written syntax does not admit (#502).
@@ -843,11 +884,10 @@ def _photometric_warning(label, syntax_uid, *,
     compress. So a caller has to say which kind of file it is judging,
     and the pixel-less one gets `_PHOTOMETRIC_NO_PIXELS`.
     """
-    admitted = _ADMISSIBLE_PHOTOMETRICS.get(str(syntax_uid))
-    if admitted is None or label is None or label in admitted:
+    found = _label_inadmissibility(label, syntax_uid)
+    if found is None:
         return None
-    clause, remedy = _PHOTOMETRIC_INADMISSIBLE.get(
-        label, _PHOTOMETRIC_INADMISSIBLE[None])
+    clause, remedy = found
     if has_pixels:
         kept = ("The label was written as declared, over the samples the "
                 "instance held, and neither was changed.")
@@ -930,6 +970,51 @@ def _multi_valued_refusal(written) -> "_PhotometricRefusal":
         f"case is refused where an inadmissible label is written with "
         f"a warning. Declare one label with "
         f"set_attr(\"0028,0004\", ...).")
+
+
+#: The uncompressed syntax an icon's label is judged against (#602). Any
+#: of the three native rows would do -- they are one set -- and this is the
+#: one `_create_ds` writes.
+_ICON_WRITTEN_SYNTAX = "1.2.840.10008.1.2"
+
+
+def _icon_label_warning(label, at) -> Optional[str]:
+    """The WARNING for an icon label uncompressed pixel data does not admit.
+
+    `label` is normalized (`_written_photometric`); `at` is the item's
+    path in `_item_path_words`' spelling. Judged against the
+    **uncompressed** row whatever syntax the file carries, because an icon
+    is always written raw (`_write_back_nested_pixels`): the J2K row
+    admits `YBR_ICT`, and a `YBR_ICT` icon inside a `.90` file holds no
+    codestream for the label to be true of. The table's clause is kept and
+    its remedy is not -- `_PHOTOMETRIC_ICON` is the icon's.
+    """
+    found = _label_inadmissibility(label, _ICON_WRITTEN_SYNTAX)
+    if found is None:
+        return None
+    clause, _remedy = found
+    return (f"PhotometricInterpretation {_cs_quoted(label)} on the icon at "
+            f"{at} is not a label uncompressed pixel data admits: {clause} "
+            f"The label was written as declared, over the samples the item "
+            f"held, and neither was changed. {_PHOTOMETRIC_ICON}")
+
+
+def _icon_label_arity_warning(label, at) -> str:
+    """The WARNING for an icon declaring several labels (#602, Q5).
+
+    Warned about and written, not refused: the pixel arms refuse a
+    multi-valued top-level label because no output would be honest, but
+    an icon is not a reason to lose the instance (#433), and the user can
+    fix it with one `set_attr`. Measured: this library's own ingest drops
+    such an icon with the unrouted `DATA_LOSS` row.
+    """
+    quoted = ", ".join(_cs_quoted(str(v)) for v in label)
+    return (f"PhotometricInterpretation (0028,0004) is VM 1; the icon at "
+            f"{at} declares {len(label)} values ({quoted}). Written as "
+            f"declared, over the samples the item held; this library's own "
+            f"ingest drops an icon so labelled, with a DATA_LOSS row. "
+            f"Declare one label with set_attr(\"0028,0004\", ...) on that "
+            f"sequence item.")
 
 
 #: PixelRepresentation (0028,0103) in the words PS3.5 6.2 uses, for the
@@ -4353,12 +4438,11 @@ def _readback_label_mismatch(readback) -> Optional[str]:
                 f"written file reads back as {len(label)} values "
                 f"({', '.join(repr(str(v)) for v in label)})")
     syntax = str(getattr(readback.file_meta, "TransferSyntaxUID", "") or "")
-    admitted = _ADMISSIBLE_PHOTOMETRICS.get(syntax)
     normalized = _written_photometric(label)
-    if admitted is None or normalized is None or normalized in admitted:
+    found = _label_inadmissibility(normalized, syntax)
+    if found is None:
         return None
-    clause, remedy = _PHOTOMETRIC_INADMISSIBLE.get(
-        normalized, _PHOTOMETRIC_INADMISSIBLE[None])
+    clause, remedy = found
     if not any(kw in readback for kw in _PIXEL_ELEMENTS):
         remedy = _PHOTOMETRIC_NO_PIXELS
     return (f"PhotometricInterpretation reads back as '{normalized}', "
@@ -4742,7 +4826,8 @@ def _resolve_ds_item(ds, path):
     return cur, parent, seq_tag
 
 
-def _write_back_nested_pixels(ds, inst, ctx, losses, *, corrections) -> None:
+def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
+                              corrections) -> None:
     """Put each carried nested payload back into its sequence item (#183).
 
     A post-pass over the dataset `_merge_sequences` has already built,
@@ -4780,6 +4865,16 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, corrections) -> None:
     BitsStored is no longer masked by every conformant reader (measured:
     `40000` read back as `3136`). `corrections` is keyword-only with no
     default, the `offset_tables` precedent.
+
+    **An icon's label is judged where it is written (#602).** This is the
+    icon's pixel door, as `_write_pixel_geometry` is the top level's, so
+    each item that is actually written has its Photometric Interpretation
+    judged here, from the pydicom item (which carries
+    `_merge_sequences`' respelling), against the uncompressed row: see
+    `_icon_label_warning`. An inadmissible label is written as declared
+    with a WARNING on `warnings`; a multi-valued one too
+    (`_icon_label_arity_warning`). An item in `removals` writes no pixel
+    element and is not judged -- it carries its own loss row.
     """
     refs = getattr(inst, "_nested_pixel_refs", None)
     if not refs:
@@ -4889,6 +4984,15 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, corrections) -> None:
                 for note in _width_notes(
                     widened, declared_int(graph_item.attributes, "0028,0102"),
                     item.BitsStored, item.HighBit))
+        # The label, judged where the pixel element is written (#602).
+        label = item.get("PhotometricInterpretation")
+        at = _item_path_words(path)
+        if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
+            warnings.append(_icon_label_arity_warning(label, at))
+        else:
+            judged = _icon_label_warning(_written_photometric(label), at)
+            if judged is not None:
+                warnings.append(judged)
 
     for parent, seq_tag, item in removals:
         sequence = parent[seq_tag].value
@@ -5059,7 +5163,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                              vrs=getattr(inst, 'attribute_vrs', None),
                              revrs=revrs)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
-                                       revrs=revrs)
+                                       revrs=revrs, corrections=corrections)
         re_vr = _re_vr_warning(revrs)
         if re_vr is not None:
             warnings.append(re_vr)
@@ -5069,7 +5173,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # the merge just built; here rather than inside `_merge_sequences`
         # so it cannot be reached by an `export_batch` caller separately,
         # and so both export paths get it from the one worker they share.
-        _write_back_nested_pixels(ds, inst, ctx, losses,
+        _write_back_nested_pixels(ds, inst, ctx, losses, warnings=warnings,
                                   corrections=corrections)
 
         # 1. Patient Level
@@ -7804,7 +7908,7 @@ class DicomExporter:
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any], losses=None, *,
-                         revrs=None, within=""):
+                         revrs=None, within="", corrections=None):
         """
         Recursively populates sequences into the dataset.
 
@@ -7816,13 +7920,16 @@ class DicomExporter:
                 threaded to every item so a nested element joins its
                 instance's one sentence.
             within (str): The enclosing sequence path, for that sentence.
+            corrections (list, optional): Appended to with
+                `_label_as_written`'s note for every item whose
+                (0028,0004) was respelled (#602), prefixed with the item.
         """
         for tag_str, dicom_seq in sequences.items():
             g, e = map(lambda x: int(x, 16), tag_str.split(','))
             tag = Tag(g, e)
 
             pydicom_seq = Sequence()
-            for item in dicom_seq.items:
+            for index, item in enumerate(dicom_seq.items):
                 # A sequence item is never encoded on its own: pydicom
                 # writes it with the enclosing file's encoding, so these
                 # flags were read by nothing even before 4.0 drops them.
@@ -7831,11 +7938,19 @@ class DicomExporter:
                 # Recursively merge item attributes and sub-sequences
                 path = (f"{within} > ({tag_str})" if within
                         else f"({tag_str})")
-                DicomExporter._merge(ds_item, item.attributes, losses,
+                # #532's respelling, per item and before its `_merge`
+                # (#602): pydicom warns as the raw value is assigned, so
+                # respelling afterwards would be too late. A copy, never
+                # `item.attributes` -- under threads that is the live graph.
+                attributes, respelled = _label_as_written(item.attributes)
+                if respelled is not None and corrections is not None:
+                    corrections.append(f"{path} item {index}: {respelled}")
+                DicomExporter._merge(ds_item, attributes, losses,
                                      vrs=getattr(item, 'attribute_vrs', None),
                                      revrs=revrs, within=path)
                 DicomExporter._merge_sequences(ds_item, item.sequences, losses,
-                                               revrs=revrs, within=path)
+                                               revrs=revrs, within=path,
+                                               corrections=corrections)
 
                 pydicom_seq.append(ds_item)
 
