@@ -1740,37 +1740,38 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">privacy_profile</span><span class="p">:</span><span class="w"> </span><span class="s">"basic"</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># 2. Date Jitter</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Range for the per-patient date shift, applied to Study Date and to</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># every tag whose rule is SHIFT or JITTER (consistent across studies).</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nt">date_jitter</span><span class="p">:</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span><span class="nt">min_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-30</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">max_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-10</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># 3. Private Tags</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># Remove all odd-group tags (vendor specific) unless whitelisted?</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="nt">remove_private_tags</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="c1"># 4. Custom PHI Tags (Overrides Profile)</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="nt">phi_tags</span><span class="p">:</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="s">"0008,1030"</span><span class="p p-Indicator">:</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"EMPTY"</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"StudyDescription"</span>
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="w">  </span><span class="s">"0008,103e"</span><span class="p p-Indicator">:</span>
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"REPLACE"</span><span class="w"> </span><span class="c1"># Writes "ANONYMIZED"</span>
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"SeriesDescription"</span>
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="w">  </span><span class="s">"0008,0080"</span><span class="p p-Indicator">:</span>
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"KEEP"</span><span class="w"> </span><span class="c1"># Exception: Keep InstitutionName</span>
-<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>
-<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="c1"># 5. Pixel Redaction Rules (Machine Specific)</span>
-<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="nt">machines</span><span class="p">:</span>
-<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"US-12345"</span>
-<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Voluson</span><span class="nv"> </span><span class="s">E10"</span>
-<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
-<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">      </span><span class="c1"># [row_start, row_end, col_start, col_end]</span>
-<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">50</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">800</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># Top Banner</span>
-<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">900</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">1024</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">400</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># Bottom Left Details</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Range for the per-patient date shift, applied to every tag whose rule</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># is SHIFT or JITTER (consistent across studies), and to Study Date under</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># no rule or REPLACE with no value.</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="nt">date_jitter</span><span class="p">:</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span><span class="nt">min_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-30</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span><span class="nt">max_days</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">-10</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># 3. Private Tags</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># Remove all odd-group tags (vendor specific) unless whitelisted?</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="nt">remove_private_tags</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="c1"># 4. Custom PHI Tags (Overrides Profile)</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="nt">phi_tags</span><span class="p">:</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="s">"0008,1030"</span><span class="p p-Indicator">:</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"EMPTY"</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"StudyDescription"</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="w">  </span><span class="s">"0008,103e"</span><span class="p p-Indicator">:</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"REPLACE"</span><span class="w"> </span><span class="c1"># Writes "ANONYMIZED"</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"SeriesDescription"</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="w">  </span><span class="s">"0008,0080"</span><span class="p p-Indicator">:</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="w">    </span><span class="nt">action</span><span class="p">:</span><span class="w"> </span><span class="s">"KEEP"</span><span class="w"> </span><span class="c1"># Exception: Keep InstitutionName</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="c1"># 5. Pixel Redaction Rules (Machine Specific)</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="nt">machines</span><span class="p">:</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">serial_number</span><span class="p">:</span><span class="w"> </span><span class="s">"US-12345"</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="w">    </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="s">"Voluson</span><span class="nv"> </span><span class="s">E10"</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="w">    </span><span class="nt">redaction_zones</span><span class="p">:</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="w">      </span><span class="c1"># [row_start, row_end, col_start, col_end]</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">50</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">800</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># Top Banner</span>
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">900</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">1024</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">0</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">400</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># Bottom Left Details</span>
 </code></pre></div>
 <hr />
 <h2 id="detailed-options">Detailed Options</h2>
@@ -1784,7 +1785,7 @@
 <ul>
 <li><strong>UIDs are not replaced</strong> (<a href="https://github.com/kvnlng/Isocenter/issues/544">#544</a>). Study, Series and SOP Instance UIDs are exported as they were ingested (a redacted instance gets a new SOP Instance UID, and references to it are not updated), so an export can be linked back to its source by anyone who can see the source UIDs. The table's <code>U</code> rows have no rule.</li>
 <li>Patient Identity Removed <code>(0012,0062)</code>, De-identification Method <code>(0012,0063)</code> and Longitudinal Temporal Information Modified <code>(0028,0303)</code> are not written (<a href="https://github.com/kvnlng/Isocenter/issues/554">#554</a>).</li>
-<li>Patient's Name, Patient ID and Study Date are replaced by <code>anonymize()</code> whatever their rule says (<a href="https://github.com/kvnlng/Isocenter/issues/537">#537</a>).</li>
+<li>Patient's Name and Patient ID are <code>REPLACE</code> rather than the table's <code>Z</code>: the name becomes <code>ANONYMIZED</code>, a dummy <code>Z</code> permits, and the ID becomes the keyed <code>ANON_</code> pseudonym, because a Patient ID rule may not empty or remove it (<a href="https://github.com/kvnlng/Isocenter/issues/537">#537</a>). Study Date follows the table and is exported zero-length; the floor shifts it instead.</li>
 <li>Deliberate departures from the table: Study and Series Description are emptied rather than removed, because the export directory names read them. Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned, and an icon is dropped when its pixels may show what redaction removed, in two tiers (<a href="https://github.com/kvnlng/Isocenter/issues/542">#542</a>): an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a <em>different</em> instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export. The retired Curve groups <code>(50xx)</code> are not removed, and removing Overlay Data <code>(60xx,3000)</code> leaves the rest of its Overlay Plane module (<a href="https://github.com/kvnlng/Isocenter/issues/556">#556</a>). Isocenter's own redaction note in Derivation Description <code>(0008,2111)</code> is kept; any other Derivation Description is removed. Private attributes are the <code>remove_private_tags</code> sweep, not a rule.</li>
 </ul>
 <p>The table removes or empties attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them <code>action: "KEEP"</code> to retain it. Membership follows the named edition and can change in a minor release; such a change is listed under <strong>Breaking</strong> in the changelog. A store anonymized under 0.9.7's 35-rule profile still reads as anonymized: run <code>audit()</code> and then <code>anonymize()</code> on it before exporting again (<a href="https://github.com/kvnlng/Isocenter/issues/555">#555</a>). That removes what 0.9.8 removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source restores them.
@@ -1795,12 +1796,61 @@
 <p>Any other value is refused: <code>load_config()</code> raises <code>ValueError</code> naming it. (These docs once offered a <code>comprehensive</code> profile, which never existed; loading it warned and applied no base.)</p>
 <p>A session that has loaded no configuration applies the <strong>floor policy</strong>, <code>FLOOR_POLICY</code> in <code>isocenter/profiles.py</code>: the basic profile with three of its rules changed by the research defaults <code>create_config()</code> writes (Study Date jittered, Patient's Sex and Age kept): 620 rules.</p>
 <p><strong>Omitting <code>privacy_profile</code> means the floor beneath your <code>phi_tags</code>.</strong> A file with a few tags and no profile line extends the floor rather than replacing it, so a one-tag config cannot switch the floor off by accident. To opt a single tag out, give it <code>action: "KEEP"</code>; to opt out of the floor entirely, write <code>privacy_profile: "none"</code>.</p>
-<div class="admonition warning">
-<p class="admonition-title">Three tags are not governed by <code>phi_tags</code></p>
-<p>Patient's Name <code>(0010,0010)</code>, Patient ID <code>(0010,0020)</code> and Study Date <code>(0008,0020)</code> belong to the patient and study, and <code>anonymize()</code> always replaces them -- the name with <code>ANONYMIZED</code>, the ID with an <code>ANON_</code> pseudonym, the study date with its per-patient shift -- under every profile, including <code>none</code>. A <code>KEEP</code>, <code>REMOVE</code>, <code>EMPTY</code> or <code>REPLACE</code> rule on one of them does not change the exported value (<a href="https://github.com/kvnlng/Isocenter/issues/537">#537</a>).</p>
+<div class="admonition note">
+<p class="admonition-title">Patient's Name, Patient ID and Study Date</p>
+<p>These three belong to the patient and the study, and the exporter writes the patient's and study's value on every file. Their rule governs that value (<a href="https://github.com/kvnlng/Isocenter/issues/537">#537</a>; until 0.9.8 <code>anonymize()</code> replaced all three whatever the rule said):</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Rule</th>
+<th style="text-align: left;">Patient's Name</th>
+<th style="text-align: left;">Patient ID</th>
+<th style="text-align: left;">Study Date</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">none, or <code>REPLACE</code> with no <code>value:</code></td>
+<td style="text-align: left;"><code>ANONYMIZED</code></td>
+<td style="text-align: left;">the keyed <code>ANON_</code> pseudonym</td>
+<td style="text-align: left;">the per-patient shift</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>REPLACE</code> with <code>value:</code></td>
+<td style="text-align: left;">the value</td>
+<td style="text-align: left;">refused</td>
+<td style="text-align: left;">the value (a valid DA)</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>KEEP</code></td>
+<td style="text-align: left;">kept</td>
+<td style="text-align: left;">kept</td>
+<td style="text-align: left;">kept</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>EMPTY</code></td>
+<td style="text-align: left;">zero-length</td>
+<td style="text-align: left;">refused</td>
+<td style="text-align: left;">zero-length</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>REMOVE</code></td>
+<td style="text-align: left;">zero-length in the file; removed from the instance's own copy</td>
+<td style="text-align: left;">refused</td>
+<td style="text-align: left;">zero-length in the file; removed from the instance's own copy</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>SHIFT</code> / <code>JITTER</code></td>
+<td style="text-align: left;">refused</td>
+<td style="text-align: left;">refused</td>
+<td style="text-align: left;">the per-patient shift</td>
+</tr>
+</tbody>
+</table>
+<p><code>REMOVE</code> still writes the element, at zero length: both are Type 2 in their modules, so a file without them would not conform. A Patient ID rule other than <code>KEEP</code> or <code>REPLACE</code> with no value raises <code>ValueError</code>, because the ID is what keeps two patients apart and <code>anonymize()</code> merges patients that share one. On Study Date, the string form (<code>"0008,0020": "Study Date"</code>) is <code>REPLACE</code> with no value, and means the shift.</p>
 </div>
 <h3 id="date-jitter">Date Jitter</h3>
-<p>Sets the range of the per-patient date shift. It is applied to Study Date and to every tag whose rule is <code>SHIFT</code> or <code>JITTER</code>; other date tags follow their own rule, and the <code>basic</code> profile <em>removes or empties</em> the dates Table E.1-1 names (Series, Acquisition, Content, Instance Creation and the rest) rather than shifting them. A date tag no rule names is exported as ingested: under <code>basic</code> or the floor that is a date the table does not name, and under <code>privacy_profile: none</code> it is every date your <code>phi_tags</code> leave out, so add a rule for any such date that must not leave the site.</p>
+<p>Sets the range of the per-patient date shift. It is applied to every tag whose rule is <code>SHIFT</code> or <code>JITTER</code>, and to Study Date when it has no rule or <code>REPLACE</code> with no value; other date tags follow their own rule, and the <code>basic</code> profile <em>removes or empties</em> the dates Table E.1-1 names (Series, Acquisition, Content, Instance Creation and the rest) rather than shifting them. A date tag no rule names is exported as ingested: under <code>basic</code> or the floor that is a date the table does not name, and under <code>privacy_profile: none</code> it is every date your <code>phi_tags</code> leave out, so add a rule for any such date that must not leave the site.</p>
 <ul>
 <li><strong>Logic</strong>: Isocenter derives each patient's offset from a secret it generates for the project and keeps inside the session store. The offset is the same for every study and series of that patient, so intervals survive, and it cannot be computed from the exported pseudonym, or from any other value the derivation uses, without that secret. That is a statement about the offset, not a guarantee that no exported date can be recovered: a date tag no rule shifts is exported as it was, UIDs that embed a date carry it (<a href="https://github.com/kvnlng/Isocenter/issues/544">#544</a>), and a whole-day shift keeps the weekday. A patient a store de-identified before 0.9.7 keeps that store's unkeyed, computable offset (see the second Migration Guide link below). The offset is not random per run, and it hides absolute dates only from someone who holds neither the store nor the secret: a store and its exports must not travel together, because the store holds the secret and its audit log records each offset. From 0.9.7 the log file (<code>isocenter.log</code>) records neither original Patient IDs nor offsets. To keep offsets consistent across stores (for example, a later batch for the same patients, or re-ingesting an export), write the secret out of one store with <code>session.store_backend.write_project_secret(path)</code> and load it into the next with <code>load_project_secret(path)</code> before that store's first <code>audit()</code> (<a href="../migration/#carrying-a-project-secret-between-stores">Migration Guide</a>). Within one store, a later batch for a patient already in it, ingested under its original Patient ID, joins that patient's studies when <code>anonymize()</code> gives it the same pseudonym, and its dates land on the same offset (<a href="https://github.com/kvnlng/Isocenter/issues/548">#548</a>). Releases before 0.9.7 derived the offset without a secret, so it could be computed from an exported file (<a href="../migration/#stores-de-identified-before-097-ghsa-phg9-vcvc-j4r7">Migration Guide</a>).</li>
 <li>
@@ -1947,22 +1997,22 @@ section but does not change the grade
 <tbody>
 <tr>
 <td style="text-align: left;"><strong><code>REPLACE</code></strong></td>
-<td style="text-align: left;">Replaces the value with <code>ANONYMIZED</code>. A <code>value:</code> key is accepted and not used (<a href="https://github.com/kvnlng/Isocenter/issues/538">#538</a>).</td>
-<td style="text-align: left;"><code>action: "REPLACE"</code></td>
+<td style="text-align: left;">Replaces the value with its <code>value:</code>, or with <code>ANONYMIZED</code> when there is none (<a href="https://github.com/kvnlng/Isocenter/issues/538">#538</a>). A tag's string form (<code>"0008,0080": "Institution Name"</code>) is <code>REPLACE</code> with no value.</td>
+<td style="text-align: left;"><code>action: "REPLACE"</code>, <code>value: "Project-X"</code></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>REMOVE</code></strong></td>
-<td style="text-align: left;">Completely deletes the tag from the dataset.</td>
+<td style="text-align: left;">Completely deletes the tag from the dataset. Patient's Name and Study Date are the exception: they are written at zero length (see the note above).</td>
 <td style="text-align: left;"><code>action: "REMOVE"</code></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>EMPTY</code></strong></td>
-<td style="text-align: left;">Sets the tag value to an empty string.</td>
+<td style="text-align: left;">Sets the tag value to an empty string (zero-length bytes for a binary VR).</td>
 <td style="text-align: left;"><code>action: "EMPTY"</code></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>SHIFT</code></strong></td>
-<td style="text-align: left;">Applies the per-patient Date Jitter offset (Dates only).</td>
+<td style="text-align: left;">Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range, a DateTime at hour or minute precision) is left unchanged and recorded as declined (<a href="https://github.com/kvnlng/Isocenter/issues/559">#559</a>).</td>
 <td style="text-align: left;"><code>action: "SHIFT"</code></td>
 </tr>
 <tr>
@@ -1977,11 +2027,21 @@ section but does not change the grade
 </tr>
 </tbody>
 </table>
-<p>Any other action makes <code>load_config()</code> raise <code>ValueError</code> naming the tag. The three patient- and study-owned tags above are not governed by these actions.</p>
+<p>Any other action makes <code>load_config()</code> raise <code>ValueError</code> naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by <code>set_phi_tag()</code> and by <code>audit()</code> for a <code>phi_tags</code> assigned in code:</p>
+<ul>
+<li>a <code>value:</code> under any action but <code>REPLACE</code>, a <code>value:</code> that is not a string, or a <code>replacement:</code> key (the name <code>set_phi_tag</code> saved in 0.9.7; rename it <code>value:</code>);</li>
+<li>a Patient ID <code>(0010,0020)</code> rule other than <code>KEEP</code> or <code>REPLACE</code> with no value;</li>
+<li><code>SHIFT</code> or <code>JITTER</code> on a standard tag that is not DA or DT (<a href="https://github.com/kvnlng/Isocenter/issues/559">#559</a>);</li>
+<li><code>REPLACE</code> on a standard tag whose VR cannot hold what it writes -- <code>ANONYMIZED</code> in a DA, TM, DT, UI, AS, DS or IS, or any text in a binary or numeric VR (<a href="https://github.com/kvnlng/Isocenter/issues/560">#560</a>). Use <code>EMPTY</code> or <code>REMOVE</code>, <code>JITTER</code> for a date, or a <code>value:</code> the VR can hold. Study Date's <code>REPLACE</code> with no value is the shift and is allowed.</li>
+<li>a <code>REPLACE</code> <code>value:</code> holding a range: a <code>-</code> in a DA or TM, or in a DT anywhere but its UTC offset at the end (<code>20230515104822-0500</code> is one DateTime; <code>20230101-20230201</code> is a range);</li>
+<li>a <code>REPLACE</code> <code>value:</code> whose count of <code>\</code>-separated values the standard tag's value multiplicity does not allow: a <code>\</code> on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.</li>
+</ul>
+<p>Private tags are not checked against a VR: the exporter writes a private value its VR cannot hold as <code>LO</code>.</p>
 <p><strong>Example:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">phi_tags</span><span class="p">:</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="s">"0008,1030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"EMPTY"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"StudyDescription"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="s">"0010,0030"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"SHIFT"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"PatientBirthDate"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="s">"0008,0080"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">"action"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"REPLACE"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"value"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"Project-X"</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"name"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">"InstitutionName"</span><span class="w"> </span><span class="p p-Indicator">}</span>
 </code></pre></div>
 <h3 id="pixel-redaction-machines">Pixel Redaction (Machines)</h3>
 <p>Automatically scrubs burned-in text (pixels) for specific devices. Isocenter identifies the machine using the <code>DeviceSerialNumber</code> (0018,1000) tag.</p>
@@ -2040,7 +2100,7 @@ section but does not change the grade
 <p>Update a rule by serial number.</p>
 <h4 id="set_phi_tag">set_phi_tag()</h4>
 <p><code>set_phi_tag(tag, action, replacement=None)</code></p>
-<p>Update the policy for a specific DICOM tag. <code>REPLACE</code> always writes <code>ANONYMIZED</code>; the <code>replacement</code> argument is stored in the policy and not currently applied (<a href="https://github.com/kvnlng/Isocenter/issues/538">#538</a>).</p>
+<p>Update the policy for a specific DICOM tag. <code>replacement</code> is stored as the rule's <code>value:</code>, which <code>REPLACE</code> writes (<a href="https://github.com/kvnlng/Isocenter/issues/538">#538</a>). An unknown action, or a rule Isocenter cannot honour (see <a href="#phi-tags">PHI Tags</a>), raises <code>ValueError</code> and leaves the policy and its file unchanged.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Force removal of PatientWeight</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">session</span><span class="o">.</span><span class="n">configuration</span><span class="o">.</span><span class="n">set_phi_tag</span><span class="p">(</span><span class="s2">"0010,1030"</span><span class="p">,</span> <span class="s2">"REMOVE"</span><span class="p">)</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>

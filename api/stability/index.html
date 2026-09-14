@@ -1564,7 +1564,10 @@ no configuration, <code>phi_tags</code> is a copy of the floor policy,
 <code>profiles.FLOOR_POLICY</code>, and <code>audit()</code>/<code>anonymize()</code> apply it; a config
 with no <code>privacy_profile</code> line extends it, and one with
 <code>privacy_profile: none</code> opts out of it (#495). <code>set_phi_tag()</code>
-stores lowercase keys, as every other key in the policy is. What the
+stores lowercase keys, as every other key in the policy is, stores
+<code>replacement</code> as the rule's <code>value</code> (#538), and raises <code>ValueError</code>,
+leaving the policy and its file unchanged, for an unknown action or a
+rule <code>load_config</code> would refuse (below). What the
 floor and <code>privacy_profile: basic</code> contain is <strong>not</strong> frozen: the basic
 profile is PS3.15 Annex E Table E.1-1 of a named edition (2026c since
 0.9.8, #547), its membership follows that edition, and a change to it
@@ -1596,9 +1599,17 @@ instances it read in <code>n_sources</code>. <code>ValueError</code> from
 (not <code>.yaml</code>/<code>.yml</code>, YAML syntax, a root that is not a mapping, an
 unknown <code>privacy_profile</code>, an unknown <code>action</code>, a <code>phi_tags</code>,
 <code>date_jitter</code> or <code>machines</code> of the wrong shape, a rule
-<code>_validate_rule</code> rejects) and <code>FileNotFoundError</code> when it does not
-exist; after either, the configuration is exactly what it was before
-the call (#456).</p>
+<code>_validate_rule</code> rejects, or a <code>phi_tags</code> rule Isocenter cannot honour:
+a Patient ID rule other than <code>KEEP</code> or <code>REPLACE</code> with no value, a
+<code>value:</code> under an action other than <code>REPLACE</code> or of a non-string type,
+a <code>replacement:</code> key, <code>SHIFT</code>/<code>JITTER</code> on a standard tag that is not DA
+or DT, <code>REPLACE</code> on a standard tag whose VR cannot hold the value it
+would write, a <code>value:</code> holding a range in a DA, TM or DT, or a count of
+<code>\</code>-separated values its tag's multiplicity does not allow -- #537, #538,</p>
+<h1 id="559-560-and-filenotfounderror-when-it-does-not-exist-after-either-the-configuration-is-exactly-what-it-was">559, #560) and <code>FileNotFoundError</code> when it does not exist; after either, the configuration is exactly what it was</h1>
+<p>before the call (#456). <code>audit()</code> without <code>config_path</code> raises the
+same <code>ValueError</code> for such a rule in <code>session.configuration.phi_tags</code>,
+before it creates a project secret.</p>
 <p><strong>Environment.</strong> Every <code>ISOCENTER_*</code> name in
 <a href="../../environment/">Environment Variables</a>, its default and its
 documented semantics — including the order the three
