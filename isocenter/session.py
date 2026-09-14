@@ -5508,7 +5508,7 @@ class DicomSession:
 
         A series with no equipment, or equipment with no serial, is
         handed a `None` rather than answered here: "no serial matches
-        nothing, not even `\"*\"`" is `rule_applies_to`'s answer, and a
+        nothing, not even `"*"`" is `rule_applies_to`'s answer, and a
         second copy of it here is a second answer that can drift from
         the one `redact()` reads.
         """
