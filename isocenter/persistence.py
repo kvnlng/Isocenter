@@ -2844,6 +2844,14 @@ class SqliteStore:
         # the next load.
         if getattr(item, "_shifted_dates", None):
             data['__shifted__'] = dict(item._shifted_dates)
+        # What a remediation left at each top-level tag (#537), the root
+        # only: `Instance` alone has the slot. In the same JSON as the
+        # values it vouches for, so a partial write cannot store one
+        # without the other.
+        values = getattr(item, "_remediated_values", None)
+        blank = getattr(item, "_remediated_blank", None)
+        if values or blank:
+            data['__remediated__'] = {"values": dict(values or {}), "blank": blank or ""}
         if item.sequences:
             seq_data = {}
             for tag, seq in item.sequences.items():
@@ -2902,6 +2910,9 @@ class SqliteStore:
         # exporter's merge and `export_dataframe(expand_metadata=True)`
         # among them (#510, #513).
         shifted_data = data.pop('__shifted__', None)
+        # The same, at every depth though only the root writes it: a
+        # hand-edited nested key must not become a tag either (#537).
+        remediated_data = data.pop('__remediated__', None)
 
         # 1. Attributes
         target_item.attributes.update(data)
@@ -2914,6 +2925,10 @@ class SqliteStore:
             # Assigned rather than recorded through `record_date_shift`,
             # for the same reason (#154): hydration restores a state.
             target_item._shifted_dates = dict(shifted_data)
+        if remediated_data and hasattr(target_item, 'record_remediation'):
+            # Assigned, not recorded, for the same reason.
+            target_item._remediated_values = dict(remediated_data.get('values') or {}) or None
+            target_item._remediated_blank = remediated_data.get('blank') or None
 
         # 2. Sequences
         if sequences_data:

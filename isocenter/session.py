@@ -24,7 +24,7 @@ from .services import (RedactionService, RedactionOutcome, RedactionError,
                        _report_redaction_failures)
 from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
-from .privacy import (PhiInspector, PhiFinding, PhiReport, _holds_owned_replacement,
+from .privacy import (PhiInspector, PhiFinding, PhiReport,
                       _is_replacement_id, _is_replacement_name, _owned_rule)
 from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_REMOVED,
@@ -3387,6 +3387,19 @@ class DicomSession:
 
         Returns:
             Union[List[Instance], LockingResult]: A list of modified instances.
+
+        Raises:
+            RuntimeError: When reversible anonymization is not enabled, or
+                when the patient cannot be locked as asked, which writes no
+                token: a value the lock would stash was written by a
+                remediation (`ANONYMIZED`, `ANON_...`, a rule's `value:`, a
+                shifted date); a tag it names was emptied or removed by
+                `anonymize()`, and the message names the `tags_to_lock`
+                that works without it; a re-lock would lose a value the
+                existing token holds; or Patient's Name is blank under a
+                rule of EMPTY or REMOVE on it. Given a list or a report, the
+                batch form checks every patient first and, if any is
+                refused, raises once naming each and locks no patient.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3418,14 +3431,23 @@ class DicomSession:
         `_patient_obj` parameter -- a private name in a public,
         soon-frozen signature.
         """
-        patient_id = patient.patient_id
-        if verbose:
-            # Counts, not the ID: see `lock_identities`.
-            get_logger().debug(
-                f"Preserving identity for a patient of {len(patient.studies)} "
-                f"stud{'y' if len(patient.studies) == 1 else 'ies'}...")
+        plan = self._planned_identity_lock(patient, tags_to_lock)
+        return self._write_identity_lock(patient, plan, persist, verbose)
 
-        modified_instances = []
+    def _planned_identity_lock(self, patient: "Patient",
+                               tags_to_lock: Optional[List[str]]
+                               ) -> Tuple[Optional["Instance"], Dict[str, Any]]:
+        """Every refusal of one patient's lock, and the values it would
+        stash: `(first_instance, original_attrs)`. Reads the graph and the
+        existing token; writes nothing, so the batch can plan every
+        patient before it locks any (#537).
+
+        Raises:
+            RuntimeError: When the lock would stash what `anonymize()`
+                left, or lose what the existing token holds (the messages
+                below).
+        """
+        patient_id = patient.patient_id
         if tags_to_lock is None:
             tags_to_lock = list(_DEFAULT_TAGS_TO_LOCK)
 
@@ -3452,11 +3474,18 @@ class DicomSession:
         # patient is itself a replacement, the refusal below names it.
         entity_fallback = {"0010,0010": patient.patient_name,
                            "0010,0020": patient.patient_id}
+
+        def captured(tag):
+            """The value the lock stashes for `tag`, and whether it came
+            from the patient rather than the first instance."""
+            val = first_instance.attributes.get(tag)
+            if val is None and tag in entity_fallback:
+                return entity_fallback[tag], True
+            return val, False
+
         if first_instance:
             for tag in tags_to_lock:
-                val = first_instance.attributes.get(tag)
-                if val is None:
-                    val = entity_fallback.get(tag)
+                val, _ = captured(tag)
                 if val is not None:
                     original_attrs[tag] = val
         else:
@@ -3473,56 +3502,54 @@ class DicomSession:
         # stash `ANONYMIZED`/`ANON_<hash>` over a good token, report
         # success, and `recover_patient_identity()` would then restore
         # the replacements everywhere while export prints that the
-        # originals are recoverable. Before #492 the same call stashed
-        # the originals by accident, because the instance still carried
-        # them. Refused, naming the value, rather than skipped: a lock
-        # that silently kept nothing is #399's shape again. The
-        # predicate is `scan_patient`'s own: privacy's
-        # `_is_replacement_name` / `_is_replacement_id`, not a copy.
-        # A re-lock of still-original values is unchanged and is what
-        # recovery answers with (#399).
+        # originals are recoverable. Refused, naming the value, rather
+        # than skipped: a lock that silently kept nothing is #399's shape
+        # again. A re-lock of still-original values is unchanged and is
+        # what recovery answers with (#399).
         #
         # What is refused, exactly (#495): any value about to be stashed
-        # that reads ANONYMIZED or starts ANON_ -- each tag's
-        # first-instance copy, and for name and ID the patient's own
-        # value where that copy is absent (above). Under the floor
-        # `anonymize()` removes the instance's own name and ID, so a
-        # refusal reading only the copies saw nothing: measured on
-        # CT_small, bare session, lock -> anonymize -> lock again raised
-        # nothing and wrote a token holding only {'0010,0040': 'O'} over
-        # the good one -- #492's defect by another route. A copy that is
-        # present is what gets stashed, so it alone is checked: a patient
-        # reading ANONYMIZED beside copies that still hold the originals
-        # has originals to stash.
+        # -- each tag's first-instance copy, and for name and ID the
+        # patient's own value where that copy is absent (above). A copy
+        # that is present is what gets stashed, so it alone is checked: a
+        # patient reading ANONYMIZED beside copies that still hold the
+        # originals has originals to stash.
         #
-        # The constants alone stopped being enough in 0.9.8 (#537): the
-        # rule on Patient's Name and Patient ID now governs the patient, so
-        # `anonymize()` can leave a custom `value:` on the name, and that
-        # reads as no replacement by the constants. So the name and ID are
-        # also judged by the rule in force (`_holds_owned_replacement`, the
-        # scan's own test), and the constants stay ORed in for every tag,
-        # which is the lock's business and not the scan's. A blank is not
-        # judged here: it is the checks below.
-        #
-        # "The rule in force" is every policy that can have written the
-        # value: the one the last `audit()` resolved, and
-        # `configuration.phi_tags`. `audit(config_path=)` assigns only the
-        # first, so reading only the second let a re-lock after a
-        # `value: Project-X` pass through that door stash `Project-X` over
-        # the held name (review of #574). A value either would write is
-        # refused; the audited policy is named first.
-        policies = [policy for policy in (self._audited_phi_tags,
-                                          self.configuration.phi_tags)
-                    if policy is not None]
+        # **What a pass wrote is read off the instance, never off a
+        # policy (#537).** Once the rule governs the name, the ID's KEEP
+        # and every `value:`, `anonymize()` can leave a custom value, an
+        # empty one, a shifted date or no element at all, on any tag, and
+        # the constants catch none of it. Every predicate tried in review
+        # asked which rule the session holds, and that is gone after a
+        # reopen and replaced by a re-audit or `load_config()`: measured,
+        # a re-lock after `audit(config_path=)` under a changed rule
+        # stashed `Project-X` over a held name, and a first lock after a
+        # reopen stashed an empty one (review of #574, M-3). So each
+        # remediation records on the instance what it left, before it
+        # writes (`Instance.record_remediation`), and a value is a
+        # replacement when it reads as a constant or when the instance it
+        # was read from vouches for it -- that record, or `__shifted__`
+        # for a shifted date. A name or ID read from the patient is on no
+        # instance, so any instance whose copy the patient's write reached
+        # vouches for it. The record is keyed on the value, so a restore
+        # puts back originals that nothing vouches for.
+        instances = [inst for st in patient.studies for se in st.series
+                     for inst in se.instances]
 
-        def is_replacement(tag, val):
+        def written_by_a_pass(tag, val, from_patient):
+            if first_instance is None:
+                return False
+            blank = not str(val if val is not None else "").strip()
+            return any(inst.remediation_vouches_for(tag, val)
+                       or (not blank and inst.date_shift_vouches_for(tag, val))
+                       for inst in (instances if from_patient else [first_instance]))
+
+        def is_replacement(tag, val, from_patient):
             return (_is_replacement_name(val) or _is_replacement_id(val)
-                    or (tag in ("0010,0010", "0010,0020") and bool(str(val).strip())
-                        and any(_holds_owned_replacement(policy, tag, val)
-                                for policy in policies)))
+                    or written_by_a_pass(tag, val, from_patient))
 
         for tag, val in original_attrs.items():
-            if is_replacement(tag, val):
+            if str(val).strip() and is_replacement(
+                    tag, val, first_instance is not None and captured(tag)[1]):
                 raise RuntimeError(
                     f"lock_identities: patient {patient_id!r} already "
                     f"carries a replacement in {tag} ({val!r}), so there "
@@ -3532,10 +3559,10 @@ class DicomSession:
                     "written is unchanged.")
 
         # A re-lock may not stash less than the token it replaces (#537).
-        # Under an EMPTY or REMOVE rule on the name, `anonymize()` leaves
-        # `""` or nothing, which no replacement test catches, and a lock
-        # taken after it would write a token without the name over one
-        # that held it. Every tag the existing token holds non-blank is
+        # Under an EMPTY or REMOVE rule, `anonymize()` leaves `""` or
+        # nothing, which no replacement test catches, and a lock taken
+        # after it would write a token without the value over one that
+        # held it. Every tag the existing token holds non-blank is
         # checked, whether or not `tags_to_lock` names it: a narrower
         # re-lock after `anonymize()` drops the held name just as a blank
         # does (review of #574, F-7). A tag this lock does not name is lost
@@ -3552,10 +3579,9 @@ class DicomSession:
                 if named:
                     new = original_attrs.get(tag)
                 else:
-                    new = first_instance.attributes.get(tag)
-                    if new is None:
-                        new = entity_fallback.get(tag)
-                    if new is not None and is_replacement(tag, new):
+                    new, from_patient = captured(tag)
+                    if new is not None and str(new).strip() \
+                            and is_replacement(tag, new, from_patient):
                         new = None
                 if new is None or not str(new).strip():
                     lost = ("nothing" if new is None else "an empty value") if named \
@@ -3567,29 +3593,50 @@ class DicomSession:
                         "anonymize(), and do not re-lock a patient after it; "
                         "the token this call would have written is unchanged.")
 
-        # A first lock after `anonymize()` under an EMPTY or REMOVE rule on
-        # the name has no token to lose, but would report success over a
-        # token without the name it exists to hold: #399's "a lock that
-        # silently kept nothing" (review of #574, F-1). On 0.9.7 the name
-        # read `ANONYMIZED` here whatever the rule, and the check above
-        # refused it.
-        #
-        # The refusal fires on the blank and the rule alone, before
-        # `anonymize()` as after, so a source whose name is already empty
-        # is refused too, and the message names the lock that works
-        # without the name. **Do not gate it on a status.** For one commit
-        # it was gated on the patient reading REMEDIATED, so that an empty
-        # source name locked before `anonymize()` as on 0.9.7, and that
+            # A first lock of a tag the pass emptied or removed has no
+            # token to lose, but would report success over a token without
+            # the value it exists to hold: #399's "a lock that silently
+            # kept nothing" (review of #574, F-1). On 0.9.7 the name read
+            # `ANONYMIZED` here whatever the rule, and a lock naming it was
+            # refused whichever tag was at fault; the record now names the
+            # tags themselves, on any tag and after a reopen. The advice is
+            # the caller's `tags_to_lock` less those tags.
+            blanked = [tag for tag in tags_to_lock
+                       if not str(original_attrs.get(tag) or "").strip()
+                       and written_by_a_pass(tag, original_attrs.get(tag), captured(tag)[1])]
+            if blanked:
+                rest = [tag for tag in tags_to_lock if tag not in blanked]
+                advice = (f"To lock this patient without "
+                          f"{'it' if len(blanked) == 1 else 'them'}, call "
+                          f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    f"lock_identities: patient {patient_id!r} holds no value in "
+                    f"{', '.join(blanked)}, which anonymize() emptied or removed, "
+                    "so there is no original left to stash. "
+                    f"{advice}; the token this call would have written is unchanged.")
+
+        # A blank Patient's Name under a rule that blanks it is refused
+        # even where no record says a pass wrote the blank (owner ruling on
+        # review of #574). On a store this release wrote, that blank is the
+        # source's own, and the refusal is kept as ruled. It is also what
+        # stands over a store 0.9.5 wrote, which has no record and left
+        # `""` on each copy under an EMPTY rule (measured): with the rule
+        # loaded this refuses it. **Do not gate it on a status.** For one
+        # commit it was gated on the patient reading REMEDIATED, and that
         # opened a loss: `anonymize() -> audit() -> lock_identities()`
         # re-records CLEARED over the REMEDIATED, the gate read "not
         # anonymized", and the lock wrote a token without the original
-        # name, where the ungated refusal and 0.9.7 both refused. CLEARED
-        # cannot be read as "anonymized" either, because an audited source
-        # whose empty name is its original is CLEARED too. No stored state
-        # separates a blank the pass wrote from a blank the source had, and
-        # of the two failures a refusal the caller can route around is the
-        # one that loses nothing (owner ruling on review of #574).
+        # name. The rule is every policy that can have written the name:
+        # the one the last `audit()` resolved, and
+        # `configuration.phi_tags`, which `audit(config_path=)` does not
+        # assign; the audited one is named first.
         if "0010,0010" in tags_to_lock and not str(original_attrs.get("0010,0010") or "").strip():
+            policies = [policy for policy in (self._audited_phi_tags,
+                                              self.configuration.phi_tags)
+                        if policy is not None]
             emptying = [_owned_rule(policy, "0010,0010")[0] for policy in policies]
             emptying = [action for action in emptying if action in ("EMPTY", "REMOVE")]
             if emptying:
@@ -3601,11 +3648,25 @@ class DicomSession:
                           "else to lock")
                 raise RuntimeError(
                     f"lock_identities: patient {patient_id!r} holds no value in "
-                    f"0010,0010 under a rule of {emptying[0]} on it, which "
-                    "cannot be told apart from an original that anonymize() "
-                    "removed, and a token without that original would lose a "
-                    f"recoverable identity. {advice}; the token this call "
-                    "would have written is unchanged.")
+                    f"0010,0010 under a rule of {emptying[0]} on it, and a blank "
+                    "Patient's Name is not locked under a rule that blanks it. "
+                    f"{advice}; the token this call would have written is unchanged.")
+
+        return first_instance, original_attrs
+
+    def _write_identity_lock(self, patient: "Patient",
+                             plan: Tuple[Optional["Instance"], Dict[str, Any]],
+                             persist: bool, verbose: bool) -> LockingResult:
+        """Embeds the token a plan from `_planned_identity_lock` holds into
+        every instance of the patient, and persists it when asked."""
+        if verbose:
+            # Counts, not the ID: see `lock_identities`. Here and not in
+            # the plan, so the batch logs each patient as it locks it.
+            get_logger().debug(
+                f"Preserving identity for a patient of {len(patient.studies)} "
+                f"stud{'y' if len(patient.studies) == 1 else 'ies'}...")
+        _, original_attrs = plan
+        modified_instances = []
 
         # Optimization: Encrypt once per patient
         token = self.reversibility_service.generate_identity_token(
@@ -3657,6 +3718,16 @@ class DicomSession:
 
         Returns:
             Union[List[Instance], LockingResult]: List of all modified instances (if chunking is disabled).
+
+        Raises:
+            RuntimeError: When reversible anonymization is not enabled, or
+                when any patient found cannot be locked as asked (the
+                refusals `lock_identities()` names). Every patient is
+                checked before any is locked, so the one error names each
+                refused patient with its own message, in Patient ID order,
+                and no patient is locked, whatever `persist` or
+                `auto_persist_chunk_size` says. A Patient ID that matches
+                no patient is logged, not raised.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
@@ -3675,7 +3746,9 @@ class DicomSession:
             elif hasattr(item, 'patient_id') and item.patient_id:
                 normalized_ids.add(item.patient_id)
 
-        start_ids = list(normalized_ids)
+        # Sorted, not a set's hash order: the refusal below names patients
+        # in this order, and the locks run in it.
+        start_ids = sorted(normalized_ids)
 
         modified_instances = []  # Only used if auto_persist_chunk_size == 0
         current_chunk = []      # Used if auto_persist_chunk_size > 0
@@ -3687,39 +3760,58 @@ class DicomSession:
         # Optimization: Create a lookup map for O(1) access
         patient_map = {p.patient_id: p for p in self.store.patients}
 
-        with progress_bar(start_ids, desc="Locking Identities",
-                          unit="patient") as pbar:
-            for pid in pbar:
-                p_obj = patient_map.get(pid)
-                if p_obj:
-                    # Forwarded, not hardcoded: a `PhiReport` is the
-                    # README's form of `lock_identities`, and a loop that
-                    # writes `persist=False` here turns `persist=True` on
-                    # that call into one that writes nothing and says
-                    # nothing (Q10).
-                    res = self._lock_patient_identity(
-                        p_obj, persist=persist, verbose=verbose,
-                        tags_to_lock=tags_to_lock)
-
-                    if auto_persist_chunk_size > 0:
-                        current_chunk.extend(res)
-                        if len(current_chunk) >= auto_persist_chunk_size:
-                            self.store_backend.update_attributes(current_chunk)
-                            count_instances_chunked += len(current_chunk)
-                            current_chunk = []  # Release memory
-                    else:
-                        modified_instances.extend(res)
-
-                    count_patients += 1
-                else:
-                    missing_ids += 1
+        # Every patient is planned before any is locked (#537). Locking as
+        # it planned, a refusal part-way left an arbitrary subset locked
+        # before `anonymize()`, and nothing said which (measured on the
+        # review of #574: one of six). A plan reads and writes nothing, so
+        # a refusal leaves no token, whatever `persist` or
+        # `auto_persist_chunk_size` says.
+        plans, refusals = {}, []
+        for pid in start_ids:
+            p_obj = patient_map.get(pid)
+            if p_obj is None:
+                missing_ids += 1
+                continue
+            try:
+                plans[pid] = self._planned_identity_lock(p_obj, tags_to_lock)
+            except RuntimeError as refusal:
+                refusals.append(str(refusal))
 
         if missing_ids:
-            # Counted, not named: see `lock_identities`.
+            # Counted, not named: see `lock_identities`. Before the refusal
+            # below, which would otherwise swallow it.
             get_logger().error(
                 f"lock_identities: {missing_ids} Patient ID"
                 f"{'' if missing_ids == 1 else 's'} given matched no patient "
                 "in the session (batch processing).")
+
+        if refusals:
+            raise RuntimeError(
+                f"lock_identities: {len(refusals)} of {len(plans) + len(refusals)} "
+                "patients cannot be locked as asked, so no patient was locked. "
+                "Lock the others without these, and each of these as its "
+                "message says:\n" + "\n".join(refusals))
+
+        with progress_bar(plans, desc="Locking Identities",
+                          unit="patient") as pbar:
+            for pid in pbar:
+                # Forwarded, not hardcoded: a `PhiReport` is the README's
+                # form of `lock_identities`, and a loop that writes
+                # `persist=False` here turns `persist=True` on that call
+                # into one that writes nothing and says nothing (Q10).
+                res = self._write_identity_lock(
+                    patient_map[pid], plans[pid], persist=persist, verbose=verbose)
+
+                if auto_persist_chunk_size > 0:
+                    current_chunk.extend(res)
+                    if len(current_chunk) >= auto_persist_chunk_size:
+                        self.store_backend.update_attributes(current_chunk)
+                        count_instances_chunked += len(current_chunk)
+                        current_chunk = []  # Release memory
+                else:
+                    modified_instances.extend(res)
+
+                count_patients += 1
 
         # Final cleanup
         if auto_persist_chunk_size > 0:

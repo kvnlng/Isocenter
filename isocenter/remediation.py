@@ -423,12 +423,12 @@ class RemediationService:
             # 1. Generic DicomItem support
             if hasattr(entity, "attributes") and isinstance(entity.attributes, dict):
                 if proposal.target_attr in entity.attributes:
+                    self._record_what_is_left(entity, proposal.target_attr, None)
                     del entity.attributes[proposal.target_attr]
-                    # `attributes` is a plain dict, so deleting from it bumps
-                    # no revision -- unlike `set_attr`, which does. Without
-                    # this an already-saved instance reported no unsaved
-                    # changes after its PHI was stripped, the next save
-                    # skipped it, and the identifier stayed in the database.
+                    # `attributes` is a plain dict, so `del` bumps no revision,
+                    # unlike `set_attr`. Without this an already-saved instance
+                    # reported no unsaved changes after its PHI was stripped,
+                    # the next save skipped it, and the identifier stayed.
                     entity.mark_modified()
                     details = f"Removed Tag {proposal.target_attr} from {finding.entity_uid}"
                     action_type = "REMEDIATION_REMOVE"
@@ -661,6 +661,7 @@ class RemediationService:
                     vr is None and isinstance(
                         (attributes or {}).get(tag), (bytes, bytearray))):
                 value = b""
+        self._record_what_is_left(entity, proposal.target_attr, value)
         entity.set_attr(proposal.target_attr, value)
         return (f"Remediated {finding.entity_uid} (Tag {proposal.target_attr}) "
                 f"-> {proposal.new_value}"), None
@@ -680,6 +681,24 @@ class RemediationService:
         if finding.entity_type == "Patient":
             return "a patient"
         return str(finding.entity_uid)
+
+    @staticmethod
+    def _record_what_is_left(item, tag: str, value) -> None:
+        """Record on `item` what the write about to run leaves at `tag`
+        (`value` None: a removal), for `lock_identities()` (#537).
+
+        Called as the statement **immediately before** each write, never
+        after: a background `save()` between the two would otherwise
+        store the value without its record, and the next lock would stash
+        a replacement as the original. `Instance` alone records; a nested
+        item has no slot, and the lock reads top-level values only, so a
+        write inside a sequence records nothing on the instance holding
+        it. Not a wrapper around `_apply_single_remediation`: that would
+        hand `audit_buffer` to a callee Pin A does not list
+        (`tests/test_frozen_surface.py`).
+        """
+        if hasattr(item, "record_remediation"):
+            item.record_remediation(tag, value)
 
     def _log_line(self, action_type: str, finding: PhiFinding, wrote) -> str:
         """The log file's line for an applied remediation.
@@ -1068,6 +1087,7 @@ class RemediationService:
                     if tag not in instance.attributes:
                         continue
                     status = instance.phi_status
+                    self._record_what_is_left(instance, tag, value)
                     if value is None:
                         del instance.attributes[tag]
                         instance.mark_modified()
