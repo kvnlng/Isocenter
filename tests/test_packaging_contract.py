@@ -1298,7 +1298,13 @@ def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():
 #: faulthandler threshold must still sit inside half of it
 #: (`test_a_hang_dumps_tracebacks_before_any_timeout_kills_it`), so a
 #: raise here is a raise of the whole family.
-_RUN_TESTS_STEP_MINUTES_FLOOR = 30
+#:
+#: Raised to 45 in v0.9.8 (2026-09-14), when the suite had grown to
+#: about 3,800 tests. The last ten gate runs took 1314-1643 s on 3.12 and
+#: 1213-1559 s on 3.14t, which put the peak at 91% of 30 minutes. One 3.12
+#: run for #614 was killed at 98% of the suite with no failing test.
+#: 45 minutes puts the measured peak at 61%.
+_RUN_TESTS_STEP_MINUTES_FLOOR = 45
 
 
 def test_the_run_tests_step_keeps_the_headroom_the_suite_needs():
@@ -1315,7 +1321,7 @@ def test_the_run_tests_step_keeps_the_headroom_the_suite_needs():
         _faulthandler_threshold_and_step_seconds())
     assert run_tests["timeout-minutes"] >= _RUN_TESTS_STEP_MINUTES_FLOOR, (
         f"the Run Tests step allows {run_tests['timeout-minutes']} minutes "
-        f"({step_seconds}s); the suite's measured peak of 993s needs at "
+        f"({step_seconds}s); the suite's measured peak of 1643s needs at "
         f"least {_RUN_TESTS_STEP_MINUTES_FLOOR} (#475), or a healthy but "
         "slow run is killed with no failing test in the log (#243)")
 

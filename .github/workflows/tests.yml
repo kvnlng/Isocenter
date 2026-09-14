@@ -89,7 +89,7 @@ jobs:
     # Run Tests step said 20, so #102's headroom was inert from the day it
     # landed and #250's three hangs each produced a log naming nothing.
     # test_packaging_contract.py pins the inequality.
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
     - uses: actions/checkout@v7
@@ -161,7 +161,13 @@ jobs:
       # and raise the job cap above with it: that must exceed the sum
       # of the steps, and pytest.ini's faulthandler_timeout must stay
       # under half of this.
-      timeout-minutes: 30
+      #
+      # It tightened again in v0.9.8, when the suite grew to about 3,800
+      # tests. The last ten gate runs on 2026-09-14 took 1314-1643 s on
+      # 3.12 and 1213-1559 s on 3.14t, a peak at 91% of 30 minutes. One
+      # 3.12 run, for #614, was killed at 98% of the suite (1813 s, no
+      # failing test). 45 puts the measured peak at 61%.
+      timeout-minutes: 45
       run: |
         pytest -v
       env:
