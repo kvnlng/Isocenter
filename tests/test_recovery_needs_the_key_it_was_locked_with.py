@@ -292,3 +292,44 @@ def test_no_lock_or_recovery_log_line_names_a_patient(tmp_path, caplog):
     for message in records:
         for identifier in (pid, pseudonym, "NO-SUCH-ID"):
             assert identifier not in message, message
+
+
+def _mode_warnings(caplog):
+    return [r.getMessage() for r in caplog.records
+            if r.levelno == logging.WARNING and "key file" in r.getMessage()]
+
+
+def test_a_key_readable_beyond_its_owner_warns_and_keeps_its_mode(tmp_path, caplog):
+    """Every key 0.9.7 wrote is typically 0644. The library does not chmod a
+    file it did not create; it says so, once, naming the mode and not the
+    path (review of #615, P-6). Kills the warning removed, and a chmod."""
+    write_ct(tmp_path / "in" / "a.dcm", LOCKED, "5395")
+    key = tmp_path / "old.key"
+    key.write_bytes(Fernet.generate_key())
+    os.chmod(key, 0o644)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        with caplog.at_level(logging.DEBUG, logger="isocenter"):
+            session.enable_reversible_anonymization(str(key))
+            session.lock_identities(LOCKED)
+            session.recover_patient_identity(LOCKED, restore=False)
+    [warning] = _mode_warnings(caplog)
+    assert "mode 0644" in warning and "chmod 600" in warning, warning
+    assert str(tmp_path) not in warning and "old.key" not in warning, warning
+    assert stat.S_IMODE(os.stat(key).st_mode) == 0o644
+
+
+def test_a_key_at_0600_loads_without_a_warning(tmp_path, caplog):
+    """The key the first lock creates is loaded by a later session without
+    the warning. Kills the warning raised whatever the mode."""
+    write_ct(tmp_path / "in" / "a.dcm", LOCKED, "5396")
+    key = str(tmp_path / "k.key")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        with caplog.at_level(logging.DEBUG, logger="isocenter"):
+            session.enable_reversible_anonymization(key)
+            session.lock_identities(LOCKED)
+            session.enable_reversible_anonymization(key)
+            session.recover_patient_identity(LOCKED, restore=False)
+    assert stat.S_IMODE(os.stat(key).st_mode) == 0o600
+    assert _mode_warnings(caplog) == []

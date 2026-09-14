@@ -2,8 +2,11 @@
 Cryptography utilities for handling encryption keys and operations.
 """
 import os
+import stat
 from typing import Optional
 from cryptography.fernet import Fernet
+
+from .logger import get_logger
 
 
 class KeyManager:
@@ -33,6 +36,17 @@ class KeyManager:
         Returns:
             bytes: The URL-safe base64-encoded key.
 
+        **A key file readable beyond its owner logs one WARNING and is
+        left as it is.** Since P2 the lock creates the key at 0600, but
+        every key 0.9.7 and earlier wrote has the umask's mode (0644
+        typically), and a key that decrypts every locked identity should
+        not be group- or world-readable. The library does not chmod a
+        file it did not create -- its mode may be deliberate (a group
+        that shares the key), and a silent permission change on the
+        caller's file is worse than a said one. The warning names the
+        mode and not the path: a path can carry whatever the caller
+        named a directory after, and the caller already holds it.
+
         Raises:
             FileNotFoundError: No file at `key_path`. The message names the
                 path, which is the caller's own argument.
@@ -40,12 +54,20 @@ class KeyManager:
         if self.key is None:
             try:
                 with open(self.key_path, "rb") as f:
+                    mode = stat.S_IMODE(os.fstat(f.fileno()).st_mode)
                     self.key = f.read()
             except FileNotFoundError:
                 raise FileNotFoundError(
                     f"no key file at {self.key_path}; recovery needs the key "
                     "the identities were locked with, and does not create "
                     "one") from None
+            if mode & 0o077:
+                get_logger().warning(
+                    "The key file given to enable_reversible_anonymization() "
+                    "has mode %04o, so users other than its owner can read "
+                    "the key that decrypts every locked identity. Restrict "
+                    "it with chmod 600; an existing key file's mode is not "
+                    "changed.", mode)
         return self.key
 
     def load_or_generate_key(self) -> bytes:
