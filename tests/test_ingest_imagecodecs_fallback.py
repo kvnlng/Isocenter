@@ -265,13 +265,14 @@ def test_every_fallback_syntax_ingests():
     """The constant is exactly the syntaxes this file shows ingesting.
 
     Narrowing it is the owner's one-line lever; this is the test that
-    names what that line currently opens. RLE (.5) and JPEG Baseline /
-    Extended (.50, .51) are out: pydicom decodes RLE with no dependency
-    and baseline JPEG through Pillow, and the handler has no RLE arm
-    (#447).
+    names what that line currently opens. RLE (.5) is out: pydicom
+    decodes RLE with no dependency, and the handler has no RLE arm
+    (#447). JPEG Baseline and Extended (.50, .51) are in since #604, for
+    the 12-bit Extended files Pillow refuses (`test_jpeg_extended_decode`).
     """
     assert _IMAGECODECS_FALLBACK_SYNTAXES == frozenset(
-        {LJPEG, LJPEG_SV1, JPEGLS, JPEGLS_NEAR, J2K_LOSSLESS, J2K,
+        {"1.2.840.10008.1.2.4.50", "1.2.840.10008.1.2.4.51",
+         LJPEG, LJPEG_SV1, JPEGLS, JPEGLS_NEAR, J2K_LOSSLESS, J2K,
          "1.2.840.10008.1.2.4.201", "1.2.840.10008.1.2.4.202",
          "1.2.840.10008.1.2.4.203"})
 
@@ -551,14 +552,19 @@ def test_the_colour_spaces_the_fallback_labels_are_chosen_per_syntax():
     where the stored samples are not in the declared space: JPEG 2000's
     `YBR_RCT` and `YBR_ICT` come back RGB from the decoder (Y1, #448), and
     8-bit `YBR_FULL` JPEG-LS is converted to RGB by the fallback (Y2).
+    JPEG Baseline and Extended take monochrome alone (#604): no palette,
+    and no colour row, which `jpeg_decode` was measured to answer
+    differently from pydicom.
     """
     grey = {label: label for label in _GREY}
     assert set(_FALLBACK_PHOTOMETRICS) == _IMAGECODECS_FALLBACK_SYNTAXES
     j2k = {**grey, "RGB": "RGB", "YBR_RCT": "RGB", "YBR_ICT": "RGB"}
     jpegls = {**grey, "RGB": "RGB", "YBR_FULL": "RGB"}
     ljpeg = {**grey, "RGB": "RGB"}
+    jpeg = {"MONOCHROME1": "MONOCHROME1", "MONOCHROME2": "MONOCHROME2"}
     assert {ts: dict(labels) for ts, labels in
             _FALLBACK_PHOTOMETRICS.items()} == {
+        "1.2.840.10008.1.2.4.50": jpeg, "1.2.840.10008.1.2.4.51": jpeg,
         LJPEG: ljpeg, LJPEG_SV1: ljpeg,
         JPEGLS: jpegls, JPEGLS_NEAR: jpegls,
         J2K_LOSSLESS: j2k, J2K: j2k,

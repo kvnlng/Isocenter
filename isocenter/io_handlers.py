@@ -366,7 +366,7 @@ _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
 #: | Transfer syntax | pydicom plugins here | in this set |
 #: | --- | --- | --- |
 #: | .5 RLE Lossless | `pydicom` | no |
-#: | .50 / .51 JPEG Baseline / Extended | `pillow` | no |
+#: | .50 / .51 JPEG Baseline / Extended | `pillow`, 12-bit refused | yes, monochrome |
 #: | .57 / .70 JPEG Lossless | none | yes |
 #: | .80 / .81 JPEG-LS | none | yes |
 #: | .90 / .91 JPEG 2000 | `pillow`, 16-bit multi-sample refused | yes |
@@ -381,12 +381,19 @@ _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
 #: ingests when its decode matches its header under a colour space
 #: `_FALLBACK_PHOTOMETRICS` labels for it. RLE is out because pydicom's RLE
 #: decoder needs no dependency, and the handler has no RLE arm (#447):
-#: pydicom's is the one that decodes. JPEG Baseline and Extended are out because
-#: Pillow decodes them here, the handler's colour handling through this
-#: door is unmeasured, and baseline JPEG is almost always YBR, which
-#: `_FALLBACK_PHOTOMETRICS` refuses anyway. UID strings, for the reason
+#: pydicom's is the one that decodes.
+#:
+#: **JPEG Baseline and Extended joined for #604**, monochrome only. Pillow
+#: refuses 12-bit JPEG Extended, and pydicom's own `JPEG-lossy.dcm` was
+#: refused at ingest while the Instance door read it through the handler
+#: #453 then deleted. `imagecodecs.jpeg_decode` returns that file and
+#: `JPGExtended.dcm` value for value as DCMTK's `dcmdjpeg` does, at
+#: imagecodecs 2024.6.1 and 2026.8.16 (review of #606, M2). Colour stays
+#: out (`_FALLBACK_JPEG`). UID strings, for the reason
 #: `_CARRIABLE_TRANSFER_SYNTAXES` gives.
 _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
+    "1.2.840.10008.1.2.4.50",   # JPEG Baseline, monochrome (#604)
+    "1.2.840.10008.1.2.4.51",   # JPEG Extended, monochrome (#604)
     "1.2.840.10008.1.2.4.57",   # JPEG Lossless, Non-Hierarchical
     "1.2.840.10008.1.2.4.70",   # JPEG Lossless, First-Order Prediction
     "1.2.840.10008.1.2.4.80",   # JPEG-LS Lossless
@@ -449,7 +456,16 @@ _FALLBACK_J2K = {**_FALLBACK_GREY, "RGB": "RGB",
                  "YBR_RCT": "RGB", "YBR_ICT": "RGB"}
 _FALLBACK_JPEGLS = {**_FALLBACK_GREY, "RGB": "RGB", "YBR_FULL": "RGB"}
 _FALLBACK_LJPEG = {**_FALLBACK_GREY, "RGB": "RGB"}
+#: JPEG Baseline and Extended (#604): monochrome, and no palette, colour
+#: or YBR row. `jpeg_decode` applies a colour transform to a 3-component
+#: stream with no Adobe marker that pydicom and DCMTK do not (measured on
+#: `SC_jpeg_no_color_transform.dcm`, 137 apart), so a colour label here
+#: would be a guess; and every 8-bit colour stream met so far is one
+#: Pillow decodes before the fallback is asked.
+_FALLBACK_JPEG = {label: label for label in ("MONOCHROME1", "MONOCHROME2")}
 _FALLBACK_PHOTOMETRICS = {
+    "1.2.840.10008.1.2.4.50": _FALLBACK_JPEG,
+    "1.2.840.10008.1.2.4.51": _FALLBACK_JPEG,
     "1.2.840.10008.1.2.4.57": _FALLBACK_LJPEG,
     "1.2.840.10008.1.2.4.70": _FALLBACK_LJPEG,
     "1.2.840.10008.1.2.4.80": _FALLBACK_JPEGLS,

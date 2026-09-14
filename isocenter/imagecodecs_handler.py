@@ -840,6 +840,12 @@ def _decode_frame(transfer_syntax, bitstream, ds):
             _in_declared_container(imagecodecs.ljpeg_decode(bitstream), ds),
             ds)
     if transfer_syntax in [JPEGBaseline, JPEGExtended]:
+        # Reached through the fallback since #604, monochrome only
+        # (`io_handlers._FALLBACK_JPEG`): 12-bit JPEG Extended, which
+        # Pillow refuses. No container widening and no sign extension:
+        # pydicom applies neither to these syntaxes, and a decode that
+        # disagrees with BitsAllocated or PixelRepresentation is refused
+        # by the fallback's dtype check.
         return imagecodecs.jpeg_decode(bitstream)
     if transfer_syntax in J2K_SYNTAXES:
         # HTJ2K included, through `jpeg2k_decode`: see `J2K_SYNTAXES`.
