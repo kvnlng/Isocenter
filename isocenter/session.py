@@ -4149,7 +4149,8 @@ class DicomSession:
                             WARNING gives the count (#583); the restored
                             values are nonetheless written onto every
                             instance, including instances of a study that
-                            carries no token.
+                            carries no token or another token, and one
+                            WARNING gives the count of those instances.
 
         The token read is the first one **of ours** in study, series and
         instance order (#616): a study without a token, or with an
@@ -4205,9 +4206,10 @@ class DicomSession:
         # would never reach the token behind it. The fallback keeps both
         # messages: a patient with instances and no token of ours gets
         # `recover_or_raise`'s "no token", one with none gets the raise
-        # below. The first token found is the one read, so a token this
-        # key cannot open on study 1 raises the wrong-key text even where
-        # study 2 carries another -- one token per patient until #583.
+        # below. The first token found is the one read, whatever else the
+        # patient carries: a token this key cannot open on study 1 raises
+        # the wrong-key text even where study 2 carries another, and a
+        # pair locked as two objects carries two (review of #640, P-6).
         first_inst = None
         token_inst = None
         for one in (inst for st in p.studies for se in st.series
@@ -4242,13 +4244,42 @@ class DicomSession:
                 # drain cannot stand in -- it runs only on a collision,
                 # after these writes.
                 self.persistence_manager.flush()
+                # The token holds one study's values and they are written
+                # onto every instance, so an instance that does not carry
+                # the token read takes identifiers that may be another
+                # study's: under the default `tags_to_lock`, Accession
+                # Number (review of #640, F-1). Until #616 a study ingested
+                # after the lock, or the unlocked half of a pair `audit()`
+                # merged, raised "no token"; now it restores, and nothing
+                # said so. Counted, not refused -- restoring only the
+                # instances carrying the token is #583's per-instance
+                # restore -- and `!=` the token read, not "carries none": a
+                # pair locked as two objects carries two tokens, and the
+                # second study's own token is not the one read. A sniff
+                # and a bytes compare, no decrypt. The #566 Study Date
+                # WARNING below cannot stand in: it needs `0008,0020`
+                # locked, which the defaults do not lock.
+                token_read = self.reversibility_service.token_of_ours(
+                    token_inst or first_inst)
                 count = 0
+                elsewhere = 0
                 for st in p.studies:
                     for se in st.series:
                         for inst in se.instances:
+                            if self.reversibility_service.token_of_ours(inst) != token_read:
+                                elsewhere += 1
                             for tag, val in original_attrs.items():
                                 inst.set_attr(tag, val)
                             count += 1
+                if elsewhere:
+                    # A log line, not an audit row, as #566's sibling is: a
+                    # restore is not a de-identification step. Counts only.
+                    get_logger().warning(
+                        "The identity token read holds one study's values, "
+                        "and they were restored onto %d of %d instances that "
+                        "do not carry that token, so study-level identifiers "
+                        "written onto them, such as Accession Number, may be "
+                        "another study's (#583).", elsewhere, count)
 
                 # Update Patient Object top-level properties if Name/ID changed
                 before = (p.patient_name, p.patient_id)

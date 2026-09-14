@@ -42,7 +42,7 @@ from isocenter.entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED,
                                 DicomItem, Instance, Patient, Series, Study)
 from isocenter.session import DicomSession
 
-from support.ct_small_files import write_ct
+from support.ct_small_files import study_uid, write_ct
 
 PID, NAME = "PAT-616", "Secret^Sixteen"
 SEQ, CONTENT, SYNTAX = "0400,0500", "0400,0510", "0400,0520"
@@ -181,16 +181,20 @@ def test_a_foreign_sequence_on_the_first_study_does_not_stop_the_walk(tmp_path):
         assert (patient.patient_name, patient.patient_id) == (NAME, PID)
 
 
-def test_a_pair_merged_by_audit_after_a_lock_recovers(tmp_path):
+def test_a_pair_merged_by_audit_after_a_lock_recovers(tmp_path, caplog):
     """#616 as filed (`probes-I/p_dup_lock.py single`): two ingested files
     made to share a Patient ID in user code, the first object locked
     before `audit()`, which merges the pair (#563) with the token on study
     1 only; then `anonymize()`. Recovery answered "no token" before the
     fix. It now recovers, and `restore=True` writes the token's values
     onto every instance of the patient, the second study's too, which
-    carries none: the token is one study's (#583)."""
-    write_ct(tmp_path / "in" / "a.dcm", "PAT-A", "6161", name=NAME)
-    write_ct(tmp_path / "in" / "b.dcm", "PAT-B", "6162", name=NAME)
+    carries none: the token is one study's (#583). The two files hold
+    different Accession Numbers, so the second study's taking the first's
+    is the cross-study write itself, not a value either restore would
+    produce (review of #640, P-3), and the #640 WARNING says so. Kills R1
+    (restore only the instances that carry the token)."""
+    write_ct(tmp_path / "in" / "a.dcm", "PAT-A", "6161", name=NAME, accession=ACC_ONE)
+    write_ct(tmp_path / "in" / "b.dcm", "PAT-B", "6162", name=NAME, accession=ACC_TWO)
     with DicomSession(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in"))
         first, second = sorted(session.store.patients, key=lambda p: p.patient_id)
@@ -198,19 +202,157 @@ def test_a_pair_merged_by_audit_after_a_lock_recovers(tmp_path):
         for inst in second.studies[0].series[0].instances:
             inst.set_attr("0010,0020", first.patient_id)
         session.enable_reversible_anonymization(str(tmp_path / "k.key"))
-        session.lock_identities("PAT-A", tags_to_lock=TAGS)
+        session.lock_identities("PAT-A", tags_to_lock=TAGS + ["0008,0050"])
         report = session.audit()
         session.anonymize(report)
         [patient] = session.store.patients
         carrying = [SEQ in st.series[0].instances[0].sequences for st in patient.studies]
         assert carrying == [True, False]
+        assert [st.study_instance_uid for st in patient.studies] == [
+            study_uid("6161"), study_uid("6162")]
         pseudonym = patient.patient_id
 
         assert session.recover_patient_identity(pseudonym, restore=False) is None
-        session.recover_patient_identity(pseudonym, restore=True)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            session.recover_patient_identity(pseudonym, restore=True)
         assert patient.patient_id == "PAT-A"
-        assert [st.series[0].instances[0].attributes["0010,0020"]
-                for st in patient.studies] == ["PAT-A", "PAT-A"]
+        assert [(st.series[0].instances[0].attributes["0010,0020"],
+                 st.series[0].instances[0].attributes["0008,0050"])
+                for st in patient.studies] == [("PAT-A", ACC_ONE), ("PAT-A", ACC_ONE)]
+    assert _elsewhere_warnings(caplog) == [elsewhere(1, 2)], caplog.text
+
+
+# ---------------------------------------------------------------------------
+# #616, review of #640 F-1: a restore onto instances that do not carry the
+# token read says so
+# ---------------------------------------------------------------------------
+
+ACC_ONE, ACC_TWO = "ACC-ONE", "ACC-TWO"
+
+
+def elsewhere(count, total):
+    """The WARNING a restore logs when `count` of the `total` instances it
+    wrote do not carry the token it read."""
+    return (f"The identity token read holds one study's values, and they were "
+            f"restored onto {count} of {total} instances that do not carry that "
+            "token, so study-level identifiers written onto them, such as "
+            "Accession Number, may be another study's (#583).")
+
+
+def _elsewhere_warnings(caplog):
+    return [r.getMessage() for r in caplog.records
+            if r.name == "isocenter" and r.levelno == logging.WARNING
+            and "identity token read" in r.getMessage()]
+
+
+def _restored_accessions(db, key, pseudonym, caplog):
+    """Reopen, restore, and return {Study Instance UID: the Accession
+    Number its instance holds}, with the restore's WARNINGs in `caplog`."""
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(key)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            session.recover_patient_identity(pseudonym, restore=True)
+        [patient] = session.store.patients
+        assert patient.patient_id == "PAT-A"
+        return {st.study_instance_uid: st.series[0].instances[0].attributes["0008,0050"]
+                for st in patient.studies}
+
+
+def _value_free(warning, pseudonym):
+    for secret in ("PAT-A", "PAT-B", NAME, pseudonym, ACC_ONE, ACC_TWO,
+                   "6171", "6172", "6173", "6174"):
+        assert secret not in warning, warning
+
+
+def test_a_restore_onto_a_study_ingested_after_the_lock_warns(tmp_path, caplog):
+    """The shape I2 turned from a refusal into a restore (review of #640,
+    F-1, `after_ingest`): study 1 locked under the default `tags_to_lock`,
+    which include Accession Number, study 2 ingested after the lock. The
+    restore writes study 1's `ACC-ONE` into study 2's instance, whose own
+    was `ACC-TWO`. That write is #583's until per-instance tokens land;
+    what this pins is that it is no longer silent: one WARNING with the
+    count, and no value in it. Before the WARNING, nothing on any channel
+    said so, and #566's Study Date WARNING cannot fire under the default
+    tags. Kills the WARNING removed and the count miscounted."""
+    write_ct(tmp_path / "one" / "a.dcm", "PAT-A", "6171", name=NAME, accession=ACC_ONE)
+    write_ct(tmp_path / "two" / "b.dcm", "PAT-A", "6172", name=NAME, accession=ACC_TWO)
+    db, key = str(tmp_path / "s.db"), str(tmp_path / "k.key")
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(tmp_path / "one"))
+        session.lock_identities("PAT-A", persist=True)
+        session.ingest(str(tmp_path / "two"))
+        report = session.audit()
+        session.anonymize(report)
+        session.save(sync=True)
+        [patient] = session.store.patients
+        assert {st.study_instance_uid: SEQ in st.series[0].instances[0].sequences
+                for st in patient.studies} == {study_uid("6171"): True,
+                                               study_uid("6172"): False}
+        pseudonym = patient.patient_id
+
+    assert _restored_accessions(db, key, pseudonym, caplog) == {
+        study_uid("6171"): ACC_ONE, study_uid("6172"): ACC_ONE}
+    warnings = _elsewhere_warnings(caplog)
+    assert warnings == [elsewhere(1, 2)], caplog.text
+    _value_free(warnings[0], pseudonym)
+
+
+def test_a_restore_onto_a_study_carrying_another_token_warns(tmp_path, caplog):
+    """`two_tokens` (review of #640, F-1): the pair's two objects locked
+    separately before `audit()` merges them, so each study carries a token
+    of ours and the two differ. The first token found is the one read, so
+    study 2 takes study 1's `ACC-ONE` over the `ACC-TWO` its own token
+    holds. It carries *a* token, not the one read, and the WARNING counts
+    it. Kills the count taken as "carries no token" (`is None`), which
+    reads study 2 as carrying one and stays silent."""
+    write_ct(tmp_path / "in" / "a.dcm", "PAT-A", "6173", name=NAME, accession=ACC_ONE)
+    write_ct(tmp_path / "in" / "b.dcm", "PAT-B", "6174", name=NAME, accession=ACC_TWO)
+    db, key = str(tmp_path / "s.db"), str(tmp_path / "k.key")
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(tmp_path / "in"))
+        first, second = sorted(session.store.patients, key=lambda p: p.patient_id)
+        second.patient_id = first.patient_id
+        for inst in second.studies[0].series[0].instances:
+            inst.set_attr("0010,0020", first.patient_id)
+        session.lock_identities("PAT-A")
+        session.lock_identities(["PAT-A"])
+        tokens = {p.studies[0].study_instance_uid: session.reversibility_service.token_of_ours(
+            p.studies[0].series[0].instances[0]) for p in (first, second)}
+        assert None not in tokens.values() and len(set(tokens.values())) == 2
+        report = session.audit()
+        session.anonymize(report)
+        session.save(sync=True)
+        [patient] = session.store.patients
+        assert [st.study_instance_uid for st in patient.studies] == [
+            study_uid("6173"), study_uid("6174")]
+        pseudonym = patient.patient_id
+
+    assert _restored_accessions(db, key, pseudonym, caplog) == {
+        study_uid("6173"): ACC_ONE, study_uid("6174"): ACC_ONE}
+    warnings = _elsewhere_warnings(caplog)
+    assert warnings == [elsewhere(1, 2)], caplog.text
+    _value_free(warnings[0], pseudonym)
+
+
+def test_a_restore_onto_instances_that_all_carry_the_token_read_does_not_warn(
+        tmp_path, caplog):
+    """The control: every instance carries the token read, so there is
+    nothing to count and no WARNING. Kills the WARNING logged whatever the
+    count."""
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        patient, instances = _patient(session, "iii")
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        _anonymize_by_hand(instances, patient)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            session.recover_patient_identity("ANON_616", restore=True)
+        assert (patient.patient_name, patient.patient_id) == (NAME, PID)
+    assert _elsewhere_warnings(caplog) == [], caplog.text
 
 
 @pytest.mark.parametrize("layout", ["i", "isi", "eie"],
@@ -261,8 +403,9 @@ def test_restore_false_under_a_key_that_does_not_open_the_token_says_so(tmp_path
 
 
 def test_the_first_token_found_is_the_one_read(tmp_path):
-    """One token per patient until #583, so the walk stops at the first.
-    Study 1 carries a token of ours under a key this session does not
+    """The first token found is the one read, whatever else the patient
+    carries (a merged pair locked as two objects carries two; review of
+    #640, P-6). Study 1 carries a token of ours under a key this session does not
     hold, study 3 the lock's own: recovery raises the wrong-key text and
     writes nothing, rather than walking on to a token it can open and
     answering for the patient with it. Kills M26b (the walk's `break`
