@@ -27,37 +27,24 @@ class TestDateShifting:
 
     def test_a_fractional_second_the_format_list_cannot_parse_still_shifts_its_date(
             self, service):
-        """A DT whose fraction `%f` rejects must still be jittered.
+        """A dotted DT's fraction is re-attached as written, whatever its
+        length.
 
-        This replaces a stub that asserted nothing (its body was
-        comments ending in `pass`) and is the question that stub was
-        reaching for. DICOM DT allows a fraction of any precision;
-        `strptime`'s `%f` accepts one to six digits and nothing more, so
-        a seven-digit fraction misses every entry in the `formats` loop
-        and reaches the dotted-DT fallback below it, which shifts the
-        first eight characters and re-attaches the remainder verbatim.
+        This replaced a stub that asserted nothing, and was a PAIR: a
+        three-digit fraction the old strptime loop parsed (and re-rendered
+        as `.677000`) beside a seven-digit one `%f` rejected, which only
+        the old dotted fallback kept verbatim. Since #559 there is no
+        loop and no fallback -- the date moves and the rest of the string
+        is re-attached -- so both keep their fraction exactly, and the
+        seven-digit one proves the dotted shape still accepts a fraction
+        longer than DT's six (it did before, and the accept set only
+        narrows by the fabricating shapes).
 
-        Without the `len(parts) >= 3` guard holding, that input returns
-        None; `_apply_single_remediation` then takes its `else` arm,
-        logs "Invalid date format", and returns having shifted nothing
-        -- so the real date survives in the graph, is exported, and no
-        exception and no audit row says it happened.
-
-        The PAIR is the point, and specifically the DIFFERING fractions.
-        The first input IS parsed by the `formats` loop, which normalises
-        its fraction to six digits; the second comes back with all seven
-        preserved, which is only possible via the fallback. That is what
-        proves the second input genuinely reached the code under test
-        rather than passing vacuously -- and it means a future addition
-        to `formats` that swallowed the second input would flip its
-        expected value and fail loudly instead of going quiet.
+        Declining it would leave the real date in the graph with only a
+        decline row to say so.
         """
-        # Parsed by the formats loop: fraction normalised to six digits.
         assert service._shift_date_string(
-            "20230515.104822.677", 10) == "20230525.104822.677000"
-
-        # Seven digits: rejected by %f, so this one reaches the fallback
-        # and keeps its fraction exactly as written.
+            "20230515.104822.677", 10) == "20230525.104822.677"
         assert service._shift_date_string(
             "20230515.104822.1234567", 10) == "20230525.104822.1234567"
 
@@ -109,3 +96,196 @@ class TestDateShifting:
         assert service._shift_date_string("", 10) is None
         assert service._shift_date_string(None, 10) is None
         assert service._shift_date_string("NotADate", 10) is None
+
+
+#: (input, days, expected) for the length-strict parser (#559). Measured
+#: on ac33641 with days=-10 unless the row says otherwise; the comment on
+#: each changed row gives what the old strptime loop returned.
+SHIFT_TABLE = [
+    # DA: unchanged.
+    ("20230515", -10, "20230505"),
+    ("2023-05-11", -10, "2023-05-01"),
+    ("19991231", -10, "19991221"),
+    ("99991231", -10, "99991221"),
+    ("20200228", 1, "20200229"),
+    # ISO with an unpadded month or day parsed before and still does.
+    ("2024-5-1", -10, "2024-04-21"),
+    # Years below 1000 render with four digits on every platform; strftime
+    # does on macOS and not on Linux.
+    ("10000101", -10, "09991222"),
+    ("09990101", 10, "09990111"),
+    # A shift out of year 1 declines.
+    ("00010105", -10, None),
+    # Declined before and after.
+    ("20230515\\20230516", -10, None),
+    ("20230515-20230601", -10, None),
+    ("202305", -10, None),
+    ("00000000", -10, None),
+    ("12345678", -10, None),
+    ("1CT1", -10, None),
+    ("ANONYMIZED", -10, None),
+    ("0727", -10, None),
+    ("07", -10, None),
+    ("072731.1", -10, None),
+    ("07:27:31", -10, None),
+    ("235959.999999", -10, None),
+    ("123000", -10, None),
+    ("2023", -10, None),
+    ("20230515104822+0100", -10, None),
+    ("20230515104822.123456-0500", -10, None),
+    ("202305151048+0000", -10, None),
+    ("20230515256000", -10, None),
+    ("20230515104860", -10, None),
+    ("20230515104822.1234567", -10, None),
+    # Newly declined: the fabricating shapes.
+    ("2023051", -10, None),              # was '20230421'
+    ("230515", -10, None),               # was '23041226'
+    ("072731", -10, None),               # TM, was '07270219'
+    ("072731.123456", -10, None),        # TM, was '07270219.123456'
+    ("2023051525", -10, None),           # hour 25
+    # DT: the date moves, the time is re-attached as written.
+    ("20230515104822", -10, "20230505104822"),
+    ("20230515104822.123456", -10, "20230505104822.123456"),
+    # Hour- and minute-precision DT decline: the old parser declined some
+    # (`2023060510`) and misread the rest (`2023051510` became
+    # '20230421050100'), and shifting them widens the accept set, which a
+    # pre-0.9.6 store's legacy branch reads as "already shifted" (#574).
+    ("2023051510", -10, None),
+    ("202305151048", -10, None),
+    ("2023060510", -10, None),
+    ("20230515104822.1", -10, "20230505104822.1"),  # was '.100000'
+    ("20230515.104822", -10, "20230505.104822"),
+    ("20230515.104822.677", -10, "20230505.104822.677"),  # was '.677000'
+    ("20230515.104822.1234567", 10, "20230525.104822.1234567"),
+    ("20230515.1048", -10, None),
+    ("2023-05-11 10:48:22", -10, "2023-05-01 10:48:22"),
+    ("2023-05-11T10:48:22", -10, "2023-05-01T10:48:22"),
+    # strptime read one-digit ISO time fields and rendered them padded.
+    ("2023-05-11T1:2:3", -10, "2023-05-01T01:02:03"),
+    ("2023-05-11 9:08:7", -10, "2023-05-01 09:08:07"),
+    ("2023-05-11T25:48:22", -10, None),
+]
+
+
+@pytest.mark.parametrize("value,days,expected", SHIFT_TABLE,
+                         ids=[f"{v}|{d}" for v, d, _ in SHIFT_TABLE])
+def test_the_shift_parser_table(service, value, days, expected):
+    """#559. `%Y%m%d` is not length-strict and each branch re-rendered
+    with `strftime(fmt)`, so a Study Time became a date and an
+    hour-precision DateTime came back with its date and time both wrong.
+    Kills: `\\d{8}` loosened to `\\d{7,8}`; the DT time re-rendered rather
+    than re-attached; the clock-time check deleted; strftime restored
+    (the year-0999 rows on Linux); a fraction re-rendered."""
+    assert service._shift_date_string(value, days) == expected
+
+
+def _old_parser(value, days):
+    """`_shift_date_string` as it stood on ac33641, the oracle for the
+    subset test below: the strptime loop and the dotted fallback."""
+    import datetime as _dt
+    formats = ["%Y%m%d", "%Y-%m-%d", "%Y%m%d%H%M%S", "%Y%m%d.%H%M%S",
+               "%Y%m%d%H%M%S.%f", "%Y%m%d.%H%M%S.%f", "%Y-%m-%d %H:%M:%S",
+               "%Y-%m-%dT%H:%M:%S"]
+    date_str = str(value).strip()
+    for fmt in formats:
+        try:
+            parsed = _dt.datetime.strptime(date_str, fmt)
+            return (parsed + _dt.timedelta(days=days)).strftime(fmt)
+        except ValueError:
+            continue
+    parts = date_str.split(".")
+    if len(parts) >= 3 and len(parts[0]) == 8 and parts[0].isdigit():
+        try:
+            parsed = _dt.datetime.strptime(parts[0], "%Y%m%d")
+        except ValueError:
+            return None
+        return (parsed + _dt.timedelta(days=days)).strftime("%Y%m%d") + date_str[8:]
+    return None
+
+
+def test_accepted_after_is_a_subset_of_accepted_before(service):
+    """The accept set only narrows (#559): every value the new parser
+    shifts, the old one shifted too, with no exception, and the new date
+    part is the value's own date moved by the offset. Generated over every prefix of a few
+    digit runs (the real DT and the TM shapes that fabricated), each with
+    the dotted, fractional and ISO spellings. Kills a widened accept set,
+    which the legacy scan branch would read as "already shifted" and skip
+    (`_date_shift_declines`)."""
+    import datetime as _dt
+    import itertools
+    seeds = ["20230515104822123456", "07273112345678", "23051510482299",
+             "10000101000000", "20231231235959"]
+    values = set()
+    for seed in seeds:
+        for length in range(1, len(seed) + 1):
+            values.add(seed[:length])
+            values.add(seed[:8] + "." + seed[8:length])
+            values.add(seed[:14] + "." + seed[14:length])
+            values.add(seed[:8] + "." + seed[8:14] + "." + seed[14:length])
+    for y, m, d in itertools.product(("2023", "0999"), ("5", "05", "13"), ("1", "01", "32")):
+        values.add(f"{y}-{m}-{d}")
+        values.add(f"{y}-{m}-{d} 10:48:22")
+        values.add(f"{y}-{m}-{d}T1:2:3")
+    for value in sorted(values):
+        new = service._shift_date_string(value, -10)
+        if new is None:
+            continue
+        assert _old_parser(value, -10) is not None, value
+        if "-" in value[:10]:
+            y, m, d = (int(x) for x in value.split(" ")[0].split("T")[0].split("-"))
+            assert new[:10] == (_dt.date(y, m, d) - _dt.timedelta(days=10)).isoformat(), value
+        else:
+            moved = (_dt.datetime.strptime(value[:8], "%Y%m%d")
+                     - _dt.timedelta(days=10))
+            assert new[:8] == f"{moved.year:04d}{moved.month:02d}{moved.day:02d}", value
+            assert new[8:] == value[8:], value
+
+
+def test_a_jitter_on_a_private_tm_declines_and_is_exported_unchanged(tmp_path, monkeypatch):
+    """End to end, the shape #559 found: a JITTER rule on a private
+    element that holds a time. On ac33641 the TM `072731` was written back
+    as `07261207`, a date-shaped value pydicom warned about in the export
+    worker. Now the arm declines it with one row, and the file keeps the
+    time. Private, so no load-time VR check stands in front of it (the
+    exporter re-VRs private values, and the parser decides by shape).
+    Kills the TM shape accepted by the parser."""
+    import sqlite3
+
+    import pydicom
+    import pydicom.data
+    import yaml
+
+    from isocenter.session import DicomSession
+
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    source = tmp_path / "in"
+    source.mkdir()
+    ds = pydicom.dcmread(pydicom.data.get_testdata_file("CT_small.dcm"))
+    ds.add_new(0x00290010, "LO", "ACME 1.0")
+    ds.add_new(0x00291014, "TM", "072731")
+    ds.save_as(str(source / "ct.dcm"))
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(yaml.safe_dump({
+        "privacy_profile": "none", "remove_private_tags": False,
+        "phi_tags": {"0029,1014": {"action": "JITTER"}}}), encoding="utf-8")
+
+    db = tmp_path / "s.db"
+    with DicomSession(str(db)) as session:
+        session.ingest(str(source))
+        session.load_config(str(cfg))
+        session.anonymize(session.audit())
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        assert instance.attributes["0029,1014"] == "072731"
+        summary = session.export(str(tmp_path / "out"), use_compression=False)
+    assert summary.written == 1, summary.failures
+    with sqlite3.connect(str(db)) as conn:
+        declines = [row[0] for row in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type='REMEDIATION_DECLINED'")]
+    assert len(declines) == 1 and "0029,1014" in declines[0], declines
+    (written,) = list((tmp_path / "out").rglob("*.dcm"))
+    value = pydicom.dcmread(str(written))[0x00291014].value
+    # An uncompressed export is Implicit VR, so a private element whose
+    # creator pydicom does not know reads back as UN bytes.
+    if isinstance(value, bytes):
+        value = value.decode("ascii").strip()
+    assert value == "072731"

@@ -12,7 +12,15 @@ class IODValidator:
 
     _MODULE_DEFINITIONS = {
         'Common': {
-            '0008,0016': '1', '0008,0018': '1', '0008,0020': '1',
+            '0008,0016': '1', '0008,0018': '1',
+            # Study Date is Type 2 in General Study (PS3.3 C.7.2.1), as
+            # Study Time below is. It read '1' until #537, which nothing
+            # noticed while `anonymize()` always wrote a shifted date: a
+            # CT whose source had no or an empty Study Date failed export
+            # ('[Type 1 Error] Missing 0008,0020', 0 files), and once the
+            # rule governs the study's date the basic profile's own EMPTY
+            # would have failed every CT file the same way.
+            '0008,0020': '2',
             # Study Time is Type 2 in General Study (PS3.3 C.7.2.1):
             # present and empty is conformant. It read '1' until #495,
             # which nothing noticed while no policy touched the tag; the

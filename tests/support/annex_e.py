@@ -80,18 +80,14 @@ NO_ENTRY = {
 #: behaviour forces the departure; the test checks the symbol is there.
 DEVIATIONS = {
     "0010,0010": {
-        "action": "REMOVE", "authority": "#537",
-        "reason": "Patient's Name is entity-owned: anonymize() replaces it "
-                  "whatever the rule says. The table's Z waits on #537"},
+        "action": "REPLACE", "authority": "#537",
+        "reason": "Z permits a dummy; ANONYMIZED keeps every existing "
+                  "export's Patient's Name and the lock refusal's default "
+                  "(#537)"},
     "0010,0020": {
-        "action": "REMOVE", "authority": "#537",
-        "reason": "Patient ID is entity-owned: anonymize() writes the "
-                  "pseudonym whatever the rule says. The table's Z/D waits "
-                  "on #537"},
-    "0008,0020": {
-        "action": "REMOVE", "authority": "#537",
-        "reason": "Study Date is entity-owned: anonymize() shifts it whatever "
-                  "the rule says. The table's Z waits on #537"},
+        "action": "REPLACE", "authority": "#537",
+        "reason": "a Patient ID rule may not empty or remove it (#537): the "
+                  "keyed pseudonym is the D arm's dummy"},
     "0008,1030": {
         "action": "EMPTY", "authority": "isocenter/io_handlers.py::export_folder_names",
         "reason": "the export directory names read Study Description; zero "
@@ -126,9 +122,9 @@ REPEATING_GROUPS = {"60xx": [f"{group:04x}" for group in range(0x6000, 0x6020, 2
 #: at the entry. A departure's reason belongs in `DEVIATIONS`.
 LITERAL_COMMENTS = {
     "0008,0020": [
-        "Z in the table. Entity-owned: anonymize() shifts the study's own",
-        "date whatever this rule says, and #537 decides what the rule",
-        "should govern. The floor JITTERs it (RESEARCH_DEFAULTS).",
+        "Z in the table. Owned by the Study, and since #537 this rule governs",
+        "the study's own date: `basic` exports it zero-length. The floor",
+        "JITTERs it (RESEARCH_DEFAULTS).",
     ],
     "0008,002a": [
         "DT-valued twin of Acquisition Date: until #38 raw acquisition",
@@ -156,7 +152,8 @@ LITERAL_COMMENTS = {
         "every redacted instance.",
     ],
     "0010,0010": [
-        "Z in the table. Entity-owned, as Patient ID below (Z/D): #537.",
+        "Z in the table, REPLACE here: ANONYMIZED is a dummy Z permits. Owned",
+        "by the Patient, as Patient ID below (Z/D, the keyed pseudonym): #537.",
     ],
     "0070,0006": [
         "Free-text annotation commentary. Reaches annotations.json `note`",

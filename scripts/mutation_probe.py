@@ -238,6 +238,7 @@ TARGETS = {
     #     `DicomExporter._finalize_dataset` in io_handlers.py, only
     #     truth-tests the result.
     "isocenter/validation.py": (["tests/test_export_error.py",
+                                 "tests/test_missing_study_date.py",
                                  "tests/test_floor_policy.py", "tests/test_io.py",
                                  "tests/test_structured_export.py",
                                  "tests/test_validation.py", "tests/test_wfdb_writer.py",
@@ -251,6 +252,7 @@ TARGETS = {
     # 21/31) were measured before either bunch and are not carried over:
     # the first default run is the new measurement.
     "isocenter/config_manager.py": (["tests/test_api_coherence.py",
+                                     "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
                                      "tests/test_config.py",
                                      "tests/test_custom_profiles.py",
                                      "tests/test_documented_zones_are_zone_space.py",
@@ -263,6 +265,8 @@ TARGETS = {
                                      "tests/test_suggested_config.py",
                                      "tests/test_zone_validation.py"], 30),
     "isocenter/configuration.py": (["tests/test_automation.py",
+                                    "tests/test_a_replace_rule_writes_its_value.py",
+                                    "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
                                     "tests/test_configuration_manual.py",
                                     "tests/test_configuration_persistence.py",
                                     "tests/test_documented_zones_are_zone_space.py",
@@ -323,7 +327,13 @@ TARGETS = {
                                 "tests/test_report_export_boundary.py",
                                 "tests/test_export_delivery_counters.py"], 30),
     "isocenter/privacy.py": (["tests/test_suggested_config.py", "tests/test_analysis.py", "tests/test_analysis_persistence.py",
+                              "tests/test_anonymize_records_what_it_left.py",
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
+                              "tests/test_a_relock_cannot_lose_a_held_identity.py",
+                              "tests/test_a_replace_rule_writes_its_value.py",
+                              "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
+                              "tests/test_replace_on_an_unfit_vr_declines.py",
+                              "tests/test_the_owned_tags_follow_their_rule.py",
                               "tests/test_a_pre_096_store_is_not_reshifted.py",
                               "tests/test_a_replaced_study_date_is_raised.py",
                               "tests/test_an_unshifted_date_is_raised.py",
@@ -353,7 +363,12 @@ TARGETS = {
                               "tests/test_the_project_secret_lives_in_the_store.py",
                               "tests/test_nested_remediation_reaches_the_instance.py"], 30),
     "isocenter/remediation.py": (["tests/test_audit_suppression.py",
+                                  "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_partial_findings_list_is_not_remediated.py",
+                                  "tests/test_a_replace_rule_writes_its_value.py",
+                                  "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
+                                  "tests/test_replace_on_an_unfit_vr_declines.py",
+                                  "tests/test_the_owned_tags_follow_their_rule.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
                                   "tests/test_an_unshifted_date_is_raised.py",
                                   "tests/test_declined_date_recurs.py",
@@ -389,6 +404,8 @@ TARGETS = {
                                   "tests/test_the_project_secret_lives_in_the_store.py",
                                   "tests/test_nested_remediation_reaches_the_instance.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_export_failure_text_carries_no_path.py", "tests/test_api_coherence.py",
+                                  "tests/test_anonymize_records_what_it_left.py",
+                                  "tests/test_the_owned_tags_follow_their_rule.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
                                   "tests/test_audit_read_barrier.py",
                                   "tests/test_binary_retention_threshold.py",
@@ -508,6 +525,7 @@ TARGETS = {
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
     "isocenter/persistence.py": (["tests/test_api_coherence.py",
+                                  "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_pre_096_store_is_not_reshifted.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
                                   "tests/test_an_unshifted_date_is_raised.py",
@@ -625,7 +643,15 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_analysis.py",
+                              "tests/test_a_batch_lock_locks_every_patient_or_none.py",
+                              "tests/test_anonymize_records_what_it_left.py",
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
+                              "tests/test_a_relock_cannot_lose_a_held_identity.py",
+                              "tests/test_a_replace_rule_writes_its_value.py",
+                              "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
+                              "tests/test_remediation_dates.py",
+                              "tests/test_replace_on_an_unfit_vr_declines.py",
+                              "tests/test_the_owned_tags_follow_their_rule.py",
                               "tests/test_a_pre_096_store_is_not_reshifted.py",
                               "tests/test_a_replaced_study_date_is_raised.py",
                               "tests/test_an_unshifted_date_is_raised.py",
@@ -847,7 +873,10 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_export_failure_text_carries_no_path.py", "tests/test_analysis.py",
+                               "tests/test_anonymize_records_what_it_left.py",
                                "tests/test_a_partial_findings_list_is_not_remediated.py",
+                               "tests/test_a_replace_rule_writes_its_value.py",
+                               "tests/test_the_owned_tags_follow_their_rule.py",
                                "tests/test_a_pre_096_store_is_not_reshifted.py",
                                "tests/test_a_replaced_study_date_is_raised.py",
                                "tests/test_an_unshifted_date_is_raised.py",

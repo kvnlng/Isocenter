@@ -206,6 +206,289 @@ def _validated_phi_tags(tags: Any, source: str) -> Dict[str, Any]:
     return _lowercase_tag_keys(tags)
 
 
+#: The VRs whose value is not a string, so that no `value:` a config can
+#: write fits them: the refusal's advice omits "give a value" for these.
+_NON_STRING_VRS = frozenset({"OB", "OD", "OF", "OL", "OV", "OW", "UN",
+                             "US", "SS", "UL", "SL", "UV", "SV", "FL", "FD",
+                             "AT"})
+
+#: The three tags the Patient and the Study own (#537). Their rules are
+#: read by `privacy._owned_rule`; the validator knows two things about
+#: them: Patient ID cannot be emptied, removed, shifted or given a
+#: literal, and Study Date's REPLACE with no value is the shift.
+_PATIENT_ID = "0010,0020"
+_STUDY_DATE = "0008,0020"
+
+
+def _standard_dictionary_vr(tag: str) -> Optional[str]:
+    """The dictionary VR of a standard (even-group) tag, or None for a
+    private tag, an unknown one, and a key that is not a tag.
+
+    No parity test: pydicom's standard dictionary, repeaters included,
+    holds no odd-group entry (measured, pydicom 3.0.2), so a private tag
+    is a `KeyError` like any unknown one. A parity test here was an
+    equivalent mutant."""
+    # Local: pydicom is wanted only when a rule is checked, and this
+    # module is imported by everything that reads a config.
+    from pydicom.datadict import dictionary_VR  # pylint: disable=import-outside-toplevel
+    try:
+        number = int(tag.replace(",", ""), 16)
+    except (AttributeError, ValueError):
+        return None
+    try:
+        return str(dictionary_VR(number))
+    except KeyError:
+        return None
+
+
+def _dictionary_vm(tag: str) -> Optional[str]:
+    """The dictionary value multiplicity of a standard tag (`'1'`,
+    `'1-n'`, ...), or None where `_standard_dictionary_vr` is None."""
+    from pydicom.datadict import dictionary_VM  # pylint: disable=import-outside-toplevel
+    if _standard_dictionary_vr(tag) is None:
+        return None
+    return str(dictionary_VM(int(tag.replace(",", ""), 16)))
+
+
+def _vm_allows(vm: str, count: int) -> bool:
+    """Whether `count` values meet a dictionary VM (review of #574 round 2,
+    P-4). pydicom's dictionary spells a VM four ways: `'N'`, `'N-M'`,
+    `'N-n'`, `'N-Nn'` (`'2-2n'`: 2, 4, 6, ...). A spelling outside those
+    allows any count, so a dictionary refresh cannot refuse a rule by an
+    unparsed VM."""
+    lower, _, upper = vm.partition("-")
+    try:
+        lower_n = int(lower)
+        if not upper:
+            return count == lower_n
+        if upper == "n":
+            return count >= lower_n
+        if upper.endswith("n"):
+            # Every `N-Nn` in the dictionary today has N equal to the step,
+            # so the lower bound is implied by the step for any count of at
+            # least one. It is kept for a spelling such as `4-2n`, which the
+            # step alone would misread, and tested on that spelling directly.
+            return count >= lower_n and count % int(upper[:-1]) == 0
+        return lower_n <= count <= int(upper)
+    except ValueError:
+        return True
+
+
+def _dt_is_a_range(value: str) -> bool:
+    """True when a `-` in a DT string is not its UTC offset (review of #574
+    round 2, P-3). The offset is `&ZZXX` at the end -- `+` or `-`, hours at
+    most 14, minutes below 60 (PS3.5 Table 6.2-1) -- so one such suffix is
+    set aside and any `-` left is a range: `20230101-20230201`,
+    `-20230201`, `20230101-`, and `2023-2024`, whose 20 is no hour of an
+    offset. `2023-1200` stays a year at offset -1200, which is what PS3.5
+    reads it as."""
+    match = re.search(r"[+-]([0-9]{2})([0-9]{2})$", value)
+    if match and int(match.group(1)) <= 14 and int(match.group(2)) < 60:
+        value = value[:match.start()]
+    return "-" in value
+
+
+def _is_oversized_tag_key(tag: str) -> bool:
+    """True for a key that reads as hex but names no 32-bit tag, such as
+    `'10000,0010'`. pydicom's `Tag` raises `OverflowError` for it, which
+    is not the `ValueError` every other refusal is (review of #574)."""
+    try:
+        number = int(tag.replace(",", ""), 16)
+    except ValueError:
+        return False
+    return not 0 <= number <= 0xFFFFFFFF
+
+
+def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
+    """The dictionary VR of a **standard** tag when that VR cannot hold
+    `value`, else None (#560).
+
+    None as well for a private (odd-group) tag, an unknown tag, and a
+    sequence: the exporter writes a private value its recorded VR cannot
+    hold as a valid LO, so a refusal there would keep an identifier the
+    write removes; an unknown tag has no VR to judge by; and a value on a
+    sequence is warned about by the scan, not written.
+
+    The verdict is pydicom's `validate_value`, not
+    `io_handlers._value_fits_vr`, which skips repertoire by design and so
+    passes `ANONYMIZED` for TM, DT and UI. Two things `validate_value`
+    does not do are done here: AT is refused outright (pydicom does not
+    validate an AT string, and the value is a tag), and a compound
+    dictionary VR (`US or SS`, `OB or OW`) is split, because pydicom has
+    no validator under that name and passes anything. It is refused when
+    no arm holds the value.
+
+    On a tag whose multiplicity allows several values, a string is judged
+    one `\\`-separated value at a time: `validate_value` reads the whole
+    string as one value, so `A\\P` on Patient Orientation (CS, VM 2) was
+    refused for the backslash CS's repertoire lacks. One value on a VM-1
+    tag holding a backslash is `_refused_phi_rule`'s to refuse.
+    """
+    from pydicom import config as pydicom_config  # pylint: disable=import-outside-toplevel
+    from pydicom.valuerep import validate_value  # pylint: disable=import-outside-toplevel
+
+    vr = _standard_dictionary_vr(tag)
+    if vr is None:
+        return None
+    # A sequence needs no arm of its own: pydicom has no validator for SQ
+    # and passes any value, and the scan warns about a value on one.
+    arms = [arm.strip() for arm in vr.split(" or ")]
+    parts = [value]
+    if isinstance(value, str) and _dictionary_vm(tag) != "1":
+        parts = value.split("\\")
+
+    def holds(arm):
+        if arm == "AT":
+            return False
+        try:
+            for part in parts:
+                validate_value(arm, part, pydicom_config.RAISE)
+        except (ValueError, TypeError):
+            return False
+        return True
+
+    return None if any(holds(arm) for arm in arms) else vr
+
+
+def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
+    """Why this one rule cannot be honoured, or None (#537, #538, #559,
+    #560). The shape checks -- a tag key, an action the inspector
+    implements, a rule that is a string or a mapping -- are
+    `_validated_phi_tags`' and are repeated only for the action, because
+    `PhiInspector(config_tags=)` and `configuration.phi_tags` assigned
+    directly reach the scan without the loader.
+
+    The checks, in the order their messages are tested:
+
+    1. `replacement:` is 0.9.7's `set_phi_tag` spelling of `value:`,
+       which nothing read (#538). One spelling, so it is refused by name.
+    2. A `value:` under anything but REPLACE writes nothing.
+    3. A `value:` that is not a string cannot be written as one.
+    4. Patient ID can only be kept or pseudonymised: the ID is what keeps
+       two patients apart, and `anonymize()` merges patients that share
+       one (#548), so an emptied or literal ID would merge every patient.
+    5. SHIFT/JITTER on a standard tag that is not DA or DT declined on
+       every pass (#559).
+    6. REPLACE on a standard tag whose VR cannot hold what it writes
+       (#560). Study Date's REPLACE with no value is the shift (#537, Q3)
+       and is not judged as a literal.
+    7. A REPLACE `value:` pydicom's `validate_value` passes and the tag
+       still cannot hold (review of #574): a `-` in a DA or TM, which is
+       a range, and a `\\` on a tag of multiplicity 1, which is a second
+       value. In a DT a `-` is a range only where it is not the UTC offset
+       at the end (`_dt_is_a_range`), and on any other tag the count of
+       `\\`-separated values must meet the dictionary VM (`_vm_allows`;
+       review of #574 round 2, P-3 and P-4). Only a `value:` is counted:
+       REPLACE with no value writes one `ANONYMIZED` wherever it did
+       in 0.9.7, and no rule of that shape is refused by its count.
+
+    Before all of them, a key naming no 32-bit tag is refused as the
+    loader refuses a key that is not `gggg,eeee`; on the in-code doors it
+    raised pydicom's `OverflowError` (review of #574).
+    """
+    if isinstance(tag, str) and _is_oversized_tag_key(tag):
+        return (f"phi_tags key {tag!r} is not a 'gggg,eeee' tag (four hex "
+                f"digits, a comma, four hex digits, such as '0010,0010'); the "
+                f"scan reads no tag by that key, so the rule would never run")
+    if isinstance(rule, dict):
+        action = rule.get("action", "REPLACE")
+        if not isinstance(action, str) or action.upper() not in _PHI_ACTIONS:
+            return (f"phi_tags[{tag!r}] has action {action!r}; the actions "
+                    f"are {', '.join(sorted(_PHI_ACTIONS))}")
+        action = action.upper()
+        value = rule.get("value")
+        if "replacement" in rule:
+            return (f"phi_tags[{tag!r}] has a 'replacement' key; the key is "
+                    f"'value' (0.9.8, #538), so rename it")
+        if value is not None and action != "REPLACE":
+            return (f"phi_tags[{tag!r}] has a value under {action}; only "
+                    f"REPLACE writes a value")
+        if value is not None and not isinstance(value, str):
+            return (f"phi_tags[{tag!r}] value must be a string, got "
+                    f"{type(value).__name__}")
+    elif isinstance(rule, str):
+        action, value = "REPLACE", None
+    else:
+        return None
+
+    if not isinstance(tag, str):
+        return None
+    if tag == _PATIENT_ID and (action in ("REMOVE", "EMPTY", "SHIFT", "JITTER")
+                               or value):
+        said = f" with value {value!r}" if value else ""
+        return (f"phi_tags['{tag}'] is {action}{said}; Patient ID can only be "
+                f"kept (KEEP) or replaced by its keyed pseudonym (REPLACE with "
+                f"no value), because the ID is what keeps two patients apart "
+                f"and anonymize() merges patients that share one (#537)")
+    if action in ("SHIFT", "JITTER"):
+        # A sequence is exempt as it is from REPLACE: the scan warns that
+        # the action has no meaning there (#547) and applies nothing.
+        vr = _standard_dictionary_vr(tag)
+        if vr is not None and not {"DA", "DT", "SQ"} & set(vr.split(" or ")):
+            return (f"phi_tags['{tag}'] is {action}, and {tag} is {vr}; "
+                    f"SHIFT and JITTER move a date by the patient's offset "
+                    f"and apply only to DA and DT (#559)")
+        return None
+    if action == "REPLACE" and not (tag == _STUDY_DATE and not value):
+        written = value or "ANONYMIZED"
+        vr = _dictionary_vr_refuses(tag, written)
+        if vr is not None:
+            advice = "EMPTY or REMOVE"
+            if vr in ("DA", "DT"):
+                advice += ", or JITTER to shift it"
+            # By arm: `US or SS` is as numeric as `US` (review of #574).
+            if not set(vr.split(" or ")) <= _NON_STRING_VRS:
+                advice += f", or give a value: that is a valid {vr}"
+            return (f"phi_tags['{tag}'] is REPLACE, which writes {written!r}, "
+                    f"and {tag} is {vr}, which cannot hold it; use {advice} "
+                    f"(#560)")
+        if value:
+            vr = _standard_dictionary_vr(tag)
+            if vr in ("DA", "TM") and "-" in value:
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and a '-' in a {vr} is a range, which "
+                        f"{tag} cannot hold; give one {vr} value (#560)")
+            if vr == "DT" and _dt_is_a_range(value):
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and a '-' in a DT anywhere but its UTC "
+                        f"offset (&ZZXX at the end) is a range, which {tag} "
+                        f"cannot hold; give one DT value (#560)")
+            vm = _dictionary_vm(tag)
+            if "\\" in value and vm == "1":
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and {tag} holds one value, which a '\\' "
+                        f"would make two; give a value without one (#560)")
+            count = value.count("\\") + 1
+            if vm is not None and not _vm_allows(vm, count):
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and {tag} holds {vm} values (its "
+                        f"dictionary VM), which {count} '\\'-separated values "
+                        f"are not; give a value of that multiplicity (#560)")
+    return None
+
+
+def validate_phi_policy(tags: Dict[str, Any], source: str) -> None:
+    """Raise `ValueError` naming `source` and the first rule in `tags` the
+    pipeline cannot honour (see `_refused_phi_rule`); return otherwise.
+
+    Called on every door a policy comes in by, before anything changes
+    (#456): the merged policy a config file resolves to
+    (`ConfigLoader.load_unified_config`, so `load_config` and
+    `audit(config_path=)`), `set_phi_tag`, `audit()` over
+    `configuration.phi_tags` before a project secret is minted, and
+    `PhiInspector.__init__`. The merged policy and not each file: a
+    user's KEEP over an external profile's REMOVE on Patient ID is an
+    honourable policy, and the profile alone is not.
+    """
+    if not isinstance(tags, dict):
+        return
+    for tag, rule in tags.items():
+        key = tag.lower() if isinstance(tag, str) else tag
+        reason = _refused_phi_rule(key, rule)
+        if reason is not None:
+            raise ValueError(f"{source}: {reason}")
+
+
 def load_unified_config(path: str) -> Dict[str, Any]:
     """
     Loads the unified configuration file (YAML).
@@ -360,6 +643,11 @@ class ConfigLoader:
         # assigns only what this returns: a file that fails any check
         # leaves the session's configuration exactly as it was (#456).
         phi_tags = data["phi_tags"]
+        # The merged policy, whichever branch produced it (a built-in or
+        # external profile beneath the file, the floor, or `none`), so a
+        # profile row the file did not override is judged and a file's
+        # KEEP over a profile's refused row is not (#537, #560).
+        validate_phi_policy(phi_tags, filepath)
         # Support 'machines' (v2) or 'machine_rules' (legacy internal)
         machine_rules = data.get("machines", data.get("machine_rules", []))
         if machine_rules is None:

@@ -909,6 +909,98 @@ class Instance(DicomItem):
     # field would add a positional to a frozen constructor order.
     _legacy_shift_provenance: bool = field(default=False, init=False, repr=False)
 
+    # What a remediation left at each of this instance's top-level tags
+    # (#537), for `lock_identities()`, which must not stash a value a pass
+    # wrote as though the source had held it. `_remediated_values` maps a
+    # tag to the non-blank value written (bytes as hex);
+    # `_remediated_blank` is a space-separated list of the tags a
+    # remediation emptied or removed. The two are disjoint per tag.
+    #
+    # Why a record and not the policy: every predicate that asked "which
+    # rule wrote this?" read session state, and the session's policy is
+    # gone after a reopen and replaced by a re-audit or a `load_config()`
+    # (review of #574, M-3). This is `_shifted_dates`' mechanism, for
+    # REPLACE, EMPTY and REMOVE, and keyed on the value the same way, so
+    # a tag written over since -- by hand or by
+    # `recover_patient_identity(restore=True)` -- stops vouching with no
+    # invalidation pass.
+    #
+    # Why the one word `private` for every odd-group tag: the floor
+    # removes about 180 private tags per CT, and one entry each cost
+    # 16.9 KB per instance against 13.1 KB for its own attributes; the
+    # compact form is 0.7 KB (measured in the C9 brief). Every private
+    # tag the source lacked then reads as removed, which only refuses.
+    #
+    # On `Instance` only: the lock reads top-level values, and a nested
+    # item must not pay a slot it never fills. **Not copied into the scan
+    # clones** (`_make_lightweight_copy`, `clone_sequences`), unlike
+    # `_shifted_dates` above, which the scan reads: nothing in a scan
+    # reads this, and the clones are discarded.
+    _remediated_values: Optional[Dict[str, str]] = field(
+        default=None, init=False, repr=False)
+    _remediated_blank: Optional[str] = field(default=None, init=False, repr=False)
+
+    @staticmethod
+    def _as_recorded(value) -> Optional[str]:
+        """The string a record keeps for `value`: None for a removal, hex
+        for bytes (an empty bytes value is blank), `str()` otherwise."""
+        if value is None:
+            return None
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value).hex()
+        return value if isinstance(value, str) else str(value)
+
+    @staticmethod
+    def _blank_word(tag: str) -> str:
+        """The blank list's word for `tag`: `private` for an odd group."""
+        try:
+            return "private" if int(tag[:4], 16) % 2 else tag
+        except ValueError:
+            return tag
+
+    def record_remediation(self, tag: str, value) -> None:
+        """Records that a remediation is about to leave `value` at `tag`;
+        `value` None means it is about to remove the tag.
+
+        Called **immediately before** the write, and deliberately does
+        **not** `mark_modified()`, as `record_date_shift` does not: the
+        write that follows advances the revision for both halves. Before
+        and not after, because a record stored without its value is
+        harmless (it is keyed on the value) while a value stored without
+        its record is a replacement the next lock stashes as an original.
+
+        There is no setter and no "mark this remediated" without a value.
+        """
+        tag = _canonical_tag(tag)
+        recorded = self._as_recorded(value)
+        words = self._remediated_blank.split() if self._remediated_blank else []
+        if recorded is not None and recorded.strip():
+            if self._remediated_values is None:
+                self._remediated_values = {}
+            self._remediated_values[tag] = recorded
+            if tag in words:
+                words.remove(tag)
+                self._remediated_blank = " ".join(words) or None
+            return
+        if self._remediated_values:
+            self._remediated_values.pop(tag, None)
+        word = self._blank_word(tag)
+        if word not in words:
+            # Reassigned, never mutated: a background save reads it whole.
+            self._remediated_blank = " ".join(words + [word])
+
+    def remediation_vouches_for(self, tag: str, value) -> bool:
+        """Whether a remediation left `value` at `tag`: for a non-blank
+        value, exactly that value; for a blank value or None (absent),
+        that the tag was emptied or removed."""
+        tag = _canonical_tag(tag)
+        recorded = self._as_recorded(value)
+        if recorded is not None and recorded.strip():
+            return bool(self._remediated_values) and \
+                self._remediated_values.get(tag) == recorded
+        return bool(self._remediated_blank) and \
+            self._blank_word(tag) in self._remediated_blank.split()
+
     def __post_init__(self):
         # Inlined from DicomItem to avoid super() mismatch issues with slots/reloads
         self.attributes = {}

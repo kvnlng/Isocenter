@@ -83,6 +83,35 @@ def test_empty_on_a_binary_vr_writes_zero_length_bytes(tag, value):
     assert isinstance(instance.attributes[tag], bytes)
 
 
+PRIVATE_TAG = "0029,1010"
+
+
+@pytest.mark.parametrize("recorded,value,expected", [
+    ("OB", "x", b""),
+    ("LO", b"x", ""),
+], ids=["recorded-OB-over-str", "recorded-LO-over-bytes"])
+def test_the_recorded_vr_decides_before_the_value_type(recorded, value, expected):
+    """The recorded VR, when there is one, outranks the value's Python
+    type (#568). Ingest records a VR only for a private element with a
+    text or numeric VR, and those arrive as str or int -- so no ingest
+    route reaches a disagreement, and the two cases here are what
+    `record_attr_vr()`, a public method, can put on an item. A private
+    tag, so the dictionary has no answer and only the recorded step
+    separates the outcomes.
+
+    Kills: the recorded lookup deleted (`vr = None`), which falls through
+    to the value's type and writes `""` over the OB and `b""` over the
+    LO."""
+    instance = Instance("1.2.826.0.1.568.1", "1.2.840.10008.5.1.4.1.1.7", 1)
+    instance.set_attr(PRIVATE_TAG, value)
+    instance.record_attr_vr(PRIVATE_TAG, recorded)
+
+    RemediationService()._apply_single_remediation(_empty(instance, PRIVATE_TAG))
+
+    assert instance.attributes[PRIVATE_TAG] == expected
+    assert type(instance.attributes[PRIVATE_TAG]) is type(expected)
+
+
 def test_empty_on_a_text_vr_still_writes_a_str():
     """The other side of the branch: a text VR keeps `""`, which is what
     `_merge` and every reader of a text attribute expect."""

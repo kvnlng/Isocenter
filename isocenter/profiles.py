@@ -48,10 +48,10 @@ BASIC_PROFILE = {
     "0008,0012": {"action": "REMOVE", "name": "Instance Creation Date"},  # X/D
     "0008,0013": {"action": "EMPTY", "name": "Instance Creation Time"},  # X/Z/D
     "0008,0015": {"action": "REMOVE", "name": "Instance Coercion DateTime"},  # X
-    # Z in the table. Entity-owned: anonymize() shifts the study's own
-    # date whatever this rule says, and #537 decides what the rule
-    # should govern. The floor JITTERs it (RESEARCH_DEFAULTS).
-    "0008,0020": {"action": "REMOVE", "name": "Study Date"},  # Z
+    # Z in the table. Owned by the Study, and since #537 this rule governs
+    # the study's own date: `basic` exports it zero-length. The floor
+    # JITTERs it (RESEARCH_DEFAULTS).
+    "0008,0020": {"action": "EMPTY", "name": "Study Date"},  # Z
     "0008,0021": {"action": "REMOVE", "name": "Series Date"},  # X/D
     "0008,0022": {"action": "EMPTY", "name": "Acquisition Date"},  # X/Z
     "0008,0023": {"action": "EMPTY", "name": "Content Date"},  # Z/D
@@ -120,15 +120,16 @@ BASIC_PROFILE = {
     # every redacted instance.
     "0008,2111": {"action": "REMOVE", "name": "Derivation Description"},  # X
     "0008,4000": {"action": "REMOVE", "name": "Identifying Comments"},  # X
-    # Z in the table. Entity-owned, as Patient ID below (Z/D): #537.
-    "0010,0010": {"action": "REMOVE", "name": "Patient's Name"},  # Z
+    # Z in the table, REPLACE here: ANONYMIZED is a dummy Z permits. Owned
+    # by the Patient, as Patient ID below (Z/D, the keyed pseudonym): #537.
+    "0010,0010": {"action": "REPLACE", "name": "Patient's Name"},  # Z
     "0010,0011": {"action": "REMOVE", "name": "Person Names to Use Sequence"},  # X
     "0010,0012": {"action": "REMOVE", "name": "Name to Use"},  # X
     "0010,0013": {"action": "REMOVE", "name": "Name to Use Comment"},  # X
     "0010,0014": {"action": "REMOVE", "name": "Third Person Pronouns Sequence"},  # X
     "0010,0015": {"action": "REMOVE", "name": "Pronoun Code Sequence"},  # X
     "0010,0016": {"action": "REMOVE", "name": "Pronoun Comment"},  # X
-    "0010,0020": {"action": "REMOVE", "name": "Patient ID"},  # Z/D
+    "0010,0020": {"action": "REPLACE", "name": "Patient ID"},  # Z/D
     "0010,0021": {"action": "REMOVE", "name": "Issuer of Patient ID"},  # X
     "0010,0030": {"action": "EMPTY", "name": "Patient's Birth Date"},  # Z
     "0010,0032": {"action": "REMOVE", "name": "Patient's Birth Time"},  # X

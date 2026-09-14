@@ -23,6 +23,69 @@ def _is_replacement_id(value) -> bool:
     return str(value).startswith("ANON_")
 
 
+def _owned_rule(phi_tags, tag) -> Tuple[str, Optional[str]]:
+    """`(action, value)` under which the owner of `tag` is remediated (#537).
+
+    Until 0.9.8 `scan_patient` and `_scan_study` read no rule: the name
+    was always `ANONYMIZED`, the ID always the keyed pseudonym, the date
+    always the per-patient shift. This is the one reading of the rule for
+    the three, so the owner scans and the instance scan cannot disagree.
+
+    No rule and the string form are `REPLACE` with no value, which is the
+    replacement these tags always had: `ANONYMIZED`, the pseudonym, the
+    shift. On Study Date, `REPLACE` with no value and `SHIFT`/`JITTER` all
+    read `SHIFT`, because the string form (`"0008,0020": "Study Date"`) has
+    always meant the shift and a DA cannot hold `ANONYMIZED` (Q3 of #537).
+    A rule the validator refuses (an emptied Patient ID, say) never gets
+    here: `PhiInspector.__init__` raises first.
+    """
+    rule = (phi_tags or {}).get(tag)
+    if isinstance(rule, dict):
+        action = str(rule.get("action") or "REPLACE").upper()
+        value = rule.get("value") or None
+    else:
+        action, value = "REPLACE", None
+    if tag == "0008,0020" and (action in ("SHIFT", "JITTER")
+                               or (action == "REPLACE" and value is None)):
+        return "SHIFT", None
+    return action, value
+
+
+def _holds_owned_replacement(phi_tags, tag, value, study=None) -> bool:
+    """Whether `value`, an owner's value for `tag`, is already what the rule
+    on `tag` resolves to (#537).
+
+    The scan's "already replaced?" test, action by action. Only the value
+    the rule resolves to *now* counts: a name holding `ANONYMIZED` under
+    `REPLACE value: v` is raised and rewritten, and so is a `v1` under
+    `value: v2`. `lock_identities` also refuses the constants on any
+    policy; that OR belongs to the lock and must not be shared with the
+    scan, which would then never write `v` over an old `ANONYMIZED`.
+
+    - `KEEP`, `REMOVE`, `EMPTY`: False. Nothing is a replacement: REMOVE
+      is judged by presence and EMPTY by blankness, which every caller
+      tests before it asks this (a blank EMPTY is not raised at all).
+    - Name `REPLACE`: the rule's `value:`, or `ANONYMIZED`.
+    - ID `REPLACE`: an `ANON_` pseudonym.
+    - Date `SHIFT`: a date this pipeline's shift produced
+      (`_study_date_is_this_pipelines`; needs `study`).
+    - Date `REPLACE value: v`: the value renders as `v`.
+    """
+    action, rule_value = _owned_rule(phi_tags, tag)
+    if tag == "0010,0010" and action == "REPLACE":
+        return value == (rule_value or "ANONYMIZED")
+    if tag == "0010,0020" and action == "REPLACE":
+        return _is_replacement_id(value)
+    if tag == "0008,0020" and action == "SHIFT":
+        return _study_date_is_this_pipelines(study)
+    if tag == "0008,0020" and action == "REPLACE":
+        # Lazy: io_handlers is the heavy module, and this is the one
+        # spelling of "a Study's date as a DA string" (#189).
+        from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
+        return value is not None and format_study_date(value) == rule_value
+    return False
+
+
 #: The hex run inside an unkeyed `ANON_` replacement. Used to refuse a
 #: value that merely starts with the prefix (`ANON_xyz`, a user's own id)
 #: before `_unkeyed_jitter_digest` reads eight characters out of it.
@@ -373,9 +436,12 @@ class PhiInspector:
                 -- or a plain string, which is the tag's **display name**
                 and leaves the action as `REPLACE`. The string form names
                 the tag; it does not choose what happens to it. Passing a
-                bare action name (`{"0008,0020": "SHIFT"}`) therefore
-                replaces the value instead of shifting it, and is warned
-                about at construction (#111).
+                bare action name (`{"0008,0080": "REMOVE"}`) therefore
+                replaces the value instead, and is warned about at
+                construction (#111). Study Date is the exception: its
+                REPLACE with no value is the per-patient shift (#537).
+                A rule the scan cannot honour raises `ValueError` here
+                (`config_manager.validate_phi_policy`).
             remove_private_tags (bool): If True, scans all attributes for non-whitelisted private tags.
             project_secret (bytes, optional): The store's project secret,
                 which keys the PatientID replacement. Optional here and
@@ -411,6 +477,11 @@ class PhiInspector:
         # one known offending key, means this class of bug cannot recur
         # regardless of which future profile or config file introduces it.
         self.phi_tags = self._normalize_tag_keys(self.phi_tags)
+        # A rule the scan cannot honour raises here, as it does at the
+        # loader and at `audit()` (#537, #560). The inspector is also
+        # built directly, and in every worker; the check is cheap.
+        from .config_manager import validate_phi_policy  # pylint: disable=import-outside-toplevel
+        validate_phi_policy(self.phi_tags, "config_tags")
         self._warn_on_bare_action_values()
         # (tag, action) pairs already warned about as meaningless on a
         # sequence, so an audit says it once rather than once per
@@ -437,19 +508,36 @@ class PhiInspector:
         Warned rather than raised: the string form works as designed, and
         rejecting a call that succeeds today would be a breaking change.
         A caller may also legitimately have a tag *described* as "Shift".
+
+        Since 0.9.8 the date example above is no longer the case it was
+        written for. On a standard tag whose VR cannot hold `ANONYMIZED`
+        -- `{"0008,0012": "SHIFT"}` -- the string form is refused at
+        construction (#560), before this runs. On Study Date the string
+        form means the shift (#537), so `{"0008,0020": "SHIFT"}` and
+        `"JITTER"` do what they say and are not warned about. `"REMOVE"`
+        and `"EMPTY"` there still are, naming the shift as what happens:
+        the caller asked for removal and gets a retained, shifted date
+        (review of #574). The warning remains for a tag where REPLACE is
+        what happens.
         """
         offenders = sorted(
             tag for tag, val in self.phi_tags.items()
-            if isinstance(val, str) and val.strip().upper() in self._ACTION_WORDS)
+            if isinstance(val, str) and val.strip().upper() in self._ACTION_WORDS
+            and not (_owned_rule(self.phi_tags, tag)[0] == "SHIFT"
+                     and val.strip().upper() in ("SHIFT", "JITTER")))
         if not offenders:
             return
 
         for tag in offenders:
+            effect = ("on Study Date that is the shift"
+                      if _owned_rule(self.phi_tags, tag)[0] == "SHIFT"
+                      else "the action stays REPLACE")
             get_logger().warning(
                 "config_tags[%r] is %r, which is read as the tag's display "
-                "name, not its action -- the action stays REPLACE. To %s "
+                "name, not its action -- %s. To %s "
                 "this tag, write {'action': %r, 'name': ...}.",
-                tag, self.phi_tags[tag], self.phi_tags[tag].strip().lower(),
+                tag, self.phi_tags[tag], effect,
+                self.phi_tags[tag].strip().lower(),
                 self.phi_tags[tag].strip().upper())
 
     @staticmethod
@@ -492,15 +580,34 @@ class PhiInspector:
         """
         findings = []
 
-        # 1. Direct Attributes
-        if (patient.patient_name and patient.patient_name != "Unknown"
-                and not _is_replacement_name(patient.patient_name)):
-            proposal = PhiRemediation(
-                action_type="REPLACE_TAG",
-                target_attr="patient_name",
-                new_value="ANONYMIZED",
-                original_value=patient.patient_name
-            )
+        # 1. Direct Attributes, under their own rules (#537). Until 0.9.8
+        # neither block looked a rule up, so every policy exported
+        # `ANONYMIZED` and the pseudonym.
+        name_action, name_value = _owned_rule(self.phi_tags, "0010,0010")
+        name_proposal = None
+        if name_action == "REMOVE":
+            if patient.patient_name is not None:
+                name_proposal = PhiRemediation(
+                    action_type="REMOVE_TAG", target_attr="patient_name",
+                    original_value=patient.patient_name)
+        elif name_action == "EMPTY":
+            if patient.patient_name:
+                name_proposal = PhiRemediation(
+                    action_type="REPLACE_TAG", target_attr="patient_name",
+                    new_value="", original_value=patient.patient_name)
+        elif name_action == "REPLACE":
+            if (patient.patient_name and patient.patient_name != "Unknown"
+                    and not _holds_owned_replacement(
+                        self.phi_tags, "0010,0010", patient.patient_name)):
+                name_proposal = PhiRemediation(
+                    action_type="REPLACE_TAG",
+                    target_attr="patient_name",
+                    new_value=name_value or "ANONYMIZED",
+                    original_value=patient.patient_name
+                )
+        # KEEP: no finding.
+        if name_proposal is not None:
+            proposal = name_proposal
             findings.append(PhiFinding(
                 entity_uid=patient.patient_id,
                 entity_type="Patient",
@@ -513,7 +620,13 @@ class PhiInspector:
                 remediation_proposal=proposal
             ))
 
-        if (patient.patient_id and patient.patient_id != "UNKNOWN"
+        # Patient ID is kept or pseudonymised and nothing else: every other
+        # rule is refused at construction (`validate_phi_policy`), because
+        # the ID keeps two patients apart.
+        id_action, _ = _owned_rule(self.phi_tags, "0010,0020")
+        assert id_action in ("KEEP", "REPLACE"), id_action
+        if (id_action == "REPLACE" and patient.patient_id
+                and patient.patient_id != "UNKNOWN"
                 and not _is_replacement_id(patient.patient_id)):
             # Through the constructors, not spelled here: the date
             # jitter canonicalizes an original id to this value (#517),
@@ -697,9 +810,17 @@ class PhiInspector:
             if isinstance(config_val, dict):
                 description = config_val.get("name", "Unknown Tag")
                 action_code = config_val.get("action", "REPLACE").upper()
+                replace_value = config_val.get("value") or "ANONYMIZED"
             else:
                 description = str(config_val)
                 action_code = "REPLACE"
+                replace_value = "ANONYMIZED"
+            # Study Date's REPLACE with no value is the shift, at any depth
+            # (#537): the owner's rule reader says so, and the validator
+            # lets it through only on that reading, since a DA cannot hold
+            # `ANONYMIZED`.
+            if tag == "0008,0020":
+                action_code = _owned_rule(self.phi_tags, tag)[0]
 
             # Check if tag exists in item items
             val = item.attributes.get(tag)
@@ -714,10 +835,10 @@ class PhiInspector:
             # IDENTIFIED, the manifest read false, and a second
             # `anonymize()` wrote a second value over the owner's.
             # Top-level only, because that is as far as the owner's write
-            # and the exporter's stamp reach. Not for REMOVE, which the
-            # remediation side exempts from the fold for the same reason:
-            # removing a copy writes no second value, and it is the
-            # policy's explicit request.
+            # and the exporter's stamp reach. Not for REMOVE, which asks
+            # for the copy to be absent whatever it holds: a present copy
+            # is raised, and folds into the owner's removal when the owner
+            # removed it (#537).
             if (action_code != "REMOVE" and not path
                     and self._holds_owners_replacement(tag, val, patient, study)):
                 continue
@@ -781,8 +902,8 @@ class PhiInspector:
                     # all. `val` cannot be `None` here -- the walk above
                     # skips a tag the item does not hold -- so this tests
                     # blank, not absent. `EMPTY` already tests `val != ""` and
-                    # `REPLACE` tests `val != "ANONYMIZED" and val !=
-                    # ""`, so three of the four value-writing actions
+                    # `REPLACE` tests `val != <the value it writes> and
+                    # val != ""`, so three of the four value-writing actions
                     # skip blank; and the arm's own reasoning is that an
                     # empty value is not retained PHI -- there is nothing
                     # to shift and nothing left behind, which is why it
@@ -830,10 +951,14 @@ class PhiInspector:
             elif action_code == "KEEP":
                 needs_remediation = False
             else:  # REPLACE (Default)
-                if val != "ANONYMIZED" and val != "":
+                # The rule's `value:`, or `ANONYMIZED` (#538): this wrote
+                # the constant whatever the rule said. "Already replaced"
+                # compares with the value this rule writes, so a copy left
+                # at `ANONYMIZED` by an earlier policy is rewritten.
+                if val != replace_value and val != "":
                     needs_remediation = True
                     remediation_action = "REPLACE_TAG"
-                    new_val = "ANONYMIZED"
+                    new_val = replace_value
 
             if needs_remediation:
                 proposal = PhiRemediation(
@@ -946,19 +1071,19 @@ class PhiInspector:
         return sorted(seq_removals, key=lambda f: len(f.entity_path),
                       reverse=True)
 
-    @staticmethod
-    def _holds_owners_replacement(tag: str, value: Any, patient: Patient,
+    def _holds_owners_replacement(self, tag: str, value: Any, patient: Patient,
                                   study: Study) -> bool:
         """Whether `value`, an instance's top-level copy of `tag`, is the
         replacement its owner already holds (#496).
 
         Agreement alone is not enough: before anything is anonymized every
         copy equals its owner's *original*, and that is PHI. The owner's
-        value has to be a replacement by the scan's own test --
-        `_is_replacement_name` / `_is_replacement_id`, the ones
-        `scan_patient` stops raising on -- or, for the date, a study date
-        this pipeline's shift produced (`_study_date_is_this_pipelines`).
-        No owner, no skip.
+        value has to be what the rule on the tag resolves to, by the owner
+        scans' own test -- `_holds_owned_replacement`, the one
+        `scan_patient` and `_scan_study` stop raising on (#537): the
+        name's `value:` or `ANONYMIZED`, an `ANON_` pseudonym, a study date
+        this pipeline's shift produced (`_study_date_is_this_pipelines`),
+        or a Study Date `value:`. No owner, no skip.
 
         The date arm read `study.date_shifted` until 0.9.6, and that flag
         cannot tell the shift's own output from a fresh original assigned
@@ -973,16 +1098,17 @@ class PhiInspector:
             # spelling of "a Study's date as a DA string" (#189) -- the
             # spelling the owner's write put on the copy.
             from .io_handlers import format_study_date
-            return (_study_date_is_this_pipelines(study)
-                    and value == format_study_date(study.study_date))
+            return (value == format_study_date(study.study_date)
+                    and _holds_owned_replacement(self.phi_tags, tag,
+                                                 study.study_date, study=study))
         if patient is None:
             return False
         if tag == "0010,0010":
             return (value == patient.patient_name
-                    and _is_replacement_name(value))
+                    and _holds_owned_replacement(self.phi_tags, tag, value))
         if tag == "0010,0020":
             return (value == patient.patient_id
-                    and _is_replacement_id(value))
+                    and _holds_owned_replacement(self.phi_tags, tag, value))
         # No StudyTime (0008,0030) arm, though `ENTITY_FIELD_TAGS` carries
         # one. The skip needs a value *known* to be a replacement, and a
         # time has no such test: no `date_shifted` flag, no `ANON_`
@@ -999,6 +1125,44 @@ class PhiInspector:
         findings = []
         uid = study.study_instance_uid
 
+        # The rule on Study Date governs the study's own date (#537); this
+        # read none until 0.9.8 and always proposed the shift.
+        action, value = _owned_rule(self.phi_tags, "0008,0020")
+        proposal = None
+        if action == "KEEP":
+            return findings
+        if action == "REMOVE":
+            if study.study_date is not None:
+                proposal = PhiRemediation(action_type="REMOVE_TAG",
+                                          target_attr="study_date",
+                                          original_value=study.study_date)
+        elif action == "EMPTY":
+            if study.study_date:
+                proposal = PhiRemediation(action_type="REPLACE_TAG",
+                                          target_attr="study_date", new_value="",
+                                          original_value=study.study_date)
+        elif action == "REPLACE":
+            # A study with no date, or an empty one, is not given one, as
+            # the instance arm's REPLACE skips `""`.
+            if study.study_date and not _holds_owned_replacement(
+                    self.phi_tags, "0008,0020", study.study_date, study=study):
+                proposal = PhiRemediation(action_type="REPLACE_TAG",
+                                          target_attr="study_date", new_value=value,
+                                          original_value=study.study_date)
+        if action != "SHIFT":
+            if proposal is not None:
+                findings.append(PhiFinding(
+                    entity_uid=uid, entity_type="Study", field_name="study_date",
+                    value=study.study_date,
+                    reason="Dates are Safe Harbor restricted", tag="0008,0020",
+                    patient_id=patient_id, entity=study,
+                    remediation_proposal=proposal))
+            return findings
+
+        # SHIFT. Below the other actions, not above them: a date shifted in
+        # an earlier pass and now under EMPTY or REPLACE must still be
+        # raised, and this early return would skip it (#537).
+        #
         # A date this pipeline's own shift produced is not raised again;
         # anything else under `study_date` is (#518).
         #

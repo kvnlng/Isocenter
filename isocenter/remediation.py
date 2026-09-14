@@ -76,11 +76,11 @@ class RemediationService:
         # Entities `_record_decline` named during the current pass;
         # reset by `apply_remediation` and read at its end.
         self._declined_entities: list = []
-        # The instance copies an entity-level write reached during the
-        # current pass, as `(id(instance), tag)`, and the foldable instance
-        # findings waiting on each copy. Reset by `apply_remediation`; read
-        # by `_folds_into_owner` and `_write_to_instances` (#496).
-        self._owner_copies: set = set()
+        # The copies an entity-level write reached this pass, `(id(instance),
+        # tag) -> removed`, and the foldable instance findings waiting on
+        # each (#496, #537: a REMOVE folds only where the owner removed).
+        # Reset by `apply_remediation`; read by `_folds_into_owner`.
+        self._owner_copies: dict = {}
         self._pending_folds: dict = {}
         self.jitter_config = date_jitter_config or {"min_days": -365, "max_days": -1}
 
@@ -101,7 +101,7 @@ class RemediationService:
         processed_entities = set()  # To avoid double-processing if multiple findings point to same entity/attr
         audit_buffer = []
         self._declined_entities, self._satisfied_keys = [], set()
-        self._owner_copies = set()
+        self._owner_copies = {}
         # Entity-level findings first, everything else after in its own
         # relative order (#496). The owner's write has to land before the
         # instance findings on the same copies are judged, or which value
@@ -423,12 +423,12 @@ class RemediationService:
             # 1. Generic DicomItem support
             if hasattr(entity, "attributes") and isinstance(entity.attributes, dict):
                 if proposal.target_attr in entity.attributes:
+                    self._record_what_is_left(entity, proposal.target_attr, None)
                     del entity.attributes[proposal.target_attr]
-                    # `attributes` is a plain dict, so deleting from it bumps
-                    # no revision -- unlike `set_attr`, which does. Without
-                    # this an already-saved instance reported no unsaved
-                    # changes after its PHI was stripped, the next save
-                    # skipped it, and the identifier stayed in the database.
+                    # `attributes` is a plain dict, so `del` bumps no revision,
+                    # unlike `set_attr`. Without this an already-saved instance
+                    # reported no unsaved changes after its PHI was stripped,
+                    # the next save skipped it, and the identifier stayed.
                     entity.mark_modified()
                     details = f"Removed Tag {proposal.target_attr} from {finding.entity_uid}"
                     action_type = "REMEDIATION_REMOVE"
@@ -632,6 +632,24 @@ class RemediationService:
             return None, reason
 
         value = proposal.new_value
+        if value != "":
+            # A value the tag's VR cannot hold declines (#560). The loader
+            # refuses such a rule, so this is reached by a finding built by
+            # hand: an OB given `ANONYMIZED` failed the export with
+            # `TypeError`, and a DA exported the literal. The dictionary VR
+            # of a standard tag only, never the recorded one: a private
+            # value its VR cannot hold is written as LO, and declining
+            # there would keep the identifier. A decline, `(None, reason)`,
+            # never `(None, None)`, which says the rule is already met.
+            from .config_manager import _dictionary_vr_refuses  # pylint: disable=import-outside-toplevel
+            refused_vr = _dictionary_vr_refuses(tag, value)
+            if refused_vr is not None:
+                reason = (f"{tag} is {refused_vr}, which cannot hold "
+                          f"{value!r}; the value is left unchanged (#560)")
+                self.logger.warning(
+                    f"Remediation declined for {self._log_subject(finding)}: "
+                    f"{reason}")
+                return None, reason
         if value == "":
             vr = (getattr(entity, "attribute_vrs", None) or {}).get(tag)
             if vr is None:
@@ -643,6 +661,7 @@ class RemediationService:
                     vr is None and isinstance(
                         (attributes or {}).get(tag), (bytes, bytearray))):
                 value = b""
+        self._record_what_is_left(entity, proposal.target_attr, value)
         entity.set_attr(proposal.target_attr, value)
         return (f"Remediated {finding.entity_uid} (Tag {proposal.target_attr}) "
                 f"-> {proposal.new_value}"), None
@@ -662,6 +681,24 @@ class RemediationService:
         if finding.entity_type == "Patient":
             return "a patient"
         return str(finding.entity_uid)
+
+    @staticmethod
+    def _record_what_is_left(item, tag: str, value) -> None:
+        """Record on `item` what the write about to run leaves at `tag`
+        (`value` None: a removal), for `lock_identities()` (#537).
+
+        Called as the statement **immediately before** each write, never
+        after: a background `save()` between the two would otherwise
+        store the value without its record, and the next lock would stash
+        a replacement as the original. `Instance` alone records; a nested
+        item has no slot, and the lock reads top-level values only, so a
+        write inside a sequence records nothing on the instance holding
+        it. Not a wrapper around `_apply_single_remediation`: that would
+        hand `audit_buffer` to a callee Pin A does not list
+        (`tests/test_frozen_surface.py`).
+        """
+        if hasattr(item, "record_remediation"):
+            item.record_remediation(tag, value)
 
     def _log_line(self, action_type: str, finding: PhiFinding, wrote) -> str:
         """The log file's line for an applied remediation.
@@ -1050,6 +1087,7 @@ class RemediationService:
                     if tag not in instance.attributes:
                         continue
                     status = instance.phi_status
+                    self._record_what_is_left(instance, tag, value)
                     if value is None:
                         del instance.attributes[tag]
                         instance.mark_modified()
@@ -1060,8 +1098,11 @@ class RemediationService:
                     # This copy now holds the owner's value; an
                     # instance finding on it later in the pass folds
                     # into this write rather than running (#496).
-                    self._owner_copies.add((id(instance), tag))
-                    folds += self._pending_folds.get((id(instance), tag), 0)
+                    # Whether the write removed it: a REMOVE folds only
+                    # into a removal, anything else only into a value.
+                    removed = value is None
+                    self._owner_copies[(id(instance), tag)] = removed
+                    folds += self._pending_folds.get((id(instance), tag, removed), 0)
                     written += 1
         return written, folds
 
@@ -1086,11 +1127,19 @@ class RemediationService:
         exactly this copy: the finding's own instance, at the top level,
         on the tag the owner wrote. A folded finding does not run.
 
+        A REMOVE folds only into a write that *removed* the copy, and a
+        REPLACE only into one that wrote a value (`_owner_copies` records
+        which). REMOVE was exempt until #537 made an owner's REMOVE
+        reachable: the owner's removal took the copy away, the instance's
+        own REMOVE then matched nothing and filed `REMEDIATION_DECLINED`,
+        and a correct outcome graded REVIEW_REQUIRED. An owner that wrote
+        a value does not absorb an instance REMOVE, which still runs and
+        removes the copy; one rule feeds both levels on every scanned path,
+        so that pairing only arises from a hand-built list.
+
         Three things never fold, each measured before this was written:
 
-        - **REMOVE.** It writes no second value, it is the policy's
-          explicit request, and it was already order-independent: it runs
-          after the owner's write, and the copy ends absent either way.
+        - **A mismatch of the two** above.
         - **A nested copy.** The owner's write and the exporter's stamp
           reach the dataset root only; a copy inside a sequence is the
           instance scan's to judge. There is no `entity_path` check for
@@ -1106,40 +1155,44 @@ class RemediationService:
           row already grades such a run REVIEW_REQUIRED.
         """
         proposal = finding.remediation_proposal
-        if proposal.action_type == "REMOVE_TAG":
-            return False
         # No "is this an instance?" check either, for the same reason as
         # the nested case: a Patient, a Study or a None entity is never in
         # `_owner_copies`, which holds only the instances the owner wrote
-        # -- so the lookup alone decides.
-        return (id(finding.entity), proposal.target_attr) in self._owner_copies
+        # -- so the lookup alone decides. `.get` is None for a copy no
+        # owner reached, and `None is True/False` is False.
+        removed = self._owner_copies.get((id(finding.entity), proposal.target_attr))
+        return removed is (proposal.action_type == "REMOVE_TAG")
 
     @staticmethod
     def _foldable_instance_findings(findings: list) -> dict:
         """The instance findings that fold if an owner's write reaches
-        their copy, counted per `(id(instance), tag)` (#496).
+        their copy, counted per `(id(instance), tag, removed)` (#496).
 
         Counted before the pass so an owner's audit row can name its folds
         when it is appended: the row is complete from the start, and no
         row is rewritten after the fact, which Pin A in
         `tests/test_frozen_surface.py` refuses. Distinct dedup keys only,
-        because a duplicate is skipped, not folded twice. REMOVE never
-        folds (see `_folds_into_owner`), so it is never counted. Only a
-        copy an owner's write reaches is ever asked for its count, so a
-        finding counted here whose copy no owner reaches costs nothing.
+        because a duplicate is skipped, not folded twice. `removed` is
+        whether the finding is a REMOVE, which folds only into an owner's
+        removal (see `_folds_into_owner`, #537): keyed on it, an owner that
+        removed counts only the REMOVEs waiting on its copies, and one that
+        wrote a value only the rest. Only a copy an owner's write reaches
+        is ever asked for its count, so a finding counted here whose copy
+        no owner reaches costs nothing.
         """
         pending = {}
         seen = set()
         for finding in findings:
             proposal = finding.remediation_proposal
-            if (not proposal or proposal.action_type == "REMOVE_TAG"
-                    or not hasattr(finding.entity, "set_attr")):
+            if not proposal or not hasattr(finding.entity, "set_attr"):
                 continue
-            key = (finding.entity_uid, finding.entity_path, proposal.target_attr)
+            removed = proposal.action_type == "REMOVE_TAG"
+            key = (finding.entity_uid, finding.entity_path, proposal.target_attr,
+                   removed)
             if key in seen:
                 continue
             seen.add(key)
-            copy = (id(finding.entity), proposal.target_attr)
+            copy = (id(finding.entity), proposal.target_attr, removed)
             pending[copy] = pending.get(copy, 0) + 1
         return pending
 
@@ -1213,108 +1266,116 @@ class RemediationService:
         offset = (val % span) + min_days
         return offset
 
+    #: The shapes `_shift_date_string` shifts (#559), matched whole and
+    #: ASCII-only. A DA, or a DT at second precision (optionally with a
+    #: fraction) whose first eight digits are its date; the non-standard
+    #: dotted DT this parser always accepted; and the ISO date and
+    #: date-time. Hour- and minute-precision DT are deliberately absent:
+    #: see the docstring's "The accept set only narrows".
+    _DA_OR_DT = (r"([0-9]{4})([0-9]{2})([0-9]{2})"
+                 r"(?:([0-9]{2})([0-9]{2})([0-9]{2})(?:\.[0-9]{1,6})?)?")
+    _DOTTED_DT = (r"([0-9]{4})([0-9]{2})([0-9]{2})"
+                  r"\.([0-9]{2})([0-9]{2})([0-9]{2})(?:\.[0-9]+)?")
+    _ISO = (r"([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})"
+            r"(?:([ T])([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}))?")
+
     @staticmethod
     def _shift_date_string(date_val, days: int) -> Optional[str]:
         """
-        Shifts a date by `days`.
+        Shifts a date by `days`, or returns None when `date_val` is not a
+        date this can shift -- which the `SHIFT_DATE` arm records as a
+        decline, and `_date_shift_declines` reads as "would decline".
 
-        Handles messy/varying input formats (DA, DT, ISO).
-        Preserves original format where possible.
+        A `date` or `datetime` is shifted as itself. A string is read by
+        shape, and only these shapes shift:
+
+        - `YYYYMMDD` (DA), and a DT that begins with one at second
+          precision -- `...HHMMSS`, `...HHMMSS.F` to six fraction digits.
+          The date moves; everything after it is re-attached exactly as
+          written.
+        - The dotted DT `YYYYMMDD.HHMMSS[.F...]` this parser has always
+          accepted, the same way.
+        - ISO `YYYY-MM-DD`, optionally with ` HH:MM:SS` or `THH:MM:SS`,
+          rendered zero-padded as before.
+
+        The time part must be a clock time (hour < 24, minute and second
+        < 60), and a shift that leaves years 1-9999 declines rather than
+        raising `OverflowError` into the pass.
+
+        **Why not `strptime` (#559).** This was a loop over strptime
+        formats, and `%Y%m%d` is not length-strict: it reads `072731`, a
+        Study Time, as the year 0727, so a JITTER rule on a TM wrote
+        `07270219`, a DA-shaped value, into the TM. A six-digit date
+        `230515` became `23041226`; an hour-precision DateTime
+        `2023051510` matched `%Y%m%d%H%M%S` as `2023 05 1 5 10` and came
+        back `20230421050100`, date and time both wrong. Each branch also
+        re-rendered with `strftime`, which turned a fraction of `.1` into
+        `.100000`, and a year below 1000 into three digits on Linux.
+
+        **The accept set only narrows.** Every value this shifted before
+        and shifted correctly is still shifted, to the same result but for
+        the two fraction spellings above; only the fabricating shapes
+        (TM-shaped, six- and seven-digit dates, a dotted time that is not
+        six digits, and hour- and minute-precision DT) now decline.
+        Widening it is not safe: `_date_shift_declines` answers "would
+        this shift" for the legacy scan branch, which skips what would
+        shift as already shifted, so a wider parser silently skips PHI on
+        a pre-0.9.6 store. That is why a 10- or 12-digit DT declines
+        rather than shifting correctly: the old loop declined
+        `2023060510`, a legacy instance can still hold it unshifted, and
+        shifting it here graded that instance CLEARED with the value
+        retained (review of #574; the misread ones, `2023051510`, it
+        accepted, and they now decline visibly instead).
 
         Args:
             date_val (Union[str, date, datetime]): The original date value.
             days (int): Delta in days.
 
         Returns:
-            Optional[str]: The shifted date string (or object), same type as input.
+            Optional[str]: The shifted value (a `date`/`datetime` for one),
+                or None when the value is declined.
         """
-        # Handles date and datetime objects
+        # Local: the patterns are wanted on this path only, and `re`
+        # caches their compiled forms.
+        import re  # pylint: disable=import-outside-toplevel
+
         if hasattr(date_val, 'strftime'):
             return date_val + timedelta(days=days)
-
-        # Try parsing with multiple supported formats
-        # We process them in order of specificity
-        formats = [
-            "%Y%m%d",                # DA: 20230515
-            "%Y-%m-%d",              # ISO DA: 2024-05-11
-            "%Y%m%d%H%M%S",          # DT: 20230515104822
-            "%Y%m%d.%H%M%S",         # DT: 20230515.104822
-            "%Y%m%d%H%M%S.%f",       # DT: 20230515104822.123456
-            "%Y%m%d.%H%M%S.%f",      # DT: 20230515.104822.123456
-            "%Y-%m-%d %H:%M:%S",     # ISO DT: 2024-05-11 10:48:22
-            "%Y-%m-%dT%H:%M:%S"      # ISO T DT: 2024-05-11T10:48:22
-        ]
-
-        # Handle DICOM's potential for variable millisecond precision if needed
-        # But for now let's try standard formats.
-        # If the input contains fractional seconds that don't match %f (6 digits),
-        # we might need to pad/truncate, but let's assume standard behavior first
-        # based on the user provided example.
-        # Pro-tip: 20230515.104822.677 is 3 digits. %f expects zero-padded to 6 usually in strict parsing,
-        # but let's see. If it fails, we can add a pre-processing step.
-
-        # Actually, for robust DICOM DT handling with generic python strptime,
-        # we might need to handle the .FFFFFF part manually if it varies.
-        # Let's try to match exactly what we can.
-
-        date_str = str(date_val).strip()
-        if not date_str:
+        if date_val is None:
             return None
+        text = str(date_val).strip()
 
-        for fmt in formats:
+        def moved(year, month, day):
             try:
-                dt = datetime.strptime(date_str, fmt)
-                new_dt = dt + timedelta(days=days)
-                return new_dt.strftime(fmt)
-            except ValueError:
+                return datetime(int(year), int(month), int(day)) + timedelta(days=days)
+            except (ValueError, OverflowError):
+                return None
+
+        def is_clock_time(hour, minute, second):
+            return all(part is None or int(part) < limit
+                       for part, limit in ((hour, 24), (minute, 60), (second, 60)))
+
+        for pattern in (RemediationService._DA_OR_DT, RemediationService._DOTTED_DT):
+            match = re.fullmatch(pattern, text)
+            if match is None:
                 continue
+            shifted = moved(*match.group(1, 2, 3))
+            if shifted is None or not is_clock_time(*match.group(4, 5, 6)):
+                return None
+            return (f"{shifted.year:04d}{shifted.month:02d}{shifted.day:02d}"
+                    f"{text[8:]}")
 
-        # If we are here, we might have odd millisecond precision (e.g. .677)
-        # Attempt to handle flexible fractional seconds if a dot is present towards the end
-        if '.' in date_str:
-            # Try to separate main part and fractional part
-            # This is a basic fallback for proper DICOM DT like 20230515.104822.677
-            try:
-                # Naive check for the "dots" format
-                parts = date_str.split('.')
-                if len(parts) >= 3:  # YYYYMMDD.HHMMSS.mmmmmm
-                    # Re-assemble without fraction to shift, then append fraction?
-                    # No, shift might cross day boundary, so 'time' part doesn't change,
-                    # but 'date' part changes.
-                    # But if we cross DST? DICOM doesn't handle DST explicitly in DT usually, it's just local time.
-                    # Actually, simplest is:
-                    # 1. Parse just the date part (first 8 chars)
-                    # 2. Shift it
-                    # 3. Re-attach the rest?
-                    # That preserves time exactly, which is what 'SHIFT_DATE' usually intends (days delta).
-                    # Let's limit this special handling to when we know it's a date+time string
-                    # BOTH halves are load-bearing, and the length check
-                    # is the one that looks redundant and is not (#132).
-                    # `strptime` with `%Y%m%d` is NOT length-strict:
-                    # `"2023051"` parses as 2023-05-01 and `"230515"` as
-                    # 2305-01-05, raising nothing. So an all-digit
-                    # `parts[0]` of the wrong length reaches `strptime`
-                    # happily, and without `len(...) == 8` this branch
-                    # would shift a date the caller never wrote and
-                    # re-attach `date_str[8:]`, which is misaligned for
-                    # any length but 8. Measured with `or` substituted:
-                    # `"2023051.104822.1234567"` returns
-                    # `"20230511104822.1234567"` -- a fabricated value
-                    # that still looks like a DT -- where the real code
-                    # returns None and the caller declines to remediate.
-                    # Pinned by `test_remediation_dates.py::
-                    # test_a_malformed_date_part_is_declined_rather_than
-                    # _shifted_into_a_fabricated_one`.
-                    if len(parts[0]) == 8 and parts[0].isdigit():
-                        base_date = parts[0]
-                        rest = date_str[8:]  # everything after YYYYMMDD
-                        dt = datetime.strptime(base_date, "%Y%m%d")
-                        new_dt = dt + timedelta(days=days)
-                        return new_dt.strftime("%Y%m%d") + rest
-            except ValueError:
-                pass
-
-        return None
+        match = re.fullmatch(RemediationService._ISO, text)
+        if match is None:
+            return None
+        shifted = moved(*match.group(1, 2, 3))
+        if shifted is None or not is_clock_time(*match.group(5, 6, 7)):
+            return None
+        rendered = f"{shifted.year:04d}-{shifted.month:02d}-{shifted.day:02d}"
+        if match.group(4):
+            hour, minute, second = (int(part) for part in match.group(5, 6, 7))
+            rendered += f"{match.group(4)}{hour:02d}:{minute:02d}:{second:02d}"
+        return rendered
 
     def add_global_deid_tags(self, entity):
         """
@@ -1408,7 +1469,11 @@ def _date_shift_declines(value) -> bool:
     The answer is the arm's own parser rather than a second one, so the
     scan re-raises exactly what the arm declines: a DA range, a
     multi-valued DA, and a DT with a UTC offset are declined here the same
-    as `'notadate'`. Blank is False because the arm skips a blank value
+    as `'notadate'`. Since #559 the parser is length-strict, so a
+    TM-shaped value (`072731`) or a six-digit date, which it used to
+    misread as a date, now answers True here too: the legacy branch
+    re-raises it where it used to skip it, which is right, because the
+    arm never could shift it. Blank is False because the arm skips a blank value
     without a decline -- nothing is left behind -- and answering True
     would make this predicate disagree with the arm it models.
 

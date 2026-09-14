@@ -21,8 +21,11 @@ def test_load_basic_profile(tmp_path):
 
     # 3. Verify Basic Profile Rules
     tags = config["phi_tags"]
-    assert tags["0010,0010"]["action"] == "REMOVE" # Patient Name
-    assert tags["0008,0020"]["action"] == "REMOVE" # Study Date
+    # The two rows #537 departs from the table's Z with, and Study Date,
+    # which follows it.
+    assert tags["0010,0010"]["action"] == "REPLACE" # Patient Name
+    assert tags["0010,0020"]["action"] == "REPLACE" # Patient ID
+    assert tags["0008,0020"]["action"] == "EMPTY" # Study Date
 
 def test_profile_override(tmp_path):
     # 1. Create config using "basic" but override Patient Name to KEEP
@@ -46,7 +49,7 @@ def test_profile_override(tmp_path):
     assert tags["0008,0090"]["action"] == "EMPTY"
 
     # Verify other profile tags (not overridden) still exist
-    assert tags["0010,0020"]["action"] == "REMOVE" # Patient ID
+    assert tags["0010,0020"]["action"] == "REPLACE" # Patient ID (#537)
 
 def test_legacy_loader_integration(tmp_path):
     # Verify that ConfigLoader.load_unified_config returns tuple correctly wrapped
@@ -60,7 +63,7 @@ def test_legacy_loader_integration(tmp_path):
     phi_tags, _, _, _, _ = ConfigLoader.load_unified_config(str(config_path))
 
     assert isinstance(phi_tags, dict)
-    assert phi_tags["0010,0010"]["action"] == "REMOVE"
+    assert phi_tags["0010,0010"]["action"] == "REPLACE"  # #537
 
 def test_unknown_profile(tmp_path):
     config_path = tmp_path / "config_unknown.yaml"

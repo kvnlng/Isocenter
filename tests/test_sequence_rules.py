@@ -450,7 +450,9 @@ def test_a_nested_emptied_sequence_reaches_the_store_after_a_reload(tmp_path):
         ds.update(_nested_observer_dataset())
     _ct_small_with(str(tmp_path / "in"), add)
     db = str(tmp_path / "s.db")
-    owners = {"0010,0010": _rule("REMOVE"), "0010,0020": _rule("REMOVE"),
+    # Patient ID is REPLACE: a Patient ID rule may only keep or
+    # pseudonymise it (#537).
+    owners = {"0010,0010": _rule("REMOVE"), "0010,0020": _rule("REPLACE"),
               "0008,0020": _rule("REMOVE")}
 
     with Session(db) as session:
