@@ -3189,13 +3189,13 @@ hydration and every re-ingest rewrite rows that did not change
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>DicomSequence</code></td>            <td>
+            <td>
                   <code><a class="autorefs autorefs-internal" title="DicomSequence
 
 
@@ -3461,13 +3461,13 @@ absent sequence changes nothing the store must hold.</p>
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>bool</code></td>            <td>
+            <td>
                   <code><span title="bool">bool</span></code>
             </td>
             <td>
@@ -4280,7 +4280,7 @@ Frozen=True allows hashing, enabling unique set generation.</p>
 <a id="__codelineno-0-569" name="__codelineno-0-569"></a>
 <a id="__codelineno-0-570" name="__codelineno-0-570"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-571" name="__codelineno-0-571"></a><span class="sd">            Optional[Equipment]: the equipment, or `None` when neither</span>
-<a id="__codelineno-0-572" name="__codelineno-0-572"></a><span class="sd">            identifying field is present.</span>
+<a id="__codelineno-0-572" name="__codelineno-0-572"></a><span class="sd">                identifying field is present.</span>
 <a id="__codelineno-0-573" name="__codelineno-0-573"></a><span class="sd">        """</span>
 <a id="__codelineno-0-574" name="__codelineno-0-574"></a>        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">manufacturer</span> <span class="ow">or</span> <span class="n">model_name</span><span class="p">):</span>
 <a id="__codelineno-0-575" name="__codelineno-0-575"></a>            <span class="k">return</span> <span class="kc">None</span>
@@ -4368,22 +4368,8 @@ filed separately; it is now one line in one place.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional[Equipment]: the equipment, or <code>None</code> when neither</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Optional">Optional</span>[<a class="autorefs autorefs-internal" title="Equipment
-
-
-  
-      dataclass
-   (isocenter.entities.Equipment)" href="#isocenter.entities.Equipment">Equipment</a>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>identifying field is present.</p>
+                <p>the equipment, or <code>None</code> when neither
+identifying field is present.</p>
               </div>
             </td>
           </tr>
@@ -4477,7 +4463,7 @@ filed separately; it is now one line in one place.</p>
 <a id="__codelineno-0-569" name="__codelineno-0-569"></a>
 <a id="__codelineno-0-570" name="__codelineno-0-570"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-571" name="__codelineno-0-571"></a><span class="sd">        Optional[Equipment]: the equipment, or `None` when neither</span>
-<a id="__codelineno-0-572" name="__codelineno-0-572"></a><span class="sd">        identifying field is present.</span>
+<a id="__codelineno-0-572" name="__codelineno-0-572"></a><span class="sd">            identifying field is present.</span>
 <a id="__codelineno-0-573" name="__codelineno-0-573"></a><span class="sd">    """</span>
 <a id="__codelineno-0-574" name="__codelineno-0-574"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">manufacturer</span> <span class="ow">or</span> <span class="n">model_name</span><span class="p">):</span>
 <a id="__codelineno-0-575" name="__codelineno-0-575"></a>        <span class="k">return</span> <span class="kc">None</span>
@@ -6763,8 +6749,8 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-1571" name="__codelineno-0-1571"></a>
 <a id="__codelineno-0-1572" name="__codelineno-0-1572"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-1573" name="__codelineno-0-1573"></a><span class="sd">            Optional[np.ndarray]: The pixel data as a numpy array, or None</span>
-<a id="__codelineno-0-1574" name="__codelineno-0-1574"></a><span class="sd">            when the instance genuinely carries no pixel element. "Could</span>
-<a id="__codelineno-0-1575" name="__codelineno-0-1575"></a><span class="sd">            not decode" is *not* None -- it raises (#226).</span>
+<a id="__codelineno-0-1574" name="__codelineno-0-1574"></a><span class="sd">                when the instance genuinely carries no pixel element. "Could</span>
+<a id="__codelineno-0-1575" name="__codelineno-0-1575"></a><span class="sd">                not decode" is *not* None -- it raises (#226).</span>
 <a id="__codelineno-0-1576" name="__codelineno-0-1576"></a>
 <a id="__codelineno-0-1577" name="__codelineno-0-1577"></a><span class="sd">        A read whose decoder returns RGB from a YBR-labelled file says so.</span>
 <a id="__codelineno-0-1578" name="__codelineno-0-1578"></a><span class="sd">        An 8-bit `YBR_FULL` JPEG-LS file read through the imagecodecs</span>
@@ -7102,7 +7088,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-1910" name="__codelineno-0-1910"></a>
 <a id="__codelineno-0-1911" name="__codelineno-0-1911"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-1912" name="__codelineno-0-1912"></a><span class="sd">            bool: True if unloaded (or already absent), False if unsafe --</span>
-<a id="__codelineno-0-1913" name="__codelineno-0-1913"></a><span class="sd">            i.e. the samples are in memory only and nothing could reload them.</span>
+<a id="__codelineno-0-1913" name="__codelineno-0-1913"></a><span class="sd">                i.e. the samples are in memory only and nothing could reload them.</span>
 <a id="__codelineno-0-1914" name="__codelineno-0-1914"></a><span class="sd">        """</span>
 <a id="__codelineno-0-1915" name="__codelineno-0-1915"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">waveform_array</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-1916" name="__codelineno-0-1916"></a>            <span class="k">return</span> <span class="kc">True</span>
@@ -7123,7 +7109,7 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-1931" name="__codelineno-0-1931"></a>
 <a id="__codelineno-0-1932" name="__codelineno-0-1932"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-1933" name="__codelineno-0-1933"></a><span class="sd">            Optional[bytes]: Raw sample bytes, or None when this instance</span>
-<a id="__codelineno-0-1934" name="__codelineno-0-1934"></a><span class="sd">            has no waveform or its samples are not backed by the sidecar.</span>
+<a id="__codelineno-0-1934" name="__codelineno-0-1934"></a><span class="sd">                has no waveform or its samples are not backed by the sidecar.</span>
 <a id="__codelineno-0-1935" name="__codelineno-0-1935"></a><span class="sd">        """</span>
 <a id="__codelineno-0-1936" name="__codelineno-0-1936"></a>        <span class="n">loader</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_waveform_loader</span>
 <a id="__codelineno-0-1937" name="__codelineno-0-1937"></a>        <span class="k">if</span> <span class="n">loader</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">loader</span><span class="p">,</span> <span class="s2">"read_raw"</span><span class="p">):</span>
@@ -7135,8 +7121,8 @@ Manages lazy loading of pixel data.</p>
 <a id="__codelineno-0-1943" name="__codelineno-0-1943"></a>
 <a id="__codelineno-0-1944" name="__codelineno-0-1944"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-1945" name="__codelineno-0-1945"></a><span class="sd">            Optional[np.ndarray]: int16 array of shape</span>
-<a id="__codelineno-0-1946" name="__codelineno-0-1946"></a><span class="sd">            (num_samples, num_channels), or None if this instance has no</span>
-<a id="__codelineno-0-1947" name="__codelineno-0-1947"></a><span class="sd">            waveform.</span>
+<a id="__codelineno-0-1946" name="__codelineno-0-1946"></a><span class="sd">                (num_samples, num_channels), or None if this instance has no</span>
+<a id="__codelineno-0-1947" name="__codelineno-0-1947"></a><span class="sd">                waveform.</span>
 <a id="__codelineno-0-1948" name="__codelineno-0-1948"></a><span class="sd">        """</span>
 <a id="__codelineno-0-1949" name="__codelineno-0-1949"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">waveform_array</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-1950" name="__codelineno-0-1950"></a>            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">waveform_array</span>
@@ -7731,13 +7717,13 @@ answer different questions -- "free this if it is safe" and
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>bool</code></td>            <td>
+            <td>
                   <code><span title="bool">bool</span></code>
             </td>
             <td>
@@ -7887,27 +7873,9 @@ is nowhere to reload from at all.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional[np.ndarray]: The pixel data as a numpy array, or None</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="numpy.ndarray">ndarray</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>when the instance genuinely carries no pixel element. "Could</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="numpy.ndarray">ndarray</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>not decode" is <em>not</em> None -- it raises (#226).</p>
+                <p>The pixel data as a numpy array, or None
+when the instance genuinely carries no pixel element. "Could
+not decode" is <em>not</em> None -- it raises (#226).</p>
               </div>
             </td>
           </tr>
@@ -8327,8 +8295,8 @@ gives the same refusal.</p>
 <a id="__codelineno-0-1571" name="__codelineno-0-1571"></a>
 <a id="__codelineno-0-1572" name="__codelineno-0-1572"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-1573" name="__codelineno-0-1573"></a><span class="sd">        Optional[np.ndarray]: The pixel data as a numpy array, or None</span>
-<a id="__codelineno-0-1574" name="__codelineno-0-1574"></a><span class="sd">        when the instance genuinely carries no pixel element. "Could</span>
-<a id="__codelineno-0-1575" name="__codelineno-0-1575"></a><span class="sd">        not decode" is *not* None -- it raises (#226).</span>
+<a id="__codelineno-0-1574" name="__codelineno-0-1574"></a><span class="sd">            when the instance genuinely carries no pixel element. "Could</span>
+<a id="__codelineno-0-1575" name="__codelineno-0-1575"></a><span class="sd">            not decode" is *not* None -- it raises (#226).</span>
 <a id="__codelineno-0-1576" name="__codelineno-0-1576"></a>
 <a id="__codelineno-0-1577" name="__codelineno-0-1577"></a><span class="sd">    A read whose decoder returns RGB from a YBR-labelled file says so.</span>
 <a id="__codelineno-0-1578" name="__codelineno-0-1578"></a><span class="sd">    An 8-bit `YBR_FULL` JPEG-LS file read through the imagecodecs</span>
@@ -8691,17 +8659,8 @@ an instance owns.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional[bytes]: Raw sample bytes, or None when this instance</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="bytes">bytes</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>has no waveform or its samples are not backed by the sidecar.</p>
+                <p>Raw sample bytes, or None when this instance
+has no waveform or its samples are not backed by the sidecar.</p>
               </div>
             </td>
           </tr>
@@ -8738,7 +8697,7 @@ an instance owns.</p>
 <a id="__codelineno-0-1931" name="__codelineno-0-1931"></a>
 <a id="__codelineno-0-1932" name="__codelineno-0-1932"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-1933" name="__codelineno-0-1933"></a><span class="sd">        Optional[bytes]: Raw sample bytes, or None when this instance</span>
-<a id="__codelineno-0-1934" name="__codelineno-0-1934"></a><span class="sd">        has no waveform or its samples are not backed by the sidecar.</span>
+<a id="__codelineno-0-1934" name="__codelineno-0-1934"></a><span class="sd">            has no waveform or its samples are not backed by the sidecar.</span>
 <a id="__codelineno-0-1935" name="__codelineno-0-1935"></a><span class="sd">    """</span>
 <a id="__codelineno-0-1936" name="__codelineno-0-1936"></a>    <span class="n">loader</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_waveform_loader</span>
 <a id="__codelineno-0-1937" name="__codelineno-0-1937"></a>    <span class="k">if</span> <span class="n">loader</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">loader</span><span class="p">,</span> <span class="s2">"read_raw"</span><span class="p">):</span>
@@ -8779,27 +8738,9 @@ an instance owns.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional[np.ndarray]: int16 array of shape</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="numpy.ndarray">ndarray</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>(num_samples, num_channels), or None if this instance has no</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Optional">Optional</span>[<span title="numpy.ndarray">ndarray</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>waveform.</p>
+                <p>int16 array of shape
+(num_samples, num_channels), or None if this instance has no
+waveform.</p>
               </div>
             </td>
           </tr>
@@ -8829,8 +8770,8 @@ an instance owns.</p>
 <a id="__codelineno-0-1943" name="__codelineno-0-1943"></a>
 <a id="__codelineno-0-1944" name="__codelineno-0-1944"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-1945" name="__codelineno-0-1945"></a><span class="sd">        Optional[np.ndarray]: int16 array of shape</span>
-<a id="__codelineno-0-1946" name="__codelineno-0-1946"></a><span class="sd">        (num_samples, num_channels), or None if this instance has no</span>
-<a id="__codelineno-0-1947" name="__codelineno-0-1947"></a><span class="sd">        waveform.</span>
+<a id="__codelineno-0-1946" name="__codelineno-0-1946"></a><span class="sd">            (num_samples, num_channels), or None if this instance has no</span>
+<a id="__codelineno-0-1947" name="__codelineno-0-1947"></a><span class="sd">            waveform.</span>
 <a id="__codelineno-0-1948" name="__codelineno-0-1948"></a><span class="sd">    """</span>
 <a id="__codelineno-0-1949" name="__codelineno-0-1949"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">waveform_array</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-1950" name="__codelineno-0-1950"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">waveform_array</span>
@@ -9936,13 +9877,13 @@ intent rather than the accident.</p>
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>bool</code></td>            <td>
+            <td>
                   <code><span title="bool">bool</span></code>
             </td>
             <td>
@@ -10151,28 +10092,19 @@ exists to prevent.</p>
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>bool</code></td>            <td>
+            <td>
                   <code><span title="bool">bool</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>True if unloaded (or already absent), False if unsafe --</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-<td></td>            <td>
-                  <code><span title="bool">bool</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>i.e. the samples are in memory only and nothing could reload them.</p>
+                <p>True if unloaded (or already absent), False if unsafe --
+i.e. the samples are in memory only and nothing could reload them.</p>
               </div>
             </td>
           </tr>
@@ -10218,7 +10150,7 @@ exists to prevent.</p>
 <a id="__codelineno-0-1910" name="__codelineno-0-1910"></a>
 <a id="__codelineno-0-1911" name="__codelineno-0-1911"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-1912" name="__codelineno-0-1912"></a><span class="sd">        bool: True if unloaded (or already absent), False if unsafe --</span>
-<a id="__codelineno-0-1913" name="__codelineno-0-1913"></a><span class="sd">        i.e. the samples are in memory only and nothing could reload them.</span>
+<a id="__codelineno-0-1913" name="__codelineno-0-1913"></a><span class="sd">            i.e. the samples are in memory only and nothing could reload them.</span>
 <a id="__codelineno-0-1914" name="__codelineno-0-1914"></a><span class="sd">    """</span>
 <a id="__codelineno-0-1915" name="__codelineno-0-1915"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">waveform_array</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
 <a id="__codelineno-0-1916" name="__codelineno-0-1916"></a>        <span class="k">return</span> <span class="kc">True</span>
@@ -11586,10 +11518,10 @@ contained it.</p>
 <a id="__codelineno-0-211" name="__codelineno-0-211"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">phi_status</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s1">'PhiStatus'</span><span class="p">:</span>
 <a id="__codelineno-0-212" name="__codelineno-0-212"></a><span class="w">        </span><span class="sd">"""What the last scan concluded, if it still applies.</span>
 <a id="__codelineno-0-213" name="__codelineno-0-213"></a>
-<a id="__codelineno-0-214" name="__codelineno-0-214"></a><span class="sd">        Returns UNSCANNED when the entity has changed since the scan ran.</span>
-<a id="__codelineno-0-215" name="__codelineno-0-215"></a><span class="sd">        The check is structural rather than a convention someone has to</span>
-<a id="__codelineno-0-216" name="__codelineno-0-216"></a><span class="sd">        remember: there is no way to read a status that describes content</span>
-<a id="__codelineno-0-217" name="__codelineno-0-217"></a><span class="sd">        the entity no longer holds.</span>
+<a id="__codelineno-0-214" name="__codelineno-0-214"></a><span class="sd">        UNSCANNED once the entity has changed since the scan ran -- structural,</span>
+<a id="__codelineno-0-215" name="__codelineno-0-215"></a><span class="sd">        not a convention: no status can describe content the entity no longer</span>
+<a id="__codelineno-0-216" name="__codelineno-0-216"></a><span class="sd">        holds. Session-scoped for a nested `DicomItem`: a reopened store hydrates</span>
+<a id="__codelineno-0-217" name="__codelineno-0-217"></a><span class="sd">        items UNSCANNED; the owning instance's status and owner survive (#564).</span>
 <a id="__codelineno-0-218" name="__codelineno-0-218"></a><span class="sd">        """</span>
 <a id="__codelineno-0-219" name="__codelineno-0-219"></a>        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_phi_status</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_phi_status_revision</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_revision</span><span class="p">:</span>
 <a id="__codelineno-0-220" name="__codelineno-0-220"></a>            <span class="k">return</span> <span class="n">PhiStatus</span><span class="o">.</span><span class="n">UNSCANNED</span>
@@ -11689,10 +11621,10 @@ contained it.</p>
     <div class="doc doc-contents ">
 
         <p>What the last scan concluded, if it still applies.</p>
-<p>Returns UNSCANNED when the entity has changed since the scan ran.
-The check is structural rather than a convention someone has to
-remember: there is no way to read a status that describes content
-the entity no longer holds.</p>
+<p>UNSCANNED once the entity has changed since the scan ran -- structural,
+not a convention: no status can describe content the entity no longer
+holds. Session-scoped for a nested <code>DicomItem</code>: a reopened store hydrates
+items UNSCANNED; the owning instance's status and owner survive (#564).</p>
 
     </div>
 

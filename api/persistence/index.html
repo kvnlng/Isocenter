@@ -8043,8 +8043,8 @@ It also handles sidecar storage for pixel data to keep the database lightweight.
 <a id="__codelineno-0-1824" name="__codelineno-0-1824"></a>
 <a id="__codelineno-0-1825" name="__codelineno-0-1825"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-1826" name="__codelineno-0-1826"></a><span class="sd">            List[tuple]: (sop_instance_uid, file_path, details), the</span>
-<a id="__codelineno-0-1827" name="__codelineno-0-1827"></a><span class="sd">            same shape as `check_unsafe_attributes` so `generate_report`</span>
-<a id="__codelineno-0-1828" name="__codelineno-0-1828"></a><span class="sd">            files both through one channel.</span>
+<a id="__codelineno-0-1827" name="__codelineno-0-1827"></a><span class="sd">                same shape as `check_unsafe_attributes` so `generate_report`</span>
+<a id="__codelineno-0-1828" name="__codelineno-0-1828"></a><span class="sd">                files both through one channel.</span>
 <a id="__codelineno-0-1829" name="__codelineno-0-1829"></a><span class="sd">        """</span>
 <a id="__codelineno-0-1830" name="__codelineno-0-1830"></a>        <span class="n">flagged</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-1831" name="__codelineno-0-1831"></a>        <span class="k">try</span><span class="p">:</span>
@@ -9347,9 +9347,9 @@ It also handles sidecar storage for pixel data to keep the database lightweight.
 <a id="__codelineno-0-3128" name="__codelineno-0-3128"></a>
 <a id="__codelineno-0-3129" name="__codelineno-0-3129"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-3130" name="__codelineno-0-3130"></a><span class="sd">            Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not</span>
-<a id="__codelineno-0-3131" name="__codelineno-0-3131"></a><span class="sd">            tags -- a VM=3 value is three rows), and per-instance</span>
-<a id="__codelineno-0-3132" name="__codelineno-0-3132"></a><span class="sd">            `{sop_instance_uid: [tags]}` so the caller can heal the live</span>
-<a id="__codelineno-0-3133" name="__codelineno-0-3133"></a><span class="sd">            graph and write the audit trail.</span>
+<a id="__codelineno-0-3131" name="__codelineno-0-3131"></a><span class="sd">                tags -- a VM=3 value is three rows), and per-instance</span>
+<a id="__codelineno-0-3132" name="__codelineno-0-3132"></a><span class="sd">                `{sop_instance_uid: [tags]}` so the caller can heal the live</span>
+<a id="__codelineno-0-3133" name="__codelineno-0-3133"></a><span class="sd">                graph and write the audit trail.</span>
 <a id="__codelineno-0-3134" name="__codelineno-0-3134"></a><span class="sd">        """</span>
 <a id="__codelineno-0-3135" name="__codelineno-0-3135"></a>        <span class="n">dropped</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
 <a id="__codelineno-0-3136" name="__codelineno-0-3136"></a>        <span class="n">rows_deleted</span> <span class="o">=</span> <span class="mi">0</span>
@@ -9454,8 +9454,8 @@ It also handles sidecar storage for pixel data to keep the database lightweight.
 <a id="__codelineno-0-3235" name="__codelineno-0-3235"></a>
 <a id="__codelineno-0-3236" name="__codelineno-0-3236"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-3237" name="__codelineno-0-3237"></a><span class="sd">            Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID -&gt;</span>
-<a id="__codelineno-0-3238" name="__codelineno-0-3238"></a><span class="sd">            {(group, element): value}. Instances with no vertical rows are</span>
-<a id="__codelineno-0-3239" name="__codelineno-0-3239"></a><span class="sd">            absent rather than present-and-empty.</span>
+<a id="__codelineno-0-3238" name="__codelineno-0-3238"></a><span class="sd">                {(group, element): value}. Instances with no vertical rows are</span>
+<a id="__codelineno-0-3239" name="__codelineno-0-3239"></a><span class="sd">                absent rather than present-and-empty.</span>
 <a id="__codelineno-0-3240" name="__codelineno-0-3240"></a><span class="sd">        """</span>
 <a id="__codelineno-0-3241" name="__codelineno-0-3241"></a>        <span class="n">select</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"SELECT instance_uid, group_id, element_id, value_rep,"</span>
 <a id="__codelineno-0-3242" name="__codelineno-0-3242"></a>                  <span class="s2">" value_text, value_count FROM instance_attributes"</span><span class="p">)</span>
@@ -9745,9 +9745,9 @@ It also handles sidecar storage for pixel data to keep the database lightweight.
 <a id="__codelineno-0-3526" name="__codelineno-0-3526"></a>
 <a id="__codelineno-0-3527" name="__codelineno-0-3527"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-3528" name="__codelineno-0-3528"></a><span class="sd">            Dict[str, Tuple[int, int]]: instance_uid -&gt; (offset, length), for</span>
-<a id="__codelineno-0-3529" name="__codelineno-0-3529"></a><span class="sd">            rows that have both. Half-specified rows are impossible via</span>
-<a id="__codelineno-0-3530" name="__codelineno-0-3530"></a><span class="sd">            `record_blob_ref`, but are skipped defensively rather than</span>
-<a id="__codelineno-0-3531" name="__codelineno-0-3531"></a><span class="sd">            yielding a None-bearing pair.</span>
+<a id="__codelineno-0-3529" name="__codelineno-0-3529"></a><span class="sd">                rows that have both. Half-specified rows are impossible via</span>
+<a id="__codelineno-0-3530" name="__codelineno-0-3530"></a><span class="sd">                `record_blob_ref`, but are skipped defensively rather than</span>
+<a id="__codelineno-0-3531" name="__codelineno-0-3531"></a><span class="sd">                yielding a None-bearing pair.</span>
 <a id="__codelineno-0-3532" name="__codelineno-0-3532"></a><span class="sd">        """</span>
 <a id="__codelineno-0-3533" name="__codelineno-0-3533"></a>        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_connection</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
 <a id="__codelineno-0-3534" name="__codelineno-0-3534"></a>            <span class="n">rows</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"""</span>
@@ -9775,7 +9775,7 @@ It also handles sidecar storage for pixel data to keep the database lightweight.
 <a id="__codelineno-0-3556" name="__codelineno-0-3556"></a>
 <a id="__codelineno-0-3557" name="__codelineno-0-3557"></a><span class="sd">        Returns:</span>
 <a id="__codelineno-0-3558" name="__codelineno-0-3558"></a><span class="sd">            Dict[Tuple[str, str], Tuple[int, int]]: `(uid, kind)` -&gt;</span>
-<a id="__codelineno-0-3559" name="__codelineno-0-3559"></a><span class="sd">            `(offset, length)`, for rows that have both.</span>
+<a id="__codelineno-0-3559" name="__codelineno-0-3559"></a><span class="sd">                `(offset, length)`, for rows that have both.</span>
 <a id="__codelineno-0-3560" name="__codelineno-0-3560"></a><span class="sd">        """</span>
 <a id="__codelineno-0-3561" name="__codelineno-0-3561"></a>        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_connection</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
 <a id="__codelineno-0-3562" name="__codelineno-0-3562"></a>            <span class="n">rows</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"""</span>
@@ -11882,27 +11882,9 @@ the bytes are actually decoded, by <code>verify_readback</code> at export.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List[tuple]: (sop_instance_uid, file_path, details), the</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>same shape as <code>check_unsafe_attributes</code> so <code>generate_report</code></p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.List">List</span>[<span title="tuple">tuple</span>]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>files both through one channel.</p>
+                <p>(sop_instance_uid, file_path, details), the
+same shape as <code>check_unsafe_attributes</code> so <code>generate_report</code>
+files both through one channel.</p>
               </div>
             </td>
           </tr>
@@ -12041,8 +12023,8 @@ the bytes are actually decoded, by <code>verify_readback</code> at export.</p>
 <a id="__codelineno-0-1824" name="__codelineno-0-1824"></a>
 <a id="__codelineno-0-1825" name="__codelineno-0-1825"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-1826" name="__codelineno-0-1826"></a><span class="sd">        List[tuple]: (sop_instance_uid, file_path, details), the</span>
-<a id="__codelineno-0-1827" name="__codelineno-0-1827"></a><span class="sd">        same shape as `check_unsafe_attributes` so `generate_report`</span>
-<a id="__codelineno-0-1828" name="__codelineno-0-1828"></a><span class="sd">        files both through one channel.</span>
+<a id="__codelineno-0-1827" name="__codelineno-0-1827"></a><span class="sd">            same shape as `check_unsafe_attributes` so `generate_report`</span>
+<a id="__codelineno-0-1828" name="__codelineno-0-1828"></a><span class="sd">            files both through one channel.</span>
 <a id="__codelineno-0-1829" name="__codelineno-0-1829"></a><span class="sd">    """</span>
 <a id="__codelineno-0-1830" name="__codelineno-0-1830"></a>    <span class="n">flagged</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-1831" name="__codelineno-0-1831"></a>    <span class="k">try</span><span class="p">:</span>
@@ -12218,7 +12200,7 @@ two on the same generation whatever fails.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dict[str, Tuple[int, int]]: A map of SOP Instance UIDs to their new (offset, length).</p>
+                <p>A map of SOP Instance UIDs to their new (offset, length).</p>
               </div>
             </td>
           </tr>
@@ -12504,7 +12486,7 @@ would report a clean run over a session that had just declined.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List[tuple]: (timestamp, entity_uid, details)</p>
+                <p>(timestamp, entity_uid, details)</p>
               </div>
             </td>
           </tr>
@@ -12754,7 +12736,7 @@ be graded; it is reported and left at <code>PASS</code>.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List[tuple]: (timestamp, entity_uid, details, loss_scope)</p>
+                <p>(timestamp, entity_uid, details, loss_scope)</p>
               </div>
             </td>
           </tr>
@@ -12879,7 +12861,7 @@ column existed.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List[tuple]: (timestamp, entity_uid, details, element_tag)</p>
+                <p>(timestamp, entity_uid, details, element_tag)</p>
               </div>
             </td>
           </tr>
@@ -13004,7 +12986,7 @@ and starts nothing.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dict[str, int]: e.g., {'ANONYMIZE': 500, 'EXPORT': 500}</p>
+                <p>e.g., {'ANONYMIZE': 500, 'EXPORT': 500}</p>
               </div>
             </td>
           </tr>
@@ -13151,10 +13133,11 @@ and starts nothing.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
+                  <code><span title="typing.Optional">Optional</span>[<span title="dict">dict</span>]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional[dict]: Keys <code>offset</code>, <code>length</code>, <code>hash</code>, <code>compress_alg</code>.</p>
+                <p>Keys <code>offset</code>, <code>length</code>, <code>hash</code>, <code>compress_alg</code>.</p>
               </div>
             </td>
           </tr>
@@ -13284,37 +13267,10 @@ instead.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dict[str, Tuple[int, int]]: instance_uid -&gt; (offset, length), for</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Tuple">Tuple</span>[<span title="int">int</span>, <span title="int">int</span>]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>rows that have both. Half-specified rows are impossible via</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Tuple">Tuple</span>[<span title="int">int</span>, <span title="int">int</span>]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>record_blob_ref</code>, but are skipped defensively rather than</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Tuple">Tuple</span>[<span title="int">int</span>, <span title="int">int</span>]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>yielding a None-bearing pair.</p>
+                <p>instance_uid -&gt; (offset, length), for
+rows that have both. Half-specified rows are impossible via
+<code>record_blob_ref</code>, but are skipped defensively rather than
+yielding a None-bearing pair.</p>
               </div>
             </td>
           </tr>
@@ -13363,9 +13319,9 @@ instead.</p>
 <a id="__codelineno-0-3526" name="__codelineno-0-3526"></a>
 <a id="__codelineno-0-3527" name="__codelineno-0-3527"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-3528" name="__codelineno-0-3528"></a><span class="sd">        Dict[str, Tuple[int, int]]: instance_uid -&gt; (offset, length), for</span>
-<a id="__codelineno-0-3529" name="__codelineno-0-3529"></a><span class="sd">        rows that have both. Half-specified rows are impossible via</span>
-<a id="__codelineno-0-3530" name="__codelineno-0-3530"></a><span class="sd">        `record_blob_ref`, but are skipped defensively rather than</span>
-<a id="__codelineno-0-3531" name="__codelineno-0-3531"></a><span class="sd">        yielding a None-bearing pair.</span>
+<a id="__codelineno-0-3529" name="__codelineno-0-3529"></a><span class="sd">            rows that have both. Half-specified rows are impossible via</span>
+<a id="__codelineno-0-3530" name="__codelineno-0-3530"></a><span class="sd">            `record_blob_ref`, but are skipped defensively rather than</span>
+<a id="__codelineno-0-3531" name="__codelineno-0-3531"></a><span class="sd">            yielding a None-bearing pair.</span>
 <a id="__codelineno-0-3532" name="__codelineno-0-3532"></a><span class="sd">    """</span>
 <a id="__codelineno-0-3533" name="__codelineno-0-3533"></a>    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_connection</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
 <a id="__codelineno-0-3534" name="__codelineno-0-3534"></a>        <span class="n">rows</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"""</span>
@@ -13498,13 +13454,14 @@ finished, so a zero would silently report an empty store.</p>
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>dict</code></td>            <td>
+            <td>
+                  <code><span title="dict">dict</span></code>
             </td>
             <td>
               <div class="doc-md-description">
@@ -13750,17 +13707,8 @@ the file.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dict[Tuple[str, str], Tuple[int, int]]: <code>(uid, kind)</code> -&gt;</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="typing.Tuple">Tuple</span>[<span title="str">str</span>, <span title="str">str</span>], <span title="typing.Tuple">Tuple</span>[<span title="int">int</span>, <span title="int">int</span>]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p><code>(offset, length)</code>, for rows that have both.</p>
+                <p><code>(uid, kind)</code> -&gt;
+<code>(offset, length)</code>, for rows that have both.</p>
               </div>
             </td>
           </tr>
@@ -13815,7 +13763,7 @@ the file.</p>
 <a id="__codelineno-0-3556" name="__codelineno-0-3556"></a>
 <a id="__codelineno-0-3557" name="__codelineno-0-3557"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-3558" name="__codelineno-0-3558"></a><span class="sd">        Dict[Tuple[str, str], Tuple[int, int]]: `(uid, kind)` -&gt;</span>
-<a id="__codelineno-0-3559" name="__codelineno-0-3559"></a><span class="sd">        `(offset, length)`, for rows that have both.</span>
+<a id="__codelineno-0-3559" name="__codelineno-0-3559"></a><span class="sd">            `(offset, length)`, for rows that have both.</span>
 <a id="__codelineno-0-3560" name="__codelineno-0-3560"></a><span class="sd">    """</span>
 <a id="__codelineno-0-3561" name="__codelineno-0-3561"></a>    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_connection</span><span class="p">()</span> <span class="k">as</span> <span class="n">conn</span><span class="p">:</span>
 <a id="__codelineno-0-3562" name="__codelineno-0-3562"></a>        <span class="n">rows</span> <span class="o">=</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"""</span>
@@ -13851,13 +13799,13 @@ the file.</p>
     <table>
       <thead>
         <tr>
-<th>Name</th>          <th>Type</th>
+          <th>Type</th>
           <th>Description</th>
         </tr>
       </thead>
       <tbody>
           <tr class="doc-section-item">
-<td><code>int</code></td>            <td>
+            <td>
                   <code><span title="int">int</span></code>
             </td>
             <td>
@@ -13943,7 +13891,7 @@ into the proper object hierarchy.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List[Patient]: A list of all root Patient objects.</p>
+                <p>A list of all root Patient objects.</p>
               </div>
             </td>
           </tr>
@@ -14457,7 +14405,7 @@ into the proper object hierarchy.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>List[PhiFinding]: All persisted PHI findings.</p>
+                <p>All persisted PHI findings.</p>
               </div>
             </td>
           </tr>
@@ -14627,7 +14575,7 @@ into the proper object hierarchy.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Optional[Patient]: The Patient object if found, else None.</p>
+                <p>The Patient object if found, else None.</p>
               </div>
             </td>
           </tr>
@@ -15311,7 +15259,7 @@ another would give those patients a second offset.</p>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dict[Tuple[str, str], Any]: Dictionary mapping (group, element) tuples to values.</p>
+                <p>Dictionary mapping (group, element) tuples to values.</p>
               </div>
             </td>
           </tr>
@@ -15492,27 +15440,9 @@ answer, and dropping it would be indistinguishable from
             </td>
             <td>
               <div class="doc-md-description">
-                <p>Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID -&gt;</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Dict">Dict</span>[<span title="typing.Tuple">Tuple</span>[<span title="str">str</span>, <span title="str">str</span>], <span title="typing.Any">Any</span>]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>{(group, element): value}. Instances with no vertical rows are</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.Dict">Dict</span>[<span title="typing.Tuple">Tuple</span>[<span title="str">str</span>, <span title="str">str</span>], <span title="typing.Any">Any</span>]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>absent rather than present-and-empty.</p>
+                <p>SOP Instance UID -&gt;
+{(group, element): value}. Instances with no vertical rows are
+absent rather than present-and-empty.</p>
               </div>
             </td>
           </tr>
@@ -15757,8 +15687,8 @@ answer, and dropping it would be indistinguishable from
 <a id="__codelineno-0-3235" name="__codelineno-0-3235"></a>
 <a id="__codelineno-0-3236" name="__codelineno-0-3236"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-3237" name="__codelineno-0-3237"></a><span class="sd">        Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID -&gt;</span>
-<a id="__codelineno-0-3238" name="__codelineno-0-3238"></a><span class="sd">        {(group, element): value}. Instances with no vertical rows are</span>
-<a id="__codelineno-0-3239" name="__codelineno-0-3239"></a><span class="sd">        absent rather than present-and-empty.</span>
+<a id="__codelineno-0-3238" name="__codelineno-0-3238"></a><span class="sd">            {(group, element): value}. Instances with no vertical rows are</span>
+<a id="__codelineno-0-3239" name="__codelineno-0-3239"></a><span class="sd">            absent rather than present-and-empty.</span>
 <a id="__codelineno-0-3240" name="__codelineno-0-3240"></a><span class="sd">    """</span>
 <a id="__codelineno-0-3241" name="__codelineno-0-3241"></a>    <span class="n">select</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"SELECT instance_uid, group_id, element_id, value_rep,"</span>
 <a id="__codelineno-0-3242" name="__codelineno-0-3242"></a>              <span class="s2">" value_text, value_count FROM instance_attributes"</span><span class="p">)</span>
@@ -16508,41 +16438,14 @@ exists to clear.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="int">int</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.List">List</span>[<span title="str">str</span>]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>tags -- a VM=3 value is three rows), and per-instance</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
                   <code><span title="typing.Tuple">Tuple</span>[<span title="int">int</span>, <span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.List">List</span>[<span title="str">str</span>]]]</code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p><code>{sop_instance_uid: [tags]}</code> so the caller can heal the live</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="typing.Tuple">Tuple</span>[<span title="int">int</span>, <span title="typing.Dict">Dict</span>[<span title="str">str</span>, <span title="typing.List">List</span>[<span title="str">str</span>]]]</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>graph and write the audit trail.</p>
+                <p>rows deleted (rows, not
+tags -- a VM=3 value is three rows), and per-instance
+<code>{sop_instance_uid: [tags]}</code> so the caller can heal the live
+graph and write the audit trail.</p>
               </div>
             </td>
           </tr>
@@ -16634,9 +16537,9 @@ exists to clear.</p>
 <a id="__codelineno-0-3128" name="__codelineno-0-3128"></a>
 <a id="__codelineno-0-3129" name="__codelineno-0-3129"></a><span class="sd">    Returns:</span>
 <a id="__codelineno-0-3130" name="__codelineno-0-3130"></a><span class="sd">        Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not</span>
-<a id="__codelineno-0-3131" name="__codelineno-0-3131"></a><span class="sd">        tags -- a VM=3 value is three rows), and per-instance</span>
-<a id="__codelineno-0-3132" name="__codelineno-0-3132"></a><span class="sd">        `{sop_instance_uid: [tags]}` so the caller can heal the live</span>
-<a id="__codelineno-0-3133" name="__codelineno-0-3133"></a><span class="sd">        graph and write the audit trail.</span>
+<a id="__codelineno-0-3131" name="__codelineno-0-3131"></a><span class="sd">            tags -- a VM=3 value is three rows), and per-instance</span>
+<a id="__codelineno-0-3132" name="__codelineno-0-3132"></a><span class="sd">            `{sop_instance_uid: [tags]}` so the caller can heal the live</span>
+<a id="__codelineno-0-3133" name="__codelineno-0-3133"></a><span class="sd">            graph and write the audit trail.</span>
 <a id="__codelineno-0-3134" name="__codelineno-0-3134"></a><span class="sd">    """</span>
 <a id="__codelineno-0-3135" name="__codelineno-0-3135"></a>    <span class="n">dropped</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
 <a id="__codelineno-0-3136" name="__codelineno-0-3136"></a>    <span class="n">rows_deleted</span> <span class="o">=</span> <span class="mi">0</span>
