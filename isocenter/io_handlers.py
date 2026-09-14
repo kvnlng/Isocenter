@@ -5627,9 +5627,10 @@ def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
     from pydicom.pixels.decoders.base import DecodeRunner
 
     runner = DecodeRunner(JPEG2000Lossless)
-    runner.set_options(rows=int(ds.Rows), columns=int(ds.Columns),
+    runner.set_options(rows=int(getattr(ds, "Rows", 0) or 0),
+                       columns=int(getattr(ds, "Columns", 0) or 0),
                        samples_per_pixel=int(samples),
-                       bits_allocated=int(ds.BitsAllocated),
+                       bits_allocated=int(getattr(ds, "BitsAllocated", 0) or 0),
                        number_of_frames=int(frames),
                        # Read by `frame_length` before it asks whether
                        # the syntax is encapsulated; the value cannot

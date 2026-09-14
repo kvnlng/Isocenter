@@ -263,6 +263,18 @@ def test_the_window_is_pydicoms_own():
     assert set(io_handlers._heuristic_lengths(ds, 2, 1)) == {512}
 
 
+def test_the_window_asks_nothing_the_encoder_did_not():
+    """A dataset with no Rows, Columns or BitsAllocated has no window (#473).
+
+    `_compress_j2k` reads its geometry with `getattr(ds, "Rows", 0)`, so a
+    direct caller without it was never an AttributeError before the #473
+    check; the window must not make it one. An empty window of `0` matches
+    no encapsulated stream, which is never shorter than its item tags.
+    Killing mutation: `int(ds.Rows)` for the `getattr` reads.
+    """
+    assert io_handlers._heuristic_lengths(Dataset(), 1, 1) == (0, 0)
+
+
 @pytest.mark.parametrize("make, shape, window", [
     (lambda seed: [_bool_mask(seed).view(np.uint8)], "bool-16x16", (256,)),
     (lambda seed: [_sparse_odd(seed)], "uint8-9x19-odd", (172,)),
