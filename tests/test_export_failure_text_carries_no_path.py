@@ -158,3 +158,103 @@ def test_any_other_exception_is_spelled_as_describe_exception_spells_it():
     except RuntimeError as exc:
         assert describe_exception_without_paths(exc) == (
             "RuntimeError: channel table is malformed (caused by KeyError: 'x')")
+
+
+# --- The DICOM export's `ERROR` row -------------------------------------
+#
+# The WFDB rows above were fixed first (#588) and the DICOM worker's console
+# line with them (P8), which left the DICOM `ERROR` row -- the one
+# `_report_export_failures` persists, renders into the report and hands
+# `ExportError.failures` -- as `Export failed for <output path>: <exception>`.
+# The output path is `<folder>/Subject_<Patient ID>/...`, and a
+# `NotADirectoryError` repeats it. It now has the WFDB row's shape: the
+# instance, the exception type, a path-free reason.
+
+
+def test_a_dicom_instance_that_cannot_be_written_records_no_path(tmp_path):
+    from tests.test_export_failure_audit import _session
+
+    session = _session(tmp_path)
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where the output folder should be")
+    report = tmp_path / "report.md"
+    try:
+        session.anonymize()
+        ids = [p.patient_id for p in session.store.patients]
+        uids = sorted(i.sop_instance_uid for p in session.store.patients
+                      for st in p.studies for se in st.series
+                      for i in se.instances)
+        with pytest.raises(ExportError) as raised:
+            session.export(str(blocker), format="dicom", show_progress=False)
+        rows = _rows(session, "ERROR")
+        session.generate_report(str(report))
+    finally:
+        session.close()
+
+    assert sorted(u for u, _d in rows) == uids, rows
+    assert sorted(u for u, _d in raised.value.failures) == uids
+    for uid, detail in rows + raised.value.failures:
+        # The failure is real: makedirs under a regular file.
+        assert detail == (f"Export failed for instance {uid}: "
+                          "NotADirectoryError: Not a directory"), detail
+    text = report.read_text(encoding="utf-8")
+    for detail in [d for _u, d in rows]:
+        assert detail in text, "the ERROR row did not reach the report"
+    for patient_id in ids + ["PAT1"]:
+        assert f"Subject_{patient_id}" not in text, patient_id
+
+
+def test_a_dicom_failure_row_spells_an_os_error_without_its_filename():
+    from isocenter.io_handlers import DicomExporter, ExportOutcome
+
+    error = PermissionError(13, "Permission denied",
+                            "/out/Subject_P1/Study_1/Series_1/1.2.dcm")
+    failures = DicomExporter._report_export_failures([ExportOutcome(
+        ok=False, output_path="/out/Subject_P1/Study_1/Series_1/1.2.dcm",
+        sop_instance_uid="1.2", error=error)])
+
+    assert failures == [
+        ("1.2", "Export failed for instance 1.2: PermissionError: Permission denied")]
+
+
+def test_a_dicom_failure_with_no_uid_is_keyed_without_its_path():
+    """The row used to fall back to the output path for its entity UID
+    too. The export plan names every file after a UID, so this is not
+    reachable from `session.export()`; the fallback is still a path."""
+    from isocenter.io_handlers import DicomExporter, ExportOutcome
+
+    failures = DicomExporter._report_export_failures([ExportOutcome(
+        ok=False, output_path="/out/Subject_P1/Study_1/Series_1/x.dcm",
+        sop_instance_uid=None, error=KeyError())])
+
+    assert failures == [(
+        "UNKNOWN",
+        "Export failed for an instance with no SOP Instance UID: KeyError")]
+
+
+def test_a_dead_export_worker_row_spells_an_os_error_without_its_filename():
+    from isocenter.io_handlers import DicomExporter
+
+    failures = DicomExporter._report_export_failures(
+        [FileNotFoundError(2, "No such file or directory", "/out/Subject_P1")])
+
+    assert failures == [("UNKNOWN", "Export worker failed: "
+                         "FileNotFoundError: No such file or directory")]
+
+
+def test_a_readback_that_cannot_open_the_written_file_names_no_path(tmp_path):
+    """The readback check reads the temp file the worker just wrote,
+    `<output path>.<pid>.tmp`, and spelled the read's exception into its
+    own message -- so an `OSError` there put `Subject_<Patient ID>/...`
+    back into the row above, inside the `RuntimeError`'s text where
+    `describe_exception_without_paths` cannot reach it."""
+    from isocenter.io_handlers import _verify_readback
+    from isocenter.logger import describe_exception_without_paths
+
+    missing = tmp_path / "Subject_P123" / "1.2.dcm.4242.tmp"
+    with pytest.raises(RuntimeError) as raised:
+        _verify_readback(str(missing), None)
+
+    text = describe_exception_without_paths(raised.value)
+    assert "FileNotFoundError" in text, text
+    assert "Subject_P123" not in text, text

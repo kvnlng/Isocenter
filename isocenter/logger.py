@@ -114,9 +114,10 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     its `str()` appends `filename` and `filename2`, and an export path is
     built from the graph: `Subject_<Patient ID>/...` for a DICOM file,
     `<Patient ID>_<series>_<instance>` for a WFDB record. The WFDB
-    exporter's `ERROR` rows interpolated the exception whole (#588), and
-    the DICOM export worker printed the output path and then the
-    exception to stderr (P8, bunch E). An `OSError` with no `strerror`
+    exporter's `ERROR` rows interpolated the exception whole (#588), the
+    DICOM export worker printed the output path and then the exception
+    to stderr (P8, bunch E), and the DICOM `ERROR` row
+    (`DicomExporter._report_export_failures`) recorded both the same way. An `OSError` with no `strerror`
     -- `OSError("cannot open <path>")` -- is its type alone: its message
     is whatever the raiser wrote, and the one exception this exists for
     is the one whose message is built around a path.
