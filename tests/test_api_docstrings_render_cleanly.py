@@ -32,12 +32,17 @@ entry carries no `(type)`, stripping the stars from `**options` to look
 it up, and warns when the signature has none. An entry naming a
 parameter the def does not have warns too.
 
-The scope is exactly what the site renders: the `:::` lines of
-`docs/api/*.md`, read at test time, so a page added to the reference is
-graded without anyone editing this file. Private members (`_name`) are
-what mkdocstrings' default filter hides and are not graded; dunders are
-rendered and are. Fixtures below spell each rule on a string, so the
-sweep's verdict and the rules' own behaviour are pinned separately.
+The scope is the `:::` lines of `docs/api/*.md`, read at test time, so
+a page added to the reference is graded without anyone editing this
+file. Private members (`_name`) are what mkdocstrings' default filter
+hides and are not graded; dunders are graded. That is a superset of what
+the site shows, not a copy of it: a page with an explicit `members:`
+list renders only those names -- `docs/api/session.md` lists the frozen
+surface of `DicomSession` and none of its dunders -- while this grades
+every documented member of the target. A red on a method you cannot
+find on the site is that case. Fixtures below spell each rule on a
+string, so the sweep's verdict and the rules' own behaviour are pinned
+separately.
 
 No `scripts/mutation_probe.py` `TARGETS` row: this reads source as text
 and imports no package module, the argument
@@ -61,14 +66,18 @@ _DIRECTIVE = re.compile(r"^:::\s+(?P<target>[\w.]+)\s*$", re.MULTILINE)
 _RETURNS = re.compile(r"^(?:Returns?|Yields?):\s*$", re.IGNORECASE)
 _ARGS = re.compile(r"^(?:Args|Arguments|Params|Parameters):\s*$",
                    re.IGNORECASE)
-# Any section title griffe recognises, so a block ends where the next
-# section starts. Griffe's own admonition grammar, at column 0.
-_SECTION = re.compile(r"^[\w][\s\w-]*:\s*$")
 
 # What the half before an item's colon may look like when it is a type:
 # `bool`, `pd.DataFrame`, `Optional[dict]`, `Dict[str, Any]`,
-# `Tuple[int, int]`, `'PhiStatus'`. A sentence is none of these.
-_TYPE_SHAPE = re.compile(r"^'?[A-Za-z_][\w.]*'?(?:\[[\w.,'\[\] ]+\])?$")
+# `Tuple[int, int]`, `'PhiStatus'`, and PEP 604 unions of those --
+# `int | None`, `str | Path`, `Dict[str, int | None]` -- which are the
+# ordinary spelling on a 3.12 floor and which griffe reads as the type
+# without a warning (measured on griffe 2.3.0 in the review of #637).
+# A sentence is none of these, and neither is `np.ndarray or None`:
+# `or` is English, and admitting a bare word between two names would
+# re-admit the `Note that this is prose:` case below.
+_TYPE_ATOM = r"'?[A-Za-z_][\w.]*'?(?:\[[\w.,'\[\] |]+\])?"
+_TYPE_SHAPE = re.compile(rf"^{_TYPE_ATOM}(?:\s*\|\s*{_TYPE_ATOM})*$")
 
 # `name (type): description` / `name: description`, first line of an
 # Args entry.
@@ -104,7 +113,12 @@ def _resolve(target, package=PACKAGE):
 
 
 def _is_rendered(name):
-    """mkdocstrings' default filter: `_private` hidden, `__dunder__` kept."""
+    """Whether a member is graded: `_private` is not, `__dunder__` is.
+
+    Modelled on mkdocstrings' default filter, which hides `_private` and
+    keeps dunders. Graded, not rendered: a page's explicit `members:`
+    list can leave a graded member off the site (the module docstring).
+    """
     return not (name.startswith("_") and not name.startswith("__"))
 
 
@@ -386,6 +400,30 @@ def test_a_sentence_before_the_colon_is_not_a_type():
                      '    """\n')
     assert len(offenders) == 1, offenders
     assert "is read as the returned type and is not one" in offenders[0]
+
+
+def test_a_pep_604_union_before_the_colon_is_a_type():
+    """Rule 2's shape admits `|`, and only `|` (review of #637).
+
+    Griffe reads `int | None: the count.` as a returned value of type
+    `int | None` with no warning; a guard red on that is red on the
+    spelling a 3.12-floor maintainer writes first. `or` is not an
+    annotation, so `np.ndarray or None:` stays an offender.
+    """
+    def returns(item):
+        return _one("def f():\n"
+                    '    """Summary.\n\n'
+                    "    Returns:\n"
+                    f"        {item}\n"
+                    '    """\n')
+
+    assert returns("int | None: the count, or None.") == []
+    assert returns("str | Path: where it went.") == []
+    assert returns("Dict[str, int | None]: per tag.") == []
+    offenders = returns("np.ndarray or None: the frame.")
+    assert len(offenders) == 1, offenders
+    assert ("'np.ndarray or None' is read as the returned type and is not "
+            "one") in offenders[0], offenders
 
 
 def test_an_untyped_args_entry_needs_a_parameter_annotation():
