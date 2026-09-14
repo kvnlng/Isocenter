@@ -79,10 +79,10 @@ def _instance(uid):
 
 def _patient(session, layout, pid=PID, prefix=None):
     """A hand-built patient, one `Study` per character of `layout`:
-    `i` a study with one instance, `s` a study whose one series holds no
-    instance, `e` a study with no series at all. UIDs are spelled from
-    `prefix` (the Patient ID by default). Returns the patient and its
-    instances, in graph order."""
+    `i` a study with one instance, `d` a study whose one series holds two,
+    `s` a study whose one series holds no instance, `e` a study with no
+    series at all. UIDs are spelled from `prefix` (the Patient ID by
+    default). Returns the patient and its instances, in graph order."""
     patient = Patient(pid, NAME)
     prefix = prefix or pid
     instances = []
@@ -90,8 +90,9 @@ def _patient(session, layout, pid=PID, prefix=None):
         study = Study(f"ST_{prefix}_{n}", date(2023, 1, n))
         if kind != "e":
             series = Series(f"SE_{prefix}_{n}", "CT", n)
-            if kind == "i":
-                inst = _instance(f"SOP_{prefix}_{n}")
+            for k in range({"i": 1, "d": 2}.get(kind, 0)):
+                inst = _instance(f"SOP_{prefix}_{n}_{k}" if kind == "d"
+                                 else f"SOP_{prefix}_{n}")
                 series.instances.append(inst)
                 instances.append(inst)
             study.series.append(series)
@@ -386,6 +387,69 @@ def test_a_restore_onto_instances_that_all_carry_the_token_read_does_not_warn(
             session.recover_patient_identity("ANON_616", restore=True)
         assert (patient.patient_name, patient.patient_id) == (NAME, PID)
     assert _elsewhere_warnings(caplog) == [], caplog.text
+
+
+def test_a_patient_locked_whole_restores_after_a_reopen_without_a_warning(
+        tmp_path, caplog):
+    """The control above never leaves memory, so every instance holds the
+    one `bytes` object the lock embedded, and a compare by identity reads
+    the same as one by value. On every real path the store hydrates each
+    instance's token as its own object: two studies locked together, then
+    anonymized, saved and reopened, carry equal tokens that are not the
+    same object. Each carries the token read, so no WARNING. Kills the
+    compare made with `is not` (K3 of the review of #640, round 2), which
+    warns on the ordinary multi-study lock the CHANGELOG says draws
+    none."""
+    write_ct(tmp_path / "in" / "a.dcm", "PAT-A", "6175", name=NAME, accession=ACC_ONE)
+    write_ct(tmp_path / "in" / "b.dcm", "PAT-A", "6176", name=NAME, accession=ACC_TWO)
+    db, key = str(tmp_path / "s.db"), str(tmp_path / "k.key")
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(tmp_path / "in"))
+        session.lock_identities("PAT-A")
+        report = session.audit()
+        session.anonymize(report)
+        session.save(sync=True)
+        [patient] = session.store.patients
+        pseudonym = patient.patient_id
+
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(key)
+        [patient] = session.store.patients
+        first, second = (session.reversibility_service.token_of_ours(
+            st.series[0].instances[0]) for st in patient.studies)
+        assert first is not None and first == second and first is not second
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            session.recover_patient_identity(pseudonym, restore=True)
+        assert patient.patient_id == "PAT-A"
+    assert _elsewhere_warnings(caplog) == [], caplog.text
+
+
+def test_the_warning_counts_this_patients_instances_against_the_token_read(
+        tmp_path, caplog):
+    """Every other F-1 test has one instance per study, the token on study
+    1, and one patient in the session, where three wrong counts give the
+    right answer. Here study 1 holds one instance and no token, study 2 the
+    token, and study 3 two instances and no token, beside an unlocked
+    patient of three instances: 3 of this patient's 4 instances do not
+    carry the token read. Kills the token compared taken from the first
+    instance (`1 of 4`: it counts the instances that carry one), the other
+    patient's instances counted (`6 of 4`), and the total given as the
+    studies (`3 of 3`) (K1, K2 and K5 of the review of #640, round 2)."""
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        patient, instances = _patient(session, "iid")
+        _patient(session, "iii", pid="PAT-OTHER")
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        _keep_tokens_only_on(instances, {1})
+        _anonymize_by_hand(instances, patient)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            session.recover_patient_identity("ANON_616", restore=True)
+        assert [(i.attributes["0010,0010"], i.attributes["0010,0020"])
+                for i in instances] == [(NAME, PID)] * 4
+    assert _elsewhere_warnings(caplog) == [elsewhere(3, 4)], caplog.text
 
 
 @pytest.mark.parametrize("layout", ["i", "isi", "eie"],

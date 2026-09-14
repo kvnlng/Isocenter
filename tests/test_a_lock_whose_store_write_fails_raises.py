@@ -11,9 +11,9 @@ It now logs, records one `ERROR` row best-effort, and re-raises the
 `sqlite3.Error` (coordinator ruling on triage-098 Q8). **Partial
 persistence is not rolled back:** a batch writes patient by patient (or
 chunk by chunk), so what was written before the failure stays written,
-the failing write's instances hold their tokens in memory only (marked
-modified, so a later `save()` writes them), and patients after it are not
-locked. The tests pin that shape rather than promise a transaction the
+the failing write stores none of its instances (they hold their tokens in
+memory, marked modified, so a later `save()` writes them), and patients
+after it are not locked. The tests pin that shape rather than promise a transaction the
 chunked API cannot keep.
 
 The store is made to refuse with a `BEFORE UPDATE ON instances` trigger:
@@ -120,45 +120,59 @@ def test_a_single_lock_whose_write_fails_raises_and_records_it(tmp_path):
 
 
 SHAPES = {
-    # how the batch writes: (stored tokens after, instances in the failed write)
-    "persist_per_patient": ({_uid(1): True, _uid(2): False, _uid(3): False}, 1),
-    "chunks_of_one": ({_uid(1): True, _uid(2): False, _uid(3): False}, 1),
-    "one_chunk_of_two": ({_uid(1): False, _uid(2): False, _uid(3): False}, 2),
+    # how the batch writes: (the patient whose row is refused, 1-3,
+    # stored tokens after, instances in the failed write)
+    "persist_per_patient": (2, {_uid(1): True, _uid(2): False, _uid(3): False}, 1),
+    "chunks_of_one": (2, {_uid(1): True, _uid(2): False, _uid(3): False}, 1),
+    "one_chunk_of_two": (2, {_uid(1): False, _uid(2): False, _uid(3): False}, 2),
+    "final_chunk_of_one": (3, {_uid(1): True, _uid(2): True, _uid(3): False}, 1),
 }
+
+#: The chunk size each chunked shape passes; `persist_per_patient` passes
+#: `persist=True` instead.
+CHUNK = {"chunks_of_one": 1, "one_chunk_of_two": 2, "final_chunk_of_one": 2}
 
 BATCH = ["PAT-599-A", "PAT-599-B", "PAT-599-C"]
 
 
 @pytest.mark.parametrize("shape", SHAPES)
 def test_a_batch_whose_write_fails_part_way_keeps_what_was_written(tmp_path, shape):
-    """Three patients, the store refusing the middle one's row only: the
+    """Three patients, the store refusing one patient's row only: the
     error leaves the batch. `persist=True` writes per patient and
-    `auto_persist_chunk_size=1` per chunk, so the first patient's token is
-    in the store and the second's is not -- written stays written, nothing
-    is rolled back across writes. One write is one transaction, so a chunk
-    of two that fails on its second row writes neither, which is what the
-    row's "this write stored none of them" says. The error leaves at the
-    failed write, so the third patient, after it in Patient ID order, is
-    not locked at all: no token in memory and none in the store. With two
-    patients the refused one was last and nothing came after it, so R2
-    and R3 of the review of #640 (the store error caught and raised at the
-    end of the batch, in the chunk arm and in the per-patient arm) locked
-    and wrote a patient after the failure and passed (F-2)."""
-    stored, failed = SHAPES[shape]
+    `auto_persist_chunk_size=1` per chunk, so with the middle patient
+    refused the first patient's token is in the store and the second's is
+    not -- written stays written, nothing is rolled back across writes. One
+    write is one transaction, so a chunk of two that fails on its second
+    row writes neither, which is what the row's "this write stored none of
+    them" says. The error leaves at the failed write, so the third patient,
+    after it in Patient ID order, is not locked at all: no token in memory
+    and none in the store. With two patients the refused one was last and
+    nothing came after it, so R2 and R3 of the review of #640 (the store
+    error caught and raised at the end of the batch, in the chunk arm and
+    in the per-patient arm) locked and wrote a patient after the failure
+    and passed (F-2).
+
+    `final_chunk_of_one` refuses the third patient under chunks of two:
+    `[A, B]` is written in the loop and `[C]` is left for the write after
+    it, which fails. Every patient holds its token in memory, and the
+    store holds A's and B's. No other shape fails that last write, so its
+    error swallowed passed every test (K6 of the review of #640, round
+    2)."""
+    refused, stored, failed = SHAPES[shape]
     db, session = _ingested(tmp_path, *BATCH)
     with session:
-        _refuse_updates(db, _uid(2))
+        _refuse_updates(db, _uid(refused))
         with pytest.raises(sqlite3.Error):
             if shape == "persist_per_patient":
                 session.lock_identities(BATCH, persist=True)
             else:
                 session.lock_identities_batch(
-                    BATCH, auto_persist_chunk_size=1 if shape == "chunks_of_one" else 2)
+                    BATCH, auto_persist_chunk_size=CHUNK[shape])
         memory = {pid: [SEQ in i.sequences for st in p.studies
                         for se in st.series for i in se.instances]
                   for p in session.store.patients for pid in [p.patient_id]}
-        assert memory == {"PAT-599-A": [True], "PAT-599-B": [True],
-                          "PAT-599-C": [False]}
+        assert memory == {pid: [n <= refused]
+                          for n, pid in enumerate(BATCH, start=1)}
         assert _stored_tokens(db) == stored
         assert _errors(session) == [row_text(failed, f"IntegrityError: {REFUSAL}")]
 
