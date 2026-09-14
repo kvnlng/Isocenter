@@ -156,7 +156,8 @@ def test_a_rule_whose_zones_all_miss_creates_no_attributes(
     **Detection**, and the assertions have to be `not in` rather than
     `not ...get(...)`: on `84113ab` all four keys are **present with the
     value `None`**, which a truthiness assertion cannot tell from
-    absence. `test_redaction_multizone.py:347` is written the loose way,
+    absence. `assert not inst.attributes.get("_ISOCENTER_REDACTION_HASH"), (`
+    at test_redaction_multizone.py line 354 is written the loose way,
     which is why it stayed green through this defect.
 
     #235 reported "no `_ISOCENTER_REDACTION_HASH` is written". Measured,
@@ -354,7 +355,7 @@ def test_a_yes_flag_without_an_image_type_does_not_break_the_risk_scan(
     **Detection, and it is not the failure mode #235 predicted.**
     Measured on `84113ab`, both levers: `redact()` raises
     `TypeError: 'NoneType' object is not iterable` from
-    `scan_burned_in_annotations` (`services.py:211`).
+    `scan_burned_in_annotations` (`services.py:491`).
 
     The route is the null write itself. `_apply_redaction_outcomes`
     copies `{"0008,0008": None, ...}` onto an instance whose source
@@ -373,7 +374,8 @@ def test_a_yes_flag_without_an_image_type_does_not_break_the_risk_scan(
     call fails.
 
     Fixed by not writing the null, not by hardening the reader. A guard
-    at `services.py:207` would make the scan survive a value the graph
+    on the read (`img_type = inst.attributes.get("0008,0008", [])` at
+    services.py line 511) would make the scan survive a value the graph
     should never have held; #235 is that the value is written at all.
     """
     monkeypatch.setenv(lever, "1")
@@ -685,8 +687,9 @@ def test_force_is_off_by_default(
     """A second `redact()` with the same rules stays a no-op.
 
     **Selectivity guard** -- green on `84113ab`, where
-    `test_redaction_failure_is_reported.py:339` already asserts the count
-    half. It is here because `force=` is the parameter that would break
+    `assert session.redact(show_progress=False) == 0, (` at
+    test_redaction_failure_is_reported.py line 344 already asserts the
+    count half. It is here because `force=` is the parameter that would break
     this if its default ever moved, and what it would break is a promise
     the project shipped three commits ago, in #228's CHANGELOG entry:
 

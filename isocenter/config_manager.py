@@ -719,12 +719,14 @@ class ConfigLoader:
         """
         Legacy/Convenience support for loading only PHI Tags.
 
-        Arg:
+        Args:
             filepath (str, optional): Path to config file. If None, returns
                 a copy of the floor policy, `profiles.FLOOR_POLICY`.
 
         Returns:
-            Dict: Mapping of tags to configuration (action/name).
+            Dict[str, Any]: Mapping of lowercase `'gggg,eeee'` tags to
+                configuration (a display name or a rule mapping), as
+                `_validated_phi_tags` returns it.
         """
         if filepath:
             data = ConfigLoader._load_yaml(filepath)
@@ -733,10 +735,16 @@ class ConfigLoader:
                     f"{filepath}: a PHI tag file must be a YAML mapping at its "
                     f"root, got {type(data).__name__}")
 
-            # Support v2 unified file used as simple PHI config
+            # Both arms return the validated table (#590): until then a
+            # unified file used as a PHI config, and a bare root mapping
+            # of tags, came back raw, so a key `load_unified_config`
+            # refuses (`patient_id`) loaded here and the scan read no
+            # tag by it. The root-mapping arm names its source as such,
+            # because the message speaks of a `phi_tags` key the file
+            # does not have.
             if "phi_tags" in data:
-                return data["phi_tags"]
-            return data.get("phi_tags", data)  # Fallback to assumes root dict is tags if no key
+                return _validated_phi_tags(data["phi_tags"], filepath)
+            return _validated_phi_tags(data, f"{filepath} (root mapping)")
         # The default policy is the floor a bare session applies (#495).
         # It was `resources/phi_tags.json` -- six name-only tags, every
         # one of them already in the basic profile -- which only this

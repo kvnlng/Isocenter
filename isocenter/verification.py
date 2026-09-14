@@ -81,7 +81,8 @@ class RedactionVerifier:
             text_box: OCR box space (x, y, w, h).
             zone_box: zone space (y1, y2, x1, x2), as `redaction_zones`
                 entries are stored and as redaction applies them (#264).
-            threshold: Fraction of text area that must be covered (0.0 - 1.0).
+            threshold (float): Fraction of text area that must be covered
+                (0.0 - 1.0).
 
         Returns:
             bool: True if covered.

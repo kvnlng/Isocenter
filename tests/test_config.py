@@ -71,3 +71,47 @@ def test_phi_config_override(tmp_path):
     tags = ConfigLoader.load_phi_config(str(p))
     assert "0010,0010" in tags
     assert tags["0010,0010"] == "PatientName"
+
+
+# --- load_phi_config validates what load_unified_config validates (#590) ---
+
+_NOT_A_TAG = ("phi_tags key 'patient_id' is not a 'gggg,eeee' tag (four hex "
+              "digits, a comma, four hex digits, such as '0010,0010'); the "
+              "scan reads no tag by that key, so the rule would never run")
+
+
+@pytest.mark.parametrize("shape", ["phi_tags-key", "root-mapping"])
+def test_load_phi_config_refuses_a_key_the_scan_would_never_read(tmp_path,
+                                                                 shape):
+    """Both lax arms return `_validated_phi_tags`' answer, not the raw dict.
+
+    `load_unified_config` refused `patient_id` while `load_phi_config`
+    handed it back, so one file loaded or failed by which entry point
+    read it (#590). The root-mapping arm names its source as such: the
+    file has no `phi_tags` key for the message to point at.
+    """
+    import yaml
+    rules = {"patient_id": {"action": "REPLACE"}}
+    data = {"phi_tags": rules} if shape == "phi_tags-key" else rules
+    p = tmp_path / "phi.yaml"
+    p.write_text(yaml.dump(data))
+
+    with pytest.raises(ValueError) as exc:
+        ConfigLoader.load_phi_config(str(p))
+    message = str(exc.value)
+    assert _NOT_A_TAG in message, message
+    source = f"{p} (root mapping)" if shape == "root-mapping" else str(p)
+    assert message.startswith(f"{source}: "), message
+
+
+@pytest.mark.parametrize("shape", ["phi_tags-key", "root-mapping"])
+def test_load_phi_config_lowercases_keys(tmp_path, shape):
+    """Killer for "return the raw mapping": the validator lowercases keys."""
+    import yaml
+    rules = {"0010,00A0": "PatientName"}
+    data = {"phi_tags": rules} if shape == "phi_tags-key" else rules
+    p = tmp_path / "phi.yaml"
+    p.write_text(yaml.dump(data))
+
+    tags = ConfigLoader.load_phi_config(str(p))
+    assert tags == {"0010,00a0": "PatientName"}, tags

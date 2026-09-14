@@ -1824,8 +1824,8 @@ class SqliteStore:
 
         Returns:
             List[tuple]: (sop_instance_uid, file_path, details), the
-            same shape as `check_unsafe_attributes` so `generate_report`
-            files both through one channel.
+                same shape as `check_unsafe_attributes` so `generate_report`
+                files both through one channel.
         """
         flagged = []
         try:
@@ -3128,9 +3128,9 @@ class SqliteStore:
 
         Returns:
             Tuple[int, Dict[str, List[str]]]: rows deleted (rows, not
-            tags -- a VM=3 value is three rows), and per-instance
-            `{sop_instance_uid: [tags]}` so the caller can heal the live
-            graph and write the audit trail.
+                tags -- a VM=3 value is three rows), and per-instance
+                `{sop_instance_uid: [tags]}` so the caller can heal the live
+                graph and write the audit trail.
         """
         dropped: Dict[str, List[str]] = {}
         rows_deleted = 0
@@ -3235,8 +3235,8 @@ class SqliteStore:
 
         Returns:
             Dict[str, Dict[Tuple[str, str], Any]]: SOP Instance UID ->
-            {(group, element): value}. Instances with no vertical rows are
-            absent rather than present-and-empty.
+                {(group, element): value}. Instances with no vertical rows are
+                absent rather than present-and-empty.
         """
         select = ("SELECT instance_uid, group_id, element_id, value_rep,"
                   " value_text, value_count FROM instance_attributes")
@@ -3526,9 +3526,9 @@ class SqliteStore:
 
         Returns:
             Dict[str, Tuple[int, int]]: instance_uid -> (offset, length), for
-            rows that have both. Half-specified rows are impossible via
-            `record_blob_ref`, but are skipped defensively rather than
-            yielding a None-bearing pair.
+                rows that have both. Half-specified rows are impossible via
+                `record_blob_ref`, but are skipped defensively rather than
+                yielding a None-bearing pair.
         """
         with self._get_connection() as conn:
             rows = conn.execute("""
@@ -3556,7 +3556,7 @@ class SqliteStore:
 
         Returns:
             Dict[Tuple[str, str], Tuple[int, int]]: `(uid, kind)` ->
-            `(offset, length)`, for rows that have both.
+                `(offset, length)`, for rows that have both.
         """
         with self._get_connection() as conn:
             rows = conn.execute("""

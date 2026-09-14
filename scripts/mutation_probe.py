@@ -1226,7 +1226,9 @@ NOT_PROBED = {
     "isocenter/logger.py":
         "deferred: 14 sites, 2 importers -- reached through get_logger() "
         "and describe_exception(), whose spelling "
-        "tests/test_ingest_failure_audit.py pins directly (#435); a row "
+        "tests/test_ingest_failure_audit.py pins directly (#435), and "
+        "configure_logger(), whose close of the handlers it replaces "
+        "tests/test_logger_closes_replaced_handlers.py pins (#611); a row "
         "would still need its list written by hand",
 
     # Deferred: at budget 30 a default run would print survivors nobody

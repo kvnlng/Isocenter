@@ -50,6 +50,17 @@ plugins:
           options:
             show_root_heading: true
             show_source: true
+            docstring_options:
+              # `Returns:` and `Yields:` items here are the canonical
+              # Google form, `Type: description`. Griffe's default reads
+              # the word before the colon as a *name* and takes the type
+              # from the def's return annotation, so every unannotated
+              # method rendered "returned value 'int'" with no type and
+              # `mkdocs build --strict` failed on 30 such warnings (#565).
+              # This is the reading the docstrings were written for, and
+              # `tests/test_api_docstrings_render_cleanly.py` pins the
+              # shape it needs: one item per block, typed before the colon.
+              returns_named_value: false
 
 markdown_extensions:
   - pymdownx.highlight:

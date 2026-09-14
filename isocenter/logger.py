@@ -38,9 +38,26 @@ def configure_logger(log_file=None):
 
     logger.setLevel(default_level)
 
-    # Reset handlers to prevent duplicates on reload
-    if logger.handlers:
-        logger.handlers = []
+    # Reset handlers to prevent duplicates on reload. Close them first:
+    # assigning `[]` over the list dropped each `FileHandler` with its
+    # file still open, so N sessions in one process held N descriptors
+    # on the log, a `ResourceWarning` at GC on 3.14t (#611). `close()`
+    # on the console `StreamHandler` flushes and leaves `sys.stdout`
+    # open -- only a `FileHandler` owns its stream.
+    #
+    # One `try` per handler, not one around the loop: `close()` flushes,
+    # and a flush that fails (a full disk) raises from it. Unguarded,
+    # that raised out of `Session()` before the reset, leaving every old
+    # handler attached and the rest unclosed -- where before #611 nothing
+    # here could raise at all. The failure is logged once the new
+    # handlers are in place, so it reaches the log it is about.
+    close_failures = []
+    for handler in list(logger.handlers):
+        try:
+            handler.close()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            close_failures.append((type(handler).__name__, exc))
+    logger.handlers = []
 
     # 1. File Handler
     fh = logging.FileHandler(log_file, mode='w')  # Overwrite mode for now per session
@@ -55,6 +72,11 @@ def configure_logger(log_file=None):
     console_formatter = logging.Formatter('%(levelname)s: %(message)s')
     ch.setFormatter(console_formatter)
     logger.addHandler(ch)
+
+    for handler_type, exc in close_failures:
+        logger.warning("A replaced %s did not close cleanly, so lines it "
+                       "held may not have reached its stream: %s",
+                       handler_type, describe_exception(exc))
 
     return logger
 

@@ -266,11 +266,11 @@ def detect_text_regions(pixel_data: np.ndarray, frame_idx: int = 0) -> List[Text
 
     Returns:
         List[TextRegion]: Detected text regions. Also `[]` when OCR is
-        unavailable, and `[]` when OCR raised (logged at ERROR), so `[]`
-        here does not mean "no text". `Session.scan_pixel_content()` and
-        `discover_redaction_zones()` check availability first and refuse
-        instead (#422), and read `_ocr_instance`, which reports the
-        failures this function only logs (#423).
+            unavailable, and `[]` when OCR raised (logged at ERROR), so `[]`
+            here does not mean "no text". `Session.scan_pixel_content()` and
+            `discover_redaction_zones()` check availability first and refuse
+            instead (#422), and read `_ocr_instance`, which reports the
+            failures this function only logs (#423).
     """
     if not HAS_OCR:
         return []
