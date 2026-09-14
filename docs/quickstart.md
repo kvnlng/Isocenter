@@ -113,16 +113,45 @@ images cannot be compressed and fail export with a message naming
 `use_compression=False`. If a recipient's reader cannot handle JPEG 2000,
 export with `use_compression=False`.
 
+**The export writes two transfer syntaxes and no others**
+([#526](https://github.com/kvnlng/Isocenter/issues/526)): Implicit VR
+Little Endian with `use_compression=False`, and JPEG 2000 Lossless
+(`1.2.840.10008.1.2.4.90`) with `use_compression=True`. A file with no
+pixel data is always Implicit VR Little Endian. A source in any other
+syntax this library reads -- JPEG-LS, JPEG Lossless, RLE, JPEG Baseline or
+Extended -- is decoded at ingest and re-encoded into one of those two.
+Nothing in the log or the audit trail records that, because the samples
+are unchanged and the source syntax is not stored. A source that was
+compressed lossily is re-encoded losslessly from its decoded samples, and
+its `LossyImageCompression (0028,2110)` is carried only if the source
+declared it: a near-lossless JPEG-LS source that did not declare it exports
+with no record that it was lossy
+([#601](https://github.com/kvnlng/Isocenter/issues/601)).
+
+A Photometric Interpretation spelled in lower case or with a leading space
+(`' rgb '`) is written upper-cased and stripped (`RGB`), with an INFO line,
+because pydicom and `ingest()` refuse the declared spelling
+([#532](https://github.com/kvnlng/Isocenter/issues/532)). The graph keeps
+what it declared.
+
 **`verify_readback=True`** decodes every file it writes through the same
 decoder `ingest()` uses and compares every pixel sample with what it meant
 to write. It also refuses a Photometric Interpretation the file's transfer
-syntax does not admit (for example `YBR_ICT` on an uncompressed file). An
-instance that fails is not delivered: it gets an `ERROR` audit row, appears
-in `ExportSummary.failures`, and grades the run `REVIEW_REQUIRED`. Without
+syntax does not admit (for example `YBR_ICT` on an uncompressed file, and
+`YBR_PARTIAL_422` or `YBR_PARTIAL_420` under either syntax the export
+writes, [#525](https://github.com/kvnlng/Isocenter/issues/525)), and a file
+`ingest()` could not read back because of its colour space: a 16-bit
+`YBR_FULL` image
+([#596](https://github.com/kvnlng/Isocenter/issues/596)). An instance that
+fails is not delivered: it gets an `ERROR` audit row, appears in
+`ExportSummary.failures`, and grades the run `REVIEW_REQUIRED`. Without
 verification that same inadmissible label is written as declared with a
 `WARNING` row, which also grades `REVIEW_REQUIRED` -- so turning
 verification on can cost you a file the default export would have
-delivered, by design.
+delivered, by design. The label is judged on a file with no pixel data too
+([#534](https://github.com/kvnlng/Isocenter/issues/534)). The 16-bit
+`YBR_FULL` file is conformant DICOM, so the default export writes it, with
+an INFO line saying this library cannot read it back and no audit row.
 
 Nothing scans or redacts a small preview image (an Icon Image Sequence
 item), so the export removes the ones that could show redacted pixels
