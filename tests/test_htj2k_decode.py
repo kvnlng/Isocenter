@@ -149,6 +149,40 @@ def test_a_signed_htj2k_codestream_under_pixel_representation_0_is_refused_in_th
         f"Decompression Failed: RuntimeError: {words}"), got["failure"]
 
 
+@pytest.mark.parametrize("ts", SYNTAXES, ids=SYNTAX_IDS)
+def test_an_htj2k_stream_gets_the_jpeg_2000_container_and_reinterpretation(
+        tmp_path, monkeypatch, ts):
+    """JPEG 2000's two sample-width rules, on HTJ2K (#523, #460).
+
+    A precision-8 codestream under BitsAllocated 16 is read in its 16-bit
+    container, where openjpeg returns `uint8`. An unsigned codestream
+    under PixelRepresentation 1 is read by the header at its own
+    precision: the patterns of `SOURCES["int16"]` come back as those
+    values. Every door, since both rules live in the decode they share.
+    """
+    from isocenter import imagecodecs_handler  # pylint: disable=import-outside-toplevel
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    narrow = SOURCES["mono8"]
+    ds = dataset(ts, [_htj2k(narrow)], rows=8, cols=8, bits_allocated=16,
+                 bits_stored=8)
+    path = write(tmp_path, ds, name="narrow")
+    assert isinstance(pydicom_answer(path), RuntimeError)
+    for got in (at_decode_pixels(path), at_instance(path)):
+        assert isinstance(got, tuple), got
+        assert same(got[0], narrow.astype(np.uint16)), got
+
+    signed = SOURCES["int16"]
+    patterns = _htj2k(signed.view(np.uint16))
+    assert imagecodecs_handler._j2k_sample_layout(  # pylint: disable=protected-access
+        patterns) == (False, 16)
+    ds = dataset(ts, [patterns], rows=8, cols=8, bits_allocated=16,
+                 pixel_representation=1)
+    path = write(tmp_path, ds, name="patterns")
+    for got in (at_decode_pixels(path), at_instance(path)):
+        assert isinstance(got, tuple), got
+        assert same(got[0], signed), got
+
+
 @pytest.mark.parametrize("compression", [True, False],
                          ids=["compressed", "native"])
 def test_an_htj2k_source_exports_and_reads_back(tmp_path, monkeypatch,
