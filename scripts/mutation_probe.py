@@ -507,7 +507,8 @@ TARGETS = {
                                   "tests/test_compression_deps.py",
                                   "tests/test_entities.py",
                                   "tests/test_high_bit_is_a_header_warning.py",
-                                  "tests/test_j2k_signedness_against_pixel_representation.py"], 30),
+                                  "tests/test_j2k_signedness_against_pixel_representation.py",
+                                  "tests/test_htj2k_decode.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -829,7 +830,8 @@ TARGETS = {
                               # test_a_restored_patient_is_saved.py (#552).
                               "tests/test_a_restored_patient_is_saved.py",
                               "tests/test_patients_sharing_an_id_are_merged.py",
-                              "tests/test_high_bit_is_a_header_warning.py"],
+                              "tests/test_high_bit_is_a_header_warning.py",
+                              "tests/test_htj2k_decode.py"],
                              30),
     # 196 sites. Until #419 this module had no row, so the persistence
     # bookkeeping every CLAUDE.md trap is about -- `mark_modified`,
@@ -1053,7 +1055,8 @@ TARGETS = {
                                "tests/test_nested_remediation_reaches_the_instance.py",
                                "tests/test_patients_sharing_an_id_are_merged.py",
                                "tests/test_save_keeps_rows_memory_holds.py",
-                               "tests/test_one_decode_answer_per_file.py"],
+                               "tests/test_one_decode_answer_per_file.py",
+                               "tests/test_htj2k_decode.py"],
                               30),
     # 81 sites; budget 60 is stride 1 (81 // 60), so every site is
     # probed, exhaustive because it is cheap, like parallel.py's 80. It
@@ -1112,7 +1115,8 @@ TARGETS = {
                                           "tests/test_ybr_jpegls_read_doors.py",
                                           "tests/test_ybr_read_door_labels.py",
                                           "tests/test_one_decode_answer_per_file.py",
-                                          "tests/test_high_bit_is_a_header_warning.py"],
+                                          "tests/test_high_bit_is_a_header_warning.py",
+                                          "tests/test_htj2k_decode.py"],
                                          60),
 }
 

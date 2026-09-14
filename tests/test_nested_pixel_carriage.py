@@ -1243,6 +1243,45 @@ def test_a_ybr_full_jpeg_ls_icon_is_carried_as_rgb(tmp_path):
     assert int(np.abs(got.astype(int) - NEAR_ICON_RGB.astype(int)).max()) <= 6
 
 
+@pytest.mark.parametrize("ts", ["1.2.840.10008.1.2.4.201",
+                                "1.2.840.10008.1.2.4.202",
+                                "1.2.840.10008.1.2.4.203"],
+                         ids=[".201", ".202", ".203"])
+def test_an_htj2k_icon_on_a_pixel_less_instance_is_carried(tmp_path, ts):
+    """N6: an HTJ2K icon is carried, under all three HTJ2K syntaxes (#459).
+
+    Before, every one dropped with the generic loss row: `.201` and
+    `.202` were admitted by the gate and then failed to decode (pydicom
+    has no plugin here), and `.203` was not admitted. Both are gone:
+    the fallback decodes HTJ2K through `jpeg2k_decode`, and `.203` is
+    admitted, measured here. The exported item holds the source's samples.
+
+    Killed by `.203` leaving `_CARRIABLE_TRANSFER_SYNTAXES` (its loss row
+    returns) and by HTJ2K leaving `_IMAGECODECS_FALLBACK_SYNTAXES` (all
+    three rows return).
+    """
+    import imagecodecs
+    from pydicom.encaps import encapsulate
+
+    source = (np.arange(16, dtype=np.int64) * 16).astype(
+        np.uint8).reshape(4, 4)
+    icon = _icon_item(
+        payload=encapsulate([imagecodecs.htj2k_encode(source,
+                                                      reversible=True)]),
+        rows=4, cols=4, encapsulated=True)
+    db, _src = _ingest(tmp_path, "htj2k", icons=[icon], transfer_syntax=ts,
+                       top_level_pixels=False)
+
+    assert not [d for d, _s in _data_loss_rows(db) if "7fe0,0010" in d], \
+        _data_loss_rows(db)
+    out = tmp_path / "out"
+    _export(db, out)
+    exported = _exported(out).IconImageSequence[0]
+    assert exported.PhotometricInterpretation == "MONOCHROME2"
+    got = np.frombuffer(exported.PixelData, dtype=np.uint8).reshape(4, 4)
+    assert got.tolist() == source.tolist()
+
+
 def test_an_icon_whose_header_pydicom_rejects_is_not_carried(tmp_path):
     """N5: an icon gets pydicom's header validation too (#453, attack A20c).
 
@@ -1331,8 +1370,9 @@ def test_the_carriable_transfer_syntaxes_are_the_uids_pydicom_names(tmp_path):
     in it since #372, and JPEG Extended and JPEG-LS Near-Lossless since
     #387, each because its behaviour through a nested item was measured
     (N1, N2) and the label is corrected from the decoder's meta. HTJ2K
-    (.4.203) stays out: nothing in this environment decodes it -- an
-    allow-list's unmeasured side is its refusing side.
+    (.4.203) joined `.4.201` and `.4.202` in #459, once the fallback
+    decoded all three (N6) -- until then an allow-list's unmeasured side
+    was, rightly, its refusing side.
 
     An exact set, not a membership check, so a syntax added without a
     test that names it is red here too.
@@ -1344,10 +1384,9 @@ def test_the_carriable_transfer_syntaxes_are_the_uids_pydicom_names(tmp_path):
              "RLELossless", "JPEGLossless", "JPEGLosslessSV1",
              "JPEGLSLossless", "JPEG2000Lossless", "HTJ2KLossless",
              "HTJ2KLosslessRPCL", "JPEGBaseline8Bit", "JPEG2000",
-             "JPEGExtended12Bit", "JPEGLSNearLossless")
+             "JPEGExtended12Bit", "JPEGLSNearLossless", "HTJ2K")
     assert _CARRIABLE_TRANSFER_SYNTAXES == frozenset(
         str(getattr(uid, name)) for name in names)
-    assert str(uid.HTJ2K) not in _CARRIABLE_TRANSFER_SYNTAXES
 
 
 # --- 4. Both export paths ------------------------------------------------

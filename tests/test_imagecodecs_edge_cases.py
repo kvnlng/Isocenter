@@ -158,10 +158,16 @@ _CODEC_FOR = {
     "1.2.840.10008.1.2.4.51": "jpeg_decode",    # JPEG Extended
     "1.2.840.10008.1.2.4.90": "jpeg2k_decode",  # JPEG 2000 Lossless
     "1.2.840.10008.1.2.4.91": "jpeg2k_decode",  # JPEG 2000
+    # HTJ2K, through openjpeg: `htj2k_decode` returns non-RCT colour
+    # planar (#459).
+    "1.2.840.10008.1.2.4.201": "jpeg2k_decode",  # HTJ2K Lossless
+    "1.2.840.10008.1.2.4.202": "jpeg2k_decode",  # HTJ2K Lossless RPCL
+    "1.2.840.10008.1.2.4.203": "jpeg2k_decode",  # HTJ2K
     "1.2.840.10008.1.2.4.80": "jpegls_decode",  # JPEG-LS Lossless
     "1.2.840.10008.1.2.4.81": "jpegls_decode",  # JPEG-LS Near-Lossless
 }
-_CODECS = sorted(set(_CODEC_FOR.values()))
+#: `htj2k_decode` too, which no syntax may reach (#459).
+_CODECS = sorted(set(_CODEC_FOR.values()) | {"htj2k_decode"})
 DISPATCH_CHUNK = b"codestream!!"  # even length: no pad byte from encapsulate
 
 
@@ -198,8 +204,8 @@ def test_each_syntax_reaches_its_own_codec_and_returns_its_result(syntax):
                 getattr(mock_ic, name).assert_not_called()
 
 
-def test_supports_exactly_the_eight_syntaxes():
-    """Eight since #447: RLE Lossless is not the handler's to claim."""
+def test_supports_exactly_the_eleven_syntaxes():
+    """Eight since #447, when RLE Lossless left; eleven with HTJ2K (#459)."""
     assert sorted(imagecodecs_handler.SUPPORTED_TRANSFER_SYNTAXES) == \
         sorted(_CODEC_FOR)
     for syntax in _CODEC_FOR:

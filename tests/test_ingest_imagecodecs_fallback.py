@@ -271,7 +271,9 @@ def test_every_fallback_syntax_ingests():
     (#447).
     """
     assert _IMAGECODECS_FALLBACK_SYNTAXES == frozenset(
-        {LJPEG, LJPEG_SV1, JPEGLS, JPEGLS_NEAR, J2K_LOSSLESS, J2K})
+        {LJPEG, LJPEG_SV1, JPEGLS, JPEGLS_NEAR, J2K_LOSSLESS, J2K,
+         "1.2.840.10008.1.2.4.201", "1.2.840.10008.1.2.4.202",
+         "1.2.840.10008.1.2.4.203"})
 
 
 # ---------------------------------------------------------------------------
@@ -559,7 +561,10 @@ def test_the_colour_spaces_the_fallback_labels_are_chosen_per_syntax():
             _FALLBACK_PHOTOMETRICS.items()} == {
         LJPEG: ljpeg, LJPEG_SV1: ljpeg,
         JPEGLS: jpegls, JPEGLS_NEAR: jpegls,
-        J2K_LOSSLESS: j2k, J2K: j2k}
+        J2K_LOSSLESS: j2k, J2K: j2k,
+        # HTJ2K is JPEG 2000 to openjpeg, row for row (#459).
+        "1.2.840.10008.1.2.4.201": j2k, "1.2.840.10008.1.2.4.202": j2k,
+        "1.2.840.10008.1.2.4.203": j2k}
 
 
 def _colour_ljpeg(ts, want, photometric="RGB"):

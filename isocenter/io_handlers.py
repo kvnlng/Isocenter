@@ -323,12 +323,14 @@ _NESTED_PIXEL_DATA_TAG = Tag(0x7fe0, 0x0010)
 #: decodes through the imagecodecs fallback (#416), within the stream's
 #: NEAR bound, under the labels `_FALLBACK_PHOTOMETRICS` gives it.
 #:
-#: HTJ2K (`.4.203`) stays out: pydicom has no plugin for it here and the
-#: imagecodecs handler has no HTJ2K arm, so nothing in this environment
-#: decodes it. `.4.201` and `.4.202` are listed and are no better off --
-#: every such icon still drops, from the decode's `except` arm with the
-#: generic row. An allow-list's whole point is that its unmeasured side is
-#: the refusing side.
+#: HTJ2K (`.4.203`) joined `.4.201` and `.4.202` in #459, measured (N6 in
+#: `tests/test_nested_pixel_carriage.py`). Until then nothing here decoded
+#: HTJ2K -- pydicom has no plugin for it without pylibjpeg-openjpeg -- so
+#: `.4.203` stayed out, and `.4.201` and `.4.202` were listed and no better
+#: off: every such icon dropped from the decode's `except` arm with the
+#: generic row. The imagecodecs fallback now decodes all three through
+#: `jpeg2k_decode`, a 4x4 icon exactly. An allow-list's whole point is that
+#: its unmeasured side is the refusing side; this one was measured.
 #:
 #: Written as UID strings rather than `pydicom.uid` names on purpose: the
 #: names are not stable across pydicom versions, and a draft of #183's spec
@@ -349,8 +351,9 @@ _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
     "1.2.840.10008.1.2.4.81",   # JPEG-LS Near-Lossless, measured (#387)
     "1.2.840.10008.1.2.4.90",   # JPEG 2000 Image Compression (Lossless Only)
     "1.2.840.10008.1.2.4.91",   # JPEG 2000 Image Compression, measured (#372)
-    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless
-    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL
+    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless, measured (#459)
+    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL, measured (#459)
+    "1.2.840.10008.1.2.4.203",  # HTJ2K, measured (#459)
 })
 
 #: The transfer syntaxes `_decode_pixels` decodes through `imagecodecs`
@@ -367,6 +370,12 @@ _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
 #: | .57 / .70 JPEG Lossless | none | yes |
 #: | .80 / .81 JPEG-LS | none | yes |
 #: | .90 / .91 JPEG 2000 | `pillow`, 16-bit multi-sample refused | yes |
+#: | .201 / .202 / .203 HTJ2K | none | yes |
+#:
+#: HTJ2K since #459 (owner ruling Q6): pydicom decodes it only with
+#: pylibjpeg-openjpeg, not a dependency, and `jpeg2k_decode` reads it
+#: exactly, so it takes every JPEG 2000 row below
+#: (`imagecodecs_handler.J2K_SYNTAXES` says why not `htj2k_decode`).
 #:
 #: So every JPEG Lossless and JPEG-LS file was refused at ingest, and now
 #: ingests when its decode matches its header under a colour space
@@ -384,6 +393,9 @@ _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
     "1.2.840.10008.1.2.4.81",   # JPEG-LS Near-Lossless
     "1.2.840.10008.1.2.4.90",   # JPEG 2000 (Lossless Only)
     "1.2.840.10008.1.2.4.91",   # JPEG 2000
+    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless
+    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL
+    "1.2.840.10008.1.2.4.203",  # HTJ2K
 })
 
 #: The colour space the fallback stores for each declared one, per transfer
@@ -444,16 +456,24 @@ _FALLBACK_PHOTOMETRICS = {
     "1.2.840.10008.1.2.4.81": _FALLBACK_JPEGLS,
     "1.2.840.10008.1.2.4.90": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.91": _FALLBACK_J2K,
+    # HTJ2K: `jpeg2k_decode` undoes a reversible colour transform to the
+    # exact RGB source, at 8 and 16 bits (#459, measured). No `YBR_ICT`
+    # stream was measured under .203; the row is JPEG 2000's, whose
+    # decoder it is.
+    "1.2.840.10008.1.2.4.201": _FALLBACK_J2K,
+    "1.2.840.10008.1.2.4.202": _FALLBACK_J2K,
+    "1.2.840.10008.1.2.4.203": _FALLBACK_J2K,
 }
 #: The syntaxes whose decoder returns the stored label's colour space
-#: itself, so a relabel there is a label change only (see above). The
-#: handler makes the same relabel at the read doors from its own
-#: `imagecodecs_handler.DECODER_RELABELS` (#482), which
-#: `test_the_handler_relabels_exactly_the_rows_ingest_relabels_without_converting`
-#: holds to these rows.
+#: itself, so a relabel there is a label change only (see above). Every
+#: door reads this one table since #453, which deleted the handler's own
+#: copy (`DECODER_RELABELS`).
 _FALLBACK_DECODER_CONVERTS = frozenset({
     "1.2.840.10008.1.2.4.90",
     "1.2.840.10008.1.2.4.91",
+    "1.2.840.10008.1.2.4.201",
+    "1.2.840.10008.1.2.4.202",
+    "1.2.840.10008.1.2.4.203",
 })
 
 

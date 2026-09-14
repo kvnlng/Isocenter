@@ -126,13 +126,26 @@ JPEGBaseline = UID("1.2.840.10008.1.2.4.50")
 JPEGExtended = UID("1.2.840.10008.1.2.4.51")
 JPEGLSLossless = UID("1.2.840.10008.1.2.4.80")
 JPEGLSLossy = UID("1.2.840.10008.1.2.4.81")
+HTJ2KLossless = UID("1.2.840.10008.1.2.4.201")
+HTJ2KLosslessRPCL = UID("1.2.840.10008.1.2.4.202")
+HTJ2K = UID("1.2.840.10008.1.2.4.203")
 
 #: The syntaxes whose frames are JPEG 2000 codestreams, and so carry a
 #: SIZ marker `_j2k_sample_layout` reads, and the JPEG-LS ones, whose
 #: frame header `_jpegls_precision` reads. One set each, so the decode,
 #: the signedness gate and ingest's HighBit row cannot disagree about
 #: which files have a stream precision.
-J2K_SYNTAXES = frozenset({JPEG2000Lossless, JPEG2000})
+#:
+#: **HTJ2K is a member (#459).** High-Throughput JPEG 2000 (PS3.5 A.4.11)
+#: is a JPEG 2000 codestream with another block coder: the same SOC and
+#: SIZ, so the same signedness, precision and colour transform. openjpeg's
+#: `jpeg2k_decode` reads it exactly -- mono 8/16, signed 16, RGB 8/16 with
+#: and without the reversible colour transform, at imagecodecs 2024.6.1
+#: and 2026.8.16 (measured). **Not `htj2k_decode`**: openjph returns an RGB
+#: stream written without the transform planar, `(3, rows, cols)`, the
+#: same samples in another image. Do not "use the matching codec".
+J2K_SYNTAXES = frozenset({JPEG2000Lossless, JPEG2000, HTJ2KLossless,
+                          HTJ2KLosslessRPCL, HTJ2K})
 JPEGLS_SYNTAXES = frozenset({JPEGLSLossless, JPEGLSLossy})
 
 HANDLER_NAME = "isocenter_imagecodecs_handler"
@@ -159,6 +172,9 @@ SUPPORTED_TRANSFER_SYNTAXES = [
     JPEGExtended,
     JPEGLSLossless,
     JPEGLSLossy,
+    HTJ2KLossless,
+    HTJ2KLosslessRPCL,
+    HTJ2K,
 ]
 
 
@@ -768,7 +784,9 @@ def _decode_frame(transfer_syntax, bitstream, ds):
             ds)
     if transfer_syntax in [JPEGBaseline, JPEGExtended]:
         return imagecodecs.jpeg_decode(bitstream)
-    if transfer_syntax in [JPEG2000Lossless, JPEG2000]:
+    if transfer_syntax in J2K_SYNTAXES:
+        # HTJ2K included, through `jpeg2k_decode`: see `J2K_SYNTAXES`.
+        #
         # The codestream's own SIZ header, per frame, for the same reason
         # the JPEG-LS branch below reads its own: a frame is a codestream
         # and one frame's header does not speak for another's samples.
