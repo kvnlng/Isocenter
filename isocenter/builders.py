@@ -74,13 +74,38 @@ class SeriesBuilder:
         that this was the one construction site with no predicate, and
         `.set_equipment("", "", "SN")` built an `Equipment` that
         `save_all` wrote and no reload could return.
+
+        **Also writes the equipment onto every instance** -- those already
+        added, and (through `add_instance`) those added later -- as
+        Manufacturer (0008,0070), Manufacturer's Model Name (0008,1090)
+        and Device Serial Number (0018,1000), each only when given (#570).
+        The instance is where the export reads equipment from; the writer
+        re-stamping it from `Series.equipment` put a serial back into a
+        file after `anonymize()` had removed it from the instance. The
+        latest write wins: a `set_attribute` of one of the three tags
+        before this call is overwritten by it, and one after is kept.
         """
         self.series.equipment = Equipment.from_parts(man, mod, sn)
+        for inst in self.series.instances:
+            self._stamp_equipment(inst)
         return self
 
+    def _stamp_equipment(self, inst):
+        """Copy the non-empty parts of `Series.equipment` onto `inst`."""
+        equipment = self.series.equipment
+        if equipment is None:
+            return
+        for tag, value in (("0008,0070", equipment.manufacturer),
+                           ("0008,1090", equipment.model_name),
+                           ("0018,1000", equipment.device_serial_number)):
+            if value:
+                inst.set_attr(tag, value)
+
     def add_instance(self, uid, cls, num):
-        """Adds a child Instance to this Series."""
+        """Adds a child Instance to this Series, carrying the series'
+        equipment tags if `set_equipment` has already run (#570)."""
         inst = Instance(uid, cls, num)
+        self._stamp_equipment(inst)
         self.series.instances.append(inst)
         return InstanceContextBuilder(self, inst)
 

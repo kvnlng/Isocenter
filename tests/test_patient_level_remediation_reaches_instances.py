@@ -3,9 +3,9 @@
 `anonymize()` wrote the replacement to the `Patient` or `Study` entity
 and left every instance's own copy of the tag as ingested. The exported
 `.dcm` was clean only because the export worker stamps the patient and
-study modules from the entities at write time (`session._patient_attributes`,
-`_study_attributes`); two frozen readers read the instance dict instead
-and handed the originals out. Measured on 168fdd6, pydicom's CT_small,
+study modules from the entities at write time (then `session._patient_attributes`
+and `_study_attributes`, since #570 `export_stamp_attributes`); two frozen
+readers read the instance dict instead and handed the originals out. Measured on 168fdd6, pydicom's CT_small,
 `DicomSession()` -> `ingest()` -> `audit()` -> `anonymize()` with no
 config loaded: `patient.patient_name == "ANONYMIZED"` while
 `instance.attributes["0010,0010"] == "CompressedSamples^CT1"`,

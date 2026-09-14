@@ -2,7 +2,7 @@
 
 `recover_patient_identity(restore=True)` wrote the locked `0008,0020`
 onto every instance, but `export()` stamps Study Date from the `Study`
-(`_study_attributes`), and `Study.study_date` kept the shifted value.
+(`export_stamp_attributes`), and `Study.study_date` kept the shifted value.
 Measured on 57400d1 (3.12 and 3.14t, `probes-E/p566.py`): instance
 `20040119`, study shifted, the exported file shifted, and the split
 survived a save and reopen.

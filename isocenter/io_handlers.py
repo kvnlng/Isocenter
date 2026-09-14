@@ -3596,8 +3596,41 @@ class DicomImporter:
             skipped=skipped_count)
 
 
+#: The refusal every door raises for a `compression` it cannot write
+#: (#605). One constant because the CHANGELOG quotes it.
+_COMPRESSION_REFUSAL = (
+    "compression must be None (Implicit VR Little Endian) or 'j2k' "
+    "(JPEG 2000 Lossless); got {!r}")
+
+
+def _compresses(compression) -> bool:
+    """Does this `compression` encode the pixels? The one spelling (#605).
+
+    True for `"j2k"`, False for None, and `ValueError` for anything else.
+    Every reader of `compression` asks this -- `ExportContext`'s
+    construction, `write_tree`'s entry, the export worker and
+    `_finalize_dataset` -- because the worker once asked three ways: two
+    sites compared `== "j2k"` and the integer arm tested truthiness, so
+    `"rle"` or `"J2K"` skipped both the raw write and the encoder and
+    delivered an image with no Pixel Data as `ok`. A refusal rather than
+    a native fallback: a caller who typed a codec name asked for a file
+    this exporter does not write, and quietly writing a different one is
+    the #605 outcome with its pixels put back. `""`, `False` and `0` are
+    refused too; they meant "native" only by accident of the truthiness
+    test.
+    """
+    if compression is None:
+        return False
+    if isinstance(compression, str) and compression == "j2k":
+        return True
+    raise ValueError(_COMPRESSION_REFUSAL.format(compression))
+
+
 @dataclass
 class ExportContext:
+    """One instance to write, and how. Validates `compression` on
+    construction (#605); the worker asks again, because a dataclass can
+    be edited after this runs."""
     instance: Instance
     output_path: str
     patient_attributes: Dict[str, Any]
@@ -3627,6 +3660,9 @@ class ExportContext:
     #: (#449). Carried here because the check runs in the worker -- the
     #: file is local to it and the cost parallelizes.
     verify_readback: bool = False
+
+    def __post_init__(self):
+        _compresses(self.compression)
 
 
 @dataclass
@@ -4785,25 +4821,26 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     corrections: List[str] = []
     warnings: List[str] = []
     uid = getattr(ctx.instance, "sop_instance_uid", None)
-    # The syntax the file will be written under, decided here so the
-    # label check judges what is actually being written (#502) rather
-    # than re-deriving it beside each call. `_create_ds` starts every
-    # file at Implicit VR Little Endian and only the compressed path
-    # moves it.
-    #
-    # **`== "j2k"`, not truthiness, and that is the same predicate
-    # `_finalize_dataset` keys on** -- it runs `_compress_j2k` for
-    # `compression == 'j2k'` and for nothing else. Read as truthiness
-    # here, any other truthy string (`compression="rle"`) would have the
-    # label judged against the JPEG 2000 row while the file was written
-    # natively, so an inadmissible label went out unwarned. `compression`
-    # is not a documented open enum, so that was latitude rather than a
-    # live defect; two spellings of one predicate is the thing this
-    # repo's "one spelling per behaviour" convention is about.
-    written_syntax = (str(JPEG2000Lossless) if ctx.compression == "j2k"
-                      else str(ImplicitVRLittleEndian))
 
     try:
+        # Whether the pixels are encoded, asked once and of the one
+        # predicate every other reader of `compression` asks (#605).
+        # Inside the `try`: `ExportContext` refuses an unknown value on
+        # construction, but a dataclass can be edited afterwards, and
+        # that context must fail as its own instance, not take the batch
+        # down. The worker used to ask three ways -- `== "j2k"` here and
+        # in `_finalize_dataset`, truthiness in the integer arm -- so
+        # `compression="rle"` skipped both the raw write and the encoder
+        # and delivered an image with no Pixel Data as `ok`.
+        compressed = _compresses(ctx.compression)
+        # The syntax the file will be written under, decided here so the
+        # label check judges what is actually being written (#502) rather
+        # than re-deriving it beside each call. `_create_ds` starts every
+        # file at Implicit VR Little Endian and only the compressed path
+        # moves it.
+        written_syntax = (str(JPEG2000Lossless) if compressed
+                          else str(ImplicitVRLittleEndian))
+
         inst = ctx.instance
         ds = DicomExporter._create_ds(inst)
 
@@ -4843,6 +4880,17 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # 3. Series Level
         DicomExporter._merge(ds, ctx.series_attributes, losses)
+
+        # Study Time is Type 2 (PS3.3 C.7.2.1): present, and empty when
+        # unknown. `IODValidator` refuses it **absent**, so a study with
+        # no time and an instance with none failed `session.export()`
+        # outright, and `write_tree` hid the same gap by writing the
+        # literal `120000` -- a fabricated clinical time (#570). Filled
+        # here, after every merge, and not in `export_stamp_attributes`:
+        # only here is it known whether the instance or the study
+        # supplied one, and a stamp of `""` would overwrite a real value.
+        if "StudyTime" not in ds:
+            ds.StudyTime = ""
 
         # There is deliberately no `populate_attrs(ds, inst)` here, and
         # there must never be again (#184). It was the ingest reader
@@ -5217,7 +5265,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # Pass the numpy array to _finalize_dataset -> _compress_j2k directly.
             # Only set PixelData if NOT compressing.
 
-            if not ctx.compression:
+            if not compressed:
                 ds.PixelData = arr.tobytes()
 
             # The second of PS3.5 Section 8.2's three reachable
@@ -5256,7 +5304,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # itself move `validation_status`.
             #
             # The gate is this `arr is not None` block, not
-            # `"PixelData" in ds`: with `ctx.compression` set the worker
+            # `"PixelData" in ds`: when `compressed` the worker
             # never assigns `ds.PixelData` at all -- `_finalize_dataset`
             # compresses from the array -- so a membership test would let
             # the URL survive every compressed export. Measured. Do not
@@ -5505,13 +5553,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # the right order: a warning describes a file that was written.
         #
         # Keyed on the arm -- no pixel arm set `written_pixels`, which is
-        # exactly "`_write_pixel_geometry` was not called" -- and not on
-        # `_PIXEL_ELEMENTS` membership in `ds`. The two differ for one
-        # input: a truthy `compression` other than `"j2k"` makes the
-        # integer arm skip `ds.PixelData` while `_finalize_dataset`
-        # encodes nothing, so a file judged by the pixel arm already
-        # would be judged a second time here (measured with
-        # `compression="rle"`, two warnings for one label).
+        # exactly "`_write_pixel_geometry` was not called". Since #605 that
+        # is also exactly "no pixel element is in the file": only None and
+        # `"j2k"` reach the integer arm, and each writes the element (the
+        # raw bytes, or the encoder), so the arm that set `written_pixels`
+        # always wrote one. It was not before -- `compression="rle"` set it
+        # and wrote nothing, so this judgement was skipped for a file with
+        # no pixels and the #596 note above described pixels the file did
+        # not carry. Keep the key on the arm regardless: the arm is what
+        # decides which of the two label judgements ran.
         if written_pixels is None:
             warning = _pixel_less_label_warning(ds)
             if warning is not None:
@@ -5785,7 +5835,7 @@ def _compress_j2k(ds, pixel_array=None):
             # Deleted rather than corrected, because it is unreachable:
             # `_compress_j2k`'s only caller is `_finalize_dataset`, whose
             # only caller is the export worker, which always passes
-            # `pixel_array=arr`; and with `ctx.compression` set the worker
+            # `pixel_array=arr`; and when compressing the worker
             # never assigns `ds.PixelData` at all, which the comment at
             # the `arr is not None` block above already says in those
             # words. The one path that arrives here with `arr is None` is
@@ -6487,6 +6537,72 @@ def export_folder_names(patient, study, series):
     return subj_name, study_folder, series_folder
 
 
+def export_stamp_attributes(patient, study, series):
+    """The patient, study and series tags stamped onto every exported
+    instance, for both write doors (#570).
+
+    The one answer to "what does the export write over the instance's own
+    attributes", as `export_folder_names` is the one answer to "where".
+    `session.export()` and `DicomExporter.write_tree()` each built their
+    own set until #570, and they disagreed: `write_tree` wrote the literal
+    Study Time `120000` over a real one, and re-stamped Manufacturer, Model
+    Name and Device Serial Number from `Series.equipment` -- which, after
+    `anonymize()` had emptied the instance's `(0018,1000)`, put the
+    scanner's real serial back into a de-identified file. Do not add
+    either back here:
+
+    * **No Study Time unless the study has one.** The worker writes a
+      zero-length Study Time when nothing supplied one (Type 2
+      "unknown"); a literal is a fabricated clinical time, and a `""`
+      here would overwrite the instance's real value.
+    * **No equipment.** It comes from the instance, which is what
+      `anonymize()` edits; `Series.equipment` keeps the source serial on
+      purpose, because `redact()` matches rules on it. A hand-built graph
+      gets its equipment onto the instances from `SeriesBuilder`.
+
+    Args:
+        patient (Patient): The patient root.
+        study (Study): The study the instance belongs to.
+        series (Series): The series the instance belongs to.
+
+    Returns:
+        Tuple[dict, dict, dict]: `(patient_attributes, study_attributes,
+            series_attributes)`, keyed by `"gggg,eeee"`.
+    """
+    patient_attributes = {
+        "0010,0010": patient.patient_name,
+        "0010,0020": patient.patient_id,
+    }
+    if getattr(patient, 'birth_date', None):
+        patient_attributes["0010,0030"] = patient.birth_date
+    if getattr(patient, 'sex', None):
+        patient_attributes["0010,0040"] = patient.sex
+
+    study_attributes = {
+        "0020,000d": study.study_instance_uid,
+        # Formatted, so one string reaches `_merge` whether the entity
+        # holds a `date`, a string or None.
+        "0008,0020": format_study_date(study.study_date),
+    }
+    if getattr(study, 'study_time', None):
+        study_attributes["0008,0030"] = study.study_time
+    if getattr(study, 'accession_number', None):
+        study_attributes["0008,0050"] = study.accession_number
+
+    series_attributes = {
+        "0020,000e": series.series_instance_uid,
+        "0008,0060": series.modality,
+        # None stays None, a zero-length Series Number (Type 2). The
+        # session stamped `str(None)`, which IS refuses, so the element
+        # was dropped with a DATA_LOSS row (#570).
+        "0020,0011": (None if series.series_number is None
+                      else str(series.series_number)),
+    }
+    if getattr(series, 'series_description', None):
+        series_attributes["0008,103e"] = series.series_description
+    return patient_attributes, study_attributes, series_attributes
+
+
 class DicomExporter:
     """
     Handles writing the Object Graph back to standard DICOM files.
@@ -6527,33 +6643,12 @@ class DicomExporter:
         for st in studies:
             for se in st.series:
                 for inst in se.instances:
-                    # Prepare Metadata used for directory structure AND overrides
-
-                    # Patient Attributes
-                    pat_attrs = {
-                        "0010,0010": patient.patient_name,
-                        "0010,0020": patient.patient_id
-                    }
-
-                    # Study Attributes
-                    s_date_str = format_study_date(st.study_date)
-
-                    study_attrs = {
-                        "0020,000d": st.study_instance_uid,
-                        "0008,0020": s_date_str,
-                        "0008,0030": "120000"
-                    }
-
-                    # Series Attributes
-                    series_attrs = {
-                        "0020,000e": se.series_instance_uid,
-                        "0008,0060": se.modality,
-                        "0020,0011": se.series_number
-                    }
-                    if se.equipment:
-                        series_attrs["0008,0070"] = se.equipment.manufacturer
-                        series_attrs["0008,1090"] = se.equipment.model_name
-                        series_attrs["0018,1000"] = se.equipment.device_serial_number
+                    # The session's stamps, from the one helper both
+                    # doors call (#570). This used to be its own set, with
+                    # a literal Study Time and equipment re-stamped from
+                    # the series -- see `export_stamp_attributes`.
+                    pat_attrs, study_attrs, series_attrs = \
+                        export_stamp_attributes(patient, st, se)
 
                     # Calculate Output Path
                     # 1-3. Subject/Study/Series folders, via the shared
@@ -6871,7 +6966,8 @@ class DicomExporter:
             out_dir (str): Destination directory.
             studies (List[Study], optional): Write only these studies.
                 Defaults to every study under `patient`.
-            compression (str, optional): Compression format ('j2k' or None).
+            compression (str, optional): `'j2k'` for JPEG 2000 Lossless, or
+                None for Implicit VR Little Endian. Nothing else (#605).
             show_progress (bool): If True, shows a progress bar.
             executor (ProcessPoolExecutor, optional): Shared executor for parallelism.
             store_backend (SqliteStore, optional): Where to write a
@@ -6880,8 +6976,13 @@ class DicomExporter:
                 so pass nothing; the losses are logged either way (#126).
 
         Raises:
+            ValueError: If `compression` is neither None nor `'j2k'`,
+                before anything is written (#605).
             RuntimeError: If any instance failed to write.
         """
+        # First, so an empty tree refuses too: the value is wrong whether
+        # or not there is anything to write with it (#605).
+        _compresses(compression)
         if studies is None:
             studies = patient.studies
         if not os.path.exists(out_dir):
@@ -7051,7 +7152,9 @@ class DicomExporter:
         Raises:
             ValueError: If validation fails.
         """
-        if compression == 'j2k':
+        # `_compresses`, the one predicate (#605): anything but None or
+        # `"j2k"` raises rather than writing natively in silence.
+        if _compresses(compression):
             _compress_j2k(ds, pixel_array)
 
         errs = IODValidator.validate(ds)
