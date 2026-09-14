@@ -242,7 +242,9 @@ instances or no identity token, or the key does not decrypt it (#539).
 It prints nothing, and no message names a Patient ID (#550).
 `enable_reversible_anonymization()` raises `ValueError` for a malformed
 key file and creates none; the first `lock_identities()` creates the key,
-exclusively and with mode 0600. `lock_identities()` refusals name no
+exclusively and with mode 0600, unless the session holds an identity token
+this library wrote that no key here opens, in which case it raises
+`RuntimeError` and creates none (#617). `lock_identities()` refusals name no
 patient: a batch refusal numbers each refused patient by its place among
 the patients found, in Patient ID order.
 

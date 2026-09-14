@@ -107,6 +107,25 @@ def test_an_empty_key_file_raises_its_own_error(tmp_path, form):
         _assert_no_patient(message)
 
 
+def test_recovery_names_an_empty_key_file_too(tmp_path):
+    """T18b. The CHANGELOG says the empty-file `ValueError` reaches
+    `recover_patient_identity()` "alike": it reads the key through the
+    same `load_key`, so the message names the path, not the patient,
+    and nothing is cached. Kills M21 through the recovery door."""
+    key = tmp_path / "k.key"
+    with _session(tmp_path) as session:
+        session.enable_reversible_anonymization(str(key))
+        key.write_bytes(b"")
+        with pytest.raises(ValueError) as caught:
+            session.recover_patient_identity(PID_A, restore=True)
+        message = str(caught.value)
+        assert str(key) in message and "empty" in message, message
+        assert "Key not loaded" not in message, message
+        _assert_no_patient(message)
+        assert session.key_manager.key is None
+        assert _first(session).attributes["0010,0010"] == "Secret^A"
+
+
 @pytest.mark.parametrize("form", FORMS)
 def test_a_key_file_filled_after_an_empty_read_locks_in_the_same_session(tmp_path, form):
     """T19. E2's race shape without the sleep: session B reads the file
