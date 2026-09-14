@@ -26,7 +26,7 @@ measured: every 8-bit YBR source, lossy or native, is decoded to RGB with
 the label left as declared. §16.6's reason for refusing lossy syntaxes
 ("a decoder whose colour-space behaviour nobody checked") is therefore
 gone for JPEG Baseline and JPEG 2000. Both clauses are struck in place.
-**Superseded in part:** #542 (v0.9.8). §8's redaction gate is no longer
+**Superseded in part:** #542 (v0.9.8). §0 Q10's redaction gate is no longer
 one store-wide boolean over every nested icon: the carrier's own depth-1
 Icon Image Sequence item is dropped only when that instance carries the
 attestation or has zones applied at export, and every other nested icon

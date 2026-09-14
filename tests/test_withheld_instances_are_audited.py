@@ -211,14 +211,22 @@ def test_a_withheld_row_is_one_table_row_whatever_the_folder_holds(tmp_path):
     finally:
         session.close()
 
-    flat = folder.replace("\n", " ").replace("|", "\\|")
-    assert warnings == [(withheld, (
-        f"DICOM export to {flat} withheld instance {withheld}: its "
+    # The whitespace join the code uses, not a `.replace` of the newline:
+    # the join also collapses any run of spaces a temporary directory's
+    # own path may hold, and a `.replace` would then expect them intact.
+    def flattened(text):
+        return " ".join(text.split()).replace("|", "\\|")
+
+    [(uid, details)] = warnings
+    assert uid == withheld
+    assert details == flattened(
+        f"DICOM export to {folder} withheld instance {withheld}: its "
         f"instance still carries an identifier the pre-export scan raised "
-        f"(check_burned_in=True)."))], warnings
+        f"(check_burned_in=True)."), details
+    assert "\n" not in details and "out\\|a b withheld" in details, details
     section_4 = text.split("## 4.", 1)[1].split("## 5.", 1)[0]
     rows = [line for line in section_4.splitlines() if withheld in line]
-    assert len(rows) == 1 and flat in rows[0], section_4
+    assert len(rows) == 1 and flattened(folder) in rows[0], section_4
 
 
 def test_the_counters_count_withheld_as_requested(tmp_path):
