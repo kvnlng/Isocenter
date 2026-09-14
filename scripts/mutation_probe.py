@@ -152,7 +152,8 @@ TARGETS = {
                                "tests/test_duplicate_sop_uid_at_ingest.py",
                                "tests/test_annex_e_end_to_end.py"],
                               80),
-    "isocenter/crypto.py": (["tests/test_crypto.py", "tests/test_reversibility.py"], 30),
+    "isocenter/crypto.py": (["tests/test_recovery_needs_the_key_it_was_locked_with.py",
+                             "tests/test_crypto.py", "tests/test_reversibility.py"], 30),
     # --- The #439 rows. Each was measured at budget 30 on 3.12.14 with other
     # suites running on the same machine, so the seconds are upper-side.
     # Every list holds what `_importers` demands; a file beyond it is named
@@ -302,7 +303,8 @@ TARGETS = {
     #     the ERROR in its `except`, which re-raises. The method has no
     #     caller in isocenter/ and its two tests pass empty or raising
     #     input, so the whole wrapper is dead (#488).
-    "isocenter/reversibility.py": (["tests/test_feature_regression.py",
+    "isocenter/reversibility.py": (["tests/test_recovery_needs_the_key_it_was_locked_with.py",
+                                    "tests/test_feature_regression.py",
                                     "tests/test_reversibility_coverage.py",
                                     "tests/test_relock_identity_token.py"], 30),
     # 7 sites, exhaustive: 6 killed. Five files, 43.3s per pass.
@@ -403,7 +405,8 @@ TARGETS = {
                                   "tests/test_the_project_secret_keys_the_pseudonym_and_offset.py",
                                   "tests/test_the_project_secret_lives_in_the_store.py",
                                   "tests/test_nested_remediation_reaches_the_instance.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_export_failure_text_carries_no_path.py", "tests/test_api_coherence.py",
+    "isocenter/io_handlers.py": (["tests/test_a_restored_study_date_reaches_the_file.py",
+                                  "tests/test_export_failure_text_carries_no_path.py", "tests/test_api_coherence.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_the_owned_tags_follow_their_rule.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
@@ -642,7 +645,11 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_analysis.py",
+    "isocenter/session.py": (["tests/test_recovery_needs_the_key_it_was_locked_with.py",
+                              "tests/test_a_restored_study_date_reaches_the_file.py",
+                              "tests/test_an_empty_patient_id_is_still_a_patient.py",
+                              "tests/test_a_lock_refusal_names_no_patient.py",
+                              "tests/test_analysis.py",
                               "tests/test_a_batch_lock_locks_every_patient_or_none.py",
                               "tests/test_anonymize_records_what_it_left.py",
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
@@ -872,7 +879,9 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_export_failure_text_carries_no_path.py", "tests/test_analysis.py",
+    "isocenter/entities.py": (["tests/test_an_empty_patient_id_is_still_a_patient.py",
+                               "tests/test_recovery_needs_the_key_it_was_locked_with.py",
+                               "tests/test_export_failure_text_carries_no_path.py", "tests/test_analysis.py",
                                "tests/test_anonymize_records_what_it_left.py",
                                "tests/test_a_partial_findings_list_is_not_remediated.py",
                                "tests/test_a_replace_rule_writes_its_value.py",
