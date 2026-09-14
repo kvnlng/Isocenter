@@ -62,7 +62,8 @@ import pytest
 from isocenter.entities import Instance, Patient, Series, Study
 from isocenter.io_handlers import (DicomExporter, ExportContext,
                                    ExportOutcome, _export_instance_worker,
-                                   _PhotometricRefusal)
+                                   _photometric_warning, _PhotometricRefusal,
+                                   _written_photometric)
 from isocenter.session import DicomSession
 
 SC_STORAGE = "1.2.840.10008.5.1.4.1.1.7"
@@ -318,46 +319,61 @@ def test_a_compressed_rgb_export_is_relabelled_and_warns_about_nothing(
     assert outcome.warnings == [], outcome.warnings
 
 
-@pytest.mark.parametrize("declared, written", [
-    (" ybr_ict ", " ybr_ict"), (["YBR_ICT"], "YBR_ICT")],
+@pytest.mark.parametrize("declared, notes", [
+    (" ybr_ict ", 1), (["YBR_ICT"], 0)],
     ids=["padded-lowercase", "one-element-list"])
-def test_a_padded_or_list_spelling_warns_too(tmp_path, declared, written):
+def test_a_padded_or_list_spelling_warns_too(tmp_path, declared, notes):
     """An odd spelling of an inadmissible label is still inadmissible (#502).
 
-    A CS is space-padded to even length in the file and read back
-    stripped on the right, and pydicom unwraps a one-element value on
-    assignment, so both of these reach a reader as `YBR_ICT`. The
-    one-element arm is a **characterisation**: pydicom's unwrap is what
-    makes it work, so `_written_photometric` deliberately does not
-    unwrap anything itself.
+    Both of these reach the file as `YBR_ICT` and are warned about once.
+    Until #532 the padded one was written as `' ybr_ict'` -- a CS
+    right-stripped on read keeps its leading space and its case, so
+    pydicom and `ingest()` refused the file -- and this test pinned that.
+    It is written as the Code String it spells now, with one INFO
+    correction saying so. The one-element list is a **characterisation**:
+    pydicom unwraps it on assignment, the spelling is already defined,
+    and there is no correction to note.
     """
     outcome = _export(tmp_path, _image(declared))
 
     assert outcome.ok, outcome.error
     assert pydicom.dcmread(
-        outcome.output_path).PhotometricInterpretation == written
+        outcome.output_path).PhotometricInterpretation == "YBR_ICT"
     assert len(outcome.warnings) == 1, outcome.warnings
+    assert len(outcome.corrections) == notes, outcome.corrections
 
 
 @pytest.mark.parametrize("declared", [" rgb ", "rgb", " RGB", ["RGB"]],
                          ids=["padded-lower", "lower", "padded", "list"])
 def test_an_oddly_spelled_admitted_label_does_not_warn(tmp_path, declared):
-    """This is what the normalization is for, and the other half of it (#502).
+    """An admitted label is not warned about for its spelling (#502).
 
-    An instance declaring `' rgb '` puts `' rgb '` on the dataset --
-    measured, pydicom does not normalize a declaration on the way in --
-    and writes a label every conformant reader takes as `RGB`. Comparing
-    it unnormalized would raise a `WARNING` and grade the run
-    `REVIEW_REQUIRED` over a file that is perfectly admissible, which is
-    worse than the silence this issue is about: a false alarm in a
-    compliance report costs the reader their trust in the true ones.
-    Killing mutation: `.strip().upper()` dropped from
-    `_written_photometric` (all four arms warn).
+    A false alarm in a compliance report costs the reader their trust in
+    the true ones. Since #532 the worker writes the label upper-cased
+    and stripped before the judgement, so this test no longer sees
+    `_written_photometric`'s own normalization -- that killer is
+    `test_the_judgement_normalizes_what_it_is_given` below.
     """
     outcome = _export(tmp_path, _image(declared))
 
     assert outcome.ok, outcome.error
     assert outcome.warnings == [], outcome.warnings
+
+
+@pytest.mark.parametrize("declared", [" rgb ", "rgb", " RGB", "Rgb"])
+def test_the_judgement_normalizes_what_it_is_given(declared):
+    """`_written_photometric` is still the comparison's normalization (#502).
+
+    The readback reads hand-built files, which the worker's #532
+    normalization never touches, so the judgement keeps its own. Unit
+    level because the worker no longer hands it an odd spelling.
+
+    Killing mutation: `.strip().upper()` dropped from
+    `_written_photometric` (every arm warns, naming a label that is not
+    in the row).
+    """
+    assert _photometric_warning(
+        _written_photometric(declared), IMPLICIT_VR_LE) is None
 
 
 # ---------------------------------------------------------------------------
@@ -655,3 +671,125 @@ def test_a_parent_row_for_ybr_partial_under_j2k(tmp_path, monkeypatch,
     assert f"({J2K_LOSSLESS})" in labelled[0][1], labelled
     assert "Subject_" not in labelled[0][0] + labelled[0][1], labelled
     assert "REVIEW_REQUIRED" in _grade(report), _grade(report)
+
+
+# ---------------------------------------------------------------------------
+# #532: the label is written as the Code String it spells.
+# ---------------------------------------------------------------------------
+
+def _mono(label):
+    """A 1-sample instance declaring `label`, with a 16-bit ramp."""
+    inst = _image(label, samples=1,
+                  arr=np.arange(64, dtype=np.uint16).reshape(8, 8))
+    return inst
+
+
+@pytest.mark.parametrize("declared, expected, build", [
+    (" rgb ", "RGB", _image), ("rgb", "RGB", _image),
+    ("Rgb", "RGB", _image), (" RGB", "RGB", _image),
+    ("monochrome2", "MONOCHROME2", _mono),
+    (" ybr_full ", "YBR_FULL", _image)],
+    ids=["padded-lower", "lower", "mixed", "leading-space", "mono-lower",
+         "ybr-padded-lower"])
+@pytest.mark.parametrize("compression", [None, "j2k"])
+def test_a_label_is_written_as_a_code_string(tmp_path, declared, expected,
+                                             build, compression):
+    """Upper case, no leading space: what PS3.5 6.2 defines a CS to be (#532).
+
+    Measured before: `' rgb '` was written `' rgb'`, `'monochrome2'` as
+    itself, and pydicom and `ingest()` refused the delivered file with
+    `ValueError: Unknown (0028,0004) 'Photometric Interpretation' value`.
+    The export succeeded and its file was unreadable by the most likely
+    reader. Now the file carries the defined spelling, decodes, and the
+    change is one INFO correction -- an exact, conformant rewrite, #506's
+    class, so no row.
+
+    Under JPEG 2000 an `RGB` spelling is then transformed and labelled
+    `YBR_RCT` like any other (#516 case 1), which is why the expected
+    label differs there.
+
+    Killing mutation (M4): `_label_as_written` returns the attributes
+    unchanged.
+    """
+    outcome = _export(tmp_path, build(declared), compression=compression)
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    if compression == "j2k" and expected == "RGB":
+        expected = "YBR_RCT"
+    assert written.PhotometricInterpretation == expected
+    written.pixel_array  # decodes: the spelling is one pydicom knows
+    assert outcome.warnings == [], outcome.warnings
+    assert len(outcome.corrections) == 1, outcome.corrections
+    note = outcome.corrections[0]
+    assert repr(declared) in note, note
+    assert "(PS3.5 6.2" in note, note
+
+
+def test_normalised_before_merge_and_before_geometry(tmp_path):
+    """Both readers of the declaration get the normalized copy (#532).
+
+    `_merge` assigns `0028,0004` and pydicom warns on the caller's stream
+    about an invalid CS value as it does; `_write_pixel_geometry` falls
+    back to the declared value when the resolver answers None and writes
+    it again. Normalizing for one of them only is silently undone by the
+    other.
+
+    Killing mutations: the copy passed to `_merge` only (M5: the geometry
+    fallback writes `' rgb '` back, and the file reads `' rgb'`); to
+    `_write_pixel_geometry` only (M5b: the `UserWarning` returns).
+    """
+    import warnings as _warnings
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        outcome = _export(tmp_path, _image(" rgb "))
+
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(
+        outcome.output_path).PhotometricInterpretation == "RGB"
+    assert [str(w.message) for w in caught
+            if "0028,0004" in str(w.message) or "CS" in str(w.message)] \
+        == [], [str(w.message) for w in caught]
+
+
+def test_a_trailing_pad_is_not_a_correction(tmp_path):
+    """`'RGB '` is `RGB` to every reader; there is nothing to note (#532).
+
+    A CS is space-padded to even length in the file and right-stripped
+    on read, so a trailing pad is not a change anyone sees. Killing
+    mutation (M6): the note guarded on the raw value differing from the
+    normalized one, instead of its right-stripped form.
+    """
+    outcome = _export(tmp_path, _image("RGB "))
+
+    assert outcome.ok, outcome.error
+    assert pydicom.dcmread(
+        outcome.output_path).PhotometricInterpretation == "RGB"
+    assert outcome.corrections == [], outcome.corrections
+
+
+@pytest.mark.parametrize("threads", [False, True])
+def test_export_leaves_the_graph_label_alone(tmp_path, monkeypatch, threads):
+    """Only the file changes; the graph keeps the declared spelling (#532).
+
+    Driven through `write_tree()`, whose workers run in this process
+    under threads, so an in-place normalization would be visible here.
+    Killing mutation (M7): the label normalized in place on
+    `inst.attributes` (the value changes and the revision advances).
+    """
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    if threads:
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    inst = _image(" rgb ")
+    revision = inst._revision
+
+    DicomExporter.write_tree(_graph([inst]), str(tmp_path / "out"),
+                             compression=None, show_progress=False)
+    # And the worker directly, in this thread, whatever the executor did.
+    outcome = _export(tmp_path, inst)
+
+    assert outcome.ok, outcome.error
+    assert inst.attributes["0028,0004"] == " rgb "
+    assert inst._revision == revision

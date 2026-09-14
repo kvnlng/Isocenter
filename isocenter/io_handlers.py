@@ -127,7 +127,7 @@ import os
 import sys
 import hashlib
 import struct
-from typing import List, Dict, Any, Optional, Tuple, Iterable
+from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
 from datetime import datetime, date
 from dataclasses import dataclass, field
 
@@ -692,6 +692,109 @@ def _written_photometric(value) -> Optional[str]:
         return None
     text = str(value).strip().upper()
     return text or None
+
+
+#: The longest value a Code String may hold (PS3.5 6.2), and how much of a
+#: declared label a correction note repeats. A label is a header value,
+#: not patient-derived text, but a hand-built graph can hold any string
+#: there, and a note must not become a vehicle for one.
+_CS_MAX_CHARS = 16
+
+
+def _cs_spelling(value):
+    """`value` as a Code String is spelled, when it is text; else itself."""
+    return value.strip().upper() if isinstance(value, str) else value
+
+
+def _cs_quoted(value) -> str:
+    """`value` quoted for a note, at most a Code String's length of it."""
+    if not isinstance(value, str):
+        return repr(value)
+    if len(value) > _CS_MAX_CHARS:
+        return f"{value[:_CS_MAX_CHARS]!r} (cut at {_CS_MAX_CHARS} characters)"
+    return repr(value)
+
+
+def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
+    """The attributes the worker writes from, with (0028,0004) spelled as a
+    CS value is defined, and the correction note when that changed what a
+    reader sees (#532).
+
+    A declared `' rgb '` used to reach the file as `' rgb'` -- a CS is
+    right-stripped on read, not left-stripped, and never case-folded --
+    and pydicom and `ingest()` refuse that file (`Unknown (0028,0004)
+    'Photometric Interpretation' value ' rgb'`), so the export delivered
+    a file this library could not read, with `ok=True`. PS3.5 6.2 defines
+    a Code String as upper case with insignificant leading and trailing
+    spaces, so writing `RGB` is the same label, spelled as defined, and
+    the samples are untouched: an exact correction, #506's class, INFO
+    and no row.
+
+    **A copy, never the graph.** The returned mapping is a shallow copy
+    of `attributes` holding a *new* value for the one key, and `attributes`
+    itself is returned unchanged when there is nothing to respell. The
+    worker runs in the caller's process under threads, so writing the
+    spelling back onto `inst.attributes` would edit the live graph from an
+    export (`tests/test_export_worker_graph_purity.py`).
+
+    **Both readers of the declaration take the copy**: `_merge`, because
+    pydicom emits `UserWarning: Invalid value for VR CS` on the caller's
+    stream when the raw value is assigned, and `_write_pixel_geometry`,
+    because it falls back to the declared value when the resolver answers
+    None and would write the raw spelling back over the corrected one.
+    Nothing else reads `0028,0004` from the worker's attributes.
+
+    **The note fires only when a reader would see a difference** --
+    compared against the right-stripped declaration, so `'RGB '` is
+    respelled silently: its trailing pad is what the file does anyway.
+
+    A multi-valued declaration has each text value respelled, so the
+    pixel arms' refusal and the pixel-less arm's warning name clean
+    values; the note is still one. Anything that is not text (`bytes`, a
+    number) is left as it is: there is no CS spelling to restore.
+
+    Only `0028,0004`, by ruling: it is the element a decoder keys on and
+    the one that made this library's own file unreadable. Other Code
+    String elements are written as held (#603).
+    """
+    value = attributes.get("0028,0004")
+    if isinstance(value, str):
+        declared = [value]
+        respelled = value.strip().upper()
+        if respelled == value:
+            return attributes, None
+        written_value = respelled
+    elif isinstance(value, (list, tuple, MultiValue)) and any(
+            isinstance(v, str) for v in value):
+        declared = list(value)
+        written_value = [_cs_spelling(v) for v in value]
+        if written_value == declared:
+            return attributes, None
+    else:
+        return attributes, None
+    copy = dict(attributes)
+    copy["0028,0004"] = written_value
+    written = [written_value] if isinstance(written_value, str) \
+        else written_value
+    if all(not isinstance(d, str) or d.rstrip() == w
+           for d, w in zip(declared, written)):
+        return copy, None
+    # One of the two is always true here: a value with no leading
+    # whitespace and no lower case has a right-strip equal to its CS
+    # spelling, and returned above.
+    changes = []
+    if any(isinstance(d, str) and d.upper() != d for d in declared):
+        changes.append("its letters upper-cased")
+    if any(isinstance(d, str) and d.lstrip() != d for d in declared):
+        changes.append("its leading spaces removed")
+    spelled = ", ".join(_cs_quoted(d) for d in declared)
+    as_written = ", ".join(_cs_quoted(w) for w in written)
+    return copy, (
+        f"PhotometricInterpretation {spelled} is not a defined Code String "
+        f"spelling; written as {as_written}, the same label with "
+        f"{' and '.join(changes)} "
+        f"(PS3.5 6.2: a CS value is upper case, and its leading and "
+        f"trailing spaces are not significant). The samples are unchanged.")
 
 
 def _photometric_warning(label, syntax_uid) -> Optional[str]:
@@ -3595,7 +3698,9 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
         geom (PixelGeometry): The one resolved geometry.
         attributes (dict): The instance's attributes, read only to decide
             whether a frame count was declared and for the photometric
-            fallback.
+            fallback -- the worker's copy with (0028,0004) spelled as a
+            Code String (`_label_as_written`, #532), so the fallback
+            cannot write a raw spelling back over the corrected one.
         float_element (bool): Whether the pixel element just written was
             (7fe0,0008) or (7fe0,0009). Keyword-only and **without a
             default**, so a third call site has to decide which module's
@@ -4567,7 +4672,16 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         written_waveform = None
 
         # 0. Base Attributes
-        DicomExporter._merge(ds, inst.attributes, losses,
+        #
+        # `attributes` is `inst.attributes` with (0028,0004) spelled as a
+        # Code String is defined (#532), and it is a copy whenever that
+        # changed anything. It is what `_merge` and both
+        # `_write_pixel_geometry` calls read, and nothing else: every
+        # other reader below stays on `inst.attributes`, the graph.
+        attributes, respelled = _label_as_written(inst.attributes)
+        if respelled is not None:
+            corrections.append(respelled)
+        DicomExporter._merge(ds, attributes, losses,
                              vrs=getattr(inst, 'attribute_vrs', None))
         DicomExporter._merge_sequences(ds, inst.sequences, losses)
 
@@ -4947,7 +5061,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                         "data held elsewhere; the exported file carries "
                         "its own."))
 
-                _write_pixel_geometry(ds, geom, inst.attributes,
+                _write_pixel_geometry(ds, geom, attributes,
                                       float_element=True,
                                       syntax_uid=written_syntax,
                                       warnings=warnings)
@@ -5017,7 +5131,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                     "The URL named pixel data held elsewhere; the "
                     "exported file carries its own."))
 
-            _write_pixel_geometry(ds, geom, inst.attributes,
+            _write_pixel_geometry(ds, geom, attributes,
                                   float_element=False,
                                   syntax_uid=written_syntax,
                                   warnings=warnings)

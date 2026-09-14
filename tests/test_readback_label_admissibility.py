@@ -233,33 +233,33 @@ def test_an_admitted_native_label_still_passes(tmp_path, label):
     assert outcome.warnings == [], outcome.warnings
 
 
-@pytest.mark.parametrize("declared", [" ybr_ict ", "ybr_ict", " YBR_ICT"],
+@pytest.mark.parametrize("declared", [" ybr_ict", "ybr_ict", " YBR_ICT"],
                          ids=["padded-lower", "lower", "padded"])
 def test_an_oddly_spelled_inadmissible_label_gets_its_own_remedy(
         tmp_path, declared):
     """Normalization is what makes the reason actionable (#507).
 
-    A declaration is not normalized on the way in (measured for #502),
-    and a CS is space-padded to even length in the file and read back
-    stripped on the *right* only -- so what the readback sees is
-    `' ybr_ict'`, leading space and lower case intact. Normalized, it
-    keys `_PHOTOMETRIC_INADMISSIBLE` and the reason names the JPEG 2000
-    codestream and tells the caller to export with
-    `use_compression=True`. Unnormalized it falls to the `None` row,
-    and the caller is told only that "no value of that name is defined"
-    -- true, unhelpful, and pointing at a spelling rather than at the
-    syntax.
+    What the readback sees in a file is right-stripped only, so a
+    hand-built `' ybr_ict'` keeps its leading space and its case.
+    Normalized, it keys `_PHOTOMETRIC_INADMISSIBLE` and the reason names
+    the JPEG 2000 codestream and tells the caller to export with
+    `use_compression=True`. Unnormalized it falls to the `None` row, and
+    the caller is told only that "no value of that name is defined".
+
+    **A hand-built file, since #532.** The export worker now writes the
+    label upper-cased and stripped, so its own output can no longer
+    carry this spelling; the readback still reads files it did not
+    write, and this is one.
 
     Killing mutation: `_written_photometric` replaced by `str(label)` in
-    `_readback_label_mismatch`. The writer's own use of it is covered by
-    `test_an_oddly_spelled_admitted_label_does_not_warn` in
-    `tests/test_export_photometric_admissibility.py`; the two call sites
-    fail separately.
+    `_readback_label_mismatch`.
     """
-    outcome = _export(tmp_path, _image(declared), verify_readback=True)
+    path, ds = _hand_built(tmp_path, declared)
 
-    assert not outcome.ok
-    message = str(outcome.error)
+    with pytest.raises(RuntimeError) as raised:
+        io_handlers._verify_readback(path, ds)
+
+    message = str(raised.value)
     assert "reads back as 'YBR_ICT'" in message, message
     assert "use_compression=True" in message, message
     assert "no value of that name is defined" not in message, message
@@ -267,27 +267,33 @@ def test_an_oddly_spelled_inadmissible_label_gets_its_own_remedy(
 
 def test_an_oddly_spelled_admitted_label_is_not_the_label_checks_refusal(
         tmp_path):
-    """Where `' rgb '` fails, and it is not here (#507).
+    """Where a `' rgb'` file fails, and it is not here (#507, #532).
 
-    The label check normalizes and admits it, exactly as the writer's
-    warning does -- and then the **pixel decode** refuses the file:
-    `ValueError: Unknown (0028,0004) 'Photometric Interpretation' value
-    ' rgb'`, measured. That refusal predates this branch (#449 added the
-    decode) and is pydicom reading a CS value the standard says is
-    upper case, so it is neither introduced nor fixed here; asserting
-    the *reason* is how this test stays true either way.
+    The label check normalizes and admits it -- and then the **pixel
+    decode** refuses a hand-built file carrying it: `ValueError: Unknown
+    (0028,0004) 'Photometric Interpretation' value ' rgb'`, measured.
+    That is pydicom reading a CS value the standard says is upper case,
+    and the readback's contract for such a file is unchanged.
 
-    It is also the control for the mutation above: under `str(label)`
-    the same file is refused by the label check instead, with a reason
-    naming a label no conformant reader would have taken as anything
-    else.
+    **The export of the same declaration now passes**, because since #532
+    the worker writes `RGB` and the delivered file decodes. Before, the
+    export's own file failed here at the decode.
+
+    The control for the mutation above: under `str(label)` the hand-built
+    file is refused by the label check instead.
     """
-    outcome = _export(tmp_path, _image(" rgb "), verify_readback=True)
+    path, ds = _hand_built(tmp_path, " rgb")
+    written = np.full((8, 8, 3), YBR, np.uint8)
 
-    assert not outcome.ok
-    message = str(outcome.error)
+    with pytest.raises(RuntimeError) as raised:
+        io_handlers._verify_readback(path, ds, written_pixels=written)
+
+    message = str(raised.value)
     assert "could not be decoded" in message, message
     assert "does not admit" not in message, message
+
+    outcome = _export(tmp_path, _image(" rgb "), verify_readback=True)
+    assert outcome.ok, outcome.error
 
 
 @pytest.mark.parametrize("declared, expected", [
