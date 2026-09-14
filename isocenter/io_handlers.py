@@ -473,9 +473,10 @@ _FALLBACK_PHOTOMETRICS = {
     "1.2.840.10008.1.2.4.90": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.91": _FALLBACK_J2K,
     # HTJ2K: `jpeg2k_decode` undoes a reversible colour transform to the
-    # exact RGB source, at 8 and 16 bits (#459, measured). No `YBR_ICT`
-    # stream was measured under .203; the row is JPEG 2000's, whose
-    # decoder it is.
+    # exact RGB source, at 8 and 16 bits (#459, measured). An irreversible
+    # `YBR_ICT` stream under .201 and .203 is stored as RGB within the
+    # lossy transform's error, 1 at 8 bits and 2 at 16 (measured by the
+    # review of #606); the row is JPEG 2000's, whose decoder it is.
     "1.2.840.10008.1.2.4.201": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.202": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.203": _FALLBACK_J2K,
@@ -2942,15 +2943,6 @@ class DicomImporter:
                             instance=inst, pixel_hash=p_hash)
                         inst._pixel_hash = p_hash
 
-                    # The frames `ingest_worker` dropped because the
-                    # offset table named more than NumberOfFrames
-                    # declares (#418). Scoped SIGNAL, as the multiplex
-                    # groups below are: what was discarded is acquired
-                    # image data, so the run is reported AND graded, and
-                    # an instance that silently lost frames does not
-                    # PASS. SIGNAL rather than a new scope word, because
-                    # the scope vocabulary is frozen
-                    # (tests/test_frozen_surface.py).
                     # HighBit other than BitsStored - 1 (#455, #523). A
                     # `WARNING`, the frozen action type (#411): the file's
                     # own header is non-conformant (PS3.5 8.1.1), which is
@@ -2977,6 +2969,15 @@ class DicomImporter:
                                 entity_uid=inst.sop_instance_uid,
                                 details=detail)
 
+                    # The frames `ingest_worker` dropped because the
+                    # offset table named more than NumberOfFrames
+                    # declares (#418). Scoped SIGNAL, as the multiplex
+                    # groups below are: what was discarded is acquired
+                    # image data, so the run is reported AND graded, and
+                    # an instance that silently lost frames does not
+                    # PASS. SIGNAL rather than a new scope word, because
+                    # the scope vocabulary is frozen
+                    # (tests/test_frozen_surface.py).
                     excess = meta.get('offset_table_excess')
                     if excess:
                         table_frames, declared, _declared_raw, _table = excess
