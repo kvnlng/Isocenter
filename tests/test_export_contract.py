@@ -121,7 +121,12 @@ def test_safe_export_skips_an_instance_whose_patient_carries_phi(
 
 def test_an_export_plan_carries_the_configured_redaction_zones(
         session_with_phi, captured_batch, tmp_path):
-    """Zones come from the rule matching the series' device serial number."""
+    """Zones come from the rule matching the series' device serial number.
+
+    Parsed to 4-tuples by `services.zone_rois`, the parser `redact()` uses,
+    since #580 -- `ExportContext.redaction_zones` is typed `List[Tuple]`,
+    and the raw zone passed through before was what made a `{"roi": ...}`
+    zone fail the export."""
     from isocenter.entities import Equipment
 
     series = session_with_phi.store.patients[0].studies[0].series[0]
@@ -135,7 +140,7 @@ def test_an_export_plan_carries_the_configured_redaction_zones(
 
     contexts = [ctx for call in captured_batch for ctx in call["tasks"]]
     assert contexts, "nothing was queued for export"
-    assert contexts[0].redaction_zones == [[0, 0, 10, 10]]
+    assert contexts[0].redaction_zones == [(0, 0, 10, 10)]
 
 
 def test_an_unusable_subset_is_refused_rather_than_ignored(

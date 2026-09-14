@@ -22,7 +22,7 @@ from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
                        carry_phi_status_across_redaction,
-                       _report_redaction_failures)
+                       _report_redaction_failures, rules_matching, zone_rois)
 from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
 from .privacy import (PhiInspector, PhiFinding, PhiReport,
@@ -5495,12 +5495,24 @@ class DicomSession:
                 self._redaction_zones_for(series) for series in every_series)
 
     def _redaction_zones_for(self, series) -> list:
-        """The configured pixel-redaction zones for this series' scanner."""
+        """The configured pixel-redaction zones for this series' scanner.
+
+        Every matching rule's zones, exact or `"*"`, in rule order, each
+        parsed to a 4-tuple -- the matcher and the parser `redact()` uses
+        (#580). This used to ask `Configuration.get_rule`, which is exact
+        and first-match, and pass the raw zones on: a `"*"` rule not yet
+        run through `redact()` exported unredacted pixels, a second rule on
+        the same serial exported its zones unredacted, and a `{"roi": ...}`
+        zone failed the export. No per-series log for an invalid zone:
+        `load_config` validated them, and `redact()` warns.
+        """
         if not (series.equipment and series.equipment.device_serial_number):
             return []
-        rule = self.configuration.get_rule(
-            series.equipment.device_serial_number)
-        return rule.get("redaction_zones", []) if rule else []
+        return [roi
+                for rule in rules_matching(
+                    self.configuration.rules,
+                    series.equipment.device_serial_number)
+                for roi in zone_rois(rule.get("redaction_zones", []))]
 
     @staticmethod
     def _run_export_batch(tasks, show_progress,
