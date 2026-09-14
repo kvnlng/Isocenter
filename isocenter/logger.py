@@ -106,6 +106,45 @@ def describe_exception(exc: BaseException) -> str:
     return text
 
 
+def describe_exception_without_paths(exc: BaseException) -> str:
+    """`describe_exception`, for text that must not carry a filesystem path.
+
+    An `OSError` -- and an `OSError` cause -- is spelled by its type and
+    its `strerror` alone (`NotADirectoryError: Not a directory`), because
+    its `str()` appends `filename` and `filename2`, and an export path is
+    built from the graph: `Subject_<Patient ID>/...` for a DICOM file,
+    `<Patient ID>_<series>_<instance>` for a WFDB record. The WFDB
+    exporter's `ERROR` rows interpolated the exception whole (#588), and
+    the DICOM export worker printed the output path and then the
+    exception to stderr (P8, bunch E). An `OSError` with no `strerror`
+    -- `OSError("cannot open <path>")` -- is its type alone: its message
+    is whatever the raiser wrote, and the one exception this exists for
+    is the one whose message is built around a path.
+
+    **The limit.** Every other exception keeps its message, exactly as
+    `describe_exception` spells it: those messages are the reasons a
+    report exists to show, and there is no general way to tell a path in
+    one from prose. An exception type that writes a path into its own
+    message is not caught by this; name it here if one is found.
+    """
+    text = _type_and_reason(exc)
+    cause = exc.__cause__
+    if cause is not None:
+        text += f" (caused by {_type_and_reason(cause)})"
+    return text
+
+
+def _type_and_reason(exc: BaseException) -> str:
+    """`_type_and_message`, with an `OSError` spelled by `strerror`."""
+    if not isinstance(exc, OSError):
+        return _type_and_message(exc)
+    name = type(exc).__name__
+    reason = exc.strerror
+    if isinstance(reason, str) and reason.strip():
+        return f"{name}: {reason}"
+    return name
+
+
 def _type_and_message(exc: BaseException) -> str:
     name = type(exc).__name__
     # `str()` runs the exception's own `__str__`, which can raise. This

@@ -307,8 +307,10 @@ def test_export_error_failures_name_each_instance(tmp_path, monkeypatch):
 
     failures = raised.value.failures
     assert sorted(failures) == [
+        # The type leads since #588, which spells the reason through
+        # `describe_exception_without_paths` rather than `{e}`.
         (uid, f"WFDB export failed for instance {uid}: "
-              f"waveform channel table is \\| malformed")
+              f"RuntimeError: waveform channel table is \\| malformed")
         for uid in uids], failures
     assert "\n" not in str(raised.value), str(raised.value)
     assert raised.value.attempted == 2

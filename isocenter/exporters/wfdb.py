@@ -13,7 +13,7 @@ import numpy as np
 from . import Exporter, register
 from ..io_handlers import (ExportError, export_folder_names,
                            format_study_date, LOSS_SCOPE_STANDARD)
-from ..logger import get_logger
+from ..logger import describe_exception_without_paths, get_logger
 from ..waveform import Waveform, WaveformChannel
 
 WAVEFORM_SEQUENCE_TAG = "5400,0100"
@@ -439,8 +439,14 @@ class WfdbExporter(Exporter):
                             # row nobody can look up is barely better
                             # than no row.
                             uid = instance.sop_instance_uid or "UNKNOWN"
+                            # Never `{e}`: an OSError's text ends in the
+                            # path it failed on, and a record path carries
+                            # the Patient ID into a persisted row and the
+                            # report (#588). The type leads, as every
+                            # other recorded reason does (#435).
                             detail = (f"WFDB export failed for instance "
-                                      f"{uid}: {e}")
+                                      f"{uid}: "
+                                      f"{describe_exception_without_paths(e)}")
                             # Flattened and pipe-escaped before it is
                             # recorded, as `io_handlers.py` does for the
                             # same reason: an arbitrary exception's

@@ -174,7 +174,8 @@ from pydicom.filewriter import write_sequence
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path)
-from .logger import describe_exception, get_logger
+from .logger import (describe_exception, describe_exception_without_paths,
+                     get_logger)
 from .pixel_geometry import (
     FLOAT_DTYPE_BY_ELEMENT,
     SIDECAR_DTYPE_NAMES,
@@ -4978,7 +4979,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     except Exception as e:
         # Do not raise, as it aborts the entire parallel batch.
         # Report the failure back for the parent to count and raise on.
-        print(f"ERROR: Export failed for {ctx.output_path}: {describe_exception(e)}", file=sys.stderr)
+        #
+        # The console line names the instance, not `ctx.output_path`, and
+        # spells the exception without its path: the output path is
+        # `Subject_<Patient ID>/...`, and an OSError's text repeats it
+        # (P8, bunch E; the WFDB half is #588). The parent's `ERROR` row
+        # is `_report_export_failures`' and is unchanged by this.
+        named = f"instance {uid}" if uid else "an instance with no SOP Instance UID"
+        print(f"ERROR: Export failed for {named}: "
+              f"{describe_exception_without_paths(e)}", file=sys.stderr)
         return ExportOutcome(ok=False, output_path=ctx.output_path,
                              sop_instance_uid=uid, losses=losses,
                              corrections=corrections,
