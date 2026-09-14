@@ -4501,6 +4501,27 @@ class DicomSession:
                 withheld (#536): nothing was attempted, and its `WARNING`
                 rows grade the run.
         """
+        # Cleared first, before the exporter is even resolved. These are
+        # session-scoped, and assigning them only on success let an
+        # export with an empty plan -- or one whose batch died at the
+        # pool -- leave a *previous* export's numbers standing: the
+        # report read "3 of 3 requested" under a PASS beside an empty
+        # folder (#196). None makes the report omit the row, and an
+        # absent row says "not answered here" -- which is the truth
+        # about an export that never completed, where a zero would say
+        # "nothing was written" and a stale pair answers for the wrong
+        # export.
+        #
+        # Here and not in `_export_dicom`, where #196 put it: a call that
+        # raises before any exporter runs (an unknown format), inside one
+        # (an option it does not take), or that goes through an exporter
+        # which does not report delivery (`wfdb`) answers nothing about
+        # DICOM delivery either, and left the last DICOM export's pair
+        # answering for it (#579). `_export_dicom` is private; a caller
+        # reaching it directly bypasses this and inherits the pair.
+        self._last_export_written = None
+        self._last_export_requested = None
+
         from . import exporters
 
         exporter = exporters.get_exporter(format)
@@ -4597,19 +4618,6 @@ class DicomSession:
                 (x1.06). Each worker holds one more decoded array while
                 it checks.
         """
-        # Cleared before anything can return early or raise. These are
-        # session-scoped, and assigning them only on success let an
-        # export with an empty plan -- or one whose batch died at the
-        # pool -- leave a *previous* export's numbers standing: the
-        # report read "3 of 3 requested" under a PASS beside an empty
-        # folder (#196). None makes the report omit the row, and an
-        # absent row says "not answered here" -- which is the truth
-        # about an export that never completed, where a zero would say
-        # "nothing was written" and a stale pair answers for the wrong
-        # export.
-        self._last_export_written = None
-        self._last_export_requested = None
-
         target_ids = (patient_ids if patient_ids is not None
                       else [p.patient_id for p in self.store.patients])
 

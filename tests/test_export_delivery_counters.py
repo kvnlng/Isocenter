@@ -152,6 +152,62 @@ def test_a_raising_export_does_not_reuse_the_previous_exports_numbers(
     assert "Instances Written" not in second, second
 
 
+def _wfdb_every_record_fails(session, folder, monkeypatch):
+    from isocenter.exporters.wfdb import WfdbExporter
+    from isocenter.io_handlers import ExportError
+
+    def _failing(*_args, **_kwargs):
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(WfdbExporter, "_write_instance", _failing)
+    with pytest.raises(ExportError):
+        session.export(folder, format="wfdb")
+
+
+def _wfdb_succeeds(session, folder, monkeypatch):
+    session.export(folder, format="wfdb")
+
+
+def _wfdb_rejects_an_option(session, folder, monkeypatch):
+    with pytest.raises(TypeError):
+        session.export(folder, format="wfdb", bogus_option=1)
+
+
+def _unknown_format(session, folder, monkeypatch):
+    with pytest.raises(ValueError):
+        session.export(folder, format="nope")
+
+
+@pytest.mark.parametrize("second_export", [
+    _wfdb_every_record_fails, _wfdb_succeeds, _wfdb_rejects_an_option,
+    _unknown_format], ids=lambda f: f.__name__.lstrip("_"))
+def test_a_later_export_call_that_is_not_a_dicom_delivery_clears_the_row(
+        second_export, tmp_path, monkeypatch):
+    """Every `export()` call answers for itself, whatever its format (#579).
+
+    The #196 reset lived inside `_export_dicom`, so only a DICOM export
+    cleared the pair. A WFDB export -- which reports its own result and
+    never fills the counters -- and a call that raised before any exporter
+    ran (an unknown format) or inside one (an option it does not take)
+    left the previous DICOM export's "3 of 3 requested" answering for a
+    call that delivered no DICOM at all.
+    """
+    session = _session(tmp_path, ["1.2.826.0.1.0", "1.2.826.0.1.1",
+                                  "1.2.826.0.1.2"])
+    try:
+        session.anonymize()
+        session.export(str(tmp_path / "out1"), show_progress=False)
+        first = _report(session, tmp_path / "report1.md")
+        assert "| Instances Written | 3 of 3 requested |" in first, first
+
+        second_export(session, str(tmp_path / "out2"), monkeypatch)
+        second = _report(session, tmp_path / "report2.md")
+    finally:
+        session.close()
+
+    assert "Instances Written" not in second, second
+
+
 # ---------------------------------------------------------------------------
 # 197 -- two instances, one SOP Instance UID, one file
 # ---------------------------------------------------------------------------
