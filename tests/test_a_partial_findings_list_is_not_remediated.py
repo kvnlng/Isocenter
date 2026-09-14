@@ -626,3 +626,23 @@ def test_a_complete_entity_leaves_nothing_behind_in_the_tally():
     assert "u1" not in tally._raised
     assert "u1" not in tally._partial
     assert tally.settle("nobody", set()) is None
+
+
+def test_an_empty_uid_is_tallied_like_any_other():
+    """An empty Patient ID is a uid the scan files findings under (#581).
+
+    The tally skipped a falsy `entity_uid`, so a pass over a `''` patient
+    got None -- no opinion -- and the success stamp stood over whatever
+    the pass was not handed. Only a hand-built graph reaches this end to
+    end: the shipped inspector raises no ID finding for an empty ID, so
+    such a patient carries one key, and one key is either handled or never
+    settled. So this is the killer for the `_ScanTally` filter
+    (`tests/test_an_empty_patient_id_is_still_a_patient.py` covers the
+    other two).
+    """
+    from isocenter.remediation import _ScanTally, _remediation_key
+
+    first, second = _finding("", "0010,0010"), _finding("", "0010,1000")
+    tally = _ScanTally([first, second])
+    assert tally.settle("", {_remediation_key(first)}) is False
+    assert tally.settle("", {_remediation_key(second)}) is True

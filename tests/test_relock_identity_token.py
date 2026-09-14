@@ -195,6 +195,10 @@ def test_a_legacy_three_item_sequence_is_still_read_at_item_zero(tmp_path):
     """
     with DicomSession(str(tmp_path / "relock_legacy.db")) as session:
         session.enable_reversible_anonymization(str(tmp_path / "isocenter.key"))
+        # Since #539 enable creates no key and the first lock does; this
+        # test drives the service directly, so it creates the key as the
+        # lock would.
+        session.key_manager.load_or_generate_key()
         inst = _build_patient(session)
         service = session.reversibility_service
 
@@ -211,6 +215,37 @@ def test_a_legacy_three_item_sequence_is_still_read_at_item_zero(tmp_path):
 
         assert len(_items(inst)) == 3
         assert service.recover_original_data(inst) == captures[0]
+        # Recovery reads through the strict read since #539; both reads
+        # must answer with item 0 (review of #615, F-2).
+        assert service.recover_or_raise(inst) == captures[0]
+
+
+def test_a_legacy_three_item_sequence_is_recovered_at_item_zero_through_the_session(tmp_path):
+    """The same commitment on the path a caller takes.
+
+    `recover_patient_identity()` reads through
+    `ReversibilityService.recover_or_raise` (#539), not
+    `recover_original_data`, so the item-0 test above pinned a method
+    recovery no longer called: `items[-1]` in the recovery read was green
+    on the whole suite (review of #615, F-2). This one restores a patient
+    from a 0.9.4-shaped three-item sequence and asserts the *first*
+    capture is what comes back.
+    """
+    with DicomSession(str(tmp_path / "relock_legacy_public.db")) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "isocenter.key"))
+        session.key_manager.load_or_generate_key()
+        inst = _build_patient(session, name="ANONYMIZED")
+        service = session.reversibility_service
+        for name in ("First^Capture", "Second^Capture", "Third^Capture"):
+            item = DicomItem()
+            item.set_attr(CONTENT, service.generate_identity_token({"0010,0010": name}))
+            item.set_attr(SYNTAX, service.PAYLOAD_TRANSFER_SYNTAX)
+            inst.add_sequence_item(SEQ, item)
+
+        session.recover_patient_identity(PID, restore=True)
+
+        assert session.store.patients[0].patient_name == "First^Capture"
+        assert inst.attributes["0010,0010"] == "First^Capture"
 
 
 def test_the_token_item_names_its_payload_transfer_syntax(tmp_path):

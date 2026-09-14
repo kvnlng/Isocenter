@@ -110,10 +110,11 @@ keyword-only parameters with the same defaults (#379, Q10).
 
 **`Session` attributes.** `store` (a `DicomStore` whose `.patients` is
 the `List[Patient]` the quickstart indexes), `configuration` (an
-`IsocenterConfiguration`), `persistence_file`. `anonymize()` and
-`recover_patient_identity()` merge two patients that end up with the
+`IsocenterConfiguration`), `persistence_file`. `audit()`, `anonymize()`
+and `recover_patient_identity()` merge two patients that end up with the
 same Patient ID into the one that was in the session first, removing the
-other from `store.patients` (#548).
+other from `store.patients` (#548, #563); `audit()` runs inside
+`export(check_burned_in=True)`, so that merges too.
 
 **Shapes the frozen methods return** (attribute names).
 `IngestSummary(ingested, failures, declined, skipped)` plus `failed`;
@@ -224,7 +225,23 @@ would write, a `value:` holding a range in a DA, TM or DT, or a count of
 #559, #560) and `FileNotFoundError` when it does not exist; after either, the configuration is exactly what it was
 before the call (#456). `audit()` without `config_path` raises the
 same `ValueError` for such a rule in `session.configuration.phi_tags`,
-before it creates a project secret.
+before it creates a project secret. `audit()` (and so
+`export(check_burned_in=True)`), `anonymize()` and
+`recover_patient_identity(restore=True)` raise `RuntimeError` when
+patients sharing a Patient ID were de-identified under different
+date-offset schemes (#548); `audit()` raises it after the policy is
+validated and before a project secret is created (#563).
+`recover_patient_identity()` raises `FileNotFoundError` when no key file
+exists at the path `enable_reversible_anonymization()` was given, before
+it looks the patient up and without creating one; `ValueError` when no
+patient holds the ID; and `RuntimeError` when the patient has no
+instances or no identity token, or the key does not decrypt it (#539).
+It prints nothing, and no message names a Patient ID (#550).
+`enable_reversible_anonymization()` raises `ValueError` for a malformed
+key file and creates none; the first `lock_identities()` creates the key,
+exclusively and with mode 0600. `lock_identities()` refusals name no
+patient: a batch refusal numbers each refused patient by its place among
+the patients found, in Patient ID order.
 
 **Environment.** Every `ISOCENTER_*` name in
 [Environment Variables](../environment.md), its default and its

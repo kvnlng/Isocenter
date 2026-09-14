@@ -50,11 +50,11 @@ def _session(tmp_path, blank):
     return session
 
 
-def _refusal(pid):
-    return (f"lock_identities: patient {pid!r} holds no value in 0010,0010 under a "
+def _refusal():
+    return ("lock_identities: this patient holds no value in 0010,0010 under a "
             "rule of EMPTY on it, and a blank Patient's Name is not locked under a "
             "rule that blanks it. To lock this patient without the name, call "
-            f"lock_identities({pid!r}, tags_to_lock={REST!r}); the token this call "
+            f"lock_identities(<its Patient ID>, tags_to_lock={REST!r}); the token this call "
             "would have written is unchanged.")
 
 
@@ -93,16 +93,18 @@ def test_one_refused_patient_leaves_every_patient_unlocked(tmp_path, persist, ch
         assert _locked(session) == PATIENTS
 
 
-def test_every_refused_patient_is_named(tmp_path):
+def test_every_refused_patient_is_numbered_in_one_refusal(tmp_path):
     """Both refused patients, in Patient ID order, each with the message its
-    own lock would raise. Kills a raise at the first refusal."""
+    own lock would raise, numbered by its place among the six found (P6: no
+    message names a patient). Kills a raise at the first refusal."""
     with _session(tmp_path, {"P3", "P1"}) as session:
         with pytest.raises(RuntimeError) as caught:
             session.lock_identities(list(reversed(PATIENTS)))
     assert str(caught.value) == (
         "lock_identities: 2 of 6 patients cannot be locked as asked, so no patient "
-        "was locked. Lock the others without these, and each of these as its "
-        "message says:\n" + _refusal("P1") + "\n" + _refusal("P3"))
+        "was locked. Each is numbered by its place among the patients found, in "
+        "Patient ID order. Lock the others without these, and each of these as its "
+        "message says:\n[2 of 6] " + _refusal() + "\n[4 of 6] " + _refusal())
 
 
 def test_the_batch_still_logs_missing_ids_when_it_refuses(tmp_path, monkeypatch):
@@ -140,10 +142,10 @@ def _bytes_session(tmp_path):
     return session
 
 
-def _unstashable(pid="PB"):
-    return (f"lock_identities: patient {pid!r} holds a value in {PRIVATE} that no "
+def _unstashable():
+    return (f"lock_identities: this patient holds a value in {PRIVATE} that no "
             "token can hold (bytes), so there is nothing to stash for it. To lock "
-            f"this patient without it, call lock_identities({pid!r}, "
+            "this patient without it, call lock_identities(<its Patient ID>, "
             "tags_to_lock=['0010,0020']); the token this call would have written "
             "is unchanged.")
 
@@ -160,8 +162,9 @@ def test_a_value_no_token_can_hold_leaves_every_patient_unlocked(tmp_path, chunk
                                           persist=True)
         assert str(caught.value) == (
             "lock_identities: 1 of 2 patients cannot be locked as asked, so no "
-            "patient was locked. Lock the others without these, and each of these "
-            "as its message says:\n" + _unstashable())
+            "patient was locked. Each is numbered by its place among the patients "
+            "found, in Patient ID order. Lock the others without these, and each of "
+            "these as its message says:\n[2 of 2] " + _unstashable())
         assert _stored_tokens(tmp_path) == 0
         assert _locked(session) == []
         session.save(sync=True)

@@ -116,7 +116,7 @@ def test_a_relock_that_would_blank_a_held_value_is_refused(tmp_path, action, sai
         with pytest.raises(RuntimeError) as caught:
             session.lock_identities(PID, tags_to_lock=TAGS)
         assert str(caught.value) == (
-            f"lock_identities: patient {PID!r} already has a locked identity "
+            "lock_identities: this patient already has a locked identity "
             f"holding 0010,0010, and this lock would replace it with {said}; "
             "lock identities before anonymize(), and do not re-lock a patient "
             "after it; the token this call would have written is unchanged.")
@@ -139,7 +139,7 @@ def test_a_narrower_relock_after_anonymize_cannot_drop_a_held_name(tmp_path):
         with pytest.raises(RuntimeError) as caught:
             session.lock_identities(PID, tags_to_lock=["0010,0020"])
         assert str(caught.value) == (
-            f"lock_identities: patient {PID!r} already has a locked identity "
+            "lock_identities: this patient already has a locked identity "
             "holding 0010,0010, and this lock would replace it with nothing "
             "(tags_to_lock does not name it); lock identities before "
             "anonymize(), and do not re-lock a patient after it; the token "
@@ -185,20 +185,20 @@ EMPTYING = pytest.mark.parametrize("action", ["EMPTY", "REMOVE"])
 def _blank_name_refusal(action, rest="['0010,0020']"):
     """The F-1 message, whose advice names `tags_to_lock` without the name.
     It fires only where no record says a pass blanked the name."""
-    return (f"lock_identities: patient {PID!r} holds no value in 0010,0010 "
+    return ("lock_identities: this patient holds no value in 0010,0010 "
             f"under a rule of {action} on it, and a blank Patient's Name is not "
             "locked under a rule that blanks it. To lock this patient "
-            f"without the name, call lock_identities({PID!r}, tags_to_lock={rest}); "
+            f"without the name, call lock_identities(<its Patient ID>, tags_to_lock={rest}); "
             "the token this call would have written is unchanged.")
 
 
-def _emptied_refusal(blanked, rest, pid=PID):
+def _emptied_refusal(blanked, rest):
     """The refusal of a tag `anonymize()` emptied or removed, whose advice
-    names `tags_to_lock` without those tags."""
+    names `tags_to_lock` without those tags. No Patient ID (P6)."""
     advice = (f"To lock this patient without {'it' if len(blanked) == 1 else 'them'}, "
-              f"call lock_identities({pid!r}, tags_to_lock={rest!r})" if rest else
+              f"call lock_identities(<its Patient ID>, tags_to_lock={rest!r})" if rest else
               "tags_to_lock names no other tag, so there is nothing else to lock")
-    return (f"lock_identities: patient {pid!r} holds no value in {', '.join(blanked)}, "
+    return (f"lock_identities: this patient holds no value in {', '.join(blanked)}, "
             "which anonymize() emptied or removed, so there is no original left to "
             f"stash. {advice}; the token this call would have written is unchanged.")
 
@@ -521,7 +521,8 @@ def test_a_first_lock_of_an_emptied_name_under_a_pseudonym_after_a_reopen_is_ref
         assert pseudonym.startswith("ANON_")
         with pytest.raises(RuntimeError) as caught:
             session.lock_identities(pseudonym, tags_to_lock=["0010,0010"])
-        assert str(caught.value) == _emptied_refusal(["0010,0010"], [], pid=pseudonym)
+        assert str(caught.value) == _emptied_refusal(["0010,0010"], [])
+        assert pseudonym not in str(caught.value)
 
 
 def test_a_relock_after_recovery_restores_the_originals_succeeds(tmp_path):

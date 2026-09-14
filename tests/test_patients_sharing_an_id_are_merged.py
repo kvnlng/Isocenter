@@ -12,7 +12,8 @@ the pair, so memory says what the store will say.
 `DicomStore._merge_patients_sharing_an_id()` runs at the two places a
 duplicate can be made -- after `apply_remediation` in `anonymize()`, and
 after `recover_patient_identity(restore=True)` puts an original ID back
-while a raw patient holds it. The patient that was in the session first
+while a raw patient holds it -- and at `audit()`'s entry, for a duplicate
+built in user code, which the scan cannot tell apart (#563, at the end). The patient that was in the session first
 survives, keeps its object identity, and takes the other's studies in
 order; the other is removed from `store.patients` with its `studies`
 emptied, so a caller still holding it sees a detached patient rather
@@ -23,6 +24,7 @@ through the save guard whether or not the merge ran, so the assertions
 here are on the graph. That is the point: the rows cannot see this layer.
 """
 import logging
+import sqlite3
 
 import pytest
 
@@ -415,3 +417,113 @@ def test_a_restore_drains_pending_saves_before_it_writes(tmp_path,
             "the restore wrote before the drain")
         assert stored.patient_id == "PAT-001"
         assert inst.attributes != attributes
+
+
+# `audit()` merges too (#563). Two `Patient` objects with one ID reached
+# `anonymize()` unmerged: `_rehydrate_findings` binds a patient finding by
+# Patient ID, so every finding raised on either landed on the last object,
+# and both shared the dedup key `(uid, path, attr)`, so one pair applied.
+# Measured on 57400d1 (threads and processes, 3.12 and 3.14t,
+# `probes-E/p563.py`): `[('X-DUP', 'identified'), ('ANON_...', 'remediated')]`,
+# and a reopen kept both.
+def _identified_study(uid, pid):
+    st = _study(uid)
+    inst = st.series[0].instances[0]
+    inst.set_attr("0010,0010", "Doe^Jane")
+    inst.set_attr("0010,0020", pid)
+    return st
+
+
+def _session_with_a_duplicate_pair(db, pid="X-DUP"):
+    session = Session(db)
+    first, second = Patient(pid, "Doe^Jane"), Patient(pid, "Doe^Jane")
+    first.studies.append(_identified_study("1.2.3.563.1", pid))
+    second.studies.append(_identified_study("1.2.3.563.2", pid))
+    session.store.patients.extend([first, second])
+    return session, first, second
+
+
+def _secret_rows(db):
+    with sqlite3.connect(db) as conn:
+        return conn.execute("SELECT count(*) FROM project_secret").fetchone()[0]
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_audit_merges_patients_sharing_an_id(tmp_path, mode):
+    """Kills the merge removed from `audit()`: without it the first object
+    keeps X-DUP and reads IDENTIFIED, and a reopen holds two patients."""
+    db = str(tmp_path / "s.db")
+    session, first, second = _session_with_a_duplicate_pair(db)
+    try:
+        report = session.audit()
+        assert session.store.patients == [first]
+        assert [s.study_instance_uid for s in first.studies] == [
+            "1.2.3.563.1", "1.2.3.563.2"]
+        assert second.studies == []
+        assert all(f.entity is first for f in report.findings
+                   if f.entity_type == "Patient")
+        session.anonymize(report)
+        [patient] = session.store.patients
+        assert patient.patient_id.startswith("ANON_")
+        assert patient.phi_status is PhiStatus.REMEDIATED
+        session.save(sync=True)
+    finally:
+        session.close()
+    with Session(db) as session:
+        assert [len(p.studies) for p in session.store.patients] == [2]
+
+
+def test_audit_refuses_a_merge_across_schemes_before_the_secret(tmp_path):
+    """The merge's own refusal, raised before a project secret is created
+    and before the audited policy is recorded, with the graph untouched.
+    Kills the merge placed after `_project_secret_for_use()` (a secret row)
+    and after `_audited_phi_tags` is assigned (the lock would then judge a
+    blank name by a policy no audit resolved)."""
+    db = str(tmp_path / "s.db")
+    session, first, second = _session_with_a_duplicate_pair(db)
+    try:
+        first._jitter_scheme = JITTER_SCHEME_UNKEYED
+        second._jitter_scheme = JITTER_SCHEME_KEYED
+        with pytest.raises(RuntimeError) as raised:
+            session.audit()
+        assert str(raised.value) == (
+            "2 patients in this session share a Patient ID but were "
+            "de-identified under different date-offset schemes; merging them "
+            "would give their dates two offsets")
+        assert session.store.patients == [first, second]
+        assert _secret_rows(db) == 0
+        assert session._audited_phi_tags is None
+    finally:
+        session.close()
+
+
+def test_an_invalid_policy_is_refused_before_the_merge(tmp_path):
+    """`validate_phi_policy`'s refusal leaves the pair as it was. Kills the
+    merge placed before the policy is validated."""
+    db = str(tmp_path / "s.db")
+    session, first, second = _session_with_a_duplicate_pair(db)
+    try:
+        session.configuration.phi_tags = {"0010,0020": {"action": "REMOVE"}}
+        with pytest.raises(ValueError):
+            session.audit()
+        assert session.store.patients == [first, second]
+        assert [len(p.studies) for p in (first, second)] == [1, 1]
+    finally:
+        session.close()
+
+
+def test_a_safe_export_merges_through_its_audit(tmp_path):
+    """`export(check_burned_in=True)` runs `audit()`, so a duplicate pair is
+    merged there, before the plan is built; the export withholds the
+    identified instances and does not trip over the emptied duplicate."""
+    write_ct(tmp_path / "in" / "a.dcm", "PAT-563A", "5631")
+    write_ct(tmp_path / "in" / "b.dcm", "PAT-563B", "5632")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        first, second = session.store.patients
+        second.patient_id = first.patient_id
+        summary = session.export(str(tmp_path / "out"), use_compression=False,
+                                 check_burned_in=True)
+        assert session.store.patients == [first]
+        assert len(first.studies) == 2
+        assert summary.written == 0

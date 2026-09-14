@@ -2391,6 +2391,16 @@ class DicomSession:
                 `configuration.phi_tags` -- holds a rule the pipeline cannot
                 honour (`config_manager.validate_phi_policy`), before a
                 project secret is created (#537, #560).
+            RuntimeError: When patients sharing a Patient ID were
+                de-identified under different date-offset schemes, so they
+                cannot be merged (#548, #563); raised after the policy is
+                validated and before anything is scanned or a project
+                secret is created. Also, as before, on a store holding
+                dates shifted under a project secret it no longer has.
+
+        Two `Patient` objects holding one Patient ID are merged into the
+        one that was in the session first before the scan (#563), so
+        `store.patients` can get shorter, as after `anonymize()`.
         """
 
         # A scan ENDS by advancing `_revision` on every entity it
@@ -2427,6 +2437,23 @@ class DicomSession:
             # loader sees. The same refusal the loader raises (#537, #560),
             # and before the project secret below, for #456's reason.
             validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
+
+        # Two `Patient` objects holding one Patient ID are merged before the
+        # scan, as `anonymize()` and a restore merge them (#563). The scan
+        # cannot see them as two: `_rehydrate_findings` binds a patient
+        # finding by Patient ID, so every finding raised on either landed
+        # on the last object, and both carry the same dedup key
+        # `(uid, path, attr)`, so `anonymize()` replaced the ID on one and
+        # left the other's original in place. After the policy is
+        # validated, so a refused policy leaves the pair as it was; before
+        # `_audited_phi_tags` is recorded and before the project secret, so
+        # a merge refused across date-offset schemes leaves neither a
+        # policy no audit resolved (which the lock reads) nor a new secret
+        # in the store (#456's reason). After the entry drain above, which
+        # the merge's own `drain` repeats only when there is a pair.
+        self.store._merge_patients_sharing_an_id(
+            drain=(self.persistence_manager.flush
+                   if hasattr(self, 'persistence_manager') else None))
         self._audited_phi_tags = tags_to_use
 
         # The project secret, once, in the parent, before any work: a
@@ -2530,7 +2557,12 @@ class DicomSession:
         """
         from .remediation import _ScanTally
 
-        identified = {f.entity_uid for f in findings if f.entity_uid}
+        # `is not None`, not truthiness: `''` is a Patient ID ingest keeps
+        # (an empty element; an absent one is `UnknownPatient`), and a
+        # falsy filter stamped such a patient CLEARED with its name finding
+        # outstanding and let its instances through the safe export
+        # (#581). The same test in `_scan_before_export` and `_ScanTally`.
+        identified = {f.entity_uid for f in findings if f.entity_uid is not None}
         # Keyed on the same scan-time uids as `identified`, and replaced
         # by every audit, so a new report settles against its own scan.
         self._scan_tally = _ScanTally(findings)
@@ -3400,8 +3432,13 @@ class DicomSession:
                 token can hold (`bytes`), naming the tag; or Patient's
                 Name is blank under a rule of EMPTY or REMOVE on it. Given
                 a list or a report, the batch form checks every patient
-                first and, if any is refused, raises once naming each and
-                locks no patient.
+                first and, if any is refused, raises once listing each and
+                locks no patient. No message carries a Patient ID (P6): a
+                message says "this patient", its advice spells the ID
+                `<its Patient ID>`, and a replaced Patient ID is described,
+                not quoted. When the lock creates the key file (the first
+                lock under a path with none, #539), it is created exclusively
+                with mode 0600; a malformed key raises `ValueError`.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3420,7 +3457,27 @@ class DicomSession:
                                "has the Patient ID given.")
             return LockingResult([])
 
+        self._key_for_locking()
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
+
+    def _key_for_locking(self) -> None:
+        """Load the key, creating it when none exists, and build its engine
+        -- before any patient's lock is planned (#539).
+
+        The engine is built here and not left to the plan: the plan builds
+        the token inside `except (TypeError, ValueError)` and reports that
+        as a value no token can hold, and the batch collects every plan's
+        `RuntimeError` as a refusal. A malformed key (`ValueError`) or a
+        key never loaded (`RuntimeError`) would be misreported as either.
+
+        Called by the single lock only once its patient is found, so a lock
+        of an ID no patient holds creates no key file. The batch calls it
+        before it plans, found or not, because it cannot plan without the
+        engine; a batch of IDs that match no patient therefore creates the
+        key, as does a lock that is then refused. Neither writes a token.
+        """
+        self.key_manager.load_or_generate_key()
+        self.reversibility_service.engine  # pylint: disable=pointless-statement
 
     def _lock_patient_identity(self, patient: "Patient", persist: bool,
                                verbose: bool, tags_to_lock: Optional[List[str]]
@@ -3549,12 +3606,23 @@ class DicomSession:
             return (_is_replacement_name(val) or _is_replacement_id(val)
                     or written_by_a_pass(tag, val, from_patient))
 
+        # **No message below names the patient (P6).** Before `anonymize()`
+        # its Patient ID is the original, and after it the pseudonym, which
+        # #550 kept off the console; so "this patient", and the advice
+        # spells the ID as a placeholder -- the caller holds the one it
+        # passed, and the batch numbers each refusal. A replaced Patient ID
+        # is described rather than quoted, because the validator refuses
+        # any literal on it: the value is always the patient's own ID.
+        # Every other replacement is quoted; it is what says which pass
+        # wrote it.
         for tag, val in original_attrs.items():
             if str(val).strip() and is_replacement(
                     tag, val, first_instance is not None and captured(tag)[1]):
+                shown = ("a replacement Patient ID"
+                         if tag == "0010,0020" or str(val) == patient_id else repr(val))
                 raise RuntimeError(
-                    f"lock_identities: patient {patient_id!r} already "
-                    f"carries a replacement in {tag} ({val!r}), so there "
+                    "lock_identities: this patient already "
+                    f"carries a replacement in {tag} ({shown}), so there "
                     "is no original identity left to stash. Lock "
                     "identities before anonymize(), and do not re-lock a "
                     "patient after it; the token this call would have "
@@ -3589,7 +3657,7 @@ class DicomSession:
                     lost = ("nothing" if new is None else "an empty value") if named \
                         else "nothing (tags_to_lock does not name it)"
                     raise RuntimeError(
-                        f"lock_identities: patient {patient_id!r} already has a "
+                        "lock_identities: this patient already has a "
                         f"locked identity holding {tag}, and this lock would "
                         f"replace it with {lost}; lock identities before "
                         "anonymize(), and do not re-lock a patient after it; "
@@ -3610,12 +3678,12 @@ class DicomSession:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 advice = (f"To lock this patient without "
                           f"{'it' if len(blanked) == 1 else 'them'}, call "
-                          f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                          f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
                           if rest else
                           "tags_to_lock names no other tag, so there is nothing "
                           "else to lock")
                 raise RuntimeError(
-                    f"lock_identities: patient {patient_id!r} holds no value in "
+                    "lock_identities: this patient holds no value in "
                     f"{', '.join(blanked)}, which anonymize() emptied or removed, "
                     "so there is no original left to stash. "
                     f"{advice}; the token this call would have written is unchanged.")
@@ -3644,12 +3712,12 @@ class DicomSession:
             if emptying:
                 rest = [tag for tag in tags_to_lock if tag != "0010,0010"]
                 advice = (f"To lock this patient without the name, call "
-                          f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                          f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
                           if rest else
                           "tags_to_lock names no other tag, so there is nothing "
                           "else to lock")
                 raise RuntimeError(
-                    f"lock_identities: patient {patient_id!r} holds no value in "
+                    "lock_identities: this patient holds no value in "
                     f"0010,0010 under a rule of {emptying[0]} on it, and a blank "
                     "Patient's Name is not locked under a rule that blanks it. "
                     f"{advice}; the token this call would have written is unchanged.")
@@ -3677,12 +3745,12 @@ class DicomSession:
             kinds = sorted({type(original_attrs[tag]).__name__ for tag in unheld})
             advice = (f"To lock this patient without "
                       f"{'it' if len(unheld) == 1 else 'them'}, call "
-                      f"lock_identities({patient_id!r}, tags_to_lock={rest!r})"
+                      f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
                       if rest else
                       "tags_to_lock names no other tag, so there is nothing "
                       "else to lock")
             raise RuntimeError(
-                f"lock_identities: patient {patient_id!r} holds a value in "
+                "lock_identities: this patient holds a value in "
                 f"{', '.join(unheld)} that no token can hold ({', '.join(kinds)}), "
                 "so there is nothing to stash for it. "
                 f"{advice}; the token this call would have written is unchanged."
@@ -3756,17 +3824,22 @@ class DicomSession:
             RuntimeError: When reversible anonymization is not enabled, or
                 when any patient found cannot be locked as asked (the
                 refusals `lock_identities()` names). Every patient is
-                checked before any is locked, so the one error names each
+                checked before any is locked, so the one error lists each
                 refused patient with its own message, in Patient ID order,
                 and no patient is locked, whatever `persist` or
                 `auto_persist_chunk_size` says. A Patient ID that matches
                 no patient is logged, not raised. The promise is about
                 refusals: a store write that fails while tokens are
                 persisted is logged by `update_attributes`, not raised,
-                and leaves memory and the store disagreeing.
+                and leaves memory and the store disagreeing. No message
+                names a patient (P6): each refusal is prefixed `[n of m]`,
+                its place among the `m` patients found, in Patient ID
+                order, so the refused patient is
+                `sorted(ids that matched a patient)[n - 1]`.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
+        self._key_for_locking()
 
         # Normalize input to a set of strings
         normalized_ids = set()
@@ -3779,7 +3852,11 @@ class DicomSession:
         for item in iterable_data:
             if isinstance(item, str):
                 normalized_ids.add(item)
-            elif hasattr(item, 'patient_id') and item.patient_id:
+            # `is not None`, not truthiness: an empty Patient ID is a
+            # patient (#581), and a report that names one must lock it --
+            # skipped, its name was unrecoverable after `anonymize()` and
+            # the `[n of m]` numbering below named the wrong patient.
+            elif hasattr(item, 'patient_id') and item.patient_id is not None:
                 normalized_ids.add(item.patient_id)
 
         # Sorted, not a set's hash order: the refusal below names patients
@@ -3791,7 +3868,6 @@ class DicomSession:
 
         count_patients = 0
         count_instances_chunked = 0
-        missing_ids = 0
 
         # Optimization: Create a lookup map for O(1) access
         patient_map = {p.patient_id: p for p in self.store.patients}
@@ -3802,16 +3878,20 @@ class DicomSession:
         # review of #574: one of six). A plan reads and writes nothing, so
         # a refusal leaves no token, whatever `persist` or
         # `auto_persist_chunk_size` says.
+        #
+        # A refusal names no patient (P6, `_planned_identity_lock`), so each
+        # is numbered by its place among the patients found, in Patient ID
+        # order -- the order they are planned and locked in -- and
+        # `sorted(found)[n - 1]` is the patient. An ID that matched no
+        # patient is not counted.
         plans, refusals = {}, []
-        for pid in start_ids:
-            p_obj = patient_map.get(pid)
-            if p_obj is None:
-                missing_ids += 1
-                continue
+        found = [pid for pid in start_ids if pid in patient_map]
+        missing_ids = len(start_ids) - len(found)
+        for place, pid in enumerate(found, start=1):
             try:
-                plans[pid] = self._planned_identity_lock(p_obj, tags_to_lock)
+                plans[pid] = self._planned_identity_lock(patient_map[pid], tags_to_lock)
             except RuntimeError as refusal:
-                refusals.append(str(refusal))
+                refusals.append(f"[{place} of {len(found)}] {refusal}")
 
         if missing_ids:
             # Counted, not named: see `lock_identities`. Before the refusal
@@ -3823,10 +3903,11 @@ class DicomSession:
 
         if refusals:
             raise RuntimeError(
-                f"lock_identities: {len(refusals)} of {len(plans) + len(refusals)} "
+                f"lock_identities: {len(refusals)} of {len(found)} "
                 "patients cannot be locked as asked, so no patient was locked. "
-                "Lock the others without these, and each of these as its "
-                "message says:\n" + "\n".join(refusals))
+                "Each is numbered by its place among the patients found, in "
+                "Patient ID order. Lock the others without these, and each of "
+                "these as its message says:\n" + "\n".join(refusals))
 
         with progress_bar(plans, desc="Locking Identities",
                           unit="patient") as pbar:
@@ -3888,23 +3969,43 @@ class DicomSession:
                             intact and a later `audit()` does not shift it
                             again. A date among the locked tags is put back
                             on the instances like any locked tag, and a later
-                            `audit()` raises it again -- except that Study
-                            Date stays shifted on the `Study`, and `export()`
-                            writes the study's value over the instance's, so
-                            the exported file carries it shifted (#566).
+                            `audit()` raises it again. A restored Study Date
+                            is also put back on the `Study`, which is where
+                            `export()` reads it, when the patient has one
+                            study (#566). The token holds one study's
+                            values, so for a patient with several each
+                            study keeps its de-identified date and one
+                            WARNING gives the count (#583).
+
+        Every failure raises and nothing is printed (#539, #550). So
+        `restore=False` checks that the patient is recoverable under this
+        key, and writes nothing. No message names a Patient ID: until
+        0.9.8 an unknown ID was echoed to the console, and the ID given is
+        normally a pseudonym.
 
         Raises:
-            RuntimeError: With `restore=True`, when a patient holding the
-                restored Patient ID was de-identified under a different
-                date-offset scheme. Raised before anything is restored.
+            FileNotFoundError: No key file at the path given to
+                `enable_reversible_anonymization()`. Checked first, before
+                the patient is looked up, and no key is created.
+            ValueError: No patient in this session holds `patient_id`.
+            RuntimeError: When reversibility is not enabled; the patient
+                has no instances, or no identity token; the key does not
+                decrypt the token; or, with `restore=True`, a patient
+                holding the restored Patient ID was de-identified under a
+                different date-offset scheme (raised before anything is
+                restored).
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversibility not enabled.")
 
+        # The key before the patient: a typo'd key path is the answer
+        # whatever ID was given, and `load_key` never creates the file.
+        self.key_manager.load_key()
+
         p = next((x for x in self.store.patients if x.patient_id == patient_id), None)
         if not p:
-            print(f"Patient {patient_id} not found.")
-            return
+            raise ValueError("recover_patient_identity: no patient in this "
+                             "session holds the Patient ID given")
 
         # Locate first instance to get the token
         first_inst = None
@@ -3915,10 +4016,10 @@ class DicomSession:
                     break
 
         if not first_inst:
-            print("No instances found for patient.")
-            return
+            raise RuntimeError("recover_patient_identity: the patient has no "
+                               "instances to recover an identity from")
 
-        original_attrs = self.reversibility_service.recover_original_data(first_inst)
+        original_attrs = self.reversibility_service.recover_or_raise(first_inst)
 
         if original_attrs:
             if restore:
@@ -3960,6 +4061,32 @@ class DicomSession:
                 # its original identifiers again.
                 if (p.patient_name, p.patient_id) != before:
                     p.mark_modified()
+                # Study Date is written onto the instances above, but the
+                # exporter stamps it from the `Study` (`_study_attributes`),
+                # so an instance-only restore never reached the file (#566).
+                # One study only: the token is the patient's first
+                # instance's, so on a patient with several it holds one
+                # study's date, and writing it onto each would export study
+                # 1's original as study 2's (#583). Counted before the merge
+                # below, which can move a raw patient's studies onto `p`.
+                # `_shifted_study_date` is left as it is: it vouches only
+                # for the value the shift wrote, so the next `audit()`
+                # raises the restored date again (#518).
+                if "0008,0020" in original_attrs:
+                    if len(p.studies) == 1:
+                        study = p.studies[0]
+                        restored = original_attrs["0008,0020"]
+                        # Compared as `Study` would hold it; a restore
+                        # onto a date that never moved records no change.
+                        if study.study_date != entities.normalize_study_date(restored):
+                            study.study_date = restored
+                            study.mark_modified()
+                    else:
+                        get_logger().warning(
+                            "Study Date was restored onto the instances of a "
+                            "patient with %d studies; the identity token holds "
+                            "one study's date, so each study keeps its "
+                            "de-identified Study Date (#583).", len(p.studies))
                 # A raw study for the restored ID, ingested before the
                 # restore, is a second `Patient` holding it: the same
                 # subject by construction, so the two are merged as
@@ -3969,21 +4096,35 @@ class DicomSession:
                     drain=self.persistence_manager.flush)
 
                 get_logger().info(f"Restored identity attributes to {count} instances.")
-        else:
-            print("No encrypted identity token found or decryption failed.")
 
     def enable_reversible_anonymization(self, key_path: str = "isocenter.key"):
         """
         Initializes the encryption subsystem for Reversible Anonymization.
 
-        Loads or generates a symmetric key which is used to encrypt original identities.
+        Loads the symmetric key at `key_path` when a file is there. **The
+        key file is created by the first `lock_identities()` when none
+        exists, never by this call or by recovery (#539).** This call
+        comes before both a lock and a recovery and cannot know which
+        follows; when it generated a missing key, a mistyped path on the
+        way to `recover_patient_identity()` minted a key the data was never
+        locked under, and recovery could only fail with it.
 
         Args:
             key_path (str): Path to the key file.
+
+        Raises:
+            ValueError: The file at `key_path` is not a Fernet key. An
+                existing key is loaded and its engine built here, so a
+                malformed one fails at enable, as it always has, and not
+                inside a later lock's plan.
         """
-        self.key_manager = KeyManager(key_path)
-        self.key_manager.load_or_generate_key()
-        self.reversibility_service = ReversibilityService(self.key_manager)
+        key_manager = KeyManager(key_path)
+        service = ReversibilityService(key_manager)
+        if os.path.exists(key_manager.key_path):
+            key_manager.load_key()
+            service.engine  # pylint: disable=pointless-statement
+        self.key_manager = key_manager
+        self.reversibility_service = service
         get_logger().info(f"Reversible anonymization enabled. Key: {key_path}")
 
     # =========================================================================
@@ -5246,7 +5387,8 @@ class DicomSession:
         get_logger().warning(
             "Safe export: identifiers detected. Exporting only the instances "
             "that carry none, and skipping the rest.")
-        return {f.entity_uid for f in findings if f.entity_uid}
+        # `''` is a uid: an empty Patient ID (#581, `_record_scan_results`).
+        return {f.entity_uid for f in findings if f.entity_uid is not None}
 
     def _resolve_subset(self, subset) -> Optional[Set[str]]:
         """Turns a subset argument into the UIDs allowed through the walk.

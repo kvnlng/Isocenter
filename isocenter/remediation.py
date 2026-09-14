@@ -1598,7 +1598,7 @@ class _ScanTally:
     def __init__(self, findings):
         raised = {}
         for finding in findings:
-            if finding.remediation_proposal is None or not finding.entity_uid:
+            if finding.remediation_proposal is None or finding.entity_uid is None:
                 continue
             raised.setdefault(finding.entity_uid, set()).add(
                 _remediation_key(finding))

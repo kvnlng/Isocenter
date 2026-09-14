@@ -98,10 +98,10 @@ def test_recover_empty_sequence(rev_service, mock_instance):
 def test_recover_missing_content_item(rev_service, mock_instance, caplog):
     """An item with no Encrypted Content says so, not just "no token" (#439).
 
-    `recover_identity` prints one sentence for every None -- "No encrypted
-    identity token found or decryption failed." -- so this WARNING is the
-    only word that says the item is there and malformed rather than
-    absent. Deleting it left the suite green until the record was
+    This read returns None for every failure (the lock's re-lock check
+    needs that tolerance; recovery raises through `recover_or_raise`
+    since #539), so this WARNING is the only word that says the item is
+    there and malformed rather than absent. Deleting it left the suite green until the record was
     asserted, not just the None.
     """
     # Sequence exists, has item, but item has no encrypted bytes

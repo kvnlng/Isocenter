@@ -1,5 +1,8 @@
 import json
 from typing import Dict, Any, Optional
+
+from cryptography.fernet import InvalidToken
+
 from .entities import Instance
 from .crypto import CryptoEngine, KeyManager
 from .logger import get_logger, describe_exception
@@ -25,8 +28,24 @@ class ReversibilityService:
 
     def __init__(self, key_manager: KeyManager):
         self.key_manager = key_manager
-        self.engine = CryptoEngine(key_manager.get_key())
+        self._engine: Optional[CryptoEngine] = None
         self.logger = get_logger()
+
+    @property
+    def engine(self) -> CryptoEngine:
+        """The `CryptoEngine` over the key manager's key, built on first use.
+
+        Lazy because the key may not exist yet: since #539
+        `enable_reversible_anonymization()` creates no key file, the first
+        lock does, so a service built at enable has no key to build an
+        engine from. Cached, so every later read -- and a test patching
+        `engine.decrypt` -- sees one object. Raises `RuntimeError` ("Key
+        not loaded") when neither `load_key()` nor `load_or_generate_key()`
+        has run, and `ValueError` for a malformed key.
+        """
+        if self._engine is None:
+            self._engine = CryptoEngine(self.key_manager.get_key())
+        return self._engine
 
     def generate_identity_token(self, original_attributes: Dict[str, Any]) -> bytes:
         """
@@ -72,7 +91,7 @@ class ReversibilityService:
             # `add_sequence()` plus a slice assignment rather than
             # `add_sequence_item()`, which appends: this sequence holds
             # exactly one item, and that item is the token this call was
-            # handed. `recover_original_data` below reads items[0], and
+            # handed. Both reads below take items[0] (`_token_item`), and
             # until #399 the two disagreed -- so a second lock was
             # accepted, reported as success, persisted and exported while
             # recovery kept answering with the *first* capture, and every
@@ -133,6 +152,58 @@ class ReversibilityService:
                 f"Failed to embed original data: {describe_exception(e)}")
             raise
 
+    def recover_or_raise(self, instance: Instance) -> Dict[str, Any]:
+        """The recovered attributes of `instance`'s token, or an exception.
+
+        `recover_patient_identity`'s read (#539). `recover_original_data`
+        below answers None for "no token" and "this key cannot open it"
+        alike, which recovery printed as one sentence and a caller could
+        not act on; the lock's re-lock check still wants that tolerance,
+        so the strict read is a second method rather than a changed one.
+
+        No message names the instance or a patient: the key path is the
+        caller's own argument, a UID is not needed to act on either
+        failure, and a raise from inside `except InvalidToken` would chain
+        the cryptography traceback (`from None`).
+
+        Raises:
+            RuntimeError: No Encrypted Attributes Sequence item with
+                content, or the key does not decrypt the token.
+        """
+        item = self._token_item(instance)
+        encrypted_bytes = item.attributes.get(self.TAG_ENCRYPTED_CONTENT) if item else None
+        if not encrypted_bytes:
+            raise RuntimeError(
+                "no encrypted identity token on this patient's instances; "
+                "was it locked with lock_identities() before anonymize()?")
+        try:
+            decrypted_bytes = self.engine.decrypt(encrypted_bytes)
+        except InvalidToken:
+            raise RuntimeError(
+                f"the key at {self.key_manager.key_path} does not decrypt this "
+                "patient's identity token; recovery needs the key the "
+                "identity was locked with") from None
+        return json.loads(decrypted_bytes.decode("utf-8"))
+
+    def _token_item(self, instance: Instance):
+        """The Encrypted Attributes Sequence item recovery reads, or None.
+
+        **Item 0, and not the last item** -- the one spelling of the index
+        both reads share. Since #399 every sequence this library writes
+        holds exactly one item, so `items[0]` and `items[-1]` are the same
+        expression on every file it will write again; they are not the
+        same on a file written by 0.9.4 or earlier, which carries one item
+        per lock and whose *first* one is what that release's recovery
+        answered with. `docs/api/stability.md` promises those files stay
+        recoverable, so this index is a compatibility commitment. It was
+        spelled once in each read until review of #615 (F-2) measured
+        `items[-1]` in the strict read green on the whole suite;
+        `tests/test_relock_identity_token.py` holds it on both reads and
+        through `recover_patient_identity()`.
+        """
+        seq = instance.sequences.get(self.TAG_ENCRYPTED_ATTRS_SEQ)
+        return seq.items[0] if seq is not None and seq.items else None
+
     def recover_original_data(self, instance: Instance) -> Optional[Dict[str, Any]]:
         """
         Extracts and decrypts the original attributes from the instance.
@@ -140,15 +211,8 @@ class ReversibilityService:
         Locates the Encrypted Attributes Sequence, decrypts the first item's
         Encrypted Content, and deserializes the JSON.
 
-        **Item 0, and not the last item.** Since #399 every sequence this
-        library writes holds exactly one item, so `items[0]` and
-        `items[-1]` are the same expression on every file it will write
-        again -- but they are not the same on a file written by 0.9.4 or
-        earlier, which carries one item per lock and whose *first* one is
-        what that release's recovery answered with.
-        `docs/api/stability.md` promises those files stay recoverable, so
-        this index is a compatibility commitment rather than a detail;
-        `tests/test_relock_identity_token.py` holds it.
+        **Item 0, and not the last item**, through `_token_item`, which
+        says why that index is a compatibility commitment.
 
         Args:
             instance (Instance): The anonymized instance.
@@ -157,16 +221,12 @@ class ReversibilityService:
             Optional[Dict[str, Any]]: The recovered dictionary of original attributes, or None if failed/missing.
         """
         try:
-            # 1. Check for Sequence
-            if self.TAG_ENCRYPTED_ATTRS_SEQ not in instance.sequences:
+            # 1. The token item, if the instance carries one
+            item = self._token_item(instance)
+            if item is None:
                 return None
 
-            seq = instance.sequences[self.TAG_ENCRYPTED_ATTRS_SEQ]
-            if not seq.items:
-                return None
-
-            # 2. Read First Item
-            item = seq.items[0]
+            # 2. Read its Encrypted Content
             encrypted_bytes = item.attributes.get(self.TAG_ENCRYPTED_CONTENT)
 
             if not encrypted_bytes:
