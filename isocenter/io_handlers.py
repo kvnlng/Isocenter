@@ -3717,10 +3717,10 @@ class ExportOutcome:
     #: the values do not fit. Carried here rather than logged by the
     #: worker, because the worker is usually a spawned process whose
     #: `isocenter` logger has no handler -- `session.export()` always
-    #: spawns them, and `write_tree()` does on a GIL build -- so a line
-    #: logged there reached no one (0 of 3, measured in the review of
-    #: #506). Not a loss: nothing was dropped and the file is correct,
-    #: so it takes no audit row and does not move the grade.
+    #: spawns them, and `write_tree()` does by default on a GIL build --
+    #: so a line logged there reached no one (0 of 3, measured in the
+    #: review of #506). Not a loss: nothing was dropped and the file is
+    #: correct, so it takes no audit row and does not move the grade.
     corrections: List[str] = field(default_factory=list)
     #: One sentence per claim in the source's own header that the file
     #: just written could not honour, for the parent to log at WARNING

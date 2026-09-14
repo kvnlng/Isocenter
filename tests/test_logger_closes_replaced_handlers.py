@@ -64,3 +64,60 @@ def test_reconfiguring_the_logger_closes_the_old_file_handler(tmp_path,
         # in this test's tmp directory.
         monkeypatch.undo()
         configure_logger()
+
+
+class _FailsToClose(logging.Handler):
+    """A handler whose first `close()` raises, as a failed flush does."""
+
+    def __init__(self):
+        super().__init__()
+        self.raised = False
+
+    def emit(self, record):
+        pass
+
+    def close(self):
+        if not self.raised:
+            self.raised = True
+            raise OSError(28, "No space left on device")
+        super().close()
+
+
+def test_a_handler_that_raises_on_close_does_not_abort_the_reset(tmp_path,
+                                                                 monkeypatch):
+    """One `close()` raising neither escapes nor stops the others (review of #637).
+
+    Every `Session()` calls `configure_logger()`, so a raise here is a
+    session that cannot open. The raising handler is put *first*, ahead
+    of the package's own `FileHandler`: the mutant with one `try` around
+    the whole loop never reaches that handler, and its stream stays
+    open. The failure is not swallowed either -- it is logged, after the
+    reset, into the new file.
+    """
+    monkeypatch.setenv("ISOCENTER_LOG_FILE", str(tmp_path / "isocenter.log"))
+    logger = logging.getLogger(LOGGER)
+    bad = _FailsToClose()
+    try:
+        configure_logger()
+        [first] = _file_handlers()
+        stream = first.stream
+        logger.handlers.insert(0, bad)
+
+        configure_logger()
+
+        assert bad.raised, "setup: the raising close() was never called"
+        assert stream.closed, (
+            "a handler after the one whose close() raised was left open")
+        assert [type(h).__name__ for h in logger.handlers] == [
+            "FileHandler", "StreamHandler"]
+        logger.warning("still logging after a failed close")
+        [live] = _file_handlers()
+        live.flush()
+        text = (tmp_path / "isocenter.log").read_text(encoding="utf-8")
+        assert ("A replaced _FailsToClose did not close cleanly, so lines "
+                "it held may not have reached its stream: OSError: "
+                "[Errno 28] No space left on device") in text, text
+        assert "still logging after a failed close" in text, text
+    finally:
+        monkeypatch.undo()
+        configure_logger()
