@@ -284,8 +284,8 @@ class RemediationService:
                     return self._satisfied(finding, declined)
                 action_type = "REMEDIATION_REPLACE"
 
-            # 2. Python Object Attribute support (Patient.patient_name)
-            elif hasattr(entity, proposal.target_attr):
+            # 2. A Python attribute (`Patient.patient_name`, `Study.study_date`).
+            elif self._replace_attr_refused(entity, proposal) is None:
                 setattr(entity, proposal.target_attr, proposal.new_value)
                 if hasattr(entity, "mark_modified"):
                     entity.mark_modified()
@@ -296,16 +296,16 @@ class RemediationService:
                 action_type = "REMEDIATION_REPLACE"
 
             else:
+                # `hasattr` was the test above until #625, and it is True
+                # of a slot holding None: a Study Date the caller cleared
+                # came back as the rule's date, filed as a success. The
+                # helper answers "no such attribute" and "cleared" alike,
+                # and is asked again here rather than bound above the
+                # arm, because a line there moves the pin at 291 (#310).
+                reason = self._replace_attr_refused(entity, proposal)
                 self.logger.warning(
-                    f"Entity {
-                        self._log_subject(finding)} (Type: {
-                        type(entity).__name__}) has no attribute or setter for {
-                        proposal.target_attr}")
-                self._record_decline(
-                    finding,
-                    f"{type(entity).__name__} has no attribute or setter "
-                    f"for {proposal.target_attr}",
-                    audit_buffer)
+                    f"Remediation declined for {self._log_subject(finding)}: {reason}")
+                self._record_decline(finding, reason, audit_buffer)
                 return False
 
         elif proposal.action_type == "SHIFT_DATE":
@@ -529,10 +529,28 @@ class RemediationService:
             # fall past it); or a proposal carrying an action type this
             # method does not implement.
             #
+            # The first of the three is the end state REMOVE asks for,
+            # already there: satisfied, as an EMPTY on a sequence at
+            # zero items is (#567), not a decline. As a decline,
+            # `anonymize(report)` handed one report twice wrote a
+            # `matched no applicable arm` row for every removal the
+            # first call made -- 196 of 196 on CT_small and MR_small
+            # under the floor, measured on a67eb30 -- demoted every
+            # instance to IDENTIFIED and graded a clean graph
+            # REVIEW_REQUIRED (#626). The other two still decline.
+            # `_remove_is_satisfied` says what "gone" means: the
+            # canonical key, so a hand-built upper-case tag the item
+            # holds lower-case is a value still there.
+            #
             # One `else` here rather than an `else` nested in the
             # `attributes` arm: nested, it would cover only the first of
             # the three, and it would stop covering a fourth if one were
             # ever added above.
+            if self._remove_is_satisfied(entity, proposal):
+                self.logger.info(
+                    f"{proposal.target_attr} is not on "
+                    f"{self._log_subject(finding)}; nothing to remove")
+                return self._satisfied(finding, None)
             self._record_decline(
                 finding,
                 f"{proposal.action_type} on {proposal.target_attr} "
@@ -800,10 +818,13 @@ class RemediationService:
         return " ".join(reason.split()).replace("|", "\\|")
 
     def _satisfied(self, finding: PhiFinding, declined) -> bool:
-        """A `REPLACE_TAG` whose end state the item already holds (#567).
+        """A proposal whose end state the item already holds (#567, #626).
 
-        `_replace_on_item` returns `(None, None)` for exactly one case: an
-        `EMPTY` on a sequence already at zero items. Nothing was written,
+        Two callers, one case each: `_replace_on_item` returning `(None,
+        None)`, an `EMPTY` on a sequence already at zero items; and the
+        bottom `else` of `_apply_single_remediation`, a `REMOVE_TAG`
+        whose tag is already gone from the item (`_remove_is_satisfied`).
+        Nothing was written,
         so there is no row and nothing is counted as applied -- and
         nothing is left to remove either, so the entity (and the instance
         holding a nested item) is stamped REMEDIATED, and the key is
@@ -908,6 +929,77 @@ class RemediationService:
         self.logger.warning(
             f"Date shift declined for {self._log_subject(finding)}: {reason}")
         return reason
+
+    @staticmethod
+    def _replace_attr_refused(entity, proposal) -> Optional[str]:
+        """Why a `REPLACE_TAG` must not write a Python attribute, or None
+        when it may (#625).
+
+        The arm's test was `hasattr(entity, target_attr)`, which is True
+        of a slots field holding None: `Study(uid, study_date=None)` has
+        the attribute. So a `0008,0020: REPLACE` rule with a value, over
+        a Study whose date the caller cleared between `audit()` and
+        `anonymize()`, wrote the rule's date into it, filed
+        `REMEDIATION_REPLACE ... written to 1 instance copy` and stamped
+        REMEDIATED -- #569's re-creation on the attribute arm, where
+        `_replace_on_item` already declines a target the item no longer
+        holds (#547). Measured on a67eb30 for `Study.study_date`,
+        `Study.study_time`, `Patient.patient_name`, `Patient.patient_id`
+        and `Series.modality`: the arm is generic, so this is.
+
+        A slot holding None refuses a value and takes `""`: the exporter
+        writes None and `""` as the same zero-length element, so an
+        EMPTY fabricates nothing, and the entity then holds `""` with a
+        row that says so, as it did before this check. A present but
+        empty value is not a cleared one and is written. A name the
+        entity lacks refuses as it always did. The reasons name the
+        attribute and the type and never a value: they are persisted in
+        the row and rendered into the report.
+
+        Static and pure, with no `audit_buffer`: Pin A in
+        `tests/test_frozen_surface.py` refuses a new callee that takes
+        one. Called twice from the arm, once as the condition and once
+        for the reason, because binding the answer above the arm is a
+        line above the pinned `mark_modified()` at 291 (#310).
+        """
+        attr = proposal.target_attr
+        if not hasattr(entity, attr):
+            return f"{type(entity).__name__} has no attribute or setter for {attr}"
+        if getattr(entity, attr) is None and proposal.new_value not in (None, ""):
+            return (f"{attr} is no longer set on the {type(entity).__name__}, "
+                    "so the rule's value is not written where the caller "
+                    "cleared one")
+        return None
+
+    @staticmethod
+    def _remove_is_satisfied(entity, proposal) -> bool:
+        """Whether a `REMOVE_TAG` that matched no arm is one whose target
+        is already gone from a `DicomItem` (#626).
+
+        True only for an entity with an `attributes` dict, when neither
+        `attributes` nor `sequences` holds the tag under its canonical
+        key. Read canonically because the REMOVE arms above test the raw
+        `target_attr`: a hand-built upper-case tag the item holds
+        lower-case fell past them, and read raw here it would count as
+        satisfied over a value still there. It reads as a decline, as it
+        did. A non-tag `target_attr` (`patient_id` against an item)
+        lower-cases harmlessly and, absent, is satisfied: the end state
+        REMOVE asks for is met, where `_replace_on_item` declines the
+        same key because it has a value to write and nowhere to put it.
+        An entity with no `attributes` dict, and an action this method
+        does not implement, are the other two ways to the bottom `else`,
+        and both stay declines.
+        """
+        from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
+
+        if proposal.action_type != "REMOVE_TAG":
+            return False
+        attributes = getattr(entity, "attributes", None)
+        if not isinstance(attributes, dict):
+            return False
+        tag = _canonical_tag(proposal.target_attr)
+        sequences = getattr(entity, "sequences", None) or {}
+        return tag not in attributes and tag not in sequences
 
     def _settle_statuses(self, findings: list, handled: set) -> None:
         """Demote every entity a pass left REMEDIATED over something it did
