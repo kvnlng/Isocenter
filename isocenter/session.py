@@ -4321,10 +4321,12 @@ class DicomSession:
                         # maps a blank or unreadable Study Date to `None`,
                         # and this wrote the token's `''` or `'20041399'`
                         # over it -- dirty, saved, exported, and raised by
-                        # the next `audit()` as a date to shift (#619). A
-                        # value that is not a date is not written; the
-                        # instances above still take it, which is what the
-                        # source held. `isinstance`, not truthiness:
+                        # the next `audit()` as a Study-level date to shift
+                        # (#619). A value that is not a date is not written;
+                        # the instances above still take it, which is what
+                        # the source held, so the instance's unreadable copy
+                        # is still raised, as the source's own was (review
+                        # of #640, P-5). `isinstance`, not truthiness:
                         # `'20041399'` is truthy. Inside the one-study arm,
                         # so a multi-study patient keeps the one WARNING
                         # below. No date in the text, and no ID.
@@ -4332,7 +4334,8 @@ class DicomSession:
                         if not isinstance(restored_date, datetime.date):
                             get_logger().warning(
                                 "The restored Study Date could not be read as "
-                                "a date, so the Study keeps the date it holds "
+                                "a date, so the Study keeps its de-identified "
+                                "Study Date "
                                 "(#619).")
                         # A restore onto a date that never moved records
                         # no change.
