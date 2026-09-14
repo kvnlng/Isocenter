@@ -4709,6 +4709,15 @@ def _nested_loader_metadata(geometry, ref, inst) -> dict:
     }
 
 
+#: How every export line and row names an instance that carries no SOP
+#: Instance UID. Never its output path: that is
+#: `<folder>/Subject_<Patient ID>/...`, and these lines reach the log, the
+#: audit table and the compliance report (bunch E). One spelling, because
+#: the worker's failure line and the parent's three report helpers name the
+#: same outcome.
+_NO_SOP_UID = "an instance with no SOP Instance UID"
+
+
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
@@ -5504,7 +5513,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # `Subject_<Patient ID>/...`, and an OSError's text repeats it
         # (P8, bunch E; the WFDB half is #588). The parent's `ERROR` row,
         # `_report_export_failures`', has the same shape.
-        named = f"instance {uid}" if uid else "an instance with no SOP Instance UID"
+        named = f"instance {uid}" if uid else _NO_SOP_UID
         print(f"ERROR: Export failed for {named}: "
               f"{describe_exception_without_paths(e)}", file=sys.stderr)
         return ExportOutcome(ok=False, output_path=ctx.output_path,
@@ -6592,12 +6601,15 @@ class DicomExporter:
             # `ERROR` row saying the file does not exist (#240).
             failed = not getattr(r, "ok", False)
             for scope, loss in getattr(r, "losses", ()):  # Exceptions have none
-                uid = r.sop_instance_uid or r.output_path
+                # Never `r.output_path`: it is `Subject_<Patient ID>/...`
+                # (D10). The row's key is `UNKNOWN`, as
+                # `_report_export_failures` keys it.
+                uid = r.sop_instance_uid or "UNKNOWN"
                 if failed:
                     loss = (f"{loss} The file itself was not written: this "
                             "instance's export failed after the element was "
                             "dropped.")
-                logger.warning(f"{uid}: {loss}")
+                logger.warning(f"{r.sop_instance_uid or _NO_SOP_UID}: {loss}")
                 count += 1
                 if store_backend is not None:
                     # `log_audit`, not `log_audit_batch`: the batch method
@@ -6636,7 +6648,8 @@ class DicomExporter:
             if not getattr(r, "ok", False):
                 continue  # A lost worker or a failed write: no file.
             for note in r.corrections:
-                logger.info("%s: %s", r.sop_instance_uid or r.output_path,
+                # The instance, never `r.output_path` (D10).
+                logger.info("%s: %s", r.sop_instance_uid or _NO_SOP_UID,
                             note)
                 count += 1
         return count
@@ -6675,9 +6688,13 @@ class DicomExporter:
         for r in results:
             if not getattr(r, "ok", False):
                 continue  # A lost worker or a failed write: no file.
-            uid = r.sop_instance_uid or r.output_path
+            # Never `r.output_path` (D10): the key is `UNKNOWN`, as
+            # `_report_export_failures` keys it, and the line names the
+            # instance in the worker's own words.
+            uid = r.sop_instance_uid or "UNKNOWN"
             for warning in r.warnings:
-                logger.warning("%s: %s", uid, warning)
+                logger.warning("%s: %s", r.sop_instance_uid or _NO_SOP_UID,
+                               warning)
                 count += 1
                 if store_backend is not None:
                     # `log_audit`, not `log_audit_batch` -- see the note
@@ -6733,7 +6750,7 @@ class DicomExporter:
                 # records it, and nothing below it is the report's.
                 uid = r.sop_instance_uid or "UNKNOWN"
                 named = (f"instance {r.sop_instance_uid}" if r.sop_instance_uid
-                         else "an instance with no SOP Instance UID")
+                         else _NO_SOP_UID)
                 # `error` is the exception the worker caught, not prose,
                 # so it is described here; `str()` of a message-less one
                 # was `''` and the row ended in a colon (#435). A string
@@ -6948,6 +6965,11 @@ class DicomExporter:
         # caller say how many of the requested instances exist (#181).
         failures = DicomExporter._report_export_failures(results, store_backend)
         summary = ExportSummary(
+            # The path fallback stays here, unlike the report helpers
+            # above (D10): `written_uids` is a frozen public field that is
+            # counted (`written` de-duplicates it) and matched against the
+            # plan's UIDs, and no line or row is built from it. A shared
+            # placeholder would count every UID-less instance as one file.
             written_uids=[r.sop_instance_uid or r.output_path
                           for r in results
                           if isinstance(r, ExportOutcome) and r.ok],

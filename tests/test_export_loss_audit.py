@@ -456,3 +456,51 @@ def test_a_float16_loss_on_a_failed_write_names_the_missing_file(tmp_path):
     assert NOT_WRITTEN in details, (
         "the row claims an element was dropped from a file that was "
         "never written", details)
+
+
+# ---------------------------------------------------------------------------
+# D10: no report line or row falls back to the output path.
+# ---------------------------------------------------------------------------
+
+#: What an output path looks like under `session.export()`: the Patient
+#: ID is in it. Nothing below may repeat it.
+IDENTIFYING_PATH = "/out/Subject_PAT-D10-SECRET/Study_x/Series_y/z.dcm"
+
+
+@pytest.mark.parametrize("helper", ["losses", "warnings", "corrections"])
+def test_no_report_line_names_a_path_for_a_uid_less_instance(caplog, helper):
+    """A UID-less outcome is named as such, never by its path (bunch E, D10).
+
+    The three helpers keyed a line, and two of them a row, on
+    `r.sop_instance_uid or r.output_path`. The export plan names every file
+    after its UID, so the fallback needs an outcome with none -- a
+    hand-built graph through `export_batch()` -- and then it put
+    `Subject_<Patient ID>/...` into the log and into the audit row.
+    Now it is the worker failure line's own words, and the row's key is
+    `UNKNOWN`, as `_report_export_failures` keys it.
+
+    Killing mutation (M24): `or r.output_path` restored in any one helper.
+    """
+    caplog.set_level(logging.DEBUG, logger="isocenter")
+    outcome = ExportOutcome(
+        ok=True, output_path=IDENTIFYING_PATH, sop_instance_uid=None,
+        losses=[(LOSS_SCOPE_STANDARD, "a loss.")],
+        warnings=["a warning."], corrections=["a correction."])
+    store = _RecordingStore()
+
+    if helper == "losses":
+        count = DicomExporter._report_export_losses([outcome], store)
+    elif helper == "warnings":
+        count = DicomExporter._report_export_warnings([outcome], store)
+    else:
+        count = DicomExporter._report_export_corrections([outcome])
+
+    assert count == 1
+    lines = [r.getMessage() for r in caplog.records if r.name == "isocenter"]
+    assert lines, "the helper logged nothing"
+    for text in lines + [repr(row) for row in store.rows]:
+        assert "Subject_" not in text, text
+        assert "SECRET" not in text, text
+    assert all(line.startswith("an instance with no SOP Instance UID: ")
+               for line in lines), lines
+    assert all(row[1] == "UNKNOWN" for row in store.rows), store.rows
