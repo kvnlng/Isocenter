@@ -739,7 +739,8 @@ def test_without_the_session_absence_is_read_on_the_finding_entity():
     no object at all, declines; a clean one is satisfied.
 
     Kills: the map's default meaning "resolved nothing" rather than "no
-    session"; an unresolved address read as satisfied; the map ignored."""
+    session"; an unresolved address read as satisfied; the map ignored;
+    the address's reason written on a decline the address did not cause."""
     rows = _Rows()
     alone = _instance()
     assert _service(rows).apply_remediation(
@@ -760,6 +761,16 @@ def test_without_the_session_absence_is_read_on_the_finding_entity():
         assert "HOSP" not in rows.rows[0][2]
         assert entity.phi_status is PhiStatus.IDENTIFIED
     assert holding.attributes[ABSENT] == "HOSP"
+
+    # An entity that would decline on its own keeps its own reason: the
+    # address did not change the answer, so the row does not blame it.
+    finding = _finding(_Bare(), "REMOVE_TAG", ABSENT)
+    rows = _Rows()
+    service = _service(rows)
+    service._use_removal_targets({id(finding): None})
+    assert service.apply_remediation([finding]) == 0
+    assert [a for a, *_ in rows.rows] == ["REMEDIATION_DECLINED"], rows.rows
+    assert NO_ARM in rows.rows[0][2] and STALE not in rows.rows[0][2], rows.rows
 
     finding = _finding(_instance(), "REMOVE_TAG", ABSENT)
     rows = _Rows()
