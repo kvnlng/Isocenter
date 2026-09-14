@@ -70,6 +70,23 @@ def no_key_refusal(path):
             "was created, and the token this call would have written is unchanged.")
 
 
+def no_record_refusal(path):
+    """The lock's refusal of a token of ours the key opens to no record
+    (review of #633, P-2)."""
+    return ("lock_identities: this patient carries an identity token that the "
+            f"key at {path} opens but that holds no identity record this library "
+            "writes, so what it holds cannot be recovered, and this lock would "
+            "replace it unread. Nothing replaces a token the lock cannot read; "
+            "the token this call would have written is unchanged.")
+
+
+def no_record_recovery(path):
+    """The same case from `recover_patient_identity()`."""
+    return (f"the key at {path} opens this patient's identity token, but it holds "
+            "no identity record this library writes, so nothing can be recovered "
+            "from it")
+
+
 @pytest.fixture(autouse=True)
 def _threads(monkeypatch):
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
@@ -254,14 +271,19 @@ def test_a_truncated_token_of_ours_is_refused_not_replaced(tmp_path):
     (bytearray(b"gAAAAABxxxxxxxxxxxxx"), True),
     (b"\x30\x82\x01\x0a\x06\x09\x2a\x86\x48\x86\xf7\x0d", False),   # CMS-shaped DER
     (base64.urlsafe_b64encode(b"\x81" + b"\x00" * 20), False),      # version byte 0x81
-    (b"////////////////", False),               # not base64url
+    (b"____________", False),                   # decodes to 0xFF...: the version byte
+    (b"gAAAAAB/xxxxxxxx", False),               # ours-shaped, but `/` is not base64url
     (None, False), (7, False),
 ], ids=["foreign", "empty", "short", "ours", "str", "bytearray", "der", "v81",
-        "not_urlsafe", "none", "int"])
+        "version_byte_ff", "not_urlsafe", "none", "int"])
 def test_the_sniff_reads_the_fernet_version_byte(content, ours):
-    """`is_one_of_ours` decodes the first 12 characters and tests the first
-    decoded byte for Fernet's version `0x80`; nothing else, and never the
-    whole string."""
+    """`is_one_of_ours` checks the first 12 characters against the
+    base64url alphabet, decodes them, and tests the first decoded byte
+    for Fernet's version `0x80`; nothing else, and never the whole
+    string. `not_urlsafe` is a standard-alphabet spelling that would
+    decode to `0x80`: `urlsafe_b64decode` does not validate, so without
+    the alphabet check it read as ours (review of #633, P-5; the old
+    `b"////////////"` case failed on the version byte, not the shape)."""
     assert ReversibilityService.is_one_of_ours(content) is ours
 
 
@@ -307,6 +329,79 @@ def test_a_lock_of_another_patient_creates_no_key_while_a_token_of_ours_is_unope
         assert str(caught.value) == no_key_refusal(str(key))
         assert not key.exists()
         assert _token(_first(session, PID_B)) is None
+
+
+@pytest.mark.parametrize("form", ("single", "batch"))
+def test_a_lock_of_another_patient_under_an_existing_valid_key_is_accepted(
+        store, tmp_path, form):
+    """Q8's permissive half (review of #633, F-3): under an existing valid
+    key that is not the one PID_A was locked with, a lock of the
+    never-locked PID_B is accepted, single and batch, holding B's own
+    values, and A's token is untouched. A is refused only when a lock
+    would replace its token -- and is, with the #617 text, A's token
+    still unchanged. A sniff scoped wider than the patients being locked,
+    or a plan refusing on any unopenable token in the session, would ship
+    green without this (the report form is the batch's all-or-none and is
+    pinned by T13)."""
+    db, _, token = store
+    other = _other_key(tmp_path, "wrong_key")
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(other)
+        result = _lock(session, form, PID_B)
+        assert len(result) == 1
+        assert session.reversibility_service.recover_original_data(
+            _first(session, PID_B)) == {"0010,0010": NAME_B, "0010,0020": PID_B}
+        assert _token(_first(session, PID_A)) == token
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities(PID_A, tags_to_lock=TAGS)
+        assert str(caught.value) == wrong_key_refusal(other)
+        assert _token(_first(session, PID_A)) == token
+
+
+@pytest.mark.parametrize("payload", [b"not json at all", b'"a string"', b"[1, 2]",
+                                     b"\xff\xfe\x80"],
+                         ids=["text", "json_string", "json_list", "not_utf8"])
+def test_a_token_of_ours_the_key_opens_to_no_record_is_refused_not_a_json_error(
+        tmp_path, payload):
+    """A Fernet token under the session's own key whose plaintext is not
+    the JSON object this library writes -- constructible only with the
+    key -- was fail-closed but escaped the lock as `JSONDecodeError`
+    (whose `.doc` is the decrypted plaintext), unnumbered by the batch
+    (review of #633, P-2). Now a `RuntimeError` refusal in P6 words from
+    the single lock, the batch (numbered, nobody locked) and recovery:
+    the key path and nothing else, `from None`, the token unchanged, and
+    no byte of the plaintext in any message. A JSON string or list is
+    "no record" too: the plan reads `.items()` off what the token holds."""
+    key = str(tmp_path / "k.key")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.enable_reversible_anonymization(key)
+        a = _hand_patient(session)
+        b = _hand_patient(session, pid=PID_B, name=NAME_B)
+        session.lock_identities(PID_A, tags_to_lock=TAGS)
+        bad = session.reversibility_service.engine.encrypt(payload)
+        a.sequences[SEQ].items[0].set_attr(CONTENT, bad)
+        with pytest.raises(RuntimeError) as single:
+            session.lock_identities(PID_A, tags_to_lock=TAGS)
+        assert str(single.value) == no_record_refusal(key)
+        assert single.value.__cause__ is None and single.value.__suppress_context__
+        assert _token(a) == bad
+        with pytest.raises(RuntimeError) as batch:
+            session.lock_identities([PID_A, PID_B], tags_to_lock=TAGS)
+        assert str(batch.value) == (
+            "lock_identities: 1 of 2 patients cannot be locked as asked, so no "
+            "patient was locked. Each is numbered by its place among the patients "
+            "found, in Patient ID order. Lock the others without these, and each of "
+            f"these as its message says:\n[1 of 2] {no_record_refusal(key)}")
+        assert _token(a) == bad and _token(b) is None
+        with pytest.raises(RuntimeError) as recovery:
+            session.recover_patient_identity(PID_A, restore=False)
+        assert str(recovery.value) == no_record_recovery(key)
+        assert recovery.value.__cause__ is None
+        for message in (str(single.value), str(batch.value), str(recovery.value)):
+            for secret in (payload.decode("utf-8", "replace"), repr(payload),
+                           PID_A, NAME_A, "Expecting", "JSON"):
+                assert secret not in message, message
+        assert a.attributes["0010,0010"] == NAME_A, "recovery restored something"
 
 
 def test_a_batch_mixing_both_refusals_locks_nobody(tmp_path):

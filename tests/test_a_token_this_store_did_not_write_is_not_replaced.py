@@ -58,12 +58,15 @@ PROJECT_X = {"0010,0010": {"action": "REPLACE", "value": "Project-X"},
 SOURCE = {"PatientBirthDate": "19700101", "AccessionNumber": "ACC123"}
 
 
-def mismatch_refusal(tag):
-    """The #607 refusal, byte for byte."""
+def mismatch_refusal(tag, named=True):
+    """The #607 refusal, byte for byte: for a tag the lock names, the
+    token would hold "a different one"; for a tag it does not name, the
+    tag leaves the token -- "nothing", 2(a)'s word (review of #633, P-4)."""
+    lost = "a different one" if named else "nothing (tags_to_lock does not name it)"
     return ("lock_identities: this patient's identity token did not come from "
             f"this store, so the value it holds in {tag} cannot be told from what "
-            "anonymize() left, and this lock would replace it with a different "
-            "one. recover_patient_identity(<its Patient ID>, restore=True) puts "
+            f"anonymize() left, and this lock would replace it with {lost}. "
+            "recover_patient_identity(<its Patient ID>, restore=True) puts "
             "the held values back, and a lock after that is accepted; the token "
             "this call would have written is unchanged.")
 
@@ -453,6 +456,53 @@ def test_the_stamp_is_recorded_before_the_token_reaches_the_store(tmp_path, monk
     assert seen == [first, second], seen
 
 
+def test_a_relock_between_the_two_reads_of_a_save_stores_the_token_with_its_stamp(tmp_path):
+    """The read order in `_serialize_item`, pinned rather than argued
+    (review of #633, F-1). A save reads the sequences -- where the token
+    lives -- and then the stamp. A `dict` subclass on `inst.sequences`
+    whose first `__len__` under the save runs a changed-value re-lock puts
+    a new token and a new stamp between the two reads, deterministically:
+    the snapshot must then hold the new token under the new stamp, its
+    `__locked__` the digest of the token the same snapshot carries.
+
+    Kills the reviewer's R1 -- the stamp read moved above
+    `data = item.attributes.copy()` -- which survived every other test
+    here: measured on 3.12 and 3.14t, R1 stores the new token under the
+    old stamp (this store's own token, refused as foreign on the next
+    changed-value re-lock) and the shipped order stores the new token
+    under the new stamp."""
+    with _session(tmp_path, KEEP_BOTH) as session:
+        instance = _instance(session)
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        old_token, old_stamp = _token(instance), instance._locked_token
+        fired = []
+
+        class Relocking(dict):
+            """`if item.sequences:` is the first read of the sequences,
+            and `bool(dict)` is `__len__`; the re-lock runs there, once."""
+
+            def __len__(self):
+                if not fired:
+                    fired.append(True)
+                    instance.set_attr("0010,0010", "CHANGED^Value")
+                    session.lock_identities(PID, tags_to_lock=TAGS)
+                return dict.__len__(self)
+
+        instance.sequences = Relocking(instance.sequences)
+        try:
+            snapshot = session.store_backend._serialize_item(instance)
+        finally:
+            instance.sequences = dict(instance.sequences)
+        assert fired, "the re-lock never ran under the save"
+        new_token = _token(instance)
+        assert new_token != old_token and instance._locked_token != old_stamp
+        stored = bytes(snapshot["__sequences__"][SEQ][0][CONTENT])
+        assert stored == new_token, "the save read the sequences before the re-lock"
+        assert snapshot[KEY] == hashlib.sha256(stored).hexdigest(), (
+            "the stored token and the stored stamp disagree")
+        assert snapshot[KEY] == instance._locked_token
+
+
 # --- T8, T9, T10: what the stamp is keyed on, the order, and every instance -----
 
 
@@ -597,6 +647,34 @@ def test_a_wider_relock_over_an_unstamped_token_whose_values_match_is_accepted(t
         assert {tag: stashed[tag] for tag in TAGS} == held
         assert stashed[ACCESSION] == instance.attributes[ACCESSION]
         assert instance.identity_token_is_this_stores(_token(instance))
+
+
+def test_a_narrower_relock_over_an_unstamped_token_whose_unnamed_value_moved_is_refused(
+        tmp_path):
+    """The unnamed-tag arm of the #607 check (review of #633, F-2): the
+    re-ingested `Project-X` export, re-locked on the ID alone. The name is
+    not named, so it would leave the token, and the instance carries the
+    pass's `Project-X` where the token holds the original: refused,
+    naming the name tag -- one the caller did not name -- in 2(a)'s
+    words, "nothing (tags_to_lock does not name it)"; the token and the
+    held name are unchanged, and nothing is stamped.
+
+    Kills the arm narrowed to the tags the caller named (the reviewer's
+    R2, `if tag not in tags_to_lock: continue`), which the suite left
+    green while it accepted this lock and dropped `Orig^Name` from the
+    token (measured: held `{'0010,0020': 'P607'}` afterwards)."""
+    session, held = _reingested(tmp_path, PROJECT_X, TAGS)
+    with session:
+        instance = _instance(session)
+        token = _token(instance)
+        assert instance.attributes["0010,0010"] == "Project-X"
+        with pytest.raises(RuntimeError) as caught:
+            session.lock_identities(session.store.patients[0].patient_id,
+                                    tags_to_lock=["0010,0020"])
+        assert str(caught.value) == mismatch_refusal("0010,0010", named=False)
+        assert _token(instance) == token
+        assert _held(session, instance) == held
+        assert instance._locked_token is None
 
 
 def test_the_stamp_is_the_digest_of_the_token_bytes():

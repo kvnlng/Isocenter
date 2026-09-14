@@ -9,6 +9,20 @@ from .crypto import CryptoEngine, KeyManager
 from .logger import get_logger, describe_exception
 
 
+class _TokenHoldsNoRecord(RuntimeError):
+    """A token of ours that the key opens, whose plaintext is not the JSON
+    object `generate_identity_token` writes (review of #633, P-2).
+
+    Only constructible with the key, so it is a corner; but until it had
+    a type of its own it escaped `lock_identities()` as a `JSONDecodeError`
+    whose `.doc` is the decrypted plaintext, and the batch, which collects
+    `RuntimeError` alone, did not number it. A `RuntimeError` so every
+    strict-read caller that refuses on "cannot open" refuses on this too;
+    a subclass so the lock's plan can say the truer thing -- the key
+    *opens* the token -- instead of the wrong-key text.
+    """
+
+
 class ReversibilityService:
     """
     Handles the embedding and recovery of encrypted original data in DICOM files.
@@ -171,6 +185,14 @@ class ReversibilityService:
     #: 0x34).
     OUR_TOKEN_FIRST_BYTE = 0x80
 
+    #: The characters a Fernet token is spelled in. Checked before the
+    #: decode, because `urlsafe_b64decode` translates `-_` to `+/` and
+    #: then decodes the *standard* alphabet without validating it, so
+    #: `+` and `/` -- which no token of ours carries -- decoded rather
+    #: than failed the shape test (review of #633, P-5).
+    _BASE64URL_ALPHABET = frozenset(
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
     @classmethod
     def is_one_of_ours(cls, content) -> bool:
         """Whether `content` is shaped like a token this library wrote:
@@ -180,18 +202,18 @@ class ReversibilityService:
         deliberately not a whole-string check: a token of ours that was
         truncated in transit is still ours, and the read then refuses it
         under the key rather than replacing it. A CMS blob, arbitrary
-        text, an empty value or anything shorter than 12 characters is
-        not ours.
+        text, an empty value, anything shorter than 12 characters, or a
+        spelling outside the base64url alphabet is not ours.
         """
         if isinstance(content, str):
             content = content.encode("utf-8")
         if not isinstance(content, (bytes, bytearray)) or len(content) < 12:
             return False
-        try:
-            head = base64.urlsafe_b64decode(bytes(content)[:12])
-        except (ValueError, TypeError):
-            # `binascii.Error` is a `ValueError`: not base64url at all.
+        head = bytes(content)[:12]
+        if any(byte not in cls._BASE64URL_ALPHABET for byte in head):
             return False
+        # Twelve alphabet characters always decode: no padding, no error.
+        head = base64.urlsafe_b64decode(head)
         return bool(head) and head[0] == cls.OUR_TOKEN_FIRST_BYTE
 
     def token_of_ours(self, instance: Instance) -> Optional[bytes]:
@@ -217,6 +239,11 @@ class ReversibilityService:
                 own argument, and a raise from inside `except
                 InvalidToken` would chain the cryptography traceback
                 (`from None`).
+            _TokenHoldsNoRecord: The key decrypts it, but what it holds
+                is not the JSON object this library writes (not UTF-8,
+                not JSON, or JSON that is not an object). `from None` and
+                nothing interpolated: a `JSONDecodeError` carries the
+                whole plaintext in `.doc`, which is the originals.
         """
         try:
             decrypted_bytes = self.engine.decrypt(content)
@@ -225,7 +252,18 @@ class ReversibilityService:
                 f"the key at {self.key_manager.key_path} does not decrypt this "
                 "patient's identity token; recovery needs the key the "
                 "identity was locked with") from None
-        return json.loads(decrypted_bytes.decode("utf-8"))
+        try:
+            record = json.loads(decrypted_bytes.decode("utf-8"))
+        except ValueError:
+            raise _TokenHoldsNoRecord(self._no_record_message()) from None
+        if not isinstance(record, dict):
+            raise _TokenHoldsNoRecord(self._no_record_message())
+        return record
+
+    def _no_record_message(self) -> str:
+        return (f"the key at {self.key_manager.key_path} opens this patient's "
+                "identity token, but it holds no identity record this library "
+                "writes, so nothing can be recovered from it")
 
     def held_identity(self, instance: Instance):
         """`(token bytes, values)` for a token of ours this key opens, or
@@ -237,8 +275,8 @@ class ReversibilityService:
         distinct token.
 
         Raises:
-            RuntimeError: A token of ours does not open under this key
-                (`open_token`'s message).
+            RuntimeError: A token of ours does not open under this key,
+                or opens to no record (`open_token`'s messages).
         """
         content = self.token_of_ours(instance)
         if content is None:

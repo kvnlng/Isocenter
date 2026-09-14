@@ -141,8 +141,14 @@ class KeyManager:
                 pass
             key = Fernet.generate_key()
             directory = os.path.dirname(self.key_path) or "."
-            fd, temp_path = tempfile.mkstemp(
-                prefix=os.path.basename(self.key_path) + ".", dir=directory)
+            try:
+                fd, temp_path = tempfile.mkstemp(
+                    prefix=os.path.basename(self.key_path) + ".", dir=directory)
+            except OSError as exc:
+                # A missing or read-only directory is reported against
+                # the path the caller gave, not the temporary name nobody
+                # asked for (review of #633, P-6). Same type, same errno.
+                raise type(exc)(exc.errno, exc.strerror, self.key_path) from None
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(key)

@@ -306,11 +306,37 @@ def test_two_processes_creating_one_key_agree(tmp_path):
 def test_a_key_path_in_a_missing_directory_still_raises_at_the_first_lock(tmp_path):
     """E2 documented `FileNotFoundError` from the create for a missing
     parent directory; the temporary file is created in that directory, so
-    the same exception, and nothing is written anywhere."""
+    the same exception, and nothing is written anywhere. The path it
+    names is the key path the caller gave, not the temporary name nobody
+    asked for (review of #633, P-6: `mkstemp`'s own error named
+    `nodir/k.key.acg_jnky`)."""
     key = tmp_path / "nodir" / "k.key"
     with _session(tmp_path) as session:
         session.enable_reversible_anonymization(str(key))
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(FileNotFoundError) as caught:
             session.lock_identities(PID_A)
         assert _tokens(session) == []
     assert not (tmp_path / "nodir").exists()
+    assert caught.value.filename == str(key), caught.value.filename
+    assert str(key) in str(caught.value)
+    assert "k.key." not in str(caught.value), "the temporary file's name"
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into any directory")
+def test_a_read_only_key_directory_is_reported_against_the_key_path(tmp_path):
+    """The same for `PermissionError` on a directory the key cannot be
+    created in: the key path, the same errno, and nothing left behind."""
+    directory = tmp_path / "ro"
+    directory.mkdir()
+    key = directory / "k.key"
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(PermissionError) as caught:
+            KeyManager(str(key)).load_or_generate_key()
+        assert os.listdir(directory) == []
+    finally:
+        directory.chmod(0o700)
+    assert caught.value.filename == str(key), caught.value.filename
+    assert caught.value.errno == errno.EACCES
+    assert "k.key." not in str(caught.value), "the temporary file's name"

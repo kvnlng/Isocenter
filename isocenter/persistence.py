@@ -2874,7 +2874,11 @@ class SqliteStore:
         # old token with the old stamp, the new token with the new stamp,
         # or the old token with the new stamp, which is harmless: the
         # stamp is keyed on the token, and an old token under a new stamp
-        # reads as unvouched-for only until the next save.
+        # reads as unvouched-for only until the next save. The order is
+        # pinned, not only argued:
+        # `test_a_relock_between_the_two_reads_of_a_save_stores_the_token_with_its_stamp`
+        # runs a re-lock between the two reads and goes red with this
+        # read moved above `attributes.copy()` (review of #633, F-1).
         locked = getattr(item, "_locked_token", None)
         if locked:
             data['__locked__'] = locked

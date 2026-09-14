@@ -34,7 +34,7 @@ from .manifest import Manifest, ManifestItem, generate_manifest_file
 from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore
 from .crypto import KeyManager
-from .reversibility import ReversibilityService
+from .reversibility import ReversibilityService, _TokenHoldsNoRecord
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
                        resolve_max_workers, resolve_worker_initializer,
@@ -3404,11 +3404,12 @@ class DicomSession:
                 that works without it; a re-lock would lose a value the
                 existing token holds; the patient carries an identity
                 token this library wrote that the key at the path given
-                to `enable_reversible_anonymization()` does not decrypt
-                (#617); a re-lock over a token this store did not write
-                -- one that arrived inside a file, or one a release
-                before 0.9.8 wrote -- would change a value it holds,
-                naming the tag (#607; `recover_patient_identity(...,
+                to `enable_reversible_anonymization()` does not decrypt,
+                or opens to no identity record (#617); a re-lock over a
+                token this store did not write -- one that arrived inside
+                a file, or one a release before 0.9.8 wrote -- would
+                change a value it holds, naming the tag, which need not be
+                one `tags_to_lock` names (#607; `recover_patient_identity(...,
                 restore=True)` and a lock after it is the way through); a
                 value it would stash is one no token can hold (`bytes`),
                 naming the tag; or Patient's Name is blank under a rule of
@@ -3685,6 +3686,22 @@ class DicomSession:
             for content, holders in carrying.items():
                 try:
                     values = self.reversibility_service.open_token(content)
+                except _TokenHoldsNoRecord:
+                    # The key *opens* this one, so the wrong-key text
+                    # below would be false. Refused all the same: what it
+                    # holds cannot be read, so nothing says what a
+                    # replacement would lose (review of #633, P-2). No
+                    # advice that works: a key that opens it is already
+                    # in hand, and there is no way to replace a token
+                    # the lock cannot read (#629 is the request for one).
+                    raise RuntimeError(
+                        "lock_identities: this patient carries an identity "
+                        f"token that the key at {self.key_manager.key_path} "
+                        "opens but that holds no identity record this "
+                        "library writes, so what it holds cannot be "
+                        "recovered, and this lock would replace it unread. "
+                        "Nothing replaces a token the lock cannot read; the "
+                        "token this call would have written is unchanged.") from None
                 except RuntimeError:
                     raise RuntimeError(
                         "lock_identities: this patient carries an identity "
@@ -3745,14 +3762,22 @@ class DicomSession:
                 for tag, kept in held.items():
                     if not str(kept or "").strip():
                         continue
-                    new = original_attrs.get(tag) if tag in tags_to_lock \
-                        else captured(tag)[0]
+                    named = tag in tags_to_lock
+                    new = original_attrs.get(tag) if named else captured(tag)[0]
                     if not _same_stashed_value(new, kept):
+                        # A tag this lock does not name leaves the token
+                        # altogether, and the instance keeps whatever the
+                        # pass left there: "nothing", 2(a)'s word for it,
+                        # not "a different one". So the tag named is the
+                        # token's own, which the caller need not have
+                        # named (review of #633, F-2 and P-4).
+                        lost = "a different one" if named \
+                            else "nothing (tags_to_lock does not name it)"
                         raise RuntimeError(
                             "lock_identities: this patient's identity token did "
                             "not come from this store, so the value it holds in "
                             f"{tag} cannot be told from what anonymize() left, and "
-                            "this lock would replace it with a different one. "
+                            f"this lock would replace it with {lost}. "
                             "recover_patient_identity(<its Patient ID>, "
                             "restore=True) puts the held values back, and a lock "
                             "after that is accepted; the token this call would "
@@ -4095,7 +4120,8 @@ class DicomSession:
                 has no instances, or no identity token -- an Encrypted
                 Attributes Sequence that did not come from this library
                 (no Fernet token in it) counts as no token, not as the
-                wrong key (#617); the key does not decrypt the token; or,
+                wrong key (#617); the key does not decrypt the token, or
+                opens it to no identity record this library writes; or,
                 with `restore=True`, a patient holding the restored
                 Patient ID was de-identified under a different date-offset
                 scheme (raised before anything is restored).
