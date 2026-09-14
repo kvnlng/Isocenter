@@ -312,15 +312,11 @@ class RemediationService:
             # Deterministic Date Shifting
             patient_id = self._resolve_patient_id(entity, proposal)
             if not patient_id:
-                self.logger.warning(
-                    f"Could not resolve PatientID for {
-                        self._log_subject(finding)}. Skipping date shift.")
+                self.logger.warning(f"Could not resolve PatientID for "
+                                    f"{self._log_subject(finding)}. Skipping date shift.")
                 self._record_decline(
-                    finding,
-                    f"could not resolve a PatientID to seed the jitter "
-                    f"for {proposal.target_attr}, so the date is "
-                    f"unshifted",
-                    audit_buffer)
+                    finding, f"could not resolve a PatientID to seed the jitter for "
+                    f"{proposal.target_attr}, so the date is unshifted", audit_buffer)
                 return False
 
             # The scheme the scan recorded for this patient; a finding
@@ -331,6 +327,10 @@ class RemediationService:
                 (proposal.metadata or {}).get("jitter_scheme",
                                               JITTER_SCHEME_KEYED))
             new_date = self._shift_date_string(proposal.original_value, shift_days)
+            moved = self._shift_target_moved(entity, finding, new_date)
+            if moved:
+                self._record_decline(finding, moved, audit_buffer)
+                return False
 
             if new_date:
                 if hasattr(entity, "set_attr"):
@@ -831,6 +831,81 @@ class RemediationService:
                                     | {_remediation_key(finding)})
         return False
 
+    def _shift_target_moved(self, entity, finding: PhiFinding,
+                            new_date) -> Optional[str]:
+        """Why a `SHIFT_DATE` must not write, or None when it may (#569).
+
+        The arm's output is a function of `proposal.original_value`, the
+        value the scan read, and not of what the target holds now. Written
+        without this check, a date deleted between `audit()` and
+        `anonymize()` came back shifted, a blanked or edited one was
+        overwritten with a shift of the value it no longer held, and each
+        was filed `REMEDIATION_SHIFT_DATE` and stamped REMEDIATED.
+
+        It may write when the target still holds the audited value, **or
+        already holds `new_date`**: `anonymize(report)` handed the same
+        report twice re-applies every shift onto its own output, and that
+        call is idempotent and must stay so. Admitting only the audited
+        value would decline every date on the second call and grade
+        REVIEW_REQUIRED over a clean graph. Shifting the live value
+        instead would move it twice.
+
+        Anything else declines, absent included, rather than counting as
+        satisfied (#567): nothing was shifted, and `_replace_on_item`
+        declines a vanished target for the same reason (#547).
+
+        A `DicomItem` is read at the canonical key, because `set_attr`
+        writes there and a hand-built `target_attr` may be upper-case. A
+        `Study` is compared through `normalize_study_date`, the rule its
+        `__setattr__` stores a date by, so `"2004-01-19"`, `"20040119"`
+        and `date(2004, 1, 19)` are one date. The reasons name the tag and
+        never a value: they are persisted in the decline row.
+
+        An unparseable original (`new_date` None) on a target still
+        holding it passes, so the arm's own invalid-format decline is the
+        one row; on a target that is gone it declines here, as gone, since
+        "the value is unchanged" would describe a value no longer there.
+
+        **A blank original passes whatever the target holds**, to the
+        arm's empty-date branch, which writes no row: there was no date to
+        shift, so nothing can have been re-created or overwritten, and a
+        decline would be `REVIEW_REQUIRED` over nothing -- the cry-wolf
+        shape `test_an_empty_date_is_not_a_decline` pins, whose instance
+        does not hold the tag at all. The scan never raises a blank.
+
+        The warning is logged here so the arm stays within its line
+        budget: every line above the success block counts toward the five
+        `mark_modified()` pins (#310).
+        """
+        from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
+
+        proposal = finding.remediation_proposal
+        if proposal.original_value is None or not str(proposal.original_value).strip():
+            return None
+        attr, admitted = proposal.target_attr, [proposal.original_value]
+        if new_date is not None:
+            admitted.append(new_date)
+        if hasattr(entity, "set_attr"):
+            attr = _canonical_tag(attr)
+            present = attr in entity.attributes
+            held = entity.attributes.get(attr)
+        else:
+            held = getattr(entity, attr, None)
+            present = held is not None
+            held = normalize_study_date(held)
+            admitted = [normalize_study_date(value) for value in admitted]
+        if not present:
+            reason = (f"{attr} is no longer on the {type(entity).__name__}, "
+                      "so there is no date to shift")
+        elif held in admitted:
+            return None
+        else:
+            reason = (f"{attr} changed after the finding was raised, so a "
+                      "shift of the value it held then is not written over it")
+        self.logger.warning(
+            f"Date shift declined for {self._log_subject(finding)}: {reason}")
+        return reason
+
     def _settle_statuses(self, findings: list, handled: set) -> None:
         """Demote every entity a pass left REMEDIATED over something it did
         not remove (#486, #553).
@@ -1171,29 +1246,54 @@ class RemediationService:
         Counted before the pass so an owner's audit row can name its folds
         when it is appended: the row is complete from the start, and no
         row is rewritten after the fact, which Pin A in
-        `tests/test_frozen_surface.py` refuses. Distinct dedup keys only,
-        because a duplicate is skipped, not folded twice. `removed` is
-        whether the finding is a REMOVE, which folds only into an owner's
-        removal (see `_folds_into_owner`, #537): keyed on it, an owner that
-        removed counts only the REMOVEs waiting on its copies, and one that
-        wrote a value only the rest. Only a copy an owner's write reaches
-        is ever asked for its count, so a finding counted here whose copy
-        no owner reaches costs nothing.
+        `tests/test_frozen_surface.py` refuses. `removed` is whether the
+        owner's write removed the copy; a REMOVE folds only into a removal
+        and anything else only into a value (see `_folds_into_owner`,
+        #537). Only a copy an owner's write reaches is ever asked for its
+        count, so a finding counted here whose copy no owner reaches costs
+        nothing.
+
+        **Counted per loop key (`_remediation_key`), because that is what
+        the loop runs.** The loop takes each key at most once, and the key
+        carries no action, so of several findings on one key only one can
+        fold. Which one depends on the copy the owner left:
+
+        - **A value.** The copy is present, so the key's *first* finding
+          ends it: a non-REMOVE folds, and a REMOVE applies and removes the
+          copy, after which the rest are duplicates. The value copy counts
+          the key iff that first finding is not a REMOVE.
+        - **A removal.** The copy is absent, so every non-REMOVE on it
+          declines -- `_replace_on_item` for REPLACE (#547),
+          `_shift_target_moved` for SHIFT (#569), the arm's bottom `else`
+          for anything else -- and a decline claims no key. The key
+          therefore reaches its first REMOVE, which folds. The removal
+          copy counts the key iff any finding on it is a REMOVE.
+
+        Counted per `(key, removed)` instead, until 0.9.8, a REMOVE and a
+        REPLACE on one tag were two folds waiting, and an owner that wrote
+        a value claimed the REPLACE the loop skipped as a duplicate of the
+        REMOVE it ran (#576). The second bullet needs #569: a SHIFT that
+        re-created the absent copy claimed the key, and its REMOVE never
+        folded. A finding that raises claims no key either, so it counts
+        as a decline does.
         """
-        pending = {}
-        seen = set()
+        chains = {}
         for finding in findings:
             proposal = finding.remediation_proposal
             if not proposal or not hasattr(finding.entity, "set_attr"):
                 continue
-            removed = proposal.action_type == "REMOVE_TAG"
-            key = (finding.entity_uid, finding.entity_path, proposal.target_attr,
-                   removed)
-            if key in seen:
-                continue
-            seen.add(key)
-            copy = (id(finding.entity), proposal.target_attr, removed)
-            pending[copy] = pending.get(copy, 0) + 1
+            remove = proposal.action_type == "REMOVE_TAG"
+            # `[copy, first is a REMOVE, any is a REMOVE]`; the copy is the
+            # first finding's, as the loop's is.
+            chain = chains.setdefault(_remediation_key(finding), [
+                (id(finding.entity), proposal.target_attr), remove, False])
+            chain[2] = chain[2] or remove
+        pending = {}
+        for (instance, tag), first_remove, any_remove in chains.values():
+            for removed, counts in ((False, not first_remove), (True, any_remove)):
+                if counts:
+                    pending[(instance, tag, removed)] = pending.get(
+                        (instance, tag, removed), 0) + 1
         return pending
 
     def _resolve_patient_id(self, entity, proposal: PhiRemediation = None) -> Optional[str]:
