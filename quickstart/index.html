@@ -1567,16 +1567,44 @@ source that decodes to RGB is already stored as <code>RGB</code>. 32- and 64-bit
 images cannot be compressed and fail export with a message naming
 <code>use_compression=False</code>. If a recipient's reader cannot handle JPEG 2000,
 export with <code>use_compression=False</code>.</p>
+<p><strong>The export writes two transfer syntaxes and no others</strong>
+(<a href="https://github.com/kvnlng/Isocenter/issues/526">#526</a>): Implicit VR
+Little Endian with <code>use_compression=False</code>, and JPEG 2000 Lossless
+(<code>1.2.840.10008.1.2.4.90</code>) with <code>use_compression=True</code>. A file with no
+pixel data is always Implicit VR Little Endian. A source in any other
+syntax this library reads -- JPEG-LS, JPEG Lossless, RLE, JPEG Baseline or
+Extended -- is decoded at ingest and re-encoded into one of those two.
+Nothing in the log or the audit trail records that, because the samples
+are unchanged and the source syntax is not stored. A source that was
+compressed lossily is re-encoded losslessly from its decoded samples, and
+its <code>LossyImageCompression (0028,2110)</code> is carried only if the source
+declared it: a near-lossless JPEG-LS source that did not declare it exports
+with no record that it was lossy
+(<a href="https://github.com/kvnlng/Isocenter/issues/601">#601</a>).</p>
+<p>A Photometric Interpretation spelled in lower case or with a leading space
+(<code>' rgb '</code>) is written upper-cased and stripped (<code>RGB</code>), with an INFO line,
+because pydicom and <code>ingest()</code> refuse the declared spelling
+(<a href="https://github.com/kvnlng/Isocenter/issues/532">#532</a>). The graph keeps
+what it declared.</p>
 <p><strong><code>verify_readback=True</code></strong> decodes every file it writes through the same
 decoder <code>ingest()</code> uses and compares every pixel sample with what it meant
 to write. It also refuses a Photometric Interpretation the file's transfer
-syntax does not admit (for example <code>YBR_ICT</code> on an uncompressed file). An
-instance that fails is not delivered: it gets an <code>ERROR</code> audit row, appears
-in <code>ExportSummary.failures</code>, and grades the run <code>REVIEW_REQUIRED</code>. Without
+syntax does not admit (for example <code>YBR_ICT</code> on an uncompressed file, and
+<code>YBR_PARTIAL_422</code> or <code>YBR_PARTIAL_420</code> under either syntax the export
+writes, <a href="https://github.com/kvnlng/Isocenter/issues/525">#525</a>), and a file
+<code>ingest()</code> could not read back because of its colour space: a <code>YBR_FULL</code>
+image whose samples are 16-bit or signed 8-bit, since pydicom's colour
+conversion takes unsigned 8-bit samples only
+(<a href="https://github.com/kvnlng/Isocenter/issues/596">#596</a>). An instance that
+fails is not delivered: it gets an <code>ERROR</code> audit row, appears in
+<code>ExportSummary.failures</code>, and grades the run <code>REVIEW_REQUIRED</code>. Without
 verification that same inadmissible label is written as declared with a
 <code>WARNING</code> row, which also grades <code>REVIEW_REQUIRED</code> -- so turning
 verification on can cost you a file the default export would have
-delivered, by design.</p>
+delivered, by design. The label is judged on a file with no pixel data too
+(<a href="https://github.com/kvnlng/Isocenter/issues/534">#534</a>). The 16-bit or
+signed 8-bit <code>YBR_FULL</code> file is conformant DICOM, so the default export writes it, with
+an INFO line saying this library cannot read it back and no audit row.</p>
 <p>Nothing scans or redacts a small preview image (an Icon Image Sequence
 item), so the export removes the ones that could show redacted pixels
 (<a href="https://github.com/kvnlng/Isocenter/issues/542">#542</a>). An instance's
