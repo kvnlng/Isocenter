@@ -195,6 +195,10 @@ def test_a_legacy_three_item_sequence_is_still_read_at_item_zero(tmp_path):
     """
     with DicomSession(str(tmp_path / "relock_legacy.db")) as session:
         session.enable_reversible_anonymization(str(tmp_path / "isocenter.key"))
+        # Since #539 enable creates no key and the first lock does; this
+        # test drives the service directly, so it creates the key as the
+        # lock would.
+        session.key_manager.load_or_generate_key()
         inst = _build_patient(session)
         service = session.reversibility_service
 

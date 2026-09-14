@@ -3420,7 +3420,27 @@ class DicomSession:
                                "has the Patient ID given.")
             return LockingResult([])
 
+        self._key_for_locking()
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
+
+    def _key_for_locking(self) -> None:
+        """Load the key, creating it when none exists, and build its engine
+        -- before any patient's lock is planned (#539).
+
+        The engine is built here and not left to the plan: the plan builds
+        the token inside `except (TypeError, ValueError)` and reports that
+        as a value no token can hold, and the batch collects every plan's
+        `RuntimeError` as a refusal. A malformed key (`ValueError`) or a
+        key never loaded (`RuntimeError`) would be misreported as either.
+
+        Called by the single lock only once its patient is found, so a lock
+        of an ID no patient holds creates no key file. The batch calls it
+        before it plans, found or not, because it cannot plan without the
+        engine; a batch of IDs that match no patient therefore creates the
+        key, as does a lock that is then refused. Neither writes a token.
+        """
+        self.key_manager.load_or_generate_key()
+        self.reversibility_service.engine  # pylint: disable=pointless-statement
 
     def _lock_patient_identity(self, patient: "Patient", persist: bool,
                                verbose: bool, tags_to_lock: Optional[List[str]]
@@ -3767,6 +3787,7 @@ class DicomSession:
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
+        self._key_for_locking()
 
         # Normalize input to a set of strings
         normalized_ids = set()
@@ -3893,18 +3914,35 @@ class DicomSession:
                             writes the study's value over the instance's, so
                             the exported file carries it shifted (#566).
 
+        Every failure raises and nothing is printed (#539, #550). So
+        `restore=False` checks that the patient is recoverable under this
+        key, and writes nothing. No message names a Patient ID: until
+        0.9.8 an unknown ID was echoed to the console, and the ID given is
+        normally a pseudonym.
+
         Raises:
-            RuntimeError: With `restore=True`, when a patient holding the
-                restored Patient ID was de-identified under a different
-                date-offset scheme. Raised before anything is restored.
+            FileNotFoundError: No key file at the path given to
+                `enable_reversible_anonymization()`. Checked first, before
+                the patient is looked up, and no key is created.
+            ValueError: No patient in this session holds `patient_id`.
+            RuntimeError: When reversibility is not enabled; the patient
+                has no instances, or no identity token; the key does not
+                decrypt the token; or, with `restore=True`, a patient
+                holding the restored Patient ID was de-identified under a
+                different date-offset scheme (raised before anything is
+                restored).
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversibility not enabled.")
 
+        # The key before the patient: a typo'd key path is the answer
+        # whatever ID was given, and `load_key` never creates the file.
+        self.key_manager.load_key()
+
         p = next((x for x in self.store.patients if x.patient_id == patient_id), None)
         if not p:
-            print(f"Patient {patient_id} not found.")
-            return
+            raise ValueError("recover_patient_identity: no patient in this "
+                             "session holds the Patient ID given")
 
         # Locate first instance to get the token
         first_inst = None
@@ -3915,10 +3953,10 @@ class DicomSession:
                     break
 
         if not first_inst:
-            print("No instances found for patient.")
-            return
+            raise RuntimeError("recover_patient_identity: the patient has no "
+                               "instances to recover an identity from")
 
-        original_attrs = self.reversibility_service.recover_original_data(first_inst)
+        original_attrs = self.reversibility_service.recover_or_raise(first_inst)
 
         if original_attrs:
             if restore:
@@ -3969,21 +4007,35 @@ class DicomSession:
                     drain=self.persistence_manager.flush)
 
                 get_logger().info(f"Restored identity attributes to {count} instances.")
-        else:
-            print("No encrypted identity token found or decryption failed.")
 
     def enable_reversible_anonymization(self, key_path: str = "isocenter.key"):
         """
         Initializes the encryption subsystem for Reversible Anonymization.
 
-        Loads or generates a symmetric key which is used to encrypt original identities.
+        Loads the symmetric key at `key_path` when a file is there. **The
+        key file is created by the first `lock_identities()` when none
+        exists, never by this call or by recovery (#539).** This call
+        comes before both a lock and a recovery and cannot know which
+        follows; when it generated a missing key, a mistyped path on the
+        way to `recover_patient_identity()` minted a key the data was never
+        locked under, and recovery could only fail with it.
 
         Args:
             key_path (str): Path to the key file.
+
+        Raises:
+            ValueError: The file at `key_path` is not a Fernet key. An
+                existing key is loaded and its engine built here, so a
+                malformed one fails at enable, as it always has, and not
+                inside a later lock's plan.
         """
-        self.key_manager = KeyManager(key_path)
-        self.key_manager.load_or_generate_key()
-        self.reversibility_service = ReversibilityService(self.key_manager)
+        key_manager = KeyManager(key_path)
+        service = ReversibilityService(key_manager)
+        if os.path.exists(key_manager.key_path):
+            key_manager.load_key()
+            service.engine  # pylint: disable=pointless-statement
+        self.key_manager = key_manager
+        self.reversibility_service = service
         get_logger().info(f"Reversible anonymization enabled. Key: {key_path}")
 
     # =========================================================================
