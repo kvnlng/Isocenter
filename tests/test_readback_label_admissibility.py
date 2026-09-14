@@ -35,6 +35,7 @@ syntax with no row in the table passes rather than guessing.
 """
 import itertools
 from datetime import date
+from unittest.mock import patch
 
 import numpy as np
 import pydicom
@@ -653,6 +654,151 @@ def test_native_16_bit_ybr_full_fails_the_readback(tmp_path, dtype,
     assert not list((tmp_path / "out").glob("*.dcm"))
 
 
+def _signed_8_bit():
+    """Eight by eight by three int8 samples, both halves of the domain."""
+    return (np.arange(8 * 8 * 3) % 200 - 100).astype(np.int8).reshape(8, 8, 3)
+
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+@pytest.mark.parametrize("declared", ["YBR_FULL", "YBR_FULL_422"])
+def test_signed_8_bit_ybr_full_fails_the_readback(tmp_path, declared,
+                                                  compression):
+    """8 bits is not the line pydicom draws; *unsigned* 8 bits is (#596).
+
+    pydicom 3.0.2's `convert_color_space` refuses on
+    `arr.dtype != np.dtype("u1")`, so an int8 `YBR_FULL` image --
+    BitsAllocated 8, PixelRepresentation 1 -- decodes as stored samples
+    and fails the conversion `ingest()` asks for (`ValueError: Invalid
+    ndarray.dtype 'int8' for color space conversion`), natively and under
+    JPEG 2000. The readback must fail it too.
+
+    Killing mutation (M16): the second decode gated on `BitsAllocated > 8`
+    instead of the decoded dtype -- this file has BitsAllocated 8, and
+    that gate passes it. The review of #609 measured M16 surviving every
+    label test before this one existed.
+    """
+    outcome = _export(tmp_path, _image(declared, arr=_signed_8_bit()),
+                      compression=compression, verify_readback=True)
+
+    assert not outcome.ok
+    message = str(outcome.error)
+    assert message.startswith(
+        "Readback verification failed: the written file cannot be "
+        "ingested by this library"), message
+    assert "int8" in message, message
+    assert not list((tmp_path / "out").glob("*.dcm"))
+
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+def test_unsigned_8_bit_ybr_full_is_decoded_once(tmp_path, compression):
+    """The one input pydicom always converts is not decoded twice (#596, Q6).
+
+    Q6's ruling: the second, converting decode runs only for a decoded
+    array that is not unsigned 8-bit, because that is the whole of what
+    `convert_color_space` refuses. Measured on the review of #609, for a
+    100-frame 512x512x3 JPEG 2000 file, the second decode took
+    `_verify_readback` from 20.3 s to 41.1 s and its peak memory from
+    0.26 to 0.91 GiB (a float32 copy of the array) -- for a decode that
+    cannot fail. The characterisation below is what makes skipping it
+    safe.
+
+    Killing mutation (Mq6): the dtype half of the gate dropped, so an
+    unsigned 8-bit file is decoded twice.
+    """
+    calls = []
+    real = io_handlers._decode_pixels
+
+    def spy(ds, *args, **kwargs):
+        calls.append(kwargs.get("as_rgb", True))
+        return real(ds, *args, **kwargs)
+
+    inst = _image("YBR_FULL", arr=np.full((8, 8, 3), YBR, np.uint8))
+    with patch.object(io_handlers, "_decode_pixels", spy):
+        outcome = _export(tmp_path, inst, compression=compression,
+                          verify_readback=True)
+
+    assert outcome.ok, outcome.error
+    assert calls == [False], calls
+
+
+def _unsigned_8_bit_files(tmp_path):
+    """Every unsigned 8-bit YBR_FULL shape the readback skips, on disk."""
+    files = []
+    for compression in (None, "j2k"):
+        for frames in (1, 2):
+            for planar in (0, 1):
+                shape = (8, 8, 3) if frames == 1 else (frames, 8, 8, 3)
+                arr = (np.arange(int(np.prod(shape))) % 251).astype(
+                    np.uint8).reshape(shape)
+                inst = _image("YBR_FULL", arr=arr)
+                if frames > 1:
+                    inst.set_attr("0028,0008", frames)
+                inst.set_attr("0028,0006", planar)
+                out = tmp_path / f"{compression}-{frames}-{planar}"
+                outcome = _export_instance_worker(ExportContext(
+                    instance=inst,
+                    output_path=str(out / f"{inst.sop_instance_uid}.dcm"),
+                    patient_attributes={"0010,0010": "ANON",
+                                        "0010,0020": "PAT1"},
+                    study_attributes={"0020,000d": "1.2.826.0.2.1"},
+                    series_attributes={"0020,000e": "1.2.826.0.3.1"},
+                    compression=compression, verify_readback=True))
+                assert outcome.ok, (compression, frames, planar,
+                                    outcome.error)
+                files.append(outcome.output_path)
+    path, ds = _hand_built(tmp_path, "YBR_FULL_422", name="u422.dcm")
+    ds.PixelData = (np.arange(8 * 8 * 2) % 251).astype(np.uint8).tobytes()
+    ds.save_as(path, enforce_file_format=True)
+    files.append(path)
+    # The exporter writes PlanarConfiguration 0 whatever was declared, so
+    # the other layout only exists by hand; pydicom's conversion reads it
+    # through a different reshape.
+    path, ds = _hand_built(tmp_path, "YBR_FULL", name="planar1.dcm")
+    ds.PlanarConfiguration = 1
+    ds.PixelData = (np.arange(8 * 8 * 3) % 251).astype(np.uint8).tobytes()
+    ds.save_as(path, enforce_file_format=True)
+    files.append(path)
+    return files
+
+
+def test_unsigned_8_bit_ybr_full_converts_whenever_it_decodes(tmp_path):
+    """The assumption the skip rests on, held against pydicom (#596, Q6).
+
+    For each unsigned 8-bit `YBR_FULL` file -- exported at 1 and 2
+    frames, native and JPEG 2000, declaring PlanarConfiguration 0 and 1
+    (written 0 either way), plus hand-built native `YBR_FULL_422` and
+    PlanarConfiguration 1 files -- the export verified without the second
+    decode, and the decode `ingest()` makes (pydicom's default, with the
+    colour conversion) succeeds on the same file the stored-sample decode
+    reads, at the same sample count. So the verdict with the second
+    decode is the verdict without it. Red if a pydicom inside `<4.0`
+    starts refusing unsigned 8-bit for some other reason, which is when
+    the gate has to widen again.
+    """
+    from isocenter.io_handlers import _decode_pixels
+
+    files = _unsigned_8_bit_files(tmp_path)
+    assert len(files) == 10, files
+    shapes = set()
+    for path in files:
+        readback = pydicom.dcmread(path)
+        shapes.add((str(readback.file_meta.TransferSyntaxUID),
+                    int(getattr(readback, "NumberOfFrames", 1) or 1),
+                    int(readback.PlanarConfiguration),
+                    str(readback.PhotometricInterpretation)))
+        stored, _ = _decode_pixels(readback, as_rgb=False)
+        converted, _ = _decode_pixels(readback)
+        assert stored.dtype == np.uint8, (path, stored.dtype)
+        assert converted.size == stored.size, (path, converted.shape,
+                                               stored.shape)
+    # The grid was really built: a helper that silently wrote one shape
+    # nine times would make this a test of one file.
+    assert shapes == {
+        (s, f, 0, "YBR_FULL") for s in (IMPLICIT_VR_LE, J2K_LOSSLESS)
+        for f in (1, 2)} | {(IMPLICIT_VR_LE, 1, 0, "YBR_FULL_422"),
+                            (IMPLICIT_VR_LE, 1, 1, "YBR_FULL")}, shapes
+
+
 def test_a_hand_built_16_bit_ybr_full_422_file_fails_the_readback(tmp_path):
     """The `_422` spelling is gated by name, not only by the writer (#596).
 
@@ -688,17 +834,13 @@ def test_16_bit_rgb_and_8_bit_ybr_full_pass(tmp_path, compression, declared,
                                             dtype):
     """The controls: what `ingest()` reads, the readback still passes (#596).
 
-    16-bit `RGB` needs no colour conversion, and an 8-bit `YBR_FULL`
-    converts. Killing mutation (M16'): the second decode replaced by a
-    refusal keyed on `BitsAllocated > 8`, which refuses the 16-bit `RGB`
-    file `ingest()` reads.
-
-    **Classified survivor (M16):** the decode gated on `BitsAllocated > 8`
-    instead of the label is equivalent from the outside. A default decode
-    of a file the stored-sample decode already read differs only by the
-    colour conversion, which succeeds for every label on 8-bit samples
-    and is a no-op for `RGB`, so the gate decides what the check costs,
-    not what it answers.
+    16-bit `RGB` needs no colour conversion, and an unsigned 8-bit
+    `YBR_FULL` converts. Killing mutation (M16'): the second decode
+    replaced by a refusal keyed on `BitsAllocated > 8`, which refuses the
+    16-bit `RGB` file `ingest()` reads. (M16, the decode gated on
+    `BitsAllocated > 8` instead of the label, is *not* equivalent: int8
+    `YBR_FULL` has BitsAllocated 8, and
+    `test_signed_8_bit_ybr_full_fails_the_readback` kills it.)
     """
     arr = _ramp(np.uint16) if dtype == np.uint16 else \
         np.full((8, 8, 3), YBR, np.uint8)

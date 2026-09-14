@@ -529,8 +529,9 @@ class _PhotometricRefusal(RuntimeError):
     on.
 
     That measurement is of a file **with pixel data**, which is the only
-    kind this exception is raised for -- pixel arms only;
-    `_write_pixel_geometry` runs only on the two pixel-writing arms. A
+    kind this exception is raised for -- the pixel arms, through
+    `_write_pixel_geometry`, and a pixel element built into `attributes`
+    by hand, through `_pixel_less_label_warning`. A
     pixel-less file carrying two labels has no decompression step to trip
     over and re-ingests cleanly (measured), so the writer warns about it
     and writes it (`_pixel_less_label_warning`, #534), and it is
@@ -638,9 +639,24 @@ _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_420"] = \
 #: The labels pydicom converts to RGB on a default decode -- pydicom 3.0.2
 #: `_process_color_space`'s own set -- which is the decode `ingest()`
 #: makes and the readback's stored-sample decode does not (#596). Its
-#: conversion refuses samples wider than 8 bits, so a file carrying one
-#: of these at BitsAllocated 16 is conformant and cannot be ingested.
+#: conversion refuses any samples but unsigned 8-bit
+#: (`convert_color_space`: `arr.dtype != np.dtype("u1")`), so a file
+#: carrying one of these over 16-bit or int8 samples is conformant and
+#: cannot be ingested.
 _PYDICOM_CONVERTS = frozenset({"YBR_FULL", "YBR_FULL_422"})
+
+
+def _pydicom_converts_samples_of(dtype) -> bool:
+    """Whether pydicom's colour conversion takes samples of `dtype` (#596).
+
+    pydicom 3.0.2 `convert_color_space` refuses any array whose dtype is
+    not `u1`. A `bool` mask is written at BitsAllocated 8 and
+    reads back as `uint8`, so it counts as the samples it becomes. One
+    predicate for the readback's second decode and the export's note, so
+    the two cannot answer differently.
+    """
+    dtype = np.dtype(dtype)
+    return dtype == np.uint8 or dtype == np.bool_
 
 
 #: The three elements a Photometric Interpretation can describe: the
@@ -864,12 +880,25 @@ def _pixel_less_label_warning(ds) -> Optional[str]:
     `ingested=1` with the graph carrying both values -- so the refusal's
     reason is false here, and the write-path ruling applies: written as
     declared, with a WARNING. `verify_readback=True` still fails it on
-    the arity (`_readback_label_mismatch`).
+    the arity (`_readback_label_mismatch`). The exception is a pixel
+    element put into `attributes` by hand, which reaches this arm too:
+    that file has pixels, so it gets the pixel sentences and, for a
+    multi-valued label, the pixel arms' refusal.
     """
     label = ds.get("PhotometricInterpretation")
     if label is None:
         return None
+    # A pixel element can still reach this arm: `set_attr("7fe0,0010",
+    # ...)` on an instance with no pixel array is written by `_merge`,
+    # and no pixel arm runs. Such a file is judged here -- nothing else
+    # judges it -- but with the sentences true of a file that has pixels,
+    # and a multi-valued label on it gets the pixel arms' refusal, whose
+    # reason holds for it. Measured on the review of #609: the warning
+    # said "which has no pixel element" over a file carrying `PixelData`.
+    has_pixels = any(kw in ds for kw in _PIXEL_ELEMENTS)
     if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
+        if has_pixels:
+            raise _multi_valued_refusal(label)
         return (f"PhotometricInterpretation (0028,0004) is VM 1; this "
                 f"instance, which has no pixel element, declares "
                 f"{len(label)} values "
@@ -879,7 +908,26 @@ def _pixel_less_label_warning(ds) -> Optional[str]:
     return _photometric_warning(
         _written_photometric(label),
         str(getattr(ds.file_meta, "TransferSyntaxUID", "") or ""),
-        has_pixels=False)
+        has_pixels=has_pixels)
+
+
+def _multi_valued_refusal(written) -> "_PhotometricRefusal":
+    """The refusal for a file with pixels declaring several labels (#502).
+
+    One sentence for both places that raise it: the pixel arms
+    (`_write_pixel_geometry`) and a pixel element built into `attributes`
+    by hand, which reaches the third arm (#534).
+    """
+    return _PhotometricRefusal(
+        f"PhotometricInterpretation (0028,0004) is a single value; "
+        f"this instance declares {len(written)} "
+        f"({', '.join(repr(str(v)) for v in written)}). A file "
+        f"carrying more than one cannot be read back by this library "
+        f"at all -- ingest refuses it before any label is examined -- "
+        f"so no output here would be honest, which is why this one "
+        f"case is refused where an inadmissible label is written with "
+        f"a warning. Declare one label with "
+        f"set_attr(\"0028,0004\", ...).")
 
 
 #: PixelRepresentation (0028,0103) in the words PS3.5 6.2 uses, for the
@@ -3906,16 +3954,7 @@ def _write_pixel_geometry(ds, geom, attributes, *, float_element: bool,
     # form silently never fires. See `_fallback_multivalue`.
     written = ds.get("PhotometricInterpretation")
     if isinstance(written, (list, tuple, MultiValue)) and len(written) > 1:
-        raise _PhotometricRefusal(
-            f"PhotometricInterpretation (0028,0004) is a single value; "
-            f"this instance declares {len(written)} "
-            f"({', '.join(repr(str(v)) for v in written)}). A file "
-            f"carrying more than one cannot be read back by this library "
-            f"at all -- ingest refuses it before any label is examined -- "
-            f"so no output here would be honest, which is why this one "
-            f"case is refused where an inadmissible label is written with "
-            f"a warning. Declare one label with "
-            f"set_attr(\"0028,0004\", ...).")
+        raise _multi_valued_refusal(written)
     if warnings is not None:
         warning = _photometric_warning(
             _written_photometric(ds.get("PhotometricInterpretation")),
@@ -4247,10 +4286,12 @@ def _verify_readback(path: str, ds, written_pixels=None,
        the declared BitsStored therefore fails: every conformant reader
        masks it, so the file does not hold what was meant (-3024 at
        BitsStored 12 reads back as 1072). A file labelled with a colour
-       space pydicom converts (`_PYDICOM_CONVERTS`) is then decoded a
-       second time the way `ingest()` decodes it, with the conversion,
-       so a 16-bit `YBR_FULL` file this library cannot ingest fails here
-       too (#596).
+       space pydicom converts (`_PYDICOM_CONVERTS`), over samples that
+       are not unsigned 8-bit, is then decoded a second time the way
+       `ingest()` decodes it, with the conversion, so a 16-bit or int8
+       `YBR_FULL` file this library cannot ingest fails here too (#596).
+       Unsigned 8-bit samples are the ones that conversion accepts, and
+       are not decoded twice.
     4. **Waveform bytes**, when `written_waveform` is given: the file's
        `WaveformData` against the bytes written, allowing exactly the
        one pad byte `save_as` adds to an odd-length value
@@ -4361,18 +4402,25 @@ def _verify_readback(path: str, ds, written_pixels=None,
         # **And the decode `ingest()` makes, where it differs (#596).**
         # The decode above asks for the stored samples, because those are
         # what was written; `ingest()` asks pydicom's default, which
-        # converts a YBR_FULL family to RGB and refuses anything but 8-bit
-        # samples doing it. Measured before this: a native 16-bit
-        # `YBR_FULL` file passed here while `ingest()` and `pixel_array`
-        # both refused it, and the JPEG 2000 one failed -- two answers
-        # from one contract, which is "this library can read it back".
-        # After the exact compare, so a sample mismatch keeps its more
-        # specific reason. Gated on the label, not on BitsAllocated: an
-        # 8-bit file converts too, and proving that it does costs one
-        # more decode for 8-bit YBR files only (measured in the #596 PR).
+        # converts a YBR_FULL family to RGB and refuses anything but
+        # unsigned 8-bit samples doing it. Measured before this: a native
+        # 16-bit `YBR_FULL` file passed here while `ingest()` and
+        # `pixel_array` both refused it, and the JPEG 2000 one failed --
+        # two answers from one contract, which is "this library can read
+        # it back". After the exact compare, so a sample mismatch keeps
+        # its more specific reason.
+        #
+        # Gated on the label **and** the decoded dtype (Q6, the review of
+        # #609). Unsigned 8-bit is exactly what the conversion accepts, so
+        # the second decode cannot change that verdict -- pinned against
+        # pydicom by `test_unsigned_8_bit_ybr_full_converts_whenever_it_
+        # decodes` -- and it cost a 100-frame JPEG 2000 file 20 s more and
+        # a float32 copy of the array. **Not** on BitsAllocated: int8 is
+        # BitsAllocated 8 and the conversion refuses it.
         if _written_photometric(getattr(
                 readback, "PhotometricInterpretation", None)) \
-                in _PYDICOM_CONVERTS:
+                in _PYDICOM_CONVERTS \
+                and not _pydicom_converts_samples_of(decoded.dtype):
             try:
                 _decode_pixels(readback)
             except Exception as exc:
@@ -5419,9 +5467,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
 
         # A limit of ours, not a defect in the data (#596, #461): a
-        # 16-bit YBR_FULL file is conformant and is written, and this
-        # library cannot read it back -- pydicom's colour conversion takes
-        # 8-bit samples only. INFO on `corrections`, no row. After
+        # 16-bit or signed 8-bit YBR_FULL file is conformant and is
+        # written, and this library cannot read it back -- pydicom's
+        # colour conversion takes unsigned 8-bit samples only. Keyed on
+        # the samples' dtype, the predicate pydicom itself applies and the
+        # one the readback's second decode is gated on, not on
+        # BitsAllocated: int8 is BitsAllocated 8, and a `> 8` key left it
+        # silent. INFO on `corrections`, no row. After
         # `_finalize_dataset` and off `ds`, so the label is the written
         # one (`YBR_FULL_422` is already `YBR_FULL`) and a JPEG 2000 file,
         # which keeps `YBR_FULL` (`_compress_j2k` case 3), is covered in
@@ -5431,13 +5483,15 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         if (written_pixels is not None and written_pixels.dtype.kind != "f"
                 and _written_photometric(ds.get("PhotometricInterpretation"))
                 in _PYDICOM_CONVERTS
-                and int(ds.get("BitsAllocated", 0) or 0) > 8):
+                and not _pydicom_converts_samples_of(written_pixels.dtype)):
             corrections.append(
                 f"PhotometricInterpretation "
                 f"{_written_photometric(ds.PhotometricInterpretation)} at "
-                f"BitsAllocated {ds.BitsAllocated} is written as declared, and this "
-                f"library cannot read such a file back (#461): pydicom's "
-                f"colour conversion takes 8-bit samples only.")
+                f"BitsAllocated {ds.BitsAllocated} and PixelRepresentation "
+                f"{ds.get('PixelRepresentation', 0)} is written as declared, "
+                f"and this library cannot read such a file back (#461): "
+                f"pydicom's colour conversion takes unsigned 8-bit samples "
+                f"only.")
 
         # The third arm's label judgement (#534): a file with no pixel
         # element never reaches `_write_pixel_geometry`, which judges the

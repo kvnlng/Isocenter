@@ -183,23 +183,35 @@ def _codestream(frame):
     return jpeg2k_encode(frame, level=0, codecformat="J2K", mct=False)
 
 
-def _search(make, expected_window, limit=2000):
-    """Seeds whose BOT encapsulation lands in pydicom's window.
+def _window(frame):
+    """pydicom 3.0.2's window for one 8-bit 1-sample frame, by hand.
+
+    Spelled here rather than read from `_heuristic_lengths`, so a mutant
+    of that function cannot also move the target the search aims at;
+    `test_the_window_is_pydicoms_own` holds the two together.
+    """
+    expected = frame.size
+    return (expected, expected + expected % 2)
+
+
+def _search(candidates, limit):
+    """Frames whose BOT encapsulation lands in pydicom's window.
 
     Searched at test time rather than hard-coded: the encoder's output
     is a property of the installed `imagecodecs`, and a seed list measured
     on one release is not a collision on another. The search failing is a
-    failure, not a skip -- a silent skip would read as a pass.
+    failure, not a skip -- a silent skip would read as a pass. `limit`
+    bounds the candidates tried; each search stops at its third hit.
     """
     hits = []
-    for seed in range(limit):
-        frames = make(seed)
-        n = len(encapsulate([_codestream(f) for f in frames]))
-        if n in expected_window:
-            hits.append(seed)
+    for tried, frame in enumerate(candidates):
+        if tried == limit:
+            break
+        if len(encapsulate([_codestream(frame)])) in _window(frame):
+            hits.append(frame)
             if len(hits) == 3:
                 break
-    assert hits, f"no colliding seed in {limit}; re-measure #473"
+    assert hits, f"no colliding frame in {limit} candidates; re-measure #473"
     return hits
 
 
@@ -208,10 +220,38 @@ def _bool_mask(seed, shape=(16, 16)):
         .astype(bool)
 
 
-def _sparse_odd(seed):
-    """A 9x19 8-bit frame: an odd expected length, 171 bytes."""
-    return (np.random.default_rng(seed).random((9, 19)) < 0.02) \
-        .astype(np.uint8)
+def _even_candidates():
+    """16x16 bool masks, as the uint8 frames they are written as.
+
+    About 1 in 6 collide (335 of the first 2000, measured on imagecodecs
+    2026.8.16).
+    """
+    for seed in itertools.count():
+        yield _bool_mask(seed).view(np.uint8)
+
+
+def _odd_candidates():
+    """Sparse 8-bit frames over many odd shapes: `expected + 1` (#473).
+
+    An odd `rows x cols` puts the window's second value, `expected + 1`,
+    in play, and an encapsulated stream is always even, so only that
+    value can collide. A near-empty codestream is roughly 150 bytes
+    whatever the shape, so a collision needs a shape whose area sits just
+    under the stream's length -- which one frame shape and one density
+    hit 3 times in 2000 seeds (review of #609): one encoder release
+    moving those lengths by a byte would have turned the gate red. The
+    grid crosses 317 odd shapes of area 60 to 600 with four densities
+    and eight seeds, 10144 candidates; measured on imagecodecs 2026.8.16,
+    identically on 3.12 and 3.14t, it holds 59 collisions over 46
+    distinct shapes and every density, so a release has to move many
+    independent lengths at once to empty it.
+    """
+    shapes = [(r, c) for r in range(3, 40, 2) for c in range(3, 80, 2)
+              if 60 <= r * c <= 600]
+    for (rows, cols), density, seed in itertools.product(
+            shapes, (0.02, 0.05, 0.08, 0.12), range(8)):
+        yield (np.random.default_rng(seed).random((rows, cols)) < density) \
+            .astype(np.uint8)
 
 
 def _instance(arr, frames=None):
@@ -261,6 +301,12 @@ def test_the_window_is_pydicoms_own():
     assert set(io_handlers._heuristic_lengths(ds, 1, 1)) == {171, 172}
     ds.Rows, ds.Columns = 16, 16
     assert set(io_handlers._heuristic_lengths(ds, 2, 1)) == {512}
+    # And the tests' hand-spelled window agrees with the function's, over
+    # the shapes the collision search tries.
+    for rows, cols in ((3, 61), (9, 21), (16, 16), (39, 15)):
+        ds.Rows, ds.Columns = rows, cols
+        assert io_handlers._heuristic_lengths(ds, 1, 1) == _window(
+            np.zeros((rows, cols), np.uint8))
 
 
 def test_the_window_asks_nothing_the_encoder_did_not():
@@ -275,12 +321,12 @@ def test_the_window_asks_nothing_the_encoder_did_not():
     assert io_handlers._heuristic_lengths(Dataset(), 1, 1) == (0, 0)
 
 
-@pytest.mark.parametrize("make, shape, window", [
-    (lambda seed: [_bool_mask(seed).view(np.uint8)], "bool-16x16", (256,)),
-    (lambda seed: [_sparse_odd(seed)], "uint8-9x19-odd", (172,)),
+@pytest.mark.parametrize("candidates, as_bool, limit", [
+    (_even_candidates, True, 2000),
+    (_odd_candidates, False, 10144),
 ], ids=["even-expected", "odd-expected"])
 def test_a_colliding_length_is_written_without_an_offset_table(
-        tmp_path, make, shape, window):
+        tmp_path, candidates, as_bool, limit):
     """No false "check the transfer syntax" warning on our own file (#473).
 
     About 1 in 5 random 16x16 bool masks encode to exactly 256 bytes of
@@ -296,15 +342,19 @@ def test_a_colliding_length_is_written_without_an_offset_table(
     warning returns); the window computed as `expected` only (M19, the
     odd case warns).
     """
-    for seed in _search(make, window):
-        frame = make(seed)[0]
-        arr = frame.astype(bool) if shape.startswith("bool") else frame
+    hits = _search(candidates(), limit)
+    if not as_bool:
+        # The odd case is the second value of the window, or it tests
+        # nothing M19 changes.
+        assert all(f.size % 2 == 1 for f in hits), [f.shape for f in hits]
+    for frame in hits:
+        arr = frame.astype(bool) if as_bool else frame
         outcome, caught = _export_recording(tmp_path, _instance(arr))
 
         assert outcome.ok, outcome.error
         assert [m for m in caught if HEURISTIC in m] == [], caught
         written = pydicom.dcmread(outcome.output_path)
-        assert len(written.PixelData) not in window
+        assert len(written.PixelData) not in _window(frame)
         assert _bot_length(written.PixelData) == 0
         assert np.array_equal(written.pixel_array, frame.astype(np.uint8))
 

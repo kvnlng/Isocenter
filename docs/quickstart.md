@@ -140,8 +140,9 @@ to write. It also refuses a Photometric Interpretation the file's transfer
 syntax does not admit (for example `YBR_ICT` on an uncompressed file, and
 `YBR_PARTIAL_422` or `YBR_PARTIAL_420` under either syntax the export
 writes, [#525](https://github.com/kvnlng/Isocenter/issues/525)), and a file
-`ingest()` could not read back because of its colour space: a 16-bit
-`YBR_FULL` image
+`ingest()` could not read back because of its colour space: a `YBR_FULL`
+image whose samples are 16-bit or signed 8-bit, since pydicom's colour
+conversion takes unsigned 8-bit samples only
 ([#596](https://github.com/kvnlng/Isocenter/issues/596)). An instance that
 fails is not delivered: it gets an `ERROR` audit row, appears in
 `ExportSummary.failures`, and grades the run `REVIEW_REQUIRED`. Without
@@ -149,8 +150,8 @@ verification that same inadmissible label is written as declared with a
 `WARNING` row, which also grades `REVIEW_REQUIRED` -- so turning
 verification on can cost you a file the default export would have
 delivered, by design. The label is judged on a file with no pixel data too
-([#534](https://github.com/kvnlng/Isocenter/issues/534)). The 16-bit
-`YBR_FULL` file is conformant DICOM, so the default export writes it, with
+([#534](https://github.com/kvnlng/Isocenter/issues/534)). The 16-bit or
+signed 8-bit `YBR_FULL` file is conformant DICOM, so the default export writes it, with
 an INFO line saying this library cannot read it back and no audit row.
 
 Nothing scans or redacts a small preview image (an Icon Image Sequence

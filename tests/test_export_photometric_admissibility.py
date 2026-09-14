@@ -685,9 +685,10 @@ def _mono(label):
     (" rgb ", "RGB", _image), ("rgb", "RGB", _image),
     ("Rgb", "RGB", _image), (" RGB", "RGB", _image),
     ("monochrome2", "MONOCHROME2", _mono),
-    (" ybr_full ", "YBR_FULL", _image)],
+    (" ybr_full ", "YBR_FULL", _image),
+    ([" rgb "], "RGB", _image), ((" rgb ",), "RGB", _image)],
     ids=["padded-lower", "lower", "mixed", "leading-space", "mono-lower",
-         "ybr-padded-lower"])
+         "ybr-padded-lower", "one-element-list", "one-element-tuple"])
 @pytest.mark.parametrize("compression", [None, "j2k"])
 def test_a_label_is_written_as_a_code_string(tmp_path, declared, expected,
                                              build, compression):
@@ -705,8 +706,13 @@ def test_a_label_is_written_as_a_code_string(tmp_path, declared, expected,
     `YBR_RCT` like any other (#516 case 1), which is why the expected
     label differs there.
 
-    Killing mutation (M4): `_label_as_written` returns the attributes
-    unchanged.
+    A one-element list or tuple is a label too -- it is how a VM-1 value
+    can arrive through `set_attr` -- and each element is respelled.
+
+    Killing mutations: (M4) `_label_as_written` returns the attributes
+    unchanged; (R5, from the review of #609) the list/tuple/MultiValue
+    arm of `_label_as_written` disabled, so `[' rgb ']` reaches `_merge`
+    raw (`one-element-list`, `one-element-tuple`).
     """
     outcome = _export(tmp_path, build(declared), compression=compression)
 
@@ -719,7 +725,8 @@ def test_a_label_is_written_as_a_code_string(tmp_path, declared, expected,
     assert outcome.warnings == [], outcome.warnings
     assert len(outcome.corrections) == 1, outcome.corrections
     note = outcome.corrections[0]
-    assert repr(declared) in note, note
+    for value in ([declared] if isinstance(declared, str) else declared):
+        assert repr(value) in note, note
     assert "(PS3.5 6.2" in note, note
 
 
@@ -862,7 +869,11 @@ def test_a_pixel_less_label_is_judged_under_the_written_syntax(tmp_path):
     assert f"({IMPLICIT_VR_LE})" in outcome.warnings[0], outcome.warnings
 
 
-def test_a_multi_valued_pixel_less_label_warns_and_writes(tmp_path):
+@pytest.mark.parametrize("declared, respelled", [
+    (["YBR_ICT", "RGB"], 0), ([" ybr_ict", "rgb"], 1)],
+    ids=["defined-spellings", "respelled-each"])
+def test_a_multi_valued_pixel_less_label_warns_and_writes(tmp_path, declared,
+                                                         respelled):
     """Two labels on a file with no pixels: written, and warned about (#534).
 
     The pixel arms refuse this (#502) because such a file cannot be read
@@ -871,10 +882,14 @@ def test_a_multi_valued_pixel_less_label_warns_and_writes(tmp_path):
     ruling (warn and write) applies instead. `verify_readback=True` still
     fails it on the arity.
 
-    Killing mutation (M11): `_PhotometricRefusal` raised on the
-    pixel-less arm.
+    Each value is a Code String (#532): `[' ybr_ict', 'rgb']` is written
+    and warned about as `['YBR_ICT', 'RGB']`, with one correction.
+
+    Killing mutations: (M11) `_PhotometricRefusal` raised on the
+    pixel-less arm; (R5) the multi-value arm of `_label_as_written`
+    disabled (`respelled-each`).
     """
-    outcome = _export(tmp_path, _pixel_less(["YBR_ICT", "RGB"]))
+    outcome = _export(tmp_path, _pixel_less(declared))
 
     assert outcome.ok, outcome.error
     written = pydicom.dcmread(outcome.output_path)
@@ -883,16 +898,80 @@ def test_a_multi_valued_pixel_less_label_warns_and_writes(tmp_path):
     warning = outcome.warnings[0]
     assert "is VM 1" in warning, warning
     assert "declares 2 values" in warning, warning
+    assert "'YBR_ICT', 'RGB'" in warning, warning
     assert "no pixel element" in warning, warning
+    assert len(outcome.corrections) == respelled, outcome.corrections
 
     with DicomSession(str(tmp_path / "re.db")) as session:
         assert session.ingest(
             str(tmp_path / "out")).ingested == 1
 
-    strict = _export(tmp_path, _pixel_less(["YBR_ICT", "RGB"]),
+    strict = _export(tmp_path, _pixel_less(declared),
                      verify_readback=True)
     assert not strict.ok
     assert "is VM 1" in str(strict.error)
+
+
+def _hand_built_element(label, element):
+    """No pixel array, and a pixel element put in `attributes` by hand."""
+    inst = _pixel_less(label)
+    for tag, value in (("0028,0010", 4), ("0028,0011", 4), ("0028,0002", 1),
+                       ("0028,0100", 8), ("0028,0101", 8), ("0028,0102", 7),
+                       ("0028,0103", 0), (element, bytes(16))):
+        inst.set_attr(tag, value)
+    return inst
+
+
+@pytest.mark.parametrize("element", ["7fe0,0010", "7fe0,0008"])
+def test_a_hand_built_pixel_element_is_not_called_pixel_less(tmp_path,
+                                                             element):
+    """A file that carries a pixel element is not told it has none (#534).
+
+    `set_attr("7fe0,0010", ...)` on an instance with no pixel array puts
+    the element in the file through `_merge`, and no pixel arm runs, so
+    the label is judged on the third arm -- rightly, since
+    `_write_pixel_geometry` never saw it. But the file *has* a pixel
+    element, and the review of #609 measured the warning saying "this
+    instance, which has no pixel element" and the remedy "This file
+    carries no pixel element at all" over a file carrying `PixelData`: a
+    false reason, #194's class. The sentence is now the one for a file
+    with pixels.
+
+    Killing mutation (P1): `has_pixels=False` passed unconditionally on
+    the third arm.
+    """
+    outcome = _export(tmp_path, _hand_built_element("YBR_ICT", element))
+
+    assert outcome.ok, outcome.error
+    written = pydicom.dcmread(outcome.output_path)
+    assert any(kw in written for kw in ("PixelData", "FloatPixelData"))
+    assert len(outcome.warnings) == 1, outcome.warnings
+    warning = outcome.warnings[0]
+    assert "no pixel element" not in warning, warning
+    assert ("The label was written as declared, over the samples the "
+            "instance held, and neither was changed.") in warning, warning
+
+
+def test_a_multi_valued_label_over_a_hand_built_pixel_element_is_refused(
+        tmp_path):
+    """Two labels over a pixel element: the pixel arms' refusal (#502, #534).
+
+    The pixel-less arm writes a multi-valued label because a file with no
+    pixels re-ingests; that reason is false for a file carrying a pixel
+    element, which is the file `_PhotometricRefusal` exists for. Measured
+    on the review of #609: written, with a warning claiming the file had
+    no pixel element.
+
+    Killing mutation (P1b): the refusal skipped when a pixel element is
+    present on the third arm.
+    """
+    outcome = _export(tmp_path,
+                      _hand_built_element(["YBR_ICT", "RGB"], "7fe0,0010"))
+
+    assert not outcome.ok
+    assert "PhotometricInterpretation (0028,0004) is a single value" in str(
+        outcome.error), outcome.error
+    assert not list((tmp_path / "out").glob("*.dcm"))
 
 
 @pytest.mark.parametrize("label", ["MONOCHROME2", "RGB"])
@@ -941,22 +1020,28 @@ def test_photometric_warning_requires_has_pixels():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("compression", [None, "j2k"])
-@pytest.mark.parametrize("dtype", [np.uint16, np.int16])
+@pytest.mark.parametrize("dtype", [np.uint16, np.int16, np.int8])
 def test_16_bit_ybr_full_default_export_notes_the_limit(tmp_path,
                                                         compression, dtype):
     """Written, conformant, and noted as a limit of ours (#596, #461).
 
-    A 16-bit `YBR_FULL` file is valid DICOM, so the default export writes
-    it. This library cannot read it back -- pydicom's colour conversion
-    takes 8-bit samples only, and the imagecodecs fallback does not label
-    it under JPEG 2000 -- so the export says so at INFO. A capability,
-    not a defect in the user's data: no `WARNING`, no row, the grade
-    unmoved.
+    A 16-bit or signed 8-bit `YBR_FULL` file is valid DICOM, so the
+    default export writes it. This library cannot read it back --
+    pydicom's colour conversion takes unsigned 8-bit samples only -- so
+    the export says so at INFO. A capability, not a defect in the user's
+    data: no `WARNING`, no row, the grade unmoved.
 
-    Killing mutation (M17): the note routed to `warnings` (a row
-    appears).
+    Killing mutations: (M17) the note routed to `warnings` (a row
+    appears); (Mnote8) the note keyed on `BitsAllocated > 8` rather than
+    the samples' dtype, which leaves the int8 file -- BitsAllocated 8,
+    and refused by `ingest()` -- silent, as it was when #609 was first
+    reviewed.
     """
-    arr = np.arange(8 * 8 * 3, dtype=dtype).reshape(8, 8, 3) * 100
+    if dtype == np.int8:
+        arr = (np.arange(8 * 8 * 3) % 200 - 100).astype(np.int8).reshape(
+            8, 8, 3)
+    else:
+        arr = np.arange(8 * 8 * 3, dtype=dtype).reshape(8, 8, 3) * 100
     outcome = _export(tmp_path, _image("YBR_FULL", arr=arr),
                       compression=compression)
 
@@ -964,22 +1049,37 @@ def test_16_bit_ybr_full_default_export_notes_the_limit(tmp_path,
     assert outcome.warnings == [], outcome.warnings
     notes = [c for c in outcome.corrections if "#461" in c]
     assert len(notes) == 1, outcome.corrections
-    assert "YBR_FULL" in notes[0] and "BitsAllocated 16" in notes[0], notes
+    bits = np.dtype(dtype).itemsize * 8
+    representation = 1 if np.dtype(dtype).kind == "i" else 0
+    assert "YBR_FULL" in notes[0], notes
+    assert (f"BitsAllocated {bits} and PixelRepresentation "
+            f"{representation}") in notes[0], notes
+    assert "unsigned 8-bit samples only" in notes[0], notes
 
 
 @pytest.mark.parametrize("declared, arr", [
     ("RGB", np.arange(8 * 8 * 3, dtype=np.uint16).reshape(8, 8, 3)),
-    ("YBR_FULL", np.full((8, 8, 3), YBR, np.uint8))],
-    ids=["16-bit-rgb", "8-bit-ybr-full"])
+    ("YBR_FULL", np.full((8, 8, 3), YBR, np.uint8)),
+    ("YBR_FULL", np.indices((8, 8, 3)).sum(axis=0) % 2 == 0)],
+    ids=["16-bit-rgb", "8-bit-ybr-full", "bool-ybr-full"])
 def test_a_readable_colour_export_notes_no_limit(tmp_path, declared, arr):
     """The control for the note above (#596).
 
-    Killing mutation: the note's label or width guard dropped.
+    Each file here reads back through `ingest()`'s decode, which the
+    `verify_readback=True` run asserts. A bool mask is written at
+    BitsAllocated 8 and reads back `uint8`, so it converts.
+
+    Killing mutations: the note's label or dtype guard dropped
+    (`16-bit-rgb`, `8-bit-ybr-full`); the `bool` half of
+    `_pydicom_converts_samples_of` dropped (`bool-ybr-full`).
     """
     outcome = _export(tmp_path, _image(declared, arr=arr))
 
     assert outcome.ok, outcome.error
     assert outcome.corrections == [], outcome.corrections
+    verified = _export(tmp_path / "verified", _image(declared, arr=arr),
+                       verify_readback=True)
+    assert verified.ok, verified.error
 
 
 def test_the_16_bit_ybr_note_writes_no_row(tmp_path):
