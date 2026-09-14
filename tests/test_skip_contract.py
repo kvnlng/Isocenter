@@ -50,7 +50,6 @@ OPTIONAL_EXTRAS = {"ocr", "nlp", "docs"}
 # simply fails the "declared anywhere" half, which is the safe direction.
 DISTRIBUTION_TO_MODULE = {
     "pyyaml": "yaml",
-    "python-dotenv": "dotenv",
     "pillow": "PIL",
 }
 

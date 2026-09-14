@@ -13,8 +13,6 @@ from typing import Dict, Any, List, Optional
 import re
 import yaml
 
-from dotenv import load_dotenv
-
 from .profiles import FLOOR_POLICY, PRIVACY_PROFILES
 
 CONFIG_VERSION = "2.0"
@@ -31,8 +29,12 @@ CONFIG_VERSION = "2.0"
 RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "resources")
 
-# Load environment variables
-load_dotenv()
+# There is deliberately no `load_dotenv()` at import (#543). It searched
+# upward from this file's directory -- from the cwd only under `python -c`
+# or a REPL -- so whether a project's `.env` applied depended on where the
+# virtual environment lived, and importing a library changed the process
+# environment. A caller who wants a `.env` loads it before importing.
+# `tests/test_import_does_not_read_a_dotenv.py` holds this.
 
 
 def require_package_resource(directory: str, basename: str,
