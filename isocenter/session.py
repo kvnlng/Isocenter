@@ -5002,7 +5002,11 @@ class DicomSession:
                 through and compared bit for bit with the samples
                 written, after redaction (#449); and a DICOM waveform's
                 `WaveformData` bytes. The stored samples are compared,
-                not a colour conversion of them. A value outside the
+                not a colour conversion of them; a file labelled
+                `YBR_FULL` or `YBR_FULL_422` is also decoded the way
+                `ingest()` decodes it, with pydicom's colour conversion,
+                and fails when that decode raises -- at BitsAllocated 16
+                it does (#596). A value outside the
                 declared BitsStored fails an uncompressed file, because
                 every conformant reader masks it (-3024 at BitsStored 12
                 reads as 1072).
