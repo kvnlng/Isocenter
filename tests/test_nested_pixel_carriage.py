@@ -11,17 +11,20 @@ it stop happening.
 Three properties this module exists to hold down, in descending order of how
 badly a regression would hurt:
 
-1. **A store that redacts anything exports no nested icons at all.** An icon
-   is a downsampled copy of a frame, and *nothing* in this pipeline scans or
+1. **No icon ships that could show what redaction removed.** An icon is a
+   downsampled copy of a frame, and *nothing* in this pipeline scans or
    redacts one: every pixel consumer reads `instance.get_pixel_data()`,
    which is the top-level frame and only that. So carrying icon bytes out of
-   a session that redacted would re-export a thumbnail of exactly what
-   redaction removed. The gate is store-wide rather than per-instance
-   because an icon under Referenced Image Sequence is a thumbnail of a
-   *different* SOP instance (PS3.3 C.7.6.16), and redaction calls
-   `regenerate_uid()` -- so "look up the referenced instance and ask if it
-   was redacted" returns nothing for precisely the instances that were.
-   That lookup fails open, which is the worst available answer.
+   a session that redacted could re-export a thumbnail of exactly what
+   redaction removed. For every icon but the carrier's own, the gate is
+   store-wide rather than per-instance, because an icon under Referenced
+   Image Sequence is a thumbnail of a *different* SOP instance (PS3.3
+   C.7.6.16), and redaction calls `regenerate_uid()` -- so "look up the
+   referenced instance and ask if it was redacted" returns nothing for
+   precisely the instances that were. That lookup fails open, which is the
+   worst available answer. The carrier's own depth-1 icon thumbnails the
+   carrier, so since #542 it goes only when that instance is redacted, and
+   every drop is a graded `SIGNAL` loss.
 
 2. **Position is the only identity a sequence item has.** The blob's key is
    a path recorded at ingest and resolved at export, and everything in
@@ -48,7 +51,8 @@ from pydicom.uid import (ExplicitVRLittleEndian, JPEGBaseline8Bit,
                          JPEGExtended12Bit, RLELossless, generate_uid)
 
 from isocenter import io_handlers
-from isocenter.io_handlers import (DicomExporter, LOSS_SCOPE_STANDARD,
+from isocenter.io_handlers import (DicomExporter, LOSS_SCOPE_SIGNAL,
+                                   LOSS_SCOPE_STANDARD,
                                    _CARRIABLE_TRANSFER_SYNTAXES)
 from isocenter.blob_kind import serialize_blob_kind
 from isocenter.session import DicomSession
@@ -121,7 +125,8 @@ def _jpeg_icon_item():
 
 
 def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
-               transfer_syntax=ExplicitVRLittleEndian, top_level_pixels=True):
+               transfer_syntax=ExplicitVRLittleEndian, top_level_pixels=True,
+               patient_id="PAT1"):
     """A CT instance carrying icons at depth 1 and/or depth 2.
 
     `icons` go under Icon Image Sequence directly. `referenced_icons` go
@@ -133,6 +138,10 @@ def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
     its own, and a raw one would fail the *whole* ingest at the top-level
     decode and never reach the nested candidate at all. Keeping the top
     level pixel-free makes the nested decode the only one under test.
+
+    `patient_id` puts an instance under a second patient, for the tests
+    that hold the foreign-icon gate to the store rather than the export's
+    `patient_ids`.
     """
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = CT_IMAGE
@@ -140,7 +149,7 @@ def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
     meta.TransferSyntaxUID = transfer_syntax
 
     ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
-    ds.PatientID, ds.PatientName = "PAT1", "DOE^JOHN"
+    ds.PatientID, ds.PatientName = patient_id, "DOE^JOHN"
     ds.StudyInstanceUID, ds.SeriesInstanceUID = generate_uid(), generate_uid()
     ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
     ds.SOPClassUID = CT_IMAGE
@@ -415,8 +424,11 @@ def test_a_redacted_store_exports_no_icon_item_at_all(tmp_path):
     assert ICON_BYTES not in exported.PixelData
     rows = [d for d, s in _data_loss_rows(db)
             if "7fe0,0010" in d and "redact" in d.lower()]
-    assert rows, _data_loss_rows(db)
-    assert all(s == LOSS_SCOPE_STANDARD
+    assert len(rows) == 1, _data_loss_rows(db)
+    # SIGNAL since #542: an icon dropped because pixels are redacted is
+    # acquired content that was in the source and is not in the export,
+    # and it grades. It was STANDARD under #183, so the run read PASS.
+    assert all(s == LOSS_SCOPE_SIGNAL
                for d, s in _data_loss_rows(db) if "redact" in d.lower())
 
 
@@ -599,6 +611,342 @@ def test_removing_one_icon_item_does_not_shift_the_next_one_out_of_reach(
     assert "IconImageSequence" not in exported
 
 
+# --- 2b. Two tiers: an own icon per instance, every other one store-wide --
+#
+# #183 dropped every nested icon from every file once anything redacted,
+# or once *any* rule carried zones -- even a rule matching no scanner --
+# and filed each drop `STANDARD`, so the run graded PASS (#542, measured
+# on ac33641: redact one of three series, all three own icons and a
+# referenced icon gone, PASS).
+#
+# The owner's ruling (Q1) splits the gate along the one line the path
+# draws without following any reference. An **own** icon -- the carrier's
+# depth-1 Icon Image Sequence item -- thumbnails the carrier itself
+# (PS3.3 C.7.6.1.1.6), so it can only show what *this* instance's
+# redaction removed: it goes iff this instance carries the attestation or
+# has zones applied at export. **Every other** nested icon may thumbnail a
+# different, redacted SOP whose UID redaction regenerated, so it keeps a
+# store-wide gate -- narrowed to an attestation anywhere or a zones rule
+# that matches a series in the store. Both drops are `SIGNAL` (Q8).
+#
+# The export batch always runs in processes (#185), whatever the mode; the
+# mode axis on the tests below reaches the redaction pass that writes the
+# attestation and pickles it back, which is the half of the own-icon gate a
+# worker has to see.
+
+MODES = ["threads", "processes"]
+
+
+@pytest.fixture
+def mode(request, monkeypatch):
+    monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
+    monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+    if request.param == "threads":
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
+    else:
+        monkeypatch.setenv("ISOCENTER_FORCE_PROCESSES", "1")
+        monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
+    return request.param
+
+
+def _multi_src(tmp_path, specs):
+    """One source folder holding one instance per `(serial, kwargs)`."""
+    src = tmp_path / "src"
+    src.mkdir()
+    for serial, kwargs in specs:
+        scratch = tmp_path / f"tmp_{serial}"
+        scratch.mkdir()
+        _write_src(str(scratch), serial=serial, **kwargs)
+        os.replace(os.path.join(str(scratch), "one.dcm"),
+                   os.path.join(str(src), f"{serial}.dcm"))
+    return str(src)
+
+
+def _by_serial(session):
+    return {series.equipment.device_serial_number: instance
+            for patient in session.store.patients
+            for study in patient.studies
+            for series in study.series
+            for instance in series.instances}
+
+
+def _exported_by_serial(out_dir):
+    found = {}
+    for root, _dirs, files in os.walk(str(out_dir)):
+        for name in files:
+            if name.endswith(".dcm"):
+                ds = pydicom.dcmread(os.path.join(root, name))
+                found[str(ds.DeviceSerialNumber)] = ds
+    return found
+
+
+def _icon_loss_rows(db):
+    """`(entity_uid, loss_scope, details)` for every icon pixel loss row."""
+    with sqlite3.connect(db) as conn:
+        return conn.execute(
+            "SELECT entity_uid, loss_scope, details FROM audit_log "
+            "WHERE action_type='DATA_LOSS' AND details LIKE '%7fe0,0010%'"
+        ).fetchall()
+
+
+def _ref_icons(ds):
+    return [item for item in ds.get("ReferencedImageSequence", [])
+            if "IconImageSequence" in item]
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_an_unredacted_instances_own_icon_survives_a_redaction_elsewhere(
+        tmp_path, mode):
+    """r1: redact SN-1; SN-2's own icon is a thumbnail of SN-2, and stays."""
+    src = _multi_src(tmp_path, [("SN-1", dict(icons=[_icon_item()])),
+                                ("SN-2", dict(icons=[_icon_item()]))])
+    db = str(tmp_path / "own.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        session.redact_by_machine("SN-1", WHOLE_FRAME)
+        redacted_uid = _by_serial(session)["SN-1"].sop_instance_uid
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False)
+        session.store_backend.flush_audit_queue()
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert set(exported) == {"SN-1", "SN-2"}, exported
+    assert "IconImageSequence" not in exported["SN-1"]
+    assert "IconImageSequence" in exported["SN-2"], (
+        "an unredacted instance lost its own icon to a redaction elsewhere")
+    assert exported["SN-2"].IconImageSequence[0].PixelData == ICON_BYTES
+
+    rows = _icon_loss_rows(db)
+    assert [(uid, scope) for uid, scope, _d in rows] == [
+        (redacted_uid, LOSS_SCOPE_SIGNAL)], rows
+    assert "this instance's pixel data is redacted" in rows[0][2], rows
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_export_time_zones_drop_that_instances_own_icon(tmp_path, mode):
+    """r3: a rule for SN-2, no `redact()`, no attestation -- zones at export.
+
+    The export redacts SN-2's frame itself, so its own icon is a thumbnail
+    of pixels this export removes. SN-1 has no rule and keeps its icon.
+    """
+    src = _multi_src(tmp_path, [("SN-1", dict(icons=[_icon_item()])),
+                                ("SN-2", dict(icons=[_icon_item()]))])
+    db = str(tmp_path / "zones.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        session.configuration.rules = [
+            {"serial_number": "SN-2", "redaction_zones": [WHOLE_FRAME]}]
+        assert not any("_ISOCENTER_REDACTION_HASH" in i.attributes
+                       for i in _by_serial(session).values())
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False)
+        zoned_uid = _by_serial(session)["SN-2"].sop_instance_uid
+        session.store_backend.flush_audit_queue()
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert "IconImageSequence" not in exported["SN-2"]
+    assert exported["SN-1"].IconImageSequence[0].PixelData == ICON_BYTES
+    assert [(uid, scope) for uid, scope, _d in _icon_loss_rows(db)] == [
+        (zoned_uid, LOSS_SCOPE_SIGNAL)], _icon_loss_rows(db)
+
+
+def test_a_zones_rule_matching_no_series_drops_no_icon(tmp_path):
+    """r2: a rule for a scanner nobody has is not a redaction in effect."""
+    src = _multi_src(tmp_path, [
+        ("SN-1", dict(icons=[_icon_item()])),
+        ("SN-2", dict(icons=[_icon_item()])),
+        ("SN-4", dict(referenced_icons=[_icon_item()]))])
+    db = str(tmp_path / "nobody.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        session.configuration.rules = [
+            {"serial_number": "SN-NOBODY", "redaction_zones": [WHOLE_FRAME]}]
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False)
+        session.store_backend.flush_audit_queue()
+        report = tmp_path / "report.md"
+        session.generate_report(str(report))
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert exported["SN-1"].IconImageSequence[0].PixelData == ICON_BYTES
+    assert exported["SN-2"].IconImageSequence[0].PixelData == ICON_BYTES
+    assert len(_ref_icons(exported["SN-4"])) == 1, exported["SN-4"]
+    assert _icon_loss_rows(db) == []
+    status = [line for line in report.read_text(encoding="utf-8").splitlines()
+              if "Validation Status" in line]
+    assert status == ["| **Validation Status** | **PASS** |"], status
+
+
+def _carrier_and_other(tmp_path):
+    """SN-CARRIER holds a referenced icon; SN-OTHER has no icon at all."""
+    return _multi_src(tmp_path, [
+        ("SN-CARRIER", dict(referenced_icons=[_icon_item()])),
+        ("SN-OTHER", dict())])
+
+
+def test_a_foreign_icon_drop_is_signal(tmp_path):
+    """The store-wide tier grades too (Q8), on the carrier's own UID.
+
+    `test_an_unredacted_instance_loses_its_icon_to_a_redaction_elsewhere`
+    pins *that* the foreign icon goes; this pins how the loss is scoped,
+    rather than editing that pin.
+    """
+    src = _carrier_and_other(tmp_path)
+    db = str(tmp_path / "foreign.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        carrier_uid = _by_serial(session)["SN-CARRIER"].sop_instance_uid
+        session.redact_by_machine("SN-OTHER", WHOLE_FRAME)
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False)
+        session.store_backend.flush_audit_queue()
+    finally:
+        session.close()
+
+    assert _ref_icons(_exported_by_serial(out)["SN-CARRIER"]) == []
+    rows = _icon_loss_rows(db)
+    assert [(uid, scope) for uid, scope, _d in rows] == [
+        (carrier_uid, LOSS_SCOPE_SIGNAL)], rows
+    assert "may be a thumbnail of a redacted instance" in rows[0][2], rows
+
+
+def test_a_matched_zones_rule_drops_a_foreign_icon_with_no_attestation(
+        tmp_path):
+    """The belt half: zones configured for a series that exists, not yet run."""
+    src = _carrier_and_other(tmp_path)
+    db = str(tmp_path / "matched.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        session.configuration.rules = [
+            {"serial_number": "SN-OTHER", "redaction_zones": [WHOLE_FRAME]}]
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False)
+    finally:
+        session.close()
+
+    assert _ref_icons(_exported_by_serial(out)["SN-CARRIER"]) == []
+
+
+@pytest.mark.parametrize("how", ["attestation", "zones"])
+def test_a_subset_does_not_turn_the_foreign_gate_off(tmp_path, how):
+    """r4 with a referenced-icon carrier: the gate is over the store.
+
+    A subset that keeps only the carrier excludes the redacted (or zoned)
+    series, and the carrier's referenced icon may still be its thumbnail.
+    """
+    src = _carrier_and_other(tmp_path)
+    db = str(tmp_path / f"subset_{how}.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        if how == "attestation":
+            session.redact_by_machine("SN-OTHER", WHOLE_FRAME)
+        else:
+            session.configuration.rules = [
+                {"serial_number": "SN-OTHER",
+                 "redaction_zones": [WHOLE_FRAME]}]
+        carrier_uid = _by_serial(session)["SN-CARRIER"].sop_instance_uid
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False, subset=[carrier_uid])
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert set(exported) == {"SN-CARRIER"}, exported
+    assert _ref_icons(exported["SN-CARRIER"]) == []
+
+
+@pytest.mark.parametrize("how", ["attestation", "zones"])
+def test_patient_ids_do_not_turn_the_foreign_gate_off(tmp_path, how):
+    """The same gate with the redacted series under a **second** patient.
+
+    The subset test above narrows inside one patient, so a gate computed
+    over the export's `patient_ids` still sees the redaction there. Here
+    `patient_ids` leaves the redacted (or zoned) patient out entirely, and
+    the carrier's referenced icon may still be a thumbnail of it.
+    """
+    src = _multi_src(tmp_path, [
+        ("SN-CARRIER", dict(referenced_icons=[_icon_item()])),
+        ("SN-OTHER", dict(patient_id="PAT2"))])
+    db = str(tmp_path / f"patients_{how}.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        assert sorted(p.patient_id for p in session.store.patients) == [
+            "PAT1", "PAT2"]
+        if how == "attestation":
+            session.redact_by_machine("SN-OTHER", WHOLE_FRAME)
+        else:
+            session.configuration.rules = [
+                {"serial_number": "SN-OTHER",
+                 "redaction_zones": [WHOLE_FRAME]}]
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False, patient_ids=["PAT1"])
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert set(exported) == {"SN-CARRIER"}, exported
+    assert _ref_icons(exported["SN-CARRIER"]) == []
+
+
+def test_an_icon_drop_grades_review_required(tmp_path):
+    """r1's report: the drop is a graded loss in section 3.1, by name."""
+    src = _multi_src(tmp_path, [("SN-1", dict(icons=[_icon_item()])),
+                                ("SN-2", dict(icons=[_icon_item()]))])
+    db = str(tmp_path / "grade.db")
+    report = tmp_path / "report.md"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        session.redact_by_machine("SN-1", WHOLE_FRAME)
+        session.export(str(tmp_path / "out"), format="dicom",
+                       use_compression=False, show_progress=False)
+        session.generate_report(str(report))
+    finally:
+        session.close()
+
+    text = report.read_text(encoding="utf-8")
+    status = [line for line in text.splitlines()
+              if "Validation Status" in line]
+    assert status == ["| **Validation Status** | **REVIEW_REQUIRED** |"], text
+    section_5 = text.split("## 5. Validation & Verification", 1)[1]
+    assert "1 graded data loss(es) in section 3.1" in section_5, section_5
+
+
+@pytest.mark.parametrize("path, own", [
+    ((("0088,0200", 0),), True),
+    ((("0088,0200", 1),), True),
+    ((("0008,1140", 0), ("0088,0200", 0)), False),
+    ((("0088,0200", 0), ("0088,0200", 0)), False),
+    ((("0040,a730", 0),), False),
+    ((("0009,1001", 0),), False),
+])
+def test_only_a_depth_one_icon_image_sequence_item_is_the_carriers_own(
+        path, own):
+    """The classifier reads the path alone and never follows a reference."""
+    assert io_handlers._is_own_icon_path(path) is own
+
+
 # --- 3. Carried or reported, never both and never neither ----------------
 
 def test_a_shifted_index_refuses_rather_than_writing_the_wrong_icon(tmp_path):
@@ -637,6 +985,9 @@ def test_a_shifted_index_refuses_rather_than_writing_the_wrong_icon(tmp_path):
         "an icon whose path resolved to a different item must not be written")
     assert [d for d, _s in _data_loss_rows(db) if "7fe0,0010" in d], \
         _data_loss_rows(db)
+    # Not a redaction drop, so still STANDARD after #542.
+    assert {s for d, s in _data_loss_rows(db) if "7fe0,0010" in d} == {
+        LOSS_SCOPE_STANDARD}, _data_loss_rows(db)
 
 
 def test_an_item_removed_outright_files_a_loss_row_and_writes_nothing(
@@ -663,6 +1014,10 @@ def test_an_item_removed_outright_files_a_loss_row_and_writes_nothing(
         "the icon's bytes must not be fabricated onto the instance")
     assert [d for d, _s in _data_loss_rows(db) if "7fe0,0010" in d], \
         _data_loss_rows(db)
+    # #542 made the *redaction* drop SIGNAL and nothing else: an item that
+    # is simply gone is a routine standard-group loss and does not grade.
+    assert [s for d, s in _data_loss_rows(db) if "7fe0,0010" in d] == [
+        LOSS_SCOPE_STANDARD], _data_loss_rows(db)
 
 
 def test_an_rle_encapsulated_icon_is_decoded_and_written_raw(tmp_path):
@@ -1008,6 +1363,66 @@ def test_write_tree_honours_the_redaction_attestation(tmp_path):
         session.close()
 
     assert "IconImageSequence" not in _exported(out)
+
+
+def test_write_tree_keeps_an_unattested_instances_own_icon(tmp_path):
+    """The serializer's own-icon rule is the same per-instance rule.
+
+    One patient, two series, one redacted. `write_tree` has no session and
+    no zones, so the attestation on each instance is the whole own-icon
+    gate there; the unredacted instance's thumbnail is of itself.
+    """
+    src = _multi_src(tmp_path, [("SN-1", dict(icons=[_icon_item()])),
+                                ("SN-2", dict(icons=[_icon_item()]))])
+    db = str(tmp_path / "wt.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        assert len(session.store.patients) == 1
+        session.redact_by_machine("SN-1", WHOLE_FRAME)
+        patient = session.store.patients[0]
+        DicomExporter.write_tree(patient, str(out), studies=patient.studies)
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert "IconImageSequence" not in exported["SN-1"]
+    assert exported["SN-2"].IconImageSequence[0].PixelData == ICON_BYTES
+
+
+def test_write_tree_drops_a_referenced_icon_under_a_redaction_elsewhere(
+        tmp_path):
+    """The serializer's store-wide tier: attestation anywhere in the tree.
+
+    `test_write_tree_honours_the_redaction_attestation` uses the carrier's
+    own icon, which the worker decides from that instance's attestation, so
+    it stays green with `write_tree`'s foreign flag wired off. This one is
+    a referenced icon on an unredacted carrier, beside a redacted series
+    under the same patient: only the foreign flag can drop it.
+    """
+    src = _carrier_and_other(tmp_path)
+    db = str(tmp_path / "wtforeign.db")
+    out = tmp_path / "out"
+    session = DicomSession(persistence_file=db)
+    try:
+        session.ingest(src)
+        assert len(session.store.patients) == 1
+        carrier_uid = _by_serial(session)["SN-CARRIER"].sop_instance_uid
+        session.redact_by_machine("SN-OTHER", WHOLE_FRAME)
+        patient = session.store.patients[0]
+        DicomExporter.write_tree(patient, str(out), studies=patient.studies,
+                                 show_progress=False,
+                                 store_backend=session.store_backend)
+        session.store_backend.flush_audit_queue()
+    finally:
+        session.close()
+
+    exported = _exported_by_serial(out)
+    assert set(exported) == {"SN-CARRIER", "SN-OTHER"}, exported
+    assert _ref_icons(exported["SN-CARRIER"]) == []
+    assert [(uid, scope) for uid, scope, _d in _icon_loss_rows(db)] == [
+        (carrier_uid, LOSS_SCOPE_SIGNAL)], _icon_loss_rows(db)
 
 
 def test_a_nested_restore_failure_with_no_message_names_its_type(

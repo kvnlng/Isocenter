@@ -319,7 +319,7 @@ def test_a_lost_element_does_not_make_the_export_report_zero_successes(
     session = DicomSession(persistence_file=str(tmp_path / "count.db"))
     try:
         session.ingest(str(src))
-        tasks, _ = session._build_export_plan(
+        tasks, _, _ = session._build_export_plan(
             _ExportOptions(str(tmp_path / "out"), None, None, False),
             {p.patient_id for p in session.store.patients})
         for task in tasks:

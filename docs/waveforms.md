@@ -38,14 +38,17 @@ out/<patient>/<study>/<series>/
 └─ <record>.annotations.json  cart findings, when present
 ```
 
-`export(format="wfdb")` returns the list of record paths it wrote. Unlike
-a DICOM export it does **not** raise when records fail, even when it wrote
-nothing: each failure is logged, written to the audit log as an `ERROR`
-row naming the instance, and counted in that export's `EXPORT` row, so the
-compliance report lists it and grades the run `REVIEW_REQUIRED`. Compare
-the returned list with the waveform instances you expected, or generate
-the report, to learn that records are missing
-([#541](https://github.com/kvnlng/Isocenter/issues/541)).
+`export(format="wfdb")` returns the list of record paths it wrote. Each
+record that fails is logged, written to the audit log as an `ERROR` row
+naming the instance, and counted in that export's `EXPORT` row, so the
+compliance report lists it and grades the run `REVIEW_REQUIRED`. A partial
+export returns the records that did reach disk. When at least one record
+was attempted and none was written, the call raises
+`io_handlers.ExportError` after those rows, as a DICOM export does; its
+`.failures` names each record
+([#541](https://github.com/kvnlng/Isocenter/issues/541)). A store with no
+waveform instances, or only waveforms with no samples (each of which gets
+its own `DATA_LOSS` row), attempted nothing and returns `[]`.
 
 ## What is exported
 

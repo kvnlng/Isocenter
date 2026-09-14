@@ -275,6 +275,40 @@ def _audit_unread_instances(store_backend, operation, failures):
                                 entity_uid=uid or "UNKNOWN", details=detail)
 
 
+def _audit_withheld_instances(store_backend, folder, withheld):
+    """One `WARNING` audit row per instance the pre-export scan withheld (#536).
+
+    `export(check_burned_in=True)` holds back every instance that still
+    carries an identifier, and until #536 it said so in a log line and
+    nowhere else: the plan simply had fewer entries, so a never-anonymized
+    CT exported to an empty folder under an `EXPORT` row reading "nothing
+    matched the export plan" and a PASS grade. The sibling of
+    `_audit_unread_instances`, for the same reason and in the same
+    vocabulary -- `WARNING`, because nothing was written wrong, and a
+    word `get_audit_errors()` already selects, so the rows grade through
+    the existing section-4 term with no new grade rule.
+
+    **The level, never the value.** The row names which level of the
+    hierarchy carried the identifier (patient, study or instance) and
+    nothing about what it was. The value is PHI, and the Patient ID is
+    the cohort's key; neither belongs in a trail that renders into a
+    report a recipient reads. The UID is in `details` as well as
+    `entity_uid` because section 4 renders details and nothing else.
+
+    `log_audit`, one call per row, and the action word spelled at the call:
+    the frozen-vocabulary pin reads the keyword at the site, and a batch
+    write swallows contention into a log line (see
+    `DicomExporter._report_export_losses`).
+    """
+    for uid, level in withheld:
+        detail = (f"DICOM export to {folder} withheld instance {uid}: its "
+                  f"{level} still carries an identifier the pre-export scan "
+                  f"raised (check_burned_in=True).")
+        detail = " ".join(detail.split()).replace("|", "\\|")
+        store_backend.log_audit(action_type="WARNING",
+                                entity_uid=uid or "UNKNOWN", details=detail)
+
+
 RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "resources")
 
@@ -477,29 +511,57 @@ class _ExportOptions(NamedTuple):
     verify_readback: bool = False
 
 
-def _excluded(options, patient, study, series, instance) -> bool:
-    """Whether an instance is filtered out of the export, and why in the log.
+#: What `_why_excluded` answers for an instance the subset did not select.
+#: Every other non-None answer is a hierarchy level the pre-export scan
+#: withheld the instance for; the plan builder tells the two apart by
+#: this constant, so the branch that records a withheld instance cannot
+#: drift from the one that returns it.
+OUTSIDE_THE_SUBSET = "outside the subset"
+
+#: The level words `_why_excluded` answers, in `_uid_path` order. The
+#: inspector raises findings on patients, studies and instances only, so
+#: "series" is not expected in practice; it is matched anyway, because a
+#: filter that skipped a level would fail open for it.
+_UID_PATH_LEVELS = ("patient", "study", "series", "instance")
+
+
+def _why_excluded(options, patient, study, series, instance) -> Optional[str]:
+    """Why an instance is filtered out of the export, or None if it is not.
 
     Two independent filters, both matching at every level of the
-    hierarchy: the safety scan excludes anything still carrying an
-    identifier, and a subset includes only what the caller selected.
-    `None` means the filter is not in use, which is not the same as an
-    empty set -- that means it is in use and matched nothing.
+    hierarchy: a subset includes only what the caller selected, and the
+    safety scan withholds anything still carrying an identifier. `None`
+    means a filter is not in use, which is not the same as an empty set --
+    that means it is in use and matched nothing.
+
+    **The subset is tested first, and the order is load-bearing (#536).**
+    An instance the caller did not select was not withheld from anything:
+    it was never asked for. Tested the other way round, as it was until
+    #536, such an instance was logged as "still carries identifiers", and
+    once withheld instances became audit rows that order would have graded
+    a run on an instance outside the export entirely.
+
+    Returns:
+        Optional[str]: `OUTSIDE_THE_SUBSET` for an instance the subset did
+        not select (no log); the level -- `"patient"`, `"study"`,
+        `"series"` or `"instance"`, the first of `_uid_path`'s UIDs the scan raised a
+        finding on -- for one the scan withheld (logged); None otherwise.
     """
     uids = _uid_path(patient, study, series, instance)
 
-    if options.identifying_uids is not None and any(
-            uid in options.identifying_uids for uid in uids):
-        get_logger().warning(
-            "Skipping %s: it or one of its parents still carries identifiers.",
-            instance.sop_instance_uid)
-        return True
-
     if options.allowed_uids is not None and not any(
             uid in options.allowed_uids for uid in uids):
-        return True
+        return OUTSIDE_THE_SUBSET
 
-    return False
+    if options.identifying_uids is not None:
+        for uid, level in zip(uids, _UID_PATH_LEVELS):
+            if uid in options.identifying_uids:
+                get_logger().warning(
+                    "Skipping %s: it or one of its parents still carries "
+                    "identifiers.", instance.sop_instance_uid)
+                return level
+
+    return None
 
 
 def _uid_path(patient, study, series, instance) -> Tuple[str, str, str, str]:
@@ -4385,7 +4447,9 @@ class DicomSession:
             two instances sharing one are two successful write
             operations and one file, the second having overwritten the
             first (#197). The WFDB exporter returns its own
-            `List[str]` of paths and is unchanged (#191 scopes it out).
+            `List[str]` of paths (#191 scopes the summary type out); an
+            empty list means nothing was attempted, because since #541 an
+            export that attempted records and wrote none raises instead.
             Every format's result must let a caller detect that nothing
             was written.
 
@@ -4399,11 +4463,15 @@ class DicomSession:
                 exported every patient. Nothing is written either way.
                 The two formats do not accept the same options, so a
                 caller forwarding one dict to both must split it.
-            io_handlers.ExportError: From the DICOM exporter, when zero
-                of N planned instances reached disk and at least one
-                failed. An empty plan -- zero of zero -- does not raise:
+            io_handlers.ExportError: From either exporter, when zero of
+                N attempted instances reached disk and at least one
+                failed -- the DICOM path since #191, the WFDB path since
+                #541. An empty plan -- zero of zero -- does not raise:
                 a subset that matched nothing is a fact about the run,
-                and the `EXPORT` audit row already carries it.
+                and the `EXPORT` audit row already carries it. Nor does
+                a DICOM export whose every instance the pre-export scan
+                withheld (#536): nothing was attempted, and its `WARNING`
+                rows grade the run.
         """
         from . import exporters
 
@@ -4421,7 +4489,18 @@ class DicomSession:
             folder (str): The output directory path.
             use_compression (bool): If True, compresses output images using JPEG2000 (Lossless).
             check_burned_in (bool): If True, scans for PHI before exporting and
-                skips every instance that still carries an identifier.
+                withholds every instance that still carries an identifier,
+                at any level of its hierarchy. Each withheld instance
+                writes one `WARNING` audit row naming it and the level
+                (patient, study, series or instance) that carried the
+                identifier -- never the value -- so the report grades
+                `REVIEW_REQUIRED` and lists them in section 4 (#536).
+                Withheld instances count as requested and not written
+                ("1 of 2 requested"), and the `EXPORT` row says how many
+                were withheld. An export that withheld everything returns
+                an empty summary and does not raise: nothing failed. An
+                instance outside `subset` is not withheld; it was never
+                asked for.
             check_reversibility (bool): If True (the default), warn when the
                 files this export wrote still carry the encrypted originals
                 that `lock_identities()` embeds, and record the disclosure in
@@ -4543,10 +4622,38 @@ class DicomSession:
         self.save(sync=True)
         self.release_memory()
 
-        tasks, patient_count = self._build_export_plan(
+        tasks, patient_count, withheld = self._build_export_plan(
             _ExportOptions(folder, identifying_uids, allowed_uids,
                            use_compression, verify_readback),
             target_ids)
+
+        # Before the empty-plan branch, so an export that withheld
+        # everything still leaves one row per instance it held back
+        # (#536). Until then the filter logged a line and nothing else,
+        # and a cohort withheld whole read as an empty plan under PASS.
+        _audit_withheld_instances(self.store_backend, folder, withheld)
+
+        if not tasks and withheld:
+            get_logger().warning(
+                "No instances exported: all %d were withheld by the "
+                "pre-export scan.", len(withheld))
+            # Counted, unlike a true empty plan: the caller asked for
+            # these instances and none was written, which is exactly what
+            # "0 of K requested" says. A zero here is a fact about this
+            # export, not a stand-in for "not answered" (#196).
+            self._last_export_written = 0
+            self._last_export_requested = len(withheld)
+            self.store_backend.log_audit(
+                action_type="EXPORT",
+                entity_uid=folder,
+                details=(f"DICOM export to {folder}: wrote 0 of "
+                         f"{len(withheld)} requested instances; all "
+                         f"{len(withheld)} were withheld by the pre-export "
+                         f"scan (check_burned_in=True)."))
+            # Returned, not `ExportError`: nothing was attempted and
+            # nothing failed. The rows above grade the run and the
+            # counters say none of it was written.
+            return ExportSummary()
 
         if not tasks:
             get_logger().warning("No instances found to export.")
@@ -4582,7 +4689,10 @@ class DicomSession:
         # and nothing else: a run that wrote none of its three instances
         # still reported "Total Instances | 3" under a PASS (#181).
         self._last_export_written = summary.written
-        self._last_export_requested = len(tasks)
+        # Withheld instances were requested and not written, so they are
+        # in the denominator (#536); "1 of 1 requested" beside a withheld
+        # second instance answered for the plan, not for the cohort.
+        self._last_export_requested = len(tasks) + len(withheld)
 
         # The run itself is an audited action, not only its failures.
         # 'EXPORT' had been `log_audit`'s first documented example since
@@ -4593,12 +4703,19 @@ class DicomSession:
         # how much of the plan reached it, and its existence is what
         # `generate_report` keys the export boundary on (#153), durably
         # across a session reopened on this store.
+        #
+        # The withheld clause is appended only when something was
+        # withheld, so a run that withheld nothing writes the row it
+        # always has, byte for byte.
+        withheld_clause = (f"; {len(withheld)} more withheld by the "
+                           f"pre-export scan (check_burned_in=True)"
+                           if withheld else "")
         self.store_backend.log_audit(
             action_type="EXPORT",
             entity_uid=folder,
             details=(f"DICOM export to {folder}: wrote {summary.written} "
                      f"of {len(tasks)} planned instances from "
-                     f"{patient_count} patients."))
+                     f"{patient_count} patients{withheld_clause}."))
         print("Done.")
 
         # Last, after all five records -- the collision report, the
@@ -4862,25 +4979,17 @@ class DicomSession:
         applied in one place rather than inside the workers.
 
         Returns:
-            Tuple of (contexts, number of patients visited).
+            Tuple of (contexts, number of patients visited, withheld), where
+            `withheld` is a list of `(sop_instance_uid, level)` for every
+            instance the subset selected and the pre-export scan held back
+            (#536). An instance outside the subset is in neither list: it
+            was never asked for.
         """
         tasks = []
+        withheld = []
         patient_count = 0
 
-        # One boolean for the whole run, computed before the walk (#183).
-        # Store-wide and not per instance, because an icon under Referenced
-        # Image Sequence is a thumbnail of a *different* SOP instance and
-        # redaction's `regenerate_uid()` makes following the reference fail
-        # open. Over `self.store.patients` rather than `target_ids`,
-        # deliberately: a subset that excludes the redacted instances must
-        # not turn the gate off for the ones it keeps.
-        drop_icons = redaction_in_effect(
-            (instance
-             for patient in self.store.patients
-             for study in patient.studies
-             for series in study.series
-             for instance in series.instances),
-            rules=self.configuration.rules)
+        drop_foreign = self._foreign_icon_gate()
 
         for patient in self.store.patients:
             if patient.patient_id not in target_ids:
@@ -4902,7 +5011,11 @@ class DicomSession:
                     zones = self._redaction_zones_for(series)
 
                     for instance in series.instances:
-                        if _excluded(options, patient, study, series, instance):
+                        why = _why_excluded(
+                            options, patient, study, series, instance)
+                        if why not in (None, OUTSIDE_THE_SUBSET):
+                            withheld.append((instance.sop_instance_uid, why))
+                        if why is not None:
                             continue
 
                         tasks.append(ExportContext(
@@ -4917,10 +5030,36 @@ class DicomSession:
                             compression=('j2k' if options.use_compression
                                          else None),
                             redaction_zones=zones,
-                            drop_nested_icons=drop_icons,
+                            drop_foreign_icons=drop_foreign,
                             verify_readback=options.verify_readback))
 
-        return tasks, patient_count
+        return tasks, patient_count, withheld
+
+    def _foreign_icon_gate(self) -> bool:
+        """Drop every nested icon that is not its carrier's own? (#183, #542)
+
+        One boolean for the whole run, computed before the walk. Store-wide
+        and not per instance, because an icon under Referenced Image
+        Sequence is a thumbnail of a *different* SOP instance and
+        redaction's `regenerate_uid()` makes following the reference fail
+        open. Over `self.store.patients` rather than the export's
+        `target_ids` or subset, deliberately: a subset that excludes the
+        redacted instances must not turn the gate off for the ones it
+        keeps.
+
+        Two halves: an attestation anywhere, or a zones rule that **matches
+        a series in the store** (#542). A rule for a scanner nobody has
+        redacts nothing, and counting it -- as #183's "any rule with zones"
+        did -- stripped every icon from every file. Each carrier's own
+        depth-1 icon is decided per instance in the worker instead.
+        """
+        every_series = [series for patient in self.store.patients
+                        for study in patient.studies
+                        for series in study.series]
+        return redaction_in_effect(
+            instance for series in every_series
+            for instance in series.instances) or any(
+                self._redaction_zones_for(series) for series in every_series)
 
     def _redaction_zones_for(self, series) -> list:
         """The configured pixel-redaction zones for this series' scanner."""
