@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
 import pydicom
-from pydicom.pixels import as_pixel_options, get_decoder
+from pydicom.pixels import get_decoder
 from pydicom.uid import generate_uid
 import isocenter.imagecodecs_handler as h
 from .logger import describe_exception_without_paths, get_logger
@@ -656,8 +656,8 @@ _ABSENT = object()
 # both arms of `SqliteStore._persist_pixels`, and the redaction rebind in
 # `Session._apply_redaction_outcomes` -- each of which checks what it read
 # still stands, rebinds the loader and clears the flag and the record.
-# `get_pixel_data()`'s three read arms (the loader, the file and the
-# imagecodecs fallback) fill the array and clear the flag through
+# `get_pixel_data()`'s two read arms (the loader and the file; the file
+# arm's own imagecodecs fallback went with #453) fill the array and clear the flag through
 # `Instance._publish_loaded_frame`, which takes it after the load,
 # holding nothing, and publishes only while the slot is still empty, so a
 # set landing during a load keeps its pixels (#465).
@@ -693,31 +693,45 @@ def _defer(notes, level, message, *args):
     notes.append((level, message, args))
 
 
-def _decode_with_pydicom(ds):
-    """`ds.pixel_array`, and the colour space pydicom says it is in (#482).
+def _decode_from_file(ds):
+    """A file's pixels through ingest's own decode, and their colour space (#453).
 
-    `Dataset.pixel_array` is the `as_array` call on `get_decoder(ts)`,
-    made with `as_pixel_options(ds)`, and it keeps `[0]` of the pair
-    (pydicom 3.0.2 `pixels/utils.py:1430`). That throws away the one
-    statement pydicom makes about colour: the meta's
-    `photometric_interpretation`. With the default
-    `as_rgb=True` every 8-bit YBR family comes back RGB -- native
-    YBR_FULL, JPEG Baseline YBR_FULL_422, J2K YBR_RCT/ICT through Pillow
-    -- while the dataset keeps its YBR label (measured). So the call is
-    made here in full, and the meta kept. Ingest reads the same meta
-    (`io_handlers._decode_pixels`, #372).
+    **`io_handlers._decode_pixels`, the function `ingest()`, the export
+    readback and an icon decode through**, so this door refuses what
+    ingest refuses, in the same words, and reads what ingest reads, to
+    the same array under the same label. It used to make its own pydicom
+    call and hand *any* failure, validation errors included, to
+    `imagecodecs_handler.get_pixel_data`, which had no colour-space
+    allow-list, no 16-bit conversion refusal and no dtype, shape or size
+    guard: a 16-bit RGB JPEG 2000 file missing PlanarConfiguration was
+    refused at ingest and read here, and a 16-bit YBR_FULL JPEG-LS file
+    came back as its stored YBR samples. Imported at call time, because
+    `io_handlers` imports this module.
+
+    The colour space is the decoder's statement about the array, not the
+    file's label: with pydicom's default `as_rgb=True` every 8-bit YBR
+    family comes back RGB while the dataset keeps its YBR label (#482),
+    and the fallback returns the label it measured (#448). The caller
+    relabels from it.
+
+    `as_pixel_options(ds)` is no longer passed. `as_array(ds)` reads the
+    same Image Pixel elements from the dataset itself, and returns the
+    same arrays with and without them -- NumberOfFrames absent, `0`, an
+    Extended Offset Table, native and encapsulated (measured, pydicom
+    3.0.2); the only difference was a second "A value of '0' for
+    (0028,0008) 'Number of Frames' is invalid" warning.
 
     **Where pydicom would refuse before decoding -- no Transfer Syntax
     UID (#281's header-less population), or one no decoder implements --
     this asks `ds.pixel_array` instead**, which refuses in pydicom's own
     words. Those words reach the caller through `get_pixel_data()`'s
     `Lazy load failed for instance <uid>: <Type>: ...`, and they are not
-    to be reworded by accident here.
+    to be reworded by accident here. `_decode_pixels` would raise
+    differently: it reads `ds.file_meta.TransferSyntaxUID` as an attribute.
 
     Returns:
-        ``(array, photometric)``, `photometric` being the decoder meta's
-        `photometric_interpretation`. The `ds.pixel_array` branch has no
-        meta and puts None beside its array in form only: every case that
+        ``(array, photometric)``. The `ds.pixel_array` branch has no meta
+        and puts None beside its array in form only: every case that
         reaches it raises (measured: no Transfer Syntax UID raises
         `AttributeError`, and one no decoder implements raises
         `NotImplementedError`).
@@ -729,8 +743,8 @@ def _decode_with_pydicom(ds):
         decoder = None
     if decoder is None:
         return ds.pixel_array, None
-    arr, meta = decoder.as_array(ds, **as_pixel_options(ds))
-    return arr, meta.get("photometric_interpretation")
+    from .io_handlers import _decode_pixels  # pylint: disable=import-outside-toplevel
+    return _decode_pixels(ds)
 
 
 def _log_memory_only_refusal(uid):
@@ -1257,8 +1271,10 @@ class Instance(DicomItem):
         This method attempts to:
             1. Return already cached `pixel_array`.
             2. Use `_pixel_loader` (Sidecar) if available.
-            3. Read from `file_path` using `pydicom`.
-            4. Fallback to `isocenter.imagecodecs_handler` if pydicom fails.
+            3. Read from `file_path` through `io_handlers._decode_pixels`,
+               the decode `ingest()` makes: pydicom, then imagecodecs where
+               pydicom has no plugin. A file ingest refuses is refused here,
+               in the same words (#453).
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
@@ -1283,7 +1299,11 @@ class Instance(DicomItem):
                 from NumberOfFrames -- "Lazy load failed for instance
                 <uid>: RuntimeError: <table> names N frames;
                 NumberOfFrames declares M" (#418). The message names the
-                instance, never the source file.
+                instance, never the source file. From a file ingest would
+                refuse, in ingest's words: a header pydicom's validation
+                rejects, whether or not pydicom has a plugin for its syntax
+                ("Missing required element: (0028,0006) 'Planar
+                Configuration'"), or a 16-bit YBR_FULL frame (#453, #461).
                 From the sidecar, when a descriptor written since the
                 loader was built asks for a reading the stored bytes
                 cannot satisfy (BitsAllocated 16 -> 8, or Rows x Columns
@@ -1389,21 +1409,20 @@ class Instance(DicomItem):
                     # is not DICOM at all, forcing parses it to a
                     # dataset with no pixel element, so the
                     # `any(t in ds ...)` guard below returns None where
-                    # this used to raise. Measured, not reasoned -- the
-                    # imagecodecs fallback is never reached. That
+                    # this used to raise. Measured, not reasoned -- no
+                    # decode is ever attempted. That
                     # narrows #226's "could not decode is not None" for
                     # a population that a forcing ingest had already
                     # accepted.
                     ds = pydicom.dcmread(self.file_path, force=True)
 
-                    # Before `ds.pixel_array`, which returns every frame
-                    # the offset table names -- (2, 4, 4) under a
-                    # one-frame header -- and before the imagecodecs
-                    # fallback below, which would decode frame 0 alone.
-                    # Here rather than in the handler only: the fallback
-                    # swallows the handler's RuntimeError and re-raises
-                    # the *original* error, so a handler-only refusal
-                    # would be hidden behind whatever pydicom said (#418).
+                    # Before the decode: pydicom returns every frame the
+                    # offset table names -- (2, 4, 4) under a one-frame
+                    # header -- and `_decode_pixels` refuses an excess only
+                    # on its imagecodecs route, so this door would read
+                    # one where ingest keeps the declared frames and writes
+                    # a row (#418). A read door has no row to write, so it
+                    # refuses both directions here.
                     #
                     # The wording trap. This rides the outer `except`
                     # into "Lazy load failed for instance <uid>:
@@ -1420,14 +1439,17 @@ class Instance(DicomItem):
 
                     # pydicom returns an 8-bit YBR source as RGB and says
                     # so only in its decoder's meta, leaving `ds` labelled
-                    # YBR. Follow the meta, as the imagecodecs arm below
-                    # follows the handler's relabel (#482, #464's rule).
-                    # Compared with the file's label, not the instance's:
-                    # only a conversion is a statement this read makes
-                    # about colour.
+                    # YBR; the imagecodecs fallback returns the label it
+                    # measured, RGB for a JPEG-LS YBR_FULL frame it
+                    # converted (#482, #464's rule). Follow it. Compared
+                    # with the file's label, not the instance's: only a
+                    # conversion is a statement this read makes about
+                    # colour, and a hand-built label that disagrees with
+                    # the file for any other reason is not this read's to
+                    # correct.
                     declared = str(getattr(
                         ds, "PhotometricInterpretation", "") or "")
-                    arr, decoded = _decode_with_pydicom(ds)
+                    arr, decoded = _decode_from_file(ds)
                     relabel = (str(decoded) if decoded is not None
                                and str(decoded) != declared else None)
                     # Cache it in memory. Assigned, not set through
@@ -1466,7 +1488,7 @@ class Instance(DicomItem):
                     # processes, #185) and `__cause__` does not survive
                     # pickling, while the message does. A second
                     # RuntimeError raised here would either duplicate that
-                    # message or bypass the codec fallback.
+                    # message or bypass the codecs-missing message.
                     #
                     # `ds is not None` keeps `dcmread`'s own AttributeError
                     # /TypeError on the old path deliberately: that is a
@@ -1490,59 +1512,34 @@ class Instance(DicomItem):
                     raise e
 
             except Exception as e:
-                # Try explicit fallback to isocenter.imagecodecs_handler
-                # Pydicom sometimes fails to iterate handlers correctly or swallows errors.
-                #
-                # No `h.is_available()` in this condition, deliberately
-                # (#444). With it, a missing imagecodecs was never asked,
-                # so the handler's refusal -- which names the import
-                # failure -- never reached the caller, who got pydicom's
-                # error and advice to install the codec that was installed
-                # and broken. The handler raises its own refusal when it
-                # is unavailable; let it.
-                fallback_words = ""
-                try:
-                    if ds is not None and h.supports_transfer_syntax(
-                            ds.file_meta.TransferSyntaxUID):
-                        declared = str(getattr(
-                            ds, "PhotometricInterpretation", "") or "")
-                        arr = h.get_pixel_data(ds)
-                        # The handler converts 8-bit YBR_FULL JPEG-LS to
-                        # RGB and says so by relabelling `ds` (#464). Asked
-                        # of `ds`, before and after, rather than of the
-                        # file's label against the instance's: only a
-                        # conversion is a statement this door makes about
-                        # colour. A hand-built label that disagrees with
-                        # the file for any other reason is not this read's
-                        # to correct.
-                        decoded = str(getattr(
-                            ds, "PhotometricInterpretation", "") or "")
-                        # Same reasoning as the two branches above: a read
-                        # must not write (#186). The relabel is the one
-                        # exception, and it is a label, not a geometry: it
-                        # states a conversion this read made, and it is
-                        # made only if this read publishes (#465).
-                        return self._publish_loaded_frame(
-                            arr, decoded if decoded != declared else None)
-                except (ImportError, AttributeError, RuntimeError) as exc:
-                    # Fallback failed: raise the original error below, and
-                    # say what the fallback said beside it (#444). This was
-                    # `pass`, which dropped the handler's reason -- a
-                    # frame-count, sign or colour refusal, or an import
-                    # failure -- for pydicom's words alone, so a refusal
-                    # made in the handler never reached this method's
-                    # caller. Formatted here because Python unbinds an
-                    # `except ... as` name when the block ends. Only when
-                    # the handler was actually asked: a syntax it does not
-                    # list leaves the message exactly as it was.
-                    fallback_words = f"\nimagecodecs fallback: {exc}"
-
+                # No second decoder here any more (#453). This block used
+                # to hand *any* failure above -- a validation error
+                # included -- to `imagecodecs_handler.get_pixel_data`,
+                # which had none of the checks ingest's fallback makes, so
+                # it read files ingest refused. The file arm now decodes
+                # through `io_handlers._decode_pixels`, which asks
+                # imagecodecs itself, after pydicom and after pydicom's
+                # validation, and refuses in words that already carry
+                # "imagecodecs could not decode it either: <why>" -- the
+                # reason #444 added a `fallback_words` line here to keep.
                 # Try to get Transfer Syntax UID for better debugging
                 ts_uid = "Unknown"
                 if ds is not None and hasattr(ds, "file_meta"):
                     ts_uid = getattr(ds.file_meta, "TransferSyntaxUID", "Unknown")
 
-                if "missing dependencies" in str(e) or "decompress" in str(e):
+                # The advice names a remedy for a codec that is missing,
+                # so it follows pydicom's "missing dependencies" or
+                # "decompress" words only when no codec decoded the file:
+                # not when imagecodecs was asked and refused it on what it
+                # holds ("imagecodecs could not decode it either: <why>"),
+                # where installing pillow, pylibjpeg or gdcm changes
+                # nothing -- unless the why is that imagecodecs is not
+                # available, which is a missing codec (review of #606, M3).
+                words = str(e)
+                if (("missing dependencies" in words or "decompress" in words)
+                        and ("imagecodecs could not decode it either: "
+                             not in words
+                             or "imagecodecs is not available" in words)):
                     # Enhanced debug output
                     handlers = []
                     try:
@@ -1560,7 +1557,6 @@ class Instance(DicomItem):
                         f"Underlying Error: {describe_exception_without_paths(e)}\n"
                         f"Active pydicom handlers: {handlers}\n"
                         "Missing image codecs. Please ensure 'pillow', 'pylibjpeg', or 'gdcm' are installed."
-                        f"{fallback_words}"
                     ) from e
 
                 # If we just caught the re-raised "no pixel data" exception, it would be handled above,
@@ -1576,7 +1572,7 @@ class Instance(DicomItem):
                 # `Pixel Loader failed for <uid>` above already did this.
                 raise RuntimeError(
                     f"Lazy load failed for instance {self.sop_instance_uid}: "
-                    f"{describe_exception_without_paths(e)}{fallback_words}"
+                    f"{describe_exception_without_paths(e)}"
                 ) from e
 
         raise FileNotFoundError(f"Pixels missing and file not found: {self.file_path}")
@@ -1708,9 +1704,10 @@ class Instance(DicomItem):
                               relabel: Optional[str] = None) -> np.ndarray:
         """Cache the frame a read arm loaded, unless a set got there first (#465).
 
-        The three read arms -- the sidecar loader, the file, the
-        imagecodecs fallback -- load with no lock held, since a decode
-        can take seconds and `PIXEL_STATE_LOCK` is a leaf held for
+        The two read arms -- the sidecar loader and the file (a third,
+        the file arm's imagecodecs fallback, went with #453) -- load with
+        no lock held, since a decode can take seconds and
+        `PIXEL_STATE_LOCK` is a leaf held for
         microseconds, and then publish here. They used to assign the
         frame and clear the unwritten flag unconditionally: a
         `set_pixel_data()` that landed during the load was overwritten by

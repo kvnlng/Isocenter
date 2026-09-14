@@ -2,22 +2,26 @@
 
 `offset_table_frame_count` compares the frame count an encapsulated
 `PixelData`'s offset table names with the one `NumberOfFrames` declares.
-It is shared by this module's `get_pixel_data`, by
-`Instance.get_pixel_data`'s file arm, by `ingest_worker` for the top
-level, by `_decode_nested_pixels` for an icon (#433) and by
-`_decode_pixels`' imagecodecs fallback (#416), so none of them can
-disagree about what a mismatch is.
+It is shared by `Instance.get_pixel_data`'s file arm, by `ingest_worker`
+for the top level, by `_decode_nested_pixels` for an icon (#433), by
+`_decode_pixels`' imagecodecs fallback (#416) and by #524's
+`signed_codestream_refusal`, so none of them can disagree about what a
+mismatch is.
 
-Two decoders share `_decode_frame`: `get_pixel_data`, the read path's
-fallback, which refuses a mismatch itself; and `decode_declared_frames`,
-ingest's fallback, which decodes exactly the frames its caller asks for
-because that caller has already counted the table and decided (#418's
-truncation, which a refusal here would turn into a rejected file).
+**One decoder, behind one door (#453).** `decode_declared_frames` decodes
+exactly the frames its caller asks for, because that caller --
+`io_handlers._decode_with_imagecodecs`, behind `_decode_pixels` -- has
+already counted the table and decided (#418's truncation, which a refusal
+here would turn into a rejected file). This module had a second decoder,
+`get_pixel_data`, which `Instance.get_pixel_data()` fell back to on any
+exception and which had none of the fallback's checks: it read files
+ingest refused. It is deleted; every door now decodes through
+`_decode_pixels`. Do not add a decode entry point here that skips it.
 
 **Signed samples (#446).** `ljpeg_decode` and `jpegls_decode` return the
 masked unsigned pattern of every sample; `_decode_frame` sign-extends it
 when PixelRepresentation is 1 -- from BitsStored for JPEG Lossless, from
-the stream's own precision for JPEG-LS (#478) -- so both decoders return
+the stream's own precision for JPEG-LS (#478) -- so the decode returns
 the signed values the file stores. See `_sign_extend`.
 
 **JPEG 2000 carries its own signedness (#460).** `jpeg2k_decode` returns
@@ -27,23 +31,28 @@ PixelRepresentation says, so the two can contradict each other.
 disagreement: an *unsigned* codestream under PixelRepresentation 1 is
 reinterpreted by the header, through the same `_sign_extend`, at the
 codestream's own precision; a *signed* codestream under
-PixelRepresentation 0 is refused. See `_against_pixel_representation`.
+PixelRepresentation 0 is refused, ahead of any decoder, by
+`signed_codestream_refusal` (#524). See `_against_pixel_representation`.
 
 **Colour (#464, #482).** `CONVERTS_TO` is the one table of conversions
-this handler makes (8-bit YBR_FULL JPEG-LS to RGB). `get_pixel_data`
-applies it and relabels its dataset, and ingest applies it through
-`colour_conversion` and `convert_colour`, so the read doors and ingest
-return the same bytes under the same label. `DECODER_RELABELS` is the
-other half: the conversions the codec has already made (JPEG 2000
-YBR_RCT/ICT to RGB), which `get_pixel_data` relabels without converting.
+this handler makes (8-bit YBR_FULL JPEG-LS to RGB), applied through
+`colour_conversion` and `convert_colour` by `_decode_with_imagecodecs`,
+which every door reaches. The conversions the codec has already made
+(JPEG 2000 YBR_RCT/ICT to RGB) are a relabel only, and live in
+`io_handlers._FALLBACK_PHOTOMETRICS` under `_FALLBACK_DECODER_CONVERTS`.
 
 **Its limit, stated.** An *empty* Basic Offset Table with no Extended
 Offset Table is legal (PS3.5 A.4) and names no frames, and the fragments
 alone do not say where one frame ends and the next begins -- one frame
 may legally span several fragments. So a multi-fragment file with an
-empty table cannot be checked, and it is decoded as it always was: the
-single-frame arm yields frame 0. That is a known silence, not a closed
-one.
+empty table cannot be checked. pydicom's decoder then walks the fragments
+by their codestreams' end markers and returns every frame it finds, not
+frame 0: a fragment beyond NumberOfFrames comes back as a frame the
+header does not declare, from `Instance.get_pixel_data()`, and ingest
+stores an array its geometry cannot reload, with no row (measured in the
+review of #606, F-r2-2; the same holds for an Extended Offset Table
+pydicom drops, `extended_offsets`). That is a known silence, not a
+closed one.
 """
 import struct
 import sys
@@ -122,6 +131,27 @@ JPEGBaseline = UID("1.2.840.10008.1.2.4.50")
 JPEGExtended = UID("1.2.840.10008.1.2.4.51")
 JPEGLSLossless = UID("1.2.840.10008.1.2.4.80")
 JPEGLSLossy = UID("1.2.840.10008.1.2.4.81")
+HTJ2KLossless = UID("1.2.840.10008.1.2.4.201")
+HTJ2KLosslessRPCL = UID("1.2.840.10008.1.2.4.202")
+HTJ2K = UID("1.2.840.10008.1.2.4.203")
+
+#: The syntaxes whose frames are JPEG 2000 codestreams, and so carry a
+#: SIZ marker `_j2k_sample_layout` reads, and the JPEG-LS ones, whose
+#: frame header `_jpegls_precision` reads. One set each, so the decode,
+#: the signedness gate and ingest's HighBit row cannot disagree about
+#: which files have a stream precision.
+#:
+#: **HTJ2K is a member (#459).** High-Throughput JPEG 2000 (PS3.5 A.4.11)
+#: is a JPEG 2000 codestream with another block coder: the same SOC and
+#: SIZ, so the same signedness, precision and colour transform. openjpeg's
+#: `jpeg2k_decode` reads it exactly -- mono 8/16, signed 16, RGB 8/16 with
+#: and without the reversible colour transform, at imagecodecs 2024.6.1
+#: and 2026.8.16 (measured). **Not `htj2k_decode`**: openjph returns an RGB
+#: stream written without the transform planar, `(3, rows, cols)`, the
+#: same samples in another image. Do not "use the matching codec".
+J2K_SYNTAXES = frozenset({JPEG2000Lossless, JPEG2000, HTJ2KLossless,
+                          HTJ2KLosslessRPCL, HTJ2K})
+JPEGLS_SYNTAXES = frozenset({JPEGLSLossless, JPEGLSLossy})
 
 HANDLER_NAME = "isocenter_imagecodecs_handler"
 
@@ -147,6 +177,9 @@ SUPPORTED_TRANSFER_SYNTAXES = [
     JPEGExtended,
     JPEGLSLossless,
     JPEGLSLossy,
+    HTJ2KLossless,
+    HTJ2KLosslessRPCL,
+    HTJ2K,
 ]
 
 
@@ -168,6 +201,46 @@ def supports_transfer_syntax(transfer_syntax):
 #: NumberOfFrames as the file states it -- an int, ``""`` when the element
 #: is present and empty, None when it is absent.
 FrameCount = Tuple[int, int, Optional[Union[int, str]], str]
+
+
+def extended_offsets(ds) -> Optional[Tuple[bytes, bytes]]:
+    """The Extended Offset Table exactly as pydicom's decoder walks by it.
+
+    ``(ExtendedOffsetTable, ExtendedOffsetTableLengths)``, the pair every
+    `generate_frames` call here passes as `extended_offsets=`, or None
+    when the decoder walks the fragments without one. pydicom takes the
+    table when both elements are present (`pixels.utils._as_options`)
+    and then **drops it when their lengths differ** (`DecodeRunner.
+    _validate_options`, with a warning), so both halves are asked here.
+
+    Why every walk takes it (review of #606, M1): a walk without the
+    table finds frames by searching for each codestream's end, and on a
+    file whose table and fragments disagree -- a fragment no frame names,
+    which PS3.3 C.7.6.3 does not allow under an EOT but pydicom decodes
+    by the table all the same -- that search reads different frames from
+    the ones the decoder reads. The signed-codestream gate read no sign
+    in a frame Pillow then shifted, and the fallback refused a file
+    Pillow read. A pair a mismatched table would give pydicom ignores is
+    just as much a second walk, which is why the length check is here
+    and not left to `generate_frames`.
+    """
+    # Membership first, as pydicom asks it, so a stand-in dataset that
+    # answers every attribute is not read as carrying a table. `ds.get`
+    # hands back the raw bytes rather than a DataElement (measured,
+    # pydicom 3.0.2); the `getattr` takes either. An empty table names no
+    # frame, and is read as none.
+    if ("ExtendedOffsetTable" not in ds
+            or "ExtendedOffsetTableLengths" not in ds):
+        return None
+    eot = ds.get("ExtendedOffsetTable")
+    lengths = ds.get("ExtendedOffsetTableLengths")
+    eot = getattr(eot, "value", eot)
+    lengths = getattr(lengths, "value", lengths)
+    if (not isinstance(eot, (bytes, bytearray))
+            or not isinstance(lengths, (bytes, bytearray))
+            or not eot or len(eot) != len(lengths)):
+        return None
+    return bytes(eot), bytes(lengths)
 
 
 def offset_table_frame_count(ds) -> Optional[FrameCount]:
@@ -235,6 +308,14 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     # frame, one 64-bit offset each. `ds.get` hands back the raw bytes
     # here rather than a DataElement (measured, pydicom 3.0.2); the
     # `getattr` takes either, so neither shape reads as "no table".
+    #
+    # **Counted even when its Lengths disagree**, deliberately unlike the
+    # walks (`extended_offsets`). pydicom drops such a table and walks the
+    # fragments, and under NumberOfFrames 1 that walk returns frame 0 and
+    # never mentions frame 1; counted from the table, ingest keeps frame 0
+    # and says it discarded one (measured, dev-F1/m1_count_*.raw). Read
+    # through the walks' rule instead, the row went and frame 1 was lost
+    # in silence. The count decides whether to report; it walks nothing.
     eot = ds.get("ExtendedOffsetTable")
     if eot:
         eot_bytes = getattr(eot, "value", eot)
@@ -303,10 +384,9 @@ def frame_count_mismatch_words(counted: FrameCount) -> str:
 #: applies (#372). pydicom with pyjpegls returns the same bytes for these
 #: files and labels them RGB (measured).
 #:
-#: **Every door converts through this one table.** Ingest
-#: (`io_handlers._decode_with_imagecodecs`) and both read doors (this
-#: module's `get_pixel_data`, and so `Instance.get_pixel_data()`) all
-#: read it. Until #464, ingest converted for itself, and the read doors
+#: **Every door converts through this one table**, by way of
+#: `io_handlers._decode_with_imagecodecs` (#453). Until #464, ingest
+#: converted for itself, and the read doors
 #: returned the YBR samples while the file's label still said YBR_FULL:
 #: one file, two answers. JPEG 2000's YBR rows are not here, because
 #: `jpeg2k_decode` has already converted them
@@ -318,35 +398,23 @@ CONVERTS_TO = {
     str(JPEGLSLossy): {"YBR_FULL": "RGB"},
 }
 
-#: The declared colour spaces whose decode *the codec* has already
-#: converted, per syntax, and the label its output is in (#482). A
-#: relabel with no conversion, which is why these rows are not in
-#: `CONVERTS_TO`: `convert_colour` would hand `YBR_RCT` to
-#: `convert_color_space`, which has no such conversion, and ingest reads
-#: `CONVERTS_TO` too. `jpeg2k_decode` undoes the codestream's colour
-#: transform and returns RGB, at 8 and 16 bits (#448's measurement,
-#: `io_handlers._FALLBACK_DECODER_CONVERTS`). Until #482 this handler
-#: returned that RGB with `ds` still saying `YBR_RCT`, so a hand-built
-#: instance read through it kept `YBR_RCT` over RGB bytes and exported
-#: them so. No depth gate, unlike `colour_conversion`: the codec converts
-#: at every depth it decodes.
-#: `test_the_handler_relabels_exactly_the_rows_ingest_relabels_without_converting`
-#: holds this table to `io_handlers._FALLBACK_PHOTOMETRICS`.
-DECODER_RELABELS = {
-    str(JPEG2000Lossless): {"YBR_RCT": "RGB", "YBR_ICT": "RGB"},
-    str(JPEG2000): {"YBR_RCT": "RGB", "YBR_ICT": "RGB"},
-}
+#: No second table of label-only relabels here (#453). `DECODER_RELABELS`
+#: named the rows `jpeg2k_decode` converts itself (YBR_RCT/ICT to RGB) for
+#: this module's `get_pixel_data`, which relabelled its dataset from it;
+#: with that door gone its only reader went too, and the one table is
+#: `io_handlers._FALLBACK_PHOTOMETRICS` under `_FALLBACK_DECODER_CONVERTS`.
+#: Rows cannot be put in `CONVERTS_TO` instead: `convert_colour` would
+#: hand `YBR_RCT` to `convert_color_space`, which has no such conversion.
 
 
 def colour_conversion(ds) -> Optional[Tuple[str, str]]:
     """`(declared, converted)` when this handler converts `ds`'s decode.
 
     None when there is nothing to convert. None, too, when the frame is
-    not 8-bit. `convert_color_space` refuses `uint16`, and whether 16-bit
-    YBR_FULL is converted here or recorded as a limit is #461, left open
-    by #464 on the owner's instruction. So a 16-bit frame is returned as
-    stored, under its own YBR_FULL label, which is true of it. (Ingest
-    refuses it before this is asked, naming the depth.)
+    not 8-bit: `convert_color_space` refuses `uint16`, and #461's ruling
+    (Q5) records 16-bit YBR_FULL as a limit rather than a conversion.
+    `io_handlers._decode_with_imagecodecs` refuses such a frame before
+    this is asked, naming the depth, at every door (#453).
 
     Raises:
         RuntimeError: before any decode, for a signed (PixelRepresentation
@@ -518,8 +586,9 @@ def _sign_extend(arr, ds, precision=None):
     `_against_pixel_representation` passes the codestream's own precision
     (#460). A *signed* J2K codestream never reaches here --
     `jpeg2k_decode` has already returned signed, sign-extended samples,
-    and extending them again would raise on the dtype check below. That
-    is pydicom's split too: `_apply_sign_correction` shifts a J2K decode
+    which this would return unchanged (there is no dtype refusal below
+    since #523: nothing that reaches here is signed). That is pydicom's
+    split too: `_apply_sign_correction` shifts a J2K decode
     only when the codestream's signedness and PixelRepresentation
     disagree.
 
@@ -532,26 +601,17 @@ def _sign_extend(arr, ds, precision=None):
         return arr
     bits = arr.dtype.itemsize * 8
     bits_stored = int(getattr(ds, "BitsStored", bits) or bits)
-    # Owner question Q1, answered with the recommendation pending
-    # confirmation: refuse. A JPEG decoder returns right-aligned
-    # BitsStored-bit samples, so HighBit other than BitsStored - 1
-    # describes a layout no decode produces, and each other reading
-    # (ignore it as pydicom does, or shift from HighBit) can return a
-    # wrong value. Inside the signed branch only: an unsigned frame is
-    # returned untouched, as pydicom returns it. Skipped when HighBit is
-    # absent. This block is the whole of Q1; delete it to reverse it.
-    high_bit = getattr(ds, "HighBit", None)
-    if high_bit is not None and int(high_bit) != bits_stored - 1:
-        raise RuntimeError(
-            f"HighBit {int(high_bit)} with BitsStored {bits_stored}: a JPEG "
-            f"decode returns right-aligned {bits_stored}-bit samples, so a "
-            f"signed sample is sign-extended from BitsStored only when "
-            f"HighBit is BitsStored - 1")
-    if arr.dtype.kind != "u" or not 1 <= bits_stored <= bits:
-        raise RuntimeError(
-            f"cannot sign-extend a {arr.dtype} decode from BitsStored "
-            f"{bits_stored}: the codec returns unsigned samples at most "
-            f"{bits} bits wide")
+    # No HighBit check here, deliberately (#455, #523; owner rulings Q2
+    # and Q3). There was one, #446's Q1: a signed frame whose HighBit was
+    # not BitsStored - 1 was refused, in words claiming a sign extension
+    # "from BitsStored" -- false on the JPEG-LS and JPEG 2000 routes,
+    # which extend from the stream's precision. HighBit is an input to no
+    # decoder here, and whether the refusal fired depended on the sign
+    # bit, while the same header over an unsigned frame was read in
+    # silence. A header rule now asks the question for every route, and
+    # answers it with a WARNING row at ingest:
+    # `io_handlers._high_bit_mismatch`. Do not put a refusal back here: it
+    # would refuse on one route what every other route reads.
     # The stream's precision where it has one, not BitsStored (#478, the
     # owner's ruling, reversing the BitsStored reading #463 shipped). The
     # two agree for every conformant encoder. `imagecodecs.jpegls_encode`
@@ -559,21 +619,31 @@ def _sign_extend(arr, ds, precision=None):
     # precision-16 stream, and pydicom with pyjpegls reads that stream by
     # its precision: 3296 for -800's pattern. A stream narrower than
     # BitsStored (precision 12 under BitsStored 16) is read by its 12 bits
-    # the same way, -800. The BitsStored check above stays even so. A
-    # precision-8 stream under BitsStored 12 and BitsAllocated 16 reaches
-    # here already widened to `uint16` (`_in_declared_container`, #454),
-    # so it is extended from 8 inside `int16`, pydicom's answer. Until
-    # #454 it arrived as `uint8`, and every door refused it. The check
-    # above is now for a container that cannot hold BitsStored at all:
-    # BitsStored 12 under BitsAllocated 8, which S6 pins.
+    # the same way, -800. A precision-8 stream under BitsStored 12 and
+    # BitsAllocated 16 reaches here already widened to `uint16`
+    # (`_in_declared_container`, #454), so it is extended from 8 inside
+    # `int16`, pydicom's answer.
     width = precision or bits_stored
     if not 1 <= width <= bits:
-        # Unreachable for a stream CharLS decoded: it returns a container
-        # at least as wide as the precision it read. Here so that a
-        # misread header raises rather than shifting by a negative count.
+        # A width the container cannot hold: the shift below would be
+        # negative. One guard, naming where the width came from. There
+        # were two until #523, and neither could fire alone: the first
+        # also refused a *signed* decode, which never reaches here (lj92
+        # and CharLS return unsigned patterns, and a signed JPEG 2000
+        # codestream is already signed), and refused BitsStored above
+        # the container, which pydicom's validation now refuses before
+        # any decode (#453) unless the container is one nothing widens --
+        # a precision-8 JPEG Lossless stream under BitsAllocated 32,
+        # BitsStored 12, the header
+        # `test_a_jpeg_lossless_stream_narrower_than_bits_stored_is_refused_not_shifted`
+        # reaches this with. CharLS and openjpeg return a container at
+        # least as wide as the precision they read, so a precision width
+        # reaches here only from a misread header.
+        source = ("its stream's precision" if precision
+                  else "BitsStored")
         raise RuntimeError(
-            f"cannot sign-extend a {arr.dtype} decode from its stream's "
-            f"precision {width}")
+            f"cannot sign-extend a {arr.dtype} decode from {source} "
+            f"{width}: the codec returns samples at most {bits} bits wide")
     shift = bits - width
     # Shift left while unsigned, reinterpret, then shift right while
     # signed: numpy's `>>` is arithmetic on a signed dtype and logical on
@@ -582,11 +652,12 @@ def _sign_extend(arr, ds, precision=None):
 
 
 def _in_declared_container(arr, ds):
-    """A JPEG Lossless or JPEG-LS decode, in the container the header declares (#454).
+    """A JPEG decode, in the container the header declares (#454, #523).
 
-    lj92, libjpeg-turbo and CharLS return the narrowest container that
-    holds the stream's precision: `uint8` for a precision of 8 or less,
-    whatever BitsAllocated says. So a precision-8 stream under
+    lj92, libjpeg-turbo, CharLS and openjpeg return the narrowest
+    container that holds the stream's precision: `uint8` for a precision
+    of 8 or less, whatever BitsAllocated says -- `int8` from openjpeg when
+    a JPEG 2000 codestream is signed. So a precision-8 stream under
     BitsAllocated 16 came back as `uint8` (or `int8`, once
     `_sign_extend` had it) from both read doors, with the right values,
     while ingest's dtype guard refused the same file against
@@ -596,19 +667,30 @@ def _in_declared_container(arr, ds):
     pylibjpeg-libjpeg raises on these files, so there the doors agree with
     each other and not with pydicom.
 
-    Exact, since every 8-bit sample fits in 16 bits. Called before
-    `_sign_extend`, so a signed sample is sign-extended inside the
-    declared container rather than the codec's. A stream of precision 8
-    under BitsStored 12 then reads as pydicom reads it, where it used to be
-    refused at every door.
+    Exact, since every 8-bit sample fits in 16 bits, so it writes no row
+    and logs nothing (#523's ruling). Called before `_sign_extend`, so a
+    signed sample is sign-extended inside the declared container rather
+    than the codec's. A stream of precision 8 under BitsStored 12 then
+    reads as pydicom reads it, where it used to be refused at every door.
 
-    It only widens, and only a `uint8` decode under BitsAllocated 16. A
+    **JPEG 2000 since #523.** The J2K arm did not call this, so a
+    precision-8 codestream under BitsAllocated 16 was refused by the
+    fallback and read by Pillow, and the handler returned `uint8`. Its
+    `int8` arm is JPEG 2000's alone: lj92 and CharLS return unsigned
+    patterns, and `_sign_extend` makes the signed dtype after this call.
+    A signed codestream is widened with its sign, which is Pillow's
+    `int16` answer (measured).
+
+    It only widens, and only an 8-bit decode under BitsAllocated 16. A
     decode wider than its container, a precision-16 stream under
     BitsAllocated 8, is left alone, so the dtype guard still refuses it.
     Read with `getattr`, never `ds.get`, for `_sign_extend`'s reason.
     """
-    if arr.dtype == np.uint8 and int(getattr(ds, "BitsAllocated", 0) or 0) == 16:
-        return arr.astype(np.uint16)
+    if int(getattr(ds, "BitsAllocated", 0) or 0) == 16:
+        if arr.dtype == np.uint8:
+            return arr.astype(np.uint16)
+        if arr.dtype == np.int8:
+            return arr.astype(np.int16)
     return arr
 
 
@@ -641,9 +723,10 @@ def _against_pixel_representation(arr, ds, layout):
     reinterpreted: for `[-32768, -800, -1]`, `uint16 [0, 31968, 32767]`
     with Pillow and `uint16 [32768, 64736, 65535]` with
     pylibjpeg-openjpeg (measured). Two plugins, two arrays, neither of
-    them the file's samples. `ingest()`'s dtype guard already refused
-    such a file (`it decoded to int16, where ... declare uint16`), so
-    refusing here is what makes the three doors say one thing.
+    them the file's samples. Since #524 the refusal is made ahead of any
+    decoder, by `signed_codestream_refusal` in `io_handlers._decode_pixels`,
+    so every door says one thing; the raise below is its twin for this
+    module's own decode.
 
     A `layout` of None -- a codestream whose SIZ did not parse, which no
     decode reaches -- returns the array untouched, the answer every door
@@ -656,18 +739,91 @@ def _against_pixel_representation(arr, ds, layout):
     if codestream_signed == declared_signed:
         return arr
     if codestream_signed:
-        raise RuntimeError(
-            f"the JPEG 2000 codestream is signed at precision {precision}, "
-            f"where PixelRepresentation 0 declares unsigned samples: "
-            f"`jpeg2k_decode` returns the codestream's own signedness, and "
-            f"there is no unsigned reading of these samples this handler "
-            f"can stand behind -- pydicom returns a different array for "
-            f"such a file with each of its two JPEG 2000 plugins")
+        # Unreachable through `io_handlers._decode_pixels`, whose
+        # `signed_codestream_refusal` gate refuses the file before any
+        # decoder is asked (#524). Kept for `decode_declared_frames`
+        # called alone, in the gate's own words.
+        raise RuntimeError(signed_codestream_words(precision))
     # Unsigned codestream under PixelRepresentation 1. `_sign_extend`
     # reads that 1 for itself and would return the array untouched under
     # any other value, which is why the branch above cannot fall through
     # to it.
     return _sign_extend(arr, ds, precision)
+
+
+def signed_codestream_words(precision) -> str:
+    """The one spelling of the signed-codestream refusal (#460, #524)."""
+    return (f"the JPEG 2000 codestream is signed at precision {precision}, "
+            f"where PixelRepresentation 0 declares unsigned samples: no "
+            f"decoder here returns these samples unsigned -- Pillow shifts "
+            f"them by 2^(precision-1), pylibjpeg-openjpeg returns their bit "
+            f"patterns, and `jpeg2k_decode` returns them signed -- so there "
+            f"is no unsigned reading of this file to stand behind")
+
+
+def signed_codestream_refusal(ds) -> Optional[str]:
+    """The refusal for a signed JPEG 2000 codestream under PixelRepresentation 0 (#524).
+
+    None when there is nothing to refuse: the syntax is not JPEG 2000,
+    PixelRepresentation is not 0, or no declared frame's SIZ says signed.
+    None, too, when PixelRepresentation is absent, empty or not an
+    integer: the words cite "PixelRepresentation 0", which such a file
+    never wrote, and pydicom's own validation refuses it in words that
+    name the element (a Type 1 element, PS3.3 C.7.6.3).
+    `io_handlers._decode_pixels` raises the words **before pydicom is
+    asked**, which is the point. pydicom's Pillow plugin decodes such a
+    file at monochrome depths and 8-bit colour and returns the samples
+    shifted by 2^(bits-1) -- `[-32768, -800, -1]` as `uint16 [0, 31968,
+    32767]` -- with no error, so ingest stored the shift and only the
+    handler refused. Asked of the SIZ, it is one answer whichever decoder
+    would have run.
+
+    **Every declared frame, and only those.** A frame is a codestream, and
+    one frame's header does not speak for another's samples. An excess
+    frame the offset table names beyond NumberOfFrames is not read: ingest
+    drops it with its #418 row, and its sign is not a reason to refuse the
+    frames it keeps. The count is `offset_table_frame_count`'s reading.
+    **That is only an excess the count reports.** A fragment beyond
+    NumberOfFrames that no table names -- an empty offset table, or an
+    Extended one pydicom drops -- is not read here either, but pydicom's
+    walk decodes it as a further frame, Pillow shifts it if it is signed,
+    and nothing drops it: see the module docstring's limit (review of
+    #606, F-r2-2).
+
+    **It never raises of its own.** A buffer `generate_frames` cannot walk,
+    or a frame whose SIZ does not parse (`_j2k_sample_layout` returns
+    None), has no sign to read: the decoder that runs next refuses it in
+    its own words, as it did before this gate.
+
+    **The frames the decoder reads.** Walked with the Extended Offset
+    Table when pydicom's decoder walks with it (`extended_offsets`), so
+    a fragment no frame names cannot join a signed codestream and hide
+    its SIZ (review of #606, M1).
+
+    Cost: one transient copy of each declared frame's bytes
+    (`generate_frames` joins its fragments), and a read of its first
+    43.
+    """
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    if ts not in J2K_SYNTAXES:
+        return None
+    try:
+        if int(ds.PixelRepresentation) != 0:
+            return None
+        counted = offset_table_frame_count(ds)
+        declared = (counted[1] if counted is not None
+                    else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
+        for frame in islice(generate_frames(ds.PixelData,
+                                            number_of_frames=declared,
+                                            extended_offsets=extended_offsets(ds)),
+                            declared):
+            layout = _j2k_sample_layout(frame)
+            if layout is not None and layout[0]:
+                return signed_codestream_words(layout[1])
+    except Exception:  # pylint: disable=broad-except
+        # Not this gate's refusal to make: see the docstring.
+        return None
+    return None
 
 
 def _decode_frame(transfer_syntax, bitstream, ds):
@@ -695,14 +851,52 @@ def _decode_frame(transfer_syntax, bitstream, ds):
             _in_declared_container(imagecodecs.ljpeg_decode(bitstream), ds),
             ds)
     if transfer_syntax in [JPEGBaseline, JPEGExtended]:
+        # Reached through the fallback since #604, monochrome only
+        # (`io_handlers._FALLBACK_JPEG`): 12-bit JPEG Extended, which
+        # Pillow refuses. No container widening and no sign extension:
+        # pydicom applies neither to these syntaxes, and a decode that
+        # disagrees with BitsAllocated or PixelRepresentation is refused
+        # by the fallback's dtype check.
+        #
+        # **A stream that does not end in EOI is refused first** (review
+        # of #606, M-r2-1). libjpeg-turbo treats a premature end of data
+        # as a warning and fills the rest of the image with mid-grey --
+        # 128, or 2048 at 12 bits -- so a file cut short decoded to rows
+        # it never held, passed every check after the decode, and was
+        # stored with no row: for an 8-bit file, over Pillow's own
+        # "image file is truncated". Trailing 0x00 and 0xFF are padding:
+        # an item is padded to even length, and DCMTK writes `ff d9 ff`
+        # (pydicom's `JPEG-lossy.dcm`). Every `.50`/`.51` file in
+        # pydicom's test data and every `jpeg8_encode` stream measured
+        # ends in EOI. A stream closed with EOI after data lost from its
+        # middle still decodes with the fill; that is the mid-stream
+        # limit `docs/installation.md` states.
+        if not bytes(bitstream).rstrip(b"\x00\xff").endswith(b"\xff\xd9"):
+            raise ValueError(
+                "the JPEG stream ends without an EOI marker, so it was cut "
+                "short: libjpeg-turbo would fill the missing rows with "
+                "mid-grey")
         return imagecodecs.jpeg_decode(bitstream)
-    if transfer_syntax in [JPEG2000Lossless, JPEG2000]:
+    if transfer_syntax in J2K_SYNTAXES:
+        # HTJ2K included, through `jpeg2k_decode`: see `J2K_SYNTAXES`.
+        #
         # The codestream's own SIZ header, per frame, for the same reason
         # the JPEG-LS branch below reads its own: a frame is a codestream
         # and one frame's header does not speak for another's samples.
+        #
+        # In the declared container first, as the other JPEG arms are
+        # (#523). openjpeg returns `uint8` or `int8` for a precision of 8
+        # or less whatever BitsAllocated says, and Pillow, at pydicom's
+        # door, returns the same samples in 16 bits. Without the widening
+        # the fallback refused such a file against BitsAllocated 16, or
+        # could not sign-extend an unsigned one from its precision, while
+        # pydicom read it: an answer that depended on which plugins were
+        # installed. Before `_against_pixel_representation`, so an
+        # unsigned precision-8 stream under PixelRepresentation 1 is
+        # extended inside `uint16`, which is Pillow's `int16` answer.
         return _against_pixel_representation(
-            imagecodecs.jpeg2k_decode(bitstream), ds,
-            _j2k_sample_layout(bitstream))
+            _in_declared_container(imagecodecs.jpeg2k_decode(bitstream), ds),
+            ds, _j2k_sample_layout(bitstream))
     if transfer_syntax in [JPEGLSLossless, JPEGLSLossy]:
         # Each frame's own precision, parsed from its own header: a frame
         # is a codestream, and one frame's header does not speak for
@@ -723,8 +917,9 @@ def decode_declared_frames(ds, number_of_frames):
     its caller has already asked `offset_table_frame_count` and decided --
     refuse fewer, drop an excess only when told to -- and a second check
     here would refuse the excess #418 truncates, rejecting a file ingest
-    means to keep. `get_pixel_data` below is the one that refuses a
-    mismatch; this is not a second spelling of it.
+    means to keep. The refusal of a mismatch is
+    `_decode_with_imagecodecs`', and `Instance.get_pixel_data()`'s through
+    `frame_count_mismatch`; this is not a third spelling of it.
 
     `islice`, because `generate_frames(buf, number_of_frames=1)` yields
     every frame a populated Basic Offset Table names, not one (measured,
@@ -740,171 +935,7 @@ def decode_declared_frames(ds, number_of_frames):
     frames = [_decode_frame(transfer_syntax, bitstream, ds)
               for bitstream in islice(
                   generate_frames(ds.PixelData,
-                                  number_of_frames=number_of_frames),
+                                  number_of_frames=number_of_frames,
+                                  extended_offsets=extended_offsets(ds)),
                   number_of_frames)]
     return frames[0] if number_of_frames == 1 else np.stack(frames)
-
-
-def get_pixel_data(ds):
-    """
-    Decodes pixel data from an encapsulated dataset using `imagecodecs`.
-
-    Handles the transfer syntaxes in `SUPPORTED_TRANSFER_SYNTAXES` --
-    JPEG, JPEG Lossless, JPEG 2000 and JPEG-LS, not RLE (#447) -- and
-    encapsulated bitstreams (fragments).
-
-    Args:
-        ds (pydicom.Dataset): The dataset containing PixelData.
-
-    Returns:
-        np.ndarray: The decoded pixel array. A signed (PixelRepresentation
-        1) JPEG Lossless or JPEG-LS frame comes back signed (#446), where
-        it used to come back as its unsigned bit pattern: sign-extended
-        from BitsStored for JPEG Lossless, and from each JPEG-LS frame's
-        own precision (#478). A JPEG Lossless or JPEG-LS stream of
-        precision 8 or less under BitsAllocated 16 comes back in that
-        16-bit container, `uint16` or `int16` (#454), where it came back
-        `uint8` or `int8`. An 8-bit YBR_FULL JPEG-LS frame comes back
-        converted to RGB, **and `ds.PhotometricInterpretation` is set to
-        `RGB`** (#464): this mutates the dataset it is given, so the label
-        stays true of the bytes. A JPEG 2000 `YBR_RCT` or `YBR_ICT` frame,
-        which the codec returns as RGB, is relabelled `RGB` the same way
-        (#482), at any depth. An *unsigned* JPEG 2000 codestream under
-        PixelRepresentation 1 comes back reinterpreted by the header, from
-        the codestream's own precision, where it came back as the codec's
-        unsigned array (#460): pydicom's `J2K_pixelrep_mismatch.dcm` reads
-        `int16 -2000`, as it does at pydicom's own door.
-
-    Raises:
-        RuntimeError: If imagecodecs is missing (naming the import
-            failure, #444) or decoding fails, or if
-            the offset table names a different number of frames from
-            NumberOfFrames (#418) -- "<table> names N frames;
-            NumberOfFrames declares M". Before any decode, for a signed
-            8-bit YBR_FULL JPEG-LS frame -- "its declared colour space
-            'YBR_FULL' is signed 8-bit, ..." (#464). For a *signed* JPEG
-            2000 codestream under PixelRepresentation 0 -- "the JPEG 2000
-            codestream is signed at precision P, where PixelRepresentation
-            0 declares unsigned samples ..." (#460).
-    """
-    if not is_available():
-        raise _unavailable() from IMPORT_ERROR
-
-    transfer_syntax = ds.file_meta.TransferSyntaxUID
-    pixel_bytes = ds.PixelData
-
-    # Before either arm, and outside the `try` below, so the refusal
-    # reaches the caller in its own words rather than prefixed with
-    # "imagecodecs failed to decode". Both arms trust NumberOfFrames:
-    # the single-frame arm asks for one frame and so returned frame 0 of
-    # a two-frame table, and the multi-frame arm returned whatever the
-    # table held -- a silent short read when it named fewer (#418).
-    mismatch = frame_count_mismatch(ds)
-    if mismatch is not None:
-        raise RuntimeError(mismatch)
-    # Also before the decode and outside the `try`, for the same reason:
-    # a signed 8-bit YBR_FULL frame is refused in its own words (#464).
-    conversion = colour_conversion(ds)
-    # The label the codec's own output is in, where it undid a colour
-    # transform (#482). Looked up here, applied only after the decode.
-    decoded_label = DECODER_RELABELS.get(str(transfer_syntax), {}).get(
-        str(getattr(ds, "PhotometricInterpretation", "") or ""))
-
-    # Handle encapsulated data (fragments)
-
-    try:
-        num_frames = getattr(ds, 'NumberOfFrames', 1)
-
-        # Multi-Frame Handling
-        if num_frames > 1 and ds.file_meta.TransferSyntaxUID.is_encapsulated:
-
-            # generate_frames handles BOT and fragments logic
-            frames = []
-            for frame_bitstream in generate_frames(ds.PixelData, number_of_frames=num_frames):
-                decoded = _decode_frame(transfer_syntax, frame_bitstream, ds)
-                frames.append(decoded)
-
-            arr = np.array(frames)
-
-        # Single-Frame Handling
-        else:
-            if ds.file_meta.TransferSyntaxUID.is_encapsulated:
-                # `generate_fragments` yields EVERY item of the
-                # encapsulated pixel data, and the first item is the
-                # Basic Offset Table (PS3.5 A.4). Joining them therefore
-                # prefixed the codestream with the BOT's own bytes -- four
-                # zeros ahead of `ff4f ff51` for a single-frame file --
-                # and `imagecodecs` refused the result with `not a J2K or
-                # JP2 data stream`, so this arm had never decoded
-                # anything. It failed identically on the JP2 container
-                # this project wrote before #404, so it is not that
-                # container's fault and predates it (#407).
-                #
-                # Only a *populated* offset table breaks the join, which
-                # is why nothing noticed: with an empty table the join is
-                # accidentally correct. `pydicom.encaps.encapsulate`
-                # writes a populated one by default and `_compress_j2k`
-                # calls it that way, so every file this project
-                # compresses hit it -- and a hand-built
-                # `item(b"") + item(codestream)` fixture would pass
-                # without this fix.
-                #
-                # `generate_frames` is what the multi-frame arm above
-                # already uses, and it is the right answer here for a
-                # second reason as well as the BOT: one frame may legally
-                # be split across several fragments, so "take the last
-                # fragment" would decode the tail of such a frame.
-                frames = list(generate_frames(pixel_bytes,
-                                              number_of_frames=1))
-                if not frames:
-                    # Unreachable against pydicom 3.x, and kept anyway as
-                    # a pin on its contract rather than on a log line
-                    # anyone will read. Measured: `generate_frames(buf,
-                    # number_of_frames=1)` yields at least one frame for
-                    # every buffer that parses at all -- an empty offset
-                    # table alone, an empty table plus an empty fragment,
-                    # and a populated table alone all come back as
-                    # `[b""]` -- and a buffer too short to parse raises
-                    # `struct.error` above this line instead. So `frames`
-                    # is never `[]` today. What this costs is one branch;
-                    # what it buys is that if that contract ever changes,
-                    # the log says which dataset had no frame instead of
-                    # `IndexError: list index out of range`. Do not
-                    # write a test for it: there is no input that reaches
-                    # it (#407).
-                    raise RuntimeError(
-                        "encapsulated PixelData holds no frame")
-                codestream = frames[0]
-            else:
-                codestream = pixel_bytes
-
-            arr = _decode_frame(transfer_syntax, codestream, ds)
-
-        if conversion is not None:
-            # The conversion ingest makes, by the same table (#464). Inside
-            # the `try`, so a decode in a shape the conversion cannot read
-            # is refused as a decode failure.
-            arr = convert_colour(arr, conversion)
-
-    except Exception as e:
-        print(
-            f"[isocenter_imagecodecs_handler] Decode error for {transfer_syntax}: {describe_exception(e)}",
-            file=sys.stderr)
-        raise RuntimeError(f"imagecodecs failed to decode {transfer_syntax}: {e}") from e
-
-    if conversion is not None:
-        # Converted, so say so: RGB bytes under the file's YBR_FULL label
-        # would be #372's defect at this door. Relabelled only after the
-        # conversion succeeded, so a refusal leaves `ds` as it was.
-        # `Instance.get_pixel_data()` reads this change to relabel the
-        # instance. Do not drop it as a side effect nobody asked for: it
-        # is the only way the door says the bytes changed colour space.
-        ds.PhotometricInterpretation = conversion[1]
-    elif decoded_label is not None:
-        # The codec converted rather than this handler, and the label
-        # follows it just the same (#482). After the `try`, for the reason
-        # above: a JPEG 2000 decode that fails leaves `ds` saying what it
-        # said. Relabel before the decode and a failed read leaves RGB on
-        # a dataset nothing was decoded from.
-        ds.PhotometricInterpretation = decoded_label
-    return arr

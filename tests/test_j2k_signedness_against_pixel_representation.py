@@ -29,27 +29,18 @@ codestream's `[-32768, -800, -1]`, pydicom 3.0.2 with Pillow returns
 64736, 65535]` (measured). Two plugins, two arrays, neither of them the
 file's samples.
 
-**The refusal's reach is narrower than the reinterpretation's, and
-`test_which_doors_refuse_a_signed_codestream_under_pixel_representation_0`
-is the measurement.** Only a codestream Pillow cannot decode reaches the
-imagecodecs fallback from all three doors, and that is *16-bit colour*
-alone. For 16-bit colour, ingest's fallback already refused the file (`it
-decoded to int16, where BitsAllocated 16 and PixelRepresentation 0 declare
-uint16`), so refusing at the handler makes all three doors say one thing.
-For **monochrome at any depth and for 8-bit colour**, Pillow decodes the
-file first (#416 is pydicom-first), so `ingest()` admits it and the
-Instance door returns Pillow's reading -- the codestream's samples with
-the top bit flipped, `source + 2**(bits-1)` exactly -- and only the
-handler refuses. Those files therefore carry **two** answers, and the
-refusal is what creates the disagreement at that one door rather than
-what resolves it. That is a deliberate, measured limit of option C, not
-an oversight: gating pydicom's J2K decode on the SIZ header at ingest is
-a separate design call the owner is deciding.
-
-Monochrome and 8-bit colour J2K are decoded by pydicom's Pillow plugin at
-ingest and at the Instance door, so for those only the handler is asked
-here. 16-bit colour, which Pillow cannot decode, reaches the imagecodecs
-doors from all three, and is asked at all three. The real file is asked at
+**The refusal reaches every door since #524.** Until then only a
+codestream Pillow cannot decode -- 16-bit colour -- reached the refusal
+from all three doors. For monochrome at any depth and for 8-bit colour,
+Pillow decoded the file first (#416 is pydicom-first), so `ingest()`
+admitted it and the Instance door returned Pillow's reading, the
+codestream's samples with the top bit flipped, while only the handler
+refused: two answers. The owner's ruling on #524 (Q4) is a gate on the
+SIZ ahead of pydicom, in `io_handlers._decode_pixels`, so every door
+refuses every shape in one set of words;
+`test_every_door_refuses_a_signed_codestream_under_pixel_representation_0`
+is the measurement, and pydicom's own shifted reading is asserted beside
+it as what the gate keeps out. The real file is asked at
 all three too, because its answer is the same at all three. Every value
 assertion is against a module literal or against pydicom's own array.
 """
@@ -68,6 +59,7 @@ from pydicom.uid import generate_uid
 from isocenter import imagecodecs_handler
 from isocenter.entities import Instance
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
 
@@ -186,10 +178,14 @@ def test_the_handler_refuses_a_signed_codestream_under_pixel_representation_0(
 
     Mutant: `_decode_frame`'s JPEG 2000 branch without the check. Every
     case goes red, returning the signed array.
+
+    Asked of `decode_declared_frames`, the handler's decode, directly:
+    every door refuses this file at #524's gate before any decoder runs,
+    so this is the one call that still reaches the handler's own raise.
     """
     ds = _dataset(_REFUSED_AT_THE_HANDLER[name], 0)
     with pytest.raises(RuntimeError) as caught:
-        imagecodecs_handler.get_pixel_data(ds)
+        imagecodecs_handler.decode_declared_frames(ds, 1)
     words = str(caught.value)
     assert REFUSAL in words, words
     assert "PixelRepresentation 0" in words, words
@@ -217,7 +213,7 @@ def test_a_signed_16_bit_colour_codestream_under_pixel_representation_0_is_refus
             ("instance", lambda: Instance(
                 generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
                 file_path=path).get_pixel_data()),
-            ("handler", lambda: imagecodecs_handler.get_pixel_data(
+            ("decode_pixels", lambda: through_the_fallback(
                 pydicom.dcmread(path)))):
         with pytest.raises(RuntimeError) as caught:
             read()
@@ -225,12 +221,12 @@ def test_a_signed_16_bit_colour_codestream_under_pixel_representation_0_is_refus
 
 
 # ---------------------------------------------------------------------------
-# B1: which doors the refusal actually reaches
+# B1: the refusal reaches every door (#524)
 # ---------------------------------------------------------------------------
 
-#: The shapes Pillow decodes, so ingest and the Instance door never reach
-#: the handler's refusal. 16-bit colour is deliberately absent: Pillow
-#: cannot decode it, so it is refused at all three doors and
+#: The shapes Pillow decodes, which ingest and the Instance door used to
+#: admit with Pillow's shifted reading. 16-bit colour is absent: Pillow
+#: cannot decode it, so it was refused at all three doors already and
 #: `test_a_signed_16_bit_colour_codestream_..._refused_at_all_three_doors`
 #: is its case.
 _PILLOW_STILL_READS = {
@@ -239,50 +235,47 @@ _PILLOW_STILL_READS = {
 
 
 @pytest.mark.parametrize("name", list(_PILLOW_STILL_READS))
-def test_which_doors_refuse_a_signed_codestream_under_pixel_representation_0(
+def test_every_door_refuses_a_signed_codestream_under_pixel_representation_0(
         tmp_path, name):
-    """Two answers, not one, for every shape Pillow can decode (B1).
+    """One answer, a refusal, for every shape Pillow can decode (B1, #524).
 
-    This pins the **limit** of option C's refusal half rather than the
-    refusal itself, because nothing else in the suite does and the
-    changelog claimed a scope the code does not have. `ingest()` and
-    `Instance.get_pixel_data()` go through pydicom first (#416), and
-    Pillow decodes monochrome at any depth and 8-bit colour. So for these
-    shapes the file still ingests, with **no error and no `DATA_LOSS`
-    row**, carrying Pillow's reading: the codestream's samples with the
-    sign bit flipped, which is `source + 2**(bits-1)` exactly and is not
-    the file's values. Only `imagecodecs_handler.get_pixel_data()`
-    refuses.
-
-    A reader deciding whether their file is affected needs this: the
-    refusal is at every door only for 16-bit colour.
-
-    If a later change gates pydicom's J2K decode on the SIZ header at
-    ingest, this test goes red at `summary.ingested`, which is the point
-    -- that is the open design call, and this records today's answer so
-    the change is visible rather than silent.
+    This pinned the **limit** of #460's refusal: `ingest()` and
+    `Instance.get_pixel_data()` go through pydicom first (#416), Pillow
+    decodes monochrome at any depth and 8-bit colour, and so these files
+    ingested with no error and no row, carrying Pillow's reading -- the
+    codestream's samples with the sign bit flipped, `source + 2**(bits-1)`
+    exactly, not the file's values -- while only the handler refused. It
+    said that it would go red at `summary.ingested` if the SIZ were ever
+    gated ahead of pydicom. #524 did that (Q4), so it is inverted: every
+    door refuses, in the same words, and pydicom's own reading is still
+    asserted, as the shift the gate keeps out of the store.
     """
     arr = _PILLOW_STILL_READS[name]
     ds = _dataset(arr, 0)
     bits = arr.dtype.itemsize * 8
 
-    # The handler, asked directly, refuses.
-    with pytest.raises(RuntimeError, match=REFUSAL):
-        imagecodecs_handler.get_pixel_data(ds)
-
-    # pydicom reads it as the samples with the top bit flipped.
+    # pydicom, asked directly, still reads the samples with the top bit
+    # flipped: that is what ingest stored until #524.
     flipped = (arr.astype(np.int32) + 2 ** (bits - 1)).astype(f"u{bits // 8}")
     assert np.array_equal(ds.pixel_array, flipped), "pydicom's own reading"
 
-    # So ingest admits the file, and the Instance door agrees with pydicom.
     path = _write(tmp_path, ds)
     summary, stored = _ingest(tmp_path, os.path.dirname(path))
-    assert (summary.ingested, summary.failures) == (1, []), "ingest admits it"
-    assert stored is not None
-    assert stored.dtype == flipped.dtype, "the unsigned dtype the header says"
-    assert np.array_equal(stored, flipped), "Pillow's reading, not the samples"
-    assert not np.array_equal(stored.astype(np.int32), arr.astype(np.int32)), (
-        "and not the codestream's own values -- that is the divergence")
+    assert (summary.ingested, stored) == (0, None), "ingest refuses it"
+    reason = summary.failures[0][1]
+    assert reason.startswith(
+        f"Decompression Failed: RuntimeError: the JPEG 2000 codestream is "
+        f"signed at precision {bits}, where PixelRepresentation 0 declares "
+        f"unsigned samples"), reason
+
+    for door, read in (
+            ("instance", lambda: Instance(
+                generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
+                file_path=path).get_pixel_data()),
+            ("decode_pixels", lambda: through_the_fallback(
+                pydicom.dcmread(path)))):
+        with pytest.raises(RuntimeError, match=REFUSAL):
+            read()
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +301,7 @@ def test_the_handler_reinterprets_an_unsigned_codestream_under_pixel_representat
     raises).
     """
     codestream, want = _REINTERPRETED[name]
-    got = imagecodecs_handler.get_pixel_data(_dataset(codestream, 1))
+    got, _label = through_the_fallback(_dataset(codestream, 1))
     assert got.dtype == want.dtype, f"{name}: {got.dtype}"
     assert got.tolist() == want.tolist(), name
 
@@ -333,8 +326,8 @@ def test_an_unsigned_16_bit_colour_codestream_under_pixel_representation_1_reads
             ("instance", Instance(generate_uid(),
                                   "1.2.840.10008.5.1.4.1.1.7", 1,
                                   file_path=path).get_pixel_data()),
-            ("handler", imagecodecs_handler.get_pixel_data(
-                pydicom.dcmread(path)))):
+            ("decode_pixels", through_the_fallback(
+                pydicom.dcmread(path))[0])):
         assert arr.dtype == want.dtype, f"{door}: {arr.dtype}"
         assert arr.tolist() == want.tolist(), door
 
@@ -367,7 +360,7 @@ def test_the_reinterpretation_is_by_the_codestream_precision_not_bits_stored(
     assert reference.dtype == np.int16
     assert reference.tolist() == WIDE_12_AS_SIGNED.tolist()
 
-    got = imagecodecs_handler.get_pixel_data(pydicom.dcmread(path))
+    got, _label = through_the_fallback(pydicom.dcmread(path))
     assert got.dtype == np.int16, got.dtype
     assert got.tolist() == WIDE_12_AS_SIGNED.tolist()
     # And not the BitsStored reading, which returns the patterns.
@@ -384,7 +377,7 @@ def test_pydicoms_own_mismatched_file_reads_minus_2000_at_every_door(tmp_path):
     returned `uint16 [0, 8191]`, the codestream's patterns -- one file,
     two answers. Now all three say -2000.
 
-    Mutant: the reinterpretation removed. The handler row goes red at
+    Mutant: the reinterpretation removed. The `_decode_pixels` row goes red at
     `uint16 [0, 8191]` while the other two stay green, which is the
     disagreement this closes.
     """
@@ -412,7 +405,7 @@ def test_pydicoms_own_mismatched_file_reads_minus_2000_at_every_door(tmp_path):
         "ingest": ingested,
         "instance": Instance(generate_uid(), str(ds.SOPClassUID), 1,
                              file_path=path).get_pixel_data(),
-        "handler": imagecodecs_handler.get_pixel_data(pydicom.dcmread(path)),
+        "decode_pixels": through_the_fallback(pydicom.dcmread(path))[0],
         "pydicom": pydicom.dcmread(path).pixel_array,
     }
     for door, arr in doors.items():
@@ -437,11 +430,12 @@ def test_a_codestream_whose_signedness_agrees_with_its_header_still_reads(
 
     Mutants: the refusal keyed on PixelRepresentation 0 alone (refusing an
     unsigned codestream under 0), or on the codestream's sign alone
-    (refusing a signed one under 1). Each turns one case red. And the
-    reinterpretation reaching a signed codestream under 1 raises in
-    `_sign_extend`'s dtype check, which turns the first case red.
+    (refusing a signed one under 1). Each turns one case red. The
+    reinterpretation reaching a signed codestream under 1 is equivalent
+    since #523 merged `_sign_extend`'s guards: extending samples already
+    signed at their precision returns them unchanged.
     """
-    got = imagecodecs_handler.get_pixel_data(_dataset(arr, pixel_representation))
+    got, _label = through_the_fallback(_dataset(arr, pixel_representation))
     assert got.dtype == want.dtype, f"{name}: {got.dtype}"
     assert got.tolist() == want.tolist(), name
 
@@ -463,7 +457,7 @@ def test_a_jp2_wrapped_codestream_reaches_the_same_rule(tmp_path):
         ds.PixelData, number_of_frames=1))
     assert bytes(codestream).startswith(b"\x00\x00\x00\x0c\x6a\x50\x20\x20")
     assert imagecodecs_handler._j2k_sample_layout(codestream) == (False, 16)
-    got = imagecodecs_handler.get_pixel_data(ds)
+    got, _label = through_the_fallback(ds)
     assert got.dtype == want.dtype, got.dtype
     assert got.tolist() == want.tolist()
 

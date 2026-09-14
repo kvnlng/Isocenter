@@ -156,6 +156,7 @@ import imagecodecs
 from imagecodecs import jpeg2k_encode
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.pixels import get_decoder
+from pydicom.pixels.decoders.base import DecodeRunner
 from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless
 from pydicom.tag import Tag
 from pydicom.datadict import dictionary_VR
@@ -163,6 +164,7 @@ try:
     from pydicom.encapsulate import encapsulate
 except ImportError:
     from pydicom.encaps import encapsulate
+from pydicom.encaps import generate_frames
 from pydicom.multival import MultiValue
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
@@ -188,10 +190,13 @@ from .pixel_geometry import (
     resolve_pixel_geometry,
 )
 from .blob_kind import serialize_blob_kind
-from .imagecodecs_handler import (colour_conversion, convert_colour,
-                                  decode_declared_frames,
+from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
+                                  _j2k_sample_layout, _jpegls_precision,
+                                  colour_conversion, convert_colour,
+                                  decode_declared_frames, extended_offsets,
                                   frame_count_mismatch_words,
-                                  offset_table_frame_count)
+                                  offset_table_frame_count,
+                                  signed_codestream_refusal)
 from .parallel import run_parallel, _resolve_strategy
 from .validation import IODValidator
 from .sidecar import SidecarManager
@@ -318,12 +323,14 @@ _NESTED_PIXEL_DATA_TAG = Tag(0x7fe0, 0x0010)
 #: decodes through the imagecodecs fallback (#416), within the stream's
 #: NEAR bound, under the labels `_FALLBACK_PHOTOMETRICS` gives it.
 #:
-#: HTJ2K (`.4.203`) stays out: pydicom has no plugin for it here and the
-#: imagecodecs handler has no HTJ2K arm, so nothing in this environment
-#: decodes it. `.4.201` and `.4.202` are listed and are no better off --
-#: every such icon still drops, from the decode's `except` arm with the
-#: generic row. An allow-list's whole point is that its unmeasured side is
-#: the refusing side.
+#: HTJ2K (`.4.203`) joined `.4.201` and `.4.202` in #459, measured (N6 in
+#: `tests/test_nested_pixel_carriage.py`). Until then nothing here decoded
+#: HTJ2K -- pydicom has no plugin for it without pylibjpeg-openjpeg -- so
+#: `.4.203` stayed out, and `.4.201` and `.4.202` were listed and no better
+#: off: every such icon dropped from the decode's `except` arm with the
+#: generic row. The imagecodecs fallback now decodes all three through
+#: `jpeg2k_decode`, a 4x4 icon exactly. An allow-list's whole point is that
+#: its unmeasured side is the refusing side; this one was measured.
 #:
 #: Written as UID strings rather than `pydicom.uid` names on purpose: the
 #: names are not stable across pydicom versions, and a draft of #183's spec
@@ -344,8 +351,9 @@ _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
     "1.2.840.10008.1.2.4.81",   # JPEG-LS Near-Lossless, measured (#387)
     "1.2.840.10008.1.2.4.90",   # JPEG 2000 Image Compression (Lossless Only)
     "1.2.840.10008.1.2.4.91",   # JPEG 2000 Image Compression, measured (#372)
-    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless
-    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL
+    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless, measured (#459)
+    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL, measured (#459)
+    "1.2.840.10008.1.2.4.203",  # HTJ2K, measured (#459)
 })
 
 #: The transfer syntaxes `_decode_pixels` decodes through `imagecodecs`
@@ -358,27 +366,43 @@ _CARRIABLE_TRANSFER_SYNTAXES = frozenset({
 #: | Transfer syntax | pydicom plugins here | in this set |
 #: | --- | --- | --- |
 #: | .5 RLE Lossless | `pydicom` | no |
-#: | .50 / .51 JPEG Baseline / Extended | `pillow` | no |
+#: | .50 / .51 JPEG Baseline / Extended | `pillow`, 12-bit refused | yes, monochrome |
 #: | .57 / .70 JPEG Lossless | none | yes |
 #: | .80 / .81 JPEG-LS | none | yes |
 #: | .90 / .91 JPEG 2000 | `pillow`, 16-bit multi-sample refused | yes |
+#: | .201 / .202 / .203 HTJ2K | none | yes |
+#:
+#: HTJ2K since #459 (owner ruling Q6): pydicom decodes it only with
+#: pylibjpeg-openjpeg, not a dependency, and `jpeg2k_decode` reads it
+#: exactly, so it takes every JPEG 2000 row below
+#: (`imagecodecs_handler.J2K_SYNTAXES` says why not `htj2k_decode`).
 #:
 #: So every JPEG Lossless and JPEG-LS file was refused at ingest, and now
 #: ingests when its decode matches its header under a colour space
 #: `_FALLBACK_PHOTOMETRICS` labels for it. RLE is out because pydicom's RLE
 #: decoder needs no dependency, and the handler has no RLE arm (#447):
-#: pydicom's is the one that decodes. JPEG Baseline and Extended are out because
-#: Pillow decodes them here, the handler's colour handling through this
-#: door is unmeasured, and baseline JPEG is almost always YBR, which
-#: `_FALLBACK_PHOTOMETRICS` refuses anyway. UID strings, for the reason
+#: pydicom's is the one that decodes.
+#:
+#: **JPEG Baseline and Extended joined for #604**, monochrome only. Pillow
+#: refuses 12-bit JPEG Extended, and pydicom's own `JPEG-lossy.dcm` was
+#: refused at ingest while the Instance door read it through the handler
+#: #453 then deleted. `imagecodecs.jpeg_decode` returns that file and
+#: `JPGExtended.dcm` value for value as DCMTK's `dcmdjpeg` does, at
+#: imagecodecs 2024.6.1 and 2026.8.16 (review of #606, M2). Colour stays
+#: out (`_FALLBACK_JPEG`). UID strings, for the reason
 #: `_CARRIABLE_TRANSFER_SYNTAXES` gives.
 _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
+    "1.2.840.10008.1.2.4.50",   # JPEG Baseline, monochrome (#604)
+    "1.2.840.10008.1.2.4.51",   # JPEG Extended, monochrome (#604)
     "1.2.840.10008.1.2.4.57",   # JPEG Lossless, Non-Hierarchical
     "1.2.840.10008.1.2.4.70",   # JPEG Lossless, First-Order Prediction
     "1.2.840.10008.1.2.4.80",   # JPEG-LS Lossless
     "1.2.840.10008.1.2.4.81",   # JPEG-LS Near-Lossless
     "1.2.840.10008.1.2.4.90",   # JPEG 2000 (Lossless Only)
     "1.2.840.10008.1.2.4.91",   # JPEG 2000
+    "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless
+    "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL
+    "1.2.840.10008.1.2.4.203",  # HTJ2K
 })
 
 #: The colour space the fallback stores for each declared one, per transfer
@@ -419,9 +443,9 @@ _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
 #:   pydicom's door applies (#372), and what pydicom with pyjpegls stores
 #:   for the same file. The conversion is `imagecodecs_handler.CONVERTS_TO`
 #:   and not this module's since #464, so the read doors make it too. 16-bit is refused
-#:   here before the decode: `convert_color_space` refuses `uint16`. The
-#:   read doors return a 16-bit frame as stored under its own label, and
-#:   #461 decides that case.
+#:   here before the decode: `convert_color_space` refuses `uint16`. Every
+#:   door refuses it, since the Instance door decodes through
+#:   `_decode_pixels` (#453); #461 recorded that as a limit (Q5).
 #:
 #: Which relabels the decoder has already done is data, not a branch on
 #: syntax: `_FALLBACK_DECODER_CONVERTS`. A relabel under any other syntax
@@ -432,23 +456,41 @@ _FALLBACK_J2K = {**_FALLBACK_GREY, "RGB": "RGB",
                  "YBR_RCT": "RGB", "YBR_ICT": "RGB"}
 _FALLBACK_JPEGLS = {**_FALLBACK_GREY, "RGB": "RGB", "YBR_FULL": "RGB"}
 _FALLBACK_LJPEG = {**_FALLBACK_GREY, "RGB": "RGB"}
+#: JPEG Baseline and Extended (#604): monochrome, and no palette, colour
+#: or YBR row. `jpeg_decode` applies a colour transform to a 3-component
+#: stream with no Adobe marker that pydicom and DCMTK do not (measured on
+#: `SC_jpeg_no_color_transform.dcm`, 137 apart), so a colour label here
+#: would be a guess; and every 8-bit colour stream met so far is one
+#: Pillow decodes before the fallback is asked.
+_FALLBACK_JPEG = {label: label for label in ("MONOCHROME1", "MONOCHROME2")}
 _FALLBACK_PHOTOMETRICS = {
+    "1.2.840.10008.1.2.4.50": _FALLBACK_JPEG,
+    "1.2.840.10008.1.2.4.51": _FALLBACK_JPEG,
     "1.2.840.10008.1.2.4.57": _FALLBACK_LJPEG,
     "1.2.840.10008.1.2.4.70": _FALLBACK_LJPEG,
     "1.2.840.10008.1.2.4.80": _FALLBACK_JPEGLS,
     "1.2.840.10008.1.2.4.81": _FALLBACK_JPEGLS,
     "1.2.840.10008.1.2.4.90": _FALLBACK_J2K,
     "1.2.840.10008.1.2.4.91": _FALLBACK_J2K,
+    # HTJ2K: `jpeg2k_decode` undoes a reversible colour transform to the
+    # exact RGB source, at 8 and 16 bits (#459, measured). An irreversible
+    # `YBR_ICT` stream under .201 and .203 is stored as RGB within the
+    # lossy transform's error, 1 at 8 bits and 2 at 16 (measured by the
+    # review of #606); the row is JPEG 2000's, whose decoder it is.
+    "1.2.840.10008.1.2.4.201": _FALLBACK_J2K,
+    "1.2.840.10008.1.2.4.202": _FALLBACK_J2K,
+    "1.2.840.10008.1.2.4.203": _FALLBACK_J2K,
 }
 #: The syntaxes whose decoder returns the stored label's colour space
-#: itself, so a relabel there is a label change only (see above). The
-#: handler makes the same relabel at the read doors from its own
-#: `imagecodecs_handler.DECODER_RELABELS` (#482), which
-#: `test_the_handler_relabels_exactly_the_rows_ingest_relabels_without_converting`
-#: holds to these rows.
+#: itself, so a relabel there is a label change only (see above). Every
+#: door reads this one table since #453, which deleted the handler's own
+#: copy (`DECODER_RELABELS`).
 _FALLBACK_DECODER_CONVERTS = frozenset({
     "1.2.840.10008.1.2.4.90",
     "1.2.840.10008.1.2.4.91",
+    "1.2.840.10008.1.2.4.201",
+    "1.2.840.10008.1.2.4.202",
+    "1.2.840.10008.1.2.4.203",
 })
 
 
@@ -1681,6 +1723,33 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     refuses. Both depths get it, because both call this: one rule for
     both depths.
 
+    **And the fallback validates first, as pydicom would have (#453).**
+    pydicom validates the header only once it has found a plugin:
+    `as_array` checks its plugins, raises "missing dependencies" when it
+    has none, and only then validates. So for JPEG Lossless and JPEG-LS,
+    which have no plugin here, "validation stays a refusal" held for
+    nobody: a file missing BitsStored, PixelRepresentation or
+    PlanarConfiguration, or declaring BitsStored 17 under BitsAllocated
+    16, reached the fallback and was ingested, where a JPEG 2000 file with
+    the same header was refused. `_validate_like_pydicom` runs the same
+    check, in the same words, before the fallback is asked. On the one
+    route where pydicom had already validated -- a plugin existed and
+    raised, as Pillow does for 16-bit colour JPEG 2000 -- the check runs
+    twice and passes twice, and pydicom's "number of bytes of compressed
+    pixel data matches the expected number for uncompressed data" warning,
+    which `validate()` also raises, can be emitted twice for one file.
+    That is a warning, not an answer, and passing `validate=False` to
+    `as_array` instead would change what pydicom decodes: its
+    `_validate_options` deletes a mismatched Extended Offset Table from
+    the runner it decodes with, and a separate runner cannot do that.
+
+    **Every door calls this (#453).** `Instance.get_pixel_data()` from a
+    file does too, so a file ingest refuses is refused there in the same
+    words, and a file ingest reads is read there to the same array under
+    the same label. It used to call pydicom and then hand any failure at
+    all to `imagecodecs_handler.get_pixel_data`, which had none of the
+    fallback's checks.
+
     **`as_rgb=False` asks for the stored samples, and only the export
     readback passes it (#449).** Forwarded only when given, like
     `allow_excess_frames`, so every ingest decode still gets pydicom's
@@ -1698,10 +1767,23 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     would need the keyword threaded through**, or the readback would
     fail its correct files.
 
+    **A signed JPEG 2000 codestream under PixelRepresentation 0 is
+    refused first, before pydicom is asked (#524).** Pillow decodes one
+    at monochrome depths and 8-bit colour and returns the samples shifted
+    by 2^(bits-1), with no error, so ingest stored the shift where the
+    imagecodecs handler refused. The codestream's SIZ is read instead,
+    for every declared frame: `imagecodecs_handler.signed_codestream_refusal`.
+    Isocenter's own exports never carry that shape -- the writer derives
+    PixelRepresentation and the codestream's sign from one dtype (#499) --
+    so the export readback, which decodes here too, never trips it.
+
     `ts` is read *outside* the `try`, so the #281 `AttributeError` above
     can never reach the fallback.
     """
     ts = ds.file_meta.TransferSyntaxUID
+    refusal = signed_codestream_refusal(ds)
+    if refusal is not None:
+        raise RuntimeError(refusal)
     kwargs = {}
     if allow_excess_frames is not None:
         kwargs["allow_excess_frames"] = allow_excess_frames
@@ -1712,8 +1794,37 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     except RuntimeError as exc:
         if str(ts) not in _IMAGECODECS_FALLBACK_SYNTAXES:
             raise
+        # Before the fallback and outside it, so the refusal is pydicom's
+        # own `AttributeError` or `ValueError`, not wrapped as a reason
+        # imagecodecs could not decode, and ingest's row reads
+        # `Decompression Failed: AttributeError: Missing required element:
+        # ...` as a JPEG 2000 file's already did. Before the photometric
+        # allow-list too: a header that fails both is refused in pydicom's
+        # words, which name the element.
+        _validate_like_pydicom(ds, ts)
         return _decode_with_imagecodecs(ds, allow_excess_frames, exc)
     return np.ascontiguousarray(arr), meta["photometric_interpretation"]
+
+
+def _validate_like_pydicom(ds, ts) -> None:
+    """pydicom's header validation, where pydicom never got to run it (#453).
+
+    `DecodeRunner.validate()` is the call `Decoder.as_array` makes after
+    it has found a plugin (pydicom 3.0.0 through 3.0.2; the only
+    difference between them is a `ceil` in the length heuristic). Raises
+    exactly what `as_array` would: `AttributeError("Missing required
+    element: (0028,0101) 'Bits Stored'")`, `ValueError("A (0028,0101)
+    'Bits Stored' value of '17' is invalid ...")`, `ValueError("Unknown
+    (0028,0004) 'Photometric Interpretation' value 'NONSENSE'")`.
+
+    `ts` is passed rather than read again: `_decode_nested_pixels` hands
+    in a sequence item whose `file_meta` it borrowed from the enclosing
+    dataset, and `set_source` reads only the item's own group 0028
+    (measured on an icon missing BitsStored under JPEG Lossless).
+    """
+    runner = DecodeRunner(ts)
+    runner.set_source(ds)
+    runner.validate()
 
 
 def _decode_with_imagecodecs(ds, allow_excess_frames,
@@ -1723,9 +1834,10 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
     A generic fallback would store whatever the codec returned, and a
     codec's output can disagree with the header. The signed JPEG Lossless
     and JPEG-LS case #416 measured -- -800 read as 3296 -- is now decoded
-    correctly by the handler, which sign-extends from BitsStored (#446);
-    the dtype check below stays for what it still refuses, a JPEG 2000
-    codestream whose signedness contradicts PixelRepresentation. So the
+    correctly by the handler, which sign-extends from BitsStored (#446),
+    and a JPEG 2000 codestream whose signedness contradicts
+    PixelRepresentation is refused before any decoder (#524); the dtype
+    check below stays for any decode that still disagrees. So the
     decode is accepted only when it passes every check below against the
     header, and refused -- keeping pydicom's reason first, so the ingest
     row still reads `Decompression Failed: <pydicom's words>` -- when:
@@ -1782,10 +1894,12 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
                and str(ts) not in _FALLBACK_DECODER_CONVERTS)
     bits = int(ds.BitsAllocated)
     if convert and bits != 8:
-        # Ingest's own refusal, and only ingest's: the read doors return a
-        # 16-bit YBR_FULL frame as stored under its own label, which is
-        # true of it. Whether 16-bit is converted or recorded as a limit
-        # is #461, deliberately left open by #464.
+        # Every door's refusal, since #453 sent the Instance door through
+        # this function too: until then it returned a 16-bit YBR_FULL
+        # frame as stored, under its own label. #461 ruled (Q5) to record
+        # it as a limit rather than convert ahead of pydicom, which refuses
+        # the native form as well ("Invalid ndarray.dtype 'uint16' for
+        # color space conversion"); `docs/installation.md` says so.
         raise refused(
             f"its declared colour space {photometric!r} is {bits}-bit, and "
             f"the conversion to {stored_label} this fallback would make, "
@@ -1853,6 +1967,105 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
         # the last axis as the three samples.
         arr = convert_colour(arr, conversion)
     return np.ascontiguousarray(arr), stored_label
+
+
+def _high_bit_mismatch(ds) -> Optional[dict]:
+    """The facts for ingest's HighBit row, or None when HighBit is BitsStored - 1.
+
+    PS3.5 8.1.1 requires HighBit to be BitsStored - 1. No decoder here
+    reads HighBit: JPEG Lossless returns right-aligned samples by
+    BitsStored, JPEG-LS and JPEG 2000 by the stream's own precision, and
+    pydicom masks a native sample to its low BitsStored bits. So a file
+    that says otherwise is read exactly as a conformant one would be, and
+    the one thing that changes is that the session says so (#455, #523;
+    owner rulings Q2 and Q3): `import_files` writes a `WARNING` row from
+    what this returns.
+
+    **A header rule, asked before the decode and of no decoder.** It
+    reads the Image Pixel module and, for a stream that carries its own
+    precision, frame 0's first bytes. So a file decoded by Pillow and one
+    decoded by imagecodecs get one answer -- which is what the refusal
+    this replaces could not give: it lived in `_sign_extend`, fired only
+    on the imagecodecs route, and only for a signed frame.
+
+    None, too, when either element is absent or not an integer: a header
+    that cannot be compared makes no claim to compare. The caller attaches
+    the facts only once the decode has succeeded; a refused file has its
+    own `ERROR` row.
+
+    Returns:
+        ``{bits_allocated, bits_stored, high_bit, pixel_representation,
+        encapsulated, stream, precision, width_read}``: `stream` is "JPEG
+        2000 codestream" or "JPEG-LS stream" where `precision` was read
+        from one, else None; `width_read` is that precision, or
+        BitsStored.
+    """
+    try:
+        bits_stored = int(ds.BitsStored)
+        high_bit = int(ds.HighBit)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if high_bit == bits_stored - 1:
+        return None
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    try:
+        encapsulated = bool(ts is not None and ts.is_encapsulated)
+    except (AttributeError, ValueError):
+        encapsulated = False
+    stream = precision = None
+    if encapsulated and (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES):
+        try:
+            frame = next(generate_frames(
+                ds.PixelData, number_of_frames=1,
+                extended_offsets=extended_offsets(ds)))
+        except Exception:  # pylint: disable=broad-except
+            # A buffer the decode below will refuse on its own terms.
+            frame = b""
+        if ts in J2K_SYNTAXES:
+            layout = _j2k_sample_layout(frame)
+            if layout is not None:
+                stream, precision = "JPEG 2000 codestream", layout[1]
+        else:
+            precision = _jpegls_precision(frame) if frame else None
+            if precision is not None:
+                stream = "JPEG-LS stream"
+    return {
+        "bits_allocated": getattr(ds, "BitsAllocated", None),
+        "bits_stored": bits_stored,
+        "high_bit": high_bit,
+        "pixel_representation": getattr(ds, "PixelRepresentation", None),
+        "encapsulated": encapsulated,
+        "stream": stream,
+        "precision": precision,
+        "width_read": precision if precision is not None else bits_stored,
+    }
+
+
+def _high_bit_words(facts) -> str:
+    """The HighBit row, from `_high_bit_mismatch`'s facts.
+
+    Names no file: the row's entity is the SOP Instance UID, and a source
+    folder may be named for the patient.
+    """
+    bits_stored = facts["bits_stored"]
+    head = (f"HighBit {facts['high_bit']} with BitsStored {bits_stored} "
+            f"and BitsAllocated {facts['bits_allocated']}: PS3.5 8.1.1 "
+            f"requires HighBit to be BitsStored - 1. ")
+    if not facts["encapsulated"]:
+        # Q3: pydicom's mask stays. Samples genuinely stored in bits
+        # 4..15 come back wrapped; they cannot be told apart from a
+        # right-aligned frame with overlay bits above BitsStored.
+        read = f"Read as pydicom reads it: the low {bits_stored} bits of each sample"
+        if facts["pixel_representation"] == 1:
+            read += ", sign-extended"
+    elif facts["stream"] is not None:
+        read = (f"Read as right-aligned {facts['width_read']}-bit samples "
+                f"(the {facts['stream']}'s precision {facts['precision']})")
+    else:
+        read = (f"Read as right-aligned {bits_stored}-bit samples "
+                f"(BitsStored {bits_stored})")
+    return (head + read + "; HighBit is not an input to this decode, and an "
+            "export writes HighBit as BitsStored - 1.").replace("|", "\\|")
 
 
 def _item_path_words(path) -> str:
@@ -2112,6 +2325,9 @@ def ingest_worker(fp: str) -> Tuple:
                             frame_count_mismatch_words(counted))
                 decode_kwargs['allow_excess_frames'] = False
                 meta['offset_table_excess'] = counted
+            # Asked of the header before the decode, so both decoders'
+            # files get it; attached only once the decode succeeds (#455).
+            high_bit_mismatch = _high_bit_mismatch(ds)
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
@@ -2138,6 +2354,11 @@ def ingest_worker(fp: str) -> Tuple:
                 # meta is the one place the colour space is stated.
                 if inst.attributes.get("0028,0004") != decoded_pi:
                     inst.set_attr("0028,0004", decoded_pi)
+                if high_bit_mismatch is not None:
+                    # Rides `meta` like `offset_table_excess`: this may be
+                    # a subprocess with no store handle, so `import_files`
+                    # writes the row.
+                    meta['high_bit_mismatch'] = high_bit_mismatch
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
                 # The path rides the meta slot, as in the blanket except
@@ -2545,6 +2766,7 @@ class DicomImporter:
         # which one happened; `IngestSummary.declined` is their sum.
         declined_superseded = 0
         declined_duplicate = 0
+        high_bit_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -2720,6 +2942,32 @@ class DicomImporter:
                             sidecar_manager.filepath, off, leng, p_alg,
                             instance=inst, pixel_hash=p_hash)
                         inst._pixel_hash = p_hash
+
+                    # HighBit other than BitsStored - 1 (#455, #523). A
+                    # `WARNING`, the frozen action type (#411): the file's
+                    # own header is non-conformant (PS3.5 8.1.1), which is
+                    # a fact about the user's data, so it bars PASS
+                    # (#479). One row per instance, as the declined rows
+                    # above are; the log is capped the same way, so a
+                    # 2,000-instance legacy cohort prints five lines and a
+                    # suppression line rather than 2,000. After both
+                    # declined `continue`s: a file not linked gets no row.
+                    high_bit = meta.get('high_bit_mismatch')
+                    if high_bit:
+                        detail = _high_bit_words(high_bit)
+                        high_bit_rows += 1
+                        if high_bit_rows <= 5:
+                            logger.warning(f"{inst.sop_instance_uid}: {detail}")
+                        elif high_bit_rows == 6:
+                            logger.warning(
+                                "... (suppressing further per-instance "
+                                "messages for HighBit other than BitsStored "
+                                "- 1) ...")
+                        if store_backend is not None:
+                            store_backend.log_audit(
+                                action_type="WARNING",
+                                entity_uid=inst.sop_instance_uid,
+                                details=detail)
 
                     # The frames `ingest_worker` dropped because the
                     # offset table named more than NumberOfFrames

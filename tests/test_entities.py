@@ -120,12 +120,14 @@ def test_lazy_loading(tmp_path):
     inst.file_path = str(dummy_file)
 
     # Mock pydicom.dcmread so we don't need a real file. The door decodes
-    # through `get_decoder(ts).as_array` -- what `Dataset.pixel_array`
-    # calls -- to keep the decoder's colour-space answer (#482), so the
-    # decode is mocked there.
+    # through `io_handlers._decode_pixels` (#453), which calls
+    # `get_decoder(ts).as_array` -- what `Dataset.pixel_array` calls -- to
+    # keep the decoder's colour-space answer (#482), so the decode is
+    # mocked there. The door's own `get_decoder` only asks whether any
+    # decoder implements the syntax; it gets the same mock.
     with patch("pydicom.dcmread") as mock_read, \
-            patch("isocenter.entities.get_decoder") as mock_decoder, \
-            patch("isocenter.entities.as_pixel_options", return_value={}):
+            patch("isocenter.io_handlers.get_decoder") as mock_decoder, \
+            patch("isocenter.entities.get_decoder", mock_decoder):
         mock_ds = mock_read.return_value
         mock_ds.PhotometricInterpretation = "MONOCHROME2"
         mock_decoder.return_value.as_array.return_value = (

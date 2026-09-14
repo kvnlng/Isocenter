@@ -502,7 +502,15 @@ TARGETS = {
                                   "tests/test_worker_loss_is_reported.py",
                                   "tests/test_ybr_jpegls_read_doors.py",
                                   "tests/test_ybr_read_door_labels.py",
-                                  "tests/test_the_project_secret_lives_in_the_store.py"], 30),
+                                  "tests/test_the_project_secret_lives_in_the_store.py",
+                                  "tests/test_one_decode_answer_per_file.py",
+                                  "tests/test_compression_deps.py",
+                                  "tests/test_entities.py",
+                                  "tests/test_high_bit_is_a_header_warning.py",
+                                  "tests/test_j2k_signedness_against_pixel_representation.py",
+                                  "tests/test_htj2k_decode.py",
+                                  "tests/test_mid_stream_corruption_is_a_documented_limit.py",
+                                  "tests/test_jpeg_extended_decode.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -823,7 +831,9 @@ TARGETS = {
                               # the restore's `p.mark_modified()` by
                               # test_a_restored_patient_is_saved.py (#552).
                               "tests/test_a_restored_patient_is_saved.py",
-                              "tests/test_patients_sharing_an_id_are_merged.py"],
+                              "tests/test_patients_sharing_an_id_are_merged.py",
+                              "tests/test_high_bit_is_a_header_warning.py",
+                              "tests/test_htj2k_decode.py"],
                              30),
     # 196 sites. Until #419 this module had no row, so the persistence
     # bookkeeping every CLAUDE.md trap is about -- `mark_modified`,
@@ -1046,7 +1056,9 @@ TARGETS = {
                                "tests/test_a_restored_patient_is_saved.py",
                                "tests/test_nested_remediation_reaches_the_instance.py",
                                "tests/test_patients_sharing_an_id_are_merged.py",
-                               "tests/test_save_keeps_rows_memory_holds.py"],
+                               "tests/test_save_keeps_rows_memory_holds.py",
+                               "tests/test_one_decode_answer_per_file.py",
+                               "tests/test_htj2k_decode.py"],
                               30),
     # 81 sites; budget 60 is stride 1 (81 // 60), so every site is
     # probed, exhaustive because it is cheap, like parallel.py's 80. It
@@ -1089,7 +1101,18 @@ TARGETS = {
     # by tests/test_ybr_read_door_labels.py. That is 79 of 81, with the
     # same two known-equivalent survivors named above and no new one.
     # The RLE arm, which no mutant could reach through a real decode, is
-    # gone (#447).
+    # gone (#447). #453 then deleted `get_pixel_data` and
+    # `DECODER_RELABELS` -- the decode-error print above and #482's two
+    # relabel sites with them -- and #523/#455/#524 moved and added sites
+    # in `_sign_extend`, `_in_declared_container` and the signed-codestream
+    # gate, so the counts above no longer describe this file. Re-measured
+    # at stride 1 on 4658b19 (3.12.14, in a copy of the tree while the
+    # full suite ran beside it): 91 of 93 killed. The two survivors were
+    # both in `signed_codestream_refusal`'s frame count when no offset
+    # table names one (`is not None` -> `is`, `or 1` -> `and 1`), a shape
+    # no test had; `test_the_signedness_gate_counts_frames_with_no_offset_table`
+    # now pins it and kills both by a real edit. The decode-error print is
+    # gone with `get_pixel_data`, and `is_available()`'s print is killed.
     "isocenter/imagecodecs_handler.py": (["tests/test_codecs_strict.py",
                                           "tests/test_imagecodecs_edge_cases.py",
                                           "tests/test_ingest_imagecodecs_fallback.py",
@@ -1098,7 +1121,12 @@ TARGETS = {
                                           "tests/test_signed_lossless_jpeg_decode.py",
                                           "tests/test_single_frame_encapsulated_decode.py",
                                           "tests/test_ybr_jpegls_read_doors.py",
-                                          "tests/test_ybr_read_door_labels.py"],
+                                          "tests/test_ybr_read_door_labels.py",
+                                          "tests/test_one_decode_answer_per_file.py",
+                                          "tests/test_high_bit_is_a_header_warning.py",
+                                          "tests/test_htj2k_decode.py",
+                                          "tests/test_mid_stream_corruption_is_a_documented_limit.py",
+                                          "tests/test_jpeg_extended_decode.py"],
                                          60),
 }
 

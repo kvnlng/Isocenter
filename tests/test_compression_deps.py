@@ -14,11 +14,15 @@ def test_missing_compression_deps_error(tmp_path):
     inst = Instance("1.2.3", "1.2.3.4", 1, file_path=str(dcm_path))
 
     # Mock pydicom.dcmread to return a dataset whose decode fails. The
-    # Instance door decodes through `get_decoder(ts).as_array`, which is
-    # what `Dataset.pixel_array` calls, so that it can keep the decoder's
-    # colour-space answer (#482); the decoder is where the failure goes.
+    # Instance door decodes through `io_handlers._decode_pixels` (#453),
+    # which calls `get_decoder(ts).as_array` -- what `Dataset.pixel_array`
+    # calls -- so that it can keep the decoder's colour-space answer
+    # (#482); the decoder is where the failure goes. The door's own
+    # `get_decoder` only asks whether a decoder exists; it gets the same
+    # mock.
     with patch("isocenter.entities.pydicom.dcmread") as mock_read, \
-            patch("isocenter.entities.get_decoder") as mock_decoder:
+            patch("isocenter.io_handlers.get_decoder") as mock_decoder, \
+            patch("isocenter.entities.get_decoder", mock_decoder):
         mock_ds = MagicMock()
         mock_read.return_value = mock_ds
         mock_decoder.return_value.as_array.side_effect = RuntimeError(

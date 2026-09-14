@@ -265,13 +265,16 @@ def test_every_fallback_syntax_ingests():
     """The constant is exactly the syntaxes this file shows ingesting.
 
     Narrowing it is the owner's one-line lever; this is the test that
-    names what that line currently opens. RLE (.5) and JPEG Baseline /
-    Extended (.50, .51) are out: pydicom decodes RLE with no dependency
-    and baseline JPEG through Pillow, and the handler has no RLE arm
-    (#447).
+    names what that line currently opens. RLE (.5) is out: pydicom
+    decodes RLE with no dependency, and the handler has no RLE arm
+    (#447). JPEG Baseline and Extended (.50, .51) are in since #604, for
+    the 12-bit Extended files Pillow refuses (`test_jpeg_extended_decode`).
     """
     assert _IMAGECODECS_FALLBACK_SYNTAXES == frozenset(
-        {LJPEG, LJPEG_SV1, JPEGLS, JPEGLS_NEAR, J2K_LOSSLESS, J2K})
+        {"1.2.840.10008.1.2.4.50", "1.2.840.10008.1.2.4.51",
+         LJPEG, LJPEG_SV1, JPEGLS, JPEGLS_NEAR, J2K_LOSSLESS, J2K,
+         "1.2.840.10008.1.2.4.201", "1.2.840.10008.1.2.4.202",
+         "1.2.840.10008.1.2.4.203"})
 
 
 # ---------------------------------------------------------------------------
@@ -549,17 +552,25 @@ def test_the_colour_spaces_the_fallback_labels_are_chosen_per_syntax():
     where the stored samples are not in the declared space: JPEG 2000's
     `YBR_RCT` and `YBR_ICT` come back RGB from the decoder (Y1, #448), and
     8-bit `YBR_FULL` JPEG-LS is converted to RGB by the fallback (Y2).
+    JPEG Baseline and Extended take monochrome alone (#604): no palette,
+    and no colour row, which `jpeg_decode` was measured to answer
+    differently from pydicom.
     """
     grey = {label: label for label in _GREY}
     assert set(_FALLBACK_PHOTOMETRICS) == _IMAGECODECS_FALLBACK_SYNTAXES
     j2k = {**grey, "RGB": "RGB", "YBR_RCT": "RGB", "YBR_ICT": "RGB"}
     jpegls = {**grey, "RGB": "RGB", "YBR_FULL": "RGB"}
     ljpeg = {**grey, "RGB": "RGB"}
+    jpeg = {"MONOCHROME1": "MONOCHROME1", "MONOCHROME2": "MONOCHROME2"}
     assert {ts: dict(labels) for ts, labels in
             _FALLBACK_PHOTOMETRICS.items()} == {
+        "1.2.840.10008.1.2.4.50": jpeg, "1.2.840.10008.1.2.4.51": jpeg,
         LJPEG: ljpeg, LJPEG_SV1: ljpeg,
         JPEGLS: jpegls, JPEGLS_NEAR: jpegls,
-        J2K_LOSSLESS: j2k, J2K: j2k}
+        J2K_LOSSLESS: j2k, J2K: j2k,
+        # HTJ2K is JPEG 2000 to openjpeg, row for row (#459).
+        "1.2.840.10008.1.2.4.201": j2k, "1.2.840.10008.1.2.4.202": j2k,
+        "1.2.840.10008.1.2.4.203": j2k}
 
 
 def _colour_ljpeg(ts, want, photometric="RGB"):
@@ -718,16 +729,22 @@ def test_ingest_names_why_imagecodecs_is_unavailable(tmp_path, monkeypatch):
     assert "libjpeg.so.8" in reason, reason
 
 
-def test_the_lazy_load_error_carries_the_fallback_words_too(tmp_path):
-    """I4: the read door's second raise says what the fallback said (#444).
+def test_the_lazy_load_error_carries_the_true_reason(tmp_path):
+    """I4: the read door's second raise says why, with no second decoder (#444).
 
     `Instance.get_pixel_data()` has two final raises, and I3 reaches only
-    the "Failed to decompress" one. This file reaches the other: pydicom
-    refuses it on validation (PlanarConfiguration absent, an
-    `AttributeError`, so not the "decompress" branch), the handler is
-    asked and refuses the offset table (it names one frame; NumberOfFrames
-    declares two), and the error is `Lazy load failed`. Without the
-    fallback line, the handler's reason -- the only true one -- is lost.
+    the "Failed to decompress" one. This file reaches the other: its
+    offset table names one frame where NumberOfFrames declares two, and
+    PlanarConfiguration is absent too. The door's own frame-count check
+    refuses before any decode, and the error is `Lazy load failed`.
+
+    Until #453 that refusal went on to the handler, which refused the
+    same table again, and #444 added an `imagecodecs fallback:` line so
+    the handler's reason -- the only true one, since pydicom's said
+    nothing about frames -- was not lost. The door no longer asks a
+    second decoder, so the reason is the message itself: exactly the
+    table's words, with nothing about imagecodecs beside them. The tail
+    is asserted, not the prefix, which names the instance.
     Found in review of #463.
     """
     from isocenter.entities import Instance
@@ -741,8 +758,9 @@ def test_the_lazy_load_error_carries_the_fallback_words_too(tmp_path):
         inst.get_pixel_data()
     msg = str(exc.value)
     assert msg.startswith("Lazy load failed"), msg
-    assert ("imagecodecs fallback: Basic Offset Table names 1 frames; "
-            "NumberOfFrames declares 2") in msg, msg
+    assert msg.endswith(": Basic Offset Table names 1 frames; "
+                        "NumberOfFrames declares 2"), msg
+    assert "imagecodecs" not in msg, msg
 
 
 def test_the_read_door_names_why_imagecodecs_is_unavailable(tmp_path,
@@ -765,6 +783,11 @@ def test_the_read_door_names_why_imagecodecs_is_unavailable(tmp_path,
     with pytest.raises(RuntimeError) as exc:
         inst.get_pixel_data()
     msg = str(exc.value)
-    assert "imagecodecs fallback: imagecodecs is not available" in msg, msg
+    # The fallback's own framing (#453): the door decodes through
+    # `_decode_pixels`, whose refusal carries the handler's words as the
+    # reason imagecodecs could not decode the file either. It read
+    # `imagecodecs fallback: ...` when the door asked the handler itself.
+    assert ("imagecodecs could not decode it either: RuntimeError: "
+            "imagecodecs is not available: ImportError") in msg, msg
     assert "libjpeg.so.8" in msg, msg
     assert "Missing image codecs" in msg, msg

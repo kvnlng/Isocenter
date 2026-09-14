@@ -8,8 +8,9 @@ The two read doors -- `Instance.get_pixel_data()` from a file and
 samples. So one file had two answers.
 
 The owner's ruling (2026-09-11) is to **convert and relabel**. The
-handler converts, as ingest does, and rewrites the dataset's
-PhotometricInterpretation to RGB. `Instance.get_pixel_data()` rewrites
+handler converts, as ingest does, and the decode says RGB (the handler
+rewrote the dataset's PhotometricInterpretation until #453 deleted its
+`get_pixel_data`; `_decode_pixels` returns the label instead). `Instance.get_pixel_data()` rewrites
 the instance's label to match. Converting without relabelling is #372's
 defect: RGB bytes under a YBR label. That must not ship at a new door,
 so every conversion assertion here sits beside a label assertion.
@@ -21,10 +22,10 @@ layout a conversion could honour. pydicom refuses the file at both its
 doors (pyjpegls, and native). Before this change ingest refused it in
 `convert_color_space`'s words, and the read doors returned `int8` YBR.
 
-A **16-bit** YBR_FULL file is left exactly as it was, and #461 stays
-open. The read doors return the samples as stored, under the file's own
-YBR_FULL label, which is true of them. Ingest still refuses the file,
-naming its depth (Y3 in `test_ingest_imagecodecs_fallback.py`).
+A **16-bit** YBR_FULL file is refused at every door, naming its depth
+(#461's ruling, Q5; Y3 in `test_ingest_imagecodecs_fallback.py`). #464
+left the read doors returning its samples as stored; since #453 the
+Instance door decodes through ingest's own `_decode_pixels`.
 
 Every fixture first asserts that pydicom cannot decode it here, so no
 case passes through pydicom's door and tells us nothing about this one.
@@ -45,6 +46,7 @@ from isocenter.entities import Instance
 from isocenter.io_handlers import (_FALLBACK_DECODER_CONVERTS,
                                    _FALLBACK_PHOTOMETRICS)
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 JPEGLS = "1.2.840.10008.1.2.4.80"
 JPEGLS_NEAR = "1.2.840.10008.1.2.4.81"
@@ -113,9 +115,9 @@ def doors(tmp_path):
 
     `ingest` is `(ingested, failures, stored, label)`. `stored` is the
     store's array after `unload_pixel_data()` -- the sidecar's answer --
-    and `label` is the instance's PhotometricInterpretation. For the
-    handler, the array (or the exception) and the dataset's label
-    afterwards. For the Instance door, twice: a bare instance, which
+    and `label` is the instance's PhotometricInterpretation. For
+    `_decode_pixels`, `(array, label)` or the exception: the column the
+    handler's `get_pixel_data` held until #453 deleted it (Q10). For the Instance door, twice: a bare instance, which
     carries no label, and one labelled as the file is, as a hand-built
     graph would be. Each comes with its label and how far its revision
     moved.
@@ -140,10 +142,8 @@ def doors(tmp_path):
             stored = inst.get_pixel_data()
             label = inst.attributes.get("0028,0004")
         out = {"ingest": (summary.ingested, summary.failures, stored, label)}
-        handler_ds = pydicom.dcmread(path)
-        out["handler"] = (
-            _read(lambda: imagecodecs_handler.get_pixel_data(handler_ds)),
-            str(handler_ds.PhotometricInterpretation))
+        out["decode_pixels"] = _read(
+            lambda: through_the_fallback(pydicom.dcmread(path)))
         for door, label in (("bare", None),
                             ("labelled", str(ds.PhotometricInterpretation))):
             inst = _instance(path, label)
@@ -192,9 +192,9 @@ def test_an_8_bit_ybr_full_jpeg_ls_file_reads_as_rgb_at_every_door(
     assert (ingested, failures) == (1, [])
     assert _same(stored, want), stored
     assert label == "RGB"
-    arr, ds_label = got["handler"]
+    arr, decoded_label = got["decode_pixels"]
     assert _same(arr, want), arr
-    assert ds_label == "RGB"
+    assert decoded_label == "RGB"
     arr, inst_label, moved = got["labelled"]
     assert _same(arr, want), arr
     assert (inst_label, moved) == ("RGB", 1)
@@ -237,8 +237,9 @@ def test_a_signed_8_bit_ybr_full_jpeg_ls_file_is_refused_at_every_door(doors):
     (`Invalid ndarray.dtype 'int8' for color space conversion`), and
     both read doors returned `int8` YBR samples. Now the handler refuses
     before it decodes. Ingest reaches the same check through
-    `_decode_with_imagecodecs`, and the Instance door carries the words
-    on its `imagecodecs fallback:` line. Neither label moves.
+    `_decode_with_imagecodecs`, and so does the Instance door, which
+    decodes through ingest's own `_decode_pixels` since #453. Neither
+    label moves.
     """
     got = doors(_dataset(JPEGLS, [YBR8], pixel_representation=1))
     ingested, failures, _stored, _label = got["ingest"]
@@ -249,16 +250,17 @@ def test_a_signed_8_bit_ybr_full_jpeg_ls_file_is_refused_at_every_door(doors):
     # it either, not as a bare error escaping `_decode_with_imagecodecs`.
     assert f"imagecodecs could not decode it either: {words}" \
         in failures[0][1], failures
-    arr, ds_label = got["handler"]
-    assert isinstance(arr, RuntimeError), arr
-    # Its own words, not "imagecodecs failed to decode ...": the refusal
-    # is made before the decode, outside the handler's `try`.
-    assert str(arr).startswith(words), str(arr)
-    assert ds_label == "YBR_FULL"
+    exc = got["decode_pixels"]
+    assert isinstance(exc, RuntimeError), exc
+    assert f"imagecodecs could not decode it either: {words}" in str(exc), \
+        str(exc)
     for door, label in (("bare", None), ("labelled", "YBR_FULL")):
         exc, inst_label, moved = got[door]
         assert isinstance(exc, RuntimeError), f"{door}: {exc!r}"
-        assert f"imagecodecs fallback: {words}" in str(exc), str(exc)
+        # Ingest's framing, since the door decodes through
+        # `_decode_pixels` (#453); it was `imagecodecs fallback: <words>`.
+        assert f"imagecodecs could not decode it either: {words}" \
+            in str(exc), str(exc)
         assert (inst_label, moved) == (label, 0)
 
 
@@ -271,9 +273,11 @@ def test_a_truncated_8_bit_ybr_full_jpeg_ls_file_changes_no_label(doors):
 
     #372's defect was a label without its conversion. Here the stream is
     cut two bytes short, so CharLS reads the header and then fails the
-    decode. A handler that relabelled `ds` before decoding would leave
-    `RGB` on a dataset whose samples were never converted. The dataset's
-    label, the labelled instance's label and its revision all stay put.
+    decode. A door that relabelled before decoding would leave `RGB` on
+    an instance whose samples were never converted. The labelled
+    instance's label and its revision stay put. (`_decode_pixels` never
+    writes to the dataset it is given, so the handler's dataset-label
+    half of this test went with the handler's `get_pixel_data`, #453.)
     """
     ds = _dataset(JPEGLS, [YBR8])
     whole = imagecodecs.jpegls_encode(YBR8)
@@ -281,10 +285,9 @@ def test_a_truncated_8_bit_ybr_full_jpeg_ls_file_changes_no_label(doors):
     ds["PixelData"].is_undefined_length = True
     got = doors(ds)
     assert got["ingest"][0] == 0, got["ingest"]
-    arr, ds_label = got["handler"]
-    assert isinstance(arr, RuntimeError), arr
-    assert "imagecodecs failed to decode" in str(arr), str(arr)
-    assert ds_label == "YBR_FULL"
+    exc = got["decode_pixels"]
+    assert isinstance(exc, RuntimeError), exc
+    assert "imagecodecs could not decode it either" in str(exc), str(exc)
     for door, label in (("bare", None), ("labelled", "YBR_FULL")):
         exc, inst_label, moved = got[door]
         assert isinstance(exc, RuntimeError), f"{door}: {exc!r}"
@@ -292,30 +295,33 @@ def test_a_truncated_8_bit_ybr_full_jpeg_ls_file_changes_no_label(doors):
 
 
 # ---------------------------------------------------------------------------
-# R4 -- 16-bit YBR_FULL: unchanged, #461 stays open
+# R4 -- 16-bit YBR_FULL: refused at the read door too (#461, Q5)
 # ---------------------------------------------------------------------------
 
-def test_a_16_bit_ybr_full_jpeg_ls_file_still_reads_as_stored_at_the_read_doors(
+def test_a_16_bit_ybr_full_jpeg_ls_file_is_refused_at_the_read_door_too(
         doors):
-    """R4: #464 converts unsigned 8-bit only, and leaves 16-bit as it was.
+    """R4: #464 converts unsigned 8-bit only; #461 recorded 16-bit as a limit.
 
-    The owner's instruction for this bunch: `convert_color_space` refuses
-    `uint16`, and whether 16-bit YBR_FULL is converted here or recorded as
-    a limit is #461's call. That issue is not decided here. So the read
-    doors keep returning the samples as stored, under the file's own
-    YBR_FULL label, which is true of them. Ingest keeps refusing the
-    file, naming its depth.
+    `convert_color_space` refuses `uint16`, and pydicom refuses the native
+    form as well, so there is no reference conversion to agree with. #464
+    left the read doors returning the samples as stored, under the file's
+    YBR_FULL label, while ingest refused the file naming its depth. #461's
+    ruling (Q5) is to refuse at every door, and since #453 the Instance
+    door decodes through ingest's own `_decode_pixels`, so it refuses in
+    ingest's words and its label does not move. The handler column is
+    gone: `imagecodecs_handler.get_pixel_data` is no longer a door.
     """
     got = doors(_dataset(JPEGLS, [RGB16], bits=16))
     ingested, failures, _stored, _label = got["ingest"]
     assert ingested == 0
-    assert "16-bit" in failures[0][1], failures
-    arr, ds_label = got["handler"]
-    assert _same(arr, RGB16), arr
-    assert ds_label == "YBR_FULL"
-    arr, inst_label, moved = got["labelled"]
-    assert _same(arr, RGB16), arr
-    assert (inst_label, moved) == ("YBR_FULL", 0)
+    words = ("its declared colour space 'YBR_FULL' is 16-bit, and the "
+             "conversion to RGB this fallback would make")
+    assert words in failures[0][1], failures
+    for door, label in (("bare", None), ("labelled", "YBR_FULL")):
+        exc, inst_label, moved = got[door]
+        assert isinstance(exc, RuntimeError), f"{door}: {exc!r}"
+        assert words in str(exc), str(exc)
+        assert (inst_label, moved) == (label, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -362,28 +368,30 @@ def test_a_set_landing_during_the_fallback_read_keeps_its_pixels_and_label(
     label no array can carry, and a publish made anyway would put the
     stale RGB frame over the set's pixels and mark them written.
 
-    The set is injected inside the handler call, which is the interleaving
+    The set is injected inside the decode call, which is the interleaving
     a second thread produces, made deterministic (#465's `SetDuringRead`
-    shape).
+    shape). The decode is `io_handlers._decode_pixels` since #453, which
+    the door imports at call time, so that is where it is patched; it was
+    `imagecodecs_handler.get_pixel_data`.
     """
     src = tmp_path / "src"
     os.makedirs(src)
     path = str(src / "one.dcm")
     _dataset(JPEGLS, [YBR8]).save_as(path, enforce_file_format=True)
     inst = _instance(path, "YBR_FULL")
-    real = imagecodecs_handler.get_pixel_data
+    from isocenter import io_handlers
+    real = io_handlers._decode_pixels  # pylint: disable=protected-access
 
     grey = np.zeros((4, 4), dtype=np.uint8)
     fired = []
 
-    def set_during_read(ds):
-        arr = real(ds)
+    def set_during_read(ds, **kwargs):
+        got = real(ds, **kwargs)
         fired.append(1)
         inst.set_pixel_data(grey)
-        return arr
+        return got
 
-    monkeypatch.setattr(imagecodecs_handler, "get_pixel_data",
-                        set_during_read)
+    monkeypatch.setattr(io_handlers, "_decode_pixels", set_during_read)
     got = inst.get_pixel_data()
     assert fired == [1], "the fallback arm was never reached"
     assert inst.attributes["0028,0004"] == "MONOCHROME2"

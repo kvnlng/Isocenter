@@ -668,14 +668,27 @@ def test_signed_samples_declared_unsigned_fail_readback(tmp_path,
     if compression is None:
         assert _stored_samples(path).reshape(-1)[:4].tolist() == [
             65535, 65534, 65533, 4]
-    # Under JPEG 2000 a reader gets unsigned samples as well, but
-    # shifted: measured [32767, 32766, 32765, 32772]. That is pydicom's
-    # J2K path and not something to pin.
+    # Under JPEG 2000 pydicom's own reader gets unsigned samples as well,
+    # but shifted: measured [32767, 32766, 32765, 32772]. That is
+    # pydicom's J2K path and not something to pin; Isocenter's doors
+    # refuse the file (#524).
 
     with pytest.raises(RuntimeError) as raised:
         io_handlers._verify_readback(path, ds, src)
 
     message = str(raised.value)
+    if compression is not None:
+        # Under JPEG 2000 the readback's decode refuses the file before
+        # the comparison is reached: its codestream is signed where the
+        # file declares PixelRepresentation 0, which `_decode_pixels`
+        # refuses at every door since #524. The readback still fails the
+        # file, and the reason still names PixelRepresentation 0. The
+        # native case below is the dtype comparison's killer.
+        assert ("could not be decoded (RuntimeError: the JPEG 2000 "
+                "codestream is signed at precision 16, where "
+                "PixelRepresentation 0 declares unsigned samples") \
+            in message, message
+        return
     assert "decodes as uint16 x 16 where int16 x 16 was written" in message, \
         message
     assert ("the file declares PixelRepresentation 0 (unsigned) where "

@@ -50,6 +50,7 @@ from isocenter.io_handlers import (_FALLBACK_DECODER_CONVERTS,
                                    _FALLBACK_PHOTOMETRICS)
 from isocenter.services import RedactionService
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 EXPLICIT_LE = "1.2.840.10008.1.2.1"
 JPEG_BASELINE = "1.2.840.10008.1.2.4.50"
@@ -162,7 +163,7 @@ def _pydicom_cannot_decode(path):
 @pytest.mark.parametrize("source", [RGB8, RGB16], ids=["8-bit", "16-bit"])
 def test_the_handler_says_rgb_for_a_ybr_rct_or_ict_j2k_stream(
         tmp_path, photometric, source):
-    """J1: RGB bytes, and `ds` relabelled RGB, at 8 and 16 bits.
+    """J1: RGB bytes, labelled RGB, at 8 and 16 bits.
 
     `jpeg2k_decode` returns the codestream's components after undoing its
     colour transform, so the array is the RGB the encoder was given
@@ -170,14 +171,18 @@ def test_the_handler_says_rgb_for_a_ybr_rct_or_ict_j2k_stream(
     #482 the handler returned it with `ds` still saying `YBR_RCT` or
     `YBR_ICT`. The label now follows the decoder's answer, which is
     `_FALLBACK_PHOTOMETRICS`' answer for ingest.
+
+    Asked of `_decode_pixels` with pydicom unable to decode since #453
+    deleted the handler's `get_pixel_data` (Q10). It returns the label
+    rather than writing it onto `ds`.
     """
     ds = _j2k_dataset(photometric, source)
     codestream = next(generate_frames(ds.PixelData, number_of_frames=1))
     want = imagecodecs.jpeg2k_decode(codestream)
     assert np.abs(want.astype(int) - source.astype(int)).max() <= 1
-    arr = imagecodecs_handler.get_pixel_data(ds)
+    arr, label = through_the_fallback(ds)
     assert _same(arr, want), arr
-    assert str(ds.PhotometricInterpretation) == "RGB"
+    assert label == "RGB"
 
 
 @pytest.mark.parametrize("photometric", ["YBR_RCT", "YBR_ICT"])
@@ -207,45 +212,23 @@ def test_a_j2k_decode_that_fails_changes_no_label(tmp_path):
 
     The stream is cut two bytes short, so OpenJPEG reads the header and
     fails the decode (measured: `opj_decode or opj_end_decompress
-    failed`). A handler that relabelled `ds` before decoding would leave
-    `RGB` on a dataset nothing was decoded from, which is the other half
-    of #372's defect: a label without its conversion.
+    failed`). A door that relabelled before decoding would leave `RGB`
+    on an instance nothing was decoded from, which is the other half of
+    #372's defect: a label without its conversion. (`_decode_pixels`
+    never writes to its dataset, so the handler's dataset-label half of
+    this test went with the handler's `get_pixel_data`, #453.)
     """
     ds = _j2k_dataset("YBR_RCT", RGB16)
     whole = _j2k(RGB16, "YBR_RCT")
     ds.PixelData = encapsulate([whole[:-2]], has_bot=True)
     ds["PixelData"].is_undefined_length = True
     path = _write(tmp_path, ds)
-    handler_ds = pydicom.dcmread(path)
-    with pytest.raises(RuntimeError, match="imagecodecs failed to decode"):
-        imagecodecs_handler.get_pixel_data(handler_ds)
-    assert str(handler_ds.PhotometricInterpretation) == "YBR_RCT"
+    with pytest.raises(RuntimeError,
+                       match="imagecodecs could not decode it either"):
+        through_the_fallback(pydicom.dcmread(path))
     exc, label, moved = _read_instance(path, "YBR_RCT")
     assert isinstance(exc, RuntimeError), exc
     assert (label, moved) == ("YBR_RCT", 0)
-
-
-def test_the_handler_relabels_exactly_the_rows_ingest_relabels_without_converting():
-    """J4: one table of label-only relabels, held to ingest's.
-
-    `_FALLBACK_PHOTOMETRICS` says which declared label ingest stores
-    under which, and `_FALLBACK_DECODER_CONVERTS` names the syntaxes
-    whose decoder has already converted, so a relabel there changes the
-    label only. The handler's `DECODER_RELABELS` must hold exactly those
-    rows. A row in one table alone is a label one door gives and the
-    other does not, which is this issue again. (#464's R5 holds the
-    conversion rows the same way.)
-    """
-    from_table = {ts: {declared: stored
-                       for declared, stored in labels.items()
-                       if declared != stored}
-                  for ts, labels in _FALLBACK_PHOTOMETRICS.items()
-                  if ts in _FALLBACK_DECODER_CONVERTS}
-    assert from_table == {
-        ts: dict(rows)
-        for ts, rows in imagecodecs_handler.DECODER_RELABELS.items()}
-    assert not set(imagecodecs_handler.DECODER_RELABELS) & set(
-        imagecodecs_handler.CONVERTS_TO)
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +320,14 @@ def test_a_set_landing_during_the_pydicom_read_keeps_its_own_label(
     path = _write(tmp_path, _dataset(
         EXPLICIT_LE, photometric="YBR_FULL", native=YBR8))
     inst = _instance(path, "YBR_FULL")
-    real = entities.get_decoder
+    # The decode the door makes is `io_handlers._decode_pixels`' since
+    # #453, so its `get_decoder` is the one wrapped. `fired` says the set
+    # really landed inside it: a wrap in a module the door no longer
+    # decodes through would leave every assertion below about a read
+    # with no set in it.
+    from isocenter import io_handlers
+    real = io_handlers.get_decoder
+    fired = []
     grey = np.zeros((4, 4), dtype=np.uint8)
 
     class SetDuringRead:
@@ -346,12 +336,14 @@ def test_a_set_landing_during_the_pydicom_read_keeps_its_own_label(
 
         def as_array(self, *args, **kwargs):
             got = self._decoder.as_array(*args, **kwargs)
+            fired.append(1)
             inst.set_pixel_data(grey)
             return got
 
-    monkeypatch.setattr(entities, "get_decoder",
+    monkeypatch.setattr(io_handlers, "get_decoder",
                         lambda ts: SetDuringRead(real(ts)))
     got = inst.get_pixel_data()
+    assert fired == [1], "the set never ran inside the decode"
     assert inst.attributes["0028,0004"] == "MONOCHROME2"
     assert int(inst.attributes["0028,0002"]) == 1
     assert got is inst.pixel_array
@@ -474,8 +466,8 @@ def test_a_hand_built_export_writes_rgb_bytes_under_an_rgb_label(
         if name == "YBR_FULL":
             colours[str(ds.SOPInstanceUID)] = YBR8_AS_RGB
         else:
-            colours[str(ds.SOPInstanceUID)] = imagecodecs_handler.get_pixel_data(
-                pydicom.dcmread(path))
+            colours[str(ds.SOPInstanceUID)] = through_the_fallback(
+                pydicom.dcmread(path))[0]
 
     hand = DicomSession(persistence_file=str(tmp_path / "hand.db"))
     ingested = DicomSession(persistence_file=str(tmp_path / "ingested.db"))
@@ -578,8 +570,8 @@ def test_a_redacted_hand_built_graph_exports_rgb_bytes_under_an_rgb_label(
     ]
     sources = [(_write(tmp_path, ds), ds) for ds in datasets]
     colours = {1: YBR8_AS_RGB,
-               2: imagecodecs_handler.get_pixel_data(
-                   pydicom.dcmread(sources[1][0]))}
+               2: through_the_fallback(
+                   pydicom.dcmread(sources[1][0]))[0]}
 
     session = DicomSession(persistence_file=str(tmp_path / "redact.db"))
     try:
@@ -639,7 +631,8 @@ def test_a_j2k_stream_with_no_colour_transform_keeps_its_label(
         tmp_path, ts, photometric, source):
     """J5, P2's twin at the handler: no transform undone, no label written.
 
-    `DECODER_RELABELS` names the labels whose transform the codec undoes.
+    `_FALLBACK_DECODER_CONVERTS` names the syntaxes whose codec undoes a
+    colour transform, and `_FALLBACK_PHOTOMETRICS` the labels it undoes.
     A J2K stream under any other label -- MONOCHROME2, or RGB written
     without the multiple component transform -- decodes to exactly what
     was encoded, so the handler has converted nothing and says nothing:
@@ -650,9 +643,11 @@ def test_a_j2k_stream_with_no_colour_transform_keeps_its_label(
     The instance half: a labelled instance over each file keeps its label
     and its revision. **It does not reach the handler for MONOCHROME2**:
     pydicom's Pillow plugin decodes that at both depths, and only the
-    16-bit RGB file falls through to the handler (measured). So the direct
-    handler calls on MONOCHROME2 are the ones that pin the lookup; the
-    instance half pins the door around it.
+    16-bit RGB file falls through to the handler (measured). So the
+    fallback calls on MONOCHROME2 are the ones that pin the lookup; the
+    instance half pins the door around it. The fallback is
+    `_decode_pixels` with pydicom unable to decode since #453 deleted the
+    handler's `get_pixel_data` (Q10), and its label is the one returned.
     """
     frame = imagecodecs.jpeg2k_encode(source, level=0, codecformat="J2K",
                                       mct=False, reversible=True)
@@ -662,10 +657,9 @@ def test_a_j2k_stream_with_no_colour_transform_keeps_its_label(
         ds.SamplesPerPixel = 1
         del ds.PlanarConfiguration
     path = _write(tmp_path, ds)
-    handler_ds = pydicom.dcmread(path)
-    arr = imagecodecs_handler.get_pixel_data(handler_ds)
+    arr, decoded_label = through_the_fallback(pydicom.dcmread(path))
     assert _same(arr, source), arr
-    assert str(handler_ds.PhotometricInterpretation) == photometric
+    assert decoded_label == photometric
     arr, label, moved = _read_instance(path, photometric)
     assert _same(arr, source), arr
     assert (label, moved) == (photometric, 0)

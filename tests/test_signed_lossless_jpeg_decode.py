@@ -10,12 +10,13 @@ from `Instance.get_pixel_data()` as `uint16` 3296, with no error, while
 The ruling: decode correctly. The handler sign-extends from BitsStored,
 the rule pydicom applies with its own plugins, measured bit-exact against
 pydicom with pylibjpeg-libjpeg and pyjpegls at 8, 12 and 16 bits. It
-lives in the handler's `_decode_frame`, which both doors reach -- ingest
-through `decode_declared_frames`, the read door through `get_pixel_data`
--- so there is one rule, not a guard at one door and a fix at the other.
-Every case here is asserted at all three: `ingest()`, the store's
-answer after it; `Instance(file_path).get_pixel_data()`; and the
-handler's own `get_pixel_data`.
+lives in the handler's `_decode_frame`, which every door reaches through
+`io_handlers._decode_pixels` and `decode_declared_frames` -- so there is
+one rule, not a guard at one door and a fix at the other. Every case here
+is asserted at all three: `ingest()`, the store's answer after it;
+`Instance(file_path).get_pixel_data()`; and `_decode_pixels` itself, with
+pydicom made unable to decode, which is the column the handler's own
+`get_pixel_data` held until #453 deleted it (Q10).
 
 JPEG 2000 is not touched by *this* rule: `jpeg2k_decode` returns signed
 samples already. It has a rule of its own, keyed on the codestream's SIZ
@@ -38,9 +39,9 @@ from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.encaps import encapsulate
 from pydicom.uid import generate_uid
 
-from isocenter import imagecodecs_handler
 from isocenter.entities import Instance
 from isocenter.session import DicomSession
+from support.decode_doors import through_the_fallback
 
 LJPEG = "1.2.840.10008.1.2.4.57"
 LJPEG_SV1 = "1.2.840.10008.1.2.4.70"
@@ -161,8 +162,8 @@ def doors(tmp_path):
                 ("instance", lambda: Instance(
                     generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
                     file_path=path).get_pixel_data()),
-                ("handler", lambda: imagecodecs_handler.get_pixel_data(
-                    pydicom.dcmread(path)))):
+                ("decode_pixels", lambda: through_the_fallback(
+                    pydicom.dcmread(path))[0])):
             try:
                 out[door] = read()
             except Exception as exc:  # pylint: disable=broad-except
@@ -179,7 +180,7 @@ def _assert_reads(got, want):
     ingested, failures, stored = got["ingest"]
     assert (ingested, failures) == (1, []), failures
     for door, arr in (("ingest", stored), ("instance", got["instance"]),
-                      ("handler", got["handler"])):
+                      ("decode_pixels", got["decode_pixels"])):
         assert isinstance(arr, np.ndarray), f"{door}: {arr!r}"
         assert arr.dtype == want.dtype, f"{door}: {arr.dtype}"
         assert arr.tolist() == want.tolist(), f"{door}: {arr[0].tolist()}"
@@ -209,7 +210,7 @@ _S1_CASES = [
          for ts, bs, enc in _S1_CASES])
 def test_a_signed_lossless_jpeg_frame_reads_its_values_at_both_doors(
         doors, ts, bits_stored, encode):
-    """S1: ingest, the Instance door and the handler agree, on the values.
+    """S1: ingest, the Instance door and `_decode_pixels` agree, on the values.
 
     Before: ingest refused (`decoded to uint16 ... declare int16`) and
     both read doors returned the unsigned pattern -- 3296 for -800 at
@@ -402,28 +403,35 @@ def test_a_signed_decode_narrower_than_bits_stored_is_refused_at_both_doors(
 
     The codec returns `uint8`, the header's container is 8 bits too, so
     there is nothing to widen it into (S7), and 12 bits cannot be
-    sign-extended inside 8: the shift the rule computes would be -4. The
-    handler refuses, in its words, at the read door, and ingest refuses.
+    sign-extended inside 8: the shift the rule computes would be -4.
     Found by the probe (#446 review): with `and` in place of `or` in the
-    guard, a `uint8` decode passed it and came back as whatever a negative
-    shift made of it, with no error at the read door.
+    handler's guard, a `uint8` decode passed it and came back as whatever
+    a negative shift made of it, with no error at the read door.
+
+    **Refused before any decode now, in pydicom's words (#453).** The
+    header is one pydicom's own validation rejects -- BitsStored greater
+    than BitsAllocated -- and pydicom never got to say so, because it
+    validates only once it has a plugin and has none for JPEG Lossless
+    here. `_decode_pixels` runs that validation ahead of the fallback, at
+    ingest and at the Instance door alike, so the handler's guard is no
+    longer what stands between this file and the shift. The handler
+    column is gone: it is no longer a door.
 
     JPEG Lossless under BitsAllocated 8, where until #454 this was a
     JPEG-LS stream under BitsAllocated 16. That stream is now widened into
-    its 16-bit container and read, as pydicom reads it (S7b). And a
-    JPEG-LS stream is sign-extended from its own precision (#478), so it
-    never asks this guard about BitsStored. JPEG Lossless is read by
-    BitsStored, so the guard is what stands between it and the shift.
+    its 16-bit container and read, as pydicom reads it (S7b).
     """
     source = np.arange(16 * 16, dtype=np.uint8).reshape(16, 16)
     got = doors(_dataset(LJPEG_SV1, _ljpeg(source, 8), source.shape, 12,
                          bits_allocated=8))
-    assert got["ingest"][0] == 0
-    for door in ("instance", "handler"):
-        words = str(got[door])
-        assert isinstance(got[door], Exception), f"{door}: {got[door]!r}"
-        assert "cannot sign-extend a uint8 decode from BitsStored 12" in \
-            words, f"{door}: {words}"
+    ingested, failures, _stored = got["ingest"]
+    assert ingested == 0
+    words = ("A (0028,0101) 'Bits Stored' value of '12' is invalid, it must "
+             "be in the range (1, 64) and no greater than the (0028,0100) "
+             "'Bits Allocated' value of '8'")
+    assert words in failures[0][1], failures
+    assert isinstance(got["instance"], RuntimeError), got["instance"]
+    assert words in str(got["instance"]), str(got["instance"])
 
 
 # ---------------------------------------------------------------------------
@@ -583,45 +591,38 @@ def test_a_precision_8_stream_under_a_signed_bits_stored_16_reads_per_syntax(
 
 
 # ---------------------------------------------------------------------------
-# S5 -- a signed header whose HighBit is not BitsStored - 1 is refused
+# S5 -- a signed header whose HighBit is not BitsStored - 1 is read
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("high_bit", [15, 10], ids=["above", "below"])
-def test_a_signed_frame_whose_high_bit_is_not_bits_stored_minus_one_is_refused_at_both_doors(  # noqa: E501  pylint: disable=line-too-long
+def test_a_signed_frame_whose_high_bit_is_not_bits_stored_minus_one_is_read_at_every_door(  # noqa: E501  pylint: disable=line-too-long
         doors, high_bit):
-    """S5: no JPEG decode produces the layout that header describes.
+    """S5: read as right-aligned BitsStored-bit samples, as pydicom reads it.
 
-    A JPEG decoder returns right-aligned BitsStored-bit samples, so
-    sign-extending from BitsStored is right only when HighBit is
-    BitsStored - 1. HighBit 15 under BitsStored 12 says the samples sit in
-    bits 4..15, which no decoder output does; pydicom never reads HighBit
-    and sign-extends anyway. Of the three readings -- refuse, ignore it as
-    pydicom does, or shift from HighBit -- refusing is the one that cannot
-    return a wrong value (owner question Q1, answered with the
-    recommendation pending confirmation). Refused at ingest, and at the
-    read door in the handler's words (#444's `imagecodecs fallback:` line).
+    #446 refused this file (owner question Q1, answered with the
+    recommendation pending confirmation): HighBit 15 under BitsStored 12
+    says the samples sit in bits 4..15, which no decoder output does, and
+    refusing was the one reading that could not return a wrong value.
+    #455 and #523 overruled it (Q2). No decoder here reads HighBit, the
+    same header over an unsigned frame was read in silence, and the
+    refusal claimed an extension "from BitsStored" on routes that extend
+    from the stream's precision -- so the file is read, at every door,
+    and ingest writes one `WARNING` row saying so
+    (`tests/test_high_bit_is_a_header_warning.py`).
 
-    Both sides of BitsStored - 1, so the check is pinned as an inequality:
-    with HighBit 15 alone, `!=` weakened to `>` stayed green (found in
-    review of #463).
+    Both sides of BitsStored - 1: with HighBit 15 alone, a read that
+    broke only below would stay green (found in review of #463, when it
+    was the refusal being pinned as an inequality).
     """
     want = SIGNED[12]
     codestream = _ljpeg(_pattern(want, 12), 12)
-    got = doors(_dataset(LJPEG_SV1, codestream, want.shape, 12,
-                         high_bit=high_bit))
-    ingested, failures, _stored = got["ingest"]
-    assert ingested == 0
-    reason = failures[0][1]
-    for door, words in (("ingest", reason),
-                        ("instance", str(got["instance"])),
-                        ("handler", str(got["handler"]))):
-        assert f"HighBit {high_bit}" in words, f"{door}: {words}"
-        assert "BitsStored 12" in words, f"{door}: {words}"
+    _assert_reads(doors(_dataset(LJPEG_SV1, codestream, want.shape, 12,
+                                 high_bit=high_bit)), want)
 
 
 def test_an_unsigned_frame_whose_high_bit_is_not_bits_stored_minus_one_is_untouched(  # noqa: E501  pylint: disable=line-too-long
         doors):
-    """S5's twin: the HighBit check is inside the signed branch only.
+    """S5's twin: an unsigned frame reads the same.
 
     An unsigned frame is returned as the codec decoded it, whatever its
     HighBit says, which is what pydicom does at every door.

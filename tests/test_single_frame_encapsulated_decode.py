@@ -1,5 +1,10 @@
 """`imagecodecs_handler`'s single-frame arm decodes what it is handed (#407).
 
+That arm was `imagecodecs_handler.get_pixel_data`'s, deleted in #453
+(Q10): the imagecodecs decode is `decode_declared_frames` behind
+`io_handlers._decode_pixels`' fallback, so these tests ask that route,
+with pydicom made unable to decode (`through_the_fallback`).
+
 The arm joined **every item** of the encapsulated `PixelData` and handed
 the result to `imagecodecs`. The first item is the Basic Offset Table
 (PS3.5 A.4), so the codestream arrived with four zero bytes ahead of its
@@ -24,9 +29,9 @@ from pydicom.uid import (ExplicitVRLittleEndian, JPEG2000Lossless,
                          generate_uid)
 
 import imagecodecs
-from isocenter import imagecodecs_handler
 from isocenter.entities import Instance
 from isocenter.io_handlers import _compress_j2k
+from support.decode_doors import through_the_fallback
 
 
 def _item(payload: bytes) -> bytes:
@@ -76,7 +81,7 @@ def test_a_single_frame_j2k_codestream_decodes_to_the_pixels_that_were_encoded()
     arr = (np.arange(16, dtype=np.uint16) * 4096).reshape(4, 4)
     ds = _project_compressed(arr)
 
-    out = imagecodecs_handler.get_pixel_data(ds)
+    out, _label = through_the_fallback(ds)
 
     assert out.dtype == np.uint16
     assert np.array_equal(out.reshape(arr.shape), arr)
@@ -96,7 +101,7 @@ def test_the_fixture_carries_a_populated_basic_offset_table():
     first = list(generate_fragments(ds.PixelData))[0]
     assert first == b"\x00\x00\x00\x00"
 
-    out = imagecodecs_handler.get_pixel_data(ds)
+    out, _label = through_the_fallback(ds)
     assert np.array_equal(out.reshape(arr.shape), arr)
 
 
@@ -120,7 +125,7 @@ def test_one_frame_split_across_two_fragments_is_reassembled():
 
     assert len(list(generate_fragments(ds.PixelData))) == 3
 
-    out = imagecodecs_handler.get_pixel_data(ds)
+    out, _label = through_the_fallback(ds)
     assert np.array_equal(out.reshape(arr.shape), arr)
 
 
@@ -135,7 +140,7 @@ def test_a_multi_frame_dataset_still_decodes_every_frame():
         [imagecodecs.jpeg2k_encode(f, level=0, codecformat="J2K")
          for f in frames])
 
-    out = imagecodecs_handler.get_pixel_data(ds)
+    out, _label = through_the_fallback(ds)
 
     assert out.shape == (2, 4, 4)
     assert np.array_equal(out[0], frames[0])

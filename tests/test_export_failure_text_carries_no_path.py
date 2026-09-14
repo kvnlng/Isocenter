@@ -317,7 +317,7 @@ def test_a_source_read_failure_names_the_instance_not_the_file(
     def refuse(_ds):
         raise raised
 
-    monkeypatch.setattr(entities, "_decode_with_pydicom", refuse)
+    monkeypatch.setattr(entities, "_decode_from_file", refuse)
     with pytest.raises(RuntimeError) as caught:
         inst.get_pixel_data()
 
