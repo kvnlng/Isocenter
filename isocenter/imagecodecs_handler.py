@@ -547,11 +547,6 @@ def _sign_extend(arr, ds, precision=None):
             f"decode returns right-aligned {bits_stored}-bit samples, so a "
             f"signed sample is sign-extended from BitsStored only when "
             f"HighBit is BitsStored - 1")
-    if arr.dtype.kind != "u" or not 1 <= bits_stored <= bits:
-        raise RuntimeError(
-            f"cannot sign-extend a {arr.dtype} decode from BitsStored "
-            f"{bits_stored}: the codec returns unsigned samples at most "
-            f"{bits} bits wide")
     # The stream's precision where it has one, not BitsStored (#478, the
     # owner's ruling, reversing the BitsStored reading #463 shipped). The
     # two agree for every conformant encoder. `imagecodecs.jpegls_encode`
@@ -559,21 +554,31 @@ def _sign_extend(arr, ds, precision=None):
     # precision-16 stream, and pydicom with pyjpegls reads that stream by
     # its precision: 3296 for -800's pattern. A stream narrower than
     # BitsStored (precision 12 under BitsStored 16) is read by its 12 bits
-    # the same way, -800. The BitsStored check above stays even so. A
-    # precision-8 stream under BitsStored 12 and BitsAllocated 16 reaches
-    # here already widened to `uint16` (`_in_declared_container`, #454),
-    # so it is extended from 8 inside `int16`, pydicom's answer. Until
-    # #454 it arrived as `uint8`, and every door refused it. The check
-    # above is now for a container that cannot hold BitsStored at all:
-    # BitsStored 12 under BitsAllocated 8, which S6 pins.
+    # the same way, -800. A precision-8 stream under BitsStored 12 and
+    # BitsAllocated 16 reaches here already widened to `uint16`
+    # (`_in_declared_container`, #454), so it is extended from 8 inside
+    # `int16`, pydicom's answer.
     width = precision or bits_stored
     if not 1 <= width <= bits:
-        # Unreachable for a stream CharLS decoded: it returns a container
-        # at least as wide as the precision it read. Here so that a
-        # misread header raises rather than shifting by a negative count.
+        # A width the container cannot hold: the shift below would be
+        # negative. One guard, naming where the width came from. There
+        # were two until #523, and neither could fire alone: the first
+        # also refused a *signed* decode, which never reaches here (lj92
+        # and CharLS return unsigned patterns, and a signed JPEG 2000
+        # codestream is already signed), and refused BitsStored above
+        # the container, which pydicom's validation now refuses before
+        # any decode (#453) unless the container is one nothing widens --
+        # a precision-8 JPEG Lossless stream under BitsAllocated 32,
+        # BitsStored 12, the header
+        # `test_a_jpeg_lossless_stream_narrower_than_bits_stored_is_refused_not_shifted`
+        # reaches this with. CharLS and openjpeg return a container at
+        # least as wide as the precision they read, so a precision width
+        # reaches here only from a misread header.
+        source = ("its stream's precision" if precision
+                  else "BitsStored")
         raise RuntimeError(
-            f"cannot sign-extend a {arr.dtype} decode from its stream's "
-            f"precision {width}")
+            f"cannot sign-extend a {arr.dtype} decode from {source} "
+            f"{width}: the codec returns samples at most {bits} bits wide")
     shift = bits - width
     # Shift left while unsigned, reinterpret, then shift right while
     # signed: numpy's `>>` is arithmetic on a signed dtype and logical on
@@ -582,11 +587,12 @@ def _sign_extend(arr, ds, precision=None):
 
 
 def _in_declared_container(arr, ds):
-    """A JPEG Lossless or JPEG-LS decode, in the container the header declares (#454).
+    """A JPEG decode, in the container the header declares (#454, #523).
 
-    lj92, libjpeg-turbo and CharLS return the narrowest container that
-    holds the stream's precision: `uint8` for a precision of 8 or less,
-    whatever BitsAllocated says. So a precision-8 stream under
+    lj92, libjpeg-turbo, CharLS and openjpeg return the narrowest
+    container that holds the stream's precision: `uint8` for a precision
+    of 8 or less, whatever BitsAllocated says -- `int8` from openjpeg when
+    a JPEG 2000 codestream is signed. So a precision-8 stream under
     BitsAllocated 16 came back as `uint8` (or `int8`, once
     `_sign_extend` had it) from both read doors, with the right values,
     while ingest's dtype guard refused the same file against
@@ -596,19 +602,30 @@ def _in_declared_container(arr, ds):
     pylibjpeg-libjpeg raises on these files, so there the doors agree with
     each other and not with pydicom.
 
-    Exact, since every 8-bit sample fits in 16 bits. Called before
-    `_sign_extend`, so a signed sample is sign-extended inside the
-    declared container rather than the codec's. A stream of precision 8
-    under BitsStored 12 then reads as pydicom reads it, where it used to be
-    refused at every door.
+    Exact, since every 8-bit sample fits in 16 bits, so it writes no row
+    and logs nothing (#523's ruling). Called before `_sign_extend`, so a
+    signed sample is sign-extended inside the declared container rather
+    than the codec's. A stream of precision 8 under BitsStored 12 then
+    reads as pydicom reads it, where it used to be refused at every door.
 
-    It only widens, and only a `uint8` decode under BitsAllocated 16. A
+    **JPEG 2000 since #523.** The J2K arm did not call this, so a
+    precision-8 codestream under BitsAllocated 16 was refused by the
+    fallback and read by Pillow, and the handler returned `uint8`. Its
+    `int8` arm is JPEG 2000's alone: lj92 and CharLS return unsigned
+    patterns, and `_sign_extend` makes the signed dtype after this call.
+    A signed codestream is widened with its sign, which is Pillow's
+    `int16` answer (measured).
+
+    It only widens, and only an 8-bit decode under BitsAllocated 16. A
     decode wider than its container, a precision-16 stream under
     BitsAllocated 8, is left alone, so the dtype guard still refuses it.
     Read with `getattr`, never `ds.get`, for `_sign_extend`'s reason.
     """
-    if arr.dtype == np.uint8 and int(getattr(ds, "BitsAllocated", 0) or 0) == 16:
-        return arr.astype(np.uint16)
+    if int(getattr(ds, "BitsAllocated", 0) or 0) == 16:
+        if arr.dtype == np.uint8:
+            return arr.astype(np.uint16)
+        if arr.dtype == np.int8:
+            return arr.astype(np.int16)
     return arr
 
 
@@ -700,9 +717,20 @@ def _decode_frame(transfer_syntax, bitstream, ds):
         # The codestream's own SIZ header, per frame, for the same reason
         # the JPEG-LS branch below reads its own: a frame is a codestream
         # and one frame's header does not speak for another's samples.
+        #
+        # In the declared container first, as the other JPEG arms are
+        # (#523). openjpeg returns `uint8` or `int8` for a precision of 8
+        # or less whatever BitsAllocated says, and Pillow, at pydicom's
+        # door, returns the same samples in 16 bits. Without the widening
+        # the fallback refused such a file against BitsAllocated 16, or
+        # could not sign-extend an unsigned one from its precision, while
+        # pydicom read it: an answer that depended on which plugins were
+        # installed. Before `_against_pixel_representation`, so an
+        # unsigned precision-8 stream under PixelRepresentation 1 is
+        # extended inside `uint16`, which is Pillow's `int16` answer.
         return _against_pixel_representation(
-            imagecodecs.jpeg2k_decode(bitstream), ds,
-            _j2k_sample_layout(bitstream))
+            _in_declared_container(imagecodecs.jpeg2k_decode(bitstream), ds),
+            ds, _j2k_sample_layout(bitstream))
     if transfer_syntax in [JPEGLSLossless, JPEGLSLossy]:
         # Each frame's own precision, parsed from its own header: a frame
         # is a codestream, and one frame's header does not speak for

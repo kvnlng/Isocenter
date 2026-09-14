@@ -32,7 +32,8 @@ import pytest
 
 from support.decode_doors import (J2K_LOSSLESS, JPEGLS, LJPEG_SV1,
                                   at_decode_pixels, at_ingest, at_instance,
-                                  dataset, pydicom_cannot, route, same,
+                                  dataset, pydicom_answer, pydicom_cannot,
+                                  route, same,
                                   write)  # noqa: F401 pylint: disable=unused-import
 
 #: 4x4 unsigned 16-bit monochrome, every value above 255.
@@ -210,3 +211,150 @@ def test_a_conformant_file_reads_the_same_array_at_every_door(
     assert same(got["array"], want) and got["label"] == label, got
     if route is not None:
         assert route["n"] > 0
+
+
+# ---------------------------------------------------------------------------
+# F1c -- the JPEG 2000 fallback returns what Pillow returns (#523)
+# ---------------------------------------------------------------------------
+
+def _grid():
+    """Every JPEG 2000 shape Pillow decodes, whose sign agrees or is unsigned.
+
+    `(id, samples, precision, signed codestream, BitsAllocated, BitsStored,
+    PixelRepresentation)`. Monochrome at precision 8, 12 and 16; colour at
+    8 only, because Pillow refuses 16-bit multi-sample data and so those
+    files reach the fallback on both routes already. A *signed* codestream
+    under PixelRepresentation 0 is not here: nothing decodes it to the
+    file's samples (#524, below).
+    """
+    cells = []
+    for samples, precisions in ((1, (8, 12, 16)), (3, (8,))):
+        for precision in precisions:
+            for signed in (False, True):
+                for allocated in sorted({8 if precision <= 8 else 16, 16}):
+                    for stored in sorted({precision, allocated}):
+                        for representation in (0, 1):
+                            if signed and not representation:
+                                continue
+                            cells.append((
+                                f"{'mono' if samples == 1 else 'rgb'}-p{precision}"
+                                f"-{'s' if signed else 'u'}cs-BA{allocated}"
+                                f"-BS{stored}-PR{representation}",
+                                samples, precision, signed, allocated, stored,
+                                representation))
+    return cells
+
+
+def _grid_codestream(samples, precision, signed):
+    rng = np.random.default_rng(523)
+    if signed:
+        low, high = -(1 << (precision - 1)), (1 << (precision - 1)) - 1
+        dtype = np.int8 if precision <= 8 else np.int16
+    else:
+        low, high = 0, (1 << precision) - 1
+        dtype = np.uint8 if precision <= 8 else np.uint16
+    shape = (4, 4, 3) if samples == 3 else (4, 4)
+    source = rng.integers(low, high + 1, size=shape).astype(dtype)
+    source.flat[0], source.flat[1] = low, high
+    return _j2k(source, bitspersample=precision, mct=False)
+
+
+@pytest.mark.parametrize(
+    "samples, precision, signed, allocated, stored, representation",
+    [cell[1:] for cell in _grid()], ids=[cell[0] for cell in _grid()])
+def test_the_fallback_returns_pillows_array_for_every_shape_pillow_decodes(
+        tmp_path, pydicom_cannot, samples, precision, signed, allocated,
+        stored, representation):
+    """The imagecodecs route and the Pillow route give one array (A6).
+
+    Before: a precision-8 codestream under BitsAllocated 16 came back from
+    `jpeg2k_decode` as `uint8` or `int8`, and the fallback refused it
+    against BitsAllocated ("it decoded to uint8") or could not sign-extend
+    it ("cannot sign-extend a uint8 decode from BitsStored 16"), where
+    Pillow returned the same samples in `uint16` or `int16` -- one file
+    refused by the fallback and read by pydicom, so its answer depended on
+    which plugins were installed. The container is exact either way
+    (#523's ruling: fixed because one file had two answers, not because a
+    value was at risk), so the widening writes no row and logs nothing.
+
+    The reference is pydicom's own decoder, read through the `as_array`
+    captured before the patch; the fallback answers `_decode_pixels` and
+    the Instance door, and the counter proves it did.
+    """
+    path = write(tmp_path, dataset(
+        J2K_LOSSLESS, [_grid_codestream(samples, precision, signed)], rows=4,
+        cols=4, samples=samples, bits_allocated=allocated, bits_stored=stored,
+        pixel_representation=representation))
+    want, want_label = pydicom_answer(path)
+    assert pydicom_cannot["n"] == 0
+    arr, label = at_decode_pixels(path)
+    assert same(arr, want) and label == want_label, (arr, want)
+    arr, _label = at_instance(path)
+    assert same(arr, want), (arr, want)
+    assert pydicom_cannot["n"] == 2
+
+
+#: A precision-8 codestream's samples, and the same values in the 16-bit
+#: container its header declares: every 8-bit pattern of the source once.
+P8_UNSIGNED = np.arange(256, dtype=np.int64).astype(np.uint8).reshape(16, 16)
+P8_SIGNED = (np.arange(256, dtype=np.int64) - 128).astype(np.int8).reshape(
+    16, 16)
+
+
+@pytest.mark.parametrize("name, source, representation, want", [
+    ("unsigned-under-PR0", P8_UNSIGNED, 0, P8_UNSIGNED.astype(np.uint16)),
+    ("unsigned-under-PR1", P8_UNSIGNED, 1,
+     P8_UNSIGNED.view(np.int8).astype(np.int16)),
+    ("signed-under-PR1", P8_SIGNED, 1, P8_SIGNED.astype(np.int16)),
+], ids=lambda value: value if isinstance(value, str) else "")
+@pytest.mark.parametrize("samples", [1, 3], ids=["mono", "rgb"])
+def test_a_precision_8_codestream_under_bits_allocated_16_ingests_in_16_bits(
+        tmp_path, route, name, source, representation, want, samples):
+    """#523's container half, and the `int8` arm, at ingest on both routes.
+
+    An unsigned precision-8 codestream under PixelRepresentation 1 is
+    reinterpreted from its own precision (#460), inside the 16-bit
+    container: 128 reads -128. A signed one is widened `int8` -> `int16`,
+    which only JPEG 2000 needs -- lj92 and CharLS return unsigned patterns
+    and `_sign_extend` makes the signed dtype after the widening. Values
+    are the module's literals, never an array the code produced.
+    """
+    if samples == 3:
+        source = np.stack([source] * 3, -1)
+        want = np.stack([want] * 3, -1)
+    path = write(tmp_path, dataset(
+        J2K_LOSSLESS, [_j2k(source, bitspersample=8, mct=False)], rows=16,
+        cols=16, samples=samples, bits_allocated=16, bits_stored=8,
+        pixel_representation=representation))
+    got = at_ingest(tmp_path, path)
+    assert got["failure"] is None, got
+    assert same(got["array"], want), got["array"]
+    assert got["rows"] == [], got["rows"]
+    arr, _label = at_decode_pixels(path)
+    assert same(arr, want), arr
+    if route is not None:
+        assert route["n"] > 0
+
+
+def test_a_jpeg_lossless_stream_narrower_than_bits_stored_is_refused_not_shifted(
+        tmp_path):
+    """`_sign_extend` refuses a width its container cannot hold (attack A7).
+
+    A precision-8 JPEG Lossless stream under BitsAllocated 32, BitsStored
+    12, PixelRepresentation 1. pydicom's validation passes it (12 <= 32),
+    the codec returns `uint8`, and nothing widens a decode into 32 bits,
+    so a sign extension from bit 11 inside 8 bits would shift by -4. The
+    guard is the one thing that stands between this header and that shift
+    now that validation refuses BitsStored above BitsAllocated before any
+    decode (S6), and the container arm widens every 8-bit decode under
+    BitsAllocated 16: this is the header that still reaches it. Refused
+    at every door, in words that name BitsStored, which is the width JPEG
+    Lossless is read by.
+    """
+    source = np.arange(16, dtype=np.uint8).reshape(4, 4)
+    _refused_everywhere(
+        tmp_path, dataset(
+            LJPEG_SV1, [imagecodecs.ljpeg_encode(source, bitspersample=8)],
+            rows=4, cols=4, bits_allocated=32, bits_stored=12,
+            pixel_representation=1),
+        "cannot sign-extend a uint8 decode from BitsStored 12", None)

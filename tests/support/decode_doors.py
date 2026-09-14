@@ -45,6 +45,11 @@ HTJ2K = "1.2.840.10008.1.2.4.203"
 EXPLICIT_LE = "1.2.840.10008.1.2.1"
 SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7"
 
+#: pydicom's own `as_array`, captured when this module is imported and so
+#: before any test patches it: `pydicom_answer` reads the reference
+#: array through it even while `pydicom_cannot` is in effect.
+_REAL_AS_ARRAY = Decoder.as_array
+
 #: The words the fixture's refusal carries, so a test can tell it from a
 #: real plugin failure.
 FORCED = ("Unable to decompress pixel data because all plugins are "
@@ -108,6 +113,23 @@ def outcome(read):
         return read()
     except Exception as exc:  # pylint: disable=broad-except
         return exc
+
+
+def pydicom_answer(path):
+    """`(array, label)` from pydicom's own decoder (Pillow, for JPEG 2000).
+
+    The reference a differential test holds the fallback to. Called
+    through the `as_array` captured at import, so it is pydicom's answer
+    whether or not `pydicom_cannot` is active.
+    """
+    from pydicom.pixels import get_decoder  # pylint: disable=import-outside-toplevel
+    ds = pydicom.dcmread(path)
+
+    def _read():
+        arr, meta = _REAL_AS_ARRAY(
+            get_decoder(ds.file_meta.TransferSyntaxUID), ds)
+        return arr, meta["photometric_interpretation"]
+    return outcome(_read)
 
 
 def at_decode_pixels(path, **kwargs):

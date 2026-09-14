@@ -1102,7 +1102,8 @@ TARGETS = {
                                           "tests/test_signed_lossless_jpeg_decode.py",
                                           "tests/test_single_frame_encapsulated_decode.py",
                                           "tests/test_ybr_jpegls_read_doors.py",
-                                          "tests/test_ybr_read_door_labels.py"],
+                                          "tests/test_ybr_read_door_labels.py",
+                                          "tests/test_one_decode_answer_per_file.py"],
                                          60),
 }
 
