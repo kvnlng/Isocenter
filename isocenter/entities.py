@@ -1527,7 +1527,19 @@ class Instance(DicomItem):
                 if ds is not None and hasattr(ds, "file_meta"):
                     ts_uid = getattr(ds.file_meta, "TransferSyntaxUID", "Unknown")
 
-                if "missing dependencies" in str(e) or "decompress" in str(e):
+                # The advice names a remedy for a codec that is missing,
+                # so it follows pydicom's "missing dependencies" or
+                # "decompress" words only when no codec decoded the file:
+                # not when imagecodecs was asked and refused it on what it
+                # holds ("imagecodecs could not decode it either: <why>"),
+                # where installing pillow, pylibjpeg or gdcm changes
+                # nothing -- unless the why is that imagecodecs is not
+                # available, which is a missing codec (review of #606, M3).
+                words = str(e)
+                if (("missing dependencies" in words or "decompress" in words)
+                        and ("imagecodecs could not decode it either: "
+                             not in words
+                             or "imagecodecs is not available" in words)):
                     # Enhanced debug output
                     handlers = []
                     try:

@@ -30,7 +30,7 @@ import imagecodecs
 import numpy as np
 import pytest
 
-from support.decode_doors import (J2K_LOSSLESS, JPEGLS, LJPEG_SV1,
+from support.decode_doors import (HTJ2K, J2K_LOSSLESS, JPEGLS, LJPEG_SV1,
                                   at_decode_pixels, at_ingest, at_instance,
                                   dataset, pydicom_answer, pydicom_cannot,
                                   route, same,
@@ -629,3 +629,49 @@ def test_an_extended_offset_table_pydicom_drops_is_not_walked_by_the_gate(
     got = _refused_everywhere(tmp_path, ds, words, None)
     assert got["failure"].startswith(
         f"Decompression Failed: RuntimeError: {words}"), got["failure"]
+
+
+# ---------------------------------------------------------------------------
+# Review of #606, M3 -- "Missing image codecs" only where no codec decoded
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name, ts, codestreams, kwargs, why", [
+    ("jpeg-ls-ybr16", JPEGLS, lambda: [imagecodecs.jpegls_encode(RGB16)],
+     dict(rows=4, cols=4, samples=3, bits_allocated=16,
+          photometric="YBR_FULL"),
+     "its declared colour space 'YBR_FULL' is 16-bit"),
+    ("ljpeg-p16-under-ba8", LJPEG_SV1,
+     lambda: [imagecodecs.ljpeg_encode(MONO16)],
+     dict(rows=4, cols=4, bits_allocated=8),
+     "it decoded to uint16, where BitsAllocated 8"),
+    ("htj2k-ybr16", HTJ2K, lambda: [_j2k(RGB16, mct=False)],
+     dict(rows=4, cols=4, samples=3, bits_allocated=16,
+          photometric="YBR_FULL"),
+     "its declared colour space 'YBR_FULL' is not one this fallback"),
+], ids=["jpeg-ls-ybr16", "ljpeg-p16-under-ba8", "htj2k-ybr16"])
+def test_a_refusal_imagecodecs_made_gives_no_missing_codecs_advice(
+        tmp_path, name, ts, codestreams, kwargs, why):
+    """Review M3: the advice names a remedy only a missing codec needs.
+
+    pydicom's own words for these syntaxes say "decompress ... missing
+    dependencies", and the Instance door took any reason saying so as a
+    missing codec: "Missing image codecs. Please ensure 'pillow',
+    'pylibjpeg', or 'gdcm' are installed." Here imagecodecs was present,
+    decoded, and refused the file on what it holds; installing those
+    packages changes nothing. The first two read at this door before
+    #453 and gained that advice with the refusal. The door now raises
+    `Lazy load failed for instance <uid>: RuntimeError: <reason>`, as it
+    does for a JPEG 2000 file whose Pillow refusal says "decode". The
+    advice where imagecodecs is not available stays, pinned by
+    `test_ingest_imagecodecs_fallback::test_the_read_door_names_why_imagecodecs_is_unavailable`.
+    """
+    path = write(tmp_path, dataset(ts, codestreams(), **kwargs))
+    read = at_instance(path)
+    assert isinstance(read, RuntimeError), read
+    words = str(read)
+    assert words.startswith("Lazy load failed for instance "), words
+    assert ": RuntimeError: " in words, words
+    assert "imagecodecs could not decode it either: " in words, words
+    assert why in words, words
+    assert "Missing image codecs" not in words, words
+    assert "Active pydicom handlers" not in words, words
