@@ -1635,8 +1635,9 @@ audit table for strings that are never written there (#396).</p>
   <code>RISK</code>, <code>SCAN_GAP</code>, <code>WARNING</code>; and the four a remediation writes,
   <code>REMEDIATION_REPLACE</code>, <code>REMEDIATION_SHIFT_DATE</code> and
   <code>REMEDIATION_REMOVE</code> when it acts on a proposal and
-  <code>REMEDIATION_DECLINED</code> when it declines to, leaving the value it
-  targeted in the graph.</li>
+  <code>REMEDIATION_DECLINED</code> when it declines to, or fails to, leaving the
+  value it targeted in the graph or partly written (a remediation that
+  raises writes one since #553).</li>
 <li>The <strong>remediation-proposal <code>action_type</code> strings</strong>, carried on
   <code>PhiFinding.remediation_proposal</code>: <code>REMOVE_TAG</code>, <code>REPLACE_TAG</code>,
   <code>SHIFT_DATE</code>. These say what a proposal <em>will</em> do and are never an
@@ -1753,8 +1754,14 @@ in a 1.x release with a CHANGELOG entry naming both spellings:</p>
   sequence counts as one on its instance: the instance reads
   <code>REMEDIATED</code> after <code>anonymize()</code>, or <code>IDENTIFIED</code> if anything on it or
   inside it declined (#494). <code>false</code> means the status does not establish
-  it: a session that never scanned, an entity edited since its scan, or
-  an entity whose last pass declined a remediation on it or inside it.</li>
+  it: a session that never scanned, an entity edited since its scan, an
+  entity whose last pass declined a remediation on it or inside it (a
+  remediation that raised included), or one a pass left with a
+  remediation the session's last <code>audit()</code> raised against it still
+  unhandled -- a partial <code>anonymize(findings=...)</code> (#553). It can also
+  read <code>false</code> over an entity with nothing left on it, when the report a
+  pass was handed came from an earlier <code>audit()</code> than the last, until
+  the next <code>audit()</code> (#582).</li>
 <li><strong>The <code>.pass.lock</code> / <code>.lock</code> file names</strong>, the sidecar's <code>_pixels.bin</code>
   suffix, the audit table's columns, the schema's table names.</li>
 </ul>
