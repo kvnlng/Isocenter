@@ -174,6 +174,7 @@ TARGETS = {
                                 "tests/test_nested_pixel_carriage.py"], 30),
     # 16 sites, exhaustive: all 16 killed. Twelve files, 18.5s per pass.
     "isocenter/builders.py": (["tests/test_entities.py", "tests/test_export_contract.py",
+                               "tests/test_both_write_doors_stamp_one_answer.py",
                                "tests/test_full_logging.py", "tests/test_io.py",
                                "tests/test_phi_retention.py", "tests/test_phi_status.py",
                                "tests/test_recursive_import.py",
@@ -410,6 +411,9 @@ TARGETS = {
                                   "tests/test_a_shift_date_declines_a_target_that_moved.py",
                                   "tests/test_the_fold_count_is_what_folded.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_restored_study_date_reaches_the_file.py",
+                                  "tests/test_a_private_re_vr_is_recorded.py",
+                                  "tests/test_both_write_doors_stamp_one_answer.py",
+                                  "tests/test_compression_takes_two_values.py",
                                   "tests/test_export_failure_text_carries_no_path.py", "tests/test_api_coherence.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_the_owned_tags_follow_their_rule.py",
@@ -658,6 +662,9 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_recovery_needs_the_key_it_was_locked_with.py",
+                              "tests/test_a_private_re_vr_is_recorded.py",
+                              "tests/test_both_write_doors_stamp_one_answer.py",
+                              "tests/test_every_matching_rule_applies_at_export.py",
                               "tests/test_a_restored_study_date_reaches_the_file.py",
                               "tests/test_an_empty_patient_id_is_still_a_patient.py",
                               "tests/test_a_lock_refusal_names_no_patient.py",
@@ -895,6 +902,9 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_an_empty_patient_id_is_still_a_patient.py",
+                               "tests/test_a_private_re_vr_is_recorded.py",
+                               "tests/test_both_write_doors_stamp_one_answer.py",
+                               "tests/test_compression_takes_two_values.py",
                                "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                                "tests/test_export_failure_text_carries_no_path.py", "tests/test_analysis.py",
                                "tests/test_anonymize_records_what_it_left.py",
