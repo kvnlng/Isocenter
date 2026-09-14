@@ -418,13 +418,17 @@ def test_a_token_of_ours_the_key_opens_to_no_record_is_refused_not_a_json_error(
     round 3 the lock replaced it and recovery answered "recoverable under
     this key" with nothing to recover (review of #633 round 2, P-3).
 
-    `from None` is pinned by `__suppress_context__` at every door, not by
-    `__cause__` alone, which is None whether or not `from None` was
-    written: mutant N6 -- `from None` dropped on `open_token`'s no-record
-    raise -- survived this test until the recovery door asserted
-    `__suppress_context__`, and under it the recovery traceback carried
-    "During handling of the above exception" and, for `not_utf8`, named
-    a byte of the plaintext (review of #633 round 2, F-1)."""
+    "Nothing chained behind the refusal" is pinned at every door by the
+    attribute that carries it there, not by `__cause__` alone, which is
+    None whether or not `from None` was written: `__suppress_context__`
+    where the read's exception is re-raised `from None` (the single lock
+    and recovery), `__context__ is None` at the batch, which raises its
+    own outside any `except`. Mutant N6 -- `from None` dropped on
+    `open_token`'s no-record raise -- survived this test until the
+    recovery door asserted `__suppress_context__`, and under it the
+    recovery traceback carried "During handling of the above exception"
+    and, for `not_utf8`, named a byte of the plaintext (review of #633
+    round 2, F-1)."""
     key = str(tmp_path / "k.key")
     with DicomSession(str(tmp_path / "s.db")) as session:
         session.enable_reversible_anonymization(key)
@@ -446,6 +450,10 @@ def test_a_token_of_ours_the_key_opens_to_no_record_is_refused_not_a_json_error(
             "found, in Patient ID order. Lock the others without these, and each of "
             f"these as its message says:\n[1 of 2] {no_record_refusal(key)}")
         assert _token(a) == bad and _token(b) is None
+        # The batch builds its own exception from the numbered texts,
+        # outside any `except`: nothing is chained because nothing was
+        # being handled, so the pin here is `__context__ is None`.
+        assert batch.value.__cause__ is None and batch.value.__context__ is None
         with pytest.raises(RuntimeError) as recovery:
             session.recover_patient_identity(PID_A, restore=False)
         assert str(recovery.value) == no_record_recovery(key)
