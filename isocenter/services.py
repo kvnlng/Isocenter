@@ -417,7 +417,7 @@ def rule_applies_to(rule_serial, serial) -> bool:
     asked `Configuration.get_rule`, exact and first-match, while
     `redact()` honoured `"*"` and every rule.
     """
-    if not rule_serial or not serial:
+    if not serial:
         return False
     return rule_serial == "*" or rule_serial == serial
 

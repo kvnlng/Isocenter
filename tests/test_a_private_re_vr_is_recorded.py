@@ -256,18 +256,26 @@ def test_tm_dt_ui_that_do_not_fit_fall_back_without_a_pydicom_warning(
 
 def test_the_collapse_is_not_logged_in_the_worker(tmp_path, caplog):
     """The collapse rides `outcome.warnings`, which the parent logs and
-    audits; the worker logs nothing of its own. Killing mutation: the
-    worker-side log restored."""
-    inst = _image(extra=[(COLLAPSE[0], COLLAPSE[2])],
-                  vrs=[COLLAPSE[:2]])
+    audits; the worker logs nothing of its own. Recorded or not: an
+    element from an Implicit VR source has no recorded VR, and its VM n ->
+    one UT value is a shape change all the same. Killing mutations: the
+    worker-side log restored; the collapse reported only when a VR was
+    recorded (the unrecorded one is silent)."""
+    recorded = _image(extra=[(COLLAPSE[0], COLLAPSE[2])], vrs=[COLLAPSE[:2]])
+    unrecorded = _image(extra=[(COLLAPSE[0], COLLAPSE[2])])
 
     with caplog.at_level(logging.WARNING):
-        outcome = _export(tmp_path, inst)
+        outcomes = [_export(tmp_path, recorded), _export(tmp_path, unrecorded)]
 
-    assert outcome.ok, outcome.error
+    assert all(o.ok for o in outcomes), [o.error for o in outcomes]
     assert [r for r in caplog.records
             if COLLAPSE[0] in r.getMessage()] == [], caplog.records
-    assert len(_re_vr_sentences(outcome)) == 1, outcome.warnings
+    sentences = [_re_vr_sentences(o) for o in outcomes]
+    assert [len(s) for s in sentences] == [1, 1], sentences
+    assert f"({COLLAPSE[0]}) recorded LO VM 2, written as one UT value" \
+        in sentences[0][0], sentences
+    assert f"({COLLAPSE[0]}) VM 2, written as one UT value" \
+        in sentences[1][0], sentences
 
 
 def test_merge_without_an_accumulator_still_says_so(caplog):
