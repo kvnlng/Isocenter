@@ -152,7 +152,10 @@ TARGETS = {
                                "tests/test_duplicate_sop_uid_at_ingest.py",
                                "tests/test_annex_e_end_to_end.py"],
                               80),
-    "isocenter/crypto.py": (["tests/test_recovery_needs_the_key_it_was_locked_with.py",
+    "isocenter/crypto.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                             "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                             "tests/test_an_unusable_key_file_is_not_cached.py",
+                             "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                              "tests/test_crypto.py", "tests/test_reversibility.py"], 30),
     # --- The #439 rows. Each was measured at budget 30 on 3.12.14 with other
     # suites running on the same machine, so the seconds are upper-side.
@@ -305,7 +308,9 @@ TARGETS = {
     #     the ERROR in its `except`, which re-raises. The method has no
     #     caller in isocenter/ and its two tests pass empty or raising
     #     input, so the whole wrapper is dead (#488).
-    "isocenter/reversibility.py": (["tests/test_recovery_needs_the_key_it_was_locked_with.py",
+    "isocenter/reversibility.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                    "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                                    "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                                     "tests/test_feature_regression.py",
                                     "tests/test_reversibility_coverage.py",
                                     "tests/test_relock_identity_token.py"], 30),
@@ -330,7 +335,8 @@ TARGETS = {
                                 "tests/test_reporting.py",
                                 "tests/test_report_export_boundary.py",
                                 "tests/test_export_delivery_counters.py"], 30),
-    "isocenter/privacy.py": (["tests/test_suggested_config.py", "tests/test_analysis.py", "tests/test_analysis_persistence.py",
+    "isocenter/privacy.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                              "tests/test_suggested_config.py", "tests/test_analysis.py", "tests/test_analysis_persistence.py",
                               "tests/test_anonymize_records_what_it_left.py",
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
                               "tests/test_a_relock_cannot_lose_a_held_identity.py",
@@ -413,7 +419,8 @@ TARGETS = {
                                   "tests/test_a_shift_date_declines_a_target_that_moved.py",
                                   "tests/test_the_fold_count_is_what_folded.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_a_restored_study_date_reaches_the_file.py",
+    "isocenter/io_handlers.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_a_restored_study_date_reaches_the_file.py",
                                   "tests/test_a_private_re_vr_is_recorded.py",
                                   "tests/test_both_write_doors_stamp_one_answer.py",
                                   "tests/test_compression_takes_two_values.py",
@@ -547,7 +554,8 @@ TARGETS = {
     # `isocenter\.persistence\b` (the `\b` correctly excludes
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
-    "isocenter/persistence.py": (["tests/test_api_coherence.py",
+    "isocenter/persistence.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_api_coherence.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_pre_096_store_is_not_reshifted.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
@@ -666,7 +674,9 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_recovery_needs_the_key_it_was_locked_with.py",
+    "isocenter/session.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                              "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                              "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                               "tests/test_a_private_re_vr_is_recorded.py",
                               "tests/test_both_write_doors_stamp_one_answer.py",
                               "tests/test_every_matching_rule_applies_at_export.py",
@@ -907,7 +917,9 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_an_empty_patient_id_is_still_a_patient.py",
+    "isocenter/entities.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                               "tests/test_an_empty_patient_id_is_still_a_patient.py",
                                "tests/test_a_private_re_vr_is_recorded.py",
                                "tests/test_both_write_doors_stamp_one_answer.py",
                                "tests/test_compression_takes_two_values.py",

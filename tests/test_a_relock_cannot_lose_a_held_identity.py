@@ -689,8 +689,11 @@ def test_a_store_written_without_the_record_locks_as_before(tmp_path, rules, con
     (None, None, r"already carries a replacement in 0010,0010 \('ANONYMIZED'\)"),
     (None, [BIRTH], r"already has a locked identity holding 0010,0030, and this lock "
                     r"would replace it with an empty value"),
-    (PROJECT_X, TAGS, None),
-    ({**KEEP_BOTH, BIRTH: {"action": "SHIFT"}}, TAGS + [BIRTH], None),
+    (PROJECT_X, TAGS, r"identity token did not come from this store, so the value it "
+                      r"holds in 0010,0010 cannot be told from what anonymize\(\) left"),
+    ({**KEEP_BOTH, BIRTH: {"action": "SHIFT"}}, TAGS + [BIRTH],
+     r"identity token did not come from this store, so the value it holds in "
+     r"0010,0030 cannot be told from what anonymize\(\) left"),
 ], ids=["floor", "floor_birth_only", "project_x", "keep_shift"])
 def test_a_relock_of_a_patient_reingested_from_its_own_export(tmp_path, rules, tags, refused):
     """Lock, `anonymize()`, `export()`; a new store with the same key
@@ -701,12 +704,16 @@ def test_a_relock_of_a_patient_reingested_from_its_own_export(tmp_path, rules, t
     The floor's constants refuse (`floor`), and the held birth date is not
     lost to the blank the floor left (`floor_birth_only`; e475ab7 stashed
     `""` over it). Under a `value:` or a `KEEP` rule nothing on the file
-    says a pass wrote what it holds, and the re-lock stashes it over the
-    held original (`project_x`, `keep_shift`): the residual the CHANGELOG
-    names (#607), pinned so a fix is seen. It is not refused on a held value that
-    differs from the current one, because #399's
-    `test_a_re_lock_is_what_recovery_answers_with` requires exactly that
-    re-lock to stash the new value."""
+    says a pass wrote what it holds, and until #607 the re-lock stashed it
+    over the held original (`project_x`, `keep_shift`): the residual the
+    CHANGELOG then named, pinned so a fix would be seen. The fix is not
+    "refuse a held value that differs from the current one", which #399's
+    `test_a_re_lock_is_what_recovery_answers_with` forbids; it is that
+    the token arrived in a file and nothing on this store vouches for it
+    (`tests/test_a_token_this_store_did_not_write_is_not_replaced.py`),
+    so a re-lock that would change a value it holds is refused, and the
+    refusal names the first such tag. The held token is unchanged in
+    every case."""
     with _session(tmp_path, rules or {}, load=rules is not None,
                   PatientBirthDate="19700101") as session:
         session.lock_identities(PID, tags_to_lock=tags)
@@ -718,14 +725,11 @@ def test_a_relock_of_a_patient_reingested_from_its_own_export(tmp_path, rules, t
         session.ingest(str(tmp_path / "out"))
         instance = _instance(session)
         assert instance._remediated_values is None and instance._remediated_blank is None
+        assert instance._locked_token is None
         assert session.reversibility_service.recover_original_data(instance) == held
         pid = session.store.patients[0].patient_id
-        if refused:
-            with pytest.raises(RuntimeError, match=refused):
-                session.lock_identities(pid, tags_to_lock=tags)
-            assert session.reversibility_service.recover_original_data(instance) == held
-            return
-        session.lock_identities(pid, tags_to_lock=tags)
-        stashed = session.reversibility_service.recover_original_data(instance)
-    assert stashed != held
-    assert stashed == {tag: instance.attributes[tag] for tag in tags}
+        token = _token(instance)
+        with pytest.raises(RuntimeError, match=refused):
+            session.lock_identities(pid, tags_to_lock=tags)
+        assert _token(instance) == token
+        assert session.reversibility_service.recover_original_data(instance) == held

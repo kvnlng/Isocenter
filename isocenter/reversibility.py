@@ -1,3 +1,4 @@
+import base64
 import json
 from typing import Dict, Any, Optional
 
@@ -103,7 +104,7 @@ class ReversibilityService:
             # `mark_modified()` is NOT redundant and must not be tidied
             # away. `add_sequence()` marks the instance modified **only
             # when it creates** -- `self.mark_modified()` at
-            # `entities.py` line 457 sits under `if sequence is None`,
+            # `entities.py` line 458 sits under `if sequence is None`,
             # #186's rule -- and this path reaches into `items` in place
             # rather than through `add_sequence_item()`, which marks on
             # every call. Without the line below the second and later
@@ -112,6 +113,16 @@ class ReversibilityService:
             # token never reaches the store: memory answers with capture
             # #2 and a reopened session answers with capture #1, with
             # nothing saying so. That is #173's shape one module over.
+            #
+            # Stamped **before** the write, at this one site (#607):
+            # `embed_original_data` comes through here too, so every
+            # token this library embeds is vouched for. Before and not
+            # after, for `record_remediation`'s reason -- a background
+            # save between the two stores either a stamp without its
+            # token (harmless: the stamp is keyed on the token) or, the
+            # other way round, a token without its stamp, which this
+            # store's next changed-value re-lock then refuses as foreign.
+            instance.record_identity_token(token)
             sequence = instance.add_sequence(self.TAG_ENCRYPTED_ATTRS_SEQ)
             sequence.items[:] = [item]
             instance.mark_modified()
@@ -152,38 +163,110 @@ class ReversibilityService:
                 f"Failed to embed original data: {describe_exception(e)}")
             raise
 
-    def recover_or_raise(self, instance: Instance) -> Dict[str, Any]:
-        """The recovered attributes of `instance`'s token, or an exception.
+    #: The first byte of every Fernet token: the format's version, of
+    #: which there is exactly one. A token this library wrote is a Fernet
+    #: token and nothing else it writes into `(0400,0510)` is, so this
+    #: byte is what tells "ours" from a foreign Encrypted Content
+    #: (measured: ours begin `gAAAAAB`; `b"NOT-OUR-TOKEN"` decodes to
+    #: 0x34).
+    OUR_TOKEN_FIRST_BYTE = 0x80
 
-        `recover_patient_identity`'s read (#539). `recover_original_data`
-        below answers None for "no token" and "this key cannot open it"
-        alike, which recovery printed as one sentence and a caller could
-        not act on; the lock's re-lock check still wants that tolerance,
-        so the strict read is a second method rather than a changed one.
+    @classmethod
+    def is_one_of_ours(cls, content) -> bool:
+        """Whether `content` is shaped like a token this library wrote:
+        base64url whose first decoded byte is Fernet's version (#617).
 
-        No message names the instance or a patient: the key path is the
-        caller's own argument, a UID is not needed to act on either
-        failure, and a raise from inside `except InvalidToken` would chain
-        the cryptography traceback (`from None`).
+        A shape test on the first 12 characters (nine bytes) only, and
+        deliberately not a whole-string check: a token of ours that was
+        truncated in transit is still ours, and the read then refuses it
+        under the key rather than replacing it. A CMS blob, arbitrary
+        text, an empty value or anything shorter than 12 characters is
+        not ours.
+        """
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        if not isinstance(content, (bytes, bytearray)) or len(content) < 12:
+            return False
+        try:
+            head = base64.urlsafe_b64decode(bytes(content)[:12])
+        except (ValueError, TypeError):
+            # `binascii.Error` is a `ValueError`: not base64url at all.
+            return False
+        return bool(head) and head[0] == cls.OUR_TOKEN_FIRST_BYTE
+
+    def token_of_ours(self, instance: Instance) -> Optional[bytes]:
+        """The Encrypted Content of `instance`'s token item as `bytes`, if
+        it is shaped like one of ours; None for no item, no content, or a
+        foreign sequence. No key is needed: this is what the lock reads
+        before it decides whether to create one (#617, Q8)."""
+        item = self._token_item(instance)
+        content = item.attributes.get(self.TAG_ENCRYPTED_CONTENT) if item else None
+        if not content or not self.is_one_of_ours(content):
+            return None
+        # `bytes`, whatever the hydration path handed back (a `bytearray`
+        # is unhashable, and the lock keys a dict on this), and a `str`
+        # encoded as the sniff read it.
+        return content.encode("utf-8") if isinstance(content, str) else bytes(content)
+
+    def open_token(self, content: bytes) -> Dict[str, Any]:
+        """The values a token of ours holds, under this key.
 
         Raises:
-            RuntimeError: No Encrypted Attributes Sequence item with
-                content, or the key does not decrypt the token.
+            RuntimeError: The key does not decrypt it. No message names
+                the instance or a patient: the key path is the caller's
+                own argument, and a raise from inside `except
+                InvalidToken` would chain the cryptography traceback
+                (`from None`).
         """
-        item = self._token_item(instance)
-        encrypted_bytes = item.attributes.get(self.TAG_ENCRYPTED_CONTENT) if item else None
-        if not encrypted_bytes:
-            raise RuntimeError(
-                "no encrypted identity token on this patient's instances; "
-                "was it locked with lock_identities() before anonymize()?")
         try:
-            decrypted_bytes = self.engine.decrypt(encrypted_bytes)
+            decrypted_bytes = self.engine.decrypt(content)
         except InvalidToken:
             raise RuntimeError(
                 f"the key at {self.key_manager.key_path} does not decrypt this "
                 "patient's identity token; recovery needs the key the "
                 "identity was locked with") from None
         return json.loads(decrypted_bytes.decode("utf-8"))
+
+    def held_identity(self, instance: Instance):
+        """`(token bytes, values)` for a token of ours this key opens, or
+        None when the instance carries no token of ours (#617).
+
+        One spelling of "what is on this instance, and can we open it":
+        `token_of_ours` then `open_token`, which a caller reading many
+        instances that share one token calls separately, one decrypt per
+        distinct token.
+
+        Raises:
+            RuntimeError: A token of ours does not open under this key
+                (`open_token`'s message).
+        """
+        content = self.token_of_ours(instance)
+        if content is None:
+            return None
+        return content, self.open_token(content)
+
+    def recover_or_raise(self, instance: Instance) -> Dict[str, Any]:
+        """The recovered attributes of `instance`'s token, or an exception.
+
+        `recover_patient_identity`'s read (#539). `recover_original_data`
+        below answers None for "no token" and "this key cannot open it"
+        alike, which recovery printed as one sentence and a caller could
+        not act on; that tolerant read is released and tests read
+        through it, so the strict read is a second method rather than a
+        changed one. Built on `held_identity` since #617, so a foreign
+        Encrypted Attributes Sequence -- one holding no Fernet token --
+        is "no token", not "the wrong key".
+
+        Raises:
+            RuntimeError: No Encrypted Attributes Sequence item holding a
+                token of ours, or the key does not decrypt the token.
+        """
+        found = self.held_identity(instance)
+        if found is None:
+            raise RuntimeError(
+                "no encrypted identity token on this patient's instances; "
+                "was it locked with lock_identities() before anonymize()?")
+        return found[1]
 
     def _token_item(self, instance: Instance):
         """The Encrypted Attributes Sequence item recovery reads, or None.
