@@ -274,8 +274,11 @@ def test_a_truncated_token_of_ours_is_refused_not_replaced(tmp_path):
     (b"____________", False),                   # decodes to 0xFF...: the version byte
     (b"gAAAAAB/xxxxxxxx", False),               # ours-shaped, but `/` is not base64url
     (None, False), (7, False),
+    ("\ud800gAAAAABxxxxxxxxx", False),          # a str UTF-8 cannot encode: not ours
+    ("gAAAAABxxxxx\ud800", False),              # ...even ours-shaped in front of it
 ], ids=["foreign", "empty", "short", "ours", "str", "bytearray", "der", "v81",
-        "version_byte_ff", "not_urlsafe", "none", "int"])
+        "version_byte_ff", "not_urlsafe", "none", "int", "lone_surrogate",
+        "lone_surrogate_after_our_head"])
 def test_the_sniff_reads_the_fernet_version_byte(content, ours):
     """`is_one_of_ours` checks the first 12 characters against the
     base64url alphabet, decodes them, and tests the first decoded byte
@@ -283,8 +286,45 @@ def test_the_sniff_reads_the_fernet_version_byte(content, ours):
     string. `not_urlsafe` is a standard-alphabet spelling that would
     decode to `0x80`: `urlsafe_b64decode` does not validate, so without
     the alphabet check it read as ours (review of #633, P-5; the old
-    `b"////////////"` case failed on the version byte, not the shape)."""
+    `b"////////////"` case failed on the version byte, not the shape).
+    A `str` UTF-8 cannot encode (a lone surrogate) is not ours wherever
+    the surrogate sits -- no token of ours is spelled outside base64url
+    -- rather than a `UnicodeEncodeError` out of the encode; the second
+    spelling is where "not ours" and a `surrogateescape` encode would
+    disagree (review of #633 round 2, P-4)."""
     assert ReversibilityService.is_one_of_ours(content) is ours
+
+
+@pytest.mark.parametrize("form", ("single", "batch"))
+def test_a_content_str_utf8_cannot_encode_is_foreign_and_no_lock_raises_on_it(
+        tmp_path, form):
+    """A `(0400,0510)` holding a `str` with a lone surrogate -- hand-set
+    only; the tag is OB and hydrates as `bytes` -- raised
+    `UnicodeEncodeError` out of the sniff's encode, and the Q8 sniff
+    walks every instance in the session before any plan, so one such
+    value refused every lock in the session with an exception the batch
+    does not collect (review of #633 round 2, P-4). Now it is not ours,
+    so from no key file -- the walk `_key_for_locking` does inside its
+    `except FileNotFoundError`, which a key already present would skip
+    -- the lock proceeds, creates the key, and replaces the sequence as
+    any foreign one (#399); the plan's own walk reads it the same way,
+    and in a batch the other patient locks too."""
+    key = tmp_path / "k.key"
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.enable_reversible_anonymization(str(key))
+        a = _hand_patient(session)
+        b = _hand_patient(session, pid=PID_B, name=NAME_B)
+        a.add_sequence_item(SEQ, _foreign_item("\ud800gAAAAABxxxxxxxxx"))
+        assert not key.exists()
+        _lock(session, form, PID_A, PID_B)
+        assert key.exists()
+        assert len(a.sequences[SEQ].items) == 1
+        service = session.reversibility_service
+        assert service.recover_original_data(a) == {"0010,0010": NAME_A, "0010,0020": PID_A}
+        if form == "batch":
+            assert service.recover_original_data(b) == {"0010,0010": NAME_B, "0010,0020": PID_B}
+        else:
+            assert _token(b) is None
 
 
 def test_a_real_token_is_ours_and_one_flipped_character_still_is(tmp_path):
@@ -359,8 +399,9 @@ def test_a_lock_of_another_patient_under_an_existing_valid_key_is_accepted(
 
 
 @pytest.mark.parametrize("payload", [b"not json at all", b'"a string"', b"[1, 2]",
-                                     b"\xff\xfe\x80"],
-                         ids=["text", "json_string", "json_list", "not_utf8"])
+                                     b"\xff\xfe\x80", b"{}"],
+                         ids=["text", "json_string", "json_list", "not_utf8",
+                              "empty_object"])
 def test_a_token_of_ours_the_key_opens_to_no_record_is_refused_not_a_json_error(
         tmp_path, payload):
     """A Fernet token under the session's own key whose plaintext is not
@@ -371,7 +412,19 @@ def test_a_token_of_ours_the_key_opens_to_no_record_is_refused_not_a_json_error(
     the single lock, the batch (numbered, nobody locked) and recovery:
     the key path and nothing else, `from None`, the token unchanged, and
     no byte of the plaintext in any message. A JSON string or list is
-    "no record" too: the plan reads `.items()` off what the token holds."""
+    "no record" too: the plan reads `.items()` off what the token holds.
+    So is an empty object: no lock writes one (`generate_identity_token`
+    returns `b""` for an empty record and nothing embeds it), and until
+    round 3 the lock replaced it and recovery answered "recoverable under
+    this key" with nothing to recover (review of #633 round 2, P-3).
+
+    `from None` is pinned by `__suppress_context__` at every door, not by
+    `__cause__` alone, which is None whether or not `from None` was
+    written: mutant N6 -- `from None` dropped on `open_token`'s no-record
+    raise -- survived this test until the recovery door asserted
+    `__suppress_context__`, and under it the recovery traceback carried
+    "During handling of the above exception" and, for `not_utf8`, named
+    a byte of the plaintext (review of #633 round 2, F-1)."""
     key = str(tmp_path / "k.key")
     with DicomSession(str(tmp_path / "s.db")) as session:
         session.enable_reversible_anonymization(key)
@@ -396,7 +449,7 @@ def test_a_token_of_ours_the_key_opens_to_no_record_is_refused_not_a_json_error(
         with pytest.raises(RuntimeError) as recovery:
             session.recover_patient_identity(PID_A, restore=False)
         assert str(recovery.value) == no_record_recovery(key)
-        assert recovery.value.__cause__ is None
+        assert recovery.value.__cause__ is None and recovery.value.__suppress_context__
         for message in (str(single.value), str(batch.value), str(recovery.value)):
             for secret in (payload.decode("utf-8", "replace"), repr(payload),
                            PID_A, NAME_A, "Expecting", "JSON"):

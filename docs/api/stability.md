@@ -239,7 +239,7 @@ exists at the path `enable_reversible_anonymization()` was given, before
 it looks the patient up and without creating one; `ValueError` when no
 patient holds the ID; and `RuntimeError` when the patient has no
 instances or no identity token, the key does not decrypt it (#539), or
-the key opens it to no identity record (#617).
+the key opens it but it holds no identity record this library writes (#617).
 It prints nothing, and no message names a Patient ID (#550).
 `enable_reversible_anonymization()` raises `ValueError` for a malformed
 key file and creates none; the first `lock_identities()` creates the key,

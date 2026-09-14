@@ -202,11 +202,23 @@ class ReversibilityService:
         deliberately not a whole-string check: a token of ours that was
         truncated in transit is still ours, and the read then refuses it
         under the key rather than replacing it. A CMS blob, arbitrary
-        text, an empty value, anything shorter than 12 characters, or a
-        spelling outside the base64url alphabet is not ours.
+        text, an empty value, anything shorter than 12 characters, a
+        spelling outside the base64url alphabet, or a `str` UTF-8 cannot
+        encode is not ours.
         """
         if isinstance(content, str):
-            content = content.encode("utf-8")
+            # A lone surrogate is unencodable and raised out of every
+            # lock in the session, because the Q8 sniff walks every
+            # instance before any plan and the batch collects only
+            # `RuntimeError` (review of #633 round 2, P-4). Not ours,
+            # wherever the surrogate sits: no token of ours is spelled
+            # outside base64url, so there is nothing for the key to
+            # refuse -- and not `surrogateescape`, which would call a
+            # value ours-shaped in front of one ours.
+            try:
+                content = content.encode("utf-8")
+            except UnicodeEncodeError:
+                return False
         if not isinstance(content, (bytes, bytearray)) or len(content) < 12:
             return False
         head = bytes(content)[:12]
@@ -241,9 +253,18 @@ class ReversibilityService:
                 (`from None`).
             _TokenHoldsNoRecord: The key decrypts it, but what it holds
                 is not the JSON object this library writes (not UTF-8,
-                not JSON, or JSON that is not an object). `from None` and
-                nothing interpolated: a `JSONDecodeError` carries the
-                whole plaintext in `.doc`, which is the originals.
+                not JSON, JSON that is not an object, or an empty
+                object, which no lock writes: `generate_identity_token`
+                returns `b""` for an empty record and
+                `embed_identity_token` embeds nothing for it). Nothing
+                interpolated, and `from None` at every raise: a
+                `JSONDecodeError` carries the whole plaintext in `.doc`,
+                which is the originals. What `from None` does is the
+                Python-defined thing -- it sets `__suppress_context__`,
+                so no formatted traceback prints the `JSONDecodeError`;
+                the object stays attached as `__context__`, reachable
+                to whoever holds the exception, who also holds the key
+                and the session (review of #633 round 2, P-1).
         """
         try:
             decrypted_bytes = self.engine.decrypt(content)
@@ -256,8 +277,16 @@ class ReversibilityService:
             record = json.loads(decrypted_bytes.decode("utf-8"))
         except ValueError:
             raise _TokenHoldsNoRecord(self._no_record_message()) from None
-        if not isinstance(record, dict):
-            raise _TokenHoldsNoRecord(self._no_record_message())
+        # The shape of the object is not judged past "non-empty": its
+        # values are `json.dumps` of whatever the attribute held at the
+        # lock, so an `int` set by hand before it is a token this
+        # library wrote, and a value-type check here would refuse it
+        # (review of #633 round 2, P-3). `from None` here too, outside
+        # any `except`, where it changes no traceback: it lets "nothing
+        # is chained behind this refusal" be the one assertion
+        # (`__suppress_context__`) at every raise of this door.
+        if not isinstance(record, dict) or not record:
+            raise _TokenHoldsNoRecord(self._no_record_message()) from None
         return record
 
     def _no_record_message(self) -> str:
