@@ -141,7 +141,7 @@ TARGETS = {
     # the mutation those files exist to kill -- an attribution computed
     # after the `force_threads` short-circuit. Extras cost the guard
     # nothing.
-    "isocenter/parallel.py": (["tests/test_logging.py",
+    "isocenter/parallel.py": (["tests/test_progress_bars_honour_the_environment.py", "tests/test_redaction_optimization.py", "tests/test_logging.py",
                                "tests/test_packaging_contract.py",
                                "tests/test_parallel_config.py",
                                "tests/test_parallel_contract.py",
@@ -161,7 +161,7 @@ TARGETS = {
     # 17 sites, exhaustive: all 17 killed. One file, 1.4s per pass.
     "isocenter/automation.py": (["tests/test_automation.py"], 30),
     # 5 sites, exhaustive: all 5 killed. Seven files, 20.3s per pass.
-    "isocenter/exporters/__init__.py": (["tests/test_exporter_registry.py",
+    "isocenter/exporters/__init__.py": (["tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py",
                                          "tests/test_murmur_annotations.py",
                                          "tests/test_study_date_roundtrip.py",
                                          "tests/test_wfdb_option_strictness.py",
@@ -322,7 +322,7 @@ TARGETS = {
                                 "tests/test_reporting.py",
                                 "tests/test_report_export_boundary.py",
                                 "tests/test_export_delivery_counters.py"], 30),
-    "isocenter/privacy.py": (["tests/test_analysis.py", "tests/test_analysis_persistence.py",
+    "isocenter/privacy.py": (["tests/test_suggested_config.py", "tests/test_analysis.py", "tests/test_analysis_persistence.py",
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
                               "tests/test_a_pre_096_store_is_not_reshifted.py",
                               "tests/test_a_replaced_study_date_is_raised.py",
@@ -388,7 +388,7 @@ TARGETS = {
                                   "tests/test_the_project_secret_keys_the_pseudonym_and_offset.py",
                                   "tests/test_the_project_secret_lives_in_the_store.py",
                                   "tests/test_nested_remediation_reaches_the_instance.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_api_coherence.py",
+    "isocenter/io_handlers.py": (["tests/test_export_failure_text_carries_no_path.py", "tests/test_api_coherence.py",
                                   "tests/test_a_replaced_study_date_is_raised.py",
                                   "tests/test_audit_read_barrier.py",
                                   "tests/test_binary_retention_threshold.py",
@@ -846,7 +846,7 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_analysis.py",
+    "isocenter/entities.py": (["tests/test_export_failure_text_carries_no_path.py", "tests/test_analysis.py",
                                "tests/test_a_partial_findings_list_is_not_remediated.py",
                                "tests/test_a_pre_096_store_is_not_reshifted.py",
                                "tests/test_a_replaced_study_date_is_raised.py",

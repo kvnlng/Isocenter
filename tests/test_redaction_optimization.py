@@ -52,7 +52,10 @@ def test_process_valid_zones(mock_store):
     service.redact_machine_instances.assert_called_once()
 
 
-@patch("isocenter.services.tqdm")
+# `isocenter.parallel.tqdm`: the bar is drawn through
+# `parallel.progress_bar` since #540, the one door that reads
+# ISOCENTER_SHOW_PROGRESS.
+@patch("isocenter.parallel.tqdm")
 def test_redact_feedback_tqdm(mock_tqdm, mock_store):
     """Verify tqdm is initialized during redaction."""
     service = RedactionService(mock_store)
