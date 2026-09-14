@@ -6,7 +6,9 @@ date deleted between `audit()` and `anonymize()` came back shifted, a
 blanked or edited one was overwritten with a shift of the value that had
 been there before, and each got a `REMEDIATION_SHIFT_DATE` row, a
 REMEDIATED status and an exported date. Measured on ac33641 and on
-57400d1, threads and processes, 3.12.14 and 3.14.7t.
+57400d1: 3.12.14 in threads and processes, and 3.14.7t for the deleted
+case. The same arm re-created a private date the default removal had
+taken out, when one report was applied twice, with no edit at all.
 
 **The rule these tests hold.** The arm writes only when its target still
 holds the value the finding was raised on, or already holds the shift
@@ -222,10 +224,61 @@ def test_a_study_date_cleared_after_the_audit_is_not_recreated(tmp_path, mode):
         session.anonymize(report)
 
         assert study.study_date is None, mode
-        assert len(_declines_on(session, STUDY_UID, "study_date")) == 1
+        declines = _declines_on(session, STUDY_UID, "study_date")
+        assert len(declines) == 1, declines
+        # A cleared Study date is gone, not changed: read as present, the
+        # None would decline under the wrong reason.
+        assert "is no longer on the Study" in declines[0], declines
         assert [d for u, d in _rows(session, "REMEDIATION_SHIFT_DATE")
                 if u == STUDY_UID] == []
         assert study.phi_status is not PhiStatus.REMEDIATED
+
+
+PRIVATE_DATE = "0009,1042"
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_a_private_date_the_first_call_removed_is_not_recreated_by_the_second(
+        tmp_path, mode):
+    """No hand edit: the scan's own output, applied twice.
+
+    pydicom's JPEG2000.dcm carries the private DA `0009,1042`. Under the
+    default private-tag removal plus a `JITTER` rule on that tag, the scan
+    raises a REMOVE and a SHIFT on one dedup key. The first
+    `anonymize(report)` runs the REMOVE and skips the SHIFT as a
+    duplicate. On the second call the REMOVE matches nothing and claims no
+    key, so the SHIFT runs. Red before: it re-created the removed private
+    tag with a shifted date, and that date was exported."""
+    src = tmp_path / "src"
+    src.mkdir()
+    ds = pydicom.dcmread(get_testdata_file("JPEG2000.dcm"))
+    assert ds[0x0009, 0x1042].VR == "DA" and ds[0x0009, 0x1042].value
+    ds.save_as(str(src / "a.dcm"))
+    session = DicomSession(str(tmp_path / "m.db"))
+    load_fixed_secret(session, tmp_path, FIXED_A)
+    tags = dict(session.configuration.phi_tags)
+    tags[PRIVATE_DATE] = {"name": "private date", "action": "JITTER"}
+    session.configuration.phi_tags = tags
+    assert session.configuration.remove_private_tags
+    with session:
+        session.ingest(str(src))
+        _, instance = _graph(session)
+        report = session.audit()
+        # Non-vacuity: both findings are on the one key.
+        assert sorted(f.remediation_proposal.action_type for f in report.findings
+                      if f.remediation_proposal and f.tag == PRIVATE_DATE
+                      and f.entity_path in (None, ())) == ["REMOVE_TAG", "SHIFT_DATE"]
+        session.anonymize(report)
+        assert PRIVATE_DATE not in instance.attributes, mode
+        session.anonymize(report)
+
+        assert PRIVATE_DATE not in instance.attributes, mode
+        uid = instance.sop_instance_uid
+        gone = [d for d in _declines_on(session, uid, PRIVATE_DATE) if "no longer on" in d]
+        assert len(gone) == 1, _rows(session, "REMEDIATION_DECLINED")
+        assert [d for u, d in _rows(session, "REMEDIATION_SHIFT_DATE")
+                if PRIVATE_DATE in d] == []
+        assert (0x0009, 0x1042) not in _exported(session, tmp_path)
 
 
 @pytest.mark.parametrize("rules", [
@@ -365,3 +418,58 @@ def test_an_unparseable_date_that_was_deleted_declines_as_gone():
     assert [r[0] for r in rows.rows] == ["REMEDIATION_DECLINED"], rows.rows
     assert "is no longer on the Instance" in rows.rows[0][2], rows.rows
     assert CONTENT_DATE not in instance.attributes
+
+
+def test_a_shift_built_with_no_original_writes_no_row():
+    """`PhiRemediation`'s `original_value` defaults to None, which is a
+    blank original like `""`: no date was read, so there is nothing to
+    have moved, and the arm's empty-date branch writes no row, as it did
+    before 0.9.8. Guarded instead, the item's date read as "changed" and
+    a decline row was written over a finding that never named one."""
+    instance = Instance("1.2.3.4.5", "1.2.840.10008.5.1.4.1.1.2", 1)
+    instance.set_attr(CONTENT_DATE, AUDITED)
+    service, rows = _service()
+    finding = _hand_built(instance, "1.2.3.4.5", CONTENT_DATE, None, "Instance")
+    assert finding.remediation_proposal.original_value is None
+
+    applied = service.apply_remediation([finding])
+
+    assert applied == 0
+    assert rows.rows == []
+    assert instance.attributes[CONTENT_DATE] == AUDITED
+
+
+def test_a_date_key_holding_none_is_no_longer_on_the_item():
+    """`set_attr(tag, None)` keeps the key with a None value, which the scan
+    skips as absent and the exporter writes empty. The decline says the
+    date is gone, as for a deleted key, not that it changed."""
+    instance = Instance("1.2.3.4.5", "1.2.840.10008.5.1.4.1.1.2", 1)
+    instance.set_attr(CONTENT_DATE, None)
+    assert CONTENT_DATE in instance.attributes
+    service, rows = _service()
+
+    applied = service.apply_remediation([_hand_built(
+        instance, "1.2.3.4.5", CONTENT_DATE, AUDITED, "Instance")])
+
+    assert applied == 0
+    assert [r[0] for r in rows.rows] == ["REMEDIATION_DECLINED"], rows.rows
+    assert "is no longer on the Instance" in rows.rows[0][2], rows.rows
+    assert instance.attributes[CONTENT_DATE] is None
+
+
+def test_a_padded_study_date_is_the_date_the_study_holds():
+    """The arm's parser strips a padded DA, so the Study is compared the
+    same way: `" 20040119 "` is the date `20040119` and shifts. Compared
+    unstripped, it read as a changed date and a correct shift declined."""
+    patient = Patient("P569", "Doe^Jane")
+    study = Study("1.2.3", "20040119")
+    patient.studies.append(study)
+    original = study.study_date
+    service, rows = _service()
+
+    applied = service.apply_remediation([_hand_built(
+        study, "1.2.3", "study_date", " 20040119 ", "Study")])
+
+    assert applied == 1, rows.rows
+    assert study.study_date != original
+    assert [r[0] for r in rows.rows] == ["REMEDIATION_SHIFT_DATE"]

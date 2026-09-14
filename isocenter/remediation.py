@@ -855,11 +855,14 @@ class RemediationService:
         declines a vanished target for the same reason (#547).
 
         A `DicomItem` is read at the canonical key, because `set_attr`
-        writes there and a hand-built `target_attr` may be upper-case. A
+        writes there and a hand-built `target_attr` may be upper-case; a
+        key holding None is gone, as the scan and the exporter read it. A
         `Study` is compared through `normalize_study_date`, the rule its
         `__setattr__` stores a date by, so `"2004-01-19"`, `"20040119"`
-        and `date(2004, 1, 19)` are one date. The reasons name the tag and
-        never a value: they are persisted in the decline row.
+        and `date(2004, 1, 19)` are one date; the audited side is stripped
+        first, as the arm's parser strips it, so a padded DA is that date
+        too. The reasons name the tag and never a value: they are
+        persisted in the decline row.
 
         An unparseable original (`new_date` None) on a target still
         holding it passes, so the arm's own invalid-format decline is the
@@ -887,13 +890,13 @@ class RemediationService:
             admitted.append(new_date)
         if hasattr(entity, "set_attr"):
             attr = _canonical_tag(attr)
-            present = attr in entity.attributes
+            present = entity.attributes.get(attr) is not None
             held = entity.attributes.get(attr)
         else:
             held = getattr(entity, attr, None)
             present = held is not None
             held = normalize_study_date(held)
-            admitted = [normalize_study_date(value) for value in admitted]
+            admitted = [normalize_study_date(str(value).strip()) for value in admitted]
         if not present:
             reason = (f"{attr} is no longer on the {type(entity).__name__}, "
                       "so there is no date to shift")
@@ -1274,8 +1277,17 @@ class RemediationService:
         a value claimed the REPLACE the loop skipped as a duplicate of the
         REMOVE it ran (#576). The second bullet needs #569: a SHIFT that
         re-created the absent copy claimed the key, and its REMOVE never
-        folded. A finding that raises claims no key either, so it counts
-        as a decline does.
+        folded.
+
+        A finding that raises claims no key. On a removed copy that is a
+        decline, and is counted as one; on a value copy a REMOVE that
+        raises leaves the key to a later non-REMOVE, which folds and is not
+        counted, so the row under-claims by one (57400d1 counted it). That
+        is not restored: before the pass a REMOVE that will raise cannot be
+        told from one that will apply, and counting it is #576's
+        over-claim. The copy is the first finding's, which is exact while
+        the findings on a key name one entity; two entities sharing a UID
+        can under-claim the same way, unchanged from 57400d1.
         """
         chains = {}
         for finding in findings:
@@ -1284,7 +1296,7 @@ class RemediationService:
                 continue
             remove = proposal.action_type == "REMOVE_TAG"
             # `[copy, first is a REMOVE, any is a REMOVE]`; the copy is the
-            # first finding's, as the loop's is.
+            # first finding's (see the docstring's last paragraph).
             chain = chains.setdefault(_remediation_key(finding), [
                 (id(finding.entity), proposal.target_attr), remove, False])
             chain[2] = chain[2] or remove
