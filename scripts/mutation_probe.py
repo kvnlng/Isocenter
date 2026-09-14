@@ -502,7 +502,10 @@ TARGETS = {
                                   "tests/test_worker_loss_is_reported.py",
                                   "tests/test_ybr_jpegls_read_doors.py",
                                   "tests/test_ybr_read_door_labels.py",
-                                  "tests/test_the_project_secret_lives_in_the_store.py"], 30),
+                                  "tests/test_the_project_secret_lives_in_the_store.py",
+                                  "tests/test_one_decode_answer_per_file.py",
+                                  "tests/test_compression_deps.py",
+                                  "tests/test_entities.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -1046,7 +1049,8 @@ TARGETS = {
                                "tests/test_a_restored_patient_is_saved.py",
                                "tests/test_nested_remediation_reaches_the_instance.py",
                                "tests/test_patients_sharing_an_id_are_merged.py",
-                               "tests/test_save_keeps_rows_memory_holds.py"],
+                               "tests/test_save_keeps_rows_memory_holds.py",
+                               "tests/test_one_decode_answer_per_file.py"],
                               30),
     # 81 sites; budget 60 is stride 1 (81 // 60), so every site is
     # probed, exhaustive because it is cheap, like parallel.py's 80. It

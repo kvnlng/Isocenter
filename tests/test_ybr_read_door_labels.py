@@ -337,7 +337,14 @@ def test_a_set_landing_during_the_pydicom_read_keeps_its_own_label(
     path = _write(tmp_path, _dataset(
         EXPLICIT_LE, photometric="YBR_FULL", native=YBR8))
     inst = _instance(path, "YBR_FULL")
-    real = entities.get_decoder
+    # The decode the door makes is `io_handlers._decode_pixels`' since
+    # #453, so its `get_decoder` is the one wrapped. `fired` says the set
+    # really landed inside it: a wrap in a module the door no longer
+    # decodes through would leave every assertion below about a read
+    # with no set in it.
+    from isocenter import io_handlers
+    real = io_handlers.get_decoder
+    fired = []
     grey = np.zeros((4, 4), dtype=np.uint8)
 
     class SetDuringRead:
@@ -346,12 +353,14 @@ def test_a_set_landing_during_the_pydicom_read_keeps_its_own_label(
 
         def as_array(self, *args, **kwargs):
             got = self._decoder.as_array(*args, **kwargs)
+            fired.append(1)
             inst.set_pixel_data(grey)
             return got
 
-    monkeypatch.setattr(entities, "get_decoder",
+    monkeypatch.setattr(io_handlers, "get_decoder",
                         lambda ts: SetDuringRead(real(ts)))
     got = inst.get_pixel_data()
+    assert fired == [1], "the set never ran inside the decode"
     assert inst.attributes["0028,0004"] == "MONOCHROME2"
     assert int(inst.attributes["0028,0002"]) == 1
     assert got is inst.pixel_array

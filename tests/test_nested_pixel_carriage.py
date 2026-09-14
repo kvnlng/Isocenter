@@ -1243,6 +1243,40 @@ def test_a_ybr_full_jpeg_ls_icon_is_carried_as_rgb(tmp_path):
     assert int(np.abs(got.astype(int) - NEAR_ICON_RGB.astype(int)).max()) <= 6
 
 
+def test_an_icon_whose_header_pydicom_rejects_is_not_carried(tmp_path):
+    """N5: an icon gets pydicom's header validation too (#453, attack A20c).
+
+    A JPEG Lossless icon with BitsStored absent. pydicom has no JPEG
+    Lossless plugin here, so it never validated, and the imagecodecs
+    fallback carried the icon with BitsStored `None` -- the top level's
+    #453 cell, one depth down. `_decode_pixels` now validates before the
+    fallback, on the sequence item itself, whose `file_meta` is borrowed
+    from the enclosing dataset. The icon files its loss row, and the
+    instance still ingests: an icon is not a reason to lose it.
+    """
+    import imagecodecs
+    from pydicom.encaps import encapsulate
+    from pydicom.uid import JPEGLosslessSV1
+
+    source = (np.arange(16, dtype=np.int64) * 4000).astype(
+        np.uint16).reshape(4, 4)
+    icon = _icon_item(
+        payload=encapsulate([imagecodecs.ljpeg_encode(source)]),
+        rows=4, cols=4, bits=16, encapsulated=True)
+    del icon.BitsStored
+    db, _src = _ingest(tmp_path, "no_bits_stored", icons=[icon],
+                       transfer_syntax=JPEGLosslessSV1,
+                       top_level_pixels=False)
+
+    assert [d for d, _s in _data_loss_rows(db) if "7fe0,0010" in d], \
+        _data_loss_rows(db)
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM instances").fetchone() \
+            == (1,)
+    assert not [k for k in _blob_kinds(db) if k.startswith("pixels:")], \
+        _blob_kinds(db)
+
+
 def test_the_gate_refuses_a_syntax_it_does_not_name(monkeypatch):
     """N4: the allow-list gate refuses, in behaviour, and only it does.
 

@@ -1073,7 +1073,7 @@ def test_a_set_landing_during_a_file_read_is_kept(tmp_path, monkeypatch):
     """S2: the file arm, the set injected inside pydicom's decode."""
     inst = _file_backed(tmp_path)
     newer = SET_DURING_READ["8x8 uint8"]
-    real = entities_module._decode_with_pydicom
+    real = entities_module._decode_from_file
     fired = []
 
     def set_during_decode(ds):
@@ -1081,7 +1081,7 @@ def test_a_set_landing_during_a_file_read_is_kept(tmp_path, monkeypatch):
         inst.set_pixel_data(newer)
         return real(ds)
 
-    monkeypatch.setattr(entities_module, "_decode_with_pydicom",
+    monkeypatch.setattr(entities_module, "_decode_from_file",
                         set_during_decode)
     got = inst.get_pixel_data()
     assert fired == [1], "the set never ran inside the decode"
@@ -1102,8 +1102,8 @@ def test_a_relabelling_read_still_relabels_when_it_publishes(tmp_path,
     """
     inst = _file_backed(tmp_path)
     inst.set_attr("0028,0004", "YBR_FULL")
-    real = entities_module._decode_with_pydicom
-    monkeypatch.setattr(entities_module, "_decode_with_pydicom",
+    real = entities_module._decode_from_file
+    monkeypatch.setattr(entities_module, "_decode_from_file",
                         lambda ds: (real(ds)[0], "RGB"))
     before = inst._revision
     got = inst.get_pixel_data()

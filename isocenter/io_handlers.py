@@ -156,6 +156,7 @@ import imagecodecs
 from imagecodecs import jpeg2k_encode
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.pixels import get_decoder
+from pydicom.pixels.decoders.base import DecodeRunner
 from pydicom.uid import ImplicitVRLittleEndian, JPEG2000Lossless
 from pydicom.tag import Tag
 from pydicom.datadict import dictionary_VR
@@ -419,9 +420,9 @@ _IMAGECODECS_FALLBACK_SYNTAXES = frozenset({
 #:   pydicom's door applies (#372), and what pydicom with pyjpegls stores
 #:   for the same file. The conversion is `imagecodecs_handler.CONVERTS_TO`
 #:   and not this module's since #464, so the read doors make it too. 16-bit is refused
-#:   here before the decode: `convert_color_space` refuses `uint16`. The
-#:   read doors return a 16-bit frame as stored under its own label, and
-#:   #461 decides that case.
+#:   here before the decode: `convert_color_space` refuses `uint16`. Every
+#:   door refuses it, since the Instance door decodes through
+#:   `_decode_pixels` (#453); #461 recorded that as a limit (Q5).
 #:
 #: Which relabels the decoder has already done is data, not a branch on
 #: syntax: `_FALLBACK_DECODER_CONVERTS`. A relabel under any other syntax
@@ -1681,6 +1682,33 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     refuses. Both depths get it, because both call this: one rule for
     both depths.
 
+    **And the fallback validates first, as pydicom would have (#453).**
+    pydicom validates the header only once it has found a plugin:
+    `as_array` checks its plugins, raises "missing dependencies" when it
+    has none, and only then validates. So for JPEG Lossless and JPEG-LS,
+    which have no plugin here, "validation stays a refusal" held for
+    nobody: a file missing BitsStored, PixelRepresentation or
+    PlanarConfiguration, or declaring BitsStored 17 under BitsAllocated
+    16, reached the fallback and was ingested, where a JPEG 2000 file with
+    the same header was refused. `_validate_like_pydicom` runs the same
+    check, in the same words, before the fallback is asked. On the one
+    route where pydicom had already validated -- a plugin existed and
+    raised, as Pillow does for 16-bit colour JPEG 2000 -- the check runs
+    twice and passes twice, and pydicom's "number of bytes of compressed
+    pixel data matches the expected number for uncompressed data" warning,
+    which `validate()` also raises, can be emitted twice for one file.
+    That is a warning, not an answer, and passing `validate=False` to
+    `as_array` instead would change what pydicom decodes: its
+    `_validate_options` deletes a mismatched Extended Offset Table from
+    the runner it decodes with, and a separate runner cannot do that.
+
+    **Every door calls this (#453).** `Instance.get_pixel_data()` from a
+    file does too, so a file ingest refuses is refused there in the same
+    words, and a file ingest reads is read there to the same array under
+    the same label. It used to call pydicom and then hand any failure at
+    all to `imagecodecs_handler.get_pixel_data`, which had none of the
+    fallback's checks.
+
     **`as_rgb=False` asks for the stored samples, and only the export
     readback passes it (#449).** Forwarded only when given, like
     `allow_excess_frames`, so every ingest decode still gets pydicom's
@@ -1712,8 +1740,37 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     except RuntimeError as exc:
         if str(ts) not in _IMAGECODECS_FALLBACK_SYNTAXES:
             raise
+        # Before the fallback and outside it, so the refusal is pydicom's
+        # own `AttributeError` or `ValueError`, not wrapped as a reason
+        # imagecodecs could not decode, and ingest's row reads
+        # `Decompression Failed: AttributeError: Missing required element:
+        # ...` as a JPEG 2000 file's already did. Before the photometric
+        # allow-list too: a header that fails both is refused in pydicom's
+        # words, which name the element.
+        _validate_like_pydicom(ds, ts)
         return _decode_with_imagecodecs(ds, allow_excess_frames, exc)
     return np.ascontiguousarray(arr), meta["photometric_interpretation"]
+
+
+def _validate_like_pydicom(ds, ts) -> None:
+    """pydicom's header validation, where pydicom never got to run it (#453).
+
+    `DecodeRunner.validate()` is the call `Decoder.as_array` makes after
+    it has found a plugin (pydicom 3.0.0 through 3.0.2; the only
+    difference between them is a `ceil` in the length heuristic). Raises
+    exactly what `as_array` would: `AttributeError("Missing required
+    element: (0028,0101) 'Bits Stored'")`, `ValueError("A (0028,0101)
+    'Bits Stored' value of '17' is invalid ...")`, `ValueError("Unknown
+    (0028,0004) 'Photometric Interpretation' value 'NONSENSE'")`.
+
+    `ts` is passed rather than read again: `_decode_nested_pixels` hands
+    in a sequence item whose `file_meta` it borrowed from the enclosing
+    dataset, and `set_source` reads only the item's own group 0028
+    (measured on an icon missing BitsStored under JPEG Lossless).
+    """
+    runner = DecodeRunner(ts)
+    runner.set_source(ds)
+    runner.validate()
 
 
 def _decode_with_imagecodecs(ds, allow_excess_frames,
@@ -1782,10 +1839,12 @@ def _decode_with_imagecodecs(ds, allow_excess_frames,
                and str(ts) not in _FALLBACK_DECODER_CONVERTS)
     bits = int(ds.BitsAllocated)
     if convert and bits != 8:
-        # Ingest's own refusal, and only ingest's: the read doors return a
-        # 16-bit YBR_FULL frame as stored under its own label, which is
-        # true of it. Whether 16-bit is converted or recorded as a limit
-        # is #461, deliberately left open by #464.
+        # Every door's refusal, since #453 sent the Instance door through
+        # this function too: until then it returned a 16-bit YBR_FULL
+        # frame as stored, under its own label. #461 ruled (Q5) to record
+        # it as a limit rather than convert ahead of pydicom, which refuses
+        # the native form as well ("Invalid ndarray.dtype 'uint16' for
+        # color space conversion"); `docs/installation.md` says so.
         raise refused(
             f"its declared colour space {photometric!r} is {bits}-bit, and "
             f"the conversion to {stored_label} this fallback would make, "

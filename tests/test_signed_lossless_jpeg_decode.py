@@ -402,28 +402,35 @@ def test_a_signed_decode_narrower_than_bits_stored_is_refused_at_both_doors(
 
     The codec returns `uint8`, the header's container is 8 bits too, so
     there is nothing to widen it into (S7), and 12 bits cannot be
-    sign-extended inside 8: the shift the rule computes would be -4. The
-    handler refuses, in its words, at the read door, and ingest refuses.
+    sign-extended inside 8: the shift the rule computes would be -4.
     Found by the probe (#446 review): with `and` in place of `or` in the
-    guard, a `uint8` decode passed it and came back as whatever a negative
-    shift made of it, with no error at the read door.
+    handler's guard, a `uint8` decode passed it and came back as whatever
+    a negative shift made of it, with no error at the read door.
+
+    **Refused before any decode now, in pydicom's words (#453).** The
+    header is one pydicom's own validation rejects -- BitsStored greater
+    than BitsAllocated -- and pydicom never got to say so, because it
+    validates only once it has a plugin and has none for JPEG Lossless
+    here. `_decode_pixels` runs that validation ahead of the fallback, at
+    ingest and at the Instance door alike, so the handler's guard is no
+    longer what stands between this file and the shift. The handler
+    column is gone: it is no longer a door.
 
     JPEG Lossless under BitsAllocated 8, where until #454 this was a
     JPEG-LS stream under BitsAllocated 16. That stream is now widened into
-    its 16-bit container and read, as pydicom reads it (S7b). And a
-    JPEG-LS stream is sign-extended from its own precision (#478), so it
-    never asks this guard about BitsStored. JPEG Lossless is read by
-    BitsStored, so the guard is what stands between it and the shift.
+    its 16-bit container and read, as pydicom reads it (S7b).
     """
     source = np.arange(16 * 16, dtype=np.uint8).reshape(16, 16)
     got = doors(_dataset(LJPEG_SV1, _ljpeg(source, 8), source.shape, 12,
                          bits_allocated=8))
-    assert got["ingest"][0] == 0
-    for door in ("instance", "handler"):
-        words = str(got[door])
-        assert isinstance(got[door], Exception), f"{door}: {got[door]!r}"
-        assert "cannot sign-extend a uint8 decode from BitsStored 12" in \
-            words, f"{door}: {words}"
+    ingested, failures, _stored = got["ingest"]
+    assert ingested == 0
+    words = ("A (0028,0101) 'Bits Stored' value of '12' is invalid, it must "
+             "be in the range (1, 64) and no greater than the (0028,0100) "
+             "'Bits Allocated' value of '8'")
+    assert words in failures[0][1], failures
+    assert isinstance(got["instance"], RuntimeError), got["instance"]
+    assert words in str(got["instance"]), str(got["instance"])
 
 
 # ---------------------------------------------------------------------------
