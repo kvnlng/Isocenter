@@ -5289,6 +5289,24 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 corrections.append(
                     f"{widened}; written with BitsStored {ds.BitsStored} "
                     f"and HighBit {ds.HighBit}, the array's own width")
+            # A declared HighBit the file does not carry is said out loud
+            # too (#597). INFO, by ruling: the written file is conformant,
+            # the samples are unchanged, and an ingested file's declaration
+            # already has ingest's own row -- nothing in the graph marks
+            # which instances those are, so a WARNING here would write a
+            # second row per instance of every legacy cohort re-exported.
+            # `declared_int` for #506's reason, and not after a widening,
+            # whose note already names the written HighBit. "Written with",
+            # because the BitsStored named may be one nobody declared.
+            declared_high_bit = declared_int(inst.attributes, "0028,0102")
+            if (widened is None and declared_high_bit is not None
+                    and declared_high_bit != ds.HighBit):
+                corrections.append(
+                    f"HighBit {declared_high_bit} was declared; written "
+                    f"with BitsStored {ds.BitsStored} and HighBit "
+                    f"{ds.HighBit}, because the samples are right-aligned "
+                    f"and PS3.5 8.1.1 puts their most significant bit at "
+                    f"BitsStored - 1. The samples are unchanged.")
             ds.PixelRepresentation = 1 if arr.dtype.kind == "i" else 0
             declared_representation = declared_int(inst.attributes,
                                                    "0028,0103")
