@@ -32,12 +32,16 @@ Icon Image Sequence item is dropped only when that instance carries the
 attestation or has zones applied at export, and every other nested icon
 keeps a store-wide gate narrowed from "any configuration rule carry
 `redaction_zones`" to a zones rule that matches a series in the store.
-Struck in place: §8's condition and its recommendation (a) "Drop every
-nested icon"; §8's "`LOSS_SCOPE_STANDARD` by the parity rule" for the
-gate's row, which is now `SIGNAL`; and §16.4's
-`redaction_in_effect(instances, rules=None)`, "passes … the rules" and
-`ExportContext.drop_nested_icons` (now `redaction_in_effect(instances)`
-and `drop_foreign_icons`, with the matched-rule half in the session).
+Struck in place: §0 Q10's condition, its recommendation (a) "Drop every
+nested icon", and its "in a session that redacts at all … nested icons
+are not carried"; §9's "under Q10's recommended answer … this
+per-instance pair is subsumed by it" (the pair is now the own-icon
+tier's condition) and its "`LOSS_SCOPE_STANDARD` by the parity rule"
+for the gate's row, which is now `SIGNAL`; and §16.4's
+`redaction_in_effect(instances, rules=None)`, "passes … the rules",
+"and `None`" and `ExportContext.drop_nested_icons` (now
+`redaction_in_effect(instances)` and `drop_foreign_icons`, with the
+matched-rule half in the session).
 **Base:** `main` at `007705d`
 **Measured with:**
 `/Users/kevin/Developer/Isocenter/.venv/bin/python` (CPython 3.14.6),
@@ -286,8 +290,11 @@ when it matches a series in the store.) Two options if it is true:
 Recommendation (a), on the grounds that this whole feature is worth
 nothing next to re-exporting a redacted frame as a thumbnail, and that a
 store which redacts anything is a store where the user has said what
-they care about. Note the effect: **in a session that redacts at all,
-recommendation (a) means nested icons are not carried** — which is a
+they care about. Note the effect: ~~**in a session that redacts at all,
+recommendation (a) means nested icons are not carried**~~ (**Superseded
+by #542:** an unredacted carrier's own depth-1 icon is carried in a
+session that redacts; only the other nested icons follow the store-wide
+gate) — which is a
 real limit on what #183 delivers and the owner should decide it
 knowingly rather than discover it. If that is unacceptable, (b) is the
 fallback and its tag list needs to be written down and tested.
@@ -1223,9 +1230,12 @@ current".
 **Both conditions are still per-instance, and that is not sufficient for
 an icon under Referenced Image Sequence** — which is this spec's own
 headline depth-2 spelling, and a thumbnail of a *different* SOP
-instance. That gap is **Q10**, and it changes what is built: under Q10's
+instance. That gap is **Q10**, and it changes what is built: ~~under Q10's
 recommended answer the gate becomes store-wide and this per-instance
-pair is subsumed by it. Do not implement §9 as it stands without
+pair is subsumed by it~~ (**Superseded by #542:** the per-instance pair
+is not subsumed; it is the own-icon tier's whole condition, in
+`io_handlers._redaction_icon_loss`, and the store-wide gate governs only
+the other nested icons). Do not implement §9 as it stands without
 reading Q10 first.
 
 Three reasons for the item removal rather than a bare skip:
@@ -1565,7 +1575,7 @@ it. A `Configuration` does not exist to consult there.
 
 So ~~`redaction_in_effect(instances, rules=None)`~~ is one function called
 at two sites. The session path passes the whole store's instances ~~*and*
-the rules~~; `write_tree` passes the tree it is about to write and `None`,
+the rules~~; `write_tree` passes the tree it is about to write ~~and `None`~~,
 which applies the `_ISOCENTER_REDACTION_HASH` attestation half only.
 That is the right split rather than a shortfall: the attestation is a
 property of the graph, so the serializer can see it, while "a rule is

@@ -3263,18 +3263,24 @@ class ExportError(RuntimeError):
     Raised by `session.export()` when **zero of N planned** instances
     reached disk and at least one failed, in both formats: the DICOM path
     since #191, and `WfdbExporter.export` since #541, where N is the
-    waveform records attempted. Not on a partial export: two
+    waveform records attempted. The message says "instances" in both:
+    a WFDB record is written from one waveform instance, and its failure
+    is named by that instance's UID, as the DICOM one is. Not on a
+    partial export: two
     files out of three is a real, usable result, and raising would
     discard the summary that says which two and would have to decide the
     fate of files already written.
 
-    Raised **last**, after every record the run produces -- the collision
-    report, the recoverable-identity disclosure, the delivery counters,
-    the `EXPORT` audit row and `Done.` -- exactly as
+    Raised **last**, after every record the run produces, exactly as
     `_apply_redaction_rules` raises `RedactionError`, and for the same
     reason: a caller who catches this still holds a correct graph, a
     complete audit trail and a compliance report grading
-    `REVIEW_REQUIRED`.
+    `REVIEW_REQUIRED`. What those records are differs by format. The
+    DICOM path raises after the collision report, the
+    recoverable-identity disclosure, the delivery counters, the `EXPORT`
+    audit row and `Done.`. The WFDB path has none of the first three; it
+    raises after each record's `ERROR` or `DATA_LOSS` row and its own
+    `EXPORT` row.
 
     **`RuntimeError`, not `Exception`.** `write_tree` and
     `_export_instance_worker` already raise bare `RuntimeError`s on this
