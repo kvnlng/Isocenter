@@ -505,3 +505,139 @@ def test_a_bitstream_that_is_no_codestream_leaves_the_array_alone():
     # A JP2 signature box with no `jp2c` box after it.
     assert imagecodecs_handler._j2k_sample_layout(
         b"\x00\x00\x00\x0c\x6a\x50\x20\x20\x0d\x0a\x87\x0a") is None
+
+
+# ---------------------------------------------------------------------------
+# The JP2 box walk: XLBox and zero-length boxes (#610)
+# ---------------------------------------------------------------------------
+#
+# ISO/IEC 15444-1 I.4: a box is `LBox` (4 bytes), `TBox` (4), then the
+# payload; `LBox == 1` means the length is in the 8-byte `XLBox` that
+# follows `TBox`, and `LBox == 0` means the box runs to the end of the
+# file. The walker read `LBox` alone, so an XLBox `jp2c` was stepped
+# *over* by 1 byte into the codestream's own bytes and never found: the
+# frame passed the signedness gate unjudged, decoded by every door, and a
+# signed codestream under PixelRepresentation 0 came out as Pillow's
+# flipped reading (#610, review of #606). Every fixture below is proved
+# to decode with `imagecodecs` *before* the walker is asked, so a test
+# measures the gate and never a decode failure.
+
+JP2_SIGNATURE = b"\x00\x00\x00\x0c\x6a\x50\x20\x20\x0d\x0a\x87\x0a"
+
+
+def _jp2_split(arr):
+    """`(boxes before jp2c, the codestream)` of a real JP2 file for `arr`."""
+    jp2 = imagecodecs.jpeg2k_encode(arr, level=0, codecformat="JP2")
+    assert jp2.startswith(JP2_SIGNATURE)
+    i = jp2.find(b"jp2c")
+    lbox = int.from_bytes(jp2[i - 4:i], "big")
+    payload = jp2[i + 4:i - 4 + lbox] if lbox else jp2[i + 4:]
+    return jp2[:i - 4], payload
+
+
+def _box(kind, payload):
+    return (8 + len(payload)).to_bytes(4, "big") + kind + payload
+
+
+def _xlbox(kind, payload):
+    return ((1).to_bytes(4, "big") + kind
+            + (16 + len(payload)).to_bytes(8, "big") + payload)
+
+
+def _xlbox_wrapped(ds):
+    """`ds` with its one JP2 frame's `jp2c` rewritten as an XLBox."""
+    frame = bytes(next(pydicom.encaps.generate_frames(
+        ds.PixelData, number_of_frames=1)))
+    assert frame.startswith(JP2_SIGNATURE)
+    i = frame.find(b"jp2c")
+    lbox = int.from_bytes(frame[i - 4:i], "big")
+    payload = frame[i + 4:i - 4 + lbox] if lbox else frame[i + 4:]
+    wrapped = frame[:i - 4] + _xlbox(b"jp2c", payload)
+    ds.PixelData = encapsulate([wrapped], has_bot=True)
+    ds["PixelData"].is_undefined_length = True
+    return wrapped
+
+
+def test_an_xlbox_jp2c_is_read():
+    """Killer for the walker reading `LBox` alone: `(True, 16)`, not None."""
+    head, payload = _jp2_split(SIGNED_16)
+    blob = head + _xlbox(b"jp2c", payload)
+    assert imagecodecs.jpeg2k_decode(blob).tolist() == SIGNED_16.tolist()
+    assert imagecodecs_handler._j2k_sample_layout(blob) == (True, 16)
+
+
+def test_an_xlbox_box_before_jp2c_is_stepped_over():
+    """An XLBox that is not the codestream is stepped by its XLBox length."""
+    head, payload = _jp2_split(SIGNED_16)
+    blob = head + _xlbox(b"uuid", b"\x00" * 24) + _box(b"jp2c", payload)
+    assert imagecodecs.jpeg2k_decode(blob).tolist() == SIGNED_16.tolist()
+    assert imagecodecs_handler._j2k_sample_layout(blob) == (True, 16)
+
+
+def test_a_truncated_xlbox_is_none():
+    """The file ends inside the XLBox, or the XLBox is shorter than itself."""
+    head, payload = _jp2_split(SIGNED_16)
+    cut = head + (1).to_bytes(4, "big") + b"jp2c" + b"\x00\x00\x00"
+    assert imagecodecs_handler._j2k_sample_layout(cut) is None
+    # A `uuid` XLBox declaring 12 bytes, fewer than its own 16-byte
+    # header, followed by `jp2c` and a real codestream. Stepping by 12
+    # lands inside the header just read: the XLBox's low four bytes
+    # (`00 00 00 0c`) read as an LBox, the next four as the TBox `jp2c`,
+    # and the walk judges a codestream box the file never declared --
+    # `(True, 16)` under the pre-#610 `length <= 0` check. Declaring 8
+    # would not show it: the step lands on the XLBox's high bytes, an
+    # LBox of 0 on a non-`jp2c` box, None for a different reason.
+    short = (head + (1).to_bytes(4, "big") + b"uuid"
+             + (12).to_bytes(8, "big") + b"jp2c" + payload)
+    assert imagecodecs_handler._j2k_sample_layout(short) is None
+
+
+def test_a_zero_length_jp2c_is_still_read():
+    """`LBox == 0` on the `jp2c` box: the codestream runs to the end (pin)."""
+    head, payload = _jp2_split(SIGNED_16)
+    blob = head + (0).to_bytes(4, "big") + b"jp2c" + payload
+    assert imagecodecs.jpeg2k_decode(blob).tolist() == SIGNED_16.tolist()
+    assert imagecodecs_handler._j2k_sample_layout(blob) == (True, 16)
+
+
+def test_an_xlbox_wrapped_signed_codestream_is_refused_at_every_door(tmp_path):
+    """#524's refusal, through the box the walker used to skip (#610).
+
+    The same three doors as
+    `test_every_door_refuses_a_signed_codestream_under_pixel_representation_0`,
+    in the same words. Before the fix all three decoded it: `ingest()`
+    stored Pillow's flipped reading with no row.
+    """
+    ds = _dataset(SIGNED_16, 0, encode={"codecformat": "JP2"})
+    wrapped = _xlbox_wrapped(ds)
+    assert imagecodecs.jpeg2k_decode(wrapped).tolist() == SIGNED_16.tolist()
+
+    path = _write(tmp_path, ds)
+    summary, stored = _ingest(tmp_path, os.path.dirname(path))
+    assert (summary.ingested, stored) == (0, None), "ingest refuses it"
+    reason = summary.failures[0][1]
+    assert reason.startswith(
+        "Decompression Failed: RuntimeError: the JPEG 2000 codestream is "
+        "signed at precision 16, where PixelRepresentation 0 declares "
+        "unsigned samples"), reason
+
+    for door, read in (
+            ("instance", lambda: Instance(
+                generate_uid(), "1.2.840.10008.5.1.4.1.1.7", 1,
+                file_path=path).get_pixel_data()),
+            ("decode_pixels", lambda: through_the_fallback(
+                pydicom.dcmread(path)))):
+        with pytest.raises(RuntimeError, match=REFUSAL):
+            read()
+
+
+def test_an_xlbox_wrapped_unsigned_codestream_is_reinterpreted_under_1():
+    """The #460 direction through the same box: the mirror of
+    `test_a_jp2_wrapped_codestream_reaches_the_same_rule`."""
+    ds = _dataset(UNSIGNED_16, 1, encode={"codecformat": "JP2"})
+    wrapped = _xlbox_wrapped(ds)
+    assert imagecodecs.jpeg2k_decode(wrapped).tolist() == UNSIGNED_16.tolist()
+    assert imagecodecs_handler._j2k_sample_layout(wrapped) == (False, 16)
+    got, _label = through_the_fallback(ds)
+    assert got.dtype == SIGNED_16.dtype, got.dtype
+    assert got.tolist() == SIGNED_16.tolist()

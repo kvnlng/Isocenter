@@ -245,11 +245,14 @@ def test_a_failed_redaction_grades_the_report_review_required(
 
 def test_the_serial_path_reports_the_same_failure_as_the_parallel_one(
         tmp_path):
-    """`redact_machine_instances` is public and swallowed just as quietly.
+    """`redact_machine_instances` is private and swallowed just as quietly.
 
-    It is what `process_machine_rules` calls, it is exercised directly by
-    five test files, and its `except Exception` logged and moved on --
-    the same silence in the same operation, one method over.
+    Private per `docs/api/stability.md` (`services.py` is Private except
+    `RedactionError` and `apply_redaction_to_array`, #522); reached
+    directly here because the failure this pins is raised there. It is
+    what `process_machine_rules` calls, five test files exercise it, and
+    its `except Exception` logged and moved on -- the same silence in the
+    same operation, one method over.
     """
     session = _session(tmp_path, name="serial")
     db_path = session.store_backend.db_path

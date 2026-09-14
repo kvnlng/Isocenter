@@ -104,9 +104,9 @@ paragraph is the answer, and the reason not to re-file #284.
 
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
-mutation sites by INDEX -- `scripts/mutation_probe.py:430` computes
-`step = max(1, total // budget)` and `:432` walks
-`range(0, total, step)` -- so removing a site anywhere in this file
+mutation sites by INDEX -- `step = max(1, total // budget)` at
+scripts/mutation_probe.py line 1608 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1611 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -1928,7 +1928,7 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     stores the array has to store this answer with it.
 
     The transfer syntax is read as an attribute, deliberately, rather
-    than with a `.get()` default. A dataset read with `force=True` and
+    than with a `dict.get()` default. A dataset read with `force=True` and
     no file meta (#281's population) has an empty `file_meta`;
     `pixel_array` raises `AttributeError` for it and so does this, into
     the same `except` and the same `Decompression Failed` row. A default
@@ -3717,10 +3717,10 @@ class ExportOutcome:
     #: the values do not fit. Carried here rather than logged by the
     #: worker, because the worker is usually a spawned process whose
     #: `isocenter` logger has no handler -- `session.export()` always
-    #: spawns them, and `write_tree()` does on a GIL build -- so a line
-    #: logged there reached no one (0 of 3, measured in the review of
-    #: #506). Not a loss: nothing was dropped and the file is correct,
-    #: so it takes no audit row and does not move the grade.
+    #: spawns them, and `write_tree()` does by default on a GIL build --
+    #: so a line logged there reached no one (0 of 3, measured in the
+    #: review of #506). Not a loss: nothing was dropped and the file is
+    #: correct, so it takes no audit row and does not move the grade.
     corrections: List[str] = field(default_factory=list)
     #: One sentence per claim in the source's own header that the file
     #: just written could not honour, for the parent to log at WARNING
@@ -3757,9 +3757,9 @@ class ExportSummary:
     not: the disclosure has to say which files went out, not how many
     were meant to.
     """
-    #: SOP Instance UID per instance that reached disk. Falls back to
-    #: the output path for an instance carrying no UID, which the export
-    #: plan cannot produce -- it names the file after that UID.
+    #: SOP Instance UID per instance that reached disk, or its output path
+    #: when it carries no UID: ingest refuses such a file, but a hand-built
+    #: graph through `write_tree()` can carry one, written as `None.dcm` (#613).
     written_uids: List[str] = field(default_factory=list)
     #: `(entity_uid, details)` per instance that did not reach disk,
     #: already audited by `_report_export_failures`.
@@ -6570,7 +6570,7 @@ def _get_attr_case_insensitive(attributes: dict, tag: str, default):
     `PHIRedactor._normalize_tag_keys` normalizes away for PHI-tag config
     keys (see its comment naming this exact tag, "0008,103E"). Callers of
     this function should look up a tag through it rather than re-adding a
-    `.lower()`/`.upper()` at their own call site.
+    `str.lower()`/`str.upper()` at their own call site.
 
     Args:
         attributes (dict): A `DicomItem.attributes`-shaped dict.
@@ -7252,7 +7252,9 @@ class DicomExporter:
             # above (D10): `written_uids` is a frozen public field that is
             # counted (`written` de-duplicates it) and matched against the
             # plan's UIDs, and no line or row is built from it. A shared
-            # placeholder would count every UID-less instance as one file.
+            # placeholder would count every UID-less instance as one file
+            # -- reachable through `write_tree()` on a hand-built graph,
+            # since ingest refuses a file with no SOP Instance UID (#613).
             written_uids=[r.sop_instance_uid or r.output_path
                           for r in results
                           if isinstance(r, ExportOutcome) and r.ok],
