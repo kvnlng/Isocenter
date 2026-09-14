@@ -117,16 +117,23 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     exporter's `ERROR` rows interpolated the exception whole (#588), the
     DICOM export worker printed the output path and then the exception
     to stderr (P8, bunch E), and the DICOM `ERROR` row
-    (`DicomExporter._report_export_failures`) recorded both the same way. An `OSError` with no `strerror`
-    -- `OSError("cannot open <path>")` -- is its type alone: its message
-    is whatever the raiser wrote, and the one exception this exists for
-    is the one whose message is built around a path.
+    (`DicomExporter._report_export_failures`) recorded both the same
+    way. An `OSError` with no `strerror` -- `OSError("cannot open
+    <path>")` -- is its type alone: its message is whatever the raiser
+    wrote, and the one exception this exists for is the one whose
+    message is built around a path.
 
     **The limit.** Every other exception keeps its message, exactly as
     `describe_exception` spells it: those messages are the reasons a
     report exists to show, and there is no general way to tell a path in
     one from prose. An exception type that writes a path into its own
-    message is not caught by this; name it here if one is found.
+    message is not caught by this, so the fix belongs at the raise:
+    name the instance there. Found and fixed that way (review of #589):
+    the export worker's `Refusing to write <output path>` refusals
+    (`io_handlers._export_instance_worker`), `get_pixel_data()`'s
+    `Lazy load failed for <source path>` and `Failed to decompress pixel
+    data for <file name>`, and `_verify_readback`'s inner exception.
+    Name any further one here.
     """
     text = _type_and_reason(exc)
     cause = exc.__cause__

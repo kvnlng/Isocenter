@@ -946,9 +946,15 @@ def test_a_multi_sample_float_export_is_refused_through_the_pipeline(
             "WHERE action_type='ERROR'").fetchall()
     assert len(errors) == 1, errors
     assert "C.7.6.24" in errors[0][0]
+    # The refusal named `ctx.output_path`, `<out>/Subject_<Patient ID>/...`,
+    # which the row keeps whole: it is a `RuntimeError`'s own message, not
+    # an `OSError`'s filename (review of #589).
+    assert "Subject_" not in errors[0][0], errors[0][0]
+    assert str(out) not in errors[0][0], errors[0][0]
 
     content = report_path.read_text(encoding="utf-8")
     assert "| **Validation Status** | **REVIEW_REQUIRED** |" in content
+    assert "Subject_" not in content, content
 
 
 @pytest.mark.parametrize("declared", [
@@ -1356,6 +1362,9 @@ def test_a_compressed_integer_export_still_drops_the_url(tmp_path):
 # it now lives.
 
 
+SOURCE_DIR_NAME = "Doe_Jane_MRN4455"
+
+
 def _run_undecodable(tmp_path, name, report_path=None):
     """Full pipeline over one undecodable float source; report what came of it.
 
@@ -1367,7 +1376,11 @@ def _run_undecodable(tmp_path, name, report_path=None):
     so a pipeline that skipped it would grade `REVIEW_REQUIRED` whatever
     the export did, and the test below would pin nothing.
     """
-    src = tmp_path / "src"
+    # A source folder named for the patient, as source trees often are:
+    # the read-door failure used to name the source file, and that name
+    # reached the export's `ERROR` row and the report after `anonymize()`
+    # (review of #589). `SOURCE_DIR_NAME` is what the callers look for.
+    src = tmp_path / SOURCE_DIR_NAME
     src.mkdir()
     _write_float_src(str(src), samples=3, planar=False)
     out = tmp_path / "out"
@@ -1417,8 +1430,8 @@ def test_a_float_instance_whose_pixels_will_not_decode_fails_the_export(
     export worker files an `ERROR` row for every failure shape, so a
     count alone would pass just as well if the write had failed for an
     unrelated reason. The message survives because the re-raise lands in
-    the outer handler's `RuntimeError(f"Lazy load failed for
-    {self.file_path}: {e}")`, which interpolates pydicom's own words --
+    the outer handler's `RuntimeError(f"Lazy load failed for instance
+    {self.sop_instance_uid}: ...")`, which interpolates pydicom's own words --
     `__cause__` does not survive the pickle back from the worker, the
     message does.
     """
@@ -1429,6 +1442,8 @@ def test_a_float_instance_whose_pixels_will_not_decode_fails_the_export(
     _uid, details = errors[0]
     assert "Lazy load failed" in details, details
     assert "Planar Configuration" in details, details
+    assert SOURCE_DIR_NAME not in details, details
+    assert _uid in details, details
 
 
 def test_an_undecodable_float_reaches_the_compliance_report(tmp_path):
@@ -1448,6 +1463,7 @@ def test_an_undecodable_float_reaches_the_compliance_report(tmp_path):
     assert "## 4. Exceptions & Errors" in content
     assert "ERROR" in content.split("## 4. Exceptions & Errors")[1], content
     assert "| Instances Written | 0 of 1 requested |" in content, content
+    assert SOURCE_DIR_NAME not in content, content
 
 
 def test_an_instance_with_no_pixel_element_at_all_still_returns_none(tmp_path):

@@ -258,3 +258,69 @@ def test_a_readback_that_cannot_open_the_written_file_names_no_path(tmp_path):
     text = describe_exception_without_paths(raised.value)
     assert "FileNotFoundError" in text, text
     assert "Subject_P123" not in text, text
+
+
+# --- The read door: the source path -------------------------------------
+#
+# `get_pixel_data()` re-reads the source file at export, and its two
+# failure messages named that file: `Lazy load failed for <source path>`
+# and `Failed to decompress pixel data for <file name>`. Both reach the
+# export's `ERROR` row, the report and `ExportError` whole -- they are a
+# `RuntimeError`'s own words -- and a source tree is often named for the
+# patient, so an anonymized session's report still named them (review of
+# #589). They name the instance now, as `Pixel Loader failed` already did.
+# The pipeline half is `test_float_pixel_data_export.py`'s #226 tests.
+
+PATIENT_NAMED = "Doe_Jane_MRN4455"
+
+
+def _source_instance(tmp_path):
+    from pydicom.dataset import FileDataset, FileMetaDataset
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    folder = tmp_path / PATIENT_NAMED
+    folder.mkdir()
+    path = folder / f"{PATIENT_NAMED}_1.dcm"
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = CT_STORAGE
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
+    ds.SOPClassUID, ds.SOPInstanceUID = CT_STORAGE, meta.MediaStorageSOPInstanceUID
+    ds.Rows = ds.Columns = 4
+    ds.BitsAllocated = ds.BitsStored = 16
+    ds.HighBit, ds.PixelRepresentation, ds.SamplesPerPixel = 15, 0, 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelData = np.zeros((4, 4), dtype=np.uint16).tobytes()
+    ds.save_as(str(path), enforce_file_format=True)
+    return Instance(ds.SOPInstanceUID, CT_STORAGE, 1, file_path=str(path))
+
+
+@pytest.mark.parametrize("raised, words", [
+    # "decompress" in the message is what selects the codecs arm.
+    (RuntimeError("Unable to decompress 'JPEG 2000' pixel data"),
+     "Failed to decompress pixel data for instance"),
+    # ... and its `Underlying Error:` line spells the exception again.
+    (OSError(5, "could not decompress frame 0", f"/src/{PATIENT_NAMED}/x.dcm"),
+     "Failed to decompress pixel data for instance"),
+    (ValueError("The pixel data is truncated"), "Lazy load failed for instance"),
+    # An `OSError` from the read repeats the path in its own `str()`.
+    (PermissionError(13, "Permission denied", f"/src/{PATIENT_NAMED}/x.dcm"),
+     "Lazy load failed for instance"),
+])
+def test_a_source_read_failure_names_the_instance_not_the_file(
+        tmp_path, monkeypatch, raised, words):
+    import isocenter.entities as entities
+
+    inst = _source_instance(tmp_path)
+
+    def refuse(_ds):
+        raise raised
+
+    monkeypatch.setattr(entities, "_decode_with_pydicom", refuse)
+    with pytest.raises(RuntimeError) as caught:
+        inst.get_pixel_data()
+
+    message = str(caught.value)
+    assert message.startswith(f"{words} {inst.sop_instance_uid}"), message
+    assert PATIENT_NAMED not in message, message

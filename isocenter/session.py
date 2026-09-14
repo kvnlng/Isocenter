@@ -4960,10 +4960,12 @@ class DicomSession:
                 continue
             # Flattened and pipe-escaped for the same reason as
             # `_report_export_failures`: the detail is rendered straight
-            # into a markdown table row.
+            # into a markdown table row. No `path`: it is
+            # `<folder>/Subject_<Patient ID>/...`, and the UID already
+            # names the file (review of #589).
             detail = " ".join(
                 f"{len(group)} exported instances share SOP Instance UID "
-                f"{uid} and were written to the same path ({path}): each "
+                f"{uid} and were written to one file: each "
                 f"successful write overwrote the previous one, and the "
                 f"folder holds one file for all {len(group)} of "
                 f"them.".split()).replace("|", "\\|")

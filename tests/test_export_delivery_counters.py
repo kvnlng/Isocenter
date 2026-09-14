@@ -284,10 +284,16 @@ def test_the_overwrite_is_filed_in_the_audit_log_and_moves_the_grade(
     assert "overw" in details.lower(), details
     assert "|" not in details and "\n" not in details, (
         "the detail is rendered into a markdown table row")
+    # The row named the colliding file, `<out>/Subject_<Patient ID>/...`;
+    # the UID and the count are the content (review of #589).
+    assert "Subject_" not in details, details
+    assert str(tmp_path) not in details, details
 
     assert "| **Validation Status** | **REVIEW_REQUIRED** |" in content, content
     assert "## 4. Exceptions & Errors" in content
     assert DUP_UID in content.split("## 4. Exceptions & Errors")[1], content
+    assert "Subject_" not in content.split("## 4. Exceptions & Errors")[1], (
+        content)
 
 
 def test_unique_uids_file_no_collision_row(tmp_path):

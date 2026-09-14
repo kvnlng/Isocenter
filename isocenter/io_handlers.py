@@ -4443,8 +4443,12 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # here can change `geom`: the redaction block copies the array
         # (always, since #469), which does not change its shape.
         if arr is not None and geom.evidence is GeometryEvidence.GUESSED:
+            # The instance, never `ctx.output_path`: this message is the
+            # export's `ERROR` row, the report and `ExportError` whole,
+            # and the output path is `Subject_<Patient ID>/...` (review
+            # of #589). The same for the float refusal below.
             raise RuntimeError(
-                f"Refusing to write {ctx.output_path}: the pixel "
+                f"Refusing to write instance {uid}: the pixel "
                 f"array's shape {tuple(arr.shape)} is ambiguous -- it is "
                 f"equally a multi-frame grayscale image and a "
                 f"single-frame image with {arr.shape[-1]} samples per "
@@ -4518,7 +4522,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             # bar, it merely stopped inventing the value.
             if arr.itemsize in (4, 8) and geom.samples > 1:
                 raise RuntimeError(
-                    f"Refusing to write {ctx.output_path}: the pixels "
+                    f"Refusing to write instance {uid}: the pixels "
                     f"are {arr.dtype} and the geometry resolves to "
                     f"{geom.samples} samples per pixel, and there is no "
                     f"conformant way to write a multi-sample float pixel "

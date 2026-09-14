@@ -163,21 +163,58 @@ def test_run_parallel_keeps_its_bar_when_the_variable_is_unset(monkeypatch):
                              None).show_progress is False
 
 
-def _tqdm_sites():
-    """Every `tqdm` import and call in the package, as `path:line`."""
+def _is_tqdm(module):
+    """`tqdm` or any submodule of it; `from . import x` has no module."""
+    return module is not None and (module == "tqdm"
+                                   or module.startswith("tqdm."))
+
+
+def _tqdm_sites(sources=None):
+    """Every `tqdm` import in the package, as `path:line`.
+
+    `sources` is `{name: source text}`, for the detector's own tests; by
+    default every module under the package.
+    """
+    if sources is None:
+        sources = {str(path.relative_to(PACKAGE)): path.read_text(encoding="utf-8")
+                   for path in sorted(PACKAGE.rglob("*.py"))}
     sites = []
-    for path in sorted(PACKAGE.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for name, text in sources.items():
+        tree = ast.parse(text)
         for node in ast.walk(tree):
             named = None
-            if isinstance(node, ast.ImportFrom) and node.module == "tqdm":
-                named = "from tqdm import"
+            # `tqdm.auto`, `tqdm.std`, `tqdm.notebook` draw the same bar
+            # past the same rule, and `from tqdm.auto import tqdm` is the
+            # usual spelling (review of #589).
+            if isinstance(node, ast.ImportFrom) and _is_tqdm(node.module):
+                named = f"from {node.module} import"
             elif isinstance(node, ast.Import) and any(
-                    alias.name == "tqdm" for alias in node.names):
+                    _is_tqdm(alias.name) for alias in node.names):
                 named = "import tqdm"
             if named:
-                sites.append(f"{path.relative_to(PACKAGE)}:{node.lineno}")
+                sites.append(f"{name}:{node.lineno}")
     return sites
+
+
+@pytest.mark.parametrize("spelling", [
+    "from tqdm import tqdm",
+    "from tqdm.auto import tqdm",
+    "from tqdm.std import tqdm as bar",
+    "import tqdm",
+    "import tqdm.auto",
+    "import tqdm.notebook as tn",
+])
+def test_the_detector_sees_every_spelling_of_a_tqdm_import(spelling):
+    """The guard below is only as good as what it recognises. It knew
+    `from tqdm import` and `import tqdm` alone, so `from tqdm.auto import
+    tqdm` in `session.py` passed it (review of #589)."""
+    assert _tqdm_sites({"session.py": f"import os\n{spelling}\n"}) == [
+        "session.py:2"]
+
+
+def test_the_detector_does_not_see_a_module_that_only_starts_with_tqdm():
+    assert _tqdm_sites({"session.py": "import tqdmx\nfrom tqdm_extra import y\n"
+                                      "from . import tqdm_like\n"}) == []
 
 
 def test_only_parallel_imports_tqdm():

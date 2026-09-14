@@ -525,6 +525,11 @@ def test_export_worker_refuses_to_write_a_guessed_geometry(tmp_path):
     msg = str(outcome.error)
     assert "(100, 200, 3)" in msg
     assert "SamplesPerPixel" in msg
+    # The message becomes the export's `ERROR` row, the report and
+    # `ExportError`; the output path is `Subject_<Patient ID>/...` there,
+    # so the refusal names the instance instead (review of #589).
+    assert out_path not in msg, msg
+    assert inst.sop_instance_uid in msg, msg
 
 
 def test_set_pixel_data_accepts_a_guessed_geometry_but_warns(caplog):

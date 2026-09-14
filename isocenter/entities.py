@@ -9,7 +9,7 @@ import pydicom
 from pydicom.pixels import as_pixel_options, get_decoder
 from pydicom.uid import generate_uid
 import isocenter.imagecodecs_handler as h
-from .logger import get_logger
+from .logger import describe_exception_without_paths, get_logger
 from .pixel_geometry import (
     SIDECAR_DTYPE_NAMES,
     GeometryEvidence,
@@ -1364,8 +1364,8 @@ class Instance(DicomItem):
                     #
                     # A bare `raise`, deliberately: the outer `except
                     # Exception` below ends in `RuntimeError(f"Lazy load
-                    # failed for {self.file_path}: {e}")`, which
-                    # interpolates pydicom's own words into the message.
+                    # failed for instance {self.sop_instance_uid}: ...")`,
+                    # which interpolates pydicom's own words into the message.
                     # That is what survives -- `ExportOutcome.error` crosses
                     # a process boundary (`session.export()` is always
                     # processes, #185) and `__cause__` does not survive
@@ -1460,9 +1460,9 @@ class Instance(DicomItem):
                         handlers = []
 
                     raise RuntimeError(
-                        f"Failed to decompress pixel data for {os.path.basename(self.file_path)} "
+                        f"Failed to decompress pixel data for instance {self.sop_instance_uid} "
                         f"(Transfer Syntax: {ts_uid}).\n"
-                        f"Underlying Error: {e}\n"
+                        f"Underlying Error: {describe_exception_without_paths(e)}\n"
                         f"Active pydicom handlers: {handlers}\n"
                         "Missing image codecs. Please ensure 'pillow', 'pylibjpeg', or 'gdcm' are installed."
                         f"{fallback_words}"
@@ -1470,8 +1470,18 @@ class Instance(DicomItem):
 
                 # If we just caught the re-raised "no pixel data" exception, it would be handled above,
                 # but if dcmread fails completely or something else happens:
+                #
+                # Both messages here name the instance, never the source
+                # file, and spell `e` without paths. They reach the
+                # export's `ERROR` row, the compliance report and
+                # `ExportError` whole, a source tree is often named for
+                # the patient, and an `OSError` from the read repeats the
+                # path in its own `str()` -- so an anonymized session's
+                # report still named the patient (review of #589).
+                # `Pixel Loader failed for <uid>` above already did this.
                 raise RuntimeError(
-                    f"Lazy load failed for {self.file_path}: {e}{fallback_words}"
+                    f"Lazy load failed for instance {self.sop_instance_uid}: "
+                    f"{describe_exception_without_paths(e)}{fallback_words}"
                 ) from e
 
         raise FileNotFoundError(f"Pixels missing and file not found: {self.file_path}")
