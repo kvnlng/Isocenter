@@ -167,6 +167,7 @@ except ImportError:
     from pydicom.encaps import encapsulate
 from pydicom.encaps import generate_frames
 from pydicom.multival import MultiValue
+from pydicom.valuerep import validate_value
 from pydicom.sequence import Sequence
 from pydicom.dataset import Dataset
 from pydicom.charset import default_encoding
@@ -1174,6 +1175,15 @@ _TEXT_VR_UNCAPPED = frozenset({'UT', 'UR', 'UC'})
 #: one uncapped VR that is 1-n, which is why the two sets are not one.
 _VM_ONE_TEXT_VRS = frozenset({'ST', 'LT', 'UT', 'UR'})
 
+#: The text VRs whose value has a *format*, not only a length: a date, a
+#: time, a datetime, a UID, an age. For these a value inside the cap can
+#: still be no value of the VR -- `ANONYMIZED` is 10 characters, inside
+#: TM's 16, and is no time -- and `_value_fits_vr` asks pydicom's own
+#: `validate_value` about it (#571). Without that, a TM, DT or UI a REPLACE
+#: had emptied of meaning kept its recorded VR with an invalid value and a
+#: pydicom `UserWarning`, while a DA (cap 8) happened to fall back.
+_FORMAT_CHECKED_VRS = frozenset({'DA', 'DT', 'TM', 'UI', 'AS'})
+
 
 def _value_fits_vr(value, vr: str) -> bool:
     """Can `value` be written under `vr` without changing what it says?
@@ -1207,6 +1217,13 @@ def _value_fits_vr(value, vr: str) -> bool:
     cap applies to a number's rendered text too (`_TEXT_VR_MAX` bounds
     `IS` at 12 characters and `DS` at 16), because pydicom writes an
     over-long one without a word.
+
+    For the VRs whose value has a format -- DA, DT, TM, UI and AS
+    (`_FORMAT_CHECKED_VRS`) -- it asks pydicom's `validate_value` too
+    (#571): a value inside the cap that names no date, time or UID is not
+    a value of the VR, and writing it under that VR is the
+    conformant-looking and wrong element this gate exists to refuse. An
+    empty value passes; it is conformant under all five.
 
     What it deliberately does **not** ask is the character *repertoire*:
     a private `CS` whose value an anonymisation rule replaced with
@@ -1327,6 +1344,11 @@ def _value_fits_vr(value, vr: str) -> bool:
                 else:
                     float(value)
             except (TypeError, ValueError, OverflowError):
+                return False
+        if vr in _FORMAT_CHECKED_VRS:
+            try:
+                validate_value(vr, value, pydicom.config.RAISE)
+            except ValueError:
                 return False
         return True
 
@@ -4803,6 +4825,60 @@ def _nested_loader_metadata(geometry, ref, inst) -> dict:
 _NO_SOP_UID = "an instance with no SOP Instance UID"
 
 
+@dataclass(frozen=True)
+class _ReVr:
+    """One private element written under a VR other than its recorded one,
+    or collapsed to one value (#571). Tags and VRs only: never the value,
+    which after a REPLACE of user text, and before it, is patient-derived.
+    """
+    tag: str
+    within: str
+    recorded: Optional[str]
+    written: str
+    #: The multiplicity collapsed from, for the VM n -> one `UT` case.
+    values: Optional[int] = None
+
+
+#: How many elements `_re_vr_warning` names before counting the rest: a
+#: vendor block re-VR'd whole would otherwise be one audit row the length
+#: of the block.
+_RE_VR_NAMED = 10
+
+
+def _re_vr_warning(revrs) -> Optional[str]:
+    """The one `WARNING` sentence for an instance's re-VR'd private
+    elements, or None when there are none (#571).
+
+    One per instance, whatever the syntax: under Implicit VR Little Endian
+    no VR is on the wire, but the value is still encoded as the new VR
+    (a US written LO is text, not two bytes), and an explicit-VR file
+    names it and re-ingest records it permanently. The words say
+    "written", never that the file names the VR.
+    """
+    if not revrs:
+        return None
+    named = []
+    for r in revrs[:_RE_VR_NAMED]:
+        where = f"({r.tag})" + (f" in {r.within}" if r.within else "")
+        recorded = f" recorded {r.recorded}" if r.recorded else ""
+        if r.values:
+            named.append(f"{where}{recorded} VM {r.values}, written as one "
+                         f"{r.written} value")
+        else:
+            named.append(f"{where}{recorded}, written {r.written}")
+    rest = len(revrs) - len(named)
+    listed = "; ".join(named) + (f"; and {rest} more" if rest else "")
+    return (f"Private element{'s' if len(revrs) > 1 else ''} {listed}. "
+            f"Each value is written under a VR that holds it, unchanged: the "
+            f"VR recorded at ingest no longer does -- typically after a "
+            f"REPLACE -- or a value over 64 characters cannot stay "
+            f"multi-valued, and the values are joined with backslashes into "
+            f"one, recoverable by splitting. A file written with an explicit "
+            f"VR transfer "
+            f"syntax names the new VR, and a re-ingest of it records that "
+            f"VR in place of the source's.")
+
+
 def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
     """
     Worker function to export a single instance.
@@ -4861,9 +4937,20 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         attributes, respelled = _label_as_written(inst.attributes)
         if respelled is not None:
             corrections.append(respelled)
+        #
+        # `revrs` gathers every private element written under a VR other
+        # than its recorded one, here and in every sequence item, for one
+        # sentence per instance after the merges (#571). The three stamp
+        # merges below are standard tags and pass none.
+        revrs: List[_ReVr] = []
         DicomExporter._merge(ds, attributes, losses,
-                             vrs=getattr(inst, 'attribute_vrs', None))
-        DicomExporter._merge_sequences(ds, inst.sequences, losses)
+                             vrs=getattr(inst, 'attribute_vrs', None),
+                             revrs=revrs)
+        DicomExporter._merge_sequences(ds, inst.sequences, losses,
+                                       revrs=revrs)
+        re_vr = _re_vr_warning(revrs)
+        if re_vr is not None:
+            warnings.append(re_vr)
 
         # 0b. Nested sidecar payloads, back into the items they came out
         # of (#183). After the merge, because it needs the sequence items
@@ -7186,7 +7273,7 @@ class DicomExporter:
         return ds
 
     @staticmethod
-    def _merge(ds, attrs, losses=None, vrs=None):
+    def _merge(ds, attrs, losses=None, vrs=None, revrs=None, within=""):
         """Merges a dictionary of attributes into a pydicom Dataset.
 
         `losses` is an optional list that collects `(scope, detail)` for
@@ -7203,6 +7290,16 @@ class DicomExporter:
         for every reader of it. Only the patient/study/series merges
         pass nothing, because those mappings are standard tags whose VRs
         the dictionary already knows.
+
+        `revrs` is the third accumulator (#571): one `_ReVr` per private
+        element written under a VR other than the one recorded for it, or
+        collapsed from several values to one. An accumulator for the
+        reason `losses` is -- the change belongs to the instance, and the
+        worker turns the whole list into **one** `WARNING` sentence
+        (`_re_vr_warning`), which a sentence per call would not be:
+        `_merge` also runs once per sequence item. `within` names the
+        sequence an item's element sits in, for that sentence. With no
+        accumulator the collapse is logged here instead, as a loss is.
         """
         for t, v in attrs.items():
             # Explicit VRs for the `gantry` v0.4.1 encrypted-identity
@@ -7238,7 +7335,7 @@ class DicomExporter:
             if g == 0x0000:
                 continue
 
-            vr, encoded = None, None
+            vr, encoded, re_vr = None, None, None
             try:
                 vr = dictionary_VR(Tag(g, e))
             except Exception:
@@ -7320,20 +7417,35 @@ class DicomExporter:
                     # all present and recoverable, so a DATA_LOSS row
                     # would overstate it. But VM n -> 1 must not be
                     # discovered by reading the file (#190), so it is
-                    # said here, where the tag is still a tag. The
+                    # said, where the tag is still a tag: onto `revrs`
+                    # for the instance's one sentence (#571), or to the
+                    # log when there is nowhere to put it. The
                     # backslash-bearing case never reaches this: the
                     # encoder returns None for it before the collapse.
-                    if (encoded[0] == 'UT'
-                            and isinstance(v, (list, tuple, MultiValue))
-                            and len(v) > 1):
+                    collapsed = (encoded[0] == 'UT'
+                                 and isinstance(v, (list, tuple, MultiValue))
+                                 and len(v) > 1)
+                    if collapsed and revrs is None:
                         get_logger().warning(
                             "Tag %s written as a single UT value: one of "
                             "its %d values exceeds LO's 64-character cap, "
                             "so the multiplicity collapses from %d to 1. "
                             "The values are backslash-joined and "
                             "recoverable by splitting.", t, len(v), len(v))
+                    # A VR other than the recorded one, or a collapse:
+                    # what re-ingest of an explicit-VR file records
+                    # changes, so it is reported under any syntax (#571).
+                    # Kept until `add_new` has accepted the element; a
+                    # refusal there is a loss, not a re-VR.
+                    if collapsed or (recorded is not None
+                                     and encoded[0] != recorded):
+                        re_vr = _ReVr(tag=t, within=within,
+                                      recorded=recorded, written=encoded[0],
+                                      values=len(v) if collapsed else None)
                     vr, v = encoded
                 ds.add_new(Tag(g, e), vr, v)
+                if re_vr is not None and revrs is not None:
+                    revrs.append(re_vr)
             except Exception as exc:
                 # Say "not exported". "Failed to merge" reads like an
                 # internal hiccup; this is an element the caller asked
@@ -7555,13 +7667,19 @@ class DicomExporter:
         return 'UT', '\\'.join(atoms)
 
     @staticmethod
-    def _merge_sequences(ds, sequences: Dict[str, Any], losses=None):
+    def _merge_sequences(ds, sequences: Dict[str, Any], losses=None,
+                         revrs=None, within=""):
         """
         Recursively populates sequences into the dataset.
 
         Args:
             ds (pydicom.Dataset): The dataset to modify.
             sequences (Dict[str, DicomSequence]): Dictionary mapping tags to Sequence objects.
+            losses (list, optional): `_merge`'s loss accumulator.
+            revrs (list, optional): `_merge`'s re-VR accumulator (#571),
+                threaded to every item so a nested element joins its
+                instance's one sentence.
+            within (str): The enclosing sequence path, for that sentence.
         """
         for tag_str, dicom_seq in sequences.items():
             g, e = map(lambda x: int(x, 16), tag_str.split(','))
@@ -7575,9 +7693,13 @@ class DicomExporter:
                 ds_item = Dataset()
 
                 # Recursively merge item attributes and sub-sequences
+                path = (f"{within} > ({tag_str})" if within
+                        else f"({tag_str})")
                 DicomExporter._merge(ds_item, item.attributes, losses,
-                                     vrs=getattr(item, 'attribute_vrs', None))
-                DicomExporter._merge_sequences(ds_item, item.sequences, losses)
+                                     vrs=getattr(item, 'attribute_vrs', None),
+                                     revrs=revrs, within=path)
+                DicomExporter._merge_sequences(ds_item, item.sequences, losses,
+                                               revrs=revrs, within=path)
 
                 pydicom_seq.append(ds_item)
 
