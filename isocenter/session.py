@@ -2391,6 +2391,16 @@ class DicomSession:
                 `configuration.phi_tags` -- holds a rule the pipeline cannot
                 honour (`config_manager.validate_phi_policy`), before a
                 project secret is created (#537, #560).
+            RuntimeError: When patients sharing a Patient ID were
+                de-identified under different date-offset schemes, so they
+                cannot be merged (#548, #563); raised after the policy is
+                validated and before anything is scanned or a project
+                secret is created. Also, as before, on a store holding
+                dates shifted under a project secret it no longer has.
+
+        Two `Patient` objects holding one Patient ID are merged into the
+        one that was in the session first before the scan (#563), so
+        `store.patients` can get shorter, as after `anonymize()`.
         """
 
         # A scan ENDS by advancing `_revision` on every entity it
@@ -2427,6 +2437,23 @@ class DicomSession:
             # loader sees. The same refusal the loader raises (#537, #560),
             # and before the project secret below, for #456's reason.
             validate_phi_policy(tags_to_use, "session.configuration.phi_tags")
+
+        # Two `Patient` objects holding one Patient ID are merged before the
+        # scan, as `anonymize()` and a restore merge them (#563). The scan
+        # cannot see them as two: `_rehydrate_findings` binds a patient
+        # finding by Patient ID, so every finding raised on either landed
+        # on the last object, and both carry the same dedup key
+        # `(uid, path, attr)`, so `anonymize()` replaced the ID on one and
+        # left the other's original in place. After the policy is
+        # validated, so a refused policy leaves the pair as it was; before
+        # `_audited_phi_tags` is recorded and before the project secret, so
+        # a merge refused across date-offset schemes leaves neither a
+        # policy no audit resolved (which the lock reads) nor a new secret
+        # in the store (#456's reason). After the entry drain above, which
+        # the merge's own `drain` repeats only when there is a pair.
+        self.store._merge_patients_sharing_an_id(
+            drain=(self.persistence_manager.flush
+                   if hasattr(self, 'persistence_manager') else None))
         self._audited_phi_tags = tags_to_use
 
         # The project secret, once, in the parent, before any work: a
