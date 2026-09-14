@@ -283,6 +283,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`_compress_j2k`'s case comments list what the export worker can reach (#528).** A 3-sample `PALETTE COLOR` becomes `RGB` before the encoder, and a 3-sample `YBR_FULL_422` becomes `YBR_FULL`, so neither reaches its case under its own name; `YBR_PARTIAL_422` was missing from the list.
 - **`docs/quickstart.md` states the two transfer syntaxes the export writes (#526):** every other source syntax is re-encoded with no row, and a lossy source's provenance survives only when the source declared it (#601).
 
+### Removed
+
+- **`ReversibilityService.embed_original_data` (#488).** It generated a token and embedded it in one call, and nothing in the package called it: the lock path under `lock_identities()` calls `generate_identity_token` and `embed_identity_token` directly. `reversibility.py` is private (`docs/api/stability.md`). Its two tests in `tests/test_reversibility_coverage.py` passed only empty or raising input, so its DEBUG line and the ERROR in its `except` were permanent mutation-probe survivors. The #607 test that used it to embed a second instance's token now calls `generate_identity_token` and `embed_identity_token`. It also asserts that the two tokens differ, which is why a stamp that vouched for any token would fail it. The probe's `reversibility.py` row went from 47 of 49 killed to 45 of 45.
+
 ### Corrections to earlier entries
 
 - **0.9.6, #460: "a *signed* codestream under PixelRepresentation 0 now raises at the imagecodecs handler -- at every door for 16-bit colour, and at that one door only for monochrome and 8-bit colour" is no longer the scope.** Since #524 it is refused at every door, for every shape, before pydicom is asked, and the words lead the error rather than following `imagecodecs fallback:`. The same entry's two further raises are gone too: HighBit ≠ BitsStored − 1 is read with a `WARNING` row (#455), and a precision-8 codestream under BitsStored greater than 8 is widened rather than refused (#523).
