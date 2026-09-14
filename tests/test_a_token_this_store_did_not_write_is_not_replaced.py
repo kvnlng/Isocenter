@@ -696,9 +696,16 @@ def test_the_stamp_is_the_digest_of_the_token_bytes():
 
 def test_embed_identity_token_stamps_through_the_service(tmp_path):
     """`ReversibilityService.embed_identity_token` is the one site: a
-    token embedded through it is vouched for, and `embed_original_data`
-    goes through it too. `DicomItem` has no slot, and the embed on it is
-    not attempted (the service takes an `Instance`)."""
+    token embedded through it is vouched for, and each instance is
+    vouched for its own token and no other. `DicomItem` has no slot, and
+    the embed on it is not attempted (the service takes an `Instance`).
+
+    The second instance's token is generated from the same attributes as
+    the first's and is still a different token -- a Fernet token carries
+    a random IV and a timestamp -- so the last assertion reads the stamp
+    against bytes, not against the attributes they encrypt. It kills an
+    `identity_token_is_this_stores` narrowed to `bool(self._locked_token)`,
+    which answers yes for any token once one is recorded."""
     from isocenter.crypto import KeyManager
     manager = KeyManager(str(tmp_path / "k.key"))
     manager.load_or_generate_key()
@@ -708,6 +715,8 @@ def test_embed_identity_token_stamps_through_the_service(tmp_path):
     service.embed_identity_token(inst, token)
     assert inst.identity_token_is_this_stores(_token(inst))
     other = Instance("SOP2", "1.2.840.10008.5.1.4.1.1.2", 2)
-    service.embed_original_data(other, {"0010,0010": NAME})
+    other_token = service.generate_identity_token({"0010,0010": NAME})
+    assert other_token != token
+    service.embed_identity_token(other, other_token)
     assert other.identity_token_is_this_stores(_token(other))
     assert not other.identity_token_is_this_stores(token)

@@ -278,7 +278,7 @@ TARGETS = {
                                     "tests/test_documented_zones_are_zone_space.py",
                                     "tests/test_floor_policy.py",
                                     "tests/test_redaction_export.py"], 30),
-    # 18 sites, exhaustive: 15 killed. Three files, 2s per pass.
+    # 45 sites, exhaustive: 45 killed. Six files, 18s per pass (3.12.14).
     #
     # tests/test_relock_identity_token.py is a hand extra (#441): it reaches
     # the module through `Session.lock_identities`, which the scan cannot
@@ -286,8 +286,8 @@ TARGETS = {
     # `item.set_attr(self.TAG_TRANSFER_SYNTAX_UID, ...)` (its
     # test_the_token_item_names_its_payload_transfer_syntax) and the
     # deleted `instance.mark_modified()` (its
-    # test_a_re_lock_reaches_the_store). On the two demanded files alone
-    # the row prints 6 survivors. tests/test_reversibility.py was measured
+    # test_a_re_lock_reaches_the_store); the four demanded files alone
+    # leave exactly those 2. tests/test_reversibility.py was measured
     # as a candidate too, and stays off: before #439's tests it killed
     # six mutants, and after them it kills nothing these three miss.
     #
@@ -303,11 +303,11 @@ TARGETS = {
     # log gets, and it named a bare raise with an empty tail), and
     # tests/test_reversibility_coverage.py kills it since.
     #
-    # The three survivors, all inside `embed_original_data`: its call to
-    #     `self.embed_identity_token(instance, token)`, its DEBUG line, and
-    #     the ERROR in its `except`, which re-raises. The method has no
-    #     caller in isocenter/ and its two tests pass empty or raising
-    #     input, so the whole wrapper is dead (#488).
+    # No survivors since #488 deleted `embed_original_data`, a wrapper with
+    # no caller, 4 sites and the last 2 survivors (its DEBUG line, and the
+    # ERROR in its `except`, which re-raises): 47 of 49 became 45 of 45.
+    # tests/test_recovery_needs_the_key_it_was_locked_with.py (#615) kills
+    # nothing the other five miss: the row without it is also 45 of 45.
     "isocenter/reversibility.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                     "tests/test_a_lock_under_the_wrong_key_refuses.py",
                                     "tests/test_recovery_needs_the_key_it_was_locked_with.py",
