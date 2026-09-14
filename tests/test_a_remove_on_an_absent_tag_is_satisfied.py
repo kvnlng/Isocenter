@@ -16,11 +16,14 @@ re-audit read as clean. The same happened on a first pass to a tag the
 caller removed by hand between `audit()` and `anonymize()`.
 
 **What still declines.** A REMOVE against an entity with no
-`attributes` dict, a proposal whose action the arm does not implement,
-and a hand-built tag spelled in upper case while the item holds it in
-lower case: the REMOVE arms read the raw key, so such a tag falls past
-them, and the satisfied test reads the canonical key so that a value
-still there is never stamped over. Two findings that both decline still
+`attributes` dict; a proposal whose action the arm does not implement; a
+hand-built tag spelled in upper case while the item holds it in lower
+case (the REMOVE arms read the raw key, so such a tag falls past them,
+and the satisfied test reads the lower-cased key, which is held); and
+any key that is not a well-formed `gggg,eeee` tag once lower-cased --
+`00080080`, `(0008,0080)`, `InstitutionName`, `patient_id` -- because
+its absence from `attributes` is no evidence the element it seems to
+name is gone (review of this change, M1). Two findings that both decline still
 write two rows (`test_declined_remediation_is_recorded.py`).
 
 **Why this file imports what it does.** The pipeline through
@@ -30,6 +33,8 @@ hand-built findings through `isocenter.privacy` and the graph through
 `test_mutation_probe_targets.py`.
 """
 import json
+import logging
+import re
 import shutil
 import sqlite3
 
@@ -82,12 +87,13 @@ class _Bare:
     """No `set_attr`, no `attributes`, no useful names."""
 
 
-def _finding(entity, action, tag, uid="1.2.3", path=None):
+def _finding(entity, action, tag, uid="1.2.3", path=None, new_value=None):
     return PhiFinding(
         entity_uid=uid, entity_type="Instance", field_name=tag, value=None,
         reason="test", tag=tag, entity=entity, entity_path=path,
         remediation_proposal=PhiRemediation(
-            action_type=action, target_attr=tag, metadata={}))
+            action_type=action, target_attr=tag, new_value=new_value,
+            metadata={}))
 
 
 def _instance():
@@ -142,9 +148,14 @@ def _manifest(session, tmp_path):
 
 
 def _grade(session, tmp_path):
+    """The grade token of every `**Grade Basis:**` line, read whole.
+
+    A token, not a substring: `"PASS" in line` would also pass a
+    REVIEW_REQUIRED line whose reasons happened to quote the word."""
     path = tmp_path / "report.md"
     session.generate_report(str(path))
-    return [line for line in path.read_text(encoding="utf-8").splitlines()
+    return [re.search(r"\*\*Grade Basis:\*\* ([A-Z_]+)", line).group(1)
+            for line in path.read_text(encoding="utf-8").splitlines()
             if "**Grade Basis:**" in line]
 
 
@@ -218,8 +229,7 @@ def test_one_report_applied_twice_writes_no_decline_and_grades_pass(
         assert [i.phi_status for i in _instances(session)] == [
             PhiStatus.REMEDIATED, PhiStatus.REMEDIATED]
         assert _manifest(session, tmp_path) == [True, True]
-        grade = _grade(session, tmp_path)
-        assert len(grade) == 1 and "PASS" in grade[0], grade
+        assert _grade(session, tmp_path) == ["PASS"]
 
 
 @pytest.mark.parametrize("mode", MODES, indirect=True)
@@ -251,8 +261,7 @@ def test_a_tag_removed_by_hand_before_anonymize_reads_remediated(
         assert _declined(session) == [], mode
         assert inst.phi_status is PhiStatus.REMEDIATED
         assert _manifest(session, tmp_path) == [True]
-        grade = _grade(session, tmp_path)
-        assert len(grade) == 1 and "PASS" in grade[0], grade
+        assert _grade(session, tmp_path) == ["PASS"]
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +281,10 @@ def _uppercase_sequence():
 
 
 def _bare():
-    return _Bare(), "REMOVE_TAG", "patient_id", lambda: True
+    # Nothing to still be there; what can be checked is that nothing was
+    # set on it either.
+    bare = _Bare()
+    return bare, "REMOVE_TAG", "patient_id", lambda: vars(bare) == {}
 
 
 def _unknown_action():
@@ -282,20 +294,53 @@ def _unknown_action():
     return inst, "REDACT_REGION", ABSENT, lambda: ABSENT not in inst.attributes
 
 
+HELD = "JFK IMAGING CENTER"
+
+
+def _misspelled(spelling, held_tag=ABSENT):
+    """A REMOVE keyed by a spelling of a tag the item holds that is not
+    its `gggg,eeee` key: every one of these lower-cases onto a key the
+    item does not have, so a predicate that only lower-cased read the
+    tag as gone and stamped the value it was pointed at REMEDIATED."""
+    def build():
+        inst = _instance()
+        inst.set_attr(held_tag, HELD)
+        return (inst, "REMOVE_TAG", spelling,
+                lambda: inst.attributes.get(held_tag) == HELD)
+    return build
+
+
 @pytest.mark.parametrize("build", [
     pytest.param(_bare, id="bare"),
     pytest.param(_unknown_action, id="unknown_action"),
     pytest.param(_uppercase_attribute, id="uppercase_attribute"),
     pytest.param(_uppercase_sequence, id="uppercase_sequence"),
+    pytest.param(_misspelled("00080080"), id="no_comma"),
+    pytest.param(_misspelled("(0008,0080)"), id="parenthesised"),
+    pytest.param(_misspelled("0008, 0080"), id="inner_space"),
+    pytest.param(_misspelled(" 0008,0080"), id="leading_space"),
+    pytest.param(_misspelled("InstitutionName"), id="keyword"),
+    pytest.param(_misspelled("patient_id", held_tag="0010,0020"), id="python_name"),
 ])
 def test_a_remove_that_matched_no_arm_still_declines(build):
     """The other ways to the bottom `else` stay declines: no `attributes`
-    dict, an action the arm does not implement, and a raw key the arms
-    did not match while the canonical one is still held -- an attribute
-    or a sequence -- so the value is still there and is not stamped over.
+    dict, an action the arm does not implement, a raw key the arms did
+    not match while the canonical one is still held -- an attribute or a
+    sequence -- and any key that is not a well-formed `gggg,eeee` tag
+    once lower-cased. In each the value is still there and is not stamped
+    over.
+
+    The malformed spellings are the review of #626 (M1): measured on
+    c6d0112, each was satisfied -- no row, REMEDIATED, the value kept --
+    and through a session the run graded PASS with the value in the
+    exported file. At a67eb30 each was a decline. Only a well-formed tag
+    can be said to be absent: `InstitutionName` or `patient_id` absent
+    from `attributes` says nothing about whether the item holds the
+    element they name.
 
     Kills: the action-type check dropped; the canonical key read raw; the
-    sequences half of the predicate dropped."""
+    sequences half of the predicate dropped; the well-formed-tag check
+    dropped."""
     entity, action, tag, still_there = build()
     before = getattr(entity, "phi_status", None)
     rows = _Rows()
@@ -322,3 +367,134 @@ def test_a_key_holding_none_is_still_removed():
     assert applied == 1
     assert ABSENT not in inst.attributes
     assert [a for a, *_ in rows.rows] == ["REMEDIATION_REMOVE"], rows.rows
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_a_misspelled_remove_through_the_session_grades_review_required(
+        tmp_path, mode):
+    """The review's session probe for M1: CT_small, no `audit()`, a
+    hand-built `REMOVE_TAG` on Institution Name spelled `00080080`
+    handed to the public `anonymize(findings)` beside a real removal of
+    Patient's Birth Date, so the pass has one success. Red on c6d0112:
+    no decline, the instance REMEDIATED and grade PASS, with `JFK IMAGING
+    CENTER` still in the graph and so in the exported file. Now the one
+    decline row, IDENTIFIED and REVIEW_REQUIRED: the file still carries
+    the value, and the session says so. (The manifest read false on
+    c6d0112 too -- no `audit()`, so nothing vouches for the instance --
+    and is asserted as the story, not as the red.)"""
+    session = _session(tmp_path, ["CT_small.dcm"])
+    with session:
+        (inst,) = _instances(session)
+        held = inst.attributes.get(ABSENT)
+        # Non-vacuity: the fixture carries both tags.
+        assert held == HELD, held
+        assert "0010,0030" in inst.attributes
+        uid = inst.sop_instance_uid
+        misspelled = _finding(inst, "REMOVE_TAG", "00080080", uid=uid)
+        companion = _finding(inst, "REMOVE_TAG", "0010,0030", uid=uid)
+
+        assert session.anonymize([misspelled, companion]) == 1
+
+        assert "0010,0030" not in inst.attributes
+        assert inst.attributes.get(ABSENT) == HELD
+        declines = _declined(session)
+        assert len(declines) == 1, declines
+        assert "REMOVE_TAG on 00080080 " + NO_ARM in declines[0], declines
+        assert inst.phi_status is PhiStatus.IDENTIFIED, mode
+        assert _manifest(session, tmp_path) == [False]
+        assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]
+
+
+# ---------------------------------------------------------------------------
+# A satisfied removal does not mask a decline on the same instance
+# ---------------------------------------------------------------------------
+
+def _replace_on_absent(inst):
+    # #547: a value aimed at a tag the item no longer holds. A different
+    # tag from the satisfied removal's, so nothing here leans on how two
+    # proposals on one key are deduplicated (#636).
+    return _finding(inst, "REPLACE_TAG", "0008,1010", new_value="ANONYMIZED")
+
+
+def _unknown_action_on(inst):
+    return _finding(inst, "REDACT_REGION", "0008,1010")
+
+
+@pytest.mark.parametrize("order", ["decline_first", "satisfied_first"])
+@pytest.mark.parametrize("decline", [
+    pytest.param(_replace_on_absent, id="replace_on_absent"),
+    pytest.param(_unknown_action_on, id="unknown_action"),
+])
+def test_a_satisfied_remove_beside_a_decline_on_the_same_instance_leaves_it_identified(
+        decline, order):
+    """The satisfied stamp is REMEDIATED, as a success's is; the pass-end
+    demotion (#486) must still take an instance that also declined back
+    to IDENTIFIED, whichever came first -- the satisfied analogue of
+    `test_one_value_per_owned_tag.py`'s
+    `test_a_fold_beside_a_decline_on_the_same_instance_leaves_it_identified`.
+
+    `_instance()` starts IDENTIFIED, so "ends IDENTIFIED" means something
+    only because the satisfied removal would have left it REMEDIATED
+    (U1): the satisfied key is asserted to be counted, and the one row
+    to be the decline's.
+
+    Kills: a satisfied removal that takes its entity out of
+    `_declined_entities` (the review's `r1`, which survived the whole
+    `remediation.py` row on c6d0112). That mutant bites only in
+    `decline_first`; `satisfied_first` is its guard in the other
+    direction."""
+    inst = _instance()
+    rows = _Rows()
+    service = _service(rows)
+    satisfied = _finding(inst, "REMOVE_TAG", ABSENT)
+    declined = decline(inst)
+    findings = ([declined, satisfied] if order == "decline_first"
+                else [satisfied, declined])
+
+    applied = service.apply_remediation(findings)
+
+    assert applied == 0
+    assert _remediation_key(satisfied) in service._satisfied_keys
+    assert [a for a, *_ in rows.rows] == ["REMEDIATION_DECLINED"], rows.rows
+    assert "0008,1010" in rows.rows[0][2], rows.rows
+    assert inst.phi_status is PhiStatus.IDENTIFIED, order
+
+
+# ---------------------------------------------------------------------------
+# The INFO line a satisfied removal logs
+# ---------------------------------------------------------------------------
+
+def test_a_satisfied_remove_logs_one_info_line_naming_the_tag_and_uid_only(caplog):
+    """The CHANGELOG promises one INFO line per satisfied removal, `<tag>
+    is not on <uid>; nothing to remove`, the level the satisfied `EMPTY`
+    logs at. The line names the tag and the instance UID -- the log
+    convention `_log_subject` and `_log_line` state -- and nothing else:
+    no value the item holds, and for a finding filed under a Patient not
+    the Patient ID, which `_log_subject` renders as `a patient`.
+
+    Kills: the INFO line deleted (the review's `m14`, which survived the
+    whole row on c6d0112); the line logged at another level; a subject
+    that prints a Patient ID."""
+    inst = _instance()
+    other = _instance()
+    rows = _Rows()
+    by_instance = _finding(inst, "REMOVE_TAG", ABSENT, uid="1.2.3")
+    by_patient = PhiFinding(
+        entity_uid="PAT-626", entity_type="Patient", field_name=ABSENT,
+        value=None, reason="test", tag="0008,1010", entity=other,
+        remediation_proposal=PhiRemediation(
+            action_type="REMOVE_TAG", target_attr="0008,1010", metadata={}))
+
+    with caplog.at_level(logging.DEBUG, logger="isocenter"):
+        applied = _service(rows).apply_remediation([by_instance, by_patient])
+
+    assert applied == 0 and rows.rows == []
+    said = [(r.levelname, r.getMessage()) for r in caplog.records
+            if "nothing to remove" in r.getMessage()]
+    assert said == [
+        ("INFO", f"{ABSENT} is not on 1.2.3; nothing to remove"),
+        ("INFO", "0008,1010 is not on a patient; nothing to remove"),
+    ], said
+    for _, message in said:
+        assert "PAT-626" not in message and "DOE^JOHN" not in message
+        assert "/" not in message, message

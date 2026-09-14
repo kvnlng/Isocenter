@@ -538,9 +538,10 @@ class RemediationService:
             # under the floor, measured on a67eb30 -- demoted every
             # instance to IDENTIFIED and graded a clean graph
             # REVIEW_REQUIRED (#626). The other two still decline.
-            # `_remove_is_satisfied` says what "gone" means: the
-            # canonical key, so a hand-built upper-case tag the item
-            # holds lower-case is a value still there.
+            # `_remove_is_satisfied` says what "gone" means: a
+            # well-formed `gggg,eeee` tag absent under its canonical key.
+            # Any other spelling -- `00080080`, `InstitutionName` -- still
+            # declines, because its absence says nothing about the value.
             #
             # One `else` here rather than an `else` nested in the
             # `attributes` arm: nested, it would cover only the first of
@@ -976,21 +977,35 @@ class RemediationService:
         """Whether a `REMOVE_TAG` that matched no arm is one whose target
         is already gone from a `DicomItem` (#626).
 
-        True only for an entity with an `attributes` dict, when neither
-        `attributes` nor `sequences` holds the tag under its canonical
-        key. Read canonically because the REMOVE arms above test the raw
+        True only when all three hold: the entity has an `attributes`
+        dict; `target_attr` lower-cased is a well-formed `gggg,eeee` tag
+        (`config_manager._is_tag_key`, the check a config's tag keys
+        already pass); and neither `attributes` nor `sequences` holds
+        that canonical key. Anything else declines, as it did.
+
+        Read canonically because the REMOVE arms above test the raw
         `target_attr`: a hand-built upper-case tag the item holds
         lower-case fell past them, and read raw here it would count as
-        satisfied over a value still there. It reads as a decline, as it
-        did. A non-tag `target_attr` (`patient_id` against an item)
-        lower-cases harmlessly and, absent, is satisfied: the end state
-        REMOVE asks for is met, where `_replace_on_item` declines the
-        same key because it has a value to write and nowhere to put it.
+        satisfied over a value still there.
+
+        Well-formed because absence under a key is evidence only for the
+        key the graph would store the element under. `00080080`,
+        `(0008,0080)`, `0008, 0080`, ` 0008,0080`, `InstitutionName`, and
+        `patient_id` against an item holding `0010,0020` all lower-case
+        onto keys no item has, so they read as absent over a value still
+        there: in review of #626 (c6d0112) each was stamped REMEDIATED
+        with no row, and through a session the run graded PASS with the
+        value in the exported file. Only a well-formed tag is satisfied;
+        a malformed or non-tag key reaches the decline, whether or not
+        the element it seems to name is held -- the arm cannot tell.
+
         An entity with no `attributes` dict, and an action this method
         does not implement, are the other two ways to the bottom `else`,
         and both stay declines.
         """
-        from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from .config_manager import _is_tag_key
+        from .entities import _canonical_tag
 
         if proposal.action_type != "REMOVE_TAG":
             return False
@@ -998,6 +1013,8 @@ class RemediationService:
         if not isinstance(attributes, dict):
             return False
         tag = _canonical_tag(proposal.target_attr)
+        if not (isinstance(tag, str) and _is_tag_key(tag)):
+            return False
         sequences = getattr(entity, "sequences", None) or {}
         return tag not in attributes and tag not in sequences
 

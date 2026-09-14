@@ -27,12 +27,19 @@ The tests drive `_apply_single_remediation` directly against a real
 `test_remediation_invariants.py` use, because the point is which call
 sites emit rather than which findings the inspector raises.
 
-**Since #626 the sixth path is no longer a decline.** A `REMOVE_TAG`
-whose tag is already gone from the item is the end state the rule asks
-for -- #567's satisfied shape -- and is stamped REMEDIATED with no row;
+**Since #626 the sixth path is no longer a decline when the tag is a
+well-formed `gggg,eeee` key absent from the item under its canonical
+(lower-case) spelling.** That is the end state the rule asks for --
+#567's satisfied shape -- and is stamped REMEDIATED with no row;
 `test_a_remove_on_an_absent_tag_is_satisfied.py` holds that rule. The
-tests here that used that shape as *the* decline use `REPLACE_TAG` on
-the absent tag instead, which #547 declines.
+sixth path still declines, with its `matched no applicable arm` row, for
+an entity with no `attributes` dict, an action the arm does not
+implement, a tag spelled in upper case while the item holds it in lower
+case, and any key that is not a well-formed tag once lower-cased
+(`00080080`, `InstitutionName`, `patient_id`): the spellings the
+paragraph above means by "under that spelling". The tests here that used
+the absent-tag shape as *the* decline use `REPLACE_TAG` on the absent
+tag instead, which #547 declines.
 """
 import pytest
 

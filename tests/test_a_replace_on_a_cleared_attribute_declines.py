@@ -30,6 +30,7 @@ hand-built findings through `isocenter.privacy` and the graph through
 """
 import datetime
 import os
+import re
 import sqlite3
 
 import pydicom
@@ -138,9 +139,12 @@ def _rows(session, action_type):
 
 
 def _grade(session, tmp_path):
+    """The grade token of every `**Grade Basis:**` line, read whole, so
+    the assert is on the grade and not on a word its reasons may quote."""
     path = tmp_path / "report.md"
     session.generate_report(str(path))
-    return [line for line in path.read_text(encoding="utf-8").splitlines()
+    return [re.search(r"\*\*Grade Basis:\*\* ([A-Z_]+)", line).group(1)
+            for line in path.read_text(encoding="utf-8").splitlines()
             if "**Grade Basis:**" in line]
 
 
@@ -192,8 +196,7 @@ def test_a_study_date_cleared_after_the_audit_is_not_recreated_by_replace(
         assert study.phi_status is PhiStatus.IDENTIFIED
         assert instance.attributes[STUDY_DATE] == VALUE
         assert instance.phi_status is PhiStatus.REMEDIATED
-        grade = _grade(session, tmp_path)
-        assert len(grade) == 1 and "REVIEW_REQUIRED" in grade[0], grade
+        assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]
         assert _exported(session, tmp_path).StudyDate == ""
 
 
