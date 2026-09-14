@@ -635,6 +635,14 @@ _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_420"] = \
     _PHOTOMETRIC_INADMISSIBLE["YBR_PARTIAL_422"]
 
 
+#: The labels pydicom converts to RGB on a default decode -- pydicom 3.0.2
+#: `_process_color_space`'s own set -- which is the decode `ingest()`
+#: makes and the readback's stored-sample decode does not (#596). Its
+#: conversion refuses samples wider than 8 bits, so a file carrying one
+#: of these at BitsAllocated 16 is conformant and cannot be ingested.
+_PYDICOM_CONVERTS = frozenset({"YBR_FULL", "YBR_FULL_422"})
+
+
 #: The three elements a Photometric Interpretation can describe: the
 #: integer one and the two float ones (PS3.3 C.7.6.24, C.7.6.25). Named
 #: because the readback's reason has to say something different when the
@@ -4238,7 +4246,11 @@ def _verify_readback(path: str, ds, written_pixels=None,
        compared bit for bit (`_bit_patterns`). A native sample outside
        the declared BitsStored therefore fails: every conformant reader
        masks it, so the file does not hold what was meant (-3024 at
-       BitsStored 12 reads back as 1072).
+       BitsStored 12 reads back as 1072). A file labelled with a colour
+       space pydicom converts (`_PYDICOM_CONVERTS`) is then decoded a
+       second time the way `ingest()` decodes it, with the conversion,
+       so a 16-bit `YBR_FULL` file this library cannot ingest fails here
+       too (#596).
     4. **Waveform bytes**, when `written_waveform` is given: the file's
        `WaveformData` against the bytes written, allowing exactly the
        one pad byte `save_as` adds to an odd-length value
@@ -4345,6 +4357,29 @@ def _verify_readback(path: str, ds, written_pixels=None,
             getattr(readback, "PixelRepresentation", None))
         if reason is not None:
             raise RuntimeError(f"Readback verification failed: {reason}")
+
+        # **And the decode `ingest()` makes, where it differs (#596).**
+        # The decode above asks for the stored samples, because those are
+        # what was written; `ingest()` asks pydicom's default, which
+        # converts a YBR_FULL family to RGB and refuses anything but 8-bit
+        # samples doing it. Measured before this: a native 16-bit
+        # `YBR_FULL` file passed here while `ingest()` and `pixel_array`
+        # both refused it, and the JPEG 2000 one failed -- two answers
+        # from one contract, which is "this library can read it back".
+        # After the exact compare, so a sample mismatch keeps its more
+        # specific reason. Gated on the label, not on BitsAllocated: an
+        # 8-bit file converts too, and proving that it does costs one
+        # more decode for 8-bit YBR files only (measured in the #596 PR).
+        if _written_photometric(getattr(
+                readback, "PhotometricInterpretation", None)) \
+                in _PYDICOM_CONVERTS:
+            try:
+                _decode_pixels(readback)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Readback verification failed: the written file "
+                    f"cannot be ingested by this library "
+                    f"({describe_exception_without_paths(exc)})") from exc
 
     if written_waveform is not None:
         reason = _readback_waveform_mismatch(readback, written_waveform)
@@ -5355,6 +5390,27 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # Validate & Save
         ds = DicomExporter._finalize_dataset(ds, ctx.compression, pixel_array=arr)
+
+        # A limit of ours, not a defect in the data (#596, #461): a
+        # 16-bit YBR_FULL file is conformant and is written, and this
+        # library cannot read it back -- pydicom's colour conversion takes
+        # 8-bit samples only. INFO on `corrections`, no row. After
+        # `_finalize_dataset` and off `ds`, so the label is the written
+        # one (`YBR_FULL_422` is already `YBR_FULL`) and a JPEG 2000 file,
+        # which keeps `YBR_FULL` (`_compress_j2k` case 3), is covered in
+        # the same words. Keyed on the integer arm having written, rather
+        # than on `"PixelData" in ds`: a float arm cannot carry a colour
+        # label at all (#222).
+        if (written_pixels is not None and written_pixels.dtype.kind != "f"
+                and _written_photometric(ds.get("PhotometricInterpretation"))
+                in _PYDICOM_CONVERTS
+                and int(ds.get("BitsAllocated", 0) or 0) > 8):
+            corrections.append(
+                f"PhotometricInterpretation "
+                f"{_written_photometric(ds.PhotometricInterpretation)} at "
+                f"BitsAllocated {ds.BitsAllocated} is written as declared, and this "
+                f"library cannot read such a file back (#461): pydicom's "
+                f"colour conversion takes 8-bit samples only.")
 
         # The third arm's label judgement (#534): a file with no pixel
         # element never reaches `_write_pixel_geometry`, which judges the

@@ -934,3 +934,64 @@ def test_photometric_warning_requires_has_pixels():
         "has_pixels"]
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
     assert parameter.default is inspect.Parameter.empty
+
+
+# ---------------------------------------------------------------------------
+# #596: the default export says what this library cannot read back.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+@pytest.mark.parametrize("dtype", [np.uint16, np.int16])
+def test_16_bit_ybr_full_default_export_notes_the_limit(tmp_path,
+                                                        compression, dtype):
+    """Written, conformant, and noted as a limit of ours (#596, #461).
+
+    A 16-bit `YBR_FULL` file is valid DICOM, so the default export writes
+    it. This library cannot read it back -- pydicom's colour conversion
+    takes 8-bit samples only, and the imagecodecs fallback does not label
+    it under JPEG 2000 -- so the export says so at INFO. A capability,
+    not a defect in the user's data: no `WARNING`, no row, the grade
+    unmoved.
+
+    Killing mutation (M17): the note routed to `warnings` (a row
+    appears).
+    """
+    arr = np.arange(8 * 8 * 3, dtype=dtype).reshape(8, 8, 3) * 100
+    outcome = _export(tmp_path, _image("YBR_FULL", arr=arr),
+                      compression=compression)
+
+    assert outcome.ok, outcome.error
+    assert outcome.warnings == [], outcome.warnings
+    notes = [c for c in outcome.corrections if "#461" in c]
+    assert len(notes) == 1, outcome.corrections
+    assert "YBR_FULL" in notes[0] and "BitsAllocated 16" in notes[0], notes
+
+
+@pytest.mark.parametrize("declared, arr", [
+    ("RGB", np.arange(8 * 8 * 3, dtype=np.uint16).reshape(8, 8, 3)),
+    ("YBR_FULL", np.full((8, 8, 3), YBR, np.uint8))],
+    ids=["16-bit-rgb", "8-bit-ybr-full"])
+def test_a_readable_colour_export_notes_no_limit(tmp_path, declared, arr):
+    """The control for the note above (#596).
+
+    Killing mutation: the note's label or width guard dropped.
+    """
+    outcome = _export(tmp_path, _image(declared, arr=arr))
+
+    assert outcome.ok, outcome.error
+    assert outcome.corrections == [], outcome.corrections
+
+
+def test_the_16_bit_ybr_note_writes_no_row(tmp_path):
+    """INFO only: a session export of such an instance grades PASS (#596).
+
+    Killing mutation (M17, the parent half): the note routed to
+    `warnings`.
+    """
+    arr = np.arange(8 * 8 * 3, dtype=np.uint16).reshape(8, 8, 3) * 100
+    with DicomSession(str(tmp_path / "n.db")) as session:
+        session.store.patients.append(_graph([_image("YBR_FULL", arr=arr)]))
+        session.save()
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       show_progress=False)
+        assert session.store_backend.get_audit_errors() == []

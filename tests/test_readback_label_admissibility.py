@@ -611,3 +611,90 @@ def test_ybr_partial_under_j2k_fails_the_readback(tmp_path, label):
     assert "Readback verification failed" in message, message
     assert f"reads back as '{label}'" in message, message
     assert f"does not admit ({J2K_LOSSLESS})" in message, message
+
+
+# ---------------------------------------------------------------------------
+# #596: the readback reads what ingest reads, colour space included.
+# ---------------------------------------------------------------------------
+
+def _ramp(dtype):
+    """Eight by eight by three samples no 8-bit reader could hold."""
+    return np.arange(8 * 8 * 3, dtype=dtype).reshape(8, 8, 3) * 100
+
+
+@pytest.mark.parametrize("declared", ["YBR_FULL", "YBR_FULL_422"])
+@pytest.mark.parametrize("dtype", [np.uint16, np.int16])
+def test_native_16_bit_ybr_full_fails_the_readback(tmp_path, dtype,
+                                                   declared):
+    """A file `ingest()` refuses is not one the readback may pass (#596).
+
+    The readback decodes the stored samples (`as_rgb=False`), because
+    those are what it compares; `ingest()` decodes with pydicom's
+    default, which converts `YBR_FULL` to RGB and refuses anything but
+    8-bit samples (`ValueError: Invalid ndarray.dtype 'uint16' for color
+    space conversion`). Measured before: the native 16-bit `YBR_FULL`
+    export with `verify_readback=True` passed, and neither `ingest()` nor
+    `pixel_array` could read the file; the JPEG 2000 one already failed.
+    `YBR_FULL_422` is declared here too, and the writer turns it into
+    `YBR_FULL` (#470) before the readback sees it.
+
+    Killing mutation (M14): the second decode removed.
+    """
+    outcome = _export(tmp_path, _image(declared, arr=_ramp(dtype)),
+                      verify_readback=True)
+
+    assert not outcome.ok
+    message = str(outcome.error)
+    assert message.startswith(
+        "Readback verification failed: the written file cannot be "
+        "ingested by this library"), message
+    assert str(tmp_path) not in message, message
+    assert "Subject_" not in message, message
+    assert not list((tmp_path / "out").glob("*.dcm"))
+
+
+def test_a_hand_built_16_bit_ybr_full_422_file_fails_the_readback(tmp_path):
+    """The `_422` spelling is gated by name, not only by the writer (#596).
+
+    The export writer rewrites `YBR_FULL_422` to `YBR_FULL`, so the
+    export-driven test above cannot tell a gate on `YBR_FULL` alone from
+    the right one. A hand-built native file carries the `_422` label and
+    the 4:2:2 byte count pydicom expects, and the "what was meant" array
+    is the stored-sample decode itself, so the first decode and the exact
+    compare pass and only the second decode is under test.
+
+    Killing mutation (M15): the gate spelled `== "YBR_FULL"`.
+    """
+    from isocenter.io_handlers import _decode_pixels
+
+    path, ds = _hand_built(tmp_path, "YBR_FULL_422", name="h422.dcm")
+    ds.BitsAllocated, ds.BitsStored, ds.HighBit = 16, 16, 15
+    ds.PixelData = np.arange(8 * 8 * 2, dtype=np.uint16).tobytes()
+    ds.save_as(path, enforce_file_format=True)
+    stored, _ = _decode_pixels(pydicom.dcmread(path), as_rgb=False)
+
+    with pytest.raises(RuntimeError) as raised:
+        io_handlers._verify_readback(path, ds, written_pixels=stored)
+
+    assert "cannot be ingested by this library" in str(raised.value), \
+        str(raised.value)
+
+
+@pytest.mark.parametrize("compression", [None, "j2k"])
+@pytest.mark.parametrize("declared, dtype", [
+    ("RGB", np.uint16), ("YBR_FULL", np.uint8)],
+    ids=["16-bit-rgb", "8-bit-ybr-full"])
+def test_16_bit_rgb_and_8_bit_ybr_full_pass(tmp_path, compression, declared,
+                                            dtype):
+    """The controls: what `ingest()` reads, the readback still passes (#596).
+
+    16-bit `RGB` needs no colour conversion, and an 8-bit `YBR_FULL`
+    converts. Killing mutation (M16): the gate on `BitsAllocated > 8`
+    alone, which refuses the 16-bit `RGB` file `ingest()` reads.
+    """
+    arr = _ramp(np.uint16) if dtype == np.uint16 else \
+        np.full((8, 8, 3), YBR, np.uint8)
+    outcome = _export(tmp_path, _image(declared, arr=arr),
+                      compression=compression, verify_readback=True)
+
+    assert outcome.ok, outcome.error
