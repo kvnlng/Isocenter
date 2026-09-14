@@ -127,6 +127,7 @@ import os
 import sys
 import hashlib
 import struct
+from math import ceil
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
 from datetime import datetime, date
 from dataclasses import dataclass, field
@@ -5675,11 +5676,10 @@ def _heuristic_lengths(ds, frames, samples) -> Tuple[int, ...]:
     that label to `YBR_FULL` before the encoder). `ds.file_meta` still
     says Implicit VR LE at this point, which is why the syntax is given,
     not read.
+
+    The import is the module-scope one `_validate_like_pydicom` uses
+    (#453): one site to fix if pydicom ever moves the class.
     """
-    from math import ceil
-
-    from pydicom.pixels.decoders.base import DecodeRunner
-
     runner = DecodeRunner(JPEG2000Lossless)
     runner.set_options(rows=int(getattr(ds, "Rows", 0) or 0),
                        columns=int(getattr(ds, "Columns", 0) or 0),
