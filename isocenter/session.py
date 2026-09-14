@@ -3572,10 +3572,32 @@ class DicomSession:
         # token without the name it exists to hold: #399's "a lock that
         # silently kept nothing" (review of #574, F-1). On 0.9.7 the name
         # read `ANONYMIZED` here whatever the rule, and the check above
-        # refused it. A blank name under such a rule is refused whether or
-        # not `anonymize()` ran, because nothing tells the two apart; a
-        # source with no name loses nothing by leaving the name out.
-        if "0010,0010" in tags_to_lock and not str(original_attrs.get("0010,0010") or "").strip():
+        # refused it.
+        #
+        # The refusal is gated on the patient reading REMEDIATED: the name
+        # arm stamps the patient when it ran (`apply_remediation`'s owner
+        # stamp), and the stamp is stored, so it survives a reload. Before
+        # `anonymize()` the blank on the instance *is* the original -- a
+        # source with an empty name -- and the lock writes it, as 0.9.7
+        # did (owner ruling on review of #574). Brief C9 rejected a refusal
+        # *based on* REMEDIATED, because it refuses a legitimate lock after
+        # an unrelated remediation. This is not one: the status never
+        # refuses on its own, it only narrows the rule-and-blank refusal
+        # below to the patients where the blank can be the rule's result.
+        # It is the patient's status and not the instance's for the same
+        # reason: a date shift stamps the instance, and EMPTY over a name
+        # that was already empty leaves the patient CLEARED, holding the
+        # original.
+        #
+        # Known edge, not closed here: a re-audit after `anonymize()`
+        # records CLEARED over the patient's REMEDIATED, which reads as
+        # the pre-anonymize state, so `anonymize -> audit -> lock` is not
+        # refused and writes a token without the name. CLEARED cannot join
+        # the gate: it is also the state of an audited source whose empty
+        # name is its original.
+        if ("0010,0010" in tags_to_lock
+                and patient.phi_status is PhiStatus.REMEDIATED
+                and not str(original_attrs.get("0010,0010") or "").strip()):
             emptying = [_owned_rule(policy, "0010,0010")[0] for policy in policies]
             emptying = [action for action in emptying if action in ("EMPTY", "REMOVE")]
             if emptying:

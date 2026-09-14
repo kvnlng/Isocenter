@@ -12,6 +12,7 @@ that over the good token, report success, and recovery would restore it.
 **Why this file imports what it does.** `isocenter.session` and
 `isocenter.privacy` are named, so their probe rows are charged.
 """
+import pydicom
 import pytest
 import yaml
 
@@ -30,12 +31,18 @@ def _threads(monkeypatch):
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
 
 
-def _session(tmp_path, tags, load=True):
+def _session(tmp_path, tags, load=True, name=NAME):
     """A reversible session over one CT. With `load` the rules go through
     `load_config`; without, the caller passes `_audit(session, ...)` the
     file, which is `audit(config_path=)`: the door that never assigns
-    `configuration.phi_tags` (review of #574)."""
-    write_ct(tmp_path / "in" / "a.dcm", PID, "5371", name=NAME)
+    `configuration.phi_tags` (review of #574). `name=""` writes a source
+    whose Patient's Name is present and empty (`write_ct` reads `""` as
+    "the default name", so the file is rewritten)."""
+    path = write_ct(tmp_path / "in" / "a.dcm", PID, "5371", name=name or NAME)
+    if not name:
+        ds = pydicom.dcmread(path)
+        ds.PatientName = ""
+        ds.save_as(path)
     cfg = tmp_path / "cfg.yaml"
     cfg.write_text(yaml.safe_dump({"phi_tags": tags}), encoding="utf-8")
     session = DicomSession(str(tmp_path / "s.db"))
@@ -170,8 +177,8 @@ def test_a_first_lock_after_anonymize_of_an_emptied_name_is_refused(tmp_path, ac
     report success over a token without the identity it exists to hold:
     #399's "a lock that silently kept nothing" (review of #574, F-1). On
     ac33641 the name read `ANONYMIZED` here and the lock was refused.
-    A blank or absent name under an EMPTY or REMOVE rule is refused, and
-    no token is written."""
+    A name `anonymize()` blanked under an EMPTY or REMOVE rule is refused,
+    and no token is written."""
     with _session(tmp_path, {"0010,0010": {"action": action},
                              "0010,0020": {"action": "KEEP"}}, load=load) as session:
         instance = session.store.patients[0].studies[0].series[0].instances[0]
@@ -185,6 +192,76 @@ def test_a_first_lock_after_anonymize_of_an_emptied_name_is_refused(tmp_path, ac
             "anonymize(), or leave 0010,0010 out of tags_to_lock; the token "
             "this call would have written is unchanged.")
         assert "0400,0500" not in instance.sequences
+
+
+@pytest.mark.parametrize("action", ["EMPTY", "REMOVE"])
+def test_a_first_lock_after_anonymize_and_a_reload_is_refused(tmp_path, action):
+    """The patient's REMEDIATED is stored, so the refusal survives a close
+    and a reopen: the blank name is still `anonymize()`'s result."""
+    with _session(tmp_path, {"0010,0010": {"action": action},
+                             "0010,0020": {"action": "KEEP"}}) as session:
+        session.anonymize(session.audit())
+        session.save(sync=True)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        session.load_config(str(tmp_path / "cfg.yaml"))
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        with pytest.raises(RuntimeError, match=r"holds no value in 0010,0010, "
+                                               rf"which its rule \({action}\)"):
+            session.lock_identities(PID, tags_to_lock=TAGS)
+        assert "0400,0500" not in instance.sequences
+
+
+@pytest.mark.parametrize("action", ["EMPTY", "REMOVE"])
+@DOORS
+def test_a_lock_before_anonymize_of_a_source_with_an_empty_name_writes_its_token(
+        tmp_path, action, load):
+    """The boundary of F-1. Before `anonymize()` the empty name on the
+    instance is the original, so the lock writes its token as 0.9.7 did:
+    no new exception on the documented order. Kills the refusal left
+    ungated by the patient's status (review of #574, owner ruling)."""
+    with _session(tmp_path, {"0010,0010": {"action": action},
+                             "0010,0020": {"action": "KEEP"}},
+                  load=load, name="") as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        report = _audit(session)
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        assert session.reversibility_service.recover_original_data(instance) == {
+            "0010,0010": "", "0010,0020": PID}
+        session.anonymize(report)
+
+
+def test_a_lock_after_anonymize_removed_an_empty_source_name_is_refused(tmp_path):
+    """The other side of the boundary on the same source: REMOVE ran over
+    the present, empty element, so the patient reads REMEDIATED and the
+    name is now `anonymize()`'s result. Kills the gate reading CLEARED,
+    or inverted."""
+    with _session(tmp_path, {"0010,0010": {"action": "REMOVE"},
+                             "0010,0020": {"action": "KEEP"}}, name="") as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        session.anonymize(session.audit())
+        assert "0010,0010" not in instance.attributes
+        with pytest.raises(RuntimeError, match=r"holds no value in 0010,0010, "
+                                               r"which its rule \(REMOVE\)"):
+            session.lock_identities(PID, tags_to_lock=TAGS)
+        assert "0400,0500" not in instance.sequences
+
+
+def test_a_lock_after_anonymize_left_an_empty_source_name_alone_writes_its_token(tmp_path):
+    """EMPTY over a name that was already empty changes nothing on the
+    patient: it reads CLEARED, not REMEDIATED, though the date shift made
+    the study and instance REMEDIATED. The empty name is still the
+    original, so the lock loses nothing and is not refused -- brief C9's
+    objection to refusing after an unrelated remediation. Kills a gate
+    reading the instance's status instead of the patient's."""
+    with _session(tmp_path, {"0010,0010": {"action": "EMPTY"},
+                             "0010,0020": {"action": "KEEP"}}, name="") as session:
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        session.anonymize(session.audit())
+        assert instance.phi_status.name == "REMEDIATED"
+        session.lock_identities(PID, tags_to_lock=TAGS)
+        assert session.reversibility_service.recover_original_data(instance) == {
+            "0010,0010": "", "0010,0020": PID}
 
 
 def test_a_tag_the_held_token_does_not_carry_never_refuses(tmp_path):
