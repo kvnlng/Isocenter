@@ -29,7 +29,7 @@ import sqlite3
 import pytest
 import yaml
 
-from isocenter.config_manager import validate_phi_policy
+from isocenter.config_manager import _vm_allows, validate_phi_policy
 from isocenter.privacy import PhiInspector
 from isocenter.profiles import BASIC_PROFILE, FLOOR_POLICY, RESEARCH_DEFAULTS
 from isocenter.session import DicomSession
@@ -183,15 +183,83 @@ def test_the_range_and_multi_value_messages():
 
 @pytest.mark.parametrize("tag,value", [
     ("0008,002a", "20230515104822-0500"),     # a DT's UTC offset is not a range
+    ("0008,002a", "20230515+0100"),
+    ("0008,002a", "2023-1200"),               # year 2023 at offset -1200
     ("0008,0012", "19000101"),
     ("0008,1030", "A-B"),                     # LO: a hyphen is text
     ("0020,0020", "A\\P"),                    # CS, VM 2
+    ("0020,0037", "1\\0\\0\\0\\1\\0"),        # DS, VM 6
+    ("0018,1620", "1\\2\\3\\4"),              # IS, VM 2-2n
+    ("0008,0008", "A\\B\\C"),                 # CS, VM 2-n
+    ("0008,9007", "A\\B\\C\\D\\E"),           # CS, VM 4-5
+    ("0088,0912", "A\\B"),                    # LO, VM 1-32
     ("0029,1013", "A\\B-C"),                  # private: no dictionary entry
-], ids=["dt-offset", "da", "lo-hyphen", "cs-vm2", "private"])
+], ids=["dt-offset", "dt-offset-plus", "dt-year-offset", "da", "lo-hyphen", "cs-vm2",
+        "ds-vm6", "is-vm2-2n", "cs-vm2-n", "cs-vm4-5", "lo-vm1-32", "private"])
 def test_what_the_range_and_multi_value_checks_let_through(tag, value):
-    """Kills over-refusal: every '-' refused, a '\\' refused on a tag whose
-    VM allows several values, and a private tag judged."""
+    """Kills over-refusal: every '-' refused, a DT offset read as a range,
+    a '\\' refused on a tag whose VM allows several values, a count judged
+    against the wrong bound of a VM, and a private tag judged."""
     validate_phi_policy({tag: {"action": "REPLACE", "value": value}}, "cfg.yaml")
+
+
+@pytest.mark.parametrize("value", ["20230101-20230201", "20230101000000-20230201000000",
+                                   "-20230201", "20230101-", "2023-2024",
+                                   "20230101-20230201-0500", "20230101-1200-0500"],
+                         ids=["dates", "datetimes", "open-start", "open-end",
+                              "years", "range-then-offset", "range-to-year-then-offset"])
+def test_a_dt_range_is_refused(value):
+    """`validate_value('DT', ...)` passes a range, and F-4 left DT out
+    because its `-` also opens the UTC offset (review of #574 round 2,
+    P-3). An offset is `&ZZXX` at the end, hours at most 14 and minutes
+    below 60, so a `-` anywhere else is a range. Kills the DT check
+    deleted, and the offset stripped from anywhere but the end."""
+    with pytest.raises(ValueError) as caught:
+        validate_phi_policy({"0008,002a": {"action": "REPLACE", "value": value}}, "cfg.yaml")
+    assert str(caught.value) == (
+        f"cfg.yaml: phi_tags['0008,002a'] is REPLACE, which writes {value!r}, "
+        "and a '-' in a DT anywhere but its UTC offset (&ZZXX at the end) is a "
+        "range, which 0008,002a cannot hold; give one DT value (#560)")
+
+
+def test_a_vm_spelling_the_counter_does_not_read_allows_any_count():
+    """Every spelling in pydicom's dictionary today is one of the four
+    `_vm_allows` reads, so no rule reaches this arm; a refresh that adds
+    another must not start refusing rules by a VM nobody parsed. Kills
+    the unparsed spelling read as a refusal."""
+    assert _vm_allows("1-n-x", 3) is True
+    assert _vm_allows("odd", 1) is True
+
+
+def test_a_stepped_vm_keeps_its_lower_bound():
+    """Every `N-Nn` in the dictionary today has N equal to the step, so no
+    rule can tell the lower bound from the step; `4-2n` can. Kills the
+    lower bound dropped from the stepped spelling."""
+    assert _vm_allows("4-2n", 2) is False
+    assert _vm_allows("4-2n", 4) is True
+
+
+@pytest.mark.parametrize("tag,value,count,vm", [
+    ("0020,0037", "1\\0", 2, "6"),
+    ("0020,0020", "A\\P\\X", 3, "2"),
+    ("0020,0020", "A", 1, "2"),
+    ("0018,1620", "1\\2\\3", 3, "2-2n"),
+    ("0008,0008", "A", 1, "2-n"),
+    ("0008,9007", "A\\B\\C\\D\\E\\F", 6, "4-5"),
+    ("0016,002a", "1", 1, "2-4"),
+], ids=["ds-vm6-short", "cs-vm2-long", "cs-vm2-one", "is-vm2-2n-odd", "cs-vm2-n-one",
+        "cs-vm4-5-long", "is-vm2-4-short"])
+def test_a_value_count_the_tags_multiplicity_does_not_allow_is_refused(tag, value, count, vm):
+    """F-4 counted values only on a VM-1 tag (review of #574 round 2, P-4).
+    The count is judged against the dictionary VM in each of pydicom's
+    spellings: a fixed count, a bounded range, `N-n`, and `N-Nn`. Kills
+    the count check deleted, and each bound or the step ignored."""
+    with pytest.raises(ValueError) as caught:
+        validate_phi_policy({tag: {"action": "REPLACE", "value": value}}, "cfg.yaml")
+    assert str(caught.value) == (
+        f"cfg.yaml: phi_tags['{tag}'] is REPLACE, which writes {value!r}, and "
+        f"{tag} holds {vm} values (its dictionary VM), which {count} "
+        f"'\\'-separated values are not; give a value of that multiplicity (#560)")
 
 
 @pytest.mark.parametrize("key", ["10000,0010", "ffff,ffff0"])

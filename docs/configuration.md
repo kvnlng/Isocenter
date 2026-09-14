@@ -251,7 +251,8 @@ Any other action makes `load_config()` raise `ValueError` naming the tag. So doe
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
 * `SHIFT` or `JITTER` on a standard tag that is not DA or DT ([#559](https://github.com/kvnlng/Isocenter/issues/559));
 * `REPLACE` on a standard tag whose VR cannot hold what it writes -- `ANONYMIZED` in a DA, TM, DT, UI, AS, DS or IS, or any text in a binary or numeric VR ([#560](https://github.com/kvnlng/Isocenter/issues/560)). Use `EMPTY` or `REMOVE`, `JITTER` for a date, or a `value:` the VR can hold. Study Date's `REPLACE` with no value is the shift and is allowed.
-* a `REPLACE` `value:` holding a `-` in a DA or TM (a range, not a date or time), or a `\` on a standard tag that holds one value (a second value). On a tag that holds several, each `\`-separated value is checked on its own.
+* a `REPLACE` `value:` holding a range: a `-` in a DA or TM, or in a DT anywhere but its UTC offset at the end (`20230515104822-0500` is one DateTime; `20230101-20230201` is a range);
+* a `REPLACE` `value:` whose count of `\`-separated values the standard tag's value multiplicity does not allow: a `\` on a tag that holds one value, two values on Image Orientation (Patient), which holds six, or three on Patient Orientation, which holds two. Each value is also checked against the VR on its own.
 
 Private tags are not checked against a VR: the exporter writes a private value its VR cannot hold as `LO`.
 

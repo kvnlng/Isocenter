@@ -250,6 +250,44 @@ def _dictionary_vm(tag: str) -> Optional[str]:
     return str(dictionary_VM(int(tag.replace(",", ""), 16)))
 
 
+def _vm_allows(vm: str, count: int) -> bool:
+    """Whether `count` values meet a dictionary VM (review of #574 round 2,
+    P-4). pydicom's dictionary spells a VM four ways: `'N'`, `'N-M'`,
+    `'N-n'`, `'N-Nn'` (`'2-2n'`: 2, 4, 6, ...). A spelling outside those
+    allows any count, so a dictionary refresh cannot refuse a rule by an
+    unparsed VM."""
+    lower, _, upper = vm.partition("-")
+    try:
+        lower_n = int(lower)
+        if not upper:
+            return count == lower_n
+        if upper == "n":
+            return count >= lower_n
+        if upper.endswith("n"):
+            # Every `N-Nn` in the dictionary today has N equal to the step,
+            # so the lower bound is implied by the step for any count of at
+            # least one. It is kept for a spelling such as `4-2n`, which the
+            # step alone would misread, and tested on that spelling directly.
+            return count >= lower_n and count % int(upper[:-1]) == 0
+        return lower_n <= count <= int(upper)
+    except ValueError:
+        return True
+
+
+def _dt_is_a_range(value: str) -> bool:
+    """True when a `-` in a DT string is not its UTC offset (review of #574
+    round 2, P-3). The offset is `&ZZXX` at the end -- `+` or `-`, hours at
+    most 14, minutes below 60 (PS3.5 Table 6.2-1) -- so one such suffix is
+    set aside and any `-` left is a range: `20230101-20230201`,
+    `-20230201`, `20230101-`, and `2023-2024`, whose 20 is no hour of an
+    offset. `2023-1200` stays a year at offset -1200, which is what PS3.5
+    reads it as."""
+    match = re.search(r"[+-]([0-9]{2})([0-9]{2})$", value)
+    if match and int(match.group(1)) <= 14 and int(match.group(2)) < 60:
+        value = value[:match.start()]
+    return "-" in value
+
+
 def _is_oversized_tag_key(tag: str) -> bool:
     """True for a key that reads as hex but names no 32-bit tag, such as
     `'10000,0010'`. pydicom's `Tag` raises `OverflowError` for it, which
@@ -337,7 +375,12 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
     7. A REPLACE `value:` pydicom's `validate_value` passes and the tag
        still cannot hold (review of #574): a `-` in a DA or TM, which is
        a range, and a `\\` on a tag of multiplicity 1, which is a second
-       value. Not in a DT, where `-` also opens a UTC offset.
+       value. In a DT a `-` is a range only where it is not the UTC offset
+       at the end (`_dt_is_a_range`), and on any other tag the count of
+       `\\`-separated values must meet the dictionary VM (`_vm_allows`;
+       review of #574 round 2, P-3 and P-4). Only a `value:` is counted:
+       REPLACE with no value writes one `ANONYMIZED` wherever it did
+       in 0.9.7, and no rule of that shape is refused by its count.
 
     Before all of them, a key naming no 32-bit tag is refused as the
     loader refuses a key that is not `gggg,eeee`; on the in-code doors it
@@ -405,10 +448,22 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 return (f"phi_tags['{tag}'] is REPLACE, which writes "
                         f"{value!r}, and a '-' in a {vr} is a range, which "
                         f"{tag} cannot hold; give one {vr} value (#560)")
-            if "\\" in value and _dictionary_vm(tag) == "1":
+            if vr == "DT" and _dt_is_a_range(value):
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and a '-' in a DT anywhere but its UTC "
+                        f"offset (&ZZXX at the end) is a range, which {tag} "
+                        f"cannot hold; give one DT value (#560)")
+            vm = _dictionary_vm(tag)
+            if "\\" in value and vm == "1":
                 return (f"phi_tags['{tag}'] is REPLACE, which writes "
                         f"{value!r}, and {tag} holds one value, which a '\\' "
                         f"would make two; give a value without one (#560)")
+            count = value.count("\\") + 1
+            if vm is not None and not _vm_allows(vm, count):
+                return (f"phi_tags['{tag}'] is REPLACE, which writes "
+                        f"{value!r}, and {tag} holds {vm} values (its "
+                        f"dictionary VM), which {count} '\\'-separated values "
+                        f"are not; give a value of that multiplicity (#560)")
     return None
 
 
