@@ -18,12 +18,12 @@ class ConfigAutomator:
 
         Returns:
             List[Dict]: A list of 'suggestion' objects:
-            {
-                "serial": str,
-                "action": "ADD_ZONE" | "EXPAND_ZONE",
-                "zone": [y1, y2, x1, x2],
-                "reason": str
-            }
+                {
+                    "serial": str,
+                    "action": "ADD_ZONE" | "EXPAND_ZONE",
+                    "zone": [y1, y2, x1, x2],
+                    "reason": str
+                }
 
         Zones are emitted in config space -- (y1, y2, x1, x2), the order
         every consumer of ``redaction_zones`` reads. OCR metadata arrives

@@ -219,13 +219,17 @@ def test_the_detector_sees_every_spelling_of_a_tqdm_import(spelling):
     """The guard below is only as good as what it recognises. It knew
     `from tqdm import` and `import tqdm` alone, so `from tqdm.auto import
     tqdm` in `session.py` passed it (review of #589)."""
-    assert _tqdm_sites({"session.py": f"import os\n{spelling}\n"}) == [
-        "session.py:2"]
+    # `zzz_session.py`, not `session.py`: the expected `path:line` below
+    # is a string literal in this file, and `tests/test_source_citations.py`
+    # sweeps this file and would grade it as a citation of the real
+    # module (#535). The detector keys on the dict, so the name is free.
+    assert _tqdm_sites({"zzz_session.py": f"import os\n{spelling}\n"}) == [
+        "zzz_session.py:2"]
 
 
 def test_the_detector_does_not_see_a_module_that_only_starts_with_tqdm():
-    assert _tqdm_sites({"session.py": "import tqdmx\nfrom tqdm_extra import y\n"
-                                      "from . import tqdm_like\n"}) == []
+    assert _tqdm_sites({"zzz_session.py": "import tqdmx\nfrom tqdm_extra import y\n"
+                                          "from . import tqdm_like\n"}) == []
 
 
 def test_only_parallel_imports_tqdm():

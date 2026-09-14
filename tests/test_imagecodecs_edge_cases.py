@@ -273,6 +273,33 @@ def test_the_unavailable_print_names_a_message_less_import_error(
         f"is unavailable without saying why: {line!r}")
 
 
+def test_the_unavailable_message_carries_the_import_errors_own_words(
+        monkeypatch, mock_dataset):
+    """`_unavailable()` spells its cause as `describe_exception` does (#519).
+
+    The raise site hand-spelled `f"{type(e).__name__}: {e}"` -- one
+    behaviour, two spellings -- and the two differ exactly where the
+    helper exists to differ: a message-less `ImportError()` rendered as
+    `ImportError: ` with nothing after the colon. That is the case
+    asserted first, because a `ModuleNotFoundError` with a message reads
+    the same either way and would kill nothing.
+    """
+    monkeypatch.setattr(imagecodecs_handler, "imagecodecs", None)
+    monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR", ImportError())
+    with pytest.raises(RuntimeError) as exc:
+        imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
+    assert str(exc.value) == "imagecodecs is not available: ImportError", (
+        str(exc.value))
+
+    monkeypatch.setattr(imagecodecs_handler, "IMPORT_ERROR",
+                        ModuleNotFoundError("No module named 'imagecodecs'"))
+    with pytest.raises(RuntimeError) as exc:
+        imagecodecs_handler.decode_declared_frames(mock_dataset, 1)
+    assert str(exc.value) == ("imagecodecs is not available: "
+                              "ModuleNotFoundError: No module named "
+                              "'imagecodecs'"), str(exc.value)
+
+
 def test_the_unavailable_print_survives_an_unrecorded_import_error(
         monkeypatch, capsys):
     """No import error recorded is said, not crashed on (#500).

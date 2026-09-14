@@ -25,10 +25,12 @@ Import constraints, deliberate and load-bearing:
   way would be a cycle.
 - **No third-party import at all**, so `tests/test_packaging_contract.py`
   needs no new `install_requires` entry.
-- `_export_instance_worker` runs in a **separate process on every
-  interpreter**, so this has to be importable at module scope in a bare
-  child. A module-level function in a dependency-free module is all that
-  child needs.
+- `_export_instance_worker` runs in a **separate process under
+  `session.export()` on every interpreter; by default `write_tree()`
+  spawns it on a GIL build and runs it in the caller's own threads on a
+  free-threaded one** (#521; the `ExportOutcome.corrections` note in
+  `io_handlers.py`). So this has to be importable at module scope in a
+  bare child, and a dependency-free module is all that child needs.
 
 `PixelGeometry` is a `NamedTuple` so it stays picklable, though nothing in
 this design sends one across a process boundary.
