@@ -2016,11 +2016,12 @@ class Instance(DicomItem):
         typed by still the instance's? A descriptor edit that lands while
         the read is inside its sidecar read is the one change that makes
         the loaded frame wrong -- published, it sits under a declaration
-        the store reads the other way, and it sticks (#531, review of
-        #628: 92 of 200 trials on 3.14t) -- and it is the only change this
-        asks about. A PHI status, a name edit, the relabel below: none
-        moves the capture. So the guard cannot false-trigger the way a
-        revision guard would, and on a stale capture it returns
+        the store reads the other way, and it sticks (#531; measured in
+        the review of PR #628's first push: 92 of 200 trials on 3.14t)
+        -- and it is the only change this asks about. A PHI status, a
+        name edit, the relabel below: none moves the capture. So the
+        guard cannot false-trigger the way a revision guard would, and
+        on a stale capture it returns
         `_STALE_CAPTURE` without publishing, and the sidecar arm reads
         again. Asked under the leaf, as it must be: asked outside it, an
         edit between the answer and the publish is the same window. It
@@ -2042,6 +2043,13 @@ class Instance(DicomItem):
         """
         with PIXEL_STATE_LOCK:
             if self.pixel_array is None:
+                # The capture guard, under the leaf (#531): one `dict()`
+                # copy and six `int()`s -- no log, no sqlite, no frame
+                # write, no lock -- so the leaf stays a leaf. It asks
+                # whether the six descriptors the frame was read by are
+                # still the instance's, which nothing but a descriptor
+                # edit moves; that is why it is not the revision guard
+                # the docstring rejects.
                 describes = getattr(capture, "describes", None)
                 if describes is not None and not describes(self):  # pylint: disable=not-callable
                     return _STALE_CAPTURE

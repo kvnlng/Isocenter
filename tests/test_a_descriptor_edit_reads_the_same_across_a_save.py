@@ -202,12 +202,12 @@ def test_a_read_in_flight_at_the_edit_is_re_read_under_the_new_declaration(
     declaration into the empty slot, and it sticks: every later read
     returns it, and a save dedups the same bytes under the new
     descriptors, so the reopened store disagrees with the live session.
-    Measured on 5244480 with four reader threads and a writer flipping
-    PixelRepresentation: 92 of 200 trials ended with the resident dtype
-    against the declaration on 3.14t (review of #628). The window is the
-    written arm's own hand-off -- `unload_pixel_data()` empties the slot
-    so that the next read rebuilds -- so it opens on every edit over
-    written pixels.
+    Measured on PR #628's first push (5244480) with four reader threads
+    and a writer flipping PixelRepresentation: 92 of 200 trials ended
+    with the resident dtype against the declaration on 3.14t. The window
+    is the written arm's own hand-off -- `unload_pixel_data()` empties
+    the slot so that the next read rebuilds -- so it opens on every edit
+    over written pixels.
 
     Driven with no race: the loader's `__call__` makes the edit just
     before it returns, which is the interleaving a second thread
