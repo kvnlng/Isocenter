@@ -3998,6 +3998,32 @@ class DicomSession:
                 # its original identifiers again.
                 if (p.patient_name, p.patient_id) != before:
                     p.mark_modified()
+                # Study Date is written onto the instances above, but the
+                # exporter stamps it from the `Study` (`_study_attributes`),
+                # so an instance-only restore never reached the file (#566).
+                # One study only: the token is the patient's first
+                # instance's, so on a patient with several it holds one
+                # study's date, and writing it onto each would export study
+                # 1's original as study 2's (#583). Counted before the merge
+                # below, which can move a raw patient's studies onto `p`.
+                # `_shifted_study_date` is left as it is: it vouches only
+                # for the value the shift wrote, so the next `audit()`
+                # raises the restored date again (#518).
+                if "0008,0020" in original_attrs:
+                    if len(p.studies) == 1:
+                        study = p.studies[0]
+                        restored = original_attrs["0008,0020"]
+                        # Compared as `Study` would hold it; a restore
+                        # onto a date that never moved records no change.
+                        if study.study_date != entities.normalize_study_date(restored):
+                            study.study_date = restored
+                            study.mark_modified()
+                    else:
+                        get_logger().warning(
+                            "Study Date was restored onto the instances of a "
+                            "patient with %d studies; the identity token holds "
+                            "one study's date, so each study keeps its "
+                            "de-identified Study Date (#583).", len(p.studies))
                 # A raw study for the restored ID, ingested before the
                 # restore, is a second `Patient` holding it: the same
                 # subject by construction, so the two are merged as
