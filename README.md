@@ -298,7 +298,7 @@ session.generate_report("compliance_report.md")
 
 ### 7. Recover Identity (Optional)
 
-If you have the key (`isocenter.key`) and need the original identity of an anonymized patient, load the session under the key the data was locked with. `enable_reversible_anonymization()` never creates a key; the first `lock_identities()` does. The call prints nothing and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path (checked first, and no key is created), `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token or the key does not decrypt it. No message names the Patient ID ([#539](https://github.com/kvnlng/Isocenter/issues/539), [#550](https://github.com/kvnlng/Isocenter/issues/550)). With `restore=False` it only checks that the patient is recoverable under the key.:
+If you have the key (`isocenter.key`) and need the original identity of an anonymized patient, load the session under the key the data was locked with. `enable_reversible_anonymization()` never creates a key; the first `lock_identities()` does. The call prints nothing and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path (checked first, and no key is created), `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token or the key does not decrypt it. No message names the Patient ID ([#539](https://github.com/kvnlng/Isocenter/issues/539), [#550](https://github.com/kvnlng/Isocenter/issues/550)). With `restore=False` it only checks that the patient is recoverable under the key:
 
 ```python
 # Load the session containing anonymized data

@@ -93,7 +93,7 @@ def test_one_refused_patient_leaves_every_patient_unlocked(tmp_path, persist, ch
         assert _locked(session) == PATIENTS
 
 
-def test_every_refused_patient_is_named(tmp_path):
+def test_every_refused_patient_is_numbered_in_one_refusal(tmp_path):
     """Both refused patients, in Patient ID order, each with the message its
     own lock would raise, numbered by its place among the six found (P6: no
     message names a patient). Kills a raise at the first refusal."""
