@@ -168,7 +168,10 @@ _CODEC_FOR = {
 }
 #: `htj2k_decode` too, which no syntax may reach (#459).
 _CODECS = sorted(set(_CODEC_FOR.values()) | {"htj2k_decode"})
-DISPATCH_CHUNK = b"codestream!!"  # even length: no pad byte from encapsulate
+#: Even length, so encapsulate adds no pad byte; it ends in an EOI marker,
+#: which the JPEG Baseline/Extended arm asks of a stream before decoding it
+#: (review of #606, M-r2-1).
+DISPATCH_CHUNK = b"codestream\xff\xd9"
 
 
 @pytest.mark.parametrize("syntax", sorted(_CODEC_FOR))

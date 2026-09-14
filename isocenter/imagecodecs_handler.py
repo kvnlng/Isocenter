@@ -45,9 +45,14 @@ which every door reaches. The conversions the codec has already made
 Offset Table is legal (PS3.5 A.4) and names no frames, and the fragments
 alone do not say where one frame ends and the next begins -- one frame
 may legally span several fragments. So a multi-fragment file with an
-empty table cannot be checked, and it is decoded as it always was:
-`generate_frames` yields frame 0. That is a known silence, not a closed
-one.
+empty table cannot be checked. pydicom's decoder then walks the fragments
+by their codestreams' end markers and returns every frame it finds, not
+frame 0: a fragment beyond NumberOfFrames comes back as a frame the
+header does not declare, from `Instance.get_pixel_data()`, and ingest
+stores an array its geometry cannot reload, with no row (measured in the
+review of #606, F-r2-2; the same holds for an Extended Offset Table
+pydicom drops, `extended_offsets`). That is a known silence, not a
+closed one.
 """
 import struct
 import sys
@@ -778,6 +783,12 @@ def signed_codestream_refusal(ds) -> Optional[str]:
     frame the offset table names beyond NumberOfFrames is not read: ingest
     drops it with its #418 row, and its sign is not a reason to refuse the
     frames it keeps. The count is `offset_table_frame_count`'s reading.
+    **That is only an excess the count reports.** A fragment beyond
+    NumberOfFrames that no table names -- an empty offset table, or an
+    Extended one pydicom drops -- is not read here either, but pydicom's
+    walk decodes it as a further frame, Pillow shifts it if it is signed,
+    and nothing drops it: see the module docstring's limit (review of
+    #606, F-r2-2).
 
     **It never raises of its own.** A buffer `generate_frames` cannot walk,
     or a frame whose SIZ does not parse (`_j2k_sample_layout` returns
@@ -846,6 +857,25 @@ def _decode_frame(transfer_syntax, bitstream, ds):
         # pydicom applies neither to these syntaxes, and a decode that
         # disagrees with BitsAllocated or PixelRepresentation is refused
         # by the fallback's dtype check.
+        #
+        # **A stream that does not end in EOI is refused first** (review
+        # of #606, M-r2-1). libjpeg-turbo treats a premature end of data
+        # as a warning and fills the rest of the image with mid-grey --
+        # 128, or 2048 at 12 bits -- so a file cut short decoded to rows
+        # it never held, passed every check after the decode, and was
+        # stored with no row: for an 8-bit file, over Pillow's own
+        # "image file is truncated". Trailing 0x00 and 0xFF are padding:
+        # an item is padded to even length, and DCMTK writes `ff d9 ff`
+        # (pydicom's `JPEG-lossy.dcm`). Every `.50`/`.51` file in
+        # pydicom's test data and every `jpeg8_encode` stream measured
+        # ends in EOI. A stream closed with EOI after data lost from its
+        # middle still decodes with the fill; that is the mid-stream
+        # limit `docs/installation.md` states.
+        if not bytes(bitstream).rstrip(b"\x00\xff").endswith(b"\xff\xd9"):
+            raise ValueError(
+                "the JPEG stream ends without an EOI marker, so it was cut "
+                "short: libjpeg-turbo would fill the missing rows with "
+                "mid-grey")
         return imagecodecs.jpeg_decode(bitstream)
     if transfer_syntax in J2K_SYNTAXES:
         # HTJ2K included, through `jpeg2k_decode`: see `J2K_SYNTAXES`.

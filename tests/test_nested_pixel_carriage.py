@@ -42,6 +42,7 @@ badly a regression would hurt:
 import os
 import sqlite3
 
+import imagecodecs
 import numpy as np
 import pydicom
 import pytest
@@ -1118,9 +1119,10 @@ def test_a_jpeg_extended_icon_is_carried_and_relabelled(tmp_path):
     measured instead, through a sequence item: pydicom's Pillow plugin
     decodes an 8-bit baseline stream under a `.4.51` label and labels it
     RGB, exactly as it does under `.4.50` (the test above), so the item is
-    relabelled from the decoder's meta. A true 12-bit SOF1 icon still
-    fails to decode here and keeps its row -- admission is not a decode
-    claim, it only stops the gate refusing what the decoder can read.
+    relabelled from the decoder's meta. Admission is not a decode claim, it
+    only stops the gate refusing what the decoder can read; a true 12-bit
+    SOF1 icon, which Pillow refuses, decodes through the imagecodecs
+    fallback since #604 when it is monochrome (the test below).
 
     Killed by removing JPEG Extended from `_CARRIABLE_TRANSFER_SYNTAXES`
     (the loss row returns and the export carries no Pixel Data).
@@ -1144,6 +1146,39 @@ def test_a_jpeg_extended_icon_is_carried_and_relabelled(tmp_path):
     assert all(abs(a - e) <= 4 for a, e in zip(raw[:3], LOSSY_ICON_RGB)), (
         "the icon's first triple is %r, not %r" % (tuple(raw[:3]),
                                                    LOSSY_ICON_RGB))
+
+
+@pytest.mark.parametrize("cut", [False, True], ids=["whole", "cut-short"])
+def test_a_12_bit_jpeg_extended_icon_is_carried_whole_and_refused_cut_short(
+        tmp_path, cut):
+    """#604 and review of #606 (M-r2-1), at the icon door.
+
+    A 12-bit monochrome SOF1 icon, which Pillow refuses, is decoded by the
+    imagecodecs fallback and carried. The same stream cut short -- which
+    libjpeg-turbo would fill with mid-grey, 2048, and return -- is refused
+    by the EOI check, and the icon keeps the loss row a decode failure
+    earns.
+    """
+    from pydicom.encaps import encapsulate
+    yy, xx = np.mgrid[0:64, 0:64]
+    icon = ((yy * 61 + xx * 37) % 4096).astype(np.uint16)
+    stream = imagecodecs.jpeg8_encode(icon, level=95, bitspersample=12)
+    if cut:
+        # Past the headers and into the scan, so libjpeg-turbo has rows
+        # to fill: a cut inside the headers is refused by the codec itself.
+        stream = stream[:int(len(stream) * 0.9)]
+    item = _icon_item(payload=encapsulate([stream]), rows=64, cols=64,
+                      bits=16, encapsulated=True)
+    item.BitsStored, item.HighBit = 12, 11
+    db, _src = _ingest(tmp_path, "sof1", icons=[item],
+                       transfer_syntax=JPEGExtended12Bit,
+                       top_level_pixels=False)
+    carried = [k for k in _blob_kinds(db) if k.startswith("pixels:")]
+    lost = [d for d, _s in _data_loss_rows(db) if "7fe0,0010" in d]
+    if cut:
+        assert not carried and lost, (_blob_kinds(db), _data_loss_rows(db))
+    else:
+        assert carried and not lost, (_blob_kinds(db), _data_loss_rows(db))
 
 
 #: A 4x4 icon and its colour twin, channels distinct so a plane swap shows.
