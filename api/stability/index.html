@@ -1554,7 +1554,10 @@ instance_number, file_path, source_path</code> (<code>pixel_array</code> and
 <code>discard</code> throws it away, with the descriptors <code>set_pixel_data()</code>
 wrote for it -- and a <code>set_attr()</code> edit to any of those descriptors
 made since the set, which described the replacement (#434)). On
-<code>DicomItem</code>: <code>set_attr()</code>.</p>
+<code>DicomItem</code>: <code>set_attr()</code>. On <code>Instance</code> it also keeps resident pixels
+reading as a pixel-descriptor edit declares, and raises <code>ValueError</code>
+for an edit that pixels set through <code>set_pixel_data()</code> and not yet
+saved cannot be read under (#531).</p>
 <p><strong><code>Builder</code>.</strong> The name, <code>Builder.start_patient()</code>, and <code>Equipment</code>'s
 three fields. The rest of the fluent chain is tier 2.</p>
 <p><strong><code>IsocenterConfiguration</code></strong> as <code>session.configuration</code>: <code>save()</code>,
