@@ -269,16 +269,10 @@ def _value_free(warning, pseudonym):
         assert secret not in warning, warning
 
 
-def test_a_restore_onto_a_study_ingested_after_the_lock_warns(tmp_path, caplog):
-    """The shape I2 turned from a refusal into a restore (review of #640,
-    F-1, `after_ingest`): study 1 locked under the default `tags_to_lock`,
-    which include Accession Number, study 2 ingested after the lock. The
-    restore writes study 1's `ACC-ONE` into study 2's instance, whose own
-    was `ACC-TWO`. That write is #583's until per-instance tokens land;
-    what this pins is that it is no longer silent: one WARNING with the
-    count, and no value in it. Before the WARNING, nothing on any channel
-    said so, and #566's Study Date WARNING cannot fire under the default
-    tags. Kills the WARNING removed and the count miscounted."""
+def _locked_then_second_study_ingested(tmp_path):
+    """Study 1 (`ACC-ONE`) locked under the default `tags_to_lock` and
+    persisted, study 2 (`ACC-TWO`, same Patient ID) ingested after the lock,
+    then audited, anonymized and saved. Returns (db, key, pseudonym)."""
     write_ct(tmp_path / "one" / "a.dcm", "PAT-A", "6171", name=NAME, accession=ACC_ONE)
     write_ct(tmp_path / "two" / "b.dcm", "PAT-A", "6172", name=NAME, accession=ACC_TWO)
     db, key = str(tmp_path / "s.db"), str(tmp_path / "k.key")
@@ -294,13 +288,49 @@ def test_a_restore_onto_a_study_ingested_after_the_lock_warns(tmp_path, caplog):
         assert {st.study_instance_uid: SEQ in st.series[0].instances[0].sequences
                 for st in patient.studies} == {study_uid("6171"): True,
                                                study_uid("6172"): False}
-        pseudonym = patient.patient_id
+        return db, key, patient.patient_id
+
+
+def test_a_restore_onto_a_study_ingested_after_the_lock_warns(tmp_path, caplog):
+    """The shape I2 turned from a refusal into a restore (review of #640,
+    F-1, `after_ingest`): study 1 locked under the default `tags_to_lock`,
+    which include Accession Number, study 2 ingested after the lock. The
+    restore writes study 1's `ACC-ONE` into study 2's instance, whose own
+    was `ACC-TWO`. That write is #583's until per-instance tokens land;
+    what this pins is that it is no longer silent: one WARNING with the
+    count, and no value in it. Before the WARNING, nothing on any channel
+    said so, and #566's Study Date WARNING cannot fire under the default
+    tags. Kills the WARNING removed and the count miscounted."""
+    db, key, pseudonym = _locked_then_second_study_ingested(tmp_path)
 
     assert _restored_accessions(db, key, pseudonym, caplog) == {
         study_uid("6171"): ACC_ONE, study_uid("6172"): ACC_ONE}
     warnings = _elsewhere_warnings(caplog)
     assert warnings == [elsewhere(1, 2)], caplog.text
     _value_free(warnings[0], pseudonym)
+
+
+def test_a_restore_onto_a_study_ingested_after_the_lock_exports_the_locked_studys_accession(
+        tmp_path):
+    """What the CHANGELOG's #616 entry says reaches the file: after the
+    restore, `export()` writes study 2's file with study 1's `ACC-ONE`,
+    where the source held `ACC-TWO` (review of #640, round 2). The test
+    above pins the instance in memory; this pins the file, because
+    `export()` stamps some study-level tags from the `Study` rather than
+    the instance (#566's Study Date), and a claim about the file should
+    not rest on the instance. Kills R1 (restore only the instances that
+    carry the token), on study 2's file."""
+    db, key, pseudonym = _locked_then_second_study_ingested(tmp_path)
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(key)
+        session.recover_patient_identity(pseudonym, restore=True)
+        session.save(sync=True)
+        session.export(str(tmp_path / "out"), use_compression=False)
+    written = {}
+    for path in sorted((tmp_path / "out").rglob("*.dcm")):
+        ds = pydicom.dcmread(str(path))
+        written[str(ds.StudyInstanceUID)] = str(ds.get("AccessionNumber", None))
+    assert written == {study_uid("6171"): ACC_ONE, study_uid("6172"): ACC_ONE}
 
 
 def test_a_restore_onto_a_study_carrying_another_token_warns(tmp_path, caplog):
