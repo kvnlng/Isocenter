@@ -662,9 +662,10 @@ def _against_pixel_representation(arr, ds, layout):
     reinterpreted: for `[-32768, -800, -1]`, `uint16 [0, 31968, 32767]`
     with Pillow and `uint16 [32768, 64736, 65535]` with
     pylibjpeg-openjpeg (measured). Two plugins, two arrays, neither of
-    them the file's samples. `ingest()`'s dtype guard already refused
-    such a file (`it decoded to int16, where ... declare uint16`), so
-    refusing here is what makes the three doors say one thing.
+    them the file's samples. Since #524 the refusal is made ahead of any
+    decoder, by `signed_codestream_refusal` in `io_handlers._decode_pixels`,
+    so every door says one thing; the raise below is its twin for this
+    module's own decode.
 
     A `layout` of None -- a codestream whose SIZ did not parse, which no
     decode reaches -- returns the array untouched, the answer every door
@@ -677,18 +678,77 @@ def _against_pixel_representation(arr, ds, layout):
     if codestream_signed == declared_signed:
         return arr
     if codestream_signed:
-        raise RuntimeError(
-            f"the JPEG 2000 codestream is signed at precision {precision}, "
-            f"where PixelRepresentation 0 declares unsigned samples: "
-            f"`jpeg2k_decode` returns the codestream's own signedness, and "
-            f"there is no unsigned reading of these samples this handler "
-            f"can stand behind -- pydicom returns a different array for "
-            f"such a file with each of its two JPEG 2000 plugins")
+        # Unreachable through `io_handlers._decode_pixels`, whose
+        # `signed_codestream_refusal` gate refuses the file before any
+        # decoder is asked (#524). Kept for `decode_declared_frames`
+        # called alone, in the gate's own words.
+        raise RuntimeError(signed_codestream_words(precision))
     # Unsigned codestream under PixelRepresentation 1. `_sign_extend`
     # reads that 1 for itself and would return the array untouched under
     # any other value, which is why the branch above cannot fall through
     # to it.
     return _sign_extend(arr, ds, precision)
+
+
+def signed_codestream_words(precision) -> str:
+    """The one spelling of the signed-codestream refusal (#460, #524)."""
+    return (f"the JPEG 2000 codestream is signed at precision {precision}, "
+            f"where PixelRepresentation 0 declares unsigned samples: no "
+            f"decoder here returns these samples unsigned -- Pillow shifts "
+            f"them by 2^(precision-1), pylibjpeg-openjpeg returns their bit "
+            f"patterns, and `jpeg2k_decode` returns them signed -- so there "
+            f"is no unsigned reading of this file to stand behind")
+
+
+def signed_codestream_refusal(ds) -> Optional[str]:
+    """The refusal for a signed JPEG 2000 codestream under PixelRepresentation 0 (#524).
+
+    None when there is nothing to refuse: the syntax is not JPEG 2000,
+    PixelRepresentation is not 0, or no declared frame's SIZ says signed.
+    None, too, when PixelRepresentation is absent, empty or not an
+    integer: the words cite "PixelRepresentation 0", which such a file
+    never wrote, and pydicom's own validation refuses it in words that
+    name the element (a Type 1 element, PS3.3 C.7.6.3).
+    `io_handlers._decode_pixels` raises the words **before pydicom is
+    asked**, which is the point. pydicom's Pillow plugin decodes such a
+    file at monochrome depths and 8-bit colour and returns the samples
+    shifted by 2^(bits-1) -- `[-32768, -800, -1]` as `uint16 [0, 31968,
+    32767]` -- with no error, so ingest stored the shift and only the
+    handler refused. Asked of the SIZ, it is one answer whichever decoder
+    would have run.
+
+    **Every declared frame, and only those.** A frame is a codestream, and
+    one frame's header does not speak for another's samples. An excess
+    frame the offset table names beyond NumberOfFrames is not read: ingest
+    drops it with its #418 row, and its sign is not a reason to refuse the
+    frames it keeps. The count is `offset_table_frame_count`'s reading.
+
+    **It never raises of its own.** A buffer `generate_frames` cannot walk,
+    or a frame whose SIZ does not parse (`_j2k_sample_layout` returns
+    None), has no sign to read: the decoder that runs next refuses it in
+    its own words, as it did before this gate.
+
+    Cost: a few bytes per frame, from a buffer `dcmread` already holds.
+    """
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    if ts not in J2K_SYNTAXES:
+        return None
+    try:
+        if int(ds.PixelRepresentation) != 0:
+            return None
+        counted = offset_table_frame_count(ds)
+        declared = (counted[1] if counted is not None
+                    else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
+        for frame in islice(generate_frames(ds.PixelData,
+                                            number_of_frames=declared),
+                            declared):
+            layout = _j2k_sample_layout(frame)
+            if layout is not None and layout[0]:
+                return signed_codestream_words(layout[1])
+    except Exception:  # pylint: disable=broad-except
+        # Not this gate's refusal to make: see the docstring.
+        return None
+    return None
 
 
 def _decode_frame(transfer_syntax, bitstream, ds):

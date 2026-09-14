@@ -195,7 +195,8 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   colour_conversion, convert_colour,
                                   decode_declared_frames,
                                   frame_count_mismatch_words,
-                                  offset_table_frame_count)
+                                  offset_table_frame_count,
+                                  signed_codestream_refusal)
 from .parallel import run_parallel, _resolve_strategy
 from .validation import IODValidator
 from .sidecar import SidecarManager
@@ -1729,10 +1730,23 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     would need the keyword threaded through**, or the readback would
     fail its correct files.
 
+    **A signed JPEG 2000 codestream under PixelRepresentation 0 is
+    refused first, before pydicom is asked (#524).** Pillow decodes one
+    at monochrome depths and 8-bit colour and returns the samples shifted
+    by 2^(bits-1), with no error, so ingest stored the shift where the
+    imagecodecs handler refused. The codestream's SIZ is read instead,
+    for every declared frame: `imagecodecs_handler.signed_codestream_refusal`.
+    Isocenter's own exports never carry that shape -- the writer derives
+    PixelRepresentation and the codestream's sign from one dtype (#499) --
+    so the export readback, which decodes here too, never trips it.
+
     `ts` is read *outside* the `try`, so the #281 `AttributeError` above
     can never reach the fallback.
     """
     ts = ds.file_meta.TransferSyntaxUID
+    refusal = signed_codestream_refusal(ds)
+    if refusal is not None:
+        raise RuntimeError(refusal)
     kwargs = {}
     if allow_excess_frames is not None:
         kwargs["allow_excess_frames"] = allow_excess_frames

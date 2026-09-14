@@ -71,6 +71,7 @@ def _refused_everywhere(tmp_path, ds, words, counter):
     assert got["failure"].startswith("Decompression Failed:"), got
     if counter is not None:
         assert counter["n"] > 0, "the fallback route was never taken"
+    return got
 
 
 # ---------------------------------------------------------------------------
@@ -358,3 +359,145 @@ def test_a_jpeg_lossless_stream_narrower_than_bits_stored_is_refused_not_shifted
             rows=4, cols=4, bits_allocated=32, bits_stored=12,
             pixel_representation=1),
         "cannot sign-extend a uint8 decode from BitsStored 12", None)
+
+
+# ---------------------------------------------------------------------------
+# F1e -- a signed JPEG 2000 codestream under PixelRepresentation 0 (#524)
+# ---------------------------------------------------------------------------
+
+#: The codestream's own samples: the extremes and either side of zero.
+SIGNED16 = np.array([-32768, -800, -1, 0, 32767, 5, -5, 100] * 2,
+                    np.int16).reshape(4, 4)
+SIGNED8 = np.array([-128, -80, -1, 0, 127, 5, -5, 100] * 2,
+                   np.int8).reshape(4, 4)
+
+#: The refusal's words, in full up to the reason, as ingest reports them.
+SIGNED_REFUSAL = ("the JPEG 2000 codestream is signed at precision {}, "
+                  "where PixelRepresentation 0 declares unsigned samples")
+
+
+@pytest.mark.parametrize("name, source, samples", [
+    ("mono16", SIGNED16, 1),
+    ("mono8", SIGNED8, 1),
+    ("rgb8", np.stack([SIGNED8] * 3, -1), 3),
+    ("rgb16", np.stack([SIGNED16] * 3, -1), 3),
+], ids=lambda value: value if isinstance(value, str) else "")
+def test_a_signed_codestream_under_pixel_representation_0_is_refused_at_every_door(
+        tmp_path, route, name, source, samples):
+    """M14: one refusal, before pydicom is asked, at every door (Q4).
+
+    Before: pydicom's Pillow plugin decoded monochrome at any depth and
+    8-bit colour, and returned the samples shifted by 2^(bits-1) --
+    `[-32768, -800, -1]` stored as `uint16 [0, 31968, 32767]` -- with no
+    row, at ingest and at the Instance door; only the handler refused. The
+    pinning test said so (#524's premise, partly false: ingest's answer was
+    pinned, as the divergence). 16-bit colour, which Pillow cannot decode,
+    was already refused everywhere, and is here as the control.
+
+    The words start the ingest reason, not the fallback's "imagecodecs
+    could not decode it either": the SIZ is read ahead of pydicom, so no
+    decoder is asked at all.
+    """
+    bits = 16 if source.dtype.itemsize == 2 else 8
+    words = SIGNED_REFUSAL.format(bits)
+    got = _refused_everywhere(tmp_path, dataset(
+        J2K_LOSSLESS, [_j2k(source, mct=False)], rows=4, cols=4,
+        samples=samples, bits_allocated=bits), words, None)
+    assert got["failure"].startswith(
+        f"Decompression Failed: RuntimeError: {words}"), got["failure"]
+    if route is not None:
+        # Refused before pydicom: the fallback route is never taken.
+        assert route["n"] == 0
+
+
+def test_the_signedness_gate_reads_every_frame(tmp_path):
+    """M15: frame 1's codestream is signed, frame 0's is not.
+
+    One frame's SIZ does not speak for another's samples. A gate that
+    read frame 0 alone let Pillow shift frame 1.
+    """
+    unsigned = SIGNED16.view(np.uint16)
+    _refused_everywhere(tmp_path, dataset(
+        J2K_LOSSLESS, [_j2k(unsigned), _j2k(SIGNED16)], rows=4, cols=4,
+        bits_allocated=16, frames=2), SIGNED_REFUSAL.format(16), None)
+
+
+def test_the_gate_reads_only_the_declared_frames(tmp_path, monkeypatch):
+    """Attack A13: an excess frame's sign does not refuse a file ingest truncates.
+
+    The offset table names two frames and NumberOfFrames declares one:
+    ingest keeps frame 0 and writes the #418 DATA_LOSS row. Frame 1 is
+    signed under PixelRepresentation 0, but it is not part of the image,
+    so it is not the gate's to refuse.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    unsigned = SIGNED16.view(np.uint16)
+    path = write(tmp_path, dataset(
+        J2K_LOSSLESS, [_j2k(unsigned), _j2k(SIGNED16)], rows=4, cols=4,
+        bits_allocated=16, frames=1))
+    got = at_ingest(tmp_path, path)
+    assert got["failure"] is None, got
+    assert same(got["array"], unsigned), got["array"]
+    assert [row[0] for row in got["rows"]] == ["DATA_LOSS"], got["rows"]
+
+
+def test_an_encapsulation_the_gate_cannot_walk_is_left_to_pydicom(tmp_path):
+    """Attack A12: a buffer `generate_frames` cannot parse is not the gate's.
+
+    The second item's tag is `(0000,0000)`. Through `_decode_pixels` the
+    answer is pydicom's own `ValueError` whether or not the gate swallows
+    it -- the gate would raise those same words -- so the gate is asked
+    directly: it returns None rather than raising, which is what its
+    docstring promises and what keeps a future gate from inventing its
+    own refusal for a file pydicom describes better.
+    """
+    from isocenter import imagecodecs_handler  # pylint: disable=import-outside-toplevel
+    codestream = _j2k(SIGNED16)
+    ds = dataset(J2K_LOSSLESS, [codestream], rows=4, cols=4, bits_allocated=16)
+    ds.PixelData = (b"\xfe\xff\x00\xe0\x00\x00\x00\x00"
+                    + b"\x00\x00\x00\x00"
+                    + len(codestream).to_bytes(4, "little") + codestream)
+    ds["PixelData"].is_undefined_length = True
+    assert imagecodecs_handler.signed_codestream_refusal(ds) is None
+    decoded = at_decode_pixels(write(tmp_path, ds))
+    assert isinstance(decoded, ValueError), decoded
+    assert "Unexpected tag '(0000,0000)'" in str(decoded), str(decoded)
+
+
+def test_a_signed_codestream_with_no_pixel_representation_is_refused_by_pydicom(
+        tmp_path):
+    """The gate's words cite "PixelRepresentation 0"; this file never wrote it.
+
+    A missing Type 1 element is pydicom's to name, and it does, at both
+    doors. The gate read absent as 0 until review, and refused the file
+    with a sentence about a declaration the file does not make.
+    """
+    ds = dataset(J2K_LOSSLESS, [_j2k(SIGNED16)], rows=4, cols=4,
+                 bits_allocated=16)
+    del ds.PixelRepresentation
+    path = write(tmp_path, ds)
+    for got in (at_decode_pixels(path), at_instance(path)):
+        assert isinstance(got, Exception), got
+        assert "(0028,0103) 'Pixel Representation'" in str(got), str(got)
+        assert "codestream is signed" not in str(got), str(got)
+
+
+@pytest.mark.parametrize("name, fragment", [
+    ("not-a-codestream", b"\x00\x01" * 32),
+    ("soc-siz-cut-short", b"\xff\x4f\xff\x51\x00\x29"),
+], ids=lambda value: value if isinstance(value, str) else "")
+def test_a_malformed_codestream_is_left_to_the_decoder(tmp_path, name,
+                                                       fragment):
+    """Attack A12: the gate reads a SIZ or nothing, and never raises itself.
+
+    A payload under .90 that is not a codestream, or whose SIZ is cut
+    short, has no sign to read: the gate says nothing and the decoders
+    refuse the file in their own words, as before. An `IndexError` from a
+    short read would have been a new, wordless refusal.
+    """
+    path = write(tmp_path, dataset(J2K_LOSSLESS, [fragment], rows=4, cols=4,
+                                   bits_allocated=16))
+    decoded = at_decode_pixels(path)
+    assert isinstance(decoded, Exception), decoded
+    assert not isinstance(decoded, IndexError), decoded
+    assert "codestream is signed" not in str(decoded), str(decoded)
