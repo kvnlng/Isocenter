@@ -14,6 +14,8 @@ whose entry names this test -- and needs no `TARGETS` row.
 import logging
 import sys
 
+import pytest
+
 from isocenter.logger import configure_logger
 
 LOGGER = "isocenter"
@@ -67,10 +69,16 @@ def test_reconfiguring_the_logger_closes_the_old_file_handler(tmp_path,
 
 
 class _FailsToClose(logging.Handler):
-    """A handler whose first `close()` raises, as a failed flush does."""
+    """A handler whose first `close()` raises, as a failed flush does.
 
-    def __init__(self):
+    Later calls close for real, so the `finally` below that reconfigures
+    the logger again, and `logging.shutdown` at exit, do not raise.
+    """
+
+    def __init__(self, exc=None):
         super().__init__()
+        self.exc = exc if exc is not None else OSError(
+            28, "No space left on device")
         self.raised = False
 
     def emit(self, record):
@@ -79,7 +87,7 @@ class _FailsToClose(logging.Handler):
     def close(self):
         if not self.raised:
             self.raised = True
-            raise OSError(28, "No space left on device")
+            raise self.exc
         super().close()
 
 
@@ -118,6 +126,70 @@ def test_a_handler_that_raises_on_close_does_not_abort_the_reset(tmp_path,
                 "it held may not have reached its stream: OSError: "
                 "[Errno 28] No space left on device") in text, text
         assert "still logging after a failed close" in text, text
+    finally:
+        monkeypatch.undo()
+        configure_logger()
+
+
+def test_every_failed_close_is_logged_not_only_the_first(tmp_path,
+                                                         monkeypatch):
+    """Two handlers whose `close()` raises give two WARNING lines.
+
+    Distinct errors, so each line is asserted by its own text rather
+    than counted: the mutant that logs `close_failures[:1]` keeps the
+    first and drops the second. Neither is left on the logger.
+    """
+    monkeypatch.setenv("ISOCENTER_LOG_FILE", str(tmp_path / "isocenter.log"))
+    logger = logging.getLogger(LOGGER)
+    full = _FailsToClose(OSError(28, "No space left on device"))
+    broken = _FailsToClose(OSError(5, "Input/output error"))
+    try:
+        configure_logger()
+        logger.handlers[0:0] = [full, broken]
+
+        configure_logger()
+
+        assert full.raised and broken.raised, "setup: a close() was not called"
+        assert [type(h).__name__ for h in logger.handlers] == [
+            "FileHandler", "StreamHandler"]
+        [live] = _file_handlers()
+        live.flush()
+        text = (tmp_path / "isocenter.log").read_text(encoding="utf-8")
+        for message in ("OSError: [Errno 28] No space left on device",
+                        "OSError: [Errno 5] Input/output error"):
+            assert ("A replaced _FailsToClose did not close cleanly, so "
+                    "lines it held may not have reached its stream: "
+                    + message) in text, text
+    finally:
+        monkeypatch.undo()
+        configure_logger()
+
+
+def test_an_interrupt_out_of_close_is_not_swallowed(tmp_path, monkeypatch):
+    """`KeyboardInterrupt` from a `close()` propagates out of the reset.
+
+    The guard is `except Exception`, so Ctrl+C during `Session()` still
+    stops it; widened to `BaseException`, the interrupt would be logged
+    as a close failure and the session would open. An interrupt leaves
+    the reset where it stopped -- every replaced handler stays attached,
+    those ahead of the raising one already closed, and no new handler
+    is added -- which is ordinary
+    interrupt semantics (review of #637), and the `finally` below
+    completes the reset.
+    """
+    monkeypatch.setenv("ISOCENTER_LOG_FILE", str(tmp_path / "isocenter.log"))
+    logger = logging.getLogger(LOGGER)
+    interrupting = _FailsToClose(KeyboardInterrupt())
+    try:
+        configure_logger()
+        logger.handlers.insert(0, interrupting)
+
+        with pytest.raises(KeyboardInterrupt):
+            configure_logger()
+
+        assert interrupting.raised, (
+            "setup: the raising close() was never called")
+        assert interrupting in logger.handlers
     finally:
         monkeypatch.undo()
         configure_logger()
