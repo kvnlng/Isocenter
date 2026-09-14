@@ -61,8 +61,10 @@ _PYTHON_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)
 # when #533 landed, ten times the next receiver -- so leaving it out
 # stopped grading all twenty, and a future `Session.no_such()` passed
 # the guard that exists to catch it (review of #637).
-# `test_the_public_session_alias_is_a_claim` holds it here, against the
-# set the tree test actually builds.
+# `test_the_public_session_alias_is_a_claim` holds `_ours()` to one
+# offender per part of the union -- `Session` among them -- and the
+# graded-claims floor in the tree test holds that the tree test grades
+# against a set that large; neither alone holds both.
 _RECEIVERS = frozenset({"self", "inst", "instance", "store_backend",
                         "persistence_manager", "configuration", "exporter",
                         "Session"})
@@ -165,34 +167,43 @@ def _class_names():
 def _ours():
     """The receivers whose `.name(` the tree test reads as a claim (#533).
 
-    A function so that the set the tree test grades against is the set
-    `test_the_public_session_alias_is_a_claim` pins. The fixture tests
-    pass an `ours` of their own, so nothing held how the real one was
-    built: emptied, the suite stayed green while no receiver'd mention
-    in the package was graded at all (review of #637).
+    A function so that `test_the_public_session_alias_is_a_claim` can
+    grade against the real union rather than a fixture: it holds this
+    function to one offender per part (`Session`, a `ROOTS` spelling, a
+    class name, a `_RECEIVERS` spelling), so dropping any part is red.
+    It does not hold that the tree test *calls* this function -- a
+    local `ours = frozenset()` there bypasses it -- which is what the
+    tree test's graded-claims floor is for (review of #637).
     """
     return _class_names() | ROOTS | _RECEIVERS
 
 
-def _offenders_in_text(text, defined, ours):
-    """The method names `text` claims for our API and `defined` lacks.
+def _claims_in_text(text, ours):
+    """The method names `text` claims for our API, in order of mention.
 
     A `.name(` is a claim when it has no receiver, or when its receiver
     is one of `ours` (a class name, a `ROOTS` entry or a `_RECEIVERS`
     spelling). Any other receiver is another library's object -- a
     docstring saying `str.strip()` is describing `str` -- and the name
-    is not looked for (#533). A claim is an offender when neither
-    `defined` nor `NOT_OURS` carries it.
+    is not looked for (#533).
     """
-    offenders = []
+    claims = []
     for match in _CALL_IN_TEXT.finditer(text):
         receiver, name = match.group("recv"), match.group("name")
         if receiver is not None and receiver not in ours:
             continue
-        if name in defined or name in NOT_OURS:
-            continue
-        offenders.append(name)
-    return offenders
+        claims.append(name)
+    return claims
+
+
+def _offenders_in_text(text, defined, ours):
+    """The method names `text` claims for our API and `defined` lacks.
+
+    A claim is `_claims_in_text`'s; it is an offender when neither
+    `defined` nor `NOT_OURS` carries it.
+    """
+    return [name for name in _claims_in_text(text, ours)
+            if name not in defined and name not in NOT_OURS]
 
 
 def test_every_method_named_in_a_package_string_exists():
@@ -230,6 +241,7 @@ def test_every_method_named_in_a_package_string_exists():
         f"only {len(sources)} source files found under {PACKAGE}; the "
         "walk is broken and this test would otherwise pass vacuously")
     offenders = []
+    graded = 0
     for path in sources:
         tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
         for node in ast.walk(tree):
@@ -237,10 +249,23 @@ def test_every_method_named_in_a_package_string_exists():
                 continue
             if not isinstance(node.value, str):
                 continue
+            graded += len(_claims_in_text(node.value, ours))
             for name in _offenders_in_text(node.value, defined, ours):
                 offenders.append((
                     path.relative_to(REPO).as_posix(), node.lineno, name,
                     node.value.strip()[:120]))
+
+    # A floor on what was graded, counted against *this* test's `ours`.
+    # The alias pin below holds `_ours()`, but no fixture can see this
+    # test's own `ours = _ours()` line: rewritten as `frozenset()`, or as
+    # a union missing a part, the walk grades fewer claims, finds no
+    # offender among them, and passes (review of #637). 83 claims when
+    # the floor was set; each part of the union dropped left 16-66.
+    # Lower it only for a string that was deleted, never to pass.
+    assert graded >= 75, (
+        f"only {graded} method claims graded across the package's "
+        "strings; the set of receivers read as ours has shrunk, and this "
+        "test would otherwise pass while checking almost nothing")
 
     assert not offenders, (
         "these strings name a method the package does not define, so a "
@@ -480,17 +505,24 @@ def test_an_ours_receiver_is_a_claim():
 
 
 def test_the_public_session_alias_is_a_claim():
-    """`Session.no_such()` is graded against the set the tree test builds.
+    """`_ours()` reads one fake method per part of its union as a claim.
 
-    Against the real `_defined_names()` and `_ours()`, not the fixtures:
-    the two ways this went quiet are `Session` missing from the set (it
-    is an import alias, not a `ClassDef`) and the set built as nothing
-    at all, and a fixture `ours` is blind to both. `Session.audit()`
-    beside it is the negative half, so a check that made every name an
-    offender does not pass either.
+    Against the real `_defined_names()` and `_ours()`, not the fixtures,
+    which pass an `ours` of their own and are blind to how the real one
+    is built. One offender per part -- `Session` (an import alias, not a
+    `ClassDef`, and the part that went missing once), `session` from
+    `ROOTS`, `DicomSession` from the class names, `inst` from
+    `_RECEIVERS` -- so `_ours()` emptied, reduced to `{"Session"}`, or
+    missing any one part returns a different list. `str.strip()` is the
+    receiver that is not ours and `Session.audit()` a defined name, the
+    two negative halves. This holds the function, not the tree test's
+    use of it: that is the graded-claims floor's job.
     """
-    assert _offenders_in_text("run Session.no_such() after Session.audit()",
-                              _defined_names(), _ours()) == ["no_such"]
+    text = ("Session.no_such_a() session.no_such_b() "
+            "DicomSession.no_such_c() inst.no_such_d() str.strip() "
+            "Session.audit()")
+    assert _offenders_in_text(text, _defined_names(), _ours()) == [
+        "no_such_a", "no_such_b", "no_such_c", "no_such_d"]
 
 
 def test_a_runtime_message_is_read_too():
