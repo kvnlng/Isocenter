@@ -53,8 +53,19 @@ _PYTHON_FENCE = re.compile(r"```python\n(.*?)```", re.DOTALL)
 # instance, a store or an exporter. A receiver outside this set and the
 # class names is another library's object, and its method is not looked
 # for here.
+#
+# `Session` is here because it is not a class name: it is bound by
+# `from .session import DicomSession as Session`, an import alias
+# `_class_names()` never sees. It is also the package's own public
+# spelling -- twenty `Session.<method>(` mentions across eight modules
+# when #533 landed, ten times the next receiver -- so leaving it out
+# stopped grading all twenty, and a future `Session.no_such()` passed
+# the guard that exists to catch it (review of #637).
+# `test_the_public_session_alias_is_a_claim` holds it here, against the
+# set the tree test actually builds.
 _RECEIVERS = frozenset({"self", "inst", "instance", "store_backend",
-                        "persistence_manager", "configuration", "exporter"})
+                        "persistence_manager", "configuration", "exporter",
+                        "Session"})
 
 # Methods named correctly in prose that belong to the standard library
 # or a third-party package, not to Isocenter, and that a string spells
@@ -151,6 +162,18 @@ def _class_names():
     return names
 
 
+def _ours():
+    """The receivers whose `.name(` the tree test reads as a claim (#533).
+
+    A function so that the set the tree test grades against is the set
+    `test_the_public_session_alias_is_a_claim` pins. The fixture tests
+    pass an `ours` of their own, so nothing held how the real one was
+    built: emptied, the suite stayed green while no receiver'd mention
+    in the package was graded at all (review of #637).
+    """
+    return _class_names() | ROOTS | _RECEIVERS
+
+
 def _offenders_in_text(text, defined, ours):
     """The method names `text` claims for our API and `defined` lacks.
 
@@ -198,7 +221,7 @@ def test_every_method_named_in_a_package_string_exists():
     wider variant without pricing that in.
     """
     defined = _defined_names()
-    ours = _class_names() | ROOTS | _RECEIVERS
+    ours = _ours()
     sources = _package_sources()
     # The walk must find something, or this passes while checking
     # nothing -- a package rename or a move under `src/` would empty it
@@ -454,6 +477,20 @@ def test_an_ours_receiver_is_a_claim():
     """`session.no_such()` names one of our objects, so it is checked."""
     assert _offenders_in_text("then session.no_such() and Session.audit()",
                               _FIXTURE_DEFINED, _FIXTURE_OURS) == ["no_such"]
+
+
+def test_the_public_session_alias_is_a_claim():
+    """`Session.no_such()` is graded against the set the tree test builds.
+
+    Against the real `_defined_names()` and `_ours()`, not the fixtures:
+    the two ways this went quiet are `Session` missing from the set (it
+    is an import alias, not a `ClassDef`) and the set built as nothing
+    at all, and a fixture `ours` is blind to both. `Session.audit()`
+    beside it is the negative half, so a check that made every name an
+    offender does not pass either.
+    """
+    assert _offenders_in_text("run Session.no_such() after Session.audit()",
+                              _defined_names(), _ours()) == ["no_such"]
 
 
 def test_a_runtime_message_is_read_too():
