@@ -3439,9 +3439,12 @@ class DicomSession:
             sqlite3.Error: With `persist=True`, the store refused the
                 write (#599). The instances already carry the new token in
                 memory, marked modified, so a later `save()` writes them;
-                the store holds none of them, and one `ERROR` audit row
-                says so. Until 0.9.8 this was logged and the lock returned
-                as if the tokens had been stored.
+                this write stored none of them, and one `ERROR` audit row
+                says so. The row speaks for the write, not the store, which
+                keeps whatever an earlier write put there. Given a list or
+                a report, the batch form's `sqlite3.Error` applies. Until
+                0.9.8 this was logged and the lock returned as if the
+                tokens had been stored.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -4006,11 +4009,15 @@ class DicomSession:
                 `auto_persist_chunk_size` per chunk), after one `ERROR`
                 audit row (#599). **Nothing is rolled back across writes**:
                 patients written before the failure stay locked in the
-                store, the failed write's patients hold their tokens in
-                memory only (a later `save()` writes them), and the
-                patients after it in Patient ID order are not locked. One
-                write is one transaction, so the failed chunk stores none
-                of its instances.
+                store, the failed write stored none of its instances (they
+                hold their new tokens in memory, marked modified, and a
+                later `save()` writes them), and the patients after it in
+                Patient ID order are not locked. One write is one
+                transaction. With both `persist=True` and
+                `auto_persist_chunk_size`, each instance is written with
+                its patient and again with its chunk, so where a chunk
+                write fails, its instances were already stored with their
+                patients.
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
