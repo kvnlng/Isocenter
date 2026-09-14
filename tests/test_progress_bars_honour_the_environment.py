@@ -188,6 +188,14 @@ def _tqdm_sites(sources=None):
             # usual spelling (review of #589).
             if isinstance(node, ast.ImportFrom) and _is_tqdm(node.module):
                 named = f"from {node.module} import"
+            # The class re-exported by another module is the same
+            # undisabled bar: `from .parallel import tqdm` binds exactly
+            # what `parallel.progress_bar` wraps, and it is the name the
+            # tests patch, so it is the one a contributor sees (review of
+            # #589, round 2).
+            elif isinstance(node, ast.ImportFrom) and any(
+                    alias.name == "tqdm" for alias in node.names):
+                named = f"from {node.module or '.'} import tqdm"
             elif isinstance(node, ast.Import) and any(
                     _is_tqdm(alias.name) for alias in node.names):
                 named = "import tqdm"
@@ -203,6 +211,9 @@ def _tqdm_sites(sources=None):
     "import tqdm",
     "import tqdm.auto",
     "import tqdm.notebook as tn",
+    "from .parallel import tqdm",
+    "from .parallel import (progress_bar, tqdm)",
+    "from isocenter.parallel import tqdm as t",
 ])
 def test_the_detector_sees_every_spelling_of_a_tqdm_import(spelling):
     """The guard below is only as good as what it recognises. It knew

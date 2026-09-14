@@ -711,8 +711,8 @@ def _decode_with_pydicom(ds):
     UID (#281's header-less population), or one no decoder implements --
     this asks `ds.pixel_array` instead**, which refuses in pydicom's own
     words. Those words reach the caller through `get_pixel_data()`'s
-    `Lazy load failed for <path>: ...`, and they are not to be reworded
-    by accident here.
+    `Lazy load failed for instance <uid>: <Type>: ...`, and they are not
+    to be reworded by accident here.
 
     Returns:
         ``(array, photometric)``, `photometric` being the decoder meta's
@@ -1188,8 +1188,10 @@ class Instance(DicomItem):
                 missing codecs, or a pixel element the reader could not
                 decode. Also, from a file, when an encapsulated pixel
                 element's offset table names a different number of frames
-                from NumberOfFrames -- "Lazy load failed for <path>:
-                <table> names N frames; NumberOfFrames declares M" (#418).
+                from NumberOfFrames -- "Lazy load failed for instance
+                <uid>: RuntimeError: <table> names N frames;
+                NumberOfFrames declares M" (#418). The message names the
+                instance, never the source file.
                 From the sidecar, when a descriptor written since the
                 loader was built asks for a reading the stored bytes
                 cannot satisfy (BitsAllocated 16 -> 8, or Rows x Columns
@@ -1312,7 +1314,8 @@ class Instance(DicomItem):
                     # would be hidden behind whatever pydicom said (#418).
                     #
                     # The wording trap. This rides the outer `except`
-                    # into "Lazy load failed for <path>: ...", and on the
+                    # into "Lazy load failed for instance <uid>:
+                    # RuntimeError: ...", and on the
                     # way it passes two message matches: "no pixel data"
                     # (just below) turns into `return None`, a silent
                     # nothing, and "decompress" / "missing dependencies"
