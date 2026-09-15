@@ -10,9 +10,11 @@ place under the same report, and a batch reported the patient secured
 beside the ones it did lock. Nothing recoverable was written, and the
 session's story said it was (review of #633 round 3, P-4).
 
-The plan now refuses it, in P6 words -- the tags, never a patient or a
-value -- and the batch numbers it and locks nobody, as it does every
-refusal (#537). Two boundaries, both pinned here:
+The plan now refuses it, in P6 words -- the tags and a count of
+instances, never a patient or a value -- and the batch numbers it and
+locks nobody, as it does every refusal (#537). Since #583 the record is
+captured from every instance, so the refusal counts the instances with
+nothing to stash. Two boundaries, both pinned here:
 
 - **A patient with no instances is not refused.** Its report is already
   `0 instances secured`, which is true whatever the record holds.
@@ -41,22 +43,21 @@ SEQ = "0400,0500"
 ABSENT = "0010,1000"   # Other Patient IDs: no hand-built instance here carries it
 
 
-def nothing_to_stash(tags):
-    """The #638 refusal for `tags_to_lock`. "This patient's first
-    instance", not "this patient": the plan captures from the first
-    instance only, so a patient whose later study carries the tag was told
-    it held none, and advised to name a tag its instances carry -- the tag
-    it had named (review of #640, P-2)."""
+def nothing_to_stash(tags, count=1, total=1):
+    """The #638 refusal for `tags_to_lock`, counted per instance since
+    #583: `count` of the patient's `total` instances hold none of the
+    tags. Until #583 it said "this patient's first instance", because the
+    plan captured from the first instance only (review of #640, P-2)."""
     if not tags:
         return ("lock_identities: tags_to_lock names no tag, so there is nothing "
                 "to stash and the lock would secure nothing. Name a tag this "
-                "patient's first instance carries; the token this call would have "
+                "patient's instances carry; the token this call would have "
                 "written is unchanged.")
-    return ("lock_identities: this patient's first instance holds no value in "
-            f"{', '.join(tags)}, every tag tags_to_lock names, so there is "
-            "nothing to stash and the lock would secure nothing. Name a tag this "
-            "patient's first instance carries; the token this call would have "
-            "written is unchanged.")
+    return (f"lock_identities: {count} of {total} instances of this patient hold "
+            f"no value in {', '.join(tags)}, every tag tags_to_lock names, so "
+            "there is nothing to stash on them and the lock would secure nothing "
+            "there. Name tags every instance of this patient carries; the token "
+            "this call would have written is unchanged.")
 
 
 @pytest.fixture(autouse=True)
@@ -107,19 +108,21 @@ def test_a_lock_with_nothing_to_stash_is_refused_and_writes_nothing(tmp_path, ta
         patient = _hand_patient(session, instances=3)
         with pytest.raises(RuntimeError) as raised:
             session.lock_identities(PID_A, persist=True, tags_to_lock=tags)
-        assert str(raised.value) == nothing_to_stash(tags)
+        assert str(raised.value) == nothing_to_stash(tags, 3, 3)
         assert all(SEQ not in inst.sequences for inst in _instances(patient))
         for secret in (PID_A, NAME_A):
             assert secret not in str(raised.value)
 
 
-def test_a_patient_whose_later_study_carries_the_tag_is_told_of_its_first_instance(
+def test_a_patient_whose_later_study_carries_the_tag_is_told_how_many_instances_hold_none(
         tmp_path):
     """The shape P-2 of the review of #640 measured: study 1's instance
-    lacks the tag and study 2's carries it. The plan reads the first
-    instance, so the lock is refused, and the refusal says what it read --
-    the first instance -- rather than that the patient holds no value.
-    Nothing is written. Per-instance capture is #583."""
+    lacks the tag and study 2's carries it. Refused, as it was, and since
+    #583 the refusal counts the instances holding none (1 of 2) rather
+    than naming the first instance, which is no longer what the record is
+    captured from. Nothing is written. The reverse shape -- study 2 lacking
+    the tag -- was accepted until #583 and is
+    `test_one_token_per_value_set.py`'s."""
     with _session(tmp_path) as session:
         patient = _hand_patient(session)
         later = _hand_patient(session, pid="PAT-638-LATER", extra={ABSENT: "OTHER-A"})
@@ -127,7 +130,7 @@ def test_a_patient_whose_later_study_carries_the_tag_is_told_of_its_first_instan
         patient.studies.extend(later.studies)
         with pytest.raises(RuntimeError) as raised:
             session.lock_identities(PID_A, tags_to_lock=[ABSENT])
-        assert str(raised.value) == nothing_to_stash([ABSENT])
+        assert str(raised.value) == nothing_to_stash([ABSENT], 1, 2)
         assert all(SEQ not in inst.sequences for inst in _instances(patient))
         assert "OTHER-A" not in str(raised.value)
 
