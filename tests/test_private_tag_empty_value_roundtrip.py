@@ -39,7 +39,7 @@ if the export encoder is ever taught to write a zero-length element,
 both paths gain it at once, where a skip destroys the information for
 good. The export writer already keeps a zero-length element rather
 than dropping it, for the same reason:
-`value = b""` at io_handlers.py line 1959.
+`value = b""` at io_handlers.py line 1971.
 
 **The file now carries the tag on both paths (#344)**, as a zero-length
 element under the VR the source recorded for it -- or under `UN` where no

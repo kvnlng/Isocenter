@@ -1698,7 +1698,9 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
             big-endian. False is a no-op, whatever the value.
         unconverted (list or None): Collects `(kind, path, tag, vr, length,
             word)` for what could not be converted whole; `kind` is `"un"`,
-            `"ragged"` or `"no-bits"`. See `_byte_order_words`.
+            `"ragged"`, `"no-bits"` or `"ob"`, and an `"ob"` entry carries
+            the declared bits where the others carry a word size. See
+            `_byte_order_words`.
         waveform_bits: Waveform Bits Allocated of the enclosing Waveform
             Sequence item, read only for `_SAMPLE_TAGS`.
 
@@ -1714,9 +1716,17 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
     value = bytes(value)
     if tag in _SAMPLE_TAGS:
         # Keyed on the tag before the VR: a sample is as wide as the
-        # waveform says, whatever word its wire VR implies.
+        # waveform says, whatever word its wire VR implies -- except `OB`,
+        # which PS3.5 6.2 gives no byte order at all, so nothing the
+        # waveform declares can establish one (owner ruling, 2026-09-15).
+        # An 8-bit sample is a byte either way, and converts to itself.
         word = (_SAMPLE_BYTES.get(waveform_bits)
                 if isinstance(waveform_bits, int) else None)
+        if vr == 'OB' and word not in (None, 1):
+            if unconverted is not None:
+                unconverted.append(
+                    ("ob", path, tag, vr, len(value), waveform_bits))
+            return value
         if word is None:
             if unconverted is not None:
                 unconverted.append(
@@ -1747,7 +1757,9 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     A retained value in words wider than a byte, read from a big-endian
     dataset, is stored little-endian: `OW` in 2-byte words, `OL` and `OF`
     in 4, `OD` and `OV` in 8, and a Channel Minimum or Maximum Value in
-    samples of Waveform Bits Allocated (#657). See `_stored_byte_order`.
+    samples of Waveform Bits Allocated (#657). An `OB` value is never
+    converted, whatever its tag: PS3.5 6.2 gives it no byte order. See
+    `_stored_byte_order`.
 
     Skipping is not the same as routing, and since #151 neither is the
     same as a VR. `PixelData` and `WaveformData` are extracted and
@@ -2928,6 +2940,13 @@ def _byte_order_words(kind, path, tag, vr, length, word) -> str:
     if kind == "no-bits":
         return (f"{head} with no usable Waveform Bits Allocated, so the "
                 f"sample width and byte order are unknown. {kept}")
+    if kind == "ob":
+        # `word` carries the declared bits for this kind: an OB value has
+        # no word, which is the whole reason for the row.
+        return (f"{head} whose value representation is OB, which has no "
+                f"byte order, while the waveform declares {word} bits a "
+                f"sample, so the sample's byte order cannot be "
+                f"established. {kept}")
     return (f"{head} are not a whole number of {word}-byte words. The "
             f"whole words were converted to little-endian; the trailing "
             f"{length % word} byte(s) were kept as read.")

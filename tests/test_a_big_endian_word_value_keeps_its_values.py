@@ -376,7 +376,6 @@ def _channel(inst, group=0):
 @pytest.mark.parametrize("bits, interpretation, vr, code, low, high", [
     pytest.param(16, "SS", "OW", "i2", -200, 3000, id="16-OW"),
     pytest.param(32, "SL", "OW", "i4", -200, 70000, id="32-OW"),
-    pytest.param(16, "SS", "OB", "i2", -200, 3000, id="16-OB"),
 ])
 def test_channel_minimum_and_maximum_are_one_sample_wide(
         tmp_path, bits, interpretation, vr, code, low, high):
@@ -411,6 +410,51 @@ def test_channel_minimum_and_maximum_are_one_sample_wide(
         assert np.frombuffer(attrs["5400,0110"], "<" + code).tolist() == [low]
         assert np.frombuffer(attrs["5400,0112"], "<" + code).tolist() == [high]
     assert _rows(db) == []
+
+
+@pytest.mark.parametrize("tag, where", [
+    pytest.param(0x54000110, "5400,0100[0] > 003a,0200[0]", id="channel-min"),
+    pytest.param(0x54001010, "5400,0100[0]", id="samples"),
+])
+def test_an_ob_sample_element_is_kept_and_said(tmp_path, tag, where):
+    """`OB` has no byte order, so an `OB` sample element is kept as read.
+
+    Owner ruling, 2026-09-15: the VR governs the byte order, and PS3.5 6.2
+    gives `OB` none, so the enclosing waveform's Bits Allocated does not
+    convert one. C.10.9.1.4.2 reserves `OB` for 8-bit samples, which a
+    conversion would leave alone anyway, so an `OB` element under a wider
+    Bits Allocated is off-spec either way: the bytes are kept and the row
+    says why. An 8-bit `OB` element still draws no row -- a byte has no
+    order -- which `test_what_has_no_byte_order_is_unchanged` pins.
+    """
+    ds = _dataset()
+    samples = np.array([0, 1, 2, 3], ">i2").tobytes()
+    channel = ([(0x54000110, "OB", b"\xff\x38")]
+               if tag == 0x54000110 else ())
+    item = _waveform_item(16, "SS", samples, channel=channel)
+    if tag == 0x54001010:
+        item[0x54001010].VR = "OB"
+    ds.WaveformSequence = Sequence([item])
+    folder = _save(tmp_path, ds)
+    db = str(tmp_path / "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        if tag == 0x54000110:
+            assert _channel(inst)["5400,0110"] == b"\xff\x38"
+        else:
+            assert inst.get_waveform_bytes() == samples
+
+    tag_words = "5400,0110" if tag == 0x54000110 else "5400,1010"
+    length = 2 if tag == 0x54000110 else 8
+    assert _rows(db) == [
+        ("WARNING",
+         f"Standard tag {tag_words} (OB) at {where}: {length} bytes read "
+         "from a big-endian source whose value representation is OB, which "
+         "has no byte order, while the waveform declares 16 bits a sample, "
+         "so the sample's byte order cannot be established. The bytes were "
+         "kept in the byte order they were read in."),
+    ]
 
 
 def test_channel_minimum_with_no_waveform_bits_allocated_is_kept_and_said(
