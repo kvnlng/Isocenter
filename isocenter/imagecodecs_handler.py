@@ -720,6 +720,61 @@ def _jpeg_frame_type(codestream) -> Optional[int]:
     return None
 
 
+def _jpeg_precision(codestream) -> Optional[int]:
+    """The sample precision P of the first SOFn frame header, or None (#622).
+
+    ITU-T T.81 B.2.2: the frame header is the marker, its two-byte length
+    Lf, then P, one byte -- the same layout `_jpegls_precision` reads out
+    of SOF55. Reached by the walk `_jpeg_frame_type` takes, so a COM or
+    APPn payload holding `FF C3` is stepped over. None when no frame
+    header comes before the scan, or the data ends first.
+    """
+    data = bytes(codestream)
+    if data[:2] != b"\xff\xd8":
+        return None
+    for marker, pos in _jpeg_marker_segments(data, 2):
+        if 0xC0 <= marker <= 0xCF and marker not in _JPEG_NOT_FRAME_HEADERS:
+            return data[pos + 4] if pos + 4 < len(data) else None
+    return None
+
+
+#: The syntaxes whose frames are ITU-T T.81 streams, whose SOFn frame
+#: header `_jpeg_precision` reads: JPEG Baseline and Extended, and JPEG
+#: Lossless.
+T81_SYNTAXES = frozenset({JPEGBaseline, JPEGExtended, JPEGLossless,
+                          JPEGLosslessSV1})
+
+
+def _stream_precision(transfer_syntax, frame) -> Tuple[Optional[str], Optional[int]]:
+    """``(stream, precision)`` the frame's own header states, or ``(None, None)`` (#622).
+
+    One reader per family, one name per family, so ingest's HighBit row
+    and its precision row name a stream the same way: a JPEG 2000
+    codestream's SIZ (`_j2k_sample_layout`), a JPEG-LS SOF55
+    (`_jpegls_precision`), and a T.81 SOFn (`_jpeg_precision`) -- "JPEG
+    Lossless stream" under `.57`/`.70`, "JPEG stream" under `.50`/`.51`.
+    ``(None, None)`` for any other syntax, an empty frame, or a header
+    that does not parse.
+    """
+    if not frame:
+        return None, None
+    if transfer_syntax in J2K_SYNTAXES:
+        layout = _j2k_sample_layout(frame)
+        return ("JPEG 2000 codestream", layout[1]) if layout else (None, None)
+    if transfer_syntax in JPEGLS_SYNTAXES:
+        precision = _jpegls_precision(frame)
+        stream = "JPEG-LS stream"
+    elif transfer_syntax in (JPEGLossless, JPEGLosslessSV1):
+        precision = _jpeg_precision(frame)
+        stream = "JPEG Lossless stream"
+    elif transfer_syntax in (JPEGBaseline, JPEGExtended):
+        precision = _jpeg_precision(frame)
+        stream = "JPEG stream"
+    else:
+        return None, None
+    return (stream, precision) if precision is not None else (None, None)
+
+
 def _j2k_sample_layout(codestream) -> Optional[Tuple[bool, int]]:
     """The `(is_signed, precision)` a JPEG 2000 codestream declares (#460).
 
@@ -869,8 +924,16 @@ def _sign_extend(arr, ds, precision=None):
 
     `width` is `precision` when the caller passes one, and BitsStored
     otherwise. `_decode_frame` passes a JPEG-LS frame's own precision
-    (#478) and nothing for JPEG Lossless, which pydicom reads by
-    BitsStored too (`_correct_unused_bits`).
+    (#478). For JPEG Lossless it passes the stream's precision only when
+    that is **wider** than BitsStored (#622) -- PS3.5 8.2.1 has the
+    stream's own characteristics control the decompression where they
+    contradict the Data Elements -- and nothing otherwise, so a
+    conformant stream is extended from BitsStored as #446 read it:
+    `max(precision, BitsStored)`. A stream narrower than BitsStored keeps
+    that reading too, and whether it should extend from its own
+    precision, as JPEG-LS does, is not decided here.
+    `io_handlers._decode_pixels` calls this on pydicom's route for the
+    same wider streams, after asking pydicom not to mask them.
 
     Called for .57/.70/.80/.81 unconditionally, and for JPEG 2000 in one
     case only: an unsigned codestream under PixelRepresentation 1, where
@@ -1138,9 +1201,17 @@ def _decode_frame(transfer_syntax, bitstream, ds):
         # not enough.
         if len(bitstream) % 2:
             bitstream = bytes(bitstream) + b"\x00"
+        # Extended from the stream's own precision where it is wider than
+        # BitsStored (#622), and from BitsStored otherwise: the wider of
+        # the two. From BitsStored 8 a 12-bit -2048 read 0. None, not
+        # BitsStored, for the narrower case, so #446's reading and its
+        # refusal words ("from BitsStored") are the ones that run.
+        precision = _jpeg_precision(bitstream)
+        bits_stored = int(getattr(ds, "BitsStored", 0) or 0)
         return _sign_extend(
             _in_declared_container(imagecodecs.ljpeg_decode(bitstream), ds),
-            ds)
+            ds, precision if precision is not None
+            and precision > bits_stored else None)
     if transfer_syntax in [JPEGBaseline, JPEGExtended]:
         # Reached through the fallback since #604, monochrome only
         # (`io_handlers._FALLBACK_JPEG`): 12-bit JPEG Extended, which

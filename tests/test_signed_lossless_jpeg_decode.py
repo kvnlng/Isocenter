@@ -358,18 +358,24 @@ def test_fill_bytes_ahead_of_the_frame_header_do_not_hide_its_precision(
 
 
 @pytest.mark.parametrize("ts", [LJPEG, LJPEG_SV1])
-def test_a_lossless_jpeg_stream_wider_than_bits_stored_still_reads_by_bits_stored(
+def test_a_lossless_jpeg_stream_wider_than_bits_stored_reads_by_its_precision(
         doors, ts):
-    """S1g: the ruling is JPEG-LS's; JPEG Lossless keeps BitsStored.
+    """S1g: JPEG Lossless now follows JPEG-LS's ruling where the stream is wider.
 
     A precision-16 SOF3 stream holding a 12-bit pattern under BitsStored
-    12. pydicom reads JPEG Lossless by BitsStored (`_correct_unused_bits`,
-    not the JPEG-LS precision branch of `_apply_sign_correction`) and
-    returns -800 (measured with pylibjpeg-libjpeg), so this does too.
+    12. Until #622 this read by BitsStored, -800, as pydicom with
+    pylibjpeg-libjpeg does by default (its `_correct_unused_bits` mask).
+    #622 (owner ruling Q2, OQ1 option A) reads a stream wider than
+    BitsStored by the stream's precision on every route -- pydicom asked
+    with `correct_unused_bits=False`, as JPEG-LS's #478 already read its
+    precision-16 streams -- so the 16-bit stream's samples are 3296 for
+    -800's pattern, positive, at every door. A stream at or below
+    BitsStored keeps #446's reading (the S1 tests above).
     """
     codestream = imagecodecs.ljpeg_encode(_pattern(SIGNED[12], 12),
                                           bitspersample=16)
-    _assert_reads(doors(_dataset(ts, codestream, (16, 16), 12)), SIGNED[12])
+    _assert_reads(doors(_dataset(ts, codestream, (16, 16), 12)),
+                  _pattern(SIGNED[12], 12).astype(np.int16))
 
 
 # ---------------------------------------------------------------------------

@@ -1387,7 +1387,7 @@ def test_the_gate_refuses_a_syntax_it_does_not_name(monkeypatch):
         dropped = []
         carried = io_handlers._decode_nested_pixels(
             ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped,
-            None, offset_tables=[], high_bits=[])
+            None, offset_tables=[], high_bits=[], precisions=[])
         return carried, dropped
 
     carried, dropped = decode(_CARRIABLE_TRANSFER_SYNTAXES)
@@ -1739,7 +1739,7 @@ def test_decode_nested_pixels_keeps_facts_only_for_a_carried_icon(icon,
     dropped, high_bits = [], []
     got = io_handlers._decode_nested_pixels(
         ds, [((), "7fe0,0010", "OW", icon())], dropped, None,
-        offset_tables=[], high_bits=high_bits)
+        offset_tables=[], high_bits=high_bits, precisions=[])
 
     assert len(got) == carried
     assert len(dropped) == 1 - carried, dropped
@@ -1967,7 +1967,7 @@ def test_a_native_file_lends_its_own_syntax_to_its_icon(tmp_path):
     dropped = []
     carried = io_handlers._decode_nested_pixels(
         ds, [((), "7fe0,0010", "OW", ds.IconImageSequence[0])], dropped,
-        None, offset_tables=[], high_bits=[])
+        None, offset_tables=[], high_bits=[], precisions=[])
 
     assert dropped == []
     assert np.frombuffer(carried[0][3], "=u2").tolist() == VALUES12.tolist()
@@ -1983,11 +1983,11 @@ def test_an_encapsulated_icon_still_borrows_the_files_syntax():
     dropped = []
     carried = io_handlers._decode_nested_pixels(
         ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped, None,
-        offset_tables=[], high_bits=[])
+        offset_tables=[], high_bits=[], precisions=[])
     assert (carried, dropped) == ([], [("7fe0,0010", "OB")])
 
     ds.file_meta.TransferSyntaxUID = JPEGBaseline8Bit
     carried = io_handlers._decode_nested_pixels(
         ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped, None,
-        offset_tables=[], high_bits=[])
+        offset_tables=[], high_bits=[], precisions=[])
     assert len(carried) == 1
