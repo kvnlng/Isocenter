@@ -24,7 +24,10 @@ addendum, section 7). What each ruling pins here:
 - **A token written before 0.9.8** that one lock shared across studies
   (non-blank values outside group 0010, not stamped by this store) is
   restored in full on the first study that carries it and as group 0010
-  only elsewhere (Q-B b2), with a WARNING.
+  only elsewhere (Q-B b2), with a WARNING that names no release. On an
+  export re-ingested whole, "first" is the earliest-dated study; on one
+  study re-ingested alone, the token is restored in full, silently
+  (residual iv). Both are pinned as ruled (review of #650, F-1 and M-1).
 - **Tokens that disagree** on Patient's Name or Patient ID leave each
   instance its own; the patient takes the first token's, with a WARNING
   (Q-F f1).
@@ -65,13 +68,16 @@ def tokenless(count, total):
 
 
 def old_shared(count, total):
-    """The WARNING a restore logs for holders of a pre-0.9.8 token shared
-    across studies, outside the first study carrying it (Q-B b2)."""
+    """The WARNING a restore logs for holders of an unstamped token shared
+    across studies, outside the first study carrying it (Q-B b2). It names
+    no release: a store never loads the stamp from a file, so a token this
+    release wrote, exported and re-ingested, reads the same (review of
+    #650, F-2; the marker is #652)."""
     return (f"{count} of {total} instances of this patient carry an identity "
-            "token written before 0.9.8 and shared across studies, which holds "
-            "one study's values, so outside the first study carrying it they "
-            "took only its patient-level identifiers (group 0010), and their "
-            "other locked identifiers keep what anonymize() left (#583).")
+            "token shared across studies that this store did not stamp, which "
+            "may hold one study's values, so outside the first study carrying "
+            "it they took only its patient-level identifiers (group 0010), and "
+            "their other locked identifiers keep what anonymize() left (#583).")
 
 
 def disagree(count, total):
@@ -352,6 +358,24 @@ def test_a_tag_a_pass_emptied_on_one_study_is_refused(tmp_path):
         assert all(SEQ not in i.sequences for i in _all(by_study))
 
 
+def test_a_blank_name_on_a_later_study_is_refused_under_a_rule_that_blanks_it(tmp_path):
+    """The blank-name refusal per value-set (review of #650, F-3: the
+    deviation #650 listed). Study 2's instance holds a blank Patient's Name
+    under an EMPTY rule on it, study 1's the name: refused, and nothing
+    written. Kills MR11 (the refusal asked of the first value-set only,
+    which holds the name)."""
+    with _session(tmp_path) as session:
+        _, by_study = _patient(session, [[{"0008_0050": ACC_ONE}],
+                                         [{"0008_0050": ACC_TWO, "name": ""}]])
+        session.configuration.phi_tags = {"0010,0010": {"action": "EMPTY"}}
+        with pytest.raises(RuntimeError) as raised:
+            session.lock_identities(PID)
+        assert "holds no value in 0010,0010 under a rule of EMPTY on it" \
+            in str(raised.value)
+        assert all(SEQ not in i.sequences for i in _all(by_study))
+        _value_free(str(raised.value))
+
+
 def test_an_instance_with_nothing_to_stash_refuses_the_lock(tmp_path):
     """T31, #638 per instance (Q-D d1). Study 1 carries Other Patient IDs,
     study 2 does not: refused, counted, naming the tags only, and nothing
@@ -442,6 +466,57 @@ def test_a_relock_whose_first_holder_differs_from_a_097_token_is_refused(tmp_pat
             in str(raised.value)
 
 
+def test_a_narrower_relock_that_would_lose_a_later_studys_value_is_refused(tmp_path):
+    """The #537 loss check asks each token of its own first holder, not the
+    patient's first instance (review of #650, F-3). Two studies locked with
+    their own tokens; study 2's Accession Number is then gone from its
+    instance, and a re-lock naming only the name and ID would leave
+    `ACC-TWO` in no token. Refused, and both tokens stand. Kills MR26 (the
+    check reads the patient's first instance, which still holds
+    `ACC-ONE`, and the re-lock is accepted)."""
+    with _session(tmp_path) as session:
+        _, by_study = _patient(session, [[{"0008_0050": ACC_ONE}],
+                                         [{"0008_0050": ACC_TWO}]])
+        session.lock_identities(PID)
+        before = _tokens(session, _all(by_study))
+        del by_study[1][0].attributes[ACC]
+        with pytest.raises(RuntimeError) as raised:
+            session.lock_identities(PID, tags_to_lock=TAGS)
+        assert "holding 0008,0050, and this lock would replace it with nothing" \
+            in str(raised.value)
+        _value_free(str(raised.value))
+        assert _tokens(session, _all(by_study)) == before
+        assert [_held(session, insts[0])[ACC] for insts in by_study] == [ACC_ONE, ACC_TWO]
+
+
+def test_unstamped_tokens_of_this_release_are_each_judged_by_their_own_first_holder(
+        tmp_path):
+    """#607 asks each unstamped token of its own first holder (review of
+    #650, F-3). Two studies locked with their own tokens, the stamps then
+    gone -- how an export of this release loads once re-ingested, since a
+    store never reads the stamp from a file. The re-lock is accepted, each
+    holder still holding what its token holds; an edit on study 2's
+    instance is then refused as a token this store did not write. Kills
+    MR27 (#607 reads the patient's first instance: token 2's `ACC-TWO` is
+    judged against `ACC-ONE`, and the unedited re-lock is refused)."""
+    with _session(tmp_path) as session:
+        _, by_study = _patient(session, [[{"0008_0050": ACC_ONE}],
+                                         [{"0008_0050": ACC_TWO}]])
+        session.lock_identities(PID)
+        for inst in _all(by_study):
+            inst._locked_token = None
+        session.lock_identities(PID)
+        assert [_held(session, insts[0])[ACC] for insts in by_study] == [ACC_ONE, ACC_TWO]
+        for inst in _all(by_study):
+            inst._locked_token = None
+        by_study[1][0].set_attr(ACC, "EDITED")
+        with pytest.raises(RuntimeError) as raised:
+            session.lock_identities(PID)
+        assert "did not come from this store, so the value it holds in 0008,0050" \
+            in str(raised.value)
+        _value_free(str(raised.value), "EDITED")
+
+
 # ---------------------------------------------------------------------------
 # The restore
 # ---------------------------------------------------------------------------
@@ -515,6 +590,58 @@ def test_a_patient_study_tag_reaches_a_study_carrying_no_token(tmp_path, caplog)
         assert _restore(session, caplog) == [tokenless(1, 2)]
         second = by_study[1][0]
         assert (second.attributes["0010,1010"], second.attributes[ACC]) == ("042Y", "X")
+
+
+def test_a_study_carrying_no_token_takes_the_first_tokens_identifiers_not_the_last(
+        tmp_path, caplog):
+    """Q-A says "the first token found", and where tokens disagree that is
+    a choice (review of #650, F-3). A merged pair locked as `PAT-A` and
+    `PAT-B`, then a third study carrying no token: it takes `PAT-A`'s name,
+    ID and birth date, as the `Patient` does, never `PAT-B`'s. Kills MR2
+    (the last token's group 0010)."""
+    tags = TAGS + ["0010,0030", ACC]
+    with _session(tmp_path) as session:
+        a, a_st = _patient(session, [[{"0008_0050": ACC_ONE, "0010_0030": "19600101"}]],
+                           pid="PAT-A", name="Doe^Ann")
+        b, b_st = _patient(session, [[{"0008_0050": ACC_TWO, "0010_0030": "19700202"}]],
+                           pid="PAT-B", name="Roe^Bea")
+        session.lock_identities("PAT-A", tags_to_lock=tags)
+        session.lock_identities("PAT-B", tags_to_lock=tags)
+        c, c_st = _patient(session, [[{"0008_0050": "ACC-THREE"}]], pid="PAT-C")
+        for other in (b, c):
+            session.store.patients.remove(other)
+            a.studies.extend(other.studies)
+        _anonymize_by_hand(a, _all(a_st) + _all(b_st) + _all(c_st),
+                           **{"0008_0050": "X", "0010_0030": ""})
+        assert _restore(session, caplog) == [tokenless(1, 3), disagree(1, 2)]
+        [third] = _all(c_st)
+        assert {t: third.attributes.get(t) for t in tags} == {
+            "0010,0010": "Doe^Ann", "0010,0020": "PAT-A", "0010,0030": "19600101",
+            ACC: "X"}
+        assert (a.patient_id, a.patient_name) == ("PAT-A", "Doe^Ann")
+
+
+def test_a_first_study_carrying_no_token_takes_only_patient_level_identifiers(
+        tmp_path, caplog):
+    """Q-A with the study carrying no token *first* (review of #650, F-3),
+    the #616 walk-past shape: study 2 locked, study 1 not. Study 1 takes
+    group 0010 only and keeps the pass's Accession Number; study 2 takes
+    its own. Kills MR29 (the patient's first study given the first token in
+    full: study 2's `ACC-TWO` on study 1, I2's F-1 exposure again)."""
+    with _session(tmp_path) as session:
+        patient, (locked,) = _patient(
+            session, [[{"0008_0050": ACC_TWO, "0010_0030": "19700101"}]])
+        session.lock_identities(PID, tags_to_lock=DEFAULT)
+        other, (unlocked,) = _patient(session, [[{"0008_0050": ACC_ONE}]],
+                                      pid="PAT-583-B")
+        session.store.patients.remove(other)
+        patient.studies.insert(0, other.studies[0])
+        _anonymize_by_hand(patient, unlocked + locked,
+                           **{"0008_0050": "X", "0010_0030": ""})
+        assert _restore(session, caplog) == [tokenless(1, 2)]
+        assert [(i.attributes["0010,0020"], i.attributes["0010,0030"], i.attributes[ACC])
+                for i in unlocked + locked] == [(PID, "19700101", "X"),
+                                                (PID, "19700101", ACC_TWO)]
 
 
 def test_a_study_carrying_its_own_token_is_restored_from_it(tmp_path, caplog):
@@ -631,7 +758,13 @@ def test_a_merged_pair_whose_tokens_disagree_on_the_id_stays_one_patient(
 # ---------------------------------------------------------------------------
 
 def _pre_098_patient(session, accessions, stamped=False):
-    patient, by_study = _patient(session, [[{"0008_0050": a}] for a in accessions])
+    """One earlier-release token holding study 1's record on every
+    instance, then a pass by hand. Study 1 carries **two** instances, so
+    "the first study carrying it" cannot be told from "the first instance
+    carrying it" by accident (review of #650, MR28)."""
+    studies = [[{"0008_0050": a}] for a in accessions]
+    studies[0] = studies[0] * 2
+    patient, by_study = _patient(session, studies)
     record = {"0010,0010": NAME, "0010,0020": PID, ACC: accessions[0]}
     _pre_098_token(session, _all(by_study), record, stamped=stamped)
     _anonymize_by_hand(patient, _all(by_study), **{"0008_0050": "X"})
@@ -641,17 +774,19 @@ def _pre_098_patient(session, accessions, stamped=False):
 def test_a_097_token_shared_across_studies_restores_study_level_values_on_the_first(
         tmp_path, caplog):
     """T29. The 0.9.7 shape: one unstamped token holding study 1's
-    `ACC-ONE`, on both studies. Study 1 takes it back in full; study 2
-    takes only group 0010, keeps the pass's Accession Number, and one
-    WARNING counts it. Kills M3 (the detector read as "shared bytes"
-    alone would also fire on T29b) and the b2 restore dropped."""
+    `ACC-ONE`, on both studies. Both of study 1's instances take it back in
+    full; study 2 takes only group 0010, keeps the pass's Accession Number,
+    and one WARNING counts it. Kills M3 (the detector read as "shared
+    bytes" alone would also fire on T29b), the b2 restore dropped, and
+    MR28 (the full restore keyed on the first holding instance, not study:
+    study 1's second instance would keep `X`)."""
     with _session(tmp_path) as session:
         patient, instances = _pre_098_patient(session, [ACC_ONE, ACC_TWO])
         warnings = _restore(session, caplog)
-        assert warnings == [old_shared(1, 2)]
+        assert warnings == [old_shared(1, 3)]
         _value_free(warnings[0])
         assert [(i.attributes["0010,0010"], i.attributes[ACC]) for i in instances] == [
-            (NAME, ACC_ONE), (NAME, "X")]
+            (NAME, ACC_ONE), (NAME, ACC_ONE), (NAME, "X")]
         assert patient.patient_id == PID
 
 
@@ -680,7 +815,7 @@ def test_a_shared_token_this_store_stamped_is_restored_on_every_holder(tmp_path,
     with _session(tmp_path) as session:
         _, instances = _pre_098_patient(session, [ACC_ONE, ACC_TWO], stamped=True)
         assert _restore(session, caplog) == []
-        assert [i.attributes[ACC] for i in instances] == [ACC_ONE, ACC_ONE]
+        assert [i.attributes[ACC] for i in instances] == [ACC_ONE, ACC_ONE, ACC_ONE]
 
 
 def test_a_097_token_over_equal_accessions_still_warns(tmp_path, caplog):
@@ -690,8 +825,8 @@ def test_a_097_token_over_equal_accessions_still_warns(tmp_path, caplog):
     been right."""
     with _session(tmp_path) as session:
         _, instances = _pre_098_patient(session, ["ACC-SAME", "ACC-SAME"])
-        assert _restore(session, caplog) == [old_shared(1, 2)]
-        assert [i.attributes[ACC] for i in instances] == ["ACC-SAME", "X"]
+        assert _restore(session, caplog) == [old_shared(1, 3)]
+        assert [i.attributes[ACC] for i in instances] == ["ACC-SAME", "ACC-SAME", "X"]
 
 
 def test_a_097_token_shared_inside_one_study_is_restored_in_full(tmp_path, caplog):
@@ -712,3 +847,83 @@ def test_a_097_token_shared_inside_one_study_is_restored_in_full(tmp_path, caplo
         _anonymize_by_hand(patient, instances, **{"0008_0023": "20030101"})
         assert _restore(session, caplog) == []
         assert [i.attributes["0008,0023"] for i in instances] == ["20040111", "20040111"]
+
+
+# ---------------------------------------------------------------------------
+# An earlier release's export, re-ingested (review of #650, F-1 and M-1)
+# ---------------------------------------------------------------------------
+
+def _a_097_export(tmp_path):
+    """An earlier release's lock, exported: two studies of one patient.
+    Source order puts `5841` (dated 2005, `ACC-ONE`) first, so the one
+    unstamped token holds `ACC-ONE` on both; `5842` is dated 2004 and held
+    `ACC-TWO`. Audited, anonymized, saved and exported, whose folders are
+    `Study_<date>_...`. Returns (export folder, key path, pseudonym)."""
+    write_ct(tmp_path / "src" / "a" / "1.dcm", PID, "5841", study_date="20050601",
+             name=NAME, accession=ACC_ONE)
+    write_ct(tmp_path / "src" / "b" / "2.dcm", PID, "5842", study_date="20040601",
+             name=NAME, accession=ACC_TWO)
+    key = str(tmp_path / "k.key")
+    with DicomSession(str(tmp_path / "old.db")) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(tmp_path / "src"))
+        [patient] = session.store.patients
+        assert [st.study_instance_uid for st in patient.studies] == [
+            study_uid("5841"), study_uid("5842")]
+        instances = [i for st in patient.studies for se in st.series for i in se.instances]
+        _pre_098_token(session, instances,
+                       {"0010,0010": NAME, "0010,0020": PID, ACC: ACC_ONE})
+        session.anonymize(session.audit())
+        session.save(sync=True)
+        pseudonym = patient.patient_id
+        session.export(str(tmp_path / "exp"), use_compression=False)
+    return tmp_path / "exp", key, pseudonym
+
+
+def _accessions(patient):
+    return {st.study_instance_uid: st.series[0].instances[0].attributes.get(ACC)
+            for st in patient.studies}
+
+
+def test_an_earlier_releases_export_reingested_whole_restores_on_the_earliest_dated_study(
+        tmp_path, caplog):
+    """Pinned as ruled (review of #650, F-1: b2 kept and disclosed). A
+    store that ingests an export loads its studies in path order, and the
+    export's folders put the earliest date first, so "the first study
+    carrying" the token is `5842`, not `5841` the lock captured it from.
+    `5842` takes `ACC-ONE` in full although it is `5841`'s; `5841`, its
+    owner, takes group 0010 only and keeps the pass's value, and the
+    WARNING counts the owner. Pinned so that a change to what "first"
+    means is a decision. Kills MR1 (the last holding study taken in full,
+    which happens to be right here)."""
+    folder, key, pseudonym = _a_097_export(tmp_path)
+    with DicomSession(str(tmp_path / "new.db")) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(folder))
+        [patient] = session.store.patients
+        assert [st.study_instance_uid for st in patient.studies] == [
+            study_uid("5842"), study_uid("5841")]
+        passed = _accessions(patient)
+        assert ACC_ONE not in passed.values() and ACC_TWO not in passed.values()
+        assert _restore(session, caplog, pseudonym) == [old_shared(1, 2)]
+        assert _accessions(patient) == {study_uid("5842"): ACC_ONE,
+                                        study_uid("5841"): passed[study_uid("5841")]}
+
+
+def test_an_earlier_releases_export_reingested_one_study_restores_another_studys_value(
+        tmp_path, caplog):
+    """Residual (iv), pinned as ruled (review of #650, M-1). Only `5842`'s
+    exported folder is ingested. The token it carries holds `5841`'s
+    `ACC-ONE`, but with one study in the session it is shared across none,
+    and nothing tells it from a token this release wrote for that study
+    (#652 is the marker that could): it is restored in full, `ACC-ONE` on
+    `5842`, and no WARNING fires. e418d3d wrote the same."""
+    folder, key, pseudonym = _a_097_export(tmp_path)
+    [study_folder] = [d for d in folder.glob("*/*") if d.name.endswith("5842")]
+    with DicomSession(str(tmp_path / "new.db")) as session:
+        session.enable_reversible_anonymization(key)
+        session.ingest(str(study_folder))
+        [patient] = session.store.patients
+        assert [st.study_instance_uid for st in patient.studies] == [study_uid("5842")]
+        assert _restore(session, caplog, pseudonym) == []
+        assert _accessions(patient) == {study_uid("5842"): ACC_ONE}

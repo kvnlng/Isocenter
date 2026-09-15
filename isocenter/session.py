@@ -4399,14 +4399,35 @@ class DicomSession:
                 # outside group 0010 (a blank one -- CT_small's Accession
                 # Number, locked by the defaults -- is no study's), and it
                 # is not stamped by this store on every holder. Its first
-                # holding study, in graph order, takes it in full, as the
-                # study it was captured from; the others take its group
-                # 0010 only. What this cannot tell, disclosed with #583:
-                # a 0.9.8 pre-release stamped its shared token, and reads
-                # as this release's; two studies whose values were equal
-                # read as two that differed; and a token shared inside one
-                # study, over series- or instance-level tags, is not
-                # shared across studies at all.
+                # holding study, in graph order, takes it in full; the
+                # others take its group 0010 only. The WARNING names no
+                # release: a store never loads the stamp from a file, so a
+                # token this release wrote, exported and re-ingested, over
+                # values equal across studies, reads the same (review of
+                # #650, F-2; a marker that could tell is #652).
+                #
+                # **"First in graph order" is the owner only in the store
+                # that locked.** There graph order is the lock's order, so
+                # the first holding study is the one the token was captured
+                # from. A store built by ingesting an export loads studies
+                # in path order, and export folders are `Study_<date>_...`,
+                # so the full restore goes to the earliest-dated study,
+                # which may not be the owner: that study then holds another
+                # study's values, and the owner keeps the pass's and is the
+                # one the WARNING counts (review of #650, F-1; kept and
+                # disclosed, and pinned by
+                # `test_an_earlier_releases_export_reingested_whole_...`).
+                #
+                # What this cannot tell, disclosed with #583: (i) a 0.9.8
+                # pre-release stamped its shared token, and reads as this
+                # release's; (ii) two studies whose values were equal read
+                # as two that differed; (iii) a token shared inside one
+                # study, over series- or instance-level tags, is not shared
+                # across studies at all; (iv) an earlier release's shared
+                # token whose other studies are not in the session -- one
+                # study, or a subset, ingested from its export -- is shared
+                # across none, and is restored in full with values that may
+                # be another study's, silently (review of #650, M-1).
                 partial: Dict[bytes, "Study"] = {}
                 for content, holders in carrying.items():
                     values = opened[content]
@@ -4460,11 +4481,11 @@ class DicomSession:
                 if elsewhere:
                     get_logger().warning(
                         "%d of %d instances of this patient carry an identity "
-                        "token written before 0.9.8 and shared across studies, "
-                        "which holds one study's values, so outside the first "
-                        "study carrying it they took only its patient-level "
-                        "identifiers (group 0010), and their other locked "
-                        "identifiers keep what anonymize() left (#583).",
+                        "token shared across studies that this store did not "
+                        "stamp, which may hold one study's values, so outside "
+                        "the first study carrying it they took only its "
+                        "patient-level identifiers (group 0010), and their other "
+                        "locked identifiers keep what anonymize() left (#583).",
                         elsewhere, count)
                 # **Tokens that disagree on the name or ID (#583, Q-F).**
                 # Each instance keeps its own token's, so a re-lock after
