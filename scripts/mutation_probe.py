@@ -141,7 +141,8 @@ TARGETS = {
     # the mutation those files exist to kill -- an attribution computed
     # after the `force_threads` short-circuit. Extras cost the guard
     # nothing.
-    "isocenter/parallel.py": (["tests/test_progress_bars_honour_the_environment.py", "tests/test_redaction_optimization.py", "tests/test_logging.py",
+    "isocenter/parallel.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                               "tests/test_progress_bars_honour_the_environment.py", "tests/test_redaction_optimization.py", "tests/test_logging.py",
                                "tests/test_packaging_contract.py",
                                "tests/test_parallel_config.py",
                                "tests/test_parallel_contract.py",
@@ -420,7 +421,8 @@ TARGETS = {
                                   "tests/test_a_replace_on_a_cleared_attribute_declines.py",
                                   "tests/test_a_remove_on_an_absent_tag_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                                  "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                   "tests/test_a_missing_type_2_element_is_written_empty.py",
                                   "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                   "tests/test_a_restored_study_date_reaches_the_file.py",
@@ -679,7 +681,8 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                              "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                               "tests/test_a_missing_type_2_element_is_written_empty.py",
                               "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
