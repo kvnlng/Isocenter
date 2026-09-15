@@ -232,17 +232,13 @@ TARGETS = {
     "isocenter/verification.py": (["tests/test_ocr_formal.py",
                                    "tests/test_scan_reports_what_it_could_not_read.py",
                                    "tests/test_verification_logic.py"], 30),
-    # 13 sites, exhaustive: 12 killed (10 before #439's Type 2 test). Five
-    # files, 5.7s per pass.
+    # 17 sites, exhaustive: 17 killed, no survivor (measured in the review
+    # of #600, 3.12, budget 100). Nine files.
     #   - The Type 2 check inverted (`req == '2'` to `!=`) and its
     #     `errors.append` deleted both survived until #439: nothing built a
     #     CT missing a Type 2 element. Killed since by
     #     tests/test_validation.py::
     #     test_a_missing_type_2_element_is_reported_and_an_empty_one_is_not.
-    #   - The survivor, `if sop not in IODValidator._SOP_RULES: return []`
-    #     returning None, is equivalent: the one caller,
-    #     `DicomExporter._finalize_dataset` in io_handlers.py, only
-    #     truth-tests the result.
     "isocenter/validation.py": (["tests/test_export_error.py",
                                  "tests/test_a_missing_type_2_element_is_written_empty.py",
                                  "tests/test_missing_study_date.py",
