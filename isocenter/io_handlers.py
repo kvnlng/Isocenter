@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1619 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1622 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1622 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1625 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -124,6 +124,7 @@ their wording would pin a rendering, not a fact.
 import concurrent.futures
 import contextlib
 import os
+import pickle
 import sys
 import hashlib
 import struct
@@ -1910,8 +1911,45 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             item.set_attr(tag, str(elem.value))
             _record_private_vr(item, tag, elem)
         else:
-            item.set_attr(tag, elem.value)
+            item.set_attr(tag, _process_safe(elem.value))
             _record_private_vr(item, tag, elem)
+
+
+def _process_safe(value):
+    """`value`, or its items as a `list` when it cannot be pickled (#651).
+
+    **The trap.** pydicom 3.0.2 holds a LUT Descriptor -- Red, Green or
+    Blue Palette Color (0028,1101-1103) or LUT Descriptor (0028,3002) --
+    as a `MultiValue` whose item constructor is `_skip_conversion`, a
+    closure local to `DataElement._convert_value`, and it does so only
+    when the VR had to be looked up: under Implicit VR, which is the
+    syntax `export(use_compression=False)` writes. Stored as it was, that
+    value made the `Instance` unpicklable, and `ingest_worker`'s result is
+    pickled by the pool *outside* the worker's `try` -- so one such file
+    raised out of `ingest()` and lost the whole pass. Our own
+    uncompressed export of a palette file could not be ingested again.
+
+    **Why only what cannot be pickled, and not every `MultiValue`.** A
+    fresh ingest keeps the `MultiValue` pydicom handed back, and
+    `tests/test_private_tag_reload.py` pins that in-memory shape;
+    converting them all turns that test red. A `list` is what the store
+    hands back on reload, so the values this does convert read the same
+    fresh and reloaded.
+
+    **Why picklability, and not the constructor's name or pydicom's
+    `_LUT_DESCRIPTOR_TAGS`.** Both are pydicom internals. Picklability is
+    the property the worker boundary needs, and it catches the next local
+    constructor pydicom adds, not only this one. It costs a pickle of
+    each `MultiValue`, a subset of the whole-result pickle `ingest_worker`
+    already measures at about 0.3% of worker time.
+    """
+    if not isinstance(value, MultiValue):
+        return value
+    try:
+        pickle.dumps(value)
+    except Exception:  # pylint: disable=broad-exception-caught
+        return list(value)
+    return value
 
 
 def _record_private_vr(item, tag: str, elem) -> None:
@@ -2723,6 +2761,13 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
     return carried
 
 
+#: The reason a file is failed with when its parsed result could not be
+#: pickled back to the parent (#651). A constant because tests match its
+#: prefix and the CHANGELOG quotes it.
+_UNCROSSABLE_RESULT = ("Its parsed result could not be returned from the "
+                       "ingest worker")
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -3022,6 +3067,30 @@ def ingest_worker(fp: str) -> Tuple:
             meta['dropped_annotations'] = ann_dropped
             meta['rewritten_annotations'] = ann_rewritten
             meta['dropped_annotation_groups'] = ann_groups
+
+        # The result has to cross the process boundary, and the pool pickles
+        # it in its own hand-back, outside this `try` (#651). A result that
+        # cannot be pickled raised there, and the parent cannot catch it
+        # per file: `executor.map` re-raises at the point of iteration and
+        # cancels every future queued behind it, and `run_parallel` is
+        # called without a per-item arm -- so one such file lost the whole
+        # pass, with no row. Asked here, it is one failed file on the
+        # channel every other failure uses. `_process_safe` is the fix for
+        # the value that was found; this is the guarantee for the next one.
+        #
+        # `(meta, inst)` and not `inst` alone: `meta` carries live objects
+        # too (the nested pixel candidates, among others). The other five
+        # slots are `bytes`, `str` or `None` and always pickle, and the
+        # pixel bytes are the expensive part, so they are left out. On
+        # every strategy, threads included, where nothing is pickled: one
+        # answer per file whatever the pool, and an unpicklable instance
+        # admitted on threads is a graph no process worker can later take.
+        try:
+            pickle.dumps((meta, inst), protocol=pickle.HIGHEST_PROTOCOL)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            return ({'path': fp}, None, None, None, None, None, None,
+                    f"{_UNCROSSABLE_RESULT}: "
+                    f"{describe_exception_without_paths(e)}")
 
         return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
@@ -5395,6 +5464,30 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # supplied one, and a stamp of `""` would overwrite a real value.
         if "StudyTime" not in ds:
             ds.StudyTime = ""
+
+        # Every other Type 2 element the IOD table knows, the same way
+        # (#600). Type 2 means present, and empty when unknown; an absent
+        # KVP or Slice Thickness failed a CT's export with `[Type 2 Error]`
+        # for a file that is conformant the moment the element is written
+        # zero-length. The conditions, each of which is the trap:
+        #   - after every merge, like Study Time above, so a value the
+        #     instance, the study or the series supplied is already in
+        #     `ds` and is never overwritten;
+        #   - read from `IODValidator`'s own table, so it fills exactly
+        #     what `validate` would refuse and invents nothing the
+        #     validator does not know -- an OT image gains no KVP;
+        #   - never Type 1: an empty Type 1 element is still a refusal,
+        #     and a fabricated value would be a lie;
+        #   - no row and no note, per #570's Study Time (owner ruling Q10):
+        #     the written file is conformant, and absent and empty say the
+        #     same thing for Type 2.
+        # Study Time keeps its own fill above: it is unconditional on SOP
+        # class, and the table is CT-only, so folding it in would stop
+        # filling it on OT and SC files. `dictionary_VR` answers one VR for
+        # every tag the table holds today; a table tag whose dictionary VR
+        # is ambiguous (`'US or SS'`) would need its own choice here.
+        for tag in IODValidator.absent_type2(ds):
+            ds.add_new(tag, dictionary_VR(tag), None)
 
         # There is deliberately no `populate_attrs(ds, inst)` here, and
         # there must never be again (#184). It was the ingest reader
