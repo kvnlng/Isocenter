@@ -53,8 +53,10 @@ def _file(tmp_path, arr, *, ts=JPEG_EXTENDED, bits_stored=12, level=100,
         bits_stored=bits_stored, pixel_representation=pixel_representation,
         photometric=photometric)
     # Declared as a DCT file honestly is (PS3.3 C.7.6.1.1.5), so the
-    # ingest rows these tests read are about the decode: an absent 0028,2110
-    # over a `.50`/`.51` stream has its own WARNING since #601.
+    # ingest rows these tests read are about the decode: since #601 an
+    # absent 0028,2110 over a `.50`/`.51` stream whose first frame header is
+    # a DCT SOFn (every `jpeg8_encode` stream here is SOF0 or SOF1) has its
+    # own WARNING.
     ds.LossyImageCompression = "01"
     return write(tmp_path, ds, name=name)
 
