@@ -761,10 +761,14 @@ def _pre_098_patient(session, accessions, stamped=False):
     """One earlier-release token holding study 1's record on every
     instance, then a pass by hand. Study 1 carries **two** instances, so
     "the first study carrying it" cannot be told from "the first instance
-    carrying it" by accident (review of #650, MR28)."""
+    carrying it" by accident (review of #650, MR28). And study 1 is dated
+    *later* than the others, so "first in graph order" -- the lock's order,
+    in the store that locked -- cannot be told from "earliest-dated" by
+    accident either (review of #650, F-4: MF3)."""
     studies = [[{"0008_0050": a}] for a in accessions]
     studies[0] = studies[0] * 2
     patient, by_study = _patient(session, studies)
+    patient.studies[0].study_date = date(2023, 2, 1)
     record = {"0010,0010": NAME, "0010,0020": PID, ACC: accessions[0]}
     _pre_098_token(session, _all(by_study), record, stamped=stamped)
     _anonymize_by_hand(patient, _all(by_study), **{"0008_0050": "X"})

@@ -272,7 +272,7 @@ carries it: a lock writes one token per distinct set of values, never
 one instance's values onto another (#583), and a restore gives each
 instance the values of the token it carries. The exception: a token
 without this store's stamp that is shared across studies and holds a
-value outside group 0010 is read as an earlier release's shared token,
+non-blank value outside group 0010 is read as an earlier release's shared token,
 and is restored in full only on the first study carrying it, and as its
 group 0010 on the others. A file carries no stamp, so this applies to
 an exported file ingested elsewhere whose studies' locked values were

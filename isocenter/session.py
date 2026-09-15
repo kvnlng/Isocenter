@@ -4425,7 +4425,7 @@ class DicomSession:
                 # study, over series- or instance-level tags, is not shared
                 # across studies at all; (iv) an earlier release's shared
                 # token whose other studies are not in the session -- one
-                # study, or a subset, ingested from its export -- is shared
+                # of its studies ingested from its export -- is shared
                 # across none, and is restored in full with values that may
                 # be another study's, silently (review of #650, M-1).
                 partial: Dict[bytes, "Study"] = {}
