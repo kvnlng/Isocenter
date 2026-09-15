@@ -710,6 +710,32 @@ def _shorter_sequence_held_deeper(session):
     return finding, ct, lambda: inner.attributes.get("0010,1000") == "SHIFTED-PHI"
 
 
+def _shorter_sequence_held_as_sequence(session):
+    """The finding names a sequence element, `(0040,a730)`, and the item
+    left in the broken sequence holds it -- as a sequence, not as an
+    attribute. Both halves of the item are read."""
+    ct, _ = _ct_and_mr(session)
+    held = DicomItem()
+    held.add_sequence_item("0040,a730", DicomItem())
+    ct.add_sequence_item("0008,1140", held)
+    finding = _finding(DicomItem(), "REMOVE_TAG", "0040,a730",
+                       uid=ct.sop_instance_uid, path=(("0008,1140", 1),))
+    return finding, ct, lambda: len(held.sequences["0040,a730"].items) == 1
+
+
+def _shorter_sequence_upper_case_target(session):
+    """A hand-built upper-case target, `0040,A730`, over a remaining item
+    holding `0040,a730` -- the spelling ingest stores. The remaining items
+    are read under the canonical key, as the satisfied test reads it."""
+    ct, _ = _ct_and_mr(session)
+    held = DicomItem()
+    held.set_attr("0040,a730", "SHIFTED-PHI")
+    ct.add_sequence_item("0008,1140", held)
+    finding = _finding(DicomItem(), "REMOVE_TAG", "0040,A730",
+                       uid=ct.sop_instance_uid, path=(("0008,1140", 1),))
+    return finding, ct, lambda: held.attributes.get("0040,a730") == "SHIFTED-PHI"
+
+
 def _study_sharing_the_instance_uid(session):
     """A Study whose Study Instance UID is its instance's SOP Instance UID
     (hand-built), with Study Date deleted from the instance, and a
@@ -749,6 +775,8 @@ def _shared_uid(session):
     pytest.param(_no_such_uid, id="no_such_uid"),
     pytest.param(_shorter_sequence_still_held, id="shorter_sequence_still_held"),
     pytest.param(_shorter_sequence_held_deeper, id="shorter_sequence_held_deeper"),
+    pytest.param(_shorter_sequence_held_as_sequence, id="shorter_sequence_held_as_sequence"),
+    pytest.param(_shorter_sequence_upper_case_target, id="shorter_sequence_upper_case_target"),
     pytest.param(_shared_uid, id="shared_uid"),
     pytest.param(_study_sharing_the_instance_uid, id="study_sharing_the_instance_uid"),
 ])
@@ -906,19 +934,30 @@ def test_a_sequence_the_first_pass_detached_reuses_cleanly(tmp_path, build, mode
         assert _grade(session, tmp_path) == ["PASS"]
 
 
-def test_a_nested_remove_never_reads_the_instance_top_level(tmp_path):
-    """A nested finding under a sequence the instance no longer holds is
-    satisfied -- nothing is at its address -- and the instance's own
-    top-level element under the same tag is neither read nor removed: the
-    finding never named it. Top-level Institution Name is held here, so
-    reading the instance for the broken path would decline instead.
+@pytest.mark.parametrize("emptied", [
+    pytest.param(False, id="sequence_gone"),
+    pytest.param(True, id="sequence_at_zero_items"),
+])
+def test_a_nested_remove_never_reads_the_instance_top_level(tmp_path, emptied):
+    """A nested finding under a sequence the instance no longer holds, or
+    holds at zero items, is satisfied -- nothing is at its address -- and
+    the instance's own top-level element under the same tag is neither
+    read nor removed: the finding never named it. Top-level Institution
+    Name is held here, so reading the instance for the broken path would
+    decline instead.
 
-    Kills: a broken path read on the instance (review of #639 r3, `w1`, in
-    the direction the shorter-sequence decline does not reach)."""
+    Kills: a broken path read on the instance, at a missing sequence
+    (`sequence_gone`) or past the end of an empty one
+    (`sequence_at_zero_items`) -- review of #639 r3, `w1`, in the
+    direction the shorter-sequence decline does not reach."""
     session = _session(tmp_path, ["CT_small.dcm", "MR_small.dcm"])
     with session:
         ct, _ = _ct_and_mr(session)
         assert "0008,1140" not in ct.sequences
+        if emptied:
+            ct.add_sequence_item("0008,1140", DicomItem())
+            ct.sequences["0008,1140"].items.clear()
+            assert ct.sequences["0008,1140"].items == []
         assert ct.attributes.get(ABSENT) == "JFK IMAGING CENTER"
         finding = _finding(DicomItem(), "REMOVE_TAG", ABSENT,
                            uid=ct.sop_instance_uid, path=(("0008,1140", 0),))
