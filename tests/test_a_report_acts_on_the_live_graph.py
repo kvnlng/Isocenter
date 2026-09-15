@@ -179,6 +179,7 @@ def _second_image_item(src):
     second.ReferencedSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
     second.ReferencedSOPInstanceUID = "1.2.3.4.8"
     second.InstitutionName = "SECOND-INST"
+    second.SeriesDate = "20020202"
     dataset.ReferencedImageSequence.append(second)
     dataset.save_as(str(src / "ct.dcm"))
 
@@ -1135,21 +1136,53 @@ def test_a_legacy_stores_saved_pass_reapplied_after_a_reopen_changes_nothing(tmp
 
 
 def test_a_live_item_filed_under_its_siblings_path_is_acted_on_as_it_is(tmp_path):
-    """A nested REPLACE whose `entity` is the CT's live second Referenced
-    Image Sequence item, handed over with the first item's path. The entity
-    is in the graph, so it is handed over as it is and the rule lands on it
-    (the disclosed residual); the item at the path is not rebound to and
-    keeps its value. With live items read as dead (review of #665, F3) the
-    rule was written to the first item instead.
+    """A nested REPLACE and SHIFT whose `entity` is the CT's live second
+    Referenced Image Sequence item, handed over with the first item's path.
+    The entity is in the graph, so each is handed over as it is and acts on
+    it (the disclosed residual); the item at the path is not rebound to and
+    keeps its values. The shift's holder is found by walking the item trees,
+    since no owner names an item at another address, and the seed is its
+    instance's patient's, so it shifts. With live items read as dead
+    (review of #665, F3) both were written to the first item instead.
 
-    Kills: the item-tree half of "live, but not at its address" dropped."""
+    Kills: the item-tree half of "live, but not at its address" dropped;
+    `_finding_holders` not filing an item no owner names (the shift
+    declines)."""
     with _store(tmp_path / "store", edit=_second_image_item) as session:
         report = session.audit()
         first, second = _by_modality(session)["CT"][2].sequences[IMAGE_SEQ].items
-        finding = _only(report, "Instance", "0008,0080", ((IMAGE_SEQ, 1),))
-        assert finding.entity is second
+        replace = _only(report, "Instance", "0008,0080", ((IMAGE_SEQ, 1),))
+        shift = _only(report, "Instance", "0008,0021", ((IMAGE_SEQ, 1),), action="SHIFT_DATE")
+        assert replace.entity is second and shift.entity is second
 
-        session.anonymize([dataclasses.replace(finding, entity_path=NESTED)])
+        assert session.anonymize([dataclasses.replace(f, entity_path=NESTED)
+                                  for f in (replace, shift)]) == 2
 
+        assert _declined(session) == []
         assert second.attributes["0008,0080"] == "RULE-INST"
+        assert second.attributes["0008,0021"] == _shifted(session, "1CT1", "20020202")
         assert first.attributes["0008,0080"] == "NESTED-INST"
+        assert first.attributes["0008,0021"] == "20010101"
+
+
+def test_a_live_patients_id_is_not_replaced_with_another_patients_pseudonym(tmp_path):
+    """The MR patient's Patient ID finding, its `entity` swapped for the live
+    CT patient: the entity is in the graph, so it is handed over as it is,
+    but the proposal's original ID (`4MR1`) does not name that patient, so
+    this store's own pseudonym for `4MR1` is not written over `1CT1`. It
+    declines, naming no value.
+
+    Kills: the Patient ID check comparing only the minted value, not
+    whether the original names the holder."""
+    with _store(tmp_path / "store") as session:
+        report = session.audit()
+        ct_patient = _by_modality(session)["CT"][0]
+        finding = _only(report, "Patient", "patient_id", uid="4MR1")
+        assert _proposal(finding).new_value == _replacement_id_for("4MR1", FIXED_A)
+
+        assert session.anonymize([dataclasses.replace(finding, entity=ct_patient)]) == 0
+
+        assert ct_patient.patient_id == "1CT1"
+        declines = [_reason(d) for d in _declined(session)]
+        assert len(declines) == 1 and REFUSED_ID in declines[0], declines
+        assert "ANON_" not in declines[0] and "4MR1" not in declines[0]
