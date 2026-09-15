@@ -497,8 +497,8 @@ def _jpeg_marker_segments(data, start, stops=(0xD9, 0xDA)):
     marker, at the end of `data`, or after yielding a marker in `stops`:
     by default EOI and SOS, after which entropy-coded data follows.
 
-    One walk for the JPEG-LS readers (`_jpegls_precision`, `_jpegls_near`)
-    and the JPEG 2000 main header (`_j2k_irreversible`, whose segments have
+    One walk for the JPEG-LS readers (`_jpegls_precision`, `_jpegls_near`),
+    the JPEG frame header (`_jpeg_frame_type`) and the JPEG 2000 main header (`_j2k_irreversible`, whose segments have
     the same marker-then-length shape between SOC and the first SOT).
     """
     pos = start
@@ -538,6 +538,40 @@ def _jpegls_near(codestream) -> Optional[int]:
                 return None
             at = pos + 5 + 2 * data[pos + 4]
             return data[at] if at < len(data) else None
+    return None
+
+
+#: The markers in `FF C0`-`FF CF` that are not frame headers: DHT, JPG
+#: (reserved) and DAC (ITU-T T.81 Table B.1). A walk that took every `Cn`
+#: for a SOF would read a Huffman table ahead of the frame as SOF4.
+_JPEG_NOT_FRAME_HEADERS = frozenset({0xC4, 0xC8, 0xCC})
+
+
+def _jpeg_frame_type(codestream) -> Optional[int]:
+    """`n` of the first SOFn frame header in a JPEG stream, or None (#601).
+
+    The frame header names the coding process (ITU-T T.81 Table B.1):
+    SOF0, 1, 2, 5, 6, 9, 10, 13 and 14 are DCT processes, lossy by
+    definition; SOF3, 7, 11 and 15 are lossless. Reached by walking
+    (`_jpeg_marker_segments`), never by searching, so a COM or APPn
+    payload holding `FF C0` is stepped over. None when a scan (SOS) or
+    the end of the image comes before any frame header, or the data
+    ends first.
+
+    The transfer syntax does not settle it: a lossless SOF3 frame under
+    `.50` or `.51` decodes bit-exact (review J2 M1), and reading the
+    syntax as evidence stamped it `01`, which can never be withdrawn.
+
+    **Limit: the first frame header speaks for the stream.** A hierarchical
+    stream (DHP) can follow a DCT frame with lossless differential ones;
+    it is read by its first frame. None was built or measured.
+    """
+    data = bytes(codestream)
+    if data[:2] != b"\xff\xd8":
+        return None
+    for marker, _pos in _jpeg_marker_segments(data, 2):
+        if 0xC0 <= marker <= 0xCF and marker not in _JPEG_NOT_FRAME_HEADERS:
+            return marker - 0xC0
     return None
 
 

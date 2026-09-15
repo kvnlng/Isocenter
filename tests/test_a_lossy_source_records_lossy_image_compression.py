@@ -16,13 +16,17 @@ codestream and a JPEG Baseline file stripped of the element all exported
 natively and under JPEG 2000 Lossless with no 2110, graded PASS, and wrote
 no row; a JPEG Baseline file declaring `00` exported `00`.
 
-Ingest now stamps `01` when **the pixel data proves it** -- a DCT process
-(JPEG Baseline or Extended), a JPEG-LS scan with NEAR above 0, or a JPEG
-2000 codestream using the 9-7 irreversible wavelet -- and writes a WARNING
+Ingest now stamps `01` when **the pixel data proves it** -- a JPEG frame
+header of a DCT process (SOF0, 1, 2, 5, 6, 9, 10, 13 or 14) under JPEG
+Baseline or Extended, a JPEG-LS scan with NEAR above 0, or a JPEG 2000
+codestream using the 9-7 irreversible wavelet -- and writes a WARNING
 naming the evidence (owner ruling Q1: kept for an absent value and for a
-declared `00`). A syntax alone is not evidence: a NEAR 0 JPEG-LS stream and
-a reversible JPEG 2000 codestream are bit-exact whatever their syntax is
-called (built and measured), and a false `01` can never be withdrawn.
+declared `00`). A syntax alone is not evidence: a NEAR 0 JPEG-LS stream, a
+reversible JPEG 2000 codestream and a lossless (SOF3) JPEG frame are
+bit-exact whatever their syntax is called (built and measured), and a
+false `01` can never be withdrawn. Review J2 M1 found the JPEG arm taking
+`.50`/`.51` as evidence by syntax alone, which stamped a lossless SOF3
+frame.
 """
 import logging
 import os
@@ -56,6 +60,9 @@ FIXTURES = (JPEGLS_NEAR_16, JLSN_RGB_ILV0, HTJ2K_08_RGB, SC_RGB_JPEG_DCMTK,
 assert all(FIXTURES), FIXTURES
 
 JPEGLS_NEAR = "1.2.840.10008.1.2.4.81"
+JPEGLS_LOSSLESS = "1.2.840.10008.1.2.4.80"
+JPEG_BASELINE = "1.2.840.10008.1.2.4.50"
+JPEG_EXTENDED = "1.2.840.10008.1.2.4.51"
 J2K = "1.2.840.10008.1.2.4.91"
 J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
 LEAD = "LossyImageCompression (0028,2110) "
@@ -131,8 +138,11 @@ def _only(session):
             for se in st.series for i in se.instances]
 
 
-def _run(tmp_path, ds, *, compression=False, name="s"):
-    """Ingest `ds`, export it, report. Returns a dict of what was seen."""
+def _run(tmp_path, ds, *, compression=False, name="s", pixels=False):
+    """Ingest `ds`, export it, report. Returns a dict of what was seen.
+
+    `pixels`: also return the stored frame, read before the export.
+    """
     src = tmp_path / f"src_{name}"
     _save(src, ds)
     db = str(tmp_path / f"{name}.db")
@@ -142,6 +152,8 @@ def _run(tmp_path, ds, *, compression=False, name="s"):
         summary = session.ingest(str(src))
         instances = _only(session)
         graph = instances[0].attributes.get("0028,2110") if instances else None
+        array = (np.array(instances[0].get_pixel_data())
+                 if pixels and instances else None)
         session.export(str(out), use_compression=compression,
                        show_progress=False)
         session.generate_report(str(report))
@@ -153,7 +165,7 @@ def _run(tmp_path, ds, *, compression=False, name="s"):
              if "Validation Status" in line]
     return {"summary": summary, "graph": graph, "file": file_value,
             "rows": _lossy_rows(db), "grade": grade, "db": db,
-            "written": written}
+            "written": written, "array": array}
 
 
 # ---------------------------------------------------------------------------
@@ -172,25 +184,32 @@ def _run(tmp_path, ds, *, compression=False, name="s"):
      "(1.2.840.10008.1.2.4.203)"),
     (lambda: _j2k91(reversible=False), "is absent",
      f"its JPEG 2000 codestream uses the irreversible 9-7 wavelet ({J2K})"),
+    (lambda: _built(JPEGLS_LOSSLESS,
+                    imagecodecs.jpegls_encode(_mr16(), level=2)), "is absent",
+     f"its JPEG-LS scan declares NEAR 2, where 0 is lossless "
+     f"({JPEGLS_LOSSLESS})"),
     (lambda: _fixture(SC_RGB_JPEG_DCMTK, declared=None), "is absent",
-     "JPEG Baseline (1.2.840.10008.1.2.4.50) is a DCT process, which is "
-     "lossy by definition"),
+     f"its JPEG frame header is SOF0, a DCT process, which is lossy by "
+     f"definition ({JPEG_BASELINE})"),
     (lambda: _fixture(JPEG_LOSSY, declared=None), "is absent",
-     "JPEG Extended (1.2.840.10008.1.2.4.51) is a DCT process, which is "
-     "lossy by definition"),
+     f"its JPEG frame header is SOF1, a DCT process, which is lossy by "
+     f"definition ({JPEG_EXTENDED})"),
     (lambda: _fixture(SC_RGB_JPEG_DCMTK, declared="00"), "declares '00'",
-     "JPEG Baseline (1.2.840.10008.1.2.4.50) is a DCT process, which is "
-     "lossy by definition"),
+     f"its JPEG frame header is SOF0, a DCT process, which is lossy by "
+     f"definition ({JPEG_BASELINE})"),
 ], ids=["jpegls-near2", "jpegls-near3-ilv0", "htj2k-irreversible",
-        "j2k91-irreversible", "jpeg50-absent", "jpeg51-absent", "jpeg50-00"])
+        "j2k91-irreversible", "jpegls80-near2", "jpeg50-absent",
+        "jpeg51-absent", "jpeg50-00"])
 def test_a_lossy_source_without_01_is_recorded(tmp_path, build, lead,
                                                evidence, compression):
     """L1: `01` in the graph and the file, one WARNING naming the evidence.
 
-    Killing mutations: (m18) the DCT-process arm deleted (the `.50`/`.51`
+    Killing mutations: (m18) the DCT arm deleted (the `.50`/`.51`
     parameters); (m20) the stamp deleted with the row kept (graph and
     file); (m24) `_first_frame` returning the undivided PixelData (the
-    JPEG-LS and JPEG 2000 parameters).
+    JPEG-LS and JPEG 2000 parameters); (r11) NEAR read only under `.81`
+    (`jpegls80-near2`: a `.80` stream with NEAR 2 is lossy too, review J2
+    F3).
     """
     got = _run(tmp_path, build(), compression=compression)
 
@@ -277,6 +296,90 @@ def test_this_librarys_own_compressed_export_claims_nothing(tmp_path, build):
     assert again["graph"] is None
 
 
+@pytest.mark.parametrize("ts, bits", [(JPEG_BASELINE, 8), (JPEG_EXTENDED, 16)],
+                         ids=["jpeg50-sof3-8bit", "jpeg51-sof3-16bit"])
+def test_a_lossless_jpeg_frame_under_a_dct_syntax_claims_nothing(tmp_path, ts,
+                                                                  bits):
+    """L2c: a lossless (SOF3) frame labelled `.50` or `.51` is not stamped.
+
+    Review J2 M1: the JPEG arm took the transfer syntax as the evidence
+    and never opened the stream, so this frame -- decoded through the
+    imagecodecs fallback, bit-exact -- was stamped `01` in the graph and
+    the export, with a row saying its pixel data is lossy-compressed,
+    and graded REVIEW_REQUIRED. The frame header is the evidence: SOF3
+    is process 14, lossless (ITU-T T.81 Table B.1). Killing mutation
+    (m29): every JPEG frame type taken as DCT.
+    """
+    source = _mr16() if bits == 16 else (_mr16() >> 4).astype(np.uint8)
+    ds = _built(ts, imagecodecs.ljpeg_encode(source), BitsStored=bits,
+                BitsAllocated=bits, HighBit=bits - 1)
+    got = _run(tmp_path, ds, pixels=True)
+
+    assert got["summary"].ingested == 1, got["summary"]
+    assert np.array_equal(got["array"].reshape(source.shape), source)
+    assert got["rows"] == [], got["rows"]
+    assert got["graph"] is None
+    assert got["file"] is None
+    assert got["grade"] == ["| **Validation Status** | **PASS** |"], got["grade"]
+
+
+def test_a_dct_syntax_is_read_by_its_frame_header():
+    """L2d: the evidence is the first frame header, and no header is none.
+
+    A SOF0 and a SOF1 frame are evidence; a SOF3 frame, a scan with no
+    frame header before it, an SOI and nothing more, and a frame that is
+    not JPEG at all are not. Killing mutations: (m29) any frame type taken as DCT; (m30)
+    an absent frame header taken as DCT.
+    """
+    from isocenter.io_handlers import _lossy_compression_evidence
+    grey8 = (_mr16() >> 4).astype(np.uint8)
+    sof0 = imagecodecs.jpeg8_encode(grey8, level=90)
+    sof1 = imagecodecs.jpeg8_encode(_mr16() & 0xFFF, level=90,
+                                    bitspersample=12)
+    sof3 = imagecodecs.ljpeg_encode(grey8)
+
+    def evidence(ts, frame):
+        return _lossy_compression_evidence(_built(ts, bytes(frame)))
+
+    assert evidence(JPEG_BASELINE, sof0) == {
+        "declared": None, "syntax": JPEG_BASELINE, "evidence": "dct",
+        "value": 0}
+    assert evidence(JPEG_EXTENDED, sof1)["value"] == 1
+    assert evidence(JPEG_BASELINE, sof3) is None
+    assert evidence(JPEG_EXTENDED, sof3) is None
+    no_header = b"\xff\xd8" + _seg(0xDA, bytes([1, 1, 0, 0, 63, 0])) + b"\x00"
+    assert evidence(JPEG_BASELINE, no_header) is None
+    assert evidence(JPEG_BASELINE, b"\xff\xd8") is None
+    assert evidence(JPEG_EXTENDED, b"\x00\x00\x00\x00") is None
+
+
+def test_jpeg_frame_type_walks_not_searches():
+    """L2e: the SOFn of the first frame header, reached by walking.
+
+    A COM payload holding `FF C0` ahead of a SOF3 header is where a search
+    would read SOF0; DHT (`FF C4`), JPG (`FF C8`) and DAC (`FF CC`) sit in
+    the `C0`-`CF` range and are not frame headers; fill bytes may precede a
+    marker; a scan reached first ends the walk. Killing mutation (m31): a
+    search for the first `FF Cn`.
+    """
+    from isocenter.imagecodecs_handler import _jpeg_frame_type
+    soi = b"\xff\xd8"
+    com = _seg(0xFE, b"\xff\xc0\x00\x0b")
+    sof3 = _seg(0xC3, bytes([8, 0, 4, 0, 4, 1, 1, 0x11, 0]))
+    sos = _seg(0xDA, bytes([1, 1, 0, 1, 0, 0]))
+
+    assert _jpeg_frame_type(soi + com + sof3 + sos) == 3
+    assert _jpeg_frame_type(soi + _seg(0xC4, bytes(4)) + _seg(0xCC, bytes(2))
+                            + b"\xff\xff" + sof3 + sos) == 3
+    assert _jpeg_frame_type(soi + _seg(0xC8, bytes(2)) + sof3) == 3
+    assert _jpeg_frame_type(soi + sos + sof3) is None
+    assert _jpeg_frame_type(soi + com) is None
+    assert _jpeg_frame_type(b"\x00\x00" + sof3) is None
+    grey8 = (_mr16() >> 4).astype(np.uint8)
+    assert _jpeg_frame_type(imagecodecs.jpeg8_encode(grey8, level=90)) == 0
+    assert _jpeg_frame_type(imagecodecs.ljpeg_encode(grey8)) == 3
+
+
 # ---------------------------------------------------------------------------
 # L3-L7
 # ---------------------------------------------------------------------------
@@ -305,6 +408,100 @@ def test_a_refused_decode_records_nothing(tmp_path):
     assert summary.ingested == 0, summary
     assert len(summary.failures) == 1, summary
     assert _lossy_rows(db) == []
+
+
+def _lossless_and_lossy(uid):
+    """A NEAR 0 and a NEAR 2 dataset sharing one SOP Instance UID.
+
+    Both carry DeviceSerialNumber `SN1` and a block of 200 in rows and
+    columns 0-7, so a redaction rule on that serial changes the frame.
+    """
+    frame = _mr16()
+    frame[0:8, 0:8] = 200
+    out = []
+    for level in (0, 2):
+        ds = _built(JPEGLS_NEAR, imagecodecs.jpegls_encode(frame, level=level))
+        ds.SOPInstanceUID = uid
+        ds.file_meta.MediaStorageSOPInstanceUID = uid
+        ds.DeviceSerialNumber = "SN1"
+        out.append(ds)
+    return out
+
+
+def test_a_declined_duplicate_writes_no_lossy_row(tmp_path, monkeypatch):
+    """L4b: the row is for an instance the store holds, not a file it declined.
+
+    A lossless file and a lossy one with the same SOP Instance UID: the
+    first in path order is kept, unstamped, and the second is declined
+    with #431's WARNING. A lossy row for the declined file would be keyed
+    to the kept instance's UID and say its pixel data is lossy -- false,
+    and it bars PASS. `test_a_declined_duplicate_writes_no_high_bit_row` is
+    the HighBit row's twin. Killing mutation (r3, review J2 F2): the row
+    recorded above the two declined `continue`s.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    lossless, lossy = _lossless_and_lossy(generate_uid())
+    src = tmp_path / "src"
+    _save(src, lossless, name="a.dcm")
+    _save(src, lossy, name="b.dcm")
+    db = str(tmp_path / "dup.db")
+    with DicomSession(persistence_file=db) as session:
+        summary = session.ingest(str(src))
+        kept = _only(session)
+    assert (summary.ingested, summary.declined) == (1, 1), summary
+    assert len(kept) == 1 and "0028,2110" not in kept[0].attributes
+    assert _lossy_rows(db) == []
+
+
+def test_a_declined_superseded_source_writes_no_lossy_row(tmp_path,
+                                                           monkeypatch):
+    """L4c: the other declined branch, #238's un-redacted original.
+
+    A lossless file is ingested and redacted, which gives the instance a
+    new SOP Instance UID; a lossy file carrying the pre-redaction UID, at
+    another path, is then declined. No lossy row: the file never entered
+    the store. Killing mutation (r3): the row recorded above the
+    superseded-source `continue`.
+    """
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    uid = generate_uid()
+    lossless, lossy = _lossless_and_lossy(uid)
+    src, elsewhere = tmp_path / "src", tmp_path / "elsewhere"
+    _save(src, lossless)
+    _save(elsewhere, lossy)
+    db = str(tmp_path / "superseded.db")
+    with DicomSession(persistence_file=db) as session:
+        session.ingest(str(src))
+        session.configuration.rules = [
+            {"serial_number": "SN1", "redaction_zones": [[0, 8, 0, 8]]}]
+        assert session.redact(show_progress=False) == 1
+        summary = session.ingest(str(elsewhere))
+        live = _only(session)
+    assert (summary.ingested, summary.declined) == (0, 1), summary
+    assert len(live) == 1 and live[0].sop_instance_uid != uid
+    assert "0028,2110" not in live[0].attributes
+    assert _lossy_rows(db) == []
+
+
+def test_the_lossy_row_quotes_a_declared_value_as_plain_data():
+    """L4d: a multi-valued declaration rides `meta` as a list, and a `|`
+    in a declared value cannot break the report's table.
+
+    Killing mutations: (r4) the MultiValue left as pydicom's type; (r5)
+    the `|` escape removed.
+    """
+    from isocenter.io_handlers import (_lossy_compression_evidence,
+                                       _lossy_compression_words)
+    ds = _near(2)
+    ds.LossyImageCompression = ["00", "02"]
+    facts = _lossy_compression_evidence(ds)
+    assert type(facts["declared"]) is list  # pylint: disable=unidiomatic-typecheck
+    assert facts["declared"] == ["00", "02"]
+    assert _lossy_compression_words(facts).startswith(
+        f"{LEAD}declares ['00', '02'], and ")
+    piped = dict(facts, declared="0|")
+    assert _lossy_compression_words(piped).startswith(
+        f"{LEAD}declares '0\\|', and "), _lossy_compression_words(piped)
 
 
 def test_the_lossy_row_log_is_capped(tmp_path, monkeypatch, caplog):

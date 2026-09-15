@@ -194,6 +194,7 @@ from .pixel_geometry import (
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   _j2k_irreversible, _j2k_sample_layout,
+                                  _jpeg_frame_type,
                                   _jpegls_near, _jpegls_precision,
                                   colour_conversion, convert_colour,
                                   decode_declared_frames, extended_offsets,
@@ -2372,8 +2373,9 @@ def _first_frame(ds) -> bytes:
     and a header rule asked before the decode has no business raising
     first. One read for the two rules that look inside a stream before
     decoding it -- `_high_bit_mismatch`'s precision and
-    `_lossy_compression_evidence`'s NEAR and wavelet (#601) -- so frame 0 is
-    the same bytes for both. Frame 0 speaks for the instance.
+    `_lossy_compression_evidence`'s frame header, NEAR and wavelet (#601)
+    -- so frame 0 is the same bytes for both. Frame 0 speaks for the
+    instance.
     """
     try:
         return next(generate_frames(
@@ -2383,12 +2385,16 @@ def _first_frame(ds) -> bytes:
         return b""
 
 
-#: The two DCT processes this library decodes, each lossy by definition
-#: (ITU-T T.81): the transfer syntax is the evidence (#601).
-_LOSSY_BY_PROCESS = {
-    "1.2.840.10008.1.2.4.50": "JPEG Baseline",
-    "1.2.840.10008.1.2.4.51": "JPEG Extended",
-}
+#: The two transfer syntaxes whose frames are read for a DCT frame header
+#: (#601). The syntax names the frame's process and does not prove it: a
+#: lossless SOF3 frame under either decodes bit-exact (review J2 M1).
+_DCT_SYNTAXES = frozenset({"1.2.840.10008.1.2.4.50",
+                           "1.2.840.10008.1.2.4.51"})
+
+#: SOFn for the DCT processes, each lossy by definition (ITU-T T.81 Table
+#: B.1: baseline, extended and progressive, Huffman or arithmetic, and
+#: their differential forms). 3, 7, 11 and 15 are the lossless processes.
+_DCT_FRAME_TYPES = frozenset({0, 1, 2, 5, 6, 9, 10, 13, 14})
 
 
 def _lossy_compression_evidence(ds) -> Optional[dict]:
@@ -2401,15 +2407,20 @@ def _lossy_compression_evidence(ds) -> Optional[dict]:
     syntax is the only record of the loss, and an export replaces the
     syntax. So ingest records `01` where **the pixel data proves it**:
 
-    - a DCT process (JPEG Baseline `.50`, JPEG Extended `.51`);
+    - a JPEG frame header of a DCT process (`_jpeg_frame_type`, SOF0, 1,
+      2, 5, 6, 9, 10, 13 or 14), under JPEG Baseline `.50` or Extended
+      `.51`;
     - a JPEG-LS scan whose NEAR is above 0 (`_jpegls_near`), under any
       JPEG-LS syntax -- a `.80` stream with NEAR 2 is lossy too;
     - a JPEG 2000 codestream using the 9-7 irreversible wavelet
       (`_j2k_irreversible`), under any JPEG 2000 or HTJ2K syntax.
 
-    **A syntax alone is not evidence**: `.81` at NEAR 0 and `.91`/`.203`
-    with the reversible wavelet are lossless in fact (built and measured
-    bit-exact), and a false `01` can never be withdrawn. What that leaves
+    **A syntax alone is not evidence**: `.81` at NEAR 0, `.91`/`.203`
+    with the reversible wavelet, and a SOF3 frame under `.50`/`.51` are
+    lossless in fact (built and measured bit-exact), and a false `01` can
+    never be withdrawn. The JPEG arm read the syntax alone until review J2
+    (M1), and stamped that SOF3 frame. A stream with no readable frame
+    header, NEAR or COD claims nothing. What that leaves
     unrecorded, stated: a reversible codestream truncated at a lossy rate,
     which its header cannot show.
 
@@ -2420,8 +2431,8 @@ def _lossy_compression_evidence(ds) -> Optional[dict]:
     Returns:
         ``{declared, syntax, evidence, value}``: `declared` is the value
         the source carried (None when absent; a list for a multi-valued
-        one), `evidence` is "process", "near" or "irreversible", and
-        `value` the process name or the NEAR. Plain types only, so it
+        one), `evidence` is "dct", "near" or "irreversible", and `value`
+        the frame header's SOF number or the NEAR. Plain types only, so it
         rides `meta` out of a spawned worker.
     """
     declared = ds.get("LossyImageCompression")
@@ -2429,8 +2440,11 @@ def _lossy_compression_evidence(ds) -> Optional[dict]:
         return None
     ts = str(getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", "")
              or "")
-    if ts in _LOSSY_BY_PROCESS:
-        evidence, value = "process", _LOSSY_BY_PROCESS[ts]
+    if ts in _DCT_SYNTAXES:
+        frame_type = _jpeg_frame_type(_first_frame(ds))
+        if frame_type not in _DCT_FRAME_TYPES:
+            return None
+        evidence, value = "dct", frame_type
     elif ts in JPEGLS_SYNTAXES:
         near = _jpegls_near(_first_frame(ds))
         if near is None or near <= 0:
@@ -2460,9 +2474,9 @@ def _lossy_compression_words(facts) -> str:
     lead = ("is absent" if declared is None
             else f"declares {_cs_quoted(declared)}")
     uid = facts["syntax"]
-    if facts["evidence"] == "process":
-        why = (f"{facts['value']} ({uid}) is a DCT process, which is lossy "
-               f"by definition")
+    if facts["evidence"] == "dct":
+        why = (f"its JPEG frame header is SOF{facts['value']}, a DCT process, "
+               f"which is lossy by definition ({uid})")
     elif facts["evidence"] == "near":
         why = (f"its JPEG-LS scan declares NEAR {facts['value']}, where 0 is "
                f"lossless ({uid})")
