@@ -532,7 +532,13 @@ def test_a_satisfied_remove_logs_one_info_line_naming_the_tag_and_uid_only(caplo
 # `entity_uid`/`entity_path`. The session now resolves that address and the
 # satisfied test reads the object it finds; a UID that names no single
 # instance satisfies nothing, and a nested path that breaks is the next
-# section's question. REPLACE and SHIFT on a stale report are #644.
+# section's question.
+#
+# Since #644 the session resolves every finding before the service sees it
+# (`test_a_report_acts_on_the_live_graph.py`): a dead entity whose address
+# names one object is rebound to it, and one whose address names none or
+# two is handed over with no entity and declines with the unresolved text.
+# The STALE text below remains for a live entity filed at another address.
 
 HELD_VALUES = ("JFK IMAGING CENTER", "TOSHIBA", "CompressedSamples", "CT01")
 STALE = "not the object this session holds at"
@@ -566,39 +572,13 @@ def _first_session_passes(tmp_path, save_after_pass):
     return report
 
 
-@pytest.mark.parametrize("mode", MODES, indirect=True)
-def test_a_report_kept_across_a_reopen_of_an_unsaved_pass_declines_its_removals(
-        tmp_path, mode):
-    """The review's `stale_report`: session 1's pass was never saved, so
-    the reopened graph still holds every value the report removed. Each
-    REMOVE declines, naming no value, and the run grades REVIEW_REQUIRED
-    over a file that still carries them. Red on 063ed59: 0 declines and
-    PASS, with `JFK IMAGING CENTER` exported.
-
-    Kills: absence read on `finding.entity` rather than the live object;
-    the session not handing the service its live objects."""
-    report = _first_session_passes(tmp_path, save_after_pass=False)
-    removes = _removes(report)
-    assert len(removes) > 100, len(removes)
-
-    session = DicomSession(str(tmp_path / "m.db"))
-    with session:
-        live = _instances(session)
-        # Non-vacuity: the live graph is not the one the report points at,
-        # and it still holds what the first pass removed.
-        assert not {id(f.entity) for f in removes} & {id(i) for i in live}
-        assert "JFK IMAGING CENTER" in [i.attributes.get(ABSENT) for i in live]
-
-        session.anonymize(report)
-
-        declines = _declined(session)
-        assert len(declines) == len(removes), (len(declines), len(removes))
-        for row in declines:
-            assert not any(v in row for v in HELD_VALUES), row
-        assert all(STALE in row for row in declines), declines[:3]
-        assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]
-        ct = [ds for ds in _exported(session, tmp_path) if ds.Modality == "CT"]
-        assert [ds.InstitutionName for ds in ct] == ["JFK IMAGING CENTER"]
+# `test_a_report_kept_across_a_reopen_of_an_unsaved_pass_declines_its_removals`
+# stood here: each removal of that reopen declined, the run graded
+# REVIEW_REQUIRED, and the file still carried every value. #644 reverses it --
+# the report is resolved against the live graph and the reopen cleans it --
+# and the test, inverted, is
+# `test_a_report_kept_across_a_reopen_of_an_unsaved_pass_cleans_the_live_graph`
+# in `test_a_report_acts_on_the_live_graph.py`.
 
 
 @pytest.mark.parametrize("mode", MODES, indirect=True)
@@ -862,7 +842,12 @@ def test_a_remove_whose_entity_is_not_at_its_address_declines(tmp_path, build, c
     broken path read on the instance's top level, or read satisfied though
     a remaining item holds the tag (`shorter_sequence_still_held`); a
     non-Instance finding resolved among the instances
-    (`study_sharing_the_instance_uid`); a value in the decline."""
+    (`study_sharing_the_instance_uid`); a value in the decline. Since #644,
+    also: a live entity at the wrong address rebound to that address as
+    though it were dead (`wrong_uid`, `nested_mismatch` would then read
+    the unresolved text, or none); a dead one rebound through
+    `resolve_item_path` rather than the strict walk (`index_negative`,
+    `index_bool` would be satisfied)."""
     session = _session(tmp_path, ["CT_small.dcm", "MR_small.dcm"])
     with session:
         finding, ct, still_there = build(session)
@@ -878,7 +863,12 @@ def test_a_remove_whose_entity_is_not_at_its_address_declines(tmp_path, build, c
         assert still_there()
         declines = _declined(session)
         assert len(declines) == 1, declines
-        expected = NO_ARM if finding.entity_type == "Study" else STALE
+        # A Study's decline is the arm's own. An entity that is itself live
+        # but filed at another address keeps #626's STALE text; a dead one
+        # whose address names no single object (#644) is handed over with
+        # no entity and declines as unresolved.
+        expected = (NO_ARM if finding.entity_type == "Study"
+                    else STALE if build in LIVE_MISADDRESSED else UNRESOLVED)
         assert expected in declines[0], declines
         assert not any(v in declines[0] for v in (
             "TOSHIBA", "OTHER-PID-123", "SHIFTED-PHI", VALUE_SENTINEL)), declines
@@ -887,6 +877,8 @@ def test_a_remove_whose_entity_is_not_at_its_address_declines(tmp_path, build, c
 
 
 VALUE_SENTINEL = "VALUE-SENTINEL-626"
+UNRESOLVED = "could not be resolved against the live graph"
+LIVE_MISADDRESSED = {_wrong_uid, _nested_mismatch, _no_such_uid}
 
 
 def test_a_shared_uid_resolves_to_the_instance_the_finding_names(tmp_path):

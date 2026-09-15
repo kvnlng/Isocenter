@@ -552,10 +552,10 @@ class RemediationService:
             # finding's address, not on `entity` (review of #639): a
             # report kept across a reopen points at objects its first
             # pass cleaned, and read there every removal of an unsaved
-            # pass was satisfied while the live graph still held it. The
-            # stamp below still lands on `entity` -- the stale object in
-            # that case -- and that is harmless, because the live object
-            # was just read clean; stale REPLACE and SHIFT are #644.
+            # pass was satisfied while the live graph still held it.
+            # Since #644 the session hands over findings already bound to
+            # that object, so on the session path the two agree, and they
+            # differ only for an entity filed at another address.
             subject = self._removal_subject(finding, entity)
             if self._remove_is_satisfied(subject, proposal):
                 self.logger.info(
@@ -918,12 +918,36 @@ class RemediationService:
         The warning is logged here so the arm stays within its line
         budget: every line above the success block counts toward the five
         `mark_modified()` pins (#310).
+
+        **A seed minted under another secret declines (#644).** The
+        offset is derived under this service's secret from the Patient ID
+        the finding carries (`_resolve_patient_id`), and a report a store
+        raised after its own pass carries that store's keyed pseudonym.
+        Resolved against another store's graph, such a finding shifted
+        the date by an offset of this secret over the other store's
+        pseudonym: measured -184 days on CT_small where this store's own
+        offset for the patient is -359, a second offset for one patient,
+        derived from a value minted elsewhere. A keyed-shaped seed that
+        does not verify under this secret is refused, as
+        `_replace_attr_refused` refuses the ID itself; an original ID, a
+        legacy unkeyed pseudonym and a service with no secret pass.
         """
         from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            _is_keyed_pseudonym_shape, _pseudonym_verifies)
 
         proposal = finding.remediation_proposal
         if proposal.original_value is None or not str(proposal.original_value).strip():
             return None
+        seed = self._resolve_patient_id(entity, proposal)
+        if (self.project_secret and _is_keyed_pseudonym_shape(seed)
+                and not _pseudonym_verifies(seed, self.project_secret)):
+            reason = (f"{proposal.target_attr}: the pseudonym its offset is seeded "
+                      "on was not minted under this store's project secret, so "
+                      "the date is not shifted")
+            self.logger.warning(
+                f"Date shift declined for {self._log_subject(finding)}: {reason}")
+            return reason
         attr, admitted = proposal.target_attr, [proposal.original_value]
         if new_date is not None:
             admitted.append(new_date)
@@ -948,8 +972,7 @@ class RemediationService:
             f"Date shift declined for {self._log_subject(finding)}: {reason}")
         return reason
 
-    @staticmethod
-    def _replace_attr_refused(entity, proposal) -> Optional[str]:
+    def _replace_attr_refused(self, entity, proposal) -> Optional[str]:
         """Why a `REPLACE_TAG` must not write a Python attribute, or None
         when it may (#625).
 
@@ -974,15 +997,44 @@ class RemediationService:
         attribute and the type and never a value: they are persisted in
         the row and rendered into the report.
 
-        Static and pure, with no `audit_buffer`: Pin A in
+        **A Patient ID pseudonym minted under another secret refuses
+        (#644).** `Session.anonymize(findings)` resolves a report against
+        the live graph, so a report raised in one store can act on another
+        that holds the same files, and its `patient_id` proposals carry
+        the first store's keyed pseudonyms. Measured before this check:
+        store B exported store A's `ANON_...` IDs and graded PASS, and
+        B's next `audit()` does not re-propose an ID already shaped
+        `ANON_`, so the cross-project link the project secret exists to
+        prevent (GHSA-phg9) was written and kept. A value shaped as a
+        keyed pseudonym (`_is_keyed_pseudonym_shape`, never
+        `_is_replacement_id`, which also accepts the shorter legacy shape
+        that `_pseudonym_verifies` can never verify) that does not verify
+        under this service's secret is refused, whatever the entity. A
+        legacy unkeyed pseudonym is not keyed-shaped and passes; so does
+        anything with no secret to check against. Refused in the safe
+        direction too: a real Patient ID that happens to have the keyed
+        shape is not written over by one that does not verify.
+
+        Pure, with no `audit_buffer`: Pin A in
         `tests/test_frozen_surface.py` refuses a new callee that takes
         one. Called twice from the arm, once as the condition and once
         for the reason, because binding the answer above the arm is a
-        line above the pinned `mark_modified()` at 291 (#310).
+        line above the pinned `mark_modified()` at 291 (#310). A method
+        rather than static since #644, for the secret; both call sites
+        already spelt `self._replace_attr_refused(...)`, so no line above
+        the pins moved.
         """
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            _is_keyed_pseudonym_shape, _pseudonym_verifies)
+
         attr = proposal.target_attr
         if not hasattr(entity, attr):
             return f"{type(entity).__name__} has no attribute or setter for {attr}"
+        if (attr == "patient_id" and self.project_secret
+                and _is_keyed_pseudonym_shape(proposal.new_value)
+                and not _pseudonym_verifies(proposal.new_value, self.project_secret)):
+            return (f"{attr}: the pseudonym was not minted under this store's "
+                    "project secret, so it is not written")
         if getattr(entity, attr) is None and proposal.new_value not in (None, ""):
             return (f"{attr} is no longer set on the {type(entity).__name__}, "
                     "so the rule's value is not written where the caller "
@@ -1055,7 +1107,8 @@ class RemediationService:
           the same entity will do; the pass can.
         - **The scan tally**, when `audit()` built one: every uid this
           pass's findings name is settled against the keys the pass
-          handled (applied, folded or already satisfied). An incomplete
+          handled (applied, folded, already satisfied, or inside a
+          sequence a pass removed, #644). An incomplete
           uid demotes every entity the pass's findings under it resolve
           to, and the instance holding a nested one. Keyed on the
           scan-time `entity_uid` strings, not live entities: a patient's
@@ -1082,7 +1135,7 @@ class RemediationService:
         `getattr`, because a hand-built entity need carry no status.
         """
         by_uid = {}
-        for key in handled | self._satisfied_keys:
+        for key in handled | self._satisfied_keys | self._gone_keys:
             by_uid.setdefault(key[0], set()).add(key)
         demote = list(self._declined_entities)
         if self._scan_tally is not None:
@@ -1213,6 +1266,19 @@ class RemediationService:
         `entity_path`, reads as a decline instead of as done.
         """
         self._removal_objects = self._MappingProxyType(dict(targets))
+
+    #: Keys of the findings `Session._live_findings` did not hand over
+    #: because a pass already removed or emptied the sequence their REPLACE
+    #: or SHIFT lived in (#644): nothing is at the address to write, and
+    #: no value reaches the export. Counted as handled by the scan tally,
+    #: as a satisfied proposal is -- without it, an instance whose
+    #: container an earlier partial pass emptied was demoted over nothing.
+    #: Rebound, never mutated, so the class default is safe to share.
+    _gone_keys = frozenset()
+
+    def _use_gone_keys(self, keys) -> None:
+        """Count `keys` as handled when this pass settles its statuses."""
+        self._gone_keys = frozenset(keys)
 
     def _removal_subject(self, finding: PhiFinding, entity):
         """What a removal's absence is read on: `entity` with no session,
