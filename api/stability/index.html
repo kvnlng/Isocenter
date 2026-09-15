@@ -1632,7 +1632,12 @@ exclusively and with mode 0600, unless the session holds an identity token
 this library wrote that no key here opens, in which case it raises
 <code>RuntimeError</code> and creates none (#617). <code>lock_identities()</code> refusals name no
 patient: a batch refusal numbers each refused patient by its place among
-the patients found, in Patient ID order.</p>
+the patients found, in Patient ID order. A lock of a patient whose first
+instance holds no value in any tag <code>tags_to_lock</code> names is such a refusal
+(#638).
+<code>lock_identities(persist=True)</code> and <code>lock_identities_batch()</code> raise the
+<code>sqlite3.Error</code> of a store write that fails, after one <code>ERROR</code> audit row;
+writes before it are not rolled back (#599).</p>
 <p><strong>Environment.</strong> Every <code>ISOCENTER_*</code> name in
 <a href="../../environment/">Environment Variables</a>, its default and its
 documented semantics — including the order the three
