@@ -270,7 +270,13 @@ file's format (raw Fernet key bytes). An identity token this library
 writes holds exactly the locked values captured from each instance that
 carries it: a lock writes one token per distinct set of values, never
 one instance's values onto another (#583), and a restore gives each
-instance the values of the token it carries. Date jitter stays
+instance the values of the token it carries. The exception: a token
+without this store's stamp that is shared across studies and holds a
+value outside group 0010 is read as an earlier release's shared token,
+and is restored in full only on the first study carrying it, and as its
+group 0010 on the others. A file carries no stamp, so this applies to
+an exported file ingested elsewhere whose studies' locked values were
+equal (#583; a marker that could tell them apart is #652). Date jitter stays
 deterministic per patient within a project: the same keyed patient under the same
 project secret and the same `date_jitter` range gets the same offset
 in every store holding that secret. A patient a store classed as
