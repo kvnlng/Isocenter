@@ -1439,6 +1439,36 @@ def test_icon_label_warning_unit():
         assert f"'{label}' on the icon at {ICON_PATH} " in sentence
 
 
+def test_a_label_two_items_deep_is_respelled_with_its_note():
+    """I10: `_merge_sequences` threads the correction notes down its recursion.
+
+    An icon inside a sequence item, declared `' rgb '`: written `RGB`, and
+    the one INFO note names the item by its full path. Review J2 P7:
+    the respelling was pinned only one level down, so a recursive call
+    that dropped `corrections` kept the label right and lost the note
+    unseen. Killing mutation (r1): `corrections` not forwarded.
+    """
+    from pydicom.dataset import Dataset
+    from isocenter.entities import DicomItem, DicomSequence
+    from isocenter.io_handlers import DicomExporter
+
+    icon = DicomItem()
+    icon.attributes.update({"0028,0004": " rgb ", "0028,0002": 3})
+    outer = DicomItem()
+    outer.attributes.update({"0008,1150": "1.2.840.10008.5.1.4.1.1.2"})
+    outer.sequences["0088,0200"] = DicomSequence("0088,0200", [icon])
+    ds, notes = Dataset(), []
+    DicomExporter._merge_sequences(  # pylint: disable=protected-access
+        ds, {"0008,1140": DicomSequence("0008,1140", [outer])}, [],
+        corrections=notes)
+
+    written = ds.ReferencedImageSequence[0].IconImageSequence[0]
+    assert written.PhotometricInterpretation == "RGB"
+    assert len(notes) == 1, notes
+    assert notes[0].startswith("(0008,1140) > (0088,0200) item 0: "), notes
+    assert "' rgb '" in notes[0], notes
+
+
 def test_verify_readback_does_not_judge_an_icon_label(tmp_path):
     """I9 (Q6): `verify_readback=True` passes the instance, and the row stays.
 
