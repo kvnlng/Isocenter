@@ -2144,11 +2144,13 @@ class DicomSession:
 
         self.save(sync=True)
         # Save first, then replace the pool -- not the natural order of
-        # "fix the pool, then save". A rebuild that raised first would
-        # skip this save, and leave every instance the import linked
-        # unsaved with its frames unreferenced in the sidecar, which is
-        # the loss #654 fixes. `OSError` is what the constructor raises on
-        # a box out of descriptors or memory (EMFILE, ENOMEM); the import
+        # "fix the pool, then save". A rebuild that came first and raised
+        # anything the guard below does not catch would skip this save,
+        # and leave every instance the import linked unsaved with its
+        # frames unreferenced in the sidecar, which is the loss #654
+        # fixes; `test_the_import_is_saved_before_the_pool_is_replaced`
+        # pins the order. `OSError` is what the constructor raises on a
+        # box out of descriptors or memory (EMFILE, ENOMEM); the import
         # has completed and saved by then, so it is a log line, and the
         # next `ingest()` finds the pool broken at its first file and
         # heals through the same retry and this same call.

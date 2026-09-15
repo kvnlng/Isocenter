@@ -427,6 +427,54 @@ def test_the_retry_reads_alone_on_a_fresh_spawned_pool(monkeypatch):
     assert all(r[7] is None for i, r in enumerate(out) if i != 1)
 
 
+def test_each_run_of_canary_deaths_gets_its_second_pool(monkeypatch):
+    """Two canary deaths in a row stop the retry, not two in the whole call.
+
+    Stubbed pools, scripted: round 0 dies; the first one-worker pool's
+    canary dies, the second's runs and that round dies on its first file
+    (named); the full-width round dies; the next canary dies once more, and
+    the one after runs and reads the rest. A count that was not reset by a
+    canary that ran would call the fourth pool's death the second in a row,
+    and mark every file left "Not read".
+    """
+    canaries = iter([False, True, False, True])
+    widths = []
+
+    class Pool:
+        def __init__(self, **kwargs):
+            widths.append(kwargs["max_workers"])
+
+        def submit(self, fn):
+            future = concurrent.futures.Future()
+            if next(canaries):
+                future.set_result(fn())
+            else:
+                future.set_exception(BrokenProcessPool("canary died"))
+            return future
+
+        def shutdown(self, **kwargs):
+            pass
+
+    calls = []
+
+    def fake(func, items, **kwargs):  # pylint: disable=unused-argument
+        calls.append(list(items))
+        if len(calls) <= 3:
+            yield BrokenProcessPool("died")
+            return
+        for it in items:
+            yield ({'path': it}, "inst", None, None, None, None, None, None)
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", Pool)
+    monkeypatch.setattr(io_handlers, "run_parallel", fake)
+    files = [f"f{i}" for i in range(8)]
+    out = list(io_handlers._ingest_results(files, object(), _strategy(2)))
+    assert widths == [1, 1, 2, 1, 1, 2]
+    assert [r[0]['path'] for r in out] == files
+    assert out[0][7].startswith(io_handlers._WORKER_ENDED_READING)
+    assert all(r[7] is None for r in out[1:])
+
+
 def test_a_rebuild_replaces_only_the_pool_that_broke(tmp_path):
     """A compare-and-swap: a second caller holding a stale pool changes nothing."""
     with DicomSession(str(tmp_path / "s.db")) as session:
