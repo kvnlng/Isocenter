@@ -182,9 +182,11 @@ class ReversibilityService:
         """
         if isinstance(content, str):
             # A lone surrogate is unencodable and raised out of every
-            # lock in the session, because the Q8 sniff walks every
-            # instance before any plan and the batch collects only
-            # `RuntimeError` (review of #633 round 2, P-4). Not ours,
+            # lock in the session where no key file existed yet, because
+            # the Q8 sniff walks every instance before any plan, and out
+            # of every lock of the patient carrying it otherwise; the
+            # batch collects only `RuntimeError` (review of #633 round 2,
+            # P-4; the scope measured in round 3, P-3). Not ours,
             # wherever the surrogate sits: no token of ours is spelled
             # outside base64url, so there is nothing for the key to
             # refuse -- and not `surrogateescape`, which would call a

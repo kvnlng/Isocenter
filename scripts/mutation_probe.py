@@ -288,8 +288,8 @@ TARGETS = {
     # deleted `instance.mark_modified()` (its
     # test_a_re_lock_reaches_the_store); the four demanded files alone
     # leave exactly those 2. tests/test_reversibility.py was measured
-    # as a candidate too, and stays off: before #439's tests it killed
-    # six mutants, and after them it kills nothing these three miss.
+    # as a candidate in #489, and stays off: before #439's tests it killed
+    # six mutants, and after them nothing the row's three files then missed.
     #
     # Three more were gaps until #439 and are killed since by
     # tests/test_relock_identity_token.py and
@@ -555,6 +555,7 @@ TARGETS = {
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
     "isocenter/persistence.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_a_lock_whose_store_write_fails_raises.py",
                                   "tests/test_api_coherence.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_pre_096_store_is_not_reshifted.py",
@@ -676,6 +677,9 @@ TARGETS = {
     # budget.
     "isocenter/session.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                              "tests/test_a_restore_reads_the_token_it_was_given.py",
+                              "tests/test_a_lock_that_stashes_nothing_is_refused.py",
+                              "tests/test_a_lock_whose_store_write_fails_raises.py",
                               "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                               "tests/test_a_private_re_vr_is_recorded.py",
                               "tests/test_both_write_doors_stamp_one_answer.py",
@@ -919,6 +923,8 @@ TARGETS = {
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                               "tests/test_a_restore_reads_the_token_it_was_given.py",
+                               "tests/test_a_lock_that_stashes_nothing_is_refused.py",
                                "tests/test_an_empty_patient_id_is_still_a_patient.py",
                                "tests/test_a_private_re_vr_is_recorded.py",
                                "tests/test_both_write_doors_stamp_one_answer.py",
