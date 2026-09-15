@@ -424,6 +424,7 @@ TARGETS = {
                                   "tests/test_a_remove_on_an_absent_tag_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                   "tests/test_a_restored_study_date_reaches_the_file.py",
                                   "tests/test_a_private_re_vr_is_recorded.py",
                                   "tests/test_both_write_doors_stamp_one_answer.py",
@@ -680,6 +681,7 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                              "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
                               "tests/test_a_restore_reads_the_token_it_was_given.py",
                               "tests/test_a_lock_that_stashes_nothing_is_refused.py",
@@ -928,6 +930,7 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                               "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                "tests/test_a_lock_under_the_wrong_key_refuses.py",
                                "tests/test_a_restore_reads_the_token_it_was_given.py",
                                "tests/test_a_lock_that_stashes_nothing_is_refused.py",
