@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1606 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1609 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1609 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1612 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -193,7 +193,8 @@ from .pixel_geometry import (
 )
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
-                                  _j2k_sample_layout, _jpegls_precision,
+                                  _j2k_irreversible, _j2k_sample_layout,
+                                  _jpegls_near, _jpegls_precision,
                                   colour_conversion, convert_colour,
                                   decode_declared_frames, extended_offsets,
                                   frame_count_mismatch_words,
@@ -2343,13 +2344,7 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
         encapsulated = False
     stream = precision = None
     if encapsulated and (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES):
-        try:
-            frame = next(generate_frames(
-                ds.PixelData, number_of_frames=1,
-                extended_offsets=extended_offsets(ds)))
-        except Exception:  # pylint: disable=broad-except
-            # A buffer the decode below will refuse on its own terms.
-            frame = b""
+        frame = _first_frame(ds)
         if ts in J2K_SYNTAXES:
             layout = _j2k_sample_layout(frame)
             if layout is not None:
@@ -2368,6 +2363,118 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
         "precision": precision,
         "width_read": precision if precision is not None else bits_stored,
     }
+
+
+def _first_frame(ds) -> bytes:
+    """Frame 0 of an encapsulated `ds`, found through its offset tables.
+
+    `b""` on any failure: a buffer the decode will refuse on its own terms,
+    and a header rule asked before the decode has no business raising
+    first. One read for the two rules that look inside a stream before
+    decoding it -- `_high_bit_mismatch`'s precision and
+    `_lossy_compression_evidence`'s NEAR and wavelet (#601) -- so frame 0 is
+    the same bytes for both. Frame 0 speaks for the instance.
+    """
+    try:
+        return next(generate_frames(
+            ds.PixelData, number_of_frames=1,
+            extended_offsets=extended_offsets(ds)))
+    except Exception:  # pylint: disable=broad-except
+        return b""
+
+
+#: The two DCT processes this library decodes, each lossy by definition
+#: (ITU-T T.81): the transfer syntax is the evidence (#601).
+_LOSSY_BY_PROCESS = {
+    "1.2.840.10008.1.2.4.50": "JPEG Baseline",
+    "1.2.840.10008.1.2.4.51": "JPEG Extended",
+}
+
+
+def _lossy_compression_evidence(ds) -> Optional[dict]:
+    """The facts for ingest's LossyImageCompression row, or None (#601).
+
+    PS3.3 C.7.6.1.1.5: (0028,2110) `01` "conveys that the Image has
+    undergone lossy compression", and "once this value has been set to 01
+    it shall not be reset". It is Type 3, and nothing requires it under a
+    lossy transfer syntax -- but when a source omits it, the transfer
+    syntax is the only record of the loss, and an export replaces the
+    syntax. So ingest records `01` where **the pixel data proves it**:
+
+    - a DCT process (JPEG Baseline `.50`, JPEG Extended `.51`);
+    - a JPEG-LS scan whose NEAR is above 0 (`_jpegls_near`), under any
+      JPEG-LS syntax -- a `.80` stream with NEAR 2 is lossy too;
+    - a JPEG 2000 codestream using the 9-7 irreversible wavelet
+      (`_j2k_irreversible`), under any JPEG 2000 or HTJ2K syntax.
+
+    **A syntax alone is not evidence**: `.81` at NEAR 0 and `.91`/`.203`
+    with the reversible wavelet are lossless in fact (built and measured
+    bit-exact), and a false `01` can never be withdrawn. What that leaves
+    unrecorded, stated: a reversible codestream truncated at a lossy rate,
+    which its header cannot show.
+
+    None when the source already declares `01`: that is the record, and
+    this never touches it. A declared `00`, or any other value, is replaced
+    -- which is not a reset of `01`.
+
+    Returns:
+        ``{declared, syntax, evidence, value}``: `declared` is the value
+        the source carried (None when absent; a list for a multi-valued
+        one), `evidence` is "process", "near" or "irreversible", and
+        `value` the process name or the NEAR. Plain types only, so it
+        rides `meta` out of a spawned worker.
+    """
+    declared = ds.get("LossyImageCompression")
+    if declared is not None and str(declared).strip() == "01":
+        return None
+    ts = str(getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", "")
+             or "")
+    if ts in _LOSSY_BY_PROCESS:
+        evidence, value = "process", _LOSSY_BY_PROCESS[ts]
+    elif ts in JPEGLS_SYNTAXES:
+        near = _jpegls_near(_first_frame(ds))
+        if near is None or near <= 0:
+            return None
+        evidence, value = "near", near
+    elif ts in J2K_SYNTAXES:
+        if _j2k_irreversible(_first_frame(ds)) is not True:
+            return None
+        evidence, value = "irreversible", None
+    else:
+        return None
+    if isinstance(declared, MultiValue):
+        declared = [str(v) for v in declared]
+    elif declared is not None:
+        declared = str(declared)
+    return {"declared": declared, "syntax": ts, "evidence": evidence,
+            "value": value}
+
+
+def _lossy_compression_words(facts) -> str:
+    """The LossyImageCompression row, from `_lossy_compression_evidence`.
+
+    Value-free: the only values quoted are the element's own code, capped
+    at a Code String's length, and a NEAR integer. Names no file.
+    """
+    declared = facts["declared"]
+    lead = ("is absent" if declared is None
+            else f"declares {_cs_quoted(declared)}")
+    uid = facts["syntax"]
+    if facts["evidence"] == "process":
+        why = (f"{facts['value']} ({uid}) is a DCT process, which is lossy "
+               f"by definition")
+    elif facts["evidence"] == "near":
+        why = (f"its JPEG-LS scan declares NEAR {facts['value']}, where 0 is "
+               f"lossless ({uid})")
+    else:
+        why = (f"its JPEG 2000 codestream uses the irreversible 9-7 wavelet "
+               f"({uid})")
+    return (f"LossyImageCompression (0028,2110) {lead}, and this file's "
+            f"pixel data is lossy-compressed: {why}. Recorded as 01 at "
+            f"ingest, so an export carries it (PS3.3 C.7.6.1.1.5: 01 conveys "
+            f"that the image has undergone lossy compression, and once set "
+            f"it shall not be reset). The samples are unchanged."
+            ).replace("|", "\\|")
 
 
 def _high_bit_words(facts) -> str:
@@ -2723,6 +2830,11 @@ def ingest_worker(fp: str) -> Tuple:
             # Asked of the header before the decode, so both decoders'
             # files get it; attached only once the decode succeeds (#455).
             high_bit_mismatch = _high_bit_mismatch(ds)
+            # The same shape for #601: asked of the header and frame 0
+            # before the decode, recorded only once the decode succeeds.
+            # Top level only -- 0028,2110 is the General Image Module's,
+            # and an icon is not the image.
+            lossy = _lossy_compression_evidence(ds)
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
@@ -2754,6 +2866,11 @@ def ingest_worker(fp: str) -> Tuple:
                     # a subprocess with no store handle, so `import_files`
                     # writes the row.
                     meta['high_bit_mismatch'] = high_bit_mismatch
+                if lossy is not None:
+                    # In the worker, on an Instance nothing has linked yet,
+                    # beside the relabel above; the row rides `meta`.
+                    inst.set_attr("0028,2110", "01")
+                    meta['lossy_compression'] = lossy
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
                 # The path rides the meta slot, as in the blanket except
@@ -3162,6 +3279,7 @@ class DicomImporter:
         declined_superseded = 0
         declined_duplicate = 0
         high_bit_rows = 0
+        lossy_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -3208,6 +3326,26 @@ class DicomImporter:
                     "... (suppressing further per-instance "
                     "messages for HighBit other than BitsStored "
                     "- 1) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_lossy(uid, detail):
+            """One LossyImageCompression row (#601), on its own log cap.
+
+            Its own counter, not the HighBit one: a cohort of near-lossless
+            files must not suppress a header fact about another file
+            before its first line is printed.
+            """
+            nonlocal lossy_rows
+            lossy_rows += 1
+            if lossy_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif lossy_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance messages for "
+                    "LossyImageCompression recorded from the pixel data) "
+                    "...")
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
@@ -3372,6 +3510,16 @@ class DicomImporter:
                     if high_bit:
                         _record_high_bit(inst.sop_instance_uid,
                                          _high_bit_words(high_bit))
+
+                    # LossyImageCompression recorded from the pixel data
+                    # (#601, owner ruling Q1). A `WARNING`: the stamp is a
+                    # permanent claim this library derived, and the row is
+                    # what makes it reviewable; it bars PASS. After both
+                    # declined `continue`s, like the HighBit row.
+                    lossy = meta.get('lossy_compression')
+                    if lossy:
+                        _record_lossy(inst.sop_instance_uid,
+                                      _lossy_compression_words(lossy))
 
                     # The frames `ingest_worker` dropped because the
                     # offset table named more than NumberOfFrames

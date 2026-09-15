@@ -47,11 +47,16 @@ def _file(tmp_path, arr, *, ts=JPEG_EXTENDED, bits_stored=12, level=100,
     samples = arr.shape[2] if arr.ndim == 3 else 1
     options = {"bitspersample": bits_stored} if bits_stored > 8 else {}
     codestream = imagecodecs.jpeg8_encode(arr, level=level, **options)
-    return write(tmp_path, dataset(
+    ds = dataset(
         ts, [codestream], rows=arr.shape[0], cols=arr.shape[1],
         samples=samples, bits_allocated=16 if bits_stored > 8 else 8,
         bits_stored=bits_stored, pixel_representation=pixel_representation,
-        photometric=photometric), name=name)
+        photometric=photometric)
+    # Declared as a DCT file honestly is (PS3.3 C.7.6.1.1.5), so the
+    # ingest rows these tests read are about the decode: an absent 0028,2110
+    # over a `.50`/`.51` stream has its own WARNING since #601.
+    ds.LossyImageCompression = "01"
+    return write(tmp_path, ds, name=name)
 
 
 @pytest.mark.parametrize("name", ["JPEG-lossy.dcm", "JPGExtended.dcm"])
