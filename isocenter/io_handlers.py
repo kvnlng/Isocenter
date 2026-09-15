@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1626 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1629 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1635 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1638 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -194,11 +194,13 @@ from .pixel_geometry import (
 )
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
-                                  _j2k_irreversible, _j2k_sample_layout,
-                                  _jpeg_frame_type,
-                                  _jpegls_near, _jpegls_precision,
+                                  T81_SYNTAXES,
+                                  _j2k_irreversible,
+                                  _jpeg_frame_type, _sign_extend,
+                                  _jpegls_near, _stream_precision,
                                   colour_conversion, convert_colour,
                                   decode_declared_frames, extended_offsets,
+                                  frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
                                   signed_codestream_refusal)
@@ -2155,8 +2157,30 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         kwargs["allow_excess_frames"] = allow_excess_frames
     if as_rgb is not None:
         kwargs["as_rgb"] = as_rgb
+    # A T.81 stream wider than BitsStored is read by its own precision on
+    # pydicom's route too (#622). pydicom masks every T.81 decode to
+    # BitsStored (`correct_unused_bits`, its default for these syntaxes),
+    # where the fallback, JPEG 2000 and JPEG-LS read the stream's width:
+    # an 8-bit JPEG Baseline stream under BitsStored 6 read 60 for 252.
+    # The mask is also pydicom's *sign extension* for them (a left shift,
+    # then an arithmetic right shift), so with it off a plugin such as
+    # pylibjpeg-libjpeg returns a signed stream's unextended pattern --
+    # measured, 2048 for -2048 -- and `_extend_each_frame` puts it back.
+    # At a width equal to the container's, as for Pillow's `int8`, that
+    # is a pure reinterpretation.
+    #
+    # **Every frame's precision, never frame 0's for all** (review of
+    # #659, M1). The mask is one switch for the whole decode, so it is
+    # off when any frame is wider; the extension is per frame, so a
+    # conformant frame behind a wider frame 0 is extended at BitsStored,
+    # as the fallback extends it. Extended at frame 0's width, its -2048
+    # read 2048 with pylibjpeg installed, where main had read it right.
+    wider = _t81_frames_wider(ds, ts)
+    if wider is not None:
+        kwargs["correct_unused_bits"] = False
     try:
         arr, meta = get_decoder(ts).as_array(ds, **kwargs)
+        photometric = meta["photometric_interpretation"]
     except RuntimeError as exc:
         if str(ts) not in _IMAGECODECS_FALLBACK_SYNTAXES:
             raise
@@ -2168,8 +2192,74 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         # allow-list too: a header that fails both is refused in pydicom's
         # words, which name the element.
         _validate_like_pydicom(ds, ts)
-        return _decode_with_imagecodecs(ds, allow_excess_frames, exc)
-    return np.ascontiguousarray(arr), meta["photometric_interpretation"]
+        arr, photometric = _decode_with_imagecodecs(ds, allow_excess_frames,
+                                                    exc)
+    else:
+        # pydicom's decode only, outside the `try`: the fallback extends
+        # its own (`_decode_frame`), and a refusal here is not a reason to
+        # ask it.
+        if wider is not None:
+            arr = _extend_each_frame(arr, ds, wider)
+    # Native byte order, at the one exit every door leaves by (#648).
+    # pydicom returns a big-endian source in the file's own order (`>u2`,
+    # `>i2`, `>u4`) with the right *values*, and every caller that stores
+    # the array stores `tobytes()` -- big-endian bytes, which the sidecar
+    # loader reads as native: `[0, 100, 4000, 4095]` came back
+    # `[0, 25600, 40975, 65295]`. `Instance.set_pixel_data` has always
+    # normalised a caller's array the same way. The export readback cannot
+    # see this class of defect, because it compares the written file with
+    # the array written, not with the source; a test has to.
+    if arr.dtype.byteorder not in ('=', '|'):
+        arr = arr.astype(arr.dtype.newbyteorder('='))
+    return np.ascontiguousarray(arr), photometric
+
+
+def _t81_frames_wider(ds, ts) -> Optional[list]:
+    """Every declared frame's `(stream, precision)`, when any is wider than BitsStored (#622).
+
+    None for any syntax but T.81 (`.50/.51/.57/.70`), for a BitsStored
+    that is absent or not an integer (pydicom's validation refuses it in
+    its own words), and when no frame's stream is wider -- the conformant
+    case, which pydicom masks and extends exactly as it did.
+    """
+    if str(ts) not in T81_SYNTAXES:
+        return None
+    try:
+        bits_stored = int(ds.BitsStored)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    precisions = frame_precisions(ds)
+    if any(precision is not None and precision > bits_stored
+           for _stream, precision in precisions):
+        return precisions
+    return None
+
+
+def _extend_each_frame(arr, ds, precisions):
+    """pydicom's unmasked T.81 decode, each frame sign-extended as the fallback extends it (#622).
+
+    Frame `i` is extended from its own stream's precision where that is
+    wider than BitsStored, and from BitsStored otherwise -- exactly
+    `imagecodecs_handler._decode_frame`'s JPEG Lossless arm, so both
+    routes give one answer frame by frame. A frame past `precisions` (an
+    excess the caller did not ask to drop) is extended from BitsStored.
+    Unsigned, `_sign_extend` returns each frame untouched.
+
+    The frame axis is read from the array's rank against SamplesPerPixel,
+    not from NumberOfFrames: pydicom returns one frame without it.
+    """
+    bits_stored = int(ds.BitsStored)
+    samples = int(getattr(ds, "SamplesPerPixel", 1) or 1)
+    single = arr.ndim == (2 if samples == 1 else 3)
+    frames = arr[np.newaxis] if single else arr
+    extended = []
+    for index, frame in enumerate(frames):
+        precision = (precisions[index][1] if index < len(precisions)
+                     else None)
+        extended.append(_sign_extend(
+            frame, ds, precision if precision is not None
+            and precision > bits_stored else None))
+    return extended[0] if single else np.stack(extended)
 
 
 def _validate_like_pydicom(ds, ts) -> None:
@@ -2340,7 +2430,8 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
 
     PS3.5 8.1.1 requires HighBit to be BitsStored - 1. No decoder here
     reads HighBit: JPEG Lossless returns right-aligned samples by
-    BitsStored, JPEG-LS and JPEG 2000 by the stream's own precision, and
+    BitsStored (or by its stream's precision where that is wider, #622),
+    JPEG-LS and JPEG 2000 by the stream's own precision, and
     pydicom masks a native sample to its low BitsStored bits. So a file
     that says otherwise is read exactly as a conformant one would be, and
     the one thing that changes is that the session says so (#455, #523;
@@ -2364,10 +2455,10 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
 
     Returns:
         ``{bits_allocated, bits_stored, high_bit, pixel_representation,
-        encapsulated, stream, precision, width_read}``: `stream` is "JPEG
-        2000 codestream" or "JPEG-LS stream" where `precision` was read
-        from one, else None; `width_read` is that precision, or
-        BitsStored.
+        encapsulated, stream, precision, width_read}``: `stream` is
+        `_stream_precision`'s name where `precision` was read from one
+        (for a T.81 stream, only when it is wider than BitsStored, #622),
+        else None; `width_read` is that precision, or BitsStored.
     """
     try:
         bits_stored = int(ds.BitsStored)
@@ -2382,16 +2473,15 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
     except (AttributeError, ValueError):
         encapsulated = False
     stream = precision = None
-    if encapsulated and (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES):
-        frame = _first_frame(ds)
-        if ts in J2K_SYNTAXES:
-            layout = _j2k_sample_layout(frame)
-            if layout is not None:
-                stream, precision = "JPEG 2000 codestream", layout[1]
-        else:
-            precision = _jpegls_precision(frame) if frame else None
-            if precision is not None:
-                stream = "JPEG-LS stream"
+    if encapsulated and (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
+                         or ts in T81_SYNTAXES):
+        stream, precision = _stream_precision(ts, _first_frame(ds))
+        # A T.81 stream is read by its precision only where that is wider
+        # than BitsStored (#622); otherwise by BitsStored, as #446 reads
+        # it, and the row says BitsStored.
+        if (ts in T81_SYNTAXES and precision is not None
+                and precision <= bits_stored):
+            stream = precision = None
     return {
         "bits_allocated": getattr(ds, "BitsAllocated", None),
         "bits_stored": bits_stored,
@@ -2421,6 +2511,109 @@ def _first_frame(ds) -> bytes:
             extended_offsets=extended_offsets(ds)))
     except Exception:  # pylint: disable=broad-except
         return b""
+
+
+def _precision_mismatch(ds, arr) -> Optional[dict]:
+    """The facts for ingest's precision row, or None (#622).
+
+    A compressed stream states its own sample precision, and PS3.5 8.2.1
+    directs that where the stream's characteristics contradict the Data
+    Elements, the stream's control the decompression. Every door here
+    reads such a stream by its precision -- JPEG 2000 and JPEG-LS always
+    did; a T.81 stream does since #622, on both routes (`_decode_pixels`,
+    `imagecodecs_handler._decode_frame`) -- and `import_files` writes a
+    `WARNING` row from what this returns, as it does for HighBit (#455).
+
+    **Only where the decoded samples do not fit BitsStored** (owner
+    ruling on review F2 of #659). A stream wider than BitsStored is the
+    ordinary output of DCMTK's true-lossless encoder, which writes the
+    precision BitsAllocated for every 12-in-16 image; four of pydicom's
+    fifty compressed test files have that shape, and every sample fits.
+    The header disagreement alone changes no value and no export, so it
+    is not a row. `arr` is the decode ingest stores: a sample of 2^BS or
+    more (unsigned), or outside `[-2^(BS-1), 2^(BS-1) - 1]` (signed), is
+    one BitsStored cannot hold, and then the stream's precision is why.
+
+    None unless some sample does not fit and the widest frame's precision
+    satisfies `BitsStored < precision <= BitsAllocated`. Above
+    BitsAllocated no container holds the samples and the decode's dtype
+    check refuses the file; at or below BitsStored a sample that does not
+    fit was not put there by the stream. **Every declared frame's
+    precision** (`frame_precisions`), so a wider frame behind a
+    conformant frame 0 is reported; the row names the widest.
+
+    No rewrite of BitsStored follows (the #455 precedent): the graph keeps
+    the declared value, and an export writes BitsStored from the samples,
+    which is the container's width for a 12-bit stream under BitsStored 8
+    (`_stored_width` falls to the array's width when the declared value
+    does not hold the samples).
+
+    Returns:
+        ``{bits_allocated, bits_stored, precision, stream,
+        pixel_representation, sample}``, plain types, so it rides `meta`
+        out of a spawned worker; `sample` is the one farthest outside
+        BitsStored's range.
+    """
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
+                          or ts in T81_SYNTAXES):
+        return None
+    try:
+        bits_allocated = int(ds.BitsAllocated)
+        bits_stored = int(ds.BitsStored)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    signed = int(getattr(ds, "PixelRepresentation", 0) or 0) == 1
+    sample = _sample_beyond(arr, bits_stored, signed)
+    if sample is None:
+        return None
+    readings = [(stream, precision) for stream, precision
+                in frame_precisions(ds) if precision is not None]
+    if not readings:
+        return None
+    stream, precision = max(readings, key=lambda reading: reading[1])
+    if not bits_stored < precision <= bits_allocated:
+        return None
+    return {
+        "bits_allocated": bits_allocated,
+        "bits_stored": bits_stored,
+        "precision": precision,
+        "stream": stream,
+        "pixel_representation": getattr(ds, "PixelRepresentation", None),
+        "sample": sample,
+    }
+
+
+def _sample_beyond(arr, bits_stored, signed) -> Optional[int]:
+    """The sample farthest outside what BitsStored holds, or None when all fit (#622).
+
+    Unsigned, BitsStored holds `0 .. 2^BS - 1`; signed, `-2^(BS-1) ..
+    2^(BS-1) - 1`. Asked of the array's minimum and maximum only, as
+    Python integers, so a 16-bit container cannot overflow the bound.
+    """
+    if arr is None or arr.size == 0 or bits_stored < 1:
+        return None
+    if signed:
+        low, high = -(1 << (bits_stored - 1)), (1 << (bits_stored - 1)) - 1
+    else:
+        low, high = 0, (1 << bits_stored) - 1
+    lowest, highest = int(arr.min()), int(arr.max())
+    beyond = [(highest - high, highest)] if highest > high else []
+    if lowest < low:
+        beyond.append((low - lowest, lowest))
+    return max(beyond)[1] if beyond else None
+
+
+def _precision_words(facts) -> str:
+    """The precision row, from `_precision_mismatch`'s facts."""
+    precision = facts["precision"]
+    return (f"BitsStored {facts['bits_stored']} with BitsAllocated "
+            f"{facts['bits_allocated']}, and the {facts['stream']}'s "
+            f"precision is {precision}: read as right-aligned {precision}-bit "
+            f"samples, as PS3.5 8.2.1 directs for a stream that contradicts "
+            f"the Data Elements, and a sample reads {facts['sample']}, which "
+            f"BitsStored {facts['bits_stored']} cannot hold; an export writes "
+            f"BitsStored from the samples.")
 
 
 #: The two transfer syntaxes whose frames are read for a DCT frame header
@@ -2601,7 +2794,7 @@ def _nested_item_syntax(transfer_syntax, item_ds, tag_str) -> str:
 
 
 def _decode_nested_pixels(ds, candidates, dropped, instance, *,
-                          offset_tables, high_bits) -> list:
+                          offset_tables, high_bits, precisions) -> list:
     """Decode every nested (7fe0,0010) `populate_attrs` collected (#183).
 
     Runs in `ingest_worker`, immediately after the walk that produced
@@ -2652,6 +2845,10 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             that is not carried appends nothing: its loss row is the one
             it is owed, and a HighBit row beside it would describe a
             decode that never reached the store.
+        precisions (list): Appended to with `(path, tag, vr, facts)` for
+            every **carried** candidate with a sample its BitsStored
+            cannot hold from a stream wider than it, `facts` being
+            `_precision_mismatch`'s (#622), on `high_bits`' terms.
 
     Returns:
         list: `(path, terminal_tag, vr, raw_bytes, sha256)` per carried
@@ -2713,6 +2910,10 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # and kept below only once the decode has succeeded.
             facts = _high_bit_mismatch(item_ds)
             arr, decoded_pi = _decode_pixels(item_ds, **decode_kwargs)
+            # Asked of the decoded samples (#622), so after the decode;
+            # inside the borrow, because it walks the frames by the
+            # borrowed transfer syntax.
+            precision = _precision_mismatch(item_ds, arr)
             if decode_kwargs:
                 offset_tables.append((path, tag_str, vr, counted, "excess"))
         except Exception:  # pylint: disable=broad-except
@@ -2738,6 +2939,8 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             (path, tag_str, vr, raw, hashlib.sha256(raw).hexdigest()))
         if facts is not None:
             high_bits.append((path, tag_str, vr, facts))
+        if precision is not None:
+            precisions.append((path, tag_str, vr, precision))
 
         # The same correction the top-level arm makes just below, for the
         # same reason: pydicom de-planarises on read, so the bytes are
@@ -2833,13 +3036,15 @@ def ingest_worker(fp: str) -> Tuple:
         # the code that knows (#183, #194).
         nested_offset_tables = []
         nested_high_bits = []
+        nested_precisions = []
         meta['nested_pixels'] = _decode_nested_pixels(
             ds, nested, dropped, inst, offset_tables=nested_offset_tables,
-            high_bits=nested_high_bits)
+            high_bits=nested_high_bits, precisions=nested_precisions)
         meta['nested_offset_table'] = nested_offset_tables
         # Ints, bools, strs and None only, so it pickles from a spawned
         # worker like the rest of `meta` (#598).
         meta['nested_high_bit'] = nested_high_bits
+        meta['nested_precision'] = nested_precisions
         meta['dropped_private_binary'] = dropped
         # Rides `meta` for the same reason as `dropped_private_binary`
         # above: this worker may be in a subprocess with no store
@@ -2859,11 +3064,13 @@ def ingest_worker(fp: str) -> Tuple:
         if "PixelData" in ds:
             # The offset table against NumberOfFrames, before the decode
             # (#418). Asked here, not left to the decoder: pydicom returns
-            # every frame the table names, so an excess used to be stored
-            # whole under a header that declared fewer, and the instance
-            # was accepted with no row and could never be read back -- the
-            # loader refused it later with an Integrity Error, against
-            # the wrong cause.
+            # every frame the table names -- and, with no table it walks
+            # by, every frame its walk of the fragments finds, or every
+            # whole frame a native element's length holds (#620) -- so an
+            # excess used to be stored whole under a header that declared
+            # fewer, and the instance was accepted with no row and could
+            # never be read back -- the loader refused it later with an
+            # Integrity Error, against the wrong cause.
             #
             # Excess: keep the declared frames. NumberOfFrames is the
             # dataset's declared shape, and frames beyond it are not
@@ -2925,6 +3132,11 @@ def ingest_worker(fp: str) -> Tuple:
                     # a subprocess with no store handle, so `import_files`
                     # writes the row.
                     meta['high_bit_mismatch'] = high_bit_mismatch
+                # A sample BitsStored cannot hold, from a stream wider
+                # than it (#622): asked of the decoded array, so here.
+                precision_mismatch = _precision_mismatch(ds, arr)
+                if precision_mismatch is not None:
+                    meta['precision_mismatch'] = precision_mismatch
                 if lossy is not None:
                     # In the worker, on an Instance nothing has linked yet,
                     # beside the relabel above; the row rides `meta`.
@@ -2957,6 +3169,12 @@ def ingest_worker(fp: str) -> Tuple:
             # still reports. One question, one answer.
             try:
                 arr = np.ascontiguousarray(ds.pixel_array)
+                # This arm does not pass through `_decode_pixels`, so it
+                # normalises byte order itself (#648): a big-endian
+                # FloatPixelData decodes to `>f4`, and its `tobytes()`
+                # stored `[0.5, -1.25, 1000, 3]` as values near 1e-41.
+                if arr.dtype.byteorder not in ('=', '|'):
+                    arr = arr.astype(arr.dtype.newbyteorder('='))
                 p_bytes = arr.tobytes()
                 p_alg = 'zlib'
                 # The dtype the sidecar will have to reconstruct with,
@@ -3363,6 +3581,7 @@ class DicomImporter:
         declined_duplicate = 0
         high_bit_rows = 0
         lossy_rows = 0
+        precision_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -3429,6 +3648,26 @@ class DicomImporter:
                     "... (suppressing further per-instance messages for "
                     "LossyImageCompression recorded from the pixel data) "
                     "...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_precision(uid, detail):
+            """One stream-precision row (#622), top level or icon, on its own cap.
+
+            Its own counter, for `_record_lossy`'s reason: a cohort of
+            12-bit streams under BitsStored 8 must not suppress another
+            file's HighBit line before it is printed. One counter for both
+            depths, for `_record_high_bit`'s.
+            """
+            nonlocal precision_rows
+            precision_rows += 1
+            if precision_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif precision_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance messages for "
+                    "a stream wider than BitsStored) ...")
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
@@ -3594,6 +3833,15 @@ class DicomImporter:
                         _record_high_bit(inst.sop_instance_uid,
                                          _high_bit_words(high_bit))
 
+                    # A stream wider than BitsStored, read by the stream
+                    # (#622, owner ruling Q2). A `WARNING` for HighBit's
+                    # reason: a fact about the file's own header, which
+                    # bars PASS. Beside it, on its own log cap.
+                    wider = meta.get('precision_mismatch')
+                    if wider:
+                        _record_precision(inst.sop_instance_uid,
+                                          _precision_words(wider))
+
                     # LossyImageCompression recorded from the pixel data
                     # (#601, owner ruling Q1). A `WARNING`: the stamp is a
                     # permanent claim this library derived, and the row is
@@ -3737,6 +3985,10 @@ class DicomImporter:
                         (h_path, h_tag): (h_vr, h_facts)
                         for h_path, h_tag, h_vr, h_facts
                         in meta.get('nested_high_bit', ())}
+                    nested_precision = {
+                        (p_path, p_tag): (p_vr, p_facts)
+                        for p_path, p_tag, p_vr, p_facts
+                        in meta.get('nested_precision', ())}
                     for n_path, n_tag, n_vr, n_raw, n_hash in meta.get(
                             'nested_pixels', ()):
                         if not sidecar_manager:
@@ -3789,6 +4041,16 @@ class DicomImporter:
                                 inst.sop_instance_uid,
                                 f"{_nested_row_prefix(n_tag, h_vr, n_path)}"
                                 f"{_high_bit_words(h_facts)}")
+                        # And the precision row (#622), on the same terms:
+                        # true here because `_write_back_nested_pixels`
+                        # writes an icon's BitsStored from its samples.
+                        n_wider = nested_precision.get((n_path, n_tag))
+                        if n_wider is not None:
+                            w_vr, w_facts = n_wider
+                            _record_precision(
+                                inst.sop_instance_uid,
+                                f"{_nested_row_prefix(n_tag, w_vr, n_path)}"
+                                f"{_precision_words(w_facts)}")
                         kind = serialize_blob_kind('pixels', n_path, n_tag)
                         # Site 2 of six (#368): append and row commit under
                         # one hold, per icon, for the reason at site 1.
@@ -5239,11 +5501,22 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
         # it is deliberate. An icon is a thumbnail, the saving is nil, and
         # a second encoder call per instance is not.
         item.add_new(Tag(group, element), vr, decoded.tobytes())
+        # A 1-bit icon is written as the top level writes a 1-bit image
+        # (#649): BitsAllocated from the array, which the loader returns
+        # one byte per sample, so BitsAllocated 8 with BitsStored 1 below.
+        # Left at the declared 1, the file held 15 unpacked bytes where a
+        # reader unpacks 2, and pydicom's `pixel_array` raised `TypeError`.
+        # PS3.3 C.7.6.1.1.6 permits 1 or 8. Re-packing to keep the declared
+        # 1 would be a second rule at a second depth. The graph keeps the
+        # declared value; only the file changes.
+        if bits == 1:
+            item.BitsAllocated = decoded.itemsize * 8
         # BitsStored and HighBit, by the top level's rule (#598). Only
         # where the item declares a BitsStored: a hand-built item with
-        # none is not given one. BitsAllocated and PixelRepresentation
-        # are left as declared -- the loader's dtype was built from them
-        # (`_nested_loader_metadata`), so the array already agrees.
+        # none is not given one. PixelRepresentation, and BitsAllocated
+        # other than 1, are left as declared -- the loader's dtype was
+        # built from them (`_nested_loader_metadata`), so the array
+        # already agrees.
         if declared_int(graph_item.attributes, "0028,0101") is not None:
             item.BitsStored, widened = _stored_width(
                 decoded, graph_item.attributes)

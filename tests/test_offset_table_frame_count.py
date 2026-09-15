@@ -23,8 +23,11 @@ message, never on the mere absence of an exception, and every fixture is
 checked (B0) to carry the table the test is about: a fixture whose offset
 table was silently empty would never enter the check at all.
 
-The one mismatch nothing can see is an **empty** BOT with no EOT: the table
-then names no frames and the fragments do not say where frames begin.
+The one mismatch nothing can see is an **empty** BOT with no EOT under
+NumberOfFrames 1: the table then names no frames, the fragments do not say
+where frames begin, and pydicom's walk joins them into one. (Under a
+larger NumberOfFrames the walk is counted since #620:
+`tests/test_a_walked_frame_excess_is_dropped_with_its_row.py`.)
 `test_an_empty_offset_table_is_the_documented_limit_and_decodes_as_before`
 pins that limit rather than pretending it is closed.
 """
