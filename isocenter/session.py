@@ -5286,15 +5286,20 @@ class DicomSession:
         performed using the current configuration, and all resulting
         findings are remediated ("Blind Execute").
 
-        Each finding is resolved against the live graph first (#644), at
-        its `entity_uid` and `entity_path` -- an instance's UID from
-        before `redact()`, and a patient's original Patient ID after the
-        pseudonym this store minted for it, included -- and acts on the
-        object `session.store` holds there, never on an object outside
-        it. So a report kept across `close()` and a reopen cleans the
-        graph `export()` writes. A finding whose address names no single
-        object declines; one inside a sequence a pass already removed or
-        emptied is satisfied. The findings passed are not modified.
+        Nothing outside `session.store` is written (#644). A finding whose
+        `entity` is itself in the graph is acted on as it is. Any other is
+        resolved against the live graph at its `entity_uid` and
+        `entity_path` -- an instance's UID from before `redact()`, and a
+        patient's original Patient ID after the pseudonym this store
+        minted for it, included -- and acts on the object found there, so
+        a report kept across `close()` and a reopen cleans the graph
+        `export()` writes. A finding whose address names no single object
+        declines; one inside a sequence a pass already removed or emptied
+        is satisfied. A Patient ID is written, and a date shifted, only
+        with a value that belongs to the live patient holding it -- this
+        store's pseudonym, and an offset seeded on that patient under its
+        own scheme -- and declines otherwise. The findings passed are not
+        modified.
 
         Two patients left holding one Patient ID -- a study ingested under
         a patient's original ID after that patient was anonymized -- are
@@ -5351,9 +5356,10 @@ class DicomSession:
             # removal targets.
             by_uid = self._instances_by_uid()
             findings, gone = self._live_findings(list(findings), project_secret, by_uid)
+            owners = self._nested_finding_owners(findings, by_uid)
             remediator._use_gone_keys(gone)
-            remediator._use_holder_patient_ids(self._holder_patient_ids())
-            remediator._use_instance_owners(self._nested_finding_owners(findings, by_uid))
+            remediator._use_instance_owners(owners)
+            remediator._use_holders(self._finding_holders(findings, owners))
             remediator._use_removal_targets(self._removal_targets(findings, by_uid))
             remediator._use_scan_tally(self._scan_tally, findings)
             count = remediator.apply_remediation(findings)
@@ -6268,25 +6274,41 @@ class DicomSession:
                             by_uid.setdefault(source, []).append(inst)
         return by_uid
 
-    def _holder_patient_ids(self) -> dict:
-        """`id(Patient, Study or Instance) -> patient_id` of the patient holding it,
-        read before the pass can replace an ID (#644).
+    def _finding_holders(self, findings, owners) -> dict:
+        """`id(entity) -> (patient_id, jitter_scheme)` of the live patient
+        holding it, read before the pass can replace an ID (#644).
 
-        What the service's cross-store seed check exempts a pseudonym by:
-        an export from another project ingested into this store carries
-        that project's pseudonym as its patient's real ID, and its dates
-        shift under this store's secret (0.9.7), while the same pseudonym
-        seeding a date on any other patient is a report from elsewhere.
+        What the service checks a Patient ID REPLACE and a SHIFT's seed
+        against: a resolved report can reach a patient other than the one
+        it was raised for (another store, another site's IDs, a legacy
+        store's scheme), and a value that does not belong to the holder is
+        not written. Every patient, study, series and instance is filed
+        under its patient. A nested item is found through `owners` (its
+        instance) by the service; an item no owner names -- a live item
+        handed over with another item's path -- is filed here by walking
+        the item trees, and only when such a finding is present.
         """
-        ids = {}
+        holders = {}
         for patient in self.store.patients:
-            ids[id(patient)] = patient.patient_id
+            mine = (patient.patient_id, patient._jitter_scheme)
+            holders[id(patient)] = mine
             for study in patient.studies:
-                ids[id(study)] = patient.patient_id
+                holders[id(study)] = mine
                 for series in study.series:
+                    holders[id(series)] = mine
                     for inst in series.instances:
-                        ids[id(inst)] = patient.patient_id
-        return ids
+                        holders[id(inst)] = mine
+        loose = {id(f.entity) for f in findings if f.entity is not None
+                 and id(f.entity) not in holders and id(f.entity) not in owners}
+        if loose:
+            for patient in self.store.patients:
+                for study in patient.studies:
+                    for series in study.series:
+                        for inst in series.instances:
+                            for item, _ in iter_item_tree(inst):
+                                if id(item) in loose:
+                                    holders[id(item)] = holders[id(inst)]
+        return holders
 
     def _live_findings(self, findings, secret, by_uid) -> tuple:
         """`(findings, gone)`: each finding resolved against the live graph,

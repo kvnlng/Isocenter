@@ -919,45 +919,44 @@ class RemediationService:
         budget: every line above the success block counts toward the five
         `mark_modified()` pins (#310).
 
-        **A seed minted under another secret declines (#644).** The
-        offset is derived under this service's secret from the Patient ID
-        the finding carries (`_resolve_patient_id`), and a report a store
-        raised after its own pass carries that store's keyed pseudonym.
-        Resolved against another store's graph, such a finding shifted
-        the date by an offset of this secret over the other store's
-        pseudonym: measured -184 days on CT_small where this store's own
-        offset for the patient is -359, a second offset for one patient,
-        derived from a value minted elsewhere. A keyed-shaped seed that
-        does not verify under this secret is refused, as
-        `_replace_attr_refused` refuses the ID itself; an original ID, a
-        legacy unkeyed pseudonym and a service with no secret pass.
-
-        **Unless the seed is the Patient ID of the patient holding the
-        target**, as the pass began (`_use_holder_patient_ids`): an export
-        from another project ingested here carries that project's
-        pseudonym as its real Patient ID, and 0.9.7 shifts it under this
-        store's secret with one `WARNING` (`_project_secret_for_use`,
-        `test_a_reingested_export_under_another_secret_is_warned`). The
-        holder's own ID, not any ID the store holds: a store holding both
-        a patient and a re-ingested export of that patient would otherwise
-        let a foreign report seeded on the export's pseudonym shift the
-        first patient's dates.
+        **A seed that is not the holder's declines (#644).** The offset is
+        derived from the Patient ID and scheme the finding carries
+        (`_resolve_patient_id`, `metadata["jitter_scheme"]`), never from
+        the patient holding the date, and `Session.anonymize(findings)`
+        resolves a report against the live graph, so a report can reach a
+        patient that is not the one it was raised for. Measured before
+        this check, each written as an offset that is not the patient's
+        own: a report from another store, raised after its own pass,
+        seeded on that store's keyed pseudonym (-184 days on CT_small
+        where this store's offset for the patient is -359); a legacy
+        store's report, seeded under the unkeyed scheme, whose offset
+        anyone can compute from the ID (GHSA-phg9), graded PASS; and a
+        report from a site whose files carry other Patient IDs under the
+        same UIDs, graded PASS. So in a session the seed must key to the
+        patient holding the date, as the pass began (`_use_holders`,
+        `_belongs_to_holder`). That admits every spelling of one patient
+        this store gives -- the original ID and its pseudonym, keyed
+        (#517) or unkeyed -- and an export from another project ingested
+        here, whose real Patient ID is that project's pseudonym and whose
+        own seed is that ID (0.9.7,
+        `test_a_reingested_export_under_another_secret_is_warned`). A
+        nested date's holder is its instance (`_instance_owners`). A
+        finding whose entity has no holder declines too. A service used
+        without a session has no holders and checks nothing, as before
+        #644.
         """
         from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
-        from .privacy import (  # pylint: disable=import-outside-toplevel
-            _is_keyed_pseudonym_shape, _pseudonym_verifies)
 
         proposal = finding.remediation_proposal
         if proposal.original_value is None or not str(proposal.original_value).strip():
             return None
-        seed = self._resolve_patient_id(entity, proposal)
-        holder = self._instance_owners.get(id(entity), entity)
-        if (self.project_secret and _is_keyed_pseudonym_shape(seed)
-                and seed != self._holder_patient_ids.get(id(holder))
-                and not _pseudonym_verifies(seed, self.project_secret)):
-            reason = (f"{proposal.target_attr}: the pseudonym its offset is seeded "
-                      "on was not minted under this store's project secret, so "
-                      "the date is not shifted")
+        if self._holders is not None and not self._belongs_to_holder(
+                self._resolve_patient_id(entity, proposal),
+                (proposal.metadata or {}).get("jitter_scheme", JITTER_SCHEME_KEYED),
+                self._holders.get(id(self._instance_owners.get(id(entity), entity)))):
+            reason = (f"{proposal.target_attr}: the Patient ID its offset is seeded "
+                      "on is not that of the patient holding the date in this "
+                      "store, so the date is not shifted")
             self.logger.warning(
                 f"Date shift declined for {self._log_subject(finding)}: {reason}")
             return reason
@@ -1010,49 +1009,80 @@ class RemediationService:
         attribute and the type and never a value: they are persisted in
         the row and rendered into the report.
 
-        **A Patient ID pseudonym minted under another secret refuses
-        (#644).** `Session.anonymize(findings)` resolves a report against
-        the live graph, so a report raised in one store can act on another
-        that holds the same files, and its `patient_id` proposals carry
-        the first store's keyed pseudonyms. Measured before this check:
-        store B exported store A's `ANON_...` IDs and graded PASS, and
-        B's next `audit()` does not re-propose an ID already shaped
-        `ANON_`, so the cross-project link the project secret exists to
-        prevent (GHSA-phg9) was written and kept. A value shaped as a
-        keyed pseudonym (`_is_keyed_pseudonym_shape`, never
-        `_is_replacement_id`, which also accepts the shorter legacy shape
-        that `_pseudonym_verifies` can never verify) that does not verify
-        under this service's secret is refused, whatever the entity. A
-        legacy unkeyed pseudonym is not keyed-shaped and passes; so does
-        anything with no secret to check against. Refused in the safe
-        direction too: a replacement value that merely has the keyed
-        shape and does not verify is not written, whatever produced it.
+        **A Patient ID that is not this store's pseudonym for the patient
+        refuses (#644).** `Session.anonymize(findings)` resolves a report
+        against the live graph, so a report raised in one store can act on
+        another that holds the same files, and its `patient_id` proposals
+        carry the first store's pseudonyms. Measured before this check:
+        store B exported store A's keyed `ANON_...` IDs, and a legacy
+        store's unkeyed ones -- an unsalted SHA-256 of the MRN -- graded
+        PASS; B's next `audit()` does not re-propose an ID already shaped
+        `ANON_`, so the link the project secret exists to prevent
+        (GHSA-phg9) was written and kept. So in a session the value
+        written must be the one this store mints for `original_value`
+        under the patient's own scheme, as the pass began (`_use_holders`),
+        and `original_value` must key to that patient
+        (`_is_holders_pseudonym`). A report from this store writes the
+        value its patient already holds or would be given; anything else
+        refuses, whatever produced it. A service used without a session
+        checks nothing, as before #644.
 
         Pure, with no `audit_buffer`: Pin A in
         `tests/test_frozen_surface.py` refuses a new callee that takes
         one. Called twice from the arm, once as the condition and once
         for the reason, because binding the answer above the arm is a
         line above the pinned `mark_modified()` at 291 (#310). A method
-        rather than static since #644, for the secret; both call sites
+        rather than static since #644, for the holders; both call sites
         already spelt `self._replace_attr_refused(...)`, so no line above
         the pins moved.
         """
-        from .privacy import (  # pylint: disable=import-outside-toplevel
-            _is_keyed_pseudonym_shape, _pseudonym_verifies)
-
         attr = proposal.target_attr
         if not hasattr(entity, attr):
             return f"{type(entity).__name__} has no attribute or setter for {attr}"
-        if (attr == "patient_id" and self.project_secret
-                and _is_keyed_pseudonym_shape(proposal.new_value)
-                and not _pseudonym_verifies(proposal.new_value, self.project_secret)):
-            return (f"{attr}: the pseudonym was not minted under this store's "
-                    "project secret, so it is not written")
         if getattr(entity, attr) is None and proposal.new_value not in (None, ""):
             return (f"{attr} is no longer set on the {type(entity).__name__}, "
                     "so the rule's value is not written where the caller "
                     "cleared one")
+        if (attr == "patient_id" and self._holders is not None
+                and not self._is_holders_pseudonym(proposal, self._holders.get(id(entity)))):
+            return (f"{attr}: the value is not this store's pseudonym for the "
+                    "patient it would be written to, so it is not written")
         return None
+
+    def _belongs_to_holder(self, patient_id, scheme, holder) -> bool:
+        """Whether `patient_id`, read under `scheme`, names the patient
+        `holder`: a `(patient_id, jitter_scheme)` pair from `_use_holders`,
+        or None for an entity with no holder in the graph (#644).
+
+        One patient has one canonical key per scheme (#517): the original
+        ID and the pseudonym this store gives it key alike, keyed or
+        unkeyed, and another patient's ID does not. The schemes must match
+        as well as the keys, so a legacy spelling never admits a keyed
+        patient.
+        """
+        if holder is None or patient_id is None:
+            return False
+        holder_id, holder_scheme = holder
+        return (scheme == holder_scheme
+                and canonical_patient_key(patient_id, self.project_secret, scheme)
+                == canonical_patient_key(holder_id, self.project_secret, holder_scheme))
+
+    def _is_holders_pseudonym(self, proposal, holder) -> bool:
+        """Whether a `patient_id` REPLACE writes the pseudonym this store
+        mints for its `original_value` under the holder's scheme, and that
+        original names the holder (#644)."""
+        from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            _replacement_id_for, _unkeyed_replacement_id_for)
+
+        if holder is None or proposal.original_value is None:
+            return False
+        scheme = holder[1]
+        minted = (_unkeyed_replacement_id_for(proposal.original_value)
+                  if scheme == JITTER_SCHEME_UNKEYED
+                  else _replacement_id_for(proposal.original_value, self.project_secret))
+        return (proposal.new_value == minted
+                and self._belongs_to_holder(proposal.original_value, scheme, holder))
 
     @staticmethod
     def _remove_is_satisfied(entity, proposal) -> bool:
@@ -1293,18 +1323,17 @@ class RemediationService:
         """Count `keys` as handled when this pass settles its statuses."""
         self._gone_keys = frozenset(keys)
 
-    #: `id(Patient, Study or Instance) -> the patient_id of the patient
-    #: holding it` (a patient holds itself),
-    #: read before the pass can replace an ID (#644). What
-    #: `_shift_target_moved` exempts a foreign-shaped seed by. Empty with
-    #: no session, so a service used alone refuses every such seed. A
-    #: class attribute for `_instance_owners`' reason.
-    _holder_patient_ids = _MappingProxyType({})
+    #: `id(entity) -> (patient_id, jitter_scheme)` of the live patient
+    #: holding it, read before the pass can replace an ID
+    #: (`Session._finding_holders`, #644): what a Patient ID REPLACE and a
+    #: SHIFT's seed must belong to. **None as the whole map means no
+    #: session**, and nothing is checked, as `_removal_objects` reads it.
+    #: A class attribute for `_instance_owners`' reason.
+    _holders = None
 
-    def _use_holder_patient_ids(self, ids) -> None:
-        """Name the Patient ID of the patient holding each patient, study
-        and instance, as the pass begins."""
-        self._holder_patient_ids = self._MappingProxyType(dict(ids))
+    def _use_holders(self, holders) -> None:
+        """Name the patient holding each entity of this pass, as it begins."""
+        self._holders = self._MappingProxyType(dict(holders))
 
     def _removal_subject(self, finding: PhiFinding, entity):
         """What a removal's absence is read on: `entity` with no session,

@@ -137,12 +137,16 @@ by its UID. `ingest()` does not admit a second instance with an SOP
 Instance UID the graph already holds (#431), so only a graph built or
 edited by hand can carry one UID on more than one instance, and findings
 on such a UID all resolve to a single one of those instances.
-`anonymize(findings)` resolves each finding against the live graph at
-its `entity_uid` and `entity_path` (an instance's UID from before
-`redact()`, and a patient's original Patient ID after its pseudonym,
-included) and acts on the object found there; it never writes to an
-object outside `session.store`, and a finding whose address names no
-single object declines. The findings passed are not modified (#644).
+`anonymize(findings)` never writes to an object outside
+`session.store` (#644). A finding whose `entity` is itself in the graph
+is acted on as it is, whatever its address says. Any other finding is
+resolved against the live graph at its `entity_uid` and `entity_path`
+(an instance's UID from before `redact()`, and a patient's original
+Patient ID after its pseudonym, included) and acts on the object found
+there, or declines when the address names no single object. A Patient
+ID is written, and a date shifted, only with a value that belongs to the
+live patient holding it; otherwise the finding declines. The findings
+passed are not modified.
 
 `PhiReport.failures` is a list of `(entity_uid, reason)`, one per
 instance `scan_pixel_content()` could not read in full, and is always a
