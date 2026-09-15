@@ -693,6 +693,23 @@ def _shorter_sequence_still_held(session):
     return finding, ct, lambda: held.attributes.get("0010,1000") == "SHIFTED-PHI"
 
 
+def _shorter_sequence_held_deeper(session):
+    """A two-level path, `(0008,1140)[1] > (0040,a170)[0] > 0010,1000`,
+    broken at the first level: the one item left holds the tag one level
+    down, where the path would have reached it. A remaining item is read
+    beneath itself, not only at its own level."""
+    ct, _ = _ct_and_mr(session)
+    outer = DicomItem()
+    inner = DicomItem()
+    inner.set_attr("0010,1000", "SHIFTED-PHI")
+    outer.add_sequence_item("0040,a170", inner)
+    ct.add_sequence_item("0008,1140", outer)
+    finding = _finding(DicomItem(), "REMOVE_TAG", "0010,1000",
+                       uid=ct.sop_instance_uid,
+                       path=(("0008,1140", 1), ("0040,a170", 0)))
+    return finding, ct, lambda: inner.attributes.get("0010,1000") == "SHIFTED-PHI"
+
+
 def _study_sharing_the_instance_uid(session):
     """A Study whose Study Instance UID is its instance's SOP Instance UID
     (hand-built), with Study Date deleted from the instance, and a
@@ -731,6 +748,7 @@ def _shared_uid(session):
     pytest.param(_nested_mismatch, id="nested_mismatch"),
     pytest.param(_no_such_uid, id="no_such_uid"),
     pytest.param(_shorter_sequence_still_held, id="shorter_sequence_still_held"),
+    pytest.param(_shorter_sequence_held_deeper, id="shorter_sequence_held_deeper"),
     pytest.param(_shared_uid, id="shared_uid"),
     pytest.param(_study_sharing_the_instance_uid, id="study_sharing_the_instance_uid"),
 ])
