@@ -5347,6 +5347,7 @@ class DicomSession:
             by_uid = self._instances_by_uid()
             findings, gone = self._live_findings(list(findings), project_secret, by_uid)
             remediator._use_gone_keys(gone)
+            remediator._use_holder_patient_ids(self._holder_patient_ids())
             remediator._use_instance_owners(self._nested_finding_owners(findings, by_uid))
             remediator._use_removal_targets(self._removal_targets(findings, by_uid))
             remediator._use_scan_tally(self._scan_tally, findings)
@@ -6261,6 +6262,26 @@ class DicomSession:
                         if source and source != inst.sop_instance_uid:
                             by_uid.setdefault(source, []).append(inst)
         return by_uid
+
+    def _holder_patient_ids(self) -> dict:
+        """`id(Patient, Study or Instance) -> patient_id` of the patient holding it,
+        read before the pass can replace an ID (#644).
+
+        What the service's cross-store seed check exempts a pseudonym by:
+        an export from another project ingested into this store carries
+        that project's pseudonym as its patient's real ID, and its dates
+        shift under this store's secret (0.9.7), while the same pseudonym
+        seeding a date on any other patient is a report from elsewhere.
+        """
+        ids = {}
+        for patient in self.store.patients:
+            ids[id(patient)] = patient.patient_id
+            for study in patient.studies:
+                ids[id(study)] = patient.patient_id
+                for series in study.series:
+                    for inst in series.instances:
+                        ids[id(inst)] = patient.patient_id
+        return ids
 
     def _live_findings(self, findings, secret, by_uid) -> tuple:
         """`(findings, gone)`: each finding resolved against the live graph,

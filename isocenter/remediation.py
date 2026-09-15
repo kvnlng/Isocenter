@@ -931,6 +931,17 @@ class RemediationService:
         does not verify under this secret is refused, as
         `_replace_attr_refused` refuses the ID itself; an original ID, a
         legacy unkeyed pseudonym and a service with no secret pass.
+
+        **Unless the seed is the Patient ID of the patient holding the
+        target**, as the pass began (`_use_holder_patient_ids`): an export
+        from another project ingested here carries that project's
+        pseudonym as its real Patient ID, and 0.9.7 shifts it under this
+        store's secret with one `WARNING` (`_project_secret_for_use`,
+        `test_a_reingested_export_under_another_secret_is_warned`). The
+        holder's own ID, not any ID the store holds: a store holding both
+        a patient and a re-ingested export of that patient would otherwise
+        let a foreign report seeded on the export's pseudonym shift the
+        first patient's dates.
         """
         from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
         from .privacy import (  # pylint: disable=import-outside-toplevel
@@ -940,7 +951,9 @@ class RemediationService:
         if proposal.original_value is None or not str(proposal.original_value).strip():
             return None
         seed = self._resolve_patient_id(entity, proposal)
+        holder = self._instance_owners.get(id(entity), entity)
         if (self.project_secret and _is_keyed_pseudonym_shape(seed)
+                and seed != self._holder_patient_ids.get(id(holder))
                 and not _pseudonym_verifies(seed, self.project_secret)):
             reason = (f"{proposal.target_attr}: the pseudonym its offset is seeded "
                       "on was not minted under this store's project secret, so "
@@ -1279,6 +1292,19 @@ class RemediationService:
     def _use_gone_keys(self, keys) -> None:
         """Count `keys` as handled when this pass settles its statuses."""
         self._gone_keys = frozenset(keys)
+
+    #: `id(Patient, Study or Instance) -> the patient_id of the patient
+    #: holding it` (a patient holds itself),
+    #: read before the pass can replace an ID (#644). What
+    #: `_shift_target_moved` exempts a foreign-shaped seed by. Empty with
+    #: no session, so a service used alone refuses every such seed. A
+    #: class attribute for `_instance_owners`' reason.
+    _holder_patient_ids = _MappingProxyType({})
+
+    def _use_holder_patient_ids(self, ids) -> None:
+        """Name the Patient ID of the patient holding each patient, study
+        and instance, as the pass begins."""
+        self._holder_patient_ids = self._MappingProxyType(dict(ids))
 
     def _removal_subject(self, finding: PhiFinding, entity):
         """What a removal's absence is read on: `entity` with no session,

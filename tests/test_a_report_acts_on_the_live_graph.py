@@ -844,3 +844,54 @@ def test_a_date_seeded_on_another_stores_pseudonym_is_not_shifted(tmp_path):
         assert _ct_tag(ct, IMAGE_SEQ, 0, "0008,0021") == "20010101"
         assert _by_modality(b)["CT"][2].phi_status is not PhiStatus.REMEDIATED
         assert _grade(b, root) == ["REVIEW_REQUIRED"]
+
+
+def test_a_foreign_seed_is_not_exempted_by_another_patient_holding_it(tmp_path):
+    """The seed check exempts a pseudonym that is the Patient ID of the
+    patient holding the target: an export from another project, ingested
+    here, carries that project's pseudonym as its real ID and shifts under
+    this store's secret, as 0.9.7 designed
+    (`test_a_reingested_export_under_another_secret_is_warned`, which is
+    the kill for the exemption dropped). Only the holder's own ID: store B
+    holds the raw CT (1CT1) *and* A's export of it, re-ingested under new
+    UIDs as patient `ANON_...`. A's post-pass report, seeded on that
+    pseudonym, still declines on 1CT1, whose dates stay as the source had
+    them.
+
+    Kills: the exemption widened to any Patient ID the store holds."""
+    keep = {"0008,0021": {"name": "Series Date", "action": "KEEP"}}
+    root_a = tmp_path / "a"
+    with _store(root_a, keep) as a:
+        a.anonymize(a.audit())
+        a.save(sync=True)
+        a.export(str(root_a / "out"), use_compression=False)
+        (root_a / "cfg.yaml").write_text(json.dumps({"phi_tags": RULES}), encoding="utf-8")
+        a.load_config(str(root_a / "cfg.yaml"))
+        report = a.audit()
+    pseudonym = _replacement_id_for("1CT1", FIXED_A)
+    assert {_proposal(f).metadata["patient_id"] for f in report.findings
+            if _proposal(f) and _proposal(f).action_type == "SHIFT_DATE"} == {pseudonym}
+    (exported,) = [ds for ds in (pydicom.dcmread(str(p)) for p in (root_a / "out").rglob("*.dcm"))
+                   if str(ds.PatientID) == pseudonym]
+    for keyword in ("StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"):
+        setattr(exported, keyword, pydicom.uid.generate_uid())
+    exported.file_meta.MediaStorageSOPInstanceUID = exported.SOPInstanceUID
+    (tmp_path / "export").mkdir()
+    exported.save_as(str(tmp_path / "export" / "ct.dcm"))
+    root = tmp_path / "b"
+    with _store(root, secret=FIXED_B) as b:
+        b.ingest(str(tmp_path / "export"))
+        assert {p.patient_id for p in b.store.patients} == {"1CT1", "4MR1", pseudonym}
+
+        b.anonymize(report)
+
+        declines = _declined(b)
+        assert len(declines) == 2 and all(FOREIGN in d for d in declines), declines
+        b.export(str(root / "out"), use_compression=False)
+        (ct,) = [ds for ds in (pydicom.dcmread(str(p)) for p in (root / "out").rglob("*.dcm"))
+                 if str(ds.PatientID) == "1CT1"]
+        assert _ct_tag(ct, "0008,0021") == "20040119"
+        assert _ct_tag(ct, IMAGE_SEQ, 0, "0008,0021") == "20010101"
+        (live,) = [i for p in b.store.patients if p.patient_id == "1CT1"
+                   for st in p.studies for se in st.series for i in se.instances]
+        assert live.phi_status is not PhiStatus.REMEDIATED
