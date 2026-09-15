@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1614 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1617 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1617 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1620 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -193,7 +193,9 @@ from .pixel_geometry import (
 )
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
-                                  _j2k_sample_layout, _jpegls_precision,
+                                  _j2k_irreversible, _j2k_sample_layout,
+                                  _jpeg_frame_type,
+                                  _jpegls_near, _jpegls_precision,
                                   colour_conversion, convert_colour,
                                   decode_declared_frames, extended_offsets,
                                   frame_count_mismatch_words,
@@ -617,8 +619,8 @@ _ADMISSIBLE_PHOTOMETRICS = {
 _PHOTOMETRIC_INADMISSIBLE = {
     "YBR_ICT": (
         "these two labels name the irreversible and reversible "
-        "multiple-component transforms of a JPEG 2000 codestream, and an "
-        "uncompressed file has no codestream to carry one.",
+        "multiple-component transforms of a JPEG 2000 codestream, and "
+        "uncompressed pixel data has no codestream to carry one.",
         "Export with use_compression=True, where the transform is applied "
         "and the label is true of the codestream, or declare the label "
         "these bytes have with set_attr(\"0028,0004\", ...)."),
@@ -680,6 +682,18 @@ _PHOTOMETRIC_NO_PIXELS = (
     "remedy involving the pixels applies. An instance with no pixels "
     "should carry no (0028,0004); the value reaching the file is the one "
     "the graph declared.")
+
+#: The remedy for an inadmissible label on an Icon Image Sequence item
+#: (#602). A property of the door, as `_PHOTOMETRIC_NO_PIXELS` is of the
+#: file: the table's ICT/RCT remedy says "export with
+#: use_compression=True", which is false for an icon, since
+#: `_write_back_nested_pixels` writes every icon raw.
+_PHOTOMETRIC_ICON = (
+    "An icon is written uncompressed whatever transfer syntax the file "
+    "carries (PS3.5 A.4 allows either, and this exporter never compresses "
+    "one), so compressing the export does not change this. Declare the "
+    "label these bytes have with set_attr(\"0028,0004\", ...) on that "
+    "sequence item.")
 
 
 def _written_photometric(value) -> Optional[str]:
@@ -784,6 +798,14 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
     Only `0028,0004`, by ruling: it is the element a decoder keys on and
     the one that made this library's own file unreadable. Other Code
     String elements are written as held (#603).
+
+    **Every sequence item takes the same copy** (#602):
+    `DicomExporter._merge_sequences` respells each item's `0028,0004`
+    through this before its `_merge`, for the same two reasons one depth
+    down -- pydicom's `UserWarning` fires on the item's assignment, and an
+    icon labelled `' rgb'` was dropped by this library's own re-ingest.
+    Its note names the item. At the top level the two readers above are
+    still the only ones.
     """
     value = attributes.get("0028,0004")
     if isinstance(value, str):
@@ -825,6 +847,27 @@ def _label_as_written(attributes) -> Tuple[Mapping, Optional[str]]:
         f"trailing spaces are not significant). The samples are unchanged.")
 
 
+def _label_inadmissibility(label, syntax_uid) -> Optional[Tuple[str, str]]:
+    """The table's `(clause, remedy)` for a label `syntax_uid` does not admit.
+
+    None when the syntax has no row (measured rows only, the discipline
+    `_FALLBACK_PHOTOMETRICS` keeps), when there is no label, or when the
+    label is admitted. `label` is already normalized
+    (`_written_photometric`).
+
+    **The one judgement.** The writer's sentence (`_photometric_warning`),
+    the readback's (`_readback_label_mismatch`) and the icon's
+    (`_icon_label_warning`, #602) each call this and keep only their own
+    sentence and remedy override, so an icon is judged by the top level's
+    rule and not by a copy of it.
+    """
+    admitted = _ADMISSIBLE_PHOTOMETRICS.get(str(syntax_uid))
+    if admitted is None or label is None or label in admitted:
+        return None
+    return _PHOTOMETRIC_INADMISSIBLE.get(label,
+                                         _PHOTOMETRIC_INADMISSIBLE[None])
+
+
 def _photometric_warning(label, syntax_uid, *,
                          has_pixels: bool) -> Optional[str]:
     """One sentence for a label the written syntax does not admit (#502).
@@ -843,11 +886,10 @@ def _photometric_warning(label, syntax_uid, *,
     compress. So a caller has to say which kind of file it is judging,
     and the pixel-less one gets `_PHOTOMETRIC_NO_PIXELS`.
     """
-    admitted = _ADMISSIBLE_PHOTOMETRICS.get(str(syntax_uid))
-    if admitted is None or label is None or label in admitted:
+    found = _label_inadmissibility(label, syntax_uid)
+    if found is None:
         return None
-    clause, remedy = _PHOTOMETRIC_INADMISSIBLE.get(
-        label, _PHOTOMETRIC_INADMISSIBLE[None])
+    clause, remedy = found
     if has_pixels:
         kept = ("The label was written as declared, over the samples the "
                 "instance held, and neither was changed.")
@@ -930,6 +972,51 @@ def _multi_valued_refusal(written) -> "_PhotometricRefusal":
         f"case is refused where an inadmissible label is written with "
         f"a warning. Declare one label with "
         f"set_attr(\"0028,0004\", ...).")
+
+
+#: The uncompressed syntax an icon's label is judged against (#602). Any
+#: of the three native rows would do -- they are one set -- and this is the
+#: one `_create_ds` writes.
+_ICON_WRITTEN_SYNTAX = "1.2.840.10008.1.2"
+
+
+def _icon_label_warning(label, at) -> Optional[str]:
+    """The WARNING for an icon label uncompressed pixel data does not admit.
+
+    `label` is normalized (`_written_photometric`); `at` is the item's
+    path in `_item_path_words`' spelling. Judged against the
+    **uncompressed** row whatever syntax the file carries, because an icon
+    is always written raw (`_write_back_nested_pixels`): the J2K row
+    admits `YBR_ICT`, and a `YBR_ICT` icon inside a `.90` file holds no
+    codestream for the label to be true of. The table's clause is kept and
+    its remedy is not -- `_PHOTOMETRIC_ICON` is the icon's.
+    """
+    found = _label_inadmissibility(label, _ICON_WRITTEN_SYNTAX)
+    if found is None:
+        return None
+    clause, _remedy = found
+    return (f"PhotometricInterpretation {_cs_quoted(label)} on the icon at "
+            f"{at} is not a label uncompressed pixel data admits: {clause} "
+            f"The label was written as declared, over the samples the item "
+            f"held, and neither was changed. {_PHOTOMETRIC_ICON}")
+
+
+def _icon_label_arity_warning(label, at) -> str:
+    """The WARNING for an icon declaring several labels (#602, Q5).
+
+    Warned about and written, not refused: the pixel arms refuse a
+    multi-valued top-level label because no output would be honest, but
+    an icon is not a reason to lose the instance (#433), and the user can
+    fix it with one `set_attr`. Measured: this library's own ingest drops
+    such an icon with the unrouted `DATA_LOSS` row.
+    """
+    quoted = ", ".join(_cs_quoted(str(v)) for v in label)
+    return (f"PhotometricInterpretation (0028,0004) is VM 1; the icon at "
+            f"{at} declares {len(label)} values ({quoted}). Written as "
+            f"declared, over the samples the item held; this library's own "
+            f"ingest drops an icon so labelled, with a DATA_LOSS row. "
+            f"Declare one label with set_attr(\"0028,0004\", ...) on that "
+            f"sequence item.")
 
 
 #: PixelRepresentation (0028,0103) in the words PS3.5 6.2 uses, for the
@@ -2234,6 +2321,9 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
     the facts only once the decode has succeeded; a refused file has its
     own `ERROR` row.
 
+    An icon item is asked the same, by `_decode_nested_pixels`, with the
+    file's `file_meta` borrowed (#598).
+
     Returns:
         ``{bits_allocated, bits_stored, high_bit, pixel_representation,
         encapsulated, stream, precision, width_read}``: `stream` is "JPEG
@@ -2255,13 +2345,7 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
         encapsulated = False
     stream = precision = None
     if encapsulated and (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES):
-        try:
-            frame = next(generate_frames(
-                ds.PixelData, number_of_frames=1,
-                extended_offsets=extended_offsets(ds)))
-        except Exception:  # pylint: disable=broad-except
-            # A buffer the decode below will refuse on its own terms.
-            frame = b""
+        frame = _first_frame(ds)
         if ts in J2K_SYNTAXES:
             layout = _j2k_sample_layout(frame)
             if layout is not None:
@@ -2280,6 +2364,131 @@ def _high_bit_mismatch(ds) -> Optional[dict]:
         "precision": precision,
         "width_read": precision if precision is not None else bits_stored,
     }
+
+
+def _first_frame(ds) -> bytes:
+    """Frame 0 of an encapsulated `ds`, found through its offset tables.
+
+    `b""` on any failure: a buffer the decode will refuse on its own terms,
+    and a header rule asked before the decode has no business raising
+    first. One read for the two rules that look inside a stream before
+    decoding it -- `_high_bit_mismatch`'s precision and
+    `_lossy_compression_evidence`'s frame header, NEAR and wavelet (#601)
+    -- so frame 0 is the same bytes for both. Frame 0 speaks for the
+    instance.
+    """
+    try:
+        return next(generate_frames(
+            ds.PixelData, number_of_frames=1,
+            extended_offsets=extended_offsets(ds)))
+    except Exception:  # pylint: disable=broad-except
+        return b""
+
+
+#: The two transfer syntaxes whose frames are read for a DCT frame header
+#: (#601). The syntax names the frame's process and does not prove it: a
+#: lossless SOF3 frame under either decodes bit-exact (review J2 M1).
+_DCT_SYNTAXES = frozenset({"1.2.840.10008.1.2.4.50",
+                           "1.2.840.10008.1.2.4.51"})
+
+#: SOFn for the DCT processes, each lossy by definition (ITU-T T.81 Table
+#: B.1: baseline, extended and progressive, Huffman or arithmetic, and
+#: their differential forms). 3, 7, 11 and 15 are the lossless processes.
+_DCT_FRAME_TYPES = frozenset({0, 1, 2, 5, 6, 9, 10, 13, 14})
+
+
+def _lossy_compression_evidence(ds) -> Optional[dict]:
+    """The facts for ingest's LossyImageCompression row, or None (#601).
+
+    PS3.3 C.7.6.1.1.5: (0028,2110) `01` "conveys that the Image has
+    undergone lossy compression", and "once this value has been set to 01
+    it shall not be reset". It is Type 3, and nothing requires it under a
+    lossy transfer syntax -- but when a source omits it, the transfer
+    syntax is the only record of the loss, and an export replaces the
+    syntax. So ingest records `01` where **the pixel data proves it**:
+
+    - a JPEG frame header of a DCT process (`_jpeg_frame_type`, SOF0, 1,
+      2, 5, 6, 9, 10, 13 or 14), under JPEG Baseline `.50` or Extended
+      `.51`;
+    - a JPEG-LS scan whose NEAR is above 0 (`_jpegls_near`), under any
+      JPEG-LS syntax -- a `.80` stream with NEAR 2 is lossy too;
+    - a JPEG 2000 codestream using the 9-7 irreversible wavelet
+      (`_j2k_irreversible`), under any JPEG 2000 or HTJ2K syntax.
+
+    **A syntax alone is not evidence**: `.81` at NEAR 0, `.91`/`.203`
+    with the reversible wavelet, and a SOF3 frame under `.50`/`.51` are
+    lossless in fact (built and measured bit-exact), and a false `01` can
+    never be withdrawn. The JPEG arm read the syntax alone until review J2
+    (M1), and stamped that SOF3 frame. A stream with no readable frame
+    header, NEAR or COD claims nothing. What that leaves
+    unrecorded, stated: a reversible codestream truncated at a lossy rate,
+    which its header cannot show.
+
+    None when the source already declares `01`: that is the record, and
+    this never touches it. A declared `00`, or any other value, is replaced
+    -- which is not a reset of `01`.
+
+    Returns:
+        ``{declared, syntax, evidence, value}``: `declared` is the value
+        the source carried (None when absent; a list for a multi-valued
+        one), `evidence` is "dct", "near" or "irreversible", and `value`
+        the frame header's SOF number or the NEAR. Plain types only, so it
+        rides `meta` out of a spawned worker.
+    """
+    declared = ds.get("LossyImageCompression")
+    if declared is not None and str(declared).strip() == "01":
+        return None
+    ts = str(getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", "")
+             or "")
+    if ts in _DCT_SYNTAXES:
+        frame_type = _jpeg_frame_type(_first_frame(ds))
+        if frame_type not in _DCT_FRAME_TYPES:
+            return None
+        evidence, value = "dct", frame_type
+    elif ts in JPEGLS_SYNTAXES:
+        near = _jpegls_near(_first_frame(ds))
+        if near is None or near <= 0:
+            return None
+        evidence, value = "near", near
+    elif ts in J2K_SYNTAXES:
+        if _j2k_irreversible(_first_frame(ds)) is not True:
+            return None
+        evidence, value = "irreversible", None
+    else:
+        return None
+    if isinstance(declared, MultiValue):
+        declared = [str(v) for v in declared]
+    elif declared is not None:
+        declared = str(declared)
+    return {"declared": declared, "syntax": ts, "evidence": evidence,
+            "value": value}
+
+
+def _lossy_compression_words(facts) -> str:
+    """The LossyImageCompression row, from `_lossy_compression_evidence`.
+
+    Value-free: the only values quoted are the element's own code, capped
+    at a Code String's length, and a NEAR integer. Names no file.
+    """
+    declared = facts["declared"]
+    lead = ("is absent" if declared is None
+            else f"declares {_cs_quoted(declared)}")
+    uid = facts["syntax"]
+    if facts["evidence"] == "dct":
+        why = (f"its JPEG frame header is SOF{facts['value']}, a DCT process, "
+               f"which is lossy by definition ({uid})")
+    elif facts["evidence"] == "near":
+        why = (f"its JPEG-LS scan declares NEAR {facts['value']}, where 0 is "
+               f"lossless ({uid})")
+    else:
+        why = (f"its JPEG 2000 codestream uses the irreversible 9-7 wavelet "
+               f"({uid})")
+    return (f"LossyImageCompression (0028,2110) {lead}, and this file's "
+            f"pixel data is lossy-compressed: {why}. Recorded as 01 at "
+            f"ingest, so an export carries it (PS3.3 C.7.6.1.1.5: 01 conveys "
+            f"that the image has undergone lossy compression, and once set "
+            f"it shall not be reset). The samples are unchanged."
+            ).replace("|", "\\|")
 
 
 def _high_bit_words(facts) -> str:
@@ -2314,8 +2523,47 @@ def _item_path_words(path) -> str:
     return " > ".join(f"{tag}[{index}]" for tag, index in path)
 
 
+def _nested_row_prefix(tag, vr, path) -> str:
+    """How every ingest row about a nested pixel element begins.
+
+    One spelling for the offset-table row (#433) and the HighBit row
+    (#598), so the two rows about one icon name it the same way.
+    """
+    return f"Standard tag {tag} ({vr}) at {_item_path_words(path)}: "
+
+
+def _nested_item_syntax(transfer_syntax, item_ds, tag_str) -> str:
+    """The transfer syntax a nested pixel element is encoded under (#645).
+
+    The file's, unless the file's is encapsulated and the element has a
+    defined length: then the element is native, and is read as Explicit
+    VR Little Endian, which is what every encapsulated syntax's native
+    encoding is. PS3.5 A.4 lets an icon be compressed or not whatever the
+    file carries, and the element's own length is how a reader tells --
+    an encapsulated value is always undefined-length (A.4). Measured: a
+    `use_compression=True` export writes its icon native inside a
+    JPEG 2000 file, and re-ingesting it borrowed the file's syntax, failed
+    the decode, and dropped the icon with the unrouted `DATA_LOSS` row.
+
+    An undefined-length element inside a native file is left under the
+    file's syntax: it is not a shape a native file can carry, and its
+    decode fails into the loss row it always had.
+    """
+    try:
+        encapsulated = pydicom.uid.UID(transfer_syntax).is_encapsulated
+    except (ValueError, AttributeError):
+        return transfer_syntax
+    if not encapsulated:
+        return transfer_syntax
+    group, element = (int(x, 16) for x in tag_str.split(','))
+    elem = item_ds.get(Tag(group, element))
+    if elem is None or getattr(elem, "is_undefined_length", True):
+        return transfer_syntax
+    return str(pydicom.uid.ExplicitVRLittleEndian)
+
+
 def _decode_nested_pixels(ds, candidates, dropped, instance, *,
-                          offset_tables) -> list:
+                          offset_tables, high_bits) -> list:
     """Decode every nested (7fe0,0010) `populate_attrs` collected (#183).
 
     Runs in `ingest_worker`, immediately after the walk that produced
@@ -2359,6 +2607,13 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             `import_files` writes the row for each; a "fewer" candidate is
             deliberately *not* also appended to `dropped`, whose row would
             give the wrong reason for the same loss.
+        high_bits (list): Appended to with `(path, tag, vr, facts)` for
+            every **carried** candidate whose HighBit is not BitsStored - 1,
+            `facts` being `_high_bit_mismatch`'s (#598). `import_files`
+            writes the top level's `WARNING` row for each. A candidate
+            that is not carried appends nothing: its loss row is the one
+            it is owed, and a HighBit row beside it would describe a
+            decode that never reached the store.
 
     Returns:
         list: `(path, terminal_tag, vr, raw_bytes, sha256)` per carried
@@ -2375,7 +2630,8 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
         getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", "") or "")
 
     for path, tag_str, vr, item_ds in candidates:
-        if transfer_syntax not in _CARRIABLE_TRANSFER_SYNTAXES:
+        item_syntax = _nested_item_syntax(transfer_syntax, item_ds, tag_str)
+        if item_syntax not in _CARRIABLE_TRANSFER_SYNTAXES:
             dropped.append((tag_str, vr))
             continue
 
@@ -2383,11 +2639,18 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # pydicom cannot decode a sequence item's pixel data on its own
             # -- `icon.pixel_array` raises `AttributeError: Unable to decode
             # the pixel data as the dataset's 'file_meta' has no (0002,0010)
-            # 'Transfer Syntax UID'`. An icon shares the file's transfer
-            # syntax by construction, so borrowing the enclosing dataset's
-            # `file_meta` is not an approximation; it is the right answer.
-            # Measured to decode correctly through RLE encapsulation too.
-            item_ds.file_meta = ds.file_meta
+            # 'Transfer Syntax UID'`. So the item is given one: the file's,
+            # when the item is encoded as the file is, and measured to
+            # decode correctly through RLE encapsulation; otherwise a
+            # native one (`_nested_item_syntax`, #645). An icon does NOT
+            # share the file's transfer syntax by construction -- PS3.5
+            # A.4 lets it be native inside a compressed file, and this
+            # library's own compressed export writes exactly that.
+            if item_syntax == transfer_syntax:
+                item_ds.file_meta = ds.file_meta
+            else:
+                item_ds.file_meta = FileMetaDataset()
+                item_ds.file_meta.TransferSyntaxUID = item_syntax
             # The top level's #418 check, at this depth (#433). After the
             # borrow, because it reads the transfer syntax off
             # `file_meta`. An excess is truncated to the declared frames,
@@ -2406,6 +2669,11 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                                           "fewer"))
                     continue
                 decode_kwargs["allow_excess_frames"] = False
+            # The top level's #455 header rule, at this depth (#598).
+            # After the borrow, because it reads the transfer syntax off
+            # `file_meta`; asked before the decode, as at the top level,
+            # and kept below only once the decode has succeeded.
+            facts = _high_bit_mismatch(item_ds)
             arr, decoded_pi = _decode_pixels(item_ds, **decode_kwargs)
             if decode_kwargs:
                 offset_tables.append((path, tag_str, vr, counted, "excess"))
@@ -2430,6 +2698,8 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
         raw = arr.tobytes()
         carried.append(
             (path, tag_str, vr, raw, hashlib.sha256(raw).hexdigest()))
+        if facts is not None:
+            high_bits.append((path, tag_str, vr, facts))
 
         # The same correction the top-level arm makes just below, for the
         # same reason: pydicom de-planarises on read, so the bytes are
@@ -2517,9 +2787,14 @@ def ingest_worker(fp: str) -> Tuple:
         # handed over. `_decode_nested_pixels` appends them itself: it is
         # the code that knows (#183, #194).
         nested_offset_tables = []
+        nested_high_bits = []
         meta['nested_pixels'] = _decode_nested_pixels(
-            ds, nested, dropped, inst, offset_tables=nested_offset_tables)
+            ds, nested, dropped, inst, offset_tables=nested_offset_tables,
+            high_bits=nested_high_bits)
         meta['nested_offset_table'] = nested_offset_tables
+        # Ints, bools, strs and None only, so it pickles from a spawned
+        # worker like the rest of `meta` (#598).
+        meta['nested_high_bit'] = nested_high_bits
         meta['dropped_private_binary'] = dropped
         # Rides `meta` for the same reason as `dropped_private_binary`
         # above: this worker may be in a subprocess with no store
@@ -2569,6 +2844,11 @@ def ingest_worker(fp: str) -> Tuple:
             # Asked of the header before the decode, so both decoders'
             # files get it; attached only once the decode succeeds (#455).
             high_bit_mismatch = _high_bit_mismatch(ds)
+            # The same shape for #601: asked of the header and frame 0
+            # before the decode, recorded only once the decode succeeds.
+            # Top level only -- 0028,2110 is the General Image Module's,
+            # and an icon is not the image.
+            lossy = _lossy_compression_evidence(ds)
             try:
                 # Always decompress to raw bytes to ensure sidecar has consistent format (SidecarPixelLoader expects raw)
                 # This handles RLE/JPEG/J2K by decoding them now.
@@ -2600,6 +2880,11 @@ def ingest_worker(fp: str) -> Tuple:
                     # a subprocess with no store handle, so `import_files`
                     # writes the row.
                     meta['high_bit_mismatch'] = high_bit_mismatch
+                if lossy is not None:
+                    # In the worker, on an Instance nothing has linked yet,
+                    # beside the relabel above; the row rides `meta`.
+                    inst.set_attr("0028,2110", "01")
+                    meta['lossy_compression'] = lossy
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
                 # The path rides the meta slot, as in the blanket except
@@ -3008,6 +3293,7 @@ class DicomImporter:
         declined_superseded = 0
         declined_duplicate = 0
         high_bit_rows = 0
+        lossy_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -3036,6 +3322,47 @@ class DicomImporter:
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="ERROR", entity_uid=path, details=detail)
+
+        def _record_high_bit(uid, detail):
+            """One HighBit row, at the top level or on a carried icon.
+
+            One counter and one suppression line for both depths (#598):
+            it is one fact about the header, and a cohort whose every
+            instance carries a mismatched icon as well as a mismatched
+            frame must not print twice the lines the cap promises.
+            """
+            nonlocal high_bit_rows
+            high_bit_rows += 1
+            if high_bit_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif high_bit_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance "
+                    "messages for HighBit other than BitsStored "
+                    "- 1) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_lossy(uid, detail):
+            """One LossyImageCompression row (#601), on its own log cap.
+
+            Its own counter, not the HighBit one: a cohort of near-lossless
+            files must not suppress a header fact about another file
+            before its first line is printed.
+            """
+            nonlocal lossy_rows
+            lossy_rows += 1
+            if lossy_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif lossy_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance messages for "
+                    "LossyImageCompression recorded from the pixel data) "
+                    "...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
 
         for meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, err in results:
             # Clear result components from scope as soon as possible after use to help GC
@@ -3195,20 +3522,18 @@ class DicomImporter:
                     # declined `continue`s: a file not linked gets no row.
                     high_bit = meta.get('high_bit_mismatch')
                     if high_bit:
-                        detail = _high_bit_words(high_bit)
-                        high_bit_rows += 1
-                        if high_bit_rows <= 5:
-                            logger.warning(f"{inst.sop_instance_uid}: {detail}")
-                        elif high_bit_rows == 6:
-                            logger.warning(
-                                "... (suppressing further per-instance "
-                                "messages for HighBit other than BitsStored "
-                                "- 1) ...")
-                        if store_backend is not None:
-                            store_backend.log_audit(
-                                action_type="WARNING",
-                                entity_uid=inst.sop_instance_uid,
-                                details=detail)
+                        _record_high_bit(inst.sop_instance_uid,
+                                         _high_bit_words(high_bit))
+
+                    # LossyImageCompression recorded from the pixel data
+                    # (#601, owner ruling Q1). A `WARNING`: the stamp is a
+                    # permanent claim this library derived, and the row is
+                    # what makes it reviewable; it bars PASS. After both
+                    # declined `continue`s, like the HighBit row.
+                    lossy = meta.get('lossy_compression')
+                    if lossy:
+                        _record_lossy(inst.sop_instance_uid,
+                                      _lossy_compression_words(lossy))
 
                     # The frames `ingest_worker` dropped because the
                     # offset table named more than NumberOfFrames
@@ -3339,6 +3664,10 @@ class DicomImporter:
                         (t_path, t_tag): (t_vr, t_counted, t_kind)
                         for t_path, t_tag, t_vr, t_counted, t_kind
                         in meta.get('nested_offset_table', ())}
+                    nested_high = {
+                        (h_path, h_tag): (h_vr, h_facts)
+                        for h_path, h_tag, h_vr, h_facts
+                        in meta.get('nested_high_bit', ())}
                     for n_path, n_tag, n_vr, n_raw, n_hash in meta.get(
                             'nested_pixels', ()):
                         if not sidecar_manager:
@@ -3366,8 +3695,7 @@ class DicomImporter:
                         if n_table is not None:
                             t_vr, t_counted, _t_kind = n_table
                             detail = (
-                                f"Standard tag {n_tag} ({t_vr}) at "
-                                f"{_item_path_words(n_path)}: "
+                                f"{_nested_row_prefix(n_tag, t_vr, n_path)}"
                                 f"{frame_count_mismatch_words(t_counted)}. "
                                 f"Kept the first {t_counted[1]} and "
                                 f"discarded {t_counted[0] - t_counted[1]}.")
@@ -3378,6 +3706,20 @@ class DicomImporter:
                                     entity_uid=inst.sop_instance_uid,
                                     details=detail,
                                     loss_scope=LOSS_SCOPE_STANDARD)
+                        # The top level's HighBit row, for a carried icon
+                        # (#598). Below the no-sidecar branch for the
+                        # offset-table row's reason: only an icon that is
+                        # carried has a decode to describe. The words are
+                        # the top level's, tail included, and it is true
+                        # here because `_write_back_nested_pixels` writes an
+                        # icon's HighBit as BitsStored - 1 too.
+                        n_high = nested_high.get((n_path, n_tag))
+                        if n_high is not None:
+                            h_vr, h_facts = n_high
+                            _record_high_bit(
+                                inst.sop_instance_uid,
+                                f"{_nested_row_prefix(n_tag, h_vr, n_path)}"
+                                f"{_high_bit_words(h_facts)}")
                         kind = serialize_blob_kind('pixels', n_path, n_tag)
                         # Site 2 of six (#368): append and row commit under
                         # one hold, per icon, for the reason at site 1.
@@ -4126,6 +4468,36 @@ def _stored_width(arr: np.ndarray, attributes) -> Tuple[int, Optional[str]]:
         f"span {lo}..{hi}")
 
 
+def _width_notes(widened, declared_high_bit, bits_stored, high_bit) -> list:
+    """The INFO notes for a BitsStored/HighBit written other than declared.
+
+    One spelling for the top-level pixel element and an icon's (#598),
+    each of which writes `_stored_width`'s BitsStored and HighBit =
+    BitsStored - 1 and hands these back on `ExportOutcome.corrections`.
+
+    `widened` is `_stored_width`'s reason, or None. A declared HighBit the
+    file does not carry is said out loud too (#597). INFO, by ruling: the
+    written file is conformant, the samples are unchanged, and an ingested
+    file's declaration already has ingest's own row -- nothing in the
+    graph marks which instances those are, so a WARNING here would write a
+    second row per instance of every legacy cohort re-exported.
+    `declared_high_bit` is read with `declared_int` for #506's reason, and
+    gets no note after a widening, whose note already names the written
+    HighBit. "Written with", because the BitsStored named may be one
+    nobody declared.
+    """
+    if widened is not None:
+        return [f"{widened}; written with BitsStored {bits_stored} "
+                f"and HighBit {high_bit}, the array's own width"]
+    if declared_high_bit is not None and declared_high_bit != high_bit:
+        return [f"HighBit {declared_high_bit} was declared; written "
+                f"with BitsStored {bits_stored} and HighBit "
+                f"{high_bit}, because the samples are right-aligned "
+                f"and PS3.5 8.1.1 puts their most significant bit at "
+                f"BitsStored - 1. The samples are unchanged."]
+    return []
+
+
 #: The descriptors the readback compares first, by pydicom keyword. The
 #: four geometry descriptors are the ones #186/#205 showed can describe
 #: a different image than the pixels beside them; BitsAllocated is the
@@ -4266,12 +4638,11 @@ def _readback_label_mismatch(readback) -> Optional[str]:
                 f"written file reads back as {len(label)} values "
                 f"({', '.join(repr(str(v)) for v in label)})")
     syntax = str(getattr(readback.file_meta, "TransferSyntaxUID", "") or "")
-    admitted = _ADMISSIBLE_PHOTOMETRICS.get(syntax)
     normalized = _written_photometric(label)
-    if admitted is None or normalized is None or normalized in admitted:
+    found = _label_inadmissibility(normalized, syntax)
+    if found is None:
         return None
-    clause, remedy = _PHOTOMETRIC_INADMISSIBLE.get(
-        normalized, _PHOTOMETRIC_INADMISSIBLE[None])
+    clause, remedy = found
     if not any(kw in readback for kw in _PIXEL_ELEMENTS):
         remedy = _PHOTOMETRIC_NO_PIXELS
     return (f"PhotometricInterpretation reads back as '{normalized}', "
@@ -4655,7 +5026,8 @@ def _resolve_ds_item(ds, path):
     return cur, parent, seq_tag
 
 
-def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
+def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
+                              corrections) -> None:
     """Put each carried nested payload back into its sequence item (#183).
 
     A post-pass over the dataset `_merge_sequences` has already built,
@@ -4683,6 +5055,26 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
     interleaving the two would file a "gone" row for it while leaving it in
     the file. Removal is then by object identity rather than by the index
     that was recorded, because two identical icon `Dataset`s compare equal.
+
+    **An icon's BitsStored and HighBit follow the top level's rule (#598).**
+    `_stored_width` over the array being written, and HighBit =
+    BitsStored - 1, with the same INFO notes (`_width_notes`) handed back
+    on `corrections`, prefixed with the item's path. Ingest's HighBit row
+    says an export writes HighBit as BitsStored - 1, and that is now true
+    of an icon; and a JPEG-LS icon whose samples overflowed its declared
+    BitsStored is no longer masked by every conformant reader (measured:
+    `40000` read back as `3136`). `corrections` is keyword-only with no
+    default, the `offset_tables` precedent.
+
+    **An icon's label is judged where it is written (#602).** This is the
+    icon's pixel door, as `_write_pixel_geometry` is the top level's, so
+    each item that is actually written has its Photometric Interpretation
+    judged here, from the pydicom item (which carries
+    `_merge_sequences`' respelling), against the uncompressed row: see
+    `_icon_label_warning`. An inadmissible label is written as declared
+    with a WARNING on `warnings`; a multi-valued one too
+    (`_icon_label_arity_warning`). An item in `removals` writes no pixel
+    element and is not judged -- it carries its own loss row.
     """
     refs = getattr(inst, "_nested_pixel_refs", None)
     if not refs:
@@ -4760,9 +5152,10 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
                 f"pixel data.")))
             continue
 
-        writes.append((item, terminal_tag, decoded, geometry[4]))
+        writes.append((path, graph_item, item, terminal_tag, decoded,
+                       geometry[4]))
 
-    for item, terminal_tag, decoded, bits in writes:
+    for path, graph_item, item, terminal_tag, decoded, bits in writes:
         group, element = (int(x, 16) for x in terminal_tag.split(','))
         # PS3.5: `OW` above 8 bits allocated, `OB` at or below. Derived from
         # the item's own BitsAllocated rather than carried on the blob,
@@ -4777,6 +5170,29 @@ def _write_back_nested_pixels(ds, inst, ctx, losses) -> None:
         # it is deliberate. An icon is a thumbnail, the saving is nil, and
         # a second encoder call per instance is not.
         item.add_new(Tag(group, element), vr, decoded.tobytes())
+        # BitsStored and HighBit, by the top level's rule (#598). Only
+        # where the item declares a BitsStored: a hand-built item with
+        # none is not given one. BitsAllocated and PixelRepresentation
+        # are left as declared -- the loader's dtype was built from them
+        # (`_nested_loader_metadata`), so the array already agrees.
+        if declared_int(graph_item.attributes, "0028,0101") is not None:
+            item.BitsStored, widened = _stored_width(
+                decoded, graph_item.attributes)
+            item.HighBit = item.BitsStored - 1
+            corrections.extend(
+                f"At {_item_path_words(path)}: {note}"
+                for note in _width_notes(
+                    widened, declared_int(graph_item.attributes, "0028,0102"),
+                    item.BitsStored, item.HighBit))
+        # The label, judged where the pixel element is written (#602).
+        label = item.get("PhotometricInterpretation")
+        at = _item_path_words(path)
+        if isinstance(label, (list, tuple, MultiValue)) and len(label) > 1:
+            warnings.append(_icon_label_arity_warning(label, at))
+        else:
+            judged = _icon_label_warning(_written_photometric(label), at)
+            if judged is not None:
+                warnings.append(judged)
 
     for parent, seq_tag, item in removals:
         sequence = parent[seq_tag].value
@@ -4947,7 +5363,7 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                              vrs=getattr(inst, 'attribute_vrs', None),
                              revrs=revrs)
         DicomExporter._merge_sequences(ds, inst.sequences, losses,
-                                       revrs=revrs)
+                                       revrs=revrs, corrections=corrections)
         re_vr = _re_vr_warning(revrs)
         if re_vr is not None:
             warnings.append(re_vr)
@@ -4957,7 +5373,8 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # the merge just built; here rather than inside `_merge_sequences`
         # so it cannot be reached by an `export_batch` caller separately,
         # and so both export paths get it from the one worker they share.
-        _write_back_nested_pixels(ds, inst, ctx, losses)
+        _write_back_nested_pixels(ds, inst, ctx, losses, warnings=warnings,
+                                  corrections=corrections)
 
         # 1. Patient Level
         DicomExporter._merge(ds, ctx.patient_attributes, losses)
@@ -5478,28 +5895,9 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             ds.BitsAllocated = arr.itemsize * 8
             ds.BitsStored, widened = _stored_width(arr, inst.attributes)
             ds.HighBit = ds.BitsStored - 1
-            if widened is not None:
-                corrections.append(
-                    f"{widened}; written with BitsStored {ds.BitsStored} "
-                    f"and HighBit {ds.HighBit}, the array's own width")
-            # A declared HighBit the file does not carry is said out loud
-            # too (#597). INFO, by ruling: the written file is conformant,
-            # the samples are unchanged, and an ingested file's declaration
-            # already has ingest's own row -- nothing in the graph marks
-            # which instances those are, so a WARNING here would write a
-            # second row per instance of every legacy cohort re-exported.
-            # `declared_int` for #506's reason, and not after a widening,
-            # whose note already names the written HighBit. "Written with",
-            # because the BitsStored named may be one nobody declared.
-            declared_high_bit = declared_int(inst.attributes, "0028,0102")
-            if (widened is None and declared_high_bit is not None
-                    and declared_high_bit != ds.HighBit):
-                corrections.append(
-                    f"HighBit {declared_high_bit} was declared; written "
-                    f"with BitsStored {ds.BitsStored} and HighBit "
-                    f"{ds.HighBit}, because the samples are right-aligned "
-                    f"and PS3.5 8.1.1 puts their most significant bit at "
-                    f"BitsStored - 1. The samples are unchanged.")
+            corrections.extend(_width_notes(
+                widened, declared_int(inst.attributes, "0028,0102"),
+                ds.BitsStored, ds.HighBit))
             ds.PixelRepresentation = 1 if arr.dtype.kind == "i" else 0
             declared_representation = declared_int(inst.attributes,
                                                    "0028,0103")
@@ -7710,7 +8108,7 @@ class DicomExporter:
 
     @staticmethod
     def _merge_sequences(ds, sequences: Dict[str, Any], losses=None, *,
-                         revrs=None, within=""):
+                         revrs=None, within="", corrections=None):
         """
         Recursively populates sequences into the dataset.
 
@@ -7722,13 +8120,16 @@ class DicomExporter:
                 threaded to every item so a nested element joins its
                 instance's one sentence.
             within (str): The enclosing sequence path, for that sentence.
+            corrections (list, optional): Appended to with
+                `_label_as_written`'s note for every item whose
+                (0028,0004) was respelled (#602), prefixed with the item.
         """
         for tag_str, dicom_seq in sequences.items():
             g, e = map(lambda x: int(x, 16), tag_str.split(','))
             tag = Tag(g, e)
 
             pydicom_seq = Sequence()
-            for item in dicom_seq.items:
+            for index, item in enumerate(dicom_seq.items):
                 # A sequence item is never encoded on its own: pydicom
                 # writes it with the enclosing file's encoding, so these
                 # flags were read by nothing even before 4.0 drops them.
@@ -7737,11 +8138,19 @@ class DicomExporter:
                 # Recursively merge item attributes and sub-sequences
                 path = (f"{within} > ({tag_str})" if within
                         else f"({tag_str})")
-                DicomExporter._merge(ds_item, item.attributes, losses,
+                # #532's respelling, per item and before its `_merge`
+                # (#602): pydicom warns as the raw value is assigned, so
+                # respelling afterwards would be too late. A copy, never
+                # `item.attributes` -- under threads that is the live graph.
+                attributes, respelled = _label_as_written(item.attributes)
+                if respelled is not None and corrections is not None:
+                    corrections.append(f"{path} item {index}: {respelled}")
+                DicomExporter._merge(ds_item, attributes, losses,
                                      vrs=getattr(item, 'attribute_vrs', None),
                                      revrs=revrs, within=path)
                 DicomExporter._merge_sequences(ds_item, item.sequences, losses,
-                                               revrs=revrs, within=path)
+                                               revrs=revrs, within=path,
+                                               corrections=corrections)
 
                 pydicom_seq.append(ds_item)
 

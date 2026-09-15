@@ -478,21 +478,100 @@ def _jpegls_precision(codestream) -> Optional[int]:
     data = bytes(codestream)
     if data[:2] != b"\xff\xd8":
         return None
-    pos = 2
-    while pos + 1 < len(data):
-        if data[pos] != 0xFF:
-            return None
-        marker = data[pos + 1]
-        if marker == 0xFF:
-            # A fill byte ahead of the marker (ITU-T T.81 B.1.1.2).
-            pos += 1
-            continue
+    for marker, pos in _jpeg_marker_segments(data, 2):
         if marker == 0xF7:
             return data[pos + 4] if pos + 4 < len(data) else None
         if marker in (0xD9, 0xDA):
             # EOI or SOS: the scan began with no frame header before it.
             return None
+    return None
+
+
+def _jpeg_marker_segments(data, start, stops=(0xD9, 0xDA)):
+    """`(marker, pos)` for each marker segment from `start`, by walking.
+
+    Each step is the segment's own length, so a COM or APPn payload --
+    opaque bytes that may hold any marker pair -- is stepped over, never
+    read (`_jpegls_precision`'s reason, #478). Fill bytes ahead of a
+    marker are skipped (ITU-T T.81 B.1.1.2). Ends at a byte that is not a
+    marker, at the end of `data`, or after yielding a marker in `stops`:
+    by default EOI and SOS, after which entropy-coded data follows.
+
+    One walk for the JPEG-LS readers (`_jpegls_precision`, `_jpegls_near`),
+    the JPEG frame header (`_jpeg_frame_type`) and the JPEG 2000 main header (`_j2k_irreversible`, whose segments have
+    the same marker-then-length shape between SOC and the first SOT).
+    """
+    pos = start
+    while pos + 1 < len(data):
+        if data[pos] != 0xFF:
+            return
+        marker = data[pos + 1]
+        if marker == 0xFF:
+            pos += 1
+            continue
+        yield marker, pos
+        if marker in stops:
+            return
         pos += 2 + int.from_bytes(data[pos + 2:pos + 4], "big")
+
+
+def _jpegls_near(codestream) -> Optional[int]:
+    """The NEAR parameter of a JPEG-LS frame's first scan, or None (#601).
+
+    Read from the first SOS (`FF DA`) segment, reached by walking
+    (`_jpeg_marker_segments`), never by searching: `Ls` (2 bytes), `Ns`
+    (1), `Ns` component specifications of 2 bytes each, then NEAR (ITU-T
+    T.87 C.2.3). 0 is lossless; above 0, each sample may differ from its
+    source by up to NEAR.
+
+    **Limit: the first scan speaks for the frame.** An ILV 0 stream has
+    one scan per component, each with its own NEAR; a stream whose later
+    scans use another NEAR than its first is not detected. None when
+    there is no SOS before the data ends.
+    """
+    data = bytes(codestream)
+    if data[:2] != b"\xff\xd8":
+        return None
+    for marker, pos in _jpeg_marker_segments(data, 2):
+        if marker == 0xDA:
+            if pos + 4 >= len(data):
+                return None
+            at = pos + 5 + 2 * data[pos + 4]
+            return data[at] if at < len(data) else None
+    return None
+
+
+#: The markers in `FF C0`-`FF CF` that are not frame headers: DHT, JPG
+#: (reserved) and DAC (ITU-T T.81 Table B.1). A walk that took every `Cn`
+#: for a SOF would read a Huffman table ahead of the frame as SOF4.
+_JPEG_NOT_FRAME_HEADERS = frozenset({0xC4, 0xC8, 0xCC})
+
+
+def _jpeg_frame_type(codestream) -> Optional[int]:
+    """`n` of the first SOFn frame header in a JPEG stream, or None (#601).
+
+    The frame header names the coding process (ITU-T T.81 Table B.1):
+    SOF0, 1, 2, 5, 6, 9, 10, 13 and 14 are DCT processes, lossy by
+    definition; SOF3, 7, 11 and 15 are lossless. Reached by walking
+    (`_jpeg_marker_segments`), never by searching, so a COM or APPn
+    payload holding `FF C0` is stepped over. None when a scan (SOS) or
+    the end of the image comes before any frame header, or the data
+    ends first.
+
+    The transfer syntax does not settle it: a lossless SOF3 frame under
+    `.50` or `.51` decodes bit-exact (review J2 M1), and reading the
+    syntax as evidence stamped it `01`, which can never be withdrawn.
+
+    **Limit: the first frame header speaks for the stream.** A hierarchical
+    stream (DHP) can follow a DCT frame with lossless differential ones;
+    it is read by its first frame. None was built or measured.
+    """
+    data = bytes(codestream)
+    if data[:2] != b"\xff\xd8":
+        return None
+    for marker, _pos in _jpeg_marker_segments(data, 2):
+        if 0xC0 <= marker <= 0xCF and marker not in _JPEG_NOT_FRAME_HEADERS:
+            return marker - 0xC0
     return None
 
 
@@ -541,6 +620,27 @@ def _j2k_sample_layout(codestream) -> Optional[Tuple[bool, int]]:
     returned it, which is what every door did before this rule existed.
     """
     data = bytes(codestream)
+    offset = _j2k_codestream(data)
+    if offset is None:
+        return None
+    if data[offset:offset + 2] != b"\xff\x4f":
+        return None
+    if data[offset + 2:offset + 4] != b"\xff\x51":
+        return None
+    if offset + 42 >= len(data):
+        return None
+    ssiz = data[offset + 42]
+    return bool(ssiz & 0x80), (ssiz & 0x7F) + 1
+
+
+def _j2k_codestream(data) -> Optional[int]:
+    """Where the codestream starts in `data`: 0, or past a JP2 box (#601).
+
+    Factored out of `_j2k_sample_layout` so it and `_j2k_irreversible`
+    share one unwrap, and #610's XLBox trap stays in one place. None when
+    `data` is a JP2 file whose boxes do not lead to a `jp2c`. The caller
+    checks for SOC itself.
+    """
     offset = 0
     if data.startswith(b"\x00\x00\x00\x0c\x6a\x50\x20\x20"):
         # A JP2 file: 12-byte signature box, then boxes until `jp2c`,
@@ -577,14 +677,36 @@ def _j2k_sample_layout(codestream) -> Optional[Tuple[bool, int]]:
             offset += length
         else:
             return None
-    if data[offset:offset + 2] != b"\xff\x4f":
+    return offset
+
+
+def _j2k_irreversible(codestream) -> Optional[bool]:
+    """Whether a JPEG 2000 codestream uses the 9-7 irreversible wavelet (#601).
+
+    Read from the COD marker segment's SPcod transformation byte, 0 for
+    the 9-7 irreversible filter and 1 for the 5-3 reversible one (ISO/IEC
+    15444-1 A.6.1), `Lcod` + `Scod` + four bytes of SGcod + four of SPcod
+    past the marker. The main header is **walked** from SOC to the first
+    SOT (`_jpeg_marker_segments`), never searched: a COM payload can hold
+    `FF 52`. A JP2 box is unwrapped first (`_j2k_codestream`).
+
+    None when there is no COD in the main header, or the byte is neither
+    value. Limits, stated: a COC that overrides the transform for one
+    component and a tile-part COD are not read; and a reversible
+    codestream truncated at a lossy rate is lossy in fact and cannot be
+    told from a lossless one by its header (measured: `693_J2KI`,
+    `SC_rgb_gdcm_KY`).
+    """
+    data = bytes(codestream)
+    offset = _j2k_codestream(data)
+    if offset is None or data[offset:offset + 2] != b"\xff\x4f":
         return None
-    if data[offset + 2:offset + 4] != b"\xff\x51":
-        return None
-    if offset + 42 >= len(data):
-        return None
-    ssiz = data[offset + 42]
-    return bool(ssiz & 0x80), (ssiz & 0x7F) + 1
+    for marker, pos in _jpeg_marker_segments(data, offset + 2,
+                                             stops=(0x90, 0x93, 0xD9)):
+        if marker == 0x52:
+            transform = data[pos + 13] if pos + 13 < len(data) else None
+            return {0: True, 1: False}.get(transform)
+    return None
 
 
 def _sign_extend(arr, ds, precision=None):
