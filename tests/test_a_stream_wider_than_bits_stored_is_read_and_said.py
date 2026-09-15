@@ -329,6 +329,25 @@ def test_a_wider_stream_whose_samples_fit_writes_nothing(
     assert got["exported"].pixel_array.tolist() == samples.tolist()
 
 
+def test_a_sample_beyond_a_stream_no_wider_than_bits_stored_writes_no_precision_row(
+        tmp_path):
+    """Precision 12 under BitsStored 12, and lj92 reads samples above 4095.
+
+    A JPEG Lossless stream carries its differences modulo 2^16, so a
+    precision-12 stream can reconstruct samples above 2^12, and the
+    fallback returns them (review of #659, round 2, F1). A sample that does
+    not fit then comes from a stream no wider than BitsStored, and the
+    stream is not why: the #622 row's words would be false. Only the row
+    is asserted -- with pylibjpeg installed pydicom masks the same file to
+    4095, a split of its own (#671).
+    """
+    stream = imagecodecs.ljpeg_encode((_XX * 700 + _YY * 10).astype(np.uint16),
+                                      bitspersample=12)
+    got = _run(tmp_path, _file(LJPEG_SV1, stream, bits_stored=12))
+
+    assert not _precision_rows(got["rows"]), got["rows"]
+
+
 def test_a_dcmtk_true_lossless_corpus_file_keeps_pass(tmp_path):
     """pydicom's `emri_small_jpeg_ls_lossless.dcm`: precision 16, BitsStored 12."""
     ds = pydicom.dcmread(EMRI_JPEG_LS)
