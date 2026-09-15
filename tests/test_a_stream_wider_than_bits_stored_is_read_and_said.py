@@ -5,8 +5,11 @@ PS3.5 8.2.1: "should the characteristics explicitly specified in the
 compressed data stream ... be inconsistent with those specified in the
 DICOM Data Elements, those explicitly specified in the compressed data
 stream should be used to control the decompression". The v0.9.8 ruling
-(Q2, and OQ1 option A) is to read by the stream's precision at every door
-and write one `WARNING` row at ingest.
+(Q2, and OQ1 option A) is to read by the stream's precision at every door,
+frame by frame, and write one `WARNING` row at ingest -- only where a
+decoded sample does not fit BitsStored (the owner's ruling on review F2 of
+#659: DCMTK's true-lossless encoder writes precision 16 under BitsStored 12
+for ordinary files, whose samples all fit).
 
 Measured on abcb3aa, a 12-bit stream under BitsAllocated 16 / BitsStored 8:
 
@@ -39,17 +42,27 @@ import imagecodecs
 import numpy as np
 import pydicom
 import pytest
+from pydicom.data import get_testdata_file
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.encaps import encapsulate
+from pydicom.pixels.decoders.base import Decoder
 from pydicom.sequence import Sequence
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from isocenter.io_handlers import _decode_pixels
+from isocenter.io_handlers import _decode_pixels, _sample_beyond
 from isocenter.session import DicomSession
-from support.decode_doors import (J2K_LOSSLESS, LJPEG, LJPEG_SV1, at_instance,
-                                  dataset, write)
+from support.decode_doors import (J2K_LOSSLESS, JPEGLS, LJPEG, LJPEG_SV1,
+                                  at_instance, dataset, write)
 
 JPEG_BASELINE = "1.2.840.10008.1.2.4.50"
+JPEG_EXTENDED = "1.2.840.10008.1.2.4.51"
+
+#: DCMTK's true-lossless shape from pydicom's own test data: a JPEG-LS
+#: stream of precision 16 under BitsAllocated 16, BitsStored 12, whose
+#: samples all fit 12 bits (review F2 of #659). Resolved at import, so a
+#: missing one fails loudly.
+EMRI_JPEG_LS = get_testdata_file("emri_small_jpeg_ls_lossless.dcm")
+assert EMRI_JPEG_LS
 
 _YY, _XX = np.mgrid[0:8, 0:8]
 #: 12-bit samples, up to 3920: above 255, so BitsStored 8 cannot hold them.
@@ -74,10 +87,21 @@ def _j2k12(samples):
                                      bitspersample=12)
 
 
+def _jpeg12(samples):
+    """A 12-bit JPEG Extended (SOF1) stream; lossy, so compare with its decode."""
+    return imagecodecs.jpeg8_encode(samples, level=95, bitspersample=12)
+
+
 def _file(ts, stream, *, bits_stored, pr=0, high_bit=None, bits=16):
     return dataset(ts, [stream], rows=8, cols=8, bits_allocated=bits,
                    bits_stored=bits_stored, high_bit=high_bit,
                    pixel_representation=pr)
+
+
+def _frames(ts, streams, *, bits_stored, pr):
+    return dataset(ts, streams, rows=8, cols=8, bits_allocated=16,
+                   bits_stored=bits_stored, pixel_representation=pr,
+                   frames=len(streams))
 
 
 def _run(tmp_path, ds, name="s"):
@@ -121,10 +145,18 @@ def _precision_rows(rows):
     (J2K_LOSSLESS, _j2k12(IMG12), 8, 12, IMG12, "JPEG 2000 codestream"),
     # A stream at BitsAllocated itself is still wider than BitsStored.
     (LJPEG_SV1, _ljpeg(IMG16, 16), 12, 16, IMG16, "JPEG Lossless stream"),
+    # `jpegls_encode` writes precision 16 for any `uint16` input.
+    (JPEGLS, imagecodecs.jpegls_encode(IMG16), 12, 16, IMG16,
+     "JPEG-LS stream"),
+    # Lossy, so `samples` is the stream's own decode (below).
+    (JPEG_EXTENDED, _jpeg12(IMG12), 8, 12, None, "JPEG stream"),
 ], ids=[".70-12-under-8", ".57-12-under-8", ".90-12-under-8",
-        ".70-16-under-12"])
+        ".70-16-under-12", ".80-16-under-12", ".51-12-under-8"])
 def test_a_lossless_stream_wider_than_bits_stored_writes_a_warning(
         tmp_path, ts, stream, bits_stored, precision, samples, name):
+    if samples is None:
+        samples = imagecodecs.jpeg8_decode(stream)
+        assert int(samples.max()) > 255, int(samples.max())
     got = _run(tmp_path, _file(ts, stream, bits_stored=bits_stored))
 
     rows = _precision_rows(got["rows"])
@@ -135,10 +167,13 @@ def test_a_lossless_stream_wider_than_bits_stored_writes_a_warning(
         f"BitsStored {bits_stored} with BitsAllocated 16, and the {name}'s "
         f"precision is {precision}: read as right-aligned {precision}-bit "
         f"samples, as PS3.5 8.2.1 directs for a stream that contradicts the "
-        f"Data Elements; an export writes BitsStored from the samples."), \
-        details
+        f"Data Elements, and a sample reads {int(samples.max())}, which "
+        f"BitsStored {bits_stored} cannot hold; an export writes BitsStored "
+        f"from the samples."), details
     assert got["stored"].tolist() == samples.tolist()
-    assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
+    if ts != JPEG_EXTENDED:
+        # `.51` also writes #601's lossy row, which grades it on its own.
+        assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
     # The graph keeps the declared BitsStored (OQ4 (a)); the export writes
     # the container's width, the narrowest #468 writes that holds them.
     assert got["exported"].BitsStored == 16
@@ -160,7 +195,10 @@ def test_a_signed_lossless_stream_keeps_its_values(tmp_path, ts):
     assert got["exported"].BitsStored == 16
     arr, _label = at_instance(got["path"])
     assert arr.tolist() == S12.tolist()
-    assert len(_precision_rows(got["rows"])) == 1
+    (row,) = _precision_rows(got["rows"])
+    # -2048 is 1920 below BitsStored 8's -128; 1872 is 1745 above its 127.
+    assert "a sample reads -2048, which BitsStored 8 cannot hold" in row[1], \
+        row[1]
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +297,178 @@ def test_the_highbit_row_names_the_jpeg_precision(tmp_path):
     assert ("Read as right-aligned 12-bit samples (the JPEG Lossless "
             "stream's precision 12)") in high_bit, high_bit
     assert got["stored"].tolist() == IMG12.tolist()
+
+
+# ---------------------------------------------------------------------------
+# 5b: a wider stream whose samples all fit writes nothing (owner ruling on
+# review F2 of #659: a row only where a value does not fit BitsStored)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("ts, stream, pr, samples", [
+    (LJPEG_SV1, imagecodecs.ljpeg_encode(IMG12, bitspersample=16), 0, IMG12),
+    # A signed cell sign-extended above HighBit, the ordinary case: the
+    # stream's 16 bits hold -2048 as 0xF800.
+    (LJPEG_SV1, imagecodecs.ljpeg_encode(S12.view(np.uint16),
+                                         bitspersample=16), 1, S12),
+    (JPEGLS, imagecodecs.jpegls_encode(IMG12), 0, IMG12),
+    (J2K_LOSSLESS, imagecodecs.jpeg2k_encode(
+        IMG12, level=0, codecformat="J2K", bitspersample=16), 0, IMG12),
+], ids=[".70-unsigned", ".70-signed-extended", ".80-unsigned",
+        ".90-unsigned"])
+def test_a_wider_stream_whose_samples_fit_writes_nothing(
+        tmp_path, ts, stream, pr, samples):
+    """Precision 16 under BitsStored 12, every sample inside 12 bits."""
+    got = _run(tmp_path, _file(ts, stream, bits_stored=12, pr=pr))
+
+    assert not got["rows"], got["rows"]
+    assert "PASS" in got["grade"] and "REVIEW" not in got["grade"], \
+        got["grade"]
+    assert got["stored"].tolist() == samples.tolist()
+    # Read by the stream and written as declared: nothing to widen.
+    assert got["exported"].BitsStored == 12
+    assert got["exported"].pixel_array.tolist() == samples.tolist()
+
+
+def test_a_dcmtk_true_lossless_corpus_file_keeps_pass(tmp_path):
+    """pydicom's `emri_small_jpeg_ls_lossless.dcm`: precision 16, BitsStored 12."""
+    ds = pydicom.dcmread(EMRI_JPEG_LS)
+    assert (ds.BitsAllocated, ds.BitsStored) == (16, 12)
+    got = _run(tmp_path, ds)
+
+    assert not _precision_rows(got["rows"]), got["rows"]
+    assert "PASS" in got["grade"] and "REVIEW" not in got["grade"], \
+        got["grade"]
+    assert int(got["stored"].max()) < 4096
+
+
+@pytest.mark.parametrize("values, bits_stored, signed, beyond", [
+    ([0, 4095], 12, False, None),
+    ([0, 4096], 12, False, 4096),
+    ([-2048, 2047], 12, True, None),
+    ([-2049, 2047], 12, True, -2049),
+    ([-2048, 2048], 12, True, 2048),
+    # Both outside: the farther names it.
+    ([-2050, 2048], 12, True, -2050),
+    ([-2049, 2050], 12, True, 2050),
+], ids=["u-fits", "u-2^BS", "s-fits", "s-below", "s-above", "s-both-low",
+        "s-both-high"])
+def test_the_row_asks_whether_a_sample_fits_bits_stored(
+        values, bits_stored, signed, beyond):
+    arr = np.array(values, dtype=np.int16 if signed else np.uint16)
+    assert _sample_beyond(arr, bits_stored, signed) == beyond
+
+
+# ---------------------------------------------------------------------------
+# 5c: every frame's precision, not frame 0's (review M1 of #659)
+# ---------------------------------------------------------------------------
+
+#: A signed 12-bit pattern, unextended, as a 16-bit container holds it.
+S12_PATTERN = (S12.astype(np.int64) & 0xFFF).astype(np.int16)
+
+#: Each case: frames as `(stream, what pylibjpeg-libjpeg returns with
+#: correct_unused_bits=False, the value read)`, under BitsStored 12,
+#: PixelRepresentation 1.
+FRAME_CASES = {
+    # frame 0 wider; frame 1 conformant, which must still read -2048;
+    # frame 2 narrower, extended from BitsStored (F5): 252 stays 252.
+    "wider-first": [
+        (imagecodecs.ljpeg_encode(S12.view(np.uint16), bitspersample=16),
+         S12, S12),
+        (_ljpeg(S12, 12), S12_PATTERN, S12),
+        (_ljpeg(IMG8.astype(np.uint16), 8), IMG8.astype(np.int16),
+         IMG8.astype(np.int16)),
+    ],
+    # frame 0 conformant; frame 1 a masked pattern at precision 16, read
+    # by its 16 bits (S1g's shape), so the mask must be off for the file.
+    "wider-later": [
+        (_ljpeg(S12, 12), S12_PATTERN, S12),
+        (imagecodecs.ljpeg_encode(S12_PATTERN.view(np.uint16),
+                                  bitspersample=16),
+         S12_PATTERN, S12_PATTERN),
+    ],
+}
+
+
+@pytest.mark.parametrize("case", sorted(FRAME_CASES))
+def test_pydicoms_route_extends_each_frame_at_its_own_precision(
+        tmp_path, monkeypatch, case):
+    """pydicom asked unmasked, each frame extended at max(P_i, BitsStored).
+
+    pydicom has no JPEG Lossless plugin here, so `as_array` is patched to
+    return what pylibjpeg-libjpeg returns with `correct_unused_bits=False`
+    (measured for #622: the unextended pattern). The fallback, which
+    reads each frame's own header, is the reference: one answer per frame
+    on both routes.
+    """
+    frames = FRAME_CASES[case]
+    ds = _frames(LJPEG_SV1, [stream for stream, _raw, _want in frames],
+                 bits_stored=12, pr=1)
+    path = write(tmp_path, ds)
+    asked = []
+
+    def unmasked(self, src, **kwargs):
+        asked.append(kwargs)
+        return (np.stack([raw for _stream, raw, _want in frames]),
+                {"photometric_interpretation": "MONOCHROME2"})
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Decoder, "as_array", unmasked)
+        arr, _label = _decode_pixels(pydicom.dcmread(path))
+    assert asked and asked[0].get("correct_unused_bits") is False, asked
+    want = [w.tolist() for _stream, _raw, w in frames]
+    assert arr.tolist() == want
+
+    reference, _label = at_instance(path)
+    assert reference.tolist() == want
+
+
+def test_a_single_colour_frame_is_extended_as_one_frame(monkeypatch):
+    """SamplesPerPixel 3, one frame: pydicom returns (rows, columns, 3).
+
+    lj92 cannot encode colour, so the stream is monochrome and stands in
+    for its header only; pylibjpeg-libjpeg decodes colour JPEG Lossless.
+    Taken as frames, the rows past the first would be extended from
+    BitsStored 12 and a 16-bit 2048 would read -2048.
+    """
+    stream = imagecodecs.ljpeg_encode(S12_PATTERN.view(np.uint16),
+                                      bitspersample=16)
+    ds = dataset(LJPEG_SV1, [stream], rows=8, cols=8, samples=3,
+                 bits_allocated=16, bits_stored=12, pixel_representation=1)
+    raw = np.stack([S12_PATTERN] * 3, axis=-1)
+
+    def unmasked(self, src, **kwargs):
+        return raw, {"photometric_interpretation": "RGB"}
+
+    monkeypatch.setattr(Decoder, "as_array", unmasked)
+    arr, _label = _decode_pixels(ds)
+    assert int(raw.max()) >= 2048
+    assert arr.tolist() == raw.tolist()
+
+
+def test_a_wider_frame_behind_a_conformant_frame_0_writes_the_row(tmp_path):
+    """The row is decided over every frame: frame 1 is precision 16."""
+    frames = FRAME_CASES["wider-later"]
+    got = _run(tmp_path, _frames(LJPEG_SV1, [s for s, _r, _w in frames],
+                                 bits_stored=12, pr=1))
+
+    (row,) = _precision_rows(got["rows"])
+    assert row[1].startswith(
+        "BitsStored 12 with BitsAllocated 16, and the JPEG Lossless "
+        "stream's precision is 16: "), row[1]
+    assert (f"a sample reads {int(S12_PATTERN.max())}, which BitsStored 12 "
+            "cannot hold") in row[1], row[1]
+    assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
+    assert got["stored"].tolist() == [w.tolist() for _s, _r, w in frames]
+
+
+def test_a_wider_frame_0_whose_samples_fit_writes_nothing(tmp_path):
+    frames = FRAME_CASES["wider-first"]
+    got = _run(tmp_path, _frames(LJPEG_SV1, [s for s, _r, _w in frames],
+                                 bits_stored=12, pr=1))
+
+    assert not got["rows"], got["rows"]
+    assert "PASS" in got["grade"] and "REVIEW" not in got["grade"]
+    assert got["stored"].tolist() == [w.tolist() for _s, _r, w in frames]
 
 
 # ---------------------------------------------------------------------------

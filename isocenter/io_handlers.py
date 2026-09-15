@@ -199,6 +199,7 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   _jpegls_near, _stream_precision,
                                   colour_conversion, convert_colour,
                                   decode_declared_frames, extended_offsets,
+                                  frame_precisions,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
                                   signed_codestream_refusal)
@@ -2126,10 +2127,17 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     # The mask is also pydicom's *sign extension* for them (a left shift,
     # then an arithmetic right shift), so with it off a plugin such as
     # pylibjpeg-libjpeg returns a signed stream's unextended pattern --
-    # measured, 2048 for -2048 -- and `_sign_extend` at the stream's
-    # precision puts it back. At a width equal to the container's, as
-    # for Pillow's `int8`, that is a pure reinterpretation.
-    wider = (_precision_mismatch(ds) if str(ts) in T81_SYNTAXES else None)
+    # measured, 2048 for -2048 -- and `_extend_each_frame` puts it back.
+    # At a width equal to the container's, as for Pillow's `int8`, that
+    # is a pure reinterpretation.
+    #
+    # **Every frame's precision, never frame 0's for all** (review of
+    # #659, M1). The mask is one switch for the whole decode, so it is
+    # off when any frame is wider; the extension is per frame, so a
+    # conformant frame behind a wider frame 0 is extended at BitsStored,
+    # as the fallback extends it. Extended at frame 0's width, its -2048
+    # read 2048 with pylibjpeg installed, where main had read it right.
+    wider = _t81_frames_wider(ds, ts)
     if wider is not None:
         kwargs["correct_unused_bits"] = False
     try:
@@ -2153,7 +2161,7 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         # its own (`_decode_frame`), and a refusal here is not a reason to
         # ask it.
         if wider is not None:
-            arr = _sign_extend(arr, ds, wider["precision"])
+            arr = _extend_each_frame(arr, ds, wider)
     # Native byte order, at the one exit every door leaves by (#648).
     # pydicom returns a big-endian source in the file's own order (`>u2`,
     # `>i2`, `>u4`) with the right *values*, and every caller that stores
@@ -2166,6 +2174,54 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     if arr.dtype.byteorder not in ('=', '|'):
         arr = arr.astype(arr.dtype.newbyteorder('='))
     return np.ascontiguousarray(arr), photometric
+
+
+def _t81_frames_wider(ds, ts) -> Optional[list]:
+    """Every declared frame's `(stream, precision)`, when any is wider than BitsStored (#622).
+
+    None for any syntax but T.81 (`.50/.51/.57/.70`), for a BitsStored
+    that is absent or not an integer (pydicom's validation refuses it in
+    its own words), and when no frame's stream is wider -- the conformant
+    case, which pydicom masks and extends exactly as it did.
+    """
+    if str(ts) not in T81_SYNTAXES:
+        return None
+    try:
+        bits_stored = int(ds.BitsStored)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    precisions = frame_precisions(ds)
+    if any(precision is not None and precision > bits_stored
+           for _stream, precision in precisions):
+        return precisions
+    return None
+
+
+def _extend_each_frame(arr, ds, precisions):
+    """pydicom's unmasked T.81 decode, each frame sign-extended as the fallback extends it (#622).
+
+    Frame `i` is extended from its own stream's precision where that is
+    wider than BitsStored, and from BitsStored otherwise -- exactly
+    `imagecodecs_handler._decode_frame`'s JPEG Lossless arm, so both
+    routes give one answer frame by frame. A frame past `precisions` (an
+    excess the caller did not ask to drop) is extended from BitsStored.
+    Unsigned, `_sign_extend` returns each frame untouched.
+
+    The frame axis is read from the array's rank against SamplesPerPixel,
+    not from NumberOfFrames: pydicom returns one frame without it.
+    """
+    bits_stored = int(ds.BitsStored)
+    samples = int(getattr(ds, "SamplesPerPixel", 1) or 1)
+    single = arr.ndim == (2 if samples == 1 else 3)
+    frames = arr[np.newaxis] if single else arr
+    extended = []
+    for index, frame in enumerate(frames):
+        precision = (precisions[index][1] if index < len(precisions)
+                     else None)
+        extended.append(_sign_extend(
+            frame, ds, precision if precision is not None
+            and precision > bits_stored else None))
+    return extended[0] if single else np.stack(extended)
 
 
 def _validate_like_pydicom(ds, ts) -> None:
@@ -2419,7 +2475,7 @@ def _first_frame(ds) -> bytes:
         return b""
 
 
-def _precision_mismatch(ds) -> Optional[dict]:
+def _precision_mismatch(ds, arr) -> Optional[dict]:
     """The facts for ingest's precision row, or None (#622).
 
     A compressed stream states its own sample precision, and PS3.5 8.2.1
@@ -2427,20 +2483,26 @@ def _precision_mismatch(ds) -> Optional[dict]:
     Elements, the stream's control the decompression. Every door here
     reads such a stream by its precision -- JPEG 2000 and JPEG-LS always
     did; a T.81 stream does since #622, on both routes (`_decode_pixels`,
-    `imagecodecs_handler._decode_frame`) -- so the one thing left to do
-    is say so: `import_files` writes a `WARNING` row from what this
-    returns, as it does for HighBit (#455).
+    `imagecodecs_handler._decode_frame`) -- and `import_files` writes a
+    `WARNING` row from what this returns, as it does for HighBit (#455).
 
-    None unless `BitsStored < precision <= BitsAllocated`. Above
+    **Only where the decoded samples do not fit BitsStored** (owner
+    ruling on review F2 of #659). A stream wider than BitsStored is the
+    ordinary output of DCMTK's true-lossless encoder, which writes the
+    precision BitsAllocated for every 12-in-16 image; four of pydicom's
+    fifty compressed test files have that shape, and every sample fits.
+    The header disagreement alone changes no value and no export, so it
+    is not a row. `arr` is the decode ingest stores: a sample of 2^BS or
+    more (unsigned), or outside `[-2^(BS-1), 2^(BS-1) - 1]` (signed), is
+    one BitsStored cannot hold, and then the stream's precision is why.
+
+    None unless some sample does not fit and the widest frame's precision
+    satisfies `BitsStored < precision <= BitsAllocated`. Above
     BitsAllocated no container holds the samples and the decode's dtype
-    check refuses the file; at or below BitsStored the stream agrees with
-    the header, or is narrower, which is read as it always was.
-
-    **Frame 0 speaks for the instance** (`_first_frame`), as for HighBit
-    and LossyImageCompression: a later frame whose header states another
-    precision is decoded by its own header and not reported. A header
-    rule, asked before the decode; the caller attaches the facts only once
-    the decode succeeds.
+    check refuses the file; at or below BitsStored a sample that does not
+    fit was not put there by the stream. **Every declared frame's
+    precision** (`frame_precisions`), so a wider frame behind a
+    conformant frame 0 is reported; the row names the widest.
 
     No rewrite of BitsStored follows (the #455 precedent): the graph keeps
     the declared value, and an export writes BitsStored from the samples,
@@ -2450,8 +2512,9 @@ def _precision_mismatch(ds) -> Optional[dict]:
 
     Returns:
         ``{bits_allocated, bits_stored, precision, stream,
-        pixel_representation}``, plain types, so it rides `meta` out of a
-        spawned worker.
+        pixel_representation, sample}``, plain types, so it rides `meta`
+        out of a spawned worker; `sample` is the one farthest outside
+        BitsStored's range.
     """
     ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
     if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
@@ -2462,8 +2525,16 @@ def _precision_mismatch(ds) -> Optional[dict]:
         bits_stored = int(ds.BitsStored)
     except (AttributeError, TypeError, ValueError):
         return None
-    stream, precision = _stream_precision(ts, _first_frame(ds))
-    if precision is None or not bits_stored < precision <= bits_allocated:
+    signed = int(getattr(ds, "PixelRepresentation", 0) or 0) == 1
+    sample = _sample_beyond(arr, bits_stored, signed)
+    if sample is None:
+        return None
+    readings = [(stream, precision) for stream, precision
+                in frame_precisions(ds) if precision is not None]
+    if not readings:
+        return None
+    stream, precision = max(readings, key=lambda reading: reading[1])
+    if not bits_stored < precision <= bits_allocated:
         return None
     return {
         "bits_allocated": bits_allocated,
@@ -2471,18 +2542,40 @@ def _precision_mismatch(ds) -> Optional[dict]:
         "precision": precision,
         "stream": stream,
         "pixel_representation": getattr(ds, "PixelRepresentation", None),
+        "sample": sample,
     }
 
 
+def _sample_beyond(arr, bits_stored, signed) -> Optional[int]:
+    """The sample farthest outside what BitsStored holds, or None when all fit (#622).
+
+    Unsigned, BitsStored holds `0 .. 2^BS - 1`; signed, `-2^(BS-1) ..
+    2^(BS-1) - 1`. Asked of the array's minimum and maximum only, as
+    Python integers, so a 16-bit container cannot overflow the bound.
+    """
+    if arr is None or arr.size == 0 or bits_stored < 1:
+        return None
+    if signed:
+        low, high = -(1 << (bits_stored - 1)), (1 << (bits_stored - 1)) - 1
+    else:
+        low, high = 0, (1 << bits_stored) - 1
+    lowest, highest = int(arr.min()), int(arr.max())
+    beyond = [(highest - high, highest)] if highest > high else []
+    if lowest < low:
+        beyond.append((low - lowest, lowest))
+    return max(beyond)[1] if beyond else None
+
+
 def _precision_words(facts) -> str:
-    """The precision row, from `_precision_mismatch`'s facts. Value-free."""
+    """The precision row, from `_precision_mismatch`'s facts."""
     precision = facts["precision"]
     return (f"BitsStored {facts['bits_stored']} with BitsAllocated "
             f"{facts['bits_allocated']}, and the {facts['stream']}'s "
             f"precision is {precision}: read as right-aligned {precision}-bit "
             f"samples, as PS3.5 8.2.1 directs for a stream that contradicts "
-            f"the Data Elements; an export writes BitsStored from the "
-            f"samples.")
+            f"the Data Elements, and a sample reads {facts['sample']}, which "
+            f"BitsStored {facts['bits_stored']} cannot hold; an export writes "
+            f"BitsStored from the samples.")
 
 
 #: The two transfer syntaxes whose frames are read for a DCT frame header
@@ -2715,9 +2808,9 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             it is owed, and a HighBit row beside it would describe a
             decode that never reached the store.
         precisions (list): Appended to with `(path, tag, vr, facts)` for
-            every **carried** candidate whose stream is wider than its
-            BitsStored, `facts` being `_precision_mismatch`'s (#622), on
-            `high_bits`' terms.
+            every **carried** candidate with a sample its BitsStored
+            cannot hold from a stream wider than it, `facts` being
+            `_precision_mismatch`'s (#622), on `high_bits`' terms.
 
     Returns:
         list: `(path, terminal_tag, vr, raw_bytes, sha256)` per carried
@@ -2778,8 +2871,11 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # `file_meta`; asked before the decode, as at the top level,
             # and kept below only once the decode has succeeded.
             facts = _high_bit_mismatch(item_ds)
-            precision = _precision_mismatch(item_ds)
             arr, decoded_pi = _decode_pixels(item_ds, **decode_kwargs)
+            # Asked of the decoded samples (#622), so after the decode;
+            # inside the borrow, because it walks the frames by the
+            # borrowed transfer syntax.
+            precision = _precision_mismatch(item_ds, arr)
             if decode_kwargs:
                 offset_tables.append((path, tag_str, vr, counted, "excess"))
         except Exception:  # pylint: disable=broad-except
@@ -2955,8 +3051,6 @@ def ingest_worker(fp: str) -> Tuple:
             # Asked of the header before the decode, so both decoders'
             # files get it; attached only once the decode succeeds (#455).
             high_bit_mismatch = _high_bit_mismatch(ds)
-            # And a stream wider than BitsStored (#622), the same shape.
-            precision_mismatch = _precision_mismatch(ds)
             # The same shape for #601: asked of the header and frame 0
             # before the decode, recorded only once the decode succeeds.
             # Top level only -- 0028,2110 is the General Image Module's,
@@ -2993,6 +3087,9 @@ def ingest_worker(fp: str) -> Tuple:
                     # a subprocess with no store handle, so `import_files`
                     # writes the row.
                     meta['high_bit_mismatch'] = high_bit_mismatch
+                # A sample BitsStored cannot hold, from a stream wider
+                # than it (#622): asked of the decoded array, so here.
+                precision_mismatch = _precision_mismatch(ds, arr)
                 if precision_mismatch is not None:
                     meta['precision_mismatch'] = precision_mismatch
                 if lossy is not None:

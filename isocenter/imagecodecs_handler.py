@@ -775,6 +775,29 @@ def _stream_precision(transfer_syntax, frame) -> Tuple[Optional[str], Optional[i
     return (stream, precision) if precision is not None else (None, None)
 
 
+def frame_precisions(ds) -> list:
+    """`_stream_precision` of every declared frame, in frame order (#622).
+
+    **Every declared frame, not frame 0** (review of #659, M1). A frame is
+    a codestream, and one frame's header does not speak for another's
+    samples: `_decode_frame` reads each frame's own, and pydicom's route
+    has to be told each frame's too, or a conformant frame behind a wider
+    frame 0 is extended at frame 0's width and its values change. Walked
+    as `signed_codestream_refusal` walks (`_declared_frames`).
+
+    Empty on any failure: a buffer that cannot be walked has no precision
+    to read, and the decode that follows refuses it in its own words.
+
+    Cost: one transient copy of each declared frame's bytes.
+    """
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    try:
+        return [_stream_precision(ts, frame) for frame in _declared_frames(ds)]
+    except Exception:  # pylint: disable=broad-except
+        # Not this reader's refusal to make: see the docstring.
+        return []
+
+
 def _j2k_sample_layout(codestream) -> Optional[Tuple[bool, int]]:
     """The `(is_signed, precision)` a JPEG 2000 codestream declares (#460).
 
@@ -932,8 +955,9 @@ def _sign_extend(arr, ds, precision=None):
     `max(precision, BitsStored)`. A stream narrower than BitsStored keeps
     that reading too, and whether it should extend from its own
     precision, as JPEG-LS does, is not decided here.
-    `io_handlers._decode_pixels` calls this on pydicom's route for the
-    same wider streams, after asking pydicom not to mask them.
+    `io_handlers._decode_pixels` calls this on pydicom's route, frame by
+    frame on the same terms, after asking pydicom not to mask a stream
+    any of whose frames is wider (`frame_precisions`).
 
     Called for .57/.70/.80/.81 unconditionally, and for JPEG 2000 in one
     case only: an unsigned codestream under PixelRepresentation 1, where
@@ -1115,6 +1139,23 @@ def signed_codestream_words(precision) -> str:
             f"is no unsigned reading of this file to stand behind")
 
 
+def _declared_frames(ds):
+    """The declared frames' bytes, walked the way pydicom's decoder walks them.
+
+    The count is `offset_table_frame_count`'s reading, so an excess a
+    table names -- or one no table names (#620) -- is not read, and the
+    walk takes the Extended Offset Table when pydicom's decoder does
+    (`extended_offsets`). Raises what `generate_frames` raises; both
+    callers catch it.
+    """
+    counted = offset_table_frame_count(ds)
+    declared = (counted[1] if counted is not None
+                else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
+    return islice(generate_frames(ds.PixelData, number_of_frames=declared,
+                                  extended_offsets=extended_offsets(ds)),
+                  declared)
+
+
 def signed_codestream_refusal(ds) -> Optional[str]:
     """The refusal for a signed JPEG 2000 codestream under PixelRepresentation 0 (#524).
 
@@ -1164,13 +1205,7 @@ def signed_codestream_refusal(ds) -> Optional[str]:
     try:
         if int(ds.PixelRepresentation) != 0:
             return None
-        counted = offset_table_frame_count(ds)
-        declared = (counted[1] if counted is not None
-                    else max(1, int(getattr(ds, "NumberOfFrames", 1) or 1)))
-        for frame in islice(generate_frames(ds.PixelData,
-                                            number_of_frames=declared,
-                                            extended_offsets=extended_offsets(ds)),
-                            declared):
+        for frame in _declared_frames(ds):
             layout = _j2k_sample_layout(frame)
             if layout is not None and layout[0]:
                 return signed_codestream_words(layout[1])
