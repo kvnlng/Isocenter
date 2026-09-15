@@ -1944,9 +1944,10 @@ def test_a_native_file_lends_its_own_syntax_to_its_icon(tmp_path):
     mutation (m27): every defined-length icon read as Explicit VR Little
     Endian, native file or not.
 
-    Asked of `_decode_nested_pixels` directly, and of the samples in the
-    order the decode returns them (`>u2`): what the store then does with a
-    big-endian array is a separate question from which syntax decoded it.
+    Asked of `_decode_nested_pixels` directly. The carried bytes are read
+    in native order, because the decode returns native order (#648): the
+    values are what this test is about, and a byte-swapped carriage is
+    `tests/test_a_big_endian_source_keeps_its_values.py`'s question.
     """
     from pydicom.uid import ExplicitVRBigEndian
     src = tmp_path / "src"
@@ -1969,7 +1970,7 @@ def test_a_native_file_lends_its_own_syntax_to_its_icon(tmp_path):
         None, offset_tables=[], high_bits=[])
 
     assert dropped == []
-    assert np.frombuffer(carried[0][3], ">u2").tolist() == VALUES12.tolist()
+    assert np.frombuffer(carried[0][3], "=u2").tolist() == VALUES12.tolist()
 
 
 def test_an_encapsulated_icon_still_borrows_the_files_syntax():

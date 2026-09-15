@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1617 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1620 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1619 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1622 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -2119,6 +2119,7 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         kwargs["as_rgb"] = as_rgb
     try:
         arr, meta = get_decoder(ts).as_array(ds, **kwargs)
+        photometric = meta["photometric_interpretation"]
     except RuntimeError as exc:
         if str(ts) not in _IMAGECODECS_FALLBACK_SYNTAXES:
             raise
@@ -2130,8 +2131,20 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         # allow-list too: a header that fails both is refused in pydicom's
         # words, which name the element.
         _validate_like_pydicom(ds, ts)
-        return _decode_with_imagecodecs(ds, allow_excess_frames, exc)
-    return np.ascontiguousarray(arr), meta["photometric_interpretation"]
+        arr, photometric = _decode_with_imagecodecs(ds, allow_excess_frames,
+                                                    exc)
+    # Native byte order, at the one exit every door leaves by (#648).
+    # pydicom returns a big-endian source in the file's own order (`>u2`,
+    # `>i2`, `>u4`) with the right *values*, and every caller that stores
+    # the array stores `tobytes()` -- big-endian bytes, which the sidecar
+    # loader reads as native: `[0, 100, 4000, 4095]` came back
+    # `[0, 25600, 40975, 65295]`. `Instance.set_pixel_data` has always
+    # normalised a caller's array the same way. The export readback cannot
+    # see this class of defect, because it compares the written file with
+    # the array written, not with the source; a test has to.
+    if arr.dtype.byteorder not in ('=', '|'):
+        arr = arr.astype(arr.dtype.newbyteorder('='))
+    return np.ascontiguousarray(arr), photometric
 
 
 def _validate_like_pydicom(ds, ts) -> None:
@@ -2912,6 +2925,12 @@ def ingest_worker(fp: str) -> Tuple:
             # still reports. One question, one answer.
             try:
                 arr = np.ascontiguousarray(ds.pixel_array)
+                # This arm does not pass through `_decode_pixels`, so it
+                # normalises byte order itself (#648): a big-endian
+                # FloatPixelData decodes to `>f4`, and its `tobytes()`
+                # stored `[0.5, -1.25, 1000, 3]` as values near 1e-41.
+                if arr.dtype.byteorder not in ('=', '|'):
+                    arr = arr.astype(arr.dtype.newbyteorder('='))
                 p_bytes = arr.tobytes()
                 p_alg = 'zlib'
                 # The dtype the sidecar will have to reconstruct with,
