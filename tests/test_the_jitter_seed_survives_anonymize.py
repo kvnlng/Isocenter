@@ -166,7 +166,10 @@ def test_a_reingested_export_under_another_secret_is_warned(tmp_path):
     ingests A's export: its offset is B's for that pseudonym, and exactly
     one WARNING names the foreign pseudonym.
 
-    Red on: `_pseudonym_verifies` always True (no warning).
+    Red on: `_pseudonym_verifies` always True (no warning); #644's seed
+    check in `_shift_target_moved` refusing a keyed-shaped seed that does
+    not verify, rather than asking whether the seed keys to the patient
+    holding the date (offset 0: every shift declines).
     """
     out = _export_project_a(tmp_path)
     db = str(tmp_path / "two.db")
