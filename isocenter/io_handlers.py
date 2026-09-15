@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1628 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1631 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1629 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1632 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -3124,7 +3124,7 @@ def _ingest_file_key(path) -> str:
 
     **A digest, not a secret.** Anyone who can guess a file's full path
     can recompute its key and confirm the guess. That was ruled
-    acceptable for 0.9.8 (brief J4 Q1): a keyed form either changes per
+    acceptable for 0.9.8 (ruled on #591): a keyed form either changes per
     session, so a decline row could not name a holder ingested earlier,
     or needs the project secret, which ingest must not create. The
     derivation lives here alone so that changing it is one line.

@@ -17,7 +17,7 @@ from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportError, ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
                           export_stamp_attributes, GRADED_LOSS_SCOPES,
-                          redaction_in_effect)
+                          redaction_in_effect, _file_key_logged)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
@@ -1131,6 +1131,12 @@ class DicomSession:
         already been mentioned would be state answering a question the
         graph answers. Zero unsaved instances is silent, so an ordinary
         double close says nothing extra.
+
+        **One emitter.** The message is a `WARNING` log line, and the
+        logger's console handler is what puts it on stdout. It was also
+        `print`ed, so every warning appeared on stdout twice (#643). The
+        cost of one emitter: under `ISOCENTER_LOG_LEVEL=ERROR` or above
+        the warning reaches neither the console nor the log.
         """
         try:
             unsaved = [inst
@@ -1158,9 +1164,16 @@ class DicomSession:
                 # `source_path` and not `file_path` -- redaction detaches
                 # `file_path` (see the field in `entities.py`), and
                 # redaction is exactly what leaves an instance dirty at
-                # close. `instance_number` is `int = 0` and never `None`,
+                # close. Named by #591's file key, not the path: the path
+                # printed here on the console, and a source tree is often
+                # named for the patient (#643). The key still locates --
+                # `_file_key_logged` pairs it with the path in
+                # `isocenter.log`, at INFO, which the console does not
+                # show. `instance_number` is `int = 0` and never `None`,
                 # so the last arm is total and the chain cannot raise.
-                i.sop_instance_uid or i.source_path
+                i.sop_instance_uid
+                or (i.source_path and "the instance from the file keyed "
+                    f"{_file_key_logged(get_logger(), i.source_path)}")
                 or f"<unidentified instance {i.instance_number}>"
                 for i in unsaved[:3])
             if len(unsaved) > 3:
@@ -1171,7 +1184,6 @@ class DicomSession:
                 f"{named}. Call save(sync=True) before close() to keep "
                 f"them.")
             get_logger().warning(message)
-            print(f"WARNING: {message}")
         except Exception:  # pylint: disable=broad-except
             # A diagnostic that cannot run is a diagnostic that is
             # missing, which is what the caller had before this existed.

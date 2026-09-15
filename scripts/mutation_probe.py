@@ -426,6 +426,7 @@ TARGETS = {
                                   "tests/test_a_remove_on_an_absent_tag_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_close_warns_about_unsaved_instances.py",
                                   "tests/test_an_ingest_row_names_no_path.py",
                                   "tests/test_a_missing_type_2_element_is_written_empty.py",
                                   "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",

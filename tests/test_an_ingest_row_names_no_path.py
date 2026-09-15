@@ -17,7 +17,7 @@ under such a folder, 3.12 and 3.14t alike:
   **stdout**.
 
 Now the row is keyed by the first eight hex digits of the sha256 of the
-path's filesystem bytes (the coordinator's ruling, triage-098 Q1), and the
+path's filesystem bytes (as ruled on #591), and the
 path goes to exactly two places: `IngestSummary.failures`, which the caller
 already holds, and `isocenter.log`, at INFO, in a line pairing it with its
 key. The console handler is WARNING and up, so the pairing line never
