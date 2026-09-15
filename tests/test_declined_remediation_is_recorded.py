@@ -26,13 +26,27 @@ The tests drive `_apply_single_remediation` directly against a real
 `SqliteStore`, the pattern `test_remediation_actions.py` and
 `test_remediation_invariants.py` use, because the point is which call
 sites emit rather than which findings the inspector raises.
+
+**Since #626 the sixth path is no longer a decline when the tag is a
+well-formed `gggg,eeee` key absent from the item under its canonical
+(lower-case) spelling.** That is the end state the rule asks for --
+#567's satisfied shape -- and is stamped REMEDIATED with no row;
+`test_a_remove_on_an_absent_tag_is_satisfied.py` holds that rule. The
+sixth path still declines, with its `matched no applicable arm` row, for
+an entity with no `attributes` dict, an action the arm does not
+implement, a tag spelled in upper case while the item holds it in lower
+case, and any key that is not a well-formed tag once lower-cased
+(`00080080`, `InstitutionName`, `patient_id`): the spellings the
+paragraph above means by "under that spelling". The tests here that used
+the absent-tag shape as *the* decline use `REPLACE_TAG` on the absent
+tag instead, which #547 declines.
 """
 import pytest
 
-from isocenter.entities import Instance, Patient
+from isocenter.entities import Instance, Patient, PhiStatus
 from isocenter.persistence import SqliteStore
 from isocenter.privacy import PhiFinding, PhiRemediation
-from isocenter.remediation import RemediationService
+from isocenter.remediation import RemediationService, _remediation_key
 
 from support.project_secret import FIXED_A
 
@@ -101,6 +115,9 @@ def test_a_replace_with_neither_a_setter_nor_the_attribute_is_recorded(store):
 
     assert len(rows) == 1
     assert "patient_name" in rows[0][2]
+    # The reason for a name the entity lacks, as distinct from the
+    # reason for a slot holding None (#625): two reasons, one helper.
+    assert "has no attribute or setter" in rows[0][2], rows[0][2]
 
 
 def test_a_date_shift_with_no_resolvable_patient_id_is_recorded(store):
@@ -134,22 +151,34 @@ def test_an_unparseable_date_is_recorded(store):
     assert "not-a-date" in rows[0][2]
 
 
-def test_a_remove_of_a_tag_the_instance_does_not_carry_is_recorded(store):
-    """The path that had no log line at all.
+def test_a_remove_of_a_tag_the_instance_does_not_carry_is_satisfied(store):
+    """The path that had no log line at all, and is now not a decline.
 
     `hasattr(entity, "attributes")` is True and the tag is in neither
     `attributes` nor `sequences`, so both inner arms fail, `action_type`
-    stays `""`, the bottom block is skipped and the function returns.
-    Before this change nothing anywhere recorded that the removal did not
-    happen.
+    stays `""` and the bottom `else` is reached. #301 made that a
+    `matched no applicable arm` decline, so it was no longer silent; #626
+    made it satisfied, because the tag being gone is the end state the
+    rule asks for: no row, REMEDIATED, the key counted as handled,
+    nothing applied.
+
+    Asserted through `_remediation_key`, not a literal tuple:
+    `entity_path` defaults to `()`, and a hardcoded tuple would pin the
+    fixture's default rather than the contract.
     """
     inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
     inst.set_attr("0010,0010", "DOE^JOHN")
+    inst.record_phi_status(PhiStatus.IDENTIFIED)
+    finding = _finding(inst, "REMOVE_TAG", "0008,0080")
+    service = RemediationService(store_backend=store, project_secret=FIXED_A)
 
-    rows = _declines(store, _finding(inst, "REMOVE_TAG", "0008,0080"))
+    applied = service.apply_remediation([finding])
+    store.flush_audit_queue()
 
-    assert len(rows) == 1
-    assert "0008,0080" in rows[0][2]
+    assert applied == 0
+    assert store.get_audit_declines() == []
+    assert inst.phi_status is PhiStatus.REMEDIATED
+    assert _remediation_key(finding) in service._satisfied_keys
 
 
 @pytest.mark.parametrize("new_value", ["", "ANONYMIZED"],
@@ -220,6 +249,11 @@ def test_a_remove_against_an_entity_with_no_attributes_dict_is_recorded(store):
 
     assert len(rows) == 1
     assert "patient_id" in rows[0][2]
+    # Through `apply_remediation` a dropped `attributes`-dict guard in
+    # the satisfied test (#626) turns this row into `REMOVE_TAG on
+    # patient_id raised TypeError ...`, which also names the attribute;
+    # the wording is what tells the two apart.
+    assert "matched no applicable arm" in rows[0][2], rows[0][2]
 
 
 def test_an_empty_date_is_not_a_decline(store):
@@ -249,8 +283,8 @@ def test_two_findings_sharing_a_target_write_two_declines(store):
     first one declined.
     """
     inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
-    findings = [_finding(inst, "REMOVE_TAG", "0008,0080"),
-                _finding(inst, "REMOVE_TAG", "0008,0080")]
+    findings = [_finding(inst, "REPLACE_TAG", "0008,0080", new_value="ANONYMIZED"),
+                _finding(inst, "REPLACE_TAG", "0008,0080", new_value="ANONYMIZED")]
 
     applied = RemediationService(store_backend=store)\
         .apply_remediation(findings)
@@ -289,7 +323,7 @@ def test_the_failure_warning_counts_declines_among_the_attempts(store,
     inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
     findings = [_finding(_Explodes(), "REPLACE_TAG", "0010,0010",
                          new_value="ANON", uid="1.2.4"),
-                _finding(inst, "REMOVE_TAG", "0008,0080")]
+                _finding(inst, "REPLACE_TAG", "0008,0080", new_value="ANONYMIZED")]
 
     with caplog.at_level("WARNING"):
         RemediationService(store_backend=store).apply_remediation(findings)
@@ -338,7 +372,7 @@ def test_a_declined_session_reports_the_decline_and_grades_review_required(
         service.apply_remediation([
             _finding(patient, "REPLACE_TAG", "patient_name",
                      new_value="ANONYMIZED", original="DOE^JOHN"),
-            _finding(inst, "REMOVE_TAG", "0008,0080"),
+            _finding(inst, "REPLACE_TAG", "0008,0080", new_value="ANONYMIZED"),
         ])
         session._actions_performed.add("ANONYMIZE")
 
@@ -395,7 +429,8 @@ def test_a_decline_is_not_a_phi_status_change(store):
     inst = Instance("1.2.3", INSTANCE_SOP_CLASS, 1)
     before = inst.phi_status
 
-    _declines(store, _finding(inst, "REMOVE_TAG", "0008,0080"))
+    _declines(store, _finding(inst, "REPLACE_TAG", "0008,0080",
+                              new_value="ANONYMIZED"))
 
     assert inst.phi_status is before
 
@@ -418,7 +453,7 @@ def test_a_pass_that_only_declined_leaves_the_status_alone(store):
     before = inst.phi_status
 
     RemediationService(store_backend=store).apply_remediation(
-        [_finding(inst, "REMOVE_TAG", "0008,0080")])
+        [_finding(inst, "REPLACE_TAG", "0008,0080", new_value="ANONYMIZED")])
     store.flush_audit_queue()
 
     assert len(store.get_audit_declines()) == 1

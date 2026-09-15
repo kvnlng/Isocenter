@@ -1101,3 +1101,385 @@ def test_the_16_bit_ybr_note_writes_no_row(tmp_path):
         session.export(str(tmp_path / "out"), use_compression=False,
                        show_progress=False)
         assert session.store_backend.get_audit_errors() == []
+
+
+# ---------------------------------------------------------------------------
+# #602: an icon's label is judged where it is written.
+# ---------------------------------------------------------------------------
+#
+# The #502 judgement ran on the top-level pixel element and the pixel-less
+# arm. An Icon Image Sequence item's label reached the file unexamined:
+# measured on ce5b2b2, `YBR_ICT`, `YBR_PARTIAL_420`, `NONSENSE` and
+# `['MONOCHROME2', 'RGB']` exported with no row under both compression
+# settings and `verify_readback=True`. An icon is always written
+# uncompressed (PS3.5 A.4 allows it), so it is judged against the
+# uncompressed row whatever syntax the file carries.
+
+CT_IMAGE = "1.2.840.10008.5.1.4.1.1.2"
+#: A 2x2 icon's samples: three per pixel, or one.
+ICON_SAMPLES = {3: bytes(range(12)), 1: bytes([11, 22, 33, 44])}
+ICON_PATH = "0088,0200[0]"
+
+
+def _icon_source(folder, *, samples, serial="SN-1"):
+    """A CT file with a 4x4 monochrome frame and one native 2x2 icon."""
+    import os
+    from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
+    from pydicom.sequence import Sequence
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+
+    meta = FileMetaDataset()
+    meta.MediaStorageSOPClassUID = CT_IMAGE
+    meta.MediaStorageSOPInstanceUID = generate_uid()
+    meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
+    ds.PatientID, ds.PatientName = "PAT1", "DOE^JOHN"
+    ds.StudyInstanceUID, ds.SeriesInstanceUID = generate_uid(), generate_uid()
+    ds.SOPInstanceUID = meta.MediaStorageSOPInstanceUID
+    ds.SOPClassUID = CT_IMAGE
+    ds.Modality, ds.SeriesNumber, ds.InstanceNumber = "CT", 1, 1
+    ds.StudyDate, ds.StudyTime = "20230101", "120000"
+    ds.DeviceSerialNumber = serial
+    ds.Manufacturer, ds.ManufacturerModelName = "ACME", "SCAN9000"
+    # `IODValidator` refuses a CT Image without these.
+    ds.SliceThickness, ds.KVP = "1.0", "120"
+    ds.ImagePositionPatient = [0.0, 0.0, 0.0]
+    ds.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+    ds.PixelSpacing = [1.0, 1.0]
+    ds.Rows = ds.Columns = 4
+    ds.BitsAllocated = ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.PixelRepresentation = 0
+    ds.PixelData = np.arange(16, dtype=np.uint8).tobytes()
+
+    icon = Dataset()
+    icon.Rows = icon.Columns = 2
+    icon.BitsAllocated = icon.BitsStored = 8
+    icon.HighBit = 7
+    icon.SamplesPerPixel = samples
+    icon.PhotometricInterpretation = "RGB" if samples == 3 else "MONOCHROME2"
+    icon.PixelRepresentation = 0
+    if samples == 3:
+        icon.PlanarConfiguration = 0
+    icon.add_new(0x7FE00010, "OB", ICON_SAMPLES[samples])
+    ds.IconImageSequence = Sequence([icon])
+    ds.save_as(os.path.join(folder, "one.dcm"), enforce_file_format=True)
+
+
+def _icon_image(tmp_path, label, samples=3, *, compression=False,
+                verify=False, redact=False):
+    """Ingest an icon source, declare `label` on the icon item, export.
+
+    Returns `(rows, exported, grade, summary)`: `get_audit_errors()` as
+    tuples, the written file read back, the report's grade line, and the
+    export's summary.
+    """
+    import os
+    src = tmp_path / "src"
+    src.mkdir()
+    _icon_source(str(src), samples=samples)
+    out = tmp_path / "out"
+    report = tmp_path / "report.md"
+    with DicomSession(str(tmp_path / "icon.db")) as session:
+        session.ingest(str(src))
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        item = inst.sequences["0088,0200"].items[0]
+        item.set_attr("0028,0004", label)
+        if redact:
+            session.redact_by_machine("SN-1", [0, 4, 0, 4])
+        summary = session.export(str(out), use_compression=compression,
+                                 verify_readback=verify, show_progress=False)
+        rows = [tuple(r) for r in session.store_backend.get_audit_errors()]
+        session.generate_report(str(report))
+    written = [os.path.join(r, f) for r, _d, files in os.walk(str(out))
+               for f in files if f.endswith(".dcm")]
+    assert len(written) == 1, (written, rows)
+    return rows, pydicom.dcmread(written[0]), _grade(report), summary
+
+
+def _icon_label_rows(rows):
+    return [r for r in rows if "on the icon at" in r[2]
+            or "the icon at" in r[2]]
+
+
+ICON_INADMISSIBLE = ("YBR_ICT", "YBR_RCT", "YBR_PARTIAL_420",
+                     "YBR_PARTIAL_422", "NONSENSE")
+
+
+@pytest.mark.parametrize("compression", [False, True],
+                         ids=["uncompressed", "compressed"])
+@pytest.mark.parametrize("label", ICON_INADMISSIBLE)
+def test_an_inadmissible_icon_label_is_written_with_a_warning(
+        tmp_path, label, compression):
+    """I1: one `WARNING` naming the item; label and samples as declared.
+
+    The remedy is the icon's own: "export with use_compression=True" is
+    false for an icon, which this exporter never compresses. Killing
+    mutations: (m8) the `_icon_label_warning` call deleted; (m14) the
+    table's remedy kept in place of `_PHOTOMETRIC_ICON`.
+    """
+    rows, exported, grade, _summary = _icon_image(
+        tmp_path, label, compression=compression)
+
+    warnings = [r for r in rows if "PhotometricInterpretation" in r[2]]
+    assert len(warnings) == 1, rows
+    _when, action, details = warnings[0]
+    assert action == "WARNING"
+    assert details.startswith(
+        f"PhotometricInterpretation '{label}' on the icon at {ICON_PATH} "
+        f"is not a label uncompressed pixel data admits: "), details
+    assert "use_compression=True, where" not in details, details
+    assert "An icon is written uncompressed whatever transfer syntax" \
+        in details, details
+    icon = exported.IconImageSequence[0]
+    assert icon.PhotometricInterpretation == label
+    assert icon.PixelData == ICON_SAMPLES[3]
+    assert "REVIEW_REQUIRED" in grade, grade
+
+
+def test_an_icon_label_is_judged_as_uncompressed_under_a_compressed_export(
+        tmp_path):
+    """I2: the J2K row admits `YBR_ICT`; the icon inside that file is raw.
+
+    Killing mutation (m9): the judgement made against the file's written
+    syntax, whose row admits the label, instead of the uncompressed row.
+    """
+    rows, exported, _grade_line, _summary = _icon_image(
+        tmp_path, "YBR_ICT", compression=True)
+
+    assert str(exported.file_meta.TransferSyntaxUID) == \
+        "1.2.840.10008.1.2.4.90"
+    assert not exported.IconImageSequence[0][
+        "PixelData"].is_undefined_length
+    assert len([r for r in rows if f"on the icon at {ICON_PATH}" in r[2]]) \
+        == 1, rows
+
+
+@pytest.mark.parametrize("compression", [False, True],
+                         ids=["uncompressed", "compressed"])
+@pytest.mark.parametrize("label, samples", [
+    ("MONOCHROME2", 1), ("MONOCHROME1", 1), ("PALETTE COLOR", 1),
+    ("RGB", 3), ("YBR_FULL", 3)])
+def test_an_admitted_icon_label_warns_about_nothing(tmp_path, label, samples,
+                                                  compression):
+    """I3: the control -- an admitted icon label writes no row.
+
+    Killing mutation (m14b, with I1): the admitted test inverted.
+    """
+    rows, exported, grade, _summary = _icon_image(
+        tmp_path, label, samples, compression=compression)
+
+    assert rows == [], rows
+    assert exported.IconImageSequence[0].PhotometricInterpretation == label
+    assert "PASS" in grade, grade
+
+
+@pytest.mark.parametrize("declared, expected, samples, noted", [
+    (" rgb ", "RGB", 3, True), ("rgb", "RGB", 3, True),
+    (" monochrome2 ", "MONOCHROME2", 1, True), ("RGB ", "RGB", 3, False)],
+    ids=["padded-lower", "lower", "mono-padded-lower", "trailing-pad"])
+def test_an_icon_label_is_written_as_a_code_string(
+        tmp_path, monkeypatch, caplog, declared, expected, samples, noted):
+    """I4 (Q4): #532's respelling, one depth down.
+
+    Measured on ce5b2b2: `' rgb '` on an icon was written `' rgb'`,
+    pydicom warned `Invalid value for VR CS` as `_merge_sequences`
+    assigned it, and re-ingesting the file dropped the icon with the
+    unrouted `DATA_LOSS` row. Now the file carries the defined spelling,
+    one INFO note names the item, and the file re-ingests with its icon.
+    A trailing pad is what the file does anyway: no note.
+
+    Threads, so the export worker runs here and its `UserWarning` would
+    reach `catch_warnings`. Killing mutation (m11): `_merge_sequences`
+    merges `item.attributes` rather than the respelled copy.
+    """
+
+    import warnings as _warnings
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+
+    with caplog.at_level(logging.INFO, logger="isocenter"), \
+            _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        rows, exported, _grade_line, _summary = _icon_image(
+            tmp_path, declared, samples)
+
+    icon = exported.IconImageSequence[0]
+    assert icon.PhotometricInterpretation == expected
+    assert _icon_label_rows(rows) == [], rows
+    assert [str(w.message) for w in caught
+            if "Invalid value for VR CS" in str(w.message)] == []
+    notes = [r.getMessage() for r in caplog.records
+             if r.levelno == logging.INFO and "(0088,0200) item 0: "
+             in r.getMessage()]
+    if noted:
+        assert len(notes) == 1, [r.getMessage() for r in caplog.records]
+        assert repr(declared) in notes[0], notes
+        assert "(PS3.5 6.2" in notes[0], notes
+    else:
+        assert notes == [], notes
+
+    reingest = tmp_path / "reingest.db"
+    exported_dir = tmp_path / "out"
+    with DicomSession(str(reingest)) as session:
+        session.ingest(str(exported_dir))
+    with sqlite3.connect(str(reingest)) as conn:
+        kinds = [k for k, in conn.execute("SELECT kind FROM instance_blobs")]
+        losses = conn.execute("SELECT details FROM audit_log WHERE "
+                              "action_type='DATA_LOSS'").fetchall()
+    assert [k for k in kinds if "0088,0200" in k], (kinds, losses)
+    assert losses == [], losses
+
+
+def test_a_multi_valued_icon_label_warns_and_is_written(tmp_path):
+    """I5 (Q5): warned about, written as declared, never refused.
+
+    The pixel arms refuse a multi-valued top-level label; an icon is not a
+    reason to lose the instance (#433), and the user can fix it with one
+    `set_attr`. Killing mutation (m13): the arity branch deleted, so the
+    label is judged as the text of a list and the wrong sentence is written.
+    """
+    rows, exported, grade, summary = _icon_image(
+        tmp_path, ["MONOCHROME2", "RGB"])
+
+    assert summary.failures == [], summary.failures
+    assert len(summary.written_uids) == 1, summary
+    warnings = [r for r in rows if "PhotometricInterpretation" in r[2]]
+    assert len(warnings) == 1, rows
+    assert warnings[0][1] == "WARNING"
+    assert warnings[0][2].startswith(
+        f"PhotometricInterpretation (0028,0004) is VM 1; the icon at "
+        f"{ICON_PATH} declares 2 values ('MONOCHROME2', 'RGB'). "), warnings
+    assert list(exported.IconImageSequence[0].PhotometricInterpretation) == [
+        "MONOCHROME2", "RGB"]
+    assert "REVIEW_REQUIRED" in grade, grade
+
+
+def test_an_icon_that_is_not_written_is_not_judged(tmp_path):
+    """I6: a redacted instance's icon is removed, with its SIGNAL loss row.
+
+    It writes no pixel element, so the label door never opens for it.
+    Green before #602. Killing mutation (m10): the judgement made over
+    every ref, before the removals are decided.
+    """
+
+    rows, exported, _grade_line, _summary = _icon_image(
+        tmp_path, "YBR_ICT", redact=True)
+
+    assert "IconImageSequence" not in exported
+    with sqlite3.connect(str(tmp_path / "icon.db")) as conn:
+        scopes = [s for s, in conn.execute(
+            "SELECT loss_scope FROM audit_log WHERE action_type='DATA_LOSS' "
+            "AND details LIKE '%7fe0,0010%'")]
+    assert scopes == ["SIGNAL"], scopes
+    assert _icon_label_rows(rows) == [], rows
+
+
+@pytest.mark.parametrize("threads", [False, True])
+def test_export_leaves_the_graph_icon_label_alone(tmp_path, monkeypatch,
+                                                  threads):
+    """I7: the file is respelled; the graph item keeps what was declared.
+
+    Driven through `write_tree()` on the session's own graph, whose
+    workers run in this process under threads -- `session.export()` hands
+    its workers a copy, so a write-back there would be invisible here.
+    Killing mutation (m12): the respelled value written back to
+    `item.attributes`.
+    """
+    for name in _LEVERS:
+        monkeypatch.delenv(name, raising=False)
+    if threads:
+        monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    src = tmp_path / "src"
+    src.mkdir()
+    _icon_source(str(src), samples=3)
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "graph.db")) as session:
+        session.ingest(str(src))
+        patient = session.store.patients[0]
+        item = patient.studies[0].series[0].instances[0].sequences[
+            "0088,0200"].items[0]
+        item.set_attr("0028,0004", " rgb ")
+        revision = item._revision
+        DicomExporter.write_tree(patient, str(out), studies=patient.studies,
+                                 compression=None, show_progress=False)
+
+        assert item.attributes["0028,0004"] == " rgb "
+        assert item._revision == revision
+    written = list(out.rglob("*.dcm"))
+    assert len(written) == 1, written
+    assert pydicom.dcmread(str(written[0])).IconImageSequence[
+        0].PhotometricInterpretation == "RGB"
+
+
+def test_icon_label_warning_unit():
+    """I8: `_icon_label_warning` on normalized labels.
+
+    None for an admitted label and for no label; otherwise the table's
+    clause and the icon's own remedy, never the table's. `YBR_ICT` is
+    inadmissible here though the J2K row admits it.
+    """
+    from isocenter.io_handlers import (_PHOTOMETRIC_ICON,
+                                       _PHOTOMETRIC_INADMISSIBLE,
+                                       _icon_label_warning)
+
+    assert _icon_label_warning("RGB", ICON_PATH) is None
+    assert _icon_label_warning(None, ICON_PATH) is None
+    for label, key in (("YBR_ICT", "YBR_ICT"), ("YBR_PARTIAL_420",
+                                                "YBR_PARTIAL_420"),
+                       ("NONSENSE", None)):
+        sentence = _icon_label_warning(label, ICON_PATH)
+        clause, remedy = _PHOTOMETRIC_INADMISSIBLE[key]
+        assert clause in sentence, sentence
+        assert remedy not in sentence, sentence
+        assert sentence.endswith(_PHOTOMETRIC_ICON), sentence
+        assert f"'{label}' on the icon at {ICON_PATH} " in sentence
+
+
+def test_a_label_two_items_deep_is_respelled_with_its_note():
+    """I10: `_merge_sequences` threads the correction notes down its recursion.
+
+    An icon inside a sequence item, declared `' rgb '`: written `RGB`, and
+    the one INFO note names the item by its full path. Review J2 P7:
+    the respelling was pinned only one level down, so a recursive call
+    that dropped `corrections` kept the label right and lost the note
+    unseen. Killing mutation (r1): `corrections` not forwarded.
+    """
+    from pydicom.dataset import Dataset
+    from isocenter.entities import DicomItem, DicomSequence
+    from isocenter.io_handlers import DicomExporter
+
+    icon = DicomItem()
+    icon.attributes.update({"0028,0004": " rgb ", "0028,0002": 3})
+    outer = DicomItem()
+    outer.attributes.update({"0008,1150": "1.2.840.10008.5.1.4.1.1.2"})
+    outer.sequences["0088,0200"] = DicomSequence("0088,0200", [icon])
+    ds, notes = Dataset(), []
+    DicomExporter._merge_sequences(  # pylint: disable=protected-access
+        ds, {"0008,1140": DicomSequence("0008,1140", [outer])}, [],
+        corrections=notes)
+
+    written = ds.ReferencedImageSequence[0].IconImageSequence[0]
+    assert written.PhotometricInterpretation == "RGB"
+    assert len(notes) == 1, notes
+    assert notes[0].startswith("(0008,1140) > (0088,0200) item 0: "), notes
+    assert "' rgb '" in notes[0], notes
+
+
+def test_verify_readback_does_not_judge_an_icon_label(tmp_path):
+    """I9 (Q6): `verify_readback=True` passes the instance, and the row stays.
+
+    The WARNING already bars PASS; failing a verified instance over a
+    thumbnail would invert #433's "an icon is not a reason to lose the
+    instance". Green before #602 (the readback compares no nested label).
+    """
+    rows, _exported, _grade_line, summary = _icon_image(
+        tmp_path, "YBR_ICT", verify=True)
+
+    assert summary.failures == [], summary.failures
+    assert len(summary.written_uids) == 1, summary
+    assert len([r for r in rows if "PhotometricInterpretation" in r[2]]) \
+        == 1, rows

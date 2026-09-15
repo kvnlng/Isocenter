@@ -72,7 +72,7 @@ REF_IMAGE_SEQ = "0008,1140"
 
 def _icon_item(payload=ICON_BYTES, rows=2, cols=2, samples=1,
                photometric="MONOCHROME2", planar=None, bits=8,
-               encapsulated=False):
+               encapsulated=False, stored=None, high=None):
     """One Icon Image Sequence item, complete enough to decode.
 
     "Complete enough" is the whole difference between this and the
@@ -82,11 +82,15 @@ def _icon_item(payload=ICON_BYTES, rows=2, cols=2, samples=1,
     `encapsulated=True` marks the element undefined-length, which is how
     an encapsulated (fragmented) payload is written under a compressed
     transfer syntax; the payload is then the output of `encapsulate`.
+
+    `stored` and `high` default to `bits` and BitsStored - 1, a conformant
+    header; the #598 tests pass either to build one that is not.
     """
     item = Dataset()
     item.Rows, item.Columns = rows, cols
-    item.BitsAllocated = item.BitsStored = bits
-    item.HighBit = bits - 1
+    item.BitsAllocated = bits
+    item.BitsStored = bits if stored is None else stored
+    item.HighBit = item.BitsStored - 1 if high is None else high
     item.SamplesPerPixel = samples
     item.PhotometricInterpretation = photometric
     item.PixelRepresentation = 0
@@ -127,7 +131,7 @@ def _jpeg_icon_item():
 
 def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
                transfer_syntax=ExplicitVRLittleEndian, top_level_pixels=True,
-               patient_id="PAT1"):
+               patient_id="PAT1", top_high_bit=7):
     """A CT instance carrying icons at depth 1 and/or depth 2.
 
     `icons` go under Icon Image Sequence directly. `referenced_icons` go
@@ -143,6 +147,9 @@ def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
     `patient_id` puts an instance under a second patient, for the tests
     that hold the foreign-icon gate to the store rather than the export's
     `patient_ids`.
+
+    `top_high_bit` other than 7 gives the top level ingest's own HighBit
+    row (#455), for the test that holds both depths to one log cap (#598).
     """
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = CT_IMAGE
@@ -170,7 +177,7 @@ def _write_src(folder, icons=(), referenced_icons=(), serial="SN-1",
     if top_level_pixels:
         ds.Rows = ds.Columns = 4
         ds.BitsAllocated = ds.BitsStored = 8
-        ds.HighBit = 7
+        ds.HighBit = top_high_bit
         ds.SamplesPerPixel = 1
         ds.PhotometricInterpretation = "MONOCHROME2"
         ds.PixelRepresentation = 0
@@ -1380,7 +1387,7 @@ def test_the_gate_refuses_a_syntax_it_does_not_name(monkeypatch):
         dropped = []
         carried = io_handlers._decode_nested_pixels(
             ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped,
-            None, offset_tables=[])
+            None, offset_tables=[], high_bits=[])
         return carried, dropped
 
     carried, dropped = decode(_CARRIABLE_TRANSFER_SYNTAXES)
@@ -1555,3 +1562,431 @@ def test_a_nested_restore_failure_with_no_message_names_its_type(
                if "could not be restored from the sidecar" in d]
     assert len(details) == 1, _data_loss_rows(db)
     assert "restored from the sidecar (KeyError);" in details[0], details
+
+
+# --- 5. An icon's HighBit gets ingest's row, and a true export (#598) ----
+#
+# Since #455 a top-level HighBit other than BitsStored - 1 writes one
+# `WARNING` per instance. An Icon Image Sequence item with the same header
+# wrote nothing and graded PASS (measured on ce5b2b2), and the export wrote
+# the declared HighBit back, so the top-level row's own tail -- "an export
+# writes HighBit as BitsStored - 1" -- was false one depth down.
+
+#: Samples a 12-bit declaration holds, as 16-bit bytes.
+VALUES12 = np.array([0, 100, 4000, 4095], dtype=np.uint16)
+#: Samples wider than 12 bits: what p598b stored and read back masked.
+WIDE16 = np.array([0, 100, 40000, 65535], dtype=np.uint16)
+
+
+def _jpegls_icon(values, *, stored, high):
+    """A JPEG-LS icon over `values` (2x2), declared BitsAllocated 16."""
+    from pydicom.encaps import encapsulate
+    return _icon_item(
+        payload=encapsulate([imagecodecs.jpegls_encode(values.reshape(2, 2))]),
+        bits=16, stored=stored, high=high, encapsulated=True)
+
+
+def _pixel_less_jpegls(**kwargs):
+    """`_write_src` kwargs for a pixel-less SR under JPEG-LS Lossless."""
+    from pydicom.uid import JPEGLSLossless
+    return dict(transfer_syntax=JPEGLSLossless, top_level_pixels=False,
+                **kwargs)
+
+
+def _high_bit_rows(db):
+    with sqlite3.connect(db) as conn:
+        return [d for d, in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type='WARNING' "
+            "AND details LIKE '%HighBit %'")]
+
+
+def _ingest_export_grade(tmp_path, name, **kwargs):
+    """Ingest a source, export it natively, report. Returns (db, out, grade)."""
+    src = tmp_path / f"src_{name}"
+    src.mkdir()
+    _write_src(str(src), **kwargs)
+    db = str(tmp_path / f"{name}.db")
+    out = tmp_path / f"out_{name}"
+    report = tmp_path / f"{name}.md"
+    with DicomSession(persistence_file=db) as session:
+        session.ingest(str(src))
+        session.export(str(out), format="dicom", use_compression=False,
+                       show_progress=False)
+        session.generate_report(str(report))
+    grade = [line for line in report.read_text(encoding="utf-8").splitlines()
+             if "Validation Status" in line]
+    return db, out, grade
+
+
+@pytest.mark.parametrize("build", [
+    lambda: dict(icons=[_icon_item(bytes([1, 2, 3, 4]), bits=8, high=6)]),
+    lambda: dict(icons=[_icon_item(VALUES12.tobytes(), bits=16, stored=12,
+                                   high=15)]),
+    lambda: _pixel_less_jpegls(
+        icons=[_jpegls_icon(VALUES12, stored=12, high=15)]),
+], ids=["native-8-8-6", "native-16-12-15", "jpegls-sr-16-12-15"])
+def test_an_icon_whose_high_bit_is_not_bits_stored_minus_one_writes_one_warning(
+        tmp_path, build):
+    """N1: one `WARNING` row naming the item, and the run is not PASS.
+
+    BitsAllocated 8, BitsStored 8, HighBit 6 is the clean case: only
+    HighBit breaks the Icon Image Macro. The top level agrees with itself
+    in every case, so the icon's row is the only one. The JPEG-LS case is
+    the stream-precision path of `_high_bit_mismatch`, on a pixel-less SR.
+
+    Killing mutations: (m1) the `high_bits` append deleted; (m5) the path
+    left out of the row's prefix.
+    """
+    db, _out, grade = _ingest_export_grade(tmp_path, "n1", **build())
+
+    rows = _high_bit_rows(db)
+    assert len(rows) == 1, rows
+    assert rows[0].startswith("Standard tag 7fe0,0010 (O"), rows
+    assert " at 0088,0200[0]: HighBit " in rows[0], rows
+    assert "PS3.5 8.1.1 requires HighBit to be BitsStored - 1." in rows[0]
+    assert grade == ["| **Validation Status** | **REVIEW_REQUIRED** |"], grade
+
+
+@pytest.mark.parametrize("icon", [
+    lambda: _icon_item(VALUES12.tobytes(), bits=16, stored=12, high=11),
+    lambda: _icon_item(bytes([1, 2, 3, 4]), bits=8),
+], ids=["16-12-11", "8-8-7"])
+def test_an_agreeing_icon_writes_no_high_bit_row(tmp_path, icon):
+    """N2: the control -- an icon whose HighBit is BitsStored - 1 is silent."""
+    db, _out, grade = _ingest_export_grade(tmp_path, "n2", icons=[icon()])
+
+    assert _high_bit_rows(db) == []
+    assert grade == ["| **Validation Status** | **PASS** |"], grade
+
+
+def test_two_icons_each_get_their_own_row(tmp_path):
+    """N3: items 0 and 2 disagree, item 1 agrees -- two rows, by path."""
+    icons = [_icon_item(bytes([1, 2, 3, 4]), high=6),
+             _icon_item(bytes([5, 6, 7, 8])),
+             _icon_item(bytes([9, 10, 11, 12]), high=5)]
+    db, _out, _grade = _ingest_export_grade(tmp_path, "n3", icons=icons)
+
+    rows = sorted(_high_bit_rows(db))
+    assert len(rows) == 2, rows
+    assert " at 0088,0200[0]: HighBit 6 " in rows[0], rows
+    assert " at 0088,0200[2]: HighBit 5 " in rows[1], rows
+
+
+def _fewer_j2k_icon():
+    """A J2K icon whose offset table names 1 frame where 2 are declared,
+    with HighBit 6 over BitsStored 8."""
+    from pydicom.encaps import encapsulate
+    frame = np.array([[10, 11], [12, 13]], dtype=np.uint8)
+    icon = _icon_item(
+        payload=encapsulate([imagecodecs.jpeg2k_encode(frame, level=0)],
+                            has_bot=True),
+        high=6, encapsulated=True)
+    icon.NumberOfFrames = 2
+    return icon
+
+
+def _undecodable_icon():
+    """HighBit 15 over BitsStored 12, and no BitsAllocated: pydicom raises
+    `Missing required element` before any decode."""
+    icon = _icon_item(VALUES12.tobytes(), bits=16, stored=12, high=15)
+    del icon.BitsAllocated
+    return icon
+
+
+@pytest.mark.parametrize("build, loss", [
+    (lambda: dict(icons=[_undecodable_icon()]), "was not ingested"),
+    (lambda: dict(icons=[_fewer_j2k_icon()],
+                  transfer_syntax="1.2.840.10008.1.2.4.90",
+                  top_level_pixels=False), "Basic Offset Table names 1"),
+], ids=["undecodable", "fewer-frames"])
+def test_an_icon_that_is_not_carried_gets_no_high_bit_row(tmp_path, build,
+                                                         loss):
+    """N4: carried or reported, never both -- the loss row, and no second.
+
+    Green before #598. Through a session, `import_files` writes the row
+    only inside its loop over carried payloads, so this holds even if
+    `_decode_nested_pixels` kept facts for an icon it did not carry; the
+    function's own half of the contract is
+    `test_decode_nested_pixels_keeps_facts_only_for_a_carried_icon`.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_src(str(src), **build())
+    db = str(tmp_path / "n4.db")
+    with DicomSession(persistence_file=db) as session:
+        session.ingest(str(src))
+
+    losses = [d for d, _s in _data_loss_rows(db) if "7fe0,0010" in d]
+    assert len(losses) == 1 and loss in losses[0], _data_loss_rows(db)
+    assert _high_bit_rows(db) == []
+
+
+@pytest.mark.parametrize("icon, carried", [
+    (lambda: _icon_item(VALUES12.tobytes(), bits=16, stored=12, high=15), 1),
+    (_undecodable_icon, 0),
+], ids=["carried", "undecodable"])
+def test_decode_nested_pixels_keeps_facts_only_for_a_carried_icon(icon,
+                                                                 carried):
+    """N4d: `high_bits` holds the facts of carried icons and nothing else.
+
+    The docstring's promise, asked of the function directly: a candidate
+    that is not carried appends nothing, whatever its header says. Killing
+    mutation (m2): the append moved above `_decode_pixels`.
+    """
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    dropped, high_bits = [], []
+    got = io_handlers._decode_nested_pixels(
+        ds, [((), "7fe0,0010", "OW", icon())], dropped, None,
+        offset_tables=[], high_bits=high_bits)
+
+    assert len(got) == carried
+    assert len(dropped) == 1 - carried, dropped
+    assert [(p, t, v, f["high_bit"]) for p, t, v, f in high_bits] == (
+        [((), "7fe0,0010", "OW", 15)] if carried else [])
+
+
+def test_an_icon_with_no_sidecar_to_carry_it_gets_no_high_bit_line(
+        tmp_path, caplog):
+    """N4c: the bare-`DicomStore` caller has no sidecar, so no icon is carried.
+
+    `import_files` then files the icon's loss instead, and a HighBit line
+    beside it would describe a carriage that did not happen. Killing
+    mutation (m3): the nested HighBit row placed above the no-sidecar
+    branch.
+    """
+    import logging
+    from isocenter.io_handlers import DicomImporter
+    from isocenter.store import DicomStore
+
+    src = tmp_path / "src"
+    src.mkdir()
+    path = _write_src(str(src), icons=[_icon_item(high=6)])
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        summary = DicomImporter.import_files([path], DicomStore())
+
+    assert summary.ingested == 1, summary
+    messages = [record.getMessage() for record in caplog.records]
+    assert [m for m in messages if "7fe0,0010" in m], messages
+    assert not [m for m in messages if "HighBit" in m], messages
+
+
+def test_top_level_and_icon_high_bit_share_one_log_cap(tmp_path, monkeypatch,
+                                                       caplog):
+    """N5: four instances, each with a top and an icon mismatch.
+
+    Eight rows -- the audit log is per fact -- and five log lines plus one
+    suppression line, because one cap serves the one fact at both depths.
+    Killing mutation (m4): the nested row counted on its own counter
+    (eight lines, and no suppression line).
+    """
+    import logging
+    monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+    src = _multi_src(tmp_path, [
+        (f"SN-{n}", dict(icons=[_icon_item(high=6)], top_high_bit=5))
+        for n in range(4)])
+    db = str(tmp_path / "n5.db")
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        with DicomSession(persistence_file=db) as session:
+            summary = session.ingest(src)
+    assert summary.ingested == 4, summary
+
+    rows = _high_bit_rows(db)
+    assert len([r for r in rows if r.startswith("HighBit 5 ")]) == 4, rows
+    assert len([r for r in rows if " at 0088,0200[0]: HighBit 6 " in r]) \
+        == 4, rows
+    messages = [record.getMessage() for record in caplog.records]
+    lines = [m for m in messages if "PS3.5 8.1.1 requires HighBit" in m]
+    assert len(lines) == 5, messages
+    assert len([m for m in messages if "suppressing further per-instance "
+                "messages for HighBit" in m]) == 1, messages
+
+
+def test_an_icon_high_bit_is_written_as_bits_stored_minus_one(tmp_path,
+                                                             caplog):
+    """N6 (Q3 a): the icon's HighBit in the file is BitsStored - 1.
+
+    The row's tail says an export writes HighBit as BitsStored - 1; at
+    ce5b2b2 an icon's was written as declared (15). The correction is
+    #597's INFO note, naming the item. Killing mutation (m6): the
+    write-back's HighBit assignment deleted.
+    """
+    import logging
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _db, out, _grade = _ingest_export_grade(
+            tmp_path, "n6", icons=[_icon_item(VALUES12.tobytes(), bits=16,
+                                              stored=12, high=15)])
+
+    icon = _exported(out).IconImageSequence[0]
+    assert (icon.BitsAllocated, icon.BitsStored, icon.HighBit) == (16, 12, 11)
+    assert np.frombuffer(icon.PixelData, np.uint16).tolist() == \
+        VALUES12.tolist()
+    notes = [record.getMessage() for record in caplog.records
+             if record.levelno == logging.INFO
+             and "HighBit 15 was declared" in record.getMessage()]
+    assert len(notes) == 1, [r.getMessage() for r in caplog.records]
+    assert "At 0088,0200[0]: " in notes[0], notes
+
+
+@pytest.mark.parametrize("high", [11, 15])
+def test_an_icon_stream_wider_than_bits_stored_reads_back_its_values(
+        tmp_path, caplog, high):
+    """N7 (Q3 a): p598b -- a JPEG-LS icon whose samples overflow BitsStored.
+
+    The stream's precision is 16 and its samples reach 65535, under a
+    declared BitsStored 12. At ce5b2b2 the export kept BitsStored 12 and a
+    conformant reader masked `40000` to `3136` with no row anywhere: #468
+    at icon depth. The top level's `_stored_width` rule now writes the
+    array's own width. Killing mutation (m7): the declared BitsStored
+    written instead.
+    """
+    import logging
+    with caplog.at_level(logging.INFO, logger="isocenter"):
+        _db, out, _grade = _ingest_export_grade(
+            tmp_path, "n7", **_pixel_less_jpegls(
+                icons=[_jpegls_icon(WIDE16, stored=12, high=high)]))
+
+    exported = _exported(out)
+    icon = exported.IconImageSequence[0]
+    icon.file_meta = exported.file_meta
+    assert (icon.BitsStored, icon.HighBit) == (16, 15)
+    assert icon.pixel_array.ravel().tolist() == WIDE16.tolist()
+    notes = [record.getMessage() for record in caplog.records
+             if "BitsStored 12 cannot hold the pixel values" in
+             record.getMessage()]
+    assert len(notes) == 1, [r.getMessage() for r in caplog.records]
+    assert "At 0088,0200[0]: " in notes[0], notes
+
+
+def test_decode_nested_pixels_requires_high_bits():
+    """N8: a caller has to say where the HighBit facts go (#598).
+
+    Keyword-only with no default, the `offset_tables` precedent: a caller
+    that forgot it would carry an icon whose header nobody reports.
+    """
+    import inspect
+
+    parameter = inspect.signature(
+        io_handlers._decode_nested_pixels).parameters["high_bits"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+
+
+# --- 6. A native icon inside a compressed file (#645) ---------------------
+#
+# PS3.5 A.4: an icon's pixel data "may or may not be compressed", so a
+# file's transfer syntax does not say how its icon is encoded. The element
+# does: a defined length is native, an undefined length is encapsulated.
+# `_decode_nested_pixels` borrowed the file's syntax for every icon, so a
+# native icon inside a JPEG 2000 file was decoded as a codestream, failed,
+# and was dropped with the unrouted `DATA_LOSS` row -- and that is the shape
+# this library's own `use_compression=True` export writes.
+
+J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
+
+
+@pytest.mark.parametrize("icon, raw", [
+    (lambda: _icon_item(), ICON_BYTES),
+    (lambda: _icon_item(VALUES12.tobytes(), bits=16, stored=12, high=11),
+     VALUES12.tobytes()),
+    (lambda: _icon_item(bytes(range(12)), samples=3, photometric="RGB",
+                        planar=0), bytes(range(12))),
+], ids=["8-bit", "16-bit", "rgb"])
+def test_a_compressed_export_re_ingests_with_its_icon(tmp_path, icon, raw):
+    """The round trip: export compressed, re-ingest, the icon survives.
+
+    Killing mutation (m25): the file's transfer syntax borrowed for every
+    icon again, whatever its element's length.
+    """
+    db, _src = _ingest(tmp_path, "c645", icons=[icon()])
+    out = tmp_path / "out"
+    with DicomSession(persistence_file=db) as session:
+        session.export(str(out), format="dicom", use_compression=True,
+                       show_progress=False)
+    exported = _exported(out)
+    assert str(exported.file_meta.TransferSyntaxUID) == J2K_LOSSLESS
+    assert not exported.IconImageSequence[0]["PixelData"].is_undefined_length
+
+    db2 = str(tmp_path / "again.db")
+    with DicomSession(persistence_file=db2) as session:
+        summary = session.ingest(str(out))
+    assert summary.ingested == 1, summary
+    assert _data_loss_rows(db2) == []
+    assert [k for k in _blob_kinds(db2) if ICON_SEQ in k], _blob_kinds(db2)
+
+    out2 = tmp_path / "out2"
+    _export(db2, out2)
+    assert _exported(out2).IconImageSequence[0].PixelData == raw
+
+
+def test_a_native_icon_in_a_compressed_file_is_read_as_native(tmp_path):
+    """The seam with #598: the HighBit facts are asked under the item's own
+    encoding, so a native icon inside a JPEG 2000 file gets the native
+    row's words, not a codestream's.
+    """
+    db, _src = _ingest(tmp_path, "seam", icons=[_icon_item(high=6)],
+                       transfer_syntax=J2K_LOSSLESS, top_level_pixels=False)
+
+    assert _data_loss_rows(db) == []
+    assert [k for k in _blob_kinds(db) if ICON_SEQ in k], _blob_kinds(db)
+    rows = _high_bit_rows(db)
+    assert len(rows) == 1, rows
+    assert "Read as pydicom reads it: the low 8 bits of each sample" \
+        in rows[0], rows
+
+
+def test_a_native_file_lends_its_own_syntax_to_its_icon(tmp_path):
+    """A native file's icon is decoded under the file's own syntax, byte
+    order included: a 16-bit BitsStored 12 icon in an Explicit VR Big Endian
+    file decodes to its values. Read as Explicit VR Little Endian, pydicom
+    masks the swapped samples to 12 bits and the values are gone. Killing
+    mutation (m27): every defined-length icon read as Explicit VR Little
+    Endian, native file or not.
+
+    Asked of `_decode_nested_pixels` directly, and of the samples in the
+    order the decode returns them (`>u2`): what the store then does with a
+    big-endian array is a separate question from which syntax decoded it.
+    """
+    from pydicom.uid import ExplicitVRBigEndian
+    src = tmp_path / "src"
+    src.mkdir()
+    # An OW value is written as the bytes it holds, so they are given in
+    # big-endian order, and the file is re-encoded explicitly.
+    path = _write_src(str(src), icons=[_icon_item(
+        VALUES12.astype(">u2").tobytes(), bits=16, stored=12, high=11)],
+        top_level_pixels=False)
+    ds = pydicom.dcmread(path)
+    ds.file_meta.TransferSyntaxUID = ExplicitVRBigEndian
+    pydicom.dcmwrite(path, ds, implicit_vr=False, little_endian=False,
+                     force_encoding=True)
+    ds = pydicom.dcmread(path)
+    assert str(ds.file_meta.TransferSyntaxUID) == str(ExplicitVRBigEndian)
+
+    dropped = []
+    carried = io_handlers._decode_nested_pixels(
+        ds, [((), "7fe0,0010", "OW", ds.IconImageSequence[0])], dropped,
+        None, offset_tables=[], high_bits=[])
+
+    assert dropped == []
+    assert np.frombuffer(carried[0][3], ">u2").tolist() == VALUES12.tolist()
+
+
+def test_an_encapsulated_icon_still_borrows_the_files_syntax():
+    """The other half: an undefined-length icon is decoded under the file's
+    syntax, and an undefined-length icon in a native file is not given one.
+    """
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    dropped = []
+    carried = io_handlers._decode_nested_pixels(
+        ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped, None,
+        offset_tables=[], high_bits=[])
+    assert (carried, dropped) == ([], [("7fe0,0010", "OB")])
+
+    ds.file_meta.TransferSyntaxUID = JPEGBaseline8Bit
+    carried = io_handlers._decode_nested_pixels(
+        ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped, None,
+        offset_tables=[], high_bits=[])
+    assert len(carried) == 1
