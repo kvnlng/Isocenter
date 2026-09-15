@@ -3129,9 +3129,9 @@ def _ingest_file_key(path) -> str:
     or needs the project secret, which ingest must not create. The
     derivation lives here alone so that changing it is one line.
 
-    **`os.fsencode`, not `str.encode()`.** `os.walk` hands back a
-    filename that is not valid UTF-8 as surrogate escapes, and
-    `.encode("utf-8")` raises `UnicodeEncodeError` on those -- inside
+    **`os.fsencode`, not `str.encode`.** `os.walk` hands back a
+    filename that is not valid UTF-8 as surrogate escapes, and encoding
+    such a string as UTF-8 raises `UnicodeEncodeError` -- inside
     `_record_failure`, replacing the failure being recorded with a new
     one. `os.fsencode` gives the file's real name back.
     """
