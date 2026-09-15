@@ -844,6 +844,14 @@ def _same_stashed_value(new_value, kept) -> bool:
         return False
 
 
+def _unheld_spelling(value):
+    """How the lock's grouping key spells a value JSON cannot hold (#583):
+    its type and repr, so equal unheld values share a group and the token
+    build refuses that group, naming the tag, as it refused the one record
+    before. Never a token byte."""
+    return ["\x00unheld", type(value).__name__, repr(value)]
+
+
 class DicomSession:
     """
     The Main Facade for the Isocenter library.
@@ -3379,6 +3387,12 @@ class DicomSession:
         is encrypted using a symmetric key and stored in a private attribute
         before the visible public attributes are anonymized.
 
+        The values are captured from each instance, and one token is
+        written per distinct set of them (#583): under the default tags a
+        patient with several studies carries about one token per study, and
+        each instance's token holds that instance's own values. Until 0.9.8
+        the first instance's values went into one token on every instance.
+
         Must be called BEFORE anonymization/redaction if recovery is required.
 
         A list of patient IDs, a `PhiReport` or a list of findings is
@@ -3430,11 +3444,16 @@ class DicomSession:
                 value it would stash is one no token can hold (`bytes`),
                 naming the tag; Patient's Name is blank under a rule of
                 EMPTY or REMOVE on it; or the patient has instances and
-                its first instance, which the record is captured from,
-                holds no value in any tag `tags_to_lock` names (or it names
-                none), so there is nothing to stash and a lock would secure
-                nothing (#638; a tag held blank is a value, and a patient
-                with no instances locks as 0 instances). Also, before any
+                any of them holds no value in any tag `tags_to_lock` names
+                (or it names none), so there is nothing to stash there and
+                the lock would secure nothing on it, counted (#638, per
+                instance since #583; a tag held blank is a value, and a
+                patient with no instances locks as 0 instances). Each of
+                these is judged on every instance's own values, since the
+                record is captured from each (#583): a value a pass wrote
+                on any study refuses the lock, not only on the first; an
+                existing token is judged against the first instance that
+                carries it. Also, before any
                 patient is planned,
                 when no key file exists at the path and an instance in the
                 session carries a token this library wrote: no key is
@@ -3548,11 +3567,32 @@ class DicomSession:
 
     def _planned_identity_lock(self, patient: "Patient",
                                tags_to_lock: Optional[List[str]]
-                               ) -> Tuple[Optional["Instance"], Dict[str, Any], bytes]:
-        """Every refusal of one patient's lock, the values it would stash
-        and the token that holds them: `(first_instance, original_attrs,
-        token)`. Reads the graph and the existing token; writes nothing, so
-        the batch can plan every patient before it locks any (#537).
+                               ) -> Tuple[List[str], List[Tuple[Dict[str, Any], bytes,
+                                                                List["Instance"]]]]:
+        """Every refusal of one patient's lock, and the tokens it would
+        write: `(tags, value_sets)`. Each value-set is `(record, token,
+        instances)`: the record captured from each of those instances,
+        which is the same for all of them, and the one token that holds
+        it (#583). `tags` names every tag any record holds, in
+        `tags_to_lock` order, for the log. Reads the graph and the
+        existing tokens; writes nothing, so the batch can plan every
+        patient before it locks any (#537).
+
+        **One token per distinct record, captured per instance (#583).**
+        Until 0.9.8 the record was captured from the patient's first
+        instance and that one token embedded on every instance, so a
+        restore wrote study 1's values onto every study: measured on
+        e418d3d, study 2's `ACC-TWO` became `ACC-ONE` in the file
+        `export()` wrote, and an instance-level locked tag (Content Date)
+        crossed between two instances of one series the same way. A
+        patient's instances normally hold one set of patient-level values
+        and one per study, so the default `tags_to_lock` write about one
+        token per study; a tag that differs per instance writes one per
+        instance, which measured +0.08 % on the store and about 0.1 s of
+        encryption at 10k instances. The refusals below are judged per
+        value-set: a value a pass wrote on *any* instance is refused, not
+        only on the first, and an existing token is judged against its
+        first holder's capture (Q-C of the #583 brief).
 
         Raises:
             RuntimeError: When the lock would stash what `anonymize()`
@@ -3563,21 +3603,11 @@ class DicomSession:
         if tags_to_lock is None:
             tags_to_lock = list(_DEFAULT_TAGS_TO_LOCK)
 
-        # Capture Original Values from First Instance
-        original_attrs = {}
-        first_instance = None
+        instances = [inst for st in patient.studies for se in st.series
+                     for inst in se.instances]
 
-        # Locate first instance efficiently
-        for st in patient.studies:
-            for se in st.series:
-                if se.instances:
-                    first_instance = se.instances[0]
-                    break
-            if first_instance:
-                break
-
-        # A name or ID the first instance no longer carries is stashed from
-        # the patient (#495), as the no-instances arm below always did. The
+        # A name or ID an instance no longer carries is stashed from the
+        # patient (#495), as the no-instances arm below always did. The
         # floor's instance rules remove those copies, so after an
         # instance-only anonymize() the copies are gone while the patient
         # still holds the originals, nothing reads as a replacement, and a
@@ -3587,25 +3617,43 @@ class DicomSession:
         entity_fallback = {"0010,0010": patient.patient_name,
                            "0010,0020": patient.patient_id}
 
-        def captured(tag):
-            """The value the lock stashes for `tag`, and whether it came
-            from the patient rather than the first instance."""
-            val = first_instance.attributes.get(tag)
+        def captured(inst, tag):
+            """The value the lock stashes for `tag` on `inst`, and whether
+            it came from the patient rather than the instance."""
+            val = inst.attributes.get(tag)
             if val is None and tag in entity_fallback:
                 return entity_fallback[tag], True
             return val, False
 
-        if first_instance:
+        # Grouped by the JSON the token would hold, sorted keys: two
+        # instances whose records spell the same JSON share one token and
+        # one encryption. A value JSON cannot hold (`bytes`) is keyed by
+        # its type and repr, so its group still reaches the refusal at the
+        # token build below, which names the tag. Graph order within and
+        # across groups, so "first" means what it meant before.
+        groups: List[Tuple[Dict[str, Any], List["Instance"]]] = []
+        by_key: Dict[str, Tuple[Dict[str, Any], List["Instance"]]] = {}
+        for inst in instances:
+            record = {}
             for tag in tags_to_lock:
-                val, _ = captured(tag)
+                val, _ = captured(inst, tag)
                 if val is not None:
-                    original_attrs[tag] = val
-        else:
-            # Fallback to Patient object properties if no instances (unlikely)
+                    record[tag] = val
+            key = json.dumps(record, sort_keys=True, default=_unheld_spelling)
+            if key not in by_key:
+                by_key[key] = (record, [])
+                groups.append(by_key[key])
+            by_key[key][1].append(inst)
+        if not instances:
+            # Fallback to Patient object properties if no instances
+            # (unlikely): judged by the refusals below like any record,
+            # and embedded on nothing.
+            record = {}
             if "0010,0010" in tags_to_lock:
-                original_attrs["0010,0010"] = patient.patient_name
+                record["0010,0010"] = patient.patient_name
             if "0010,0020" in tags_to_lock:
-                original_attrs["0010,0020"] = patient.patient_id
+                record["0010,0020"] = patient.patient_id
+            groups.append((record, []))
 
         # A replacement is not an identity to keep. Since #492 the
         # instance carries `anonymize()`'s replacement in its own tags,
@@ -3620,7 +3668,7 @@ class DicomSession:
         # what recovery answers with (#399).
         #
         # What is refused, exactly (#495): any value about to be stashed
-        # -- each tag's first-instance copy, and for name and ID the
+        # -- each tag's copy on every instance, and for name and ID the
         # patient's own value where that copy is absent (above). A copy
         # that is present is what gets stashed, so it alone is checked: a
         # patient reading ANONYMIZED beside copies that still hold the
@@ -3644,20 +3692,43 @@ class DicomSession:
         # instance, so any instance whose copy the patient's write reached
         # vouches for it. The record is keyed on the value, so a restore
         # puts back originals that nothing vouches for.
-        instances = [inst for st in patient.studies for se in st.series
-                     for inst in se.instances]
+        #
+        # **Per value-set, not per first instance (#583).** Each group's
+        # instances are asked about the value they hold, so a patient
+        # whose study 2 holds a pass's Accession Number beside a raw study
+        # 1 is refused; the first-instance read accepted it and wrote
+        # study 1's value into study 2's token (measured on e418d3d). The
+        # patient's own value is asked of every instance **once per tag**
+        # and remembered: it is one value, and asking it for each instance
+        # that lacks a copy made the plan quadratic (10^8 calls at 10k
+        # instances).
+        patient_vouched: Dict[str, bool] = {}
 
-        def written_by_a_pass(tag, val, from_patient):
-            if first_instance is None:
+        def vouches(inst, tag, val, blank):
+            return (inst.remediation_vouches_for(tag, val)
+                    or (not blank and inst.date_shift_vouches_for(tag, val)))
+
+        def written_by_a_pass(tag, val, members):
+            """Whether a pass wrote `val` at `tag` on `members`, which all
+            hold it (a value-set's instances)."""
+            if not members:
                 return False
             blank = not str(val if val is not None else "").strip()
-            return any(inst.remediation_vouches_for(tag, val)
-                       or (not blank and inst.date_shift_vouches_for(tag, val))
-                       for inst in (instances if from_patient else [first_instance]))
+            own = members
+            if tag in entity_fallback:
+                own = [inst for inst in members if inst.attributes.get(tag) is not None]
+                if len(own) < len(members):
+                    # Some hold the patient's value, so `val` is it.
+                    if tag not in patient_vouched:
+                        patient_vouched[tag] = any(vouches(inst, tag, val, blank)
+                                                   for inst in instances)
+                    if patient_vouched[tag]:
+                        return True
+            return any(vouches(inst, tag, val, blank) for inst in own)
 
-        def is_replacement(tag, val, from_patient):
+        def is_replacement(tag, val, members):
             return (_is_replacement_name(val) or _is_replacement_id(val)
-                    or written_by_a_pass(tag, val, from_patient))
+                    or written_by_a_pass(tag, val, members))
 
         # **No message below names the patient (P6).** Before `anonymize()`
         # its Patient ID is the original, and after it the pseudonym, which
@@ -3668,9 +3739,10 @@ class DicomSession:
         # any literal on it: the value is always the patient's own ID.
         # Every other replacement is quoted; it is what says which pass
         # wrote it.
-        for tag, val in original_attrs.items():
-            if str(val).strip() and is_replacement(
-                    tag, val, first_instance is not None and captured(tag)[1]):
+        for record, members in groups:
+            for tag, val in record.items():
+                if not (str(val).strip() and is_replacement(tag, val, members)):
+                    continue
                 shown = ("a replacement Patient ID"
                          if tag == "0010,0020" or str(val) == patient_id else repr(val))
                 raise RuntimeError(
@@ -3705,9 +3777,24 @@ class DicomSession:
         # key opened). A foreign `(0400,0500)` is still "no token" and
         # is replaced, as #399 released. The instances are grouped by
         # token bytes first and each distinct token is decrypted once: a
-        # patient's instances normally share one, and a 100k-instance
-        # patient must not pay 100k decrypts.
-        if first_instance is not None:
+        # value-set's instances share one, and a 100k-instance patient
+        # must not pay 100k decrypts.
+        #
+        # **Each token is judged against its first holder's capture
+        # (#583, Q-C).** The token's own first instance, in graph order,
+        # stands where the patient's first instance stood. Not every
+        # holder: a store a release before 0.9.8 wrote carries one token
+        # holding study 1's values on every study, and a re-lock of its
+        # raw data would then be refused on study 2 -- whose own
+        # `ACC-TWO` is not the `ACC-ONE` the token holds -- with advice
+        # (restore, then lock) that writes `ACC-ONE` over it. Judged by
+        # the first holder, that store re-locks as it did, and study 2
+        # gets a token of its own. The residual is disclosed with #583: on
+        # such a store *anonymized*, a holder outside study 1 holds the
+        # pass's value, which only a record written since 0.9.8 (#537)
+        # could vouch for, so its new token can stash that value -- one
+        # the old token never held either.
+        if instances:
             carrying: Dict[bytes, List["Instance"]] = {}
             for inst in instances:
                 content = self.reversibility_service.token_of_ours(inst)
@@ -3745,20 +3832,17 @@ class DicomSession:
                 # without a stamp is a file that arrived carrying it.
                 stamped = all(inst.identity_token_is_this_stores(content)
                               for inst in holders)
-                tokens.append((values, stamped))
+                tokens.append((values, stamped, holders[0]))
 
-            for held, _ in tokens:
+            for held, _, holder in tokens:
                 for tag, kept in held.items():
                     if not str(kept or "").strip():
                         continue
                     named = tag in tags_to_lock
-                    if named:
-                        new = original_attrs.get(tag)
-                    else:
-                        new, from_patient = captured(tag)
-                        if new is not None and str(new).strip() \
-                                and is_replacement(tag, new, from_patient):
-                            new = None
+                    new, _ = captured(holder, tag)
+                    if not named and new is not None and str(new).strip() \
+                            and is_replacement(tag, new, [holder]):
+                        new = None
                     if new is None or not str(new).strip():
                         lost = ("nothing" if new is None else "an empty value") if named \
                             else "nothing (tags_to_lock does not name it)"
@@ -3787,14 +3871,14 @@ class DicomSession:
             # `floor_birth_only`'s message stays what it was: a blank is
             # a loss, not a different value. The message names no value:
             # the held one is an original, and the current one may be.
-            for held, stamped in tokens:
+            for held, stamped, holder in tokens:
                 if stamped:
                     continue
                 for tag, kept in held.items():
                     if not str(kept or "").strip():
                         continue
                     named = tag in tags_to_lock
-                    new = original_attrs.get(tag) if named else captured(tag)[0]
+                    new = captured(holder, tag)[0]
                     if not _same_stashed_value(new, kept):
                         # A tag this lock does not name leaves the token
                         # altogether, and the instance keeps whatever the
@@ -3823,8 +3907,9 @@ class DicomSession:
             # tags themselves, on any tag and after a reopen. The advice is
             # the caller's `tags_to_lock` less those tags.
             blanked = [tag for tag in tags_to_lock
-                       if not str(original_attrs.get(tag) or "").strip()
-                       and written_by_a_pass(tag, original_attrs.get(tag), captured(tag)[1])]
+                       if any(not str(record.get(tag) or "").strip()
+                              and written_by_a_pass(tag, record.get(tag), members)
+                              for record, members in groups)]
             if blanked:
                 rest = [tag for tag in tags_to_lock if tag not in blanked]
                 advice = (f"To lock this patient without "
@@ -3854,7 +3939,8 @@ class DicomSession:
         # the one the last `audit()` resolved, and
         # `configuration.phi_tags`, which `audit(config_path=)` does not
         # assign; the audited one is named first.
-        if "0010,0010" in tags_to_lock and not str(original_attrs.get("0010,0010") or "").strip():
+        if "0010,0010" in tags_to_lock and any(
+                not str(record.get("0010,0010") or "").strip() for record, _ in groups):
             policies = [policy for policy in (self._audited_phi_tags,
                                               self.configuration.phi_tags)
                         if policy is not None]
@@ -3883,22 +3969,30 @@ class DicomSession:
         # instances, whose `0 instances secured` is already true; and not
         # for a record holding a blank, which is not empty (blanks are the
         # loss checks' concern above). The tags are the caller's own
-        # argument; no patient, no value. "This patient's first instance",
-        # because the record above is captured from it alone: a patient
-        # whose later study carries the tag was told it held none, and
-        # advised to name a tag its instances carry -- the one it named
-        # (review of #640, P-2). Per-instance capture is #583.
-        if first_instance is not None and not original_attrs:
-            if tags_to_lock:
-                nothing = ("this patient's first instance holds no value in "
-                           f"{', '.join(tags_to_lock)}, every tag tags_to_lock names")
-            else:
-                nothing = "tags_to_lock names no tag"
-            raise RuntimeError(
-                f"lock_identities: {nothing}, so there is nothing to stash and "
-                "the lock would secure nothing. Name a tag this patient's "
-                "first instance carries; the token this call would have "
-                "written is unchanged.")
+        # argument; no patient, no value. **Counted per instance (#583,
+        # Q-D).** Until 0.9.8 the record was the first instance's alone,
+        # so a patient whose study 2 lacked every tag named was accepted
+        # and study 2's token held study 1's value (measured on e418d3d),
+        # while one whose study 1 lacked them was refused although study 2
+        # carried one (review of #640, P-2). Now any instance with nothing
+        # to stash refuses the lock, and the message counts them: a
+        # patient partly locked would be reported secured.
+        if instances:
+            empty = sum(len(members) for record, members in groups if not record)
+            if empty and tags_to_lock:
+                raise RuntimeError(
+                    f"lock_identities: {empty} of {len(instances)} instances of this "
+                    f"patient hold no value in {', '.join(tags_to_lock)}, every tag "
+                    "tags_to_lock names, so there is nothing to stash on them and "
+                    "the lock would secure nothing there. Name tags every instance "
+                    "of this patient carries; the token this call would have "
+                    "written is unchanged.")
+            if empty:
+                raise RuntimeError(
+                    "lock_identities: tags_to_lock names no tag, so there is "
+                    "nothing to stash and the lock would secure nothing. Name a "
+                    "tag this patient's instances carry; the token this call "
+                    "would have written is unchanged.")
 
         # The token is built here, in the plan, and not where it is
         # embedded: it is `json.dumps` of the values, and a value JSON
@@ -3907,61 +4001,72 @@ class DicomSession:
         # batch was locked and persisted (measured on the round-3 review
         # of #574: one of two). Building it reads and writes nothing, so
         # the plan still locks no one, and the failure is a refusal like
-        # any other, naming the tag.
-        try:
-            token = self.reversibility_service.generate_identity_token(
-                original_attributes=original_attrs)
-        except (TypeError, ValueError):
-            unheld = []
-            for tag, val in original_attrs.items():
-                try:
-                    json.dumps(val)
-                except (TypeError, ValueError):
-                    unheld.append(tag)
-            unheld = unheld or list(original_attrs)
-            rest = [tag for tag in tags_to_lock if tag not in unheld]
-            kinds = sorted({type(original_attrs[tag]).__name__ for tag in unheld})
-            advice = (f"To lock this patient without "
-                      f"{'it' if len(unheld) == 1 else 'them'}, call "
-                      f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
-                      if rest else
-                      "tags_to_lock names no other tag, so there is nothing "
-                      "else to lock")
-            raise RuntimeError(
-                "lock_identities: this patient holds a value in "
-                f"{', '.join(unheld)} that no token can hold ({', '.join(kinds)}), "
-                "so there is nothing to stash for it. "
-                f"{advice}; the token this call would have written is unchanged."
-            ) from None
+        # any other, naming the tag. One encryption per value-set, not per
+        # instance: equal records share the bytes.
+        value_sets = []
+        for record, members in groups:
+            try:
+                token = self.reversibility_service.generate_identity_token(
+                    original_attributes=record)
+            except (TypeError, ValueError):
+                unheld = []
+                for tag, val in record.items():
+                    try:
+                        json.dumps(val)
+                    except (TypeError, ValueError):
+                        unheld.append(tag)
+                unheld = unheld or list(record)
+                rest = [tag for tag in tags_to_lock if tag not in unheld]
+                kinds = sorted({type(record[tag]).__name__ for tag in unheld})
+                advice = (f"To lock this patient without "
+                          f"{'it' if len(unheld) == 1 else 'them'}, call "
+                          f"lock_identities(<its Patient ID>, tags_to_lock={rest!r})"
+                          if rest else
+                          "tags_to_lock names no other tag, so there is nothing "
+                          "else to lock")
+                raise RuntimeError(
+                    "lock_identities: this patient holds a value in "
+                    f"{', '.join(unheld)} that no token can hold ({', '.join(kinds)}), "
+                    "so there is nothing to stash for it. "
+                    f"{advice}; the token this call would have written is unchanged."
+                ) from None
+            value_sets.append((record, token, members))
 
-        return first_instance, original_attrs, token
+        tags = [tag for tag in dict.fromkeys(tags_to_lock)
+                if any(tag in record for record, _ in groups)]
+        return tags, value_sets
 
     def _write_identity_lock(self, patient: "Patient",
-                             plan: Tuple[Optional["Instance"], Dict[str, Any], bytes],
+                             plan: Tuple[List[str], List[Tuple[Dict[str, Any], bytes,
+                                                              List["Instance"]]]],
                              persist: bool, verbose: bool) -> LockingResult:
-        """Embeds the token a plan from `_planned_identity_lock` holds into
-        every instance of the patient, and persists it when asked."""
+        """Embeds each token a plan from `_planned_identity_lock` holds into
+        the instances of its value-set, and persists them when asked."""
         if verbose:
             # Counts, not the ID: see `lock_identities`. Here and not in
             # the plan, so the batch logs each patient as it locks it.
             get_logger().debug(
                 f"Preserving identity for a patient of {len(patient.studies)} "
                 f"stud{'y' if len(patient.studies) == 1 else 'ies'}...")
-        # Encrypted once per patient, in the plan (see its end).
-        _, original_attrs, token = plan
+        # Encrypted once per value-set, in the plan (see its end).
+        tags, value_sets = plan
+        token_of = {id(inst): token for _, token, members in value_sets
+                    for inst in members}
         modified_instances = []
 
-        # Iterate deep
+        # Graph order, as before: every instance the plan read is in
+        # exactly one value-set, and nothing runs between plan and write.
         for st in patient.studies:
             for se in st.series:
                 for inst in se.instances:
-                    self.reversibility_service.embed_identity_token(inst, token)
+                    self.reversibility_service.embed_identity_token(
+                        inst, token_of[id(inst)])
                     modified_instances.append(inst)
 
         if persist and modified_instances:
             self.store_backend.update_attributes(modified_instances)
             get_logger().info(
-                f"Secured identity (tags: {list(original_attrs.keys())}) in "
+                f"Secured identity (tags: {tags}) in "
                 f"{len(modified_instances)} instances of one patient.")
 
         return LockingResult(modified_instances)
@@ -4155,7 +4260,8 @@ class DicomSession:
         Args:
             patient_id (str): The PatientID to search for and recover.
             restore (bool): If True, applies the recovered attributes back to ALL
-                            in-memory instances for this patient. The restore
+                            in-memory instances for this patient, **each from
+                            the token it carries** (#583). The restore
                             is recorded, so a later `save()` stores it, and a
                             patient already holding the restored Patient ID
                             is merged into whichever of the two was in the
@@ -4166,26 +4272,38 @@ class DicomSession:
                             again. A date among the locked tags is put back
                             on the instances like any locked tag, and a later
                             `audit()` raises it again. A restored Study Date
-                            is also put back on the `Study`, which is where
-                            `export()` reads it, when the patient has one
-                            study (#566), and when the restored value reads
-                            as a date: a blank or unreadable one leaves the
-                            `Study` as it is, with one WARNING that carries
-                            no date (#619). The token holds one study's
-                            values, so for a patient with several each
-                            study keeps its de-identified date and one
-                            WARNING gives the count (#583); the restored
-                            values are nonetheless written onto every
-                            instance, including instances of a study that
-                            carries no token or another token, and one
-                            WARNING gives the count of those instances.
+                            is also put back on each `Study`, which is where
+                            `export()` reads it (#566), from that study's own
+                            token, when the restored value reads as a date:
+                            a blank or unreadable one leaves the `Study` as
+                            it is, with one WARNING per such study that
+                            carries no date (#619). An instance carrying no
+                            token takes only the patient-level identifiers
+                            (group 0010) of the first token found -- which
+                            include Patient's Age, Size and Weight, and so
+                            may be another study's -- and keeps its other
+                            locked identifiers as the pass left them; one
+                            WARNING gives the count. A token a release before
+                            0.9.8 shared across studies, holding a non-blank
+                            value outside group 0010 and not stamped by this
+                            store, is restored in full on the first study
+                            carrying it and as group 0010 elsewhere, with a
+                            WARNING giving the count; a shared token a 0.9.8
+                            pre-release stamped is not told apart and is
+                            restored in full everywhere. Where tokens
+                            disagree on Patient's Name or Patient ID, each
+                            instance keeps its own and the `Patient` takes
+                            the first token's, with a WARNING.
 
-        The token read is the first one **of ours** in study, series and
-        instance order (#616): a study without a token, or with an
-        Encrypted Attributes Sequence this library did not write, is
-        walked past. Until 0.9.8 the walk read the first instance of the
-        last study that had one, so a patient whose token sat on an
-        earlier study raised the "no token" message.
+        The token that speaks for the patient is the first one **of ours**
+        in study, series and instance order (#616): a study without a
+        token, or with an Encrypted Attributes Sequence this library did
+        not write, is walked past. Until 0.9.8 the walk read the first
+        instance of the last study that had one, so a patient whose token
+        sat on an earlier study raised the "no token" message. **Every
+        distinct token is opened before anything is written (#583)**, with
+        `restore=False` too: a token of ours on any study that this key
+        cannot open, or that holds no record, raises and writes nothing.
 
         Every failure raises and nothing is printed (#539, #550). So
         `restore=False` checks that the patient is recoverable under this
@@ -4223,37 +4341,46 @@ class DicomSession:
             raise ValueError("recover_patient_identity: no patient in this "
                              "session holds the Patient ID given")
 
-        # The first instance carrying a token of ours, else the first
-        # instance at all (#616). The walk used to `break` out of the
-        # series loop only, so it ended on the first instance of the
-        # *last* study with instances, and a patient whose token sits on
-        # an earlier study -- a pair merged by `audit()` (#563), a study
-        # ingested after the lock -- was told it had never been locked.
-        # `token_of_ours`, not "any Encrypted Attributes Sequence": a
-        # foreign sequence is "no token" since #617, so stopping on one
-        # would never reach the token behind it. The fallback keeps both
-        # messages: a patient with instances and no token of ours gets
+        # Every instance of the patient, in study, series and instance
+        # order, with the token of ours it carries (#616). The walk used
+        # to `break` out of the series loop only, so it ended on the first
+        # instance of the *last* study with instances, and a patient whose
+        # token sits on an earlier study -- a pair merged by `audit()`
+        # (#563), a study ingested after the lock -- was told it had never
+        # been locked. `token_of_ours`, not "any Encrypted Attributes
+        # Sequence": a foreign sequence is "no token" since #617. A
+        # patient with instances and no token of ours gets
         # `recover_or_raise`'s "no token", one with none gets the raise
-        # below. The first token found is the one read, whatever else the
-        # patient carries: a token this key cannot open on study 1 raises
-        # the wrong-key text even where study 2 carries another, and a
-        # pair locked as two objects carries two (review of #640, P-6).
-        first_inst = None
-        token_inst = None
-        for one in (inst for st in p.studies for se in st.series
-                    for inst in se.instances):
-            if first_inst is None:
-                first_inst = one
-            if self.reversibility_service.token_of_ours(one) is not None:
-                token_inst = one
-                break
-
-        if not first_inst:
+        # below.
+        rs = self.reversibility_service
+        walk = [(st, inst, rs.token_of_ours(inst))
+                for st in p.studies for se in st.series for inst in se.instances]
+        if not walk:
             raise RuntimeError("recover_patient_identity: the patient has no "
                                "instances to recover an identity from")
+        carrying: Dict[bytes, List[Tuple["Study", "Instance"]]] = {}
+        for st, inst, content in walk:
+            if content is not None:
+                carrying.setdefault(content, []).append((st, inst))
+        if not carrying:
+            rs.recover_or_raise(walk[0][1])  # raises "no token"
 
-        original_attrs = self.reversibility_service.recover_or_raise(
-            token_inst or first_inst)
+        # **Every distinct token is opened before anything is written
+        # (#583).** Since the lock writes one token per value-set, a
+        # patient carries several, and each instance is restored from its
+        # own. Until 0.9.8 the first token found was the one read, and its
+        # values went onto every instance; a token on study 2 this key
+        # cannot open now raises the wrong-key text with nothing written,
+        # under `restore=False` too, which is how that call answers "is
+        # this patient recoverable under this key". One decrypt per
+        # distinct token, in the order found, so a token on study 1 the
+        # key cannot open is still the one the message is about.
+        opened = {content: rs.recover_or_raise(holders[0][1])
+                  for content, holders in carrying.items()}
+        # The first token found speaks for the patient -- its name and ID,
+        # the #548 scheme check, and the instances carrying no token --
+        # as it spoke for every instance before.
+        original_attrs = opened[next(iter(carrying))]
 
         if original_attrs:
             if restore:
@@ -4272,42 +4399,126 @@ class DicomSession:
                 # drain cannot stand in -- it runs only on a collision,
                 # after these writes.
                 self.persistence_manager.flush()
-                # The token holds one study's values and they are written
-                # onto every instance, so an instance that does not carry
-                # the token read takes identifiers that may be another
-                # study's: under the default `tags_to_lock`, Accession
-                # Number (review of #640, F-1). Until #616 a study ingested
-                # after the lock, or the unlocked half of a pair `audit()`
-                # merged, raised "no token"; now it restores, and nothing
-                # said so. Counted, not refused -- restoring only the
-                # instances carrying the token is #583's per-instance
-                # restore -- and `!=` the token read, not "carries none": a
-                # pair locked as two objects carries two tokens, and the
-                # second study's own token is not the one read. A sniff
-                # and a bytes compare, no decrypt. The #566 Study Date
-                # WARNING below cannot stand in: it needs `0008,0020`
-                # locked, which the defaults do not lock.
-                token_read = self.reversibility_service.token_of_ours(
-                    token_inst or first_inst)
-                count = 0
-                elsewhere = 0
-                for st in p.studies:
-                    for se in st.series:
-                        for inst in se.instances:
-                            if self.reversibility_service.token_of_ours(inst) != token_read:
-                                elsewhere += 1
-                            for tag, val in original_attrs.items():
-                                inst.set_attr(tag, val)
-                            count += 1
-                if elsewhere:
-                    # A log line, not an audit row, as #566's sibling is: a
-                    # restore is not a de-identification step. Counts only.
+
+                def patient_level(values):
+                    return {tag: val for tag, val in values.items()
+                            if tag.startswith("0010,")}
+
+                # **A token a release before 0.9.8 shared across studies
+                # (#583, Q-B).** That lock captured study 1's values and
+                # embedded them on every study, so its token, on study 2,
+                # holds study 1's Accession Number. It is told from a
+                # token this release writes by three things together: it
+                # is shared across studies, it holds a non-blank value
+                # outside group 0010 (a blank one -- CT_small's Accession
+                # Number, locked by the defaults -- is no study's), and it
+                # is not stamped by this store on every holder. Its first
+                # holding study, in graph order, takes it in full; the
+                # others take its group 0010 only. The WARNING names no
+                # release: a store never loads the stamp from a file, so a
+                # token this release wrote, exported and re-ingested, over
+                # values equal across studies, reads the same (review of
+                # #650, F-2; a marker that could tell is #652).
+                #
+                # **"First in graph order" is the owner only in the store
+                # that locked.** There graph order is the lock's order, so
+                # the first holding study is the one the token was captured
+                # from. A store built by ingesting an export loads studies
+                # in path order, and export folders are `Study_<date>_...`,
+                # so the full restore goes to the earliest-dated study,
+                # which may not be the owner: that study then holds another
+                # study's values, and the owner keeps the pass's and is the
+                # one the WARNING counts (review of #650, F-1; kept and
+                # disclosed, and pinned by
+                # `test_an_earlier_releases_export_reingested_whole_...`).
+                #
+                # What this cannot tell, disclosed with #583: (i) a 0.9.8
+                # pre-release stamped its shared token, and reads as this
+                # release's; (ii) two studies whose values were equal read
+                # as two that differed; (iii) a token shared inside one
+                # study, over series- or instance-level tags, is not shared
+                # across studies at all; (iv) an earlier release's shared
+                # token whose other studies are not in the session -- one
+                # of its studies ingested from its export -- is shared
+                # across none, and is restored in full with values that may
+                # be another study's, silently (review of #650, M-1).
+                partial: Dict[bytes, "Study"] = {}
+                for content, holders in carrying.items():
+                    values = opened[content]
+                    if (len({id(st) for st, _ in holders}) > 1
+                            and any(not tag.startswith("0010,")
+                                    and str(val if val is not None else "").strip()
+                                    for tag, val in values.items())
+                            and not all(inst.identity_token_is_this_stores(content)
+                                        for _, inst in holders)):
+                        partial[content] = holders[0][0]
+
+                tokenless = elsewhere = count = 0
+                study_dates: Dict[int, Tuple["Study", Any]] = {}
+                fallback = patient_level(original_attrs)
+                for st, inst, content in walk:
+                    if content is None:
+                        # **An instance carrying no token takes the
+                        # patient-level identifiers only (#583, Q-A)**:
+                        # group 0010, from the first token found. Until
+                        # 0.9.8 it took every value of that token, so a
+                        # study ingested after the lock, or the unlocked
+                        # half of a pair `audit()` merged, took another
+                        # study's Accession Number (review of #640, F-1).
+                        # Nothing at all would leave a half-restored file:
+                        # `export()` stamps the name and ID from the
+                        # `Patient` whatever the instance holds, and birth
+                        # date and sex from the instance. Group 0010
+                        # includes the Patient Study module's Age, Size and
+                        # Weight, which can differ by study; disclosed.
+                        values = fallback
+                        tokenless += 1
+                    elif content in partial and st is not partial[content]:
+                        values = patient_level(opened[content])
+                        elsewhere += 1
+                    else:
+                        values = opened[content]
+                        if "0008,0020" in values and id(st) not in study_dates:
+                            study_dates[id(st)] = (st, values["0008,0020"])
+                    for tag, val in values.items():
+                        inst.set_attr(tag, val)
+                    count += 1
+                # Log lines, not audit rows, as #566's was: a restore is
+                # not a de-identification step. Counts only (P6).
+                if tokenless:
                     get_logger().warning(
-                        "The identity token read holds one study's values, "
-                        "and they were restored onto %d of %d instances that "
-                        "do not carry that token, so study-level identifiers "
-                        "written onto them, such as Accession Number, may be "
-                        "another study's (#583).", elsewhere, count)
+                        "%d of %d instances of this patient carry no identity "
+                        "token, so they took only the patient-level identifiers "
+                        "(group 0010) of the first token found, and their other "
+                        "locked identifiers keep what anonymize() left (#583).",
+                        tokenless, count)
+                if elsewhere:
+                    get_logger().warning(
+                        "%d of %d instances of this patient carry an identity "
+                        "token shared across studies that this store did not "
+                        "stamp, which may hold one study's values, so outside "
+                        "the first study carrying it they took only its "
+                        "patient-level identifiers (group 0010), and their other "
+                        "locked identifiers keep what anonymize() left (#583).",
+                        elsewhere, count)
+                # **Tokens that disagree on the name or ID (#583, Q-F).**
+                # Each instance keeps its own token's, so a re-lock after
+                # the restore stashes each again; the `Patient` has one
+                # name and one ID, and takes the first token's, which is
+                # what `export()` stamps on every study -- as the #548
+                # merge already stamps the surviving patient's.
+                disagreeing = sum(
+                    1 for values in opened.values()
+                    if any(tag in values and tag in original_attrs
+                           and values[tag] != original_attrs[tag]
+                           for tag in ("0010,0010", "0010,0020")))
+                if disagreeing:
+                    get_logger().warning(
+                        "%d of %d identity tokens of this patient hold a "
+                        "Patient's Name or Patient ID different from the first "
+                        "token found; the patient takes the first token's, which "
+                        "export() stamps on every study (#583).",
+                        disagreeing, len(opened))
 
                 # Update Patient Object top-level properties if Name/ID changed
                 before = (p.patient_name, p.patient_id)
@@ -4327,50 +4538,43 @@ class DicomSession:
                 # Study Date is written onto the instances above, but the
                 # exporter stamps it from the `Study` (`export_stamp_attributes`),
                 # so an instance-only restore never reached the file (#566).
-                # One study only: the token is the patient's first
-                # instance's, so on a patient with several it holds one
-                # study's date, and writing it onto each would export study
-                # 1's original as study 2's (#583). Counted before the merge
-                # below, which can move a raw patient's studies onto `p`.
-                # `_shifted_study_date` is left as it is: it vouches only
-                # for the value the shift wrote, so the next `audit()`
-                # raises the restored date again (#518).
-                if "0008,0020" in original_attrs:
-                    if len(p.studies) == 1:
-                        study = p.studies[0]
-                        restored = original_attrs["0008,0020"]
-                        # Read as `Study` would hold it, through the one
-                        # parser its setter and hydration share: ingest
-                        # maps a blank or unreadable Study Date to `None`,
-                        # and this wrote the token's `''` or `'20041399'`
-                        # over it -- dirty, saved, exported, and raised by
-                        # the next `audit()` as a Study-level date to shift
-                        # (#619). A value that is not a date is not written;
-                        # the instances above still take it, which is what
-                        # the source held, so the instance's unreadable copy
-                        # is still raised, as the source's own was (review
-                        # of #640, P-5). `isinstance`, not truthiness:
-                        # `'20041399'` is truthy. Inside the one-study arm,
-                        # so a multi-study patient keeps the one WARNING
-                        # below. No date in the text, and no ID.
-                        restored_date = entities.normalize_study_date(restored)
-                        if not isinstance(restored_date, datetime.date):
-                            get_logger().warning(
-                                "The restored Study Date could not be read as "
-                                "a date, so the Study keeps its de-identified "
-                                "Study Date "
-                                "(#619).")
-                        # A restore onto a date that never moved records
-                        # no change.
-                        elif study.study_date != restored_date:
-                            study.study_date = restored
-                            study.mark_modified()
-                    else:
+                # **Each study from its own token (#583)**: the first of
+                # its instances restored in full from a token holding
+                # `0008,0020`. Until 0.9.8 the one token held study 1's
+                # date, so only a single-study patient's `Study` took it and
+                # a multi-study patient kept every de-identified date with a
+                # WARNING. A study whose instances carry no token, or only a
+                # shared pre-0.9.8 token's group 0010, keeps its date.
+                # Taken before the merge below, which can move a raw
+                # patient's studies onto `p`. `_shifted_study_date` is left
+                # as it is: it vouches only for the value the shift wrote,
+                # so the next `audit()` raises the restored date again
+                # (#518).
+                for study, restored in study_dates.values():
+                    # Read as `Study` would hold it, through the one parser
+                    # its setter and hydration share: ingest maps a blank
+                    # or unreadable Study Date to `None`, and this wrote the
+                    # token's `''` or `'20041399'` over it -- dirty, saved,
+                    # exported, and raised by the next `audit()` as a
+                    # Study-level date to shift (#619). A value that is not
+                    # a date is not written; the instances above still take
+                    # it, which is what the source held, so the instance's
+                    # unreadable copy is still raised, as the source's own
+                    # was (review of #640, P-5). `isinstance`, not
+                    # truthiness: `'20041399'` is truthy. One WARNING per
+                    # such study. No date in the text, and no ID.
+                    restored_date = entities.normalize_study_date(restored)
+                    if not isinstance(restored_date, datetime.date):
                         get_logger().warning(
-                            "Study Date was restored onto the instances of a "
-                            "patient with %d studies; the identity token holds "
-                            "one study's date, so each study keeps its "
-                            "de-identified Study Date (#583).", len(p.studies))
+                            "The restored Study Date could not be read as "
+                            "a date, so the Study keeps its de-identified "
+                            "Study Date "
+                            "(#619).")
+                    # A restore onto a date that never moved records
+                    # no change.
+                    elif study.study_date != restored_date:
+                        study.study_date = restored
+                        study.mark_modified()
                 # A raw study for the restored ID, ingested before the
                 # restore, is a second `Patient` holding it: the same
                 # subject by construction, so the two are merged as
