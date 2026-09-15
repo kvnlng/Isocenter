@@ -353,6 +353,41 @@ def test_a_dct_syntax_is_read_by_its_frame_header():
     assert evidence(JPEG_EXTENDED, b"\x00\x00\x00\x00") is None
 
 
+#: T.81 Table B.1: the DCT processes, and the lossless ones. C4, C8 and CC
+#: sit in the same range and are not frame headers (L2e covers those).
+_DCT_SOFS = (0, 1, 2, 5, 6, 9, 10, 13, 14)
+_LOSSLESS_SOFS = (3, 7, 11, 15)
+
+
+@pytest.mark.parametrize("ts", [JPEG_BASELINE, JPEG_EXTENDED],
+                         ids=["jpeg50", "jpeg51"])
+@pytest.mark.parametrize("n", _DCT_SOFS + _LOSSLESS_SOFS,
+                         ids=[f"sof{n}" for n in _DCT_SOFS + _LOSSLESS_SOFS])
+def test_every_frame_process_is_read_by_its_own_header(ts, n):
+    """L2d, per SOFn: each documented DCT process is evidence, and no lossless one is.
+
+    L2d reaches SOF0 and SOF1 through a real encoder. This walks every
+    frame type in T.81 Table B.1 over the synthetic `SOI + SOFn + SOS`
+    shape, because SOF2, SOF9 and SOF10 are streams libjpeg-turbo writes
+    and pydicom decodes under `.50`/`.51`, while no installed encoder
+    writes the rest. Killing mutations (review round 2): (n1) SOF2
+    dropped from the DCT set; (n2) the frame-header range narrowed to
+    `C0`-`C3`; (n6) SOF7, SOF11 and SOF15 taken as DCT.
+    """
+    from isocenter.io_handlers import _lossy_compression_evidence
+    frame = (b"\xff\xd8"
+             + _seg(0xC0 + n, bytes([8, 0, 4, 0, 4, 1, 1, 0x11, 0]))
+             + _seg(0xDA, bytes([1, 1, 0, 1, 0, 0])))
+
+    got = _lossy_compression_evidence(_built(ts, frame))
+
+    if n in _DCT_SOFS:
+        assert got == {"declared": None, "syntax": ts, "evidence": "dct",
+                       "value": n}
+    else:
+        assert got is None
+
+
 def test_jpeg_frame_type_walks_not_searches():
     """L2e: the SOFn of the first frame header, reached by walking.
 
