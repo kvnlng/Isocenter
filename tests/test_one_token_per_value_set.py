@@ -286,12 +286,12 @@ def test_an_instance_level_tag_is_captured_from_each_instance(tmp_path, caplog):
 
 def test_the_lock_log_names_every_tag_any_value_set_holds(tmp_path, caplog):
     """The `Secured identity (tags: ...)` line names the union, in
-    `tags_to_lock` order, and counts every instance. Study 1 carries Other
-    Patient IDs and study 2 does not, so the two records hold different
-    tags."""
+    `tags_to_lock` order, and counts every instance. Study 2 carries Other
+    Patient IDs and study 1 does not, so the first record lacks a tag the
+    second holds. Kills M20 (the tags read off the first value-set)."""
     with _session(tmp_path) as session:
-        _patient(session, [[{"0010_1000": "OTHER-1", "0008_0050": ACC_ONE}],
-                           [{"0008_0050": ACC_TWO}]])
+        _patient(session, [[{"0008_0050": ACC_ONE}],
+                           [{"0010_1000": "OTHER-2", "0008_0050": ACC_TWO}]])
         caplog.clear()
         with caplog.at_level(logging.INFO, logger="isocenter"):
             session.lock_identities(PID, persist=True,
@@ -692,3 +692,23 @@ def test_a_097_token_over_equal_accessions_still_warns(tmp_path, caplog):
         _, instances = _pre_098_patient(session, ["ACC-SAME", "ACC-SAME"])
         assert _restore(session, caplog) == [old_shared(1, 2)]
         assert [i.attributes[ACC] for i in instances] == ["ACC-SAME", "X"]
+
+
+def test_a_097_token_shared_inside_one_study_is_restored_in_full(tmp_path, caplog):
+    """Residual (iii) as ruled: an earlier release's one token over the two
+    instances of a single study, holding a non-blank Content Date, is not
+    shared across studies, so both instances take it in full and no
+    WARNING fires -- the second instance's own date, which that token never
+    held, cannot be told apart. Pinned so that a change to it is a
+    decision. (The detector counting instances rather than studies, M15,
+    is equivalent under the ruling: every holder of such a token is in the
+    first study carrying it, so all of them take it in full either way.)"""
+    with _session(tmp_path) as session:
+        patient, by_study = _patient(session, [[{"0008_0023": "20040111"},
+                                                {"0008_0023": "20040112"}]])
+        instances = _all(by_study)
+        _pre_098_token(session, instances, {"0010,0010": NAME, "0010,0020": PID,
+                                            "0008,0023": "20040111"})
+        _anonymize_by_hand(patient, instances, **{"0008_0023": "20030101"})
+        assert _restore(session, caplog) == []
+        assert [i.attributes["0008,0023"] for i in instances] == ["20040111", "20040111"]

@@ -247,9 +247,9 @@ exclusively and with mode 0600, unless the session holds an identity token
 this library wrote that no key here opens, in which case it raises
 `RuntimeError` and creates none (#617). `lock_identities()` refusals name no
 patient: a batch refusal numbers each refused patient by its place among
-the patients found, in Patient ID order. A lock of a patient whose first
-instance holds no value in any tag `tags_to_lock` names is such a refusal
-(#638).
+the patients found, in Patient ID order. A lock of a patient any of whose
+instances holds no value in any tag `tags_to_lock` names is such a refusal
+(#638, per instance since #583).
 `lock_identities(persist=True)` and `lock_identities_batch()` raise the
 `sqlite3.Error` of a store write that fails, after one `ERROR` audit row;
 writes before it are not rolled back (#599).
@@ -266,8 +266,12 @@ default.
 not frozen, their forward compatibility is. A DICOM file exported with
 reversible anonymization by 1.0 is recoverable by every 1.x with its
 key: the tags `(0400,0500)`, `(0400,0510)`, `(0400,0520)` and the key
-file's format (raw Fernet key bytes). Date jitter stays deterministic
-per patient within a project: the same keyed patient under the same
+file's format (raw Fernet key bytes). An identity token this library
+writes holds exactly the locked values captured from each instance that
+carries it: a lock writes one token per distinct set of values, never
+one instance's values onto another (#583), and a restore gives each
+instance the values of the token it carries. Date jitter stays
+deterministic per patient within a project: the same keyed patient under the same
 project secret and the same `date_jitter` range gets the same offset
 in every store holding that secret. A patient a store classed as
 de-identified before 0.9.7 keeps that store's unkeyed offset, which
