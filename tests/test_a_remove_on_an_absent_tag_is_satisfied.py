@@ -736,6 +736,65 @@ def _shorter_sequence_upper_case_target(session):
     return finding, ct, lambda: held.attributes.get("0040,a730") == "SHIFTED-PHI"
 
 
+def _shorter_sequence_second_item_holds(session):
+    """Two items left, the first clean and the second holding the tag, and
+    a path to index 2. Every remaining item is read, not the first alone
+    (review of #639 r4, F1: `y5`)."""
+    ct, _ = _ct_and_mr(session)
+    clean, held = DicomItem(), DicomItem()
+    clean.set_attr("0008,1155", "1.2.3.4.5")
+    held.set_attr("0010,1000", "SHIFTED-PHI")
+    ct.add_sequence_item("0008,1140", clean)
+    ct.add_sequence_item("0008,1140", held)
+    finding = _finding(DicomItem(), "REMOVE_TAG", "0010,1000",
+                       uid=ct.sop_instance_uid, path=(("0008,1140", 2),))
+    return finding, ct, lambda: held.attributes.get("0010,1000") == "SHIFTED-PHI"
+
+
+WALK_VALUE = "WALK-PHI-VALUE"
+
+
+def _misspelt_segment(spelling, held_sequence):
+    """The instance holds `held_sequence`, whose item holds Other Patient
+    IDs; the finding's path names that sequence as `spelling`, which the
+    graph never stores a sequence under, and its entity is a cleaned copy
+    of the item. A key the parent does not hold because no sequence is ever
+    stored under it is no evidence the sequence was removed (review of
+    #639 r4, M1: satisfied on 7252395, with the value exported)."""
+    def build(session):
+        ct, _ = _ct_and_mr(session)
+        held = DicomItem()
+        held.set_attr("0010,1000", WALK_VALUE)
+        ct.add_sequence_item(held_sequence, held)
+        entity = DicomItem()
+        finding = _finding(entity, "REMOVE_TAG", "0010,1000",
+                           uid=ct.sop_instance_uid, path=((spelling, 0),))
+        return finding, ct, lambda: (
+            held.attributes.get("0010,1000") == WALK_VALUE
+            and entity.phi_status is not PhiStatus.REMEDIATED)
+    return build
+
+
+def _index_that_is_not_a_position(index):
+    """`[A holds, B lacks]` and a path whose index is `index`: Python would
+    read `-1` or `True` as B, which lacks the tag, and call the removal
+    done over A's value (review of #639 r4, F2)."""
+    def build(session):
+        ct, _ = _ct_and_mr(session)
+        a, b = DicomItem(), DicomItem()
+        a.set_attr("0010,1000", WALK_VALUE)
+        b.set_attr("0008,1155", "1.2.3.4.5")
+        ct.add_sequence_item("0008,1140", a)
+        ct.add_sequence_item("0008,1140", b)
+        entity = DicomItem()
+        finding = _finding(entity, "REMOVE_TAG", "0010,1000",
+                           uid=ct.sop_instance_uid, path=(("0008,1140", index),))
+        return finding, ct, lambda: (
+            a.attributes.get("0010,1000") == WALK_VALUE
+            and entity.phi_status is not PhiStatus.REMEDIATED)
+    return build
+
+
 def _study_sharing_the_instance_uid(session):
     """A Study whose Study Instance UID is its instance's SOP Instance UID
     (hand-built), with Study Date deleted from the instance, and a
@@ -777,6 +836,12 @@ def _shared_uid(session):
     pytest.param(_shorter_sequence_held_deeper, id="shorter_sequence_held_deeper"),
     pytest.param(_shorter_sequence_held_as_sequence, id="shorter_sequence_held_as_sequence"),
     pytest.param(_shorter_sequence_upper_case_target, id="shorter_sequence_upper_case_target"),
+    pytest.param(_shorter_sequence_second_item_holds, id="shorter_sequence_second_item_holds"),
+    pytest.param(_misspelt_segment("0040,A730", "0040,a730"), id="segment_upper_case"),
+    pytest.param(_misspelt_segment("(0008,1140)", "0008,1140"), id="segment_parenthesised"),
+    pytest.param(_misspelt_segment("ReferencedImageSequence", "0008,1140"), id="segment_keyword"),
+    pytest.param(_index_that_is_not_a_position(-1), id="index_negative"),
+    pytest.param(_index_that_is_not_a_position(True), id="index_bool"),
     pytest.param(_shared_uid, id="shared_uid"),
     pytest.param(_study_sharing_the_instance_uid, id="study_sharing_the_instance_uid"),
 ])
@@ -891,6 +956,25 @@ def _private_sequence(session, tmp_path):
     return lambda: "0029,1050" not in inst.sequences
 
 
+def _private_sequence_below_the_top(session, tmp_path):
+    """A private sequence nested in a standard one:
+    `(0008,1140)[0] > (0029,1050)[0]` holding private tags. The floor's
+    sweep removes private elements at every depth, so the path of each
+    nested private finding breaks one level below the instance (review of
+    #639 r4, F1: `y6`, a gone sequence read as removed only at the top)."""
+    (inst,) = _instances(session)
+    outer = DicomItem()
+    outer.set_attr("0008,1150", SOP_CLASS)
+    outer.set_attr("0008,1155", "1.2.3.4.5")
+    outer.set_attr("0029,0010", "PRIVCREATOR")
+    inner = DicomItem()
+    inner.set_attr("0029,0010", "PRIVCREATOR")
+    inner.set_attr("0029,1051", "PRIVATE-PHI-51")
+    outer.add_sequence_item("0029,1050", inner)
+    inst.add_sequence_item("0008,1140", outer)
+    return lambda: "0029,1050" not in inst.sequences["0008,1140"].items[0].sequences
+
+
 def _emptied_sequence(session, tmp_path):
     """`0008,1140: EMPTY` over an item holding `0010,1000` under
     `REMOVE`: the pass removes the nested tag, then empties the sequence,
@@ -912,18 +996,23 @@ def _emptied_sequence(session, tmp_path):
 @pytest.mark.parametrize("build", [
     pytest.param(_private_sequence, id="private_sequence_removed"),
     pytest.param(_emptied_sequence, id="sequence_emptied"),
+    pytest.param(_private_sequence_below_the_top, id="private_sequence_below_the_top"),
 ])
 @pytest.mark.parametrize("mode", MODES, indirect=True)
 def test_a_sequence_the_first_pass_detached_reuses_cleanly(tmp_path, build, mode):
     """The review's minimal shapes. Red on d7a2a3d: 2 declines on the
-    private sequence, 1 on the emptied one, REVIEW_REQUIRED.
+    private sequence, 1 on the emptied one, REVIEW_REQUIRED. The private
+    sequence below the top level is r4's (a guard, green before).
 
-    Kills: a broken path read as a decline whatever the live parent holds."""
+    Kills: a broken path read as a decline whatever the live parent holds;
+    a gone sequence read as removed only when its parent is the instance."""
     session = _session(tmp_path, ["CT_small.dcm"])
     with session:
         detached = build(session, tmp_path)
         report = session.audit()
-        assert [f for f in _removes(report) if f.entity_path], report.findings
+        depth = 2 if build is _private_sequence_below_the_top else 1
+        assert [f for f in _removes(report)
+                if f.entity_path and len(f.entity_path) >= depth], report.findings
         session.anonymize(report)
         assert detached()
         assert _declined(session) == [], mode

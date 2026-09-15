@@ -6115,7 +6115,8 @@ class DicomSession:
 
         - **It resolves:** the item at its end, read as any item is.
         - **It breaks at a sequence the deepest live parent does not
-          hold:** an empty `DicomItem` -- nothing is at the address, so
+          hold, named by a well-formed lower-case `gggg,eeee` key:** an
+          empty `DicomItem` -- nothing is at the address, so
           the removal's end state holds. This is the clean reuse the walk
           exists for: the floor's private sweep removes a private sequence
           after the tags inside it, and on d7a2a3d `OBXXXX1A.dcm`'s second
@@ -6127,6 +6128,15 @@ class DicomSession:
           means gone": an item that shifted into a lower index, or one the
           finding never covered, still carries the value into the export,
           and an address names a position, not a value.
+        - **Anything else:** None. A segment spelt any other way misses a
+          sequence the parent may well hold, and an index that is not a
+          non-negative `int` names no position.
+
+        Judged only within the sequence the address names. A path that
+        still resolves is read at its position, so an item that moved into
+        it after the report was raised is what is read; and a value held
+        elsewhere -- a sibling or cousin item, the top level, another
+        sequence -- is that element's own finding.
 
         **Never the instance itself** for a nested path. Its top-level
         element under the same tag is not the element the finding names;
@@ -6138,9 +6148,23 @@ class DicomSession:
 
         item = instance
         for sequence_tag, index in path or ():
+            # A position is a non-negative int. `-1` would read the last
+            # item and `True` the second, each a different element from
+            # the one the address was raised on (review of #639 r4, F2).
+            # `type() is int` because `bool` is an `int`.
+            if type(index) is not int or index < 0:  # pylint: disable=unidiomatic-typecheck
+                return None
             sequence = item.sequences.get(sequence_tag)
             if sequence is None:
-                return DicomItem()
+                # Removed only if a sequence could ever have been stored
+                # under this key: `0040,A730`, `(0008,1140)` or a keyword
+                # misses because the graph never uses that spelling, not
+                # because a pass removed anything (review of #639 r4, M1 --
+                # round 1's M1, one level down).
+                if (isinstance(sequence_tag, str) and _is_tag_key(sequence_tag)
+                        and sequence_tag == _canonical_tag(sequence_tag)):
+                    return DicomItem()
+                return None
             if index >= len(sequence.items):
                 key = _canonical_tag(tag)
                 for remaining in sequence.items:
