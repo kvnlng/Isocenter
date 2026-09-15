@@ -2026,19 +2026,22 @@ class DicomSession:
 
         That includes a file that **ends the worker process reading it**
         -- the out-of-memory killer, a decoder crash, `SIGKILL` (#654).
-        The results already returned are kept, the files not yet returned
-        are read again one at a time on a fresh process pool until the
-        worker ends again, and the file it ends on is rejected with the
-        reason "The ingest worker process ended while reading this file,
-        and again when the file was read alone on a fresh worker". The
-        rest are read at full width, the call saves as usual, and the
-        session's pool is replaced so the next `ingest()` runs normally.
-        A death that does not recur when its file is read alone costs no
-        file and writes no row; a `WARNING` log line records it. If a
-        fresh worker cannot run even a trivial task, no file is to blame:
-        every file left is rejected as "Not read", with a reason naming
-        the causes that do this -- a script without the main guard among
-        them -- and the call returns. A fresh pool costs a few tenths of
+        The results already returned are kept, and the files not yet
+        returned are read again one at a time on a fresh one-worker process
+        pool. A file is rejected only when that fresh worker ends on it as
+        the first file it was given, with the reason "An ingest worker
+        process ended before this file was returned, and a fresh worker
+        process given this file alone, as its first file, ended while
+        reading it". A worker that ends on a later file had read others
+        first, so that file is not blamed: reading starts again from it on
+        another fresh worker. The rest are read at full width, the call
+        saves as usual, and the session's pool is replaced so the next
+        `ingest()` runs normally. A death that does not recur costs no file
+        and writes no row; a `WARNING` log line records it. If two fresh
+        workers in a row cannot run even a trivial task, no file is to
+        blame: every file left is rejected as "Not read", with a reason
+        naming the causes that do this -- a script without the main guard
+        among them -- and the call returns. A fresh pool costs a few tenths of
         a second to start, and a fatal file costs two of them and up to
         2 x `ISOCENTER_MAX_WORKERS` + 1 files read one at a time. Any
         other failure of the worker pool still raises.
