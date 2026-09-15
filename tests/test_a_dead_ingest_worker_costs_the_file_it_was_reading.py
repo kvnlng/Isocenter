@@ -427,6 +427,47 @@ def test_the_retry_reads_alone_on_a_fresh_spawned_pool(monkeypatch):
     assert all(r[7] is None for i, r in enumerate(out) if i != 1)
 
 
+def test_a_later_death_reads_on_alone_from_the_file_it_held(monkeypatch):
+    """A one-at-a-time round that dies after returning files goes on alone.
+
+    Stubbed pools. Round 0 returns one file and dies; the one-worker round
+    over the next 2W+1 = 9 returns two and dies on the third. That file is
+    not blamed -- the worker had read two others first -- and the next
+    round is again one worker, from the held file to the end of the same
+    nine, so that a file the death was the held file's is still met first
+    after the canary. Only then does reading go back to full width.
+    """
+    calls, widths = [], []
+    real = concurrent.futures.ProcessPoolExecutor
+
+    class Recording(real):
+        def __init__(self, *args, **kwargs):
+            widths.append(kwargs["max_workers"])
+            super().__init__(*args, **kwargs)
+
+    def fake(func, items, **kwargs):  # pylint: disable=unused-argument
+        calls.append(list(items))
+        if len(calls) in (1, 2):
+            for it in items[:len(calls)]:
+                yield ({'path': it}, "inst", None, None, None, None, None,
+                       None)
+            yield BrokenProcessPool("died")
+            return
+        for it in items:
+            yield ({'path': it}, "inst", None, None, None, None, None, None)
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", Recording)
+    monkeypatch.setattr(io_handlers, "run_parallel", fake)
+    files = [f"f{i}" for i in range(20)]
+    out = list(io_handlers._ingest_results(files, object(), _strategy(4)))
+    assert calls[1] == files[1:10]
+    assert calls[2] == files[3:10]
+    assert calls[3] == files[10:]
+    assert widths == [1, 1, 4]
+    assert [r[0]['path'] for r in out] == files
+    assert all(r[7] is None for r in out)
+
+
 def test_each_run_of_canary_deaths_gets_its_second_pool(monkeypatch):
     """Two canary deaths in a row stop the retry, not two in the whole call.
 
@@ -724,11 +765,10 @@ def test_a_rebuild_leaves_a_pool_a_peer_has_already_replaced(tmp_path,
         real_save = session.save
 
         def save_then_a_peer_rebuilds(*a, **k):
-            result = real_save(*a, **k)
+            real_save(*a, **k)
             if not peer:
                 session._restart_executor(broken=broke)
                 peer["pool"] = session._executor
-            return result
 
         monkeypatch.setattr(session, "save", save_then_a_peer_rebuilds)
         summary = session.ingest(str(src))
