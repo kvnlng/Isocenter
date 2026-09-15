@@ -552,10 +552,10 @@ class RemediationService:
             # finding's address, not on `entity` (review of #639): a
             # report kept across a reopen points at objects its first
             # pass cleaned, and read there every removal of an unsaved
-            # pass was satisfied while the live graph still held it. The
-            # stamp below still lands on `entity` -- the stale object in
-            # that case -- and that is harmless, because the live object
-            # was just read clean; stale REPLACE and SHIFT are #644.
+            # pass was satisfied while the live graph still held it.
+            # Since #644 the session hands over findings already bound to
+            # that object, so on the session path the two agree, and they
+            # differ only for an entity filed at another address.
             subject = self._removal_subject(finding, entity)
             if self._remove_is_satisfied(subject, proposal):
                 self.logger.info(
@@ -918,12 +918,48 @@ class RemediationService:
         The warning is logged here so the arm stays within its line
         budget: every line above the success block counts toward the five
         `mark_modified()` pins (#310).
+
+        **A seed that is not the holder's declines (#644).** The offset is
+        derived from the Patient ID and scheme the finding carries
+        (`_resolve_patient_id`, `metadata["jitter_scheme"]`), never from
+        the patient holding the date, and `Session.anonymize(findings)`
+        resolves a report against the live graph, so a report can reach a
+        patient that is not the one it was raised for. Measured before
+        this check, each written as an offset that is not the patient's
+        own: a report from another store, raised after its own pass,
+        seeded on that store's keyed pseudonym (-184 days on CT_small
+        where this store's offset for the patient is -359); a legacy
+        store's report, seeded under the unkeyed scheme, whose offset
+        anyone can compute from the ID (GHSA-phg9), graded PASS; and a
+        report from a site whose files carry other Patient IDs under the
+        same UIDs, graded PASS. So in a session the seed must key to the
+        patient holding the date, as the pass began (`_use_holders`,
+        `_belongs_to_holder`). That admits every spelling of one patient
+        this store gives -- the original ID and its pseudonym, keyed
+        (#517) or unkeyed -- and an export from another project ingested
+        here, whose real Patient ID is that project's pseudonym and whose
+        own seed is that ID (0.9.7,
+        `test_a_reingested_export_under_another_secret_is_warned`). A
+        nested date's holder is its instance (`_instance_owners`). A
+        finding whose entity has no holder declines too. A service used
+        without a session has no holders and checks nothing, as before
+        #644.
         """
         from .entities import _canonical_tag, normalize_study_date  # pylint: disable=import-outside-toplevel
 
         proposal = finding.remediation_proposal
         if proposal.original_value is None or not str(proposal.original_value).strip():
             return None
+        if self._holders is not None and not self._belongs_to_holder(
+                self._resolve_patient_id(entity, proposal),
+                (proposal.metadata or {}).get("jitter_scheme", JITTER_SCHEME_KEYED),
+                self._holders.get(id(self._instance_owners.get(id(entity), entity)))):
+            reason = (f"{proposal.target_attr}: the Patient ID its offset is seeded "
+                      "on is not that of the patient holding the date in this "
+                      "store, so the date is not shifted")
+            self.logger.warning(
+                f"Date shift declined for {self._log_subject(finding)}: {reason}")
+            return reason
         attr, admitted = proposal.target_attr, [proposal.original_value]
         if new_date is not None:
             admitted.append(new_date)
@@ -948,8 +984,7 @@ class RemediationService:
             f"Date shift declined for {self._log_subject(finding)}: {reason}")
         return reason
 
-    @staticmethod
-    def _replace_attr_refused(entity, proposal) -> Optional[str]:
+    def _replace_attr_refused(self, entity, proposal) -> Optional[str]:
         """Why a `REPLACE_TAG` must not write a Python attribute, or None
         when it may (#625).
 
@@ -974,11 +1009,32 @@ class RemediationService:
         attribute and the type and never a value: they are persisted in
         the row and rendered into the report.
 
-        Static and pure, with no `audit_buffer`: Pin A in
+        **A Patient ID that is not this store's pseudonym for the patient
+        refuses (#644).** `Session.anonymize(findings)` resolves a report
+        against the live graph, so a report raised in one store can act on
+        another that holds the same files, and its `patient_id` proposals
+        carry the first store's pseudonyms. Measured before this check:
+        store B exported store A's keyed `ANON_...` IDs, and a legacy
+        store's unkeyed ones -- an unsalted SHA-256 of the MRN -- graded
+        PASS; B's next `audit()` does not re-propose an ID already shaped
+        `ANON_`, so the link the project secret exists to prevent
+        (GHSA-phg9) was written and kept. So in a session the value
+        written must be the one this store mints for `original_value`
+        under the patient's own scheme, as the pass began (`_use_holders`),
+        and `original_value` must key to that patient
+        (`_is_holders_pseudonym`). A report from this store writes the
+        value its patient already holds or would be given; anything else
+        refuses, whatever produced it. A service used without a session
+        checks nothing, as before #644.
+
+        Pure, with no `audit_buffer`: Pin A in
         `tests/test_frozen_surface.py` refuses a new callee that takes
         one. Called twice from the arm, once as the condition and once
         for the reason, because binding the answer above the arm is a
-        line above the pinned `mark_modified()` at 291 (#310).
+        line above the pinned `mark_modified()` at 291 (#310). A method
+        rather than static since #644, for the holders; both call sites
+        already spelt `self._replace_attr_refused(...)`, so no line above
+        the pins moved.
         """
         attr = proposal.target_attr
         if not hasattr(entity, attr):
@@ -987,7 +1043,46 @@ class RemediationService:
             return (f"{attr} is no longer set on the {type(entity).__name__}, "
                     "so the rule's value is not written where the caller "
                     "cleared one")
+        if (attr == "patient_id" and self._holders is not None
+                and not self._is_holders_pseudonym(proposal, self._holders.get(id(entity)))):
+            return (f"{attr}: the value is not this store's pseudonym for the "
+                    "patient it would be written to, so it is not written")
         return None
+
+    def _belongs_to_holder(self, patient_id, scheme, holder) -> bool:
+        """Whether `patient_id`, read under `scheme`, names the patient
+        `holder`: a `(patient_id, jitter_scheme)` pair from `_use_holders`,
+        or None for an entity with no holder in the graph (#644).
+
+        One patient has one canonical key per scheme (#517): the original
+        ID and the pseudonym this store gives it key alike, keyed or
+        unkeyed, and another patient's ID does not. The schemes must match
+        as well as the keys, so a legacy spelling never admits a keyed
+        patient.
+        """
+        if holder is None or patient_id is None:
+            return False
+        holder_id, holder_scheme = holder
+        return (scheme == holder_scheme
+                and canonical_patient_key(patient_id, self.project_secret, scheme)
+                == canonical_patient_key(holder_id, self.project_secret, holder_scheme))
+
+    def _is_holders_pseudonym(self, proposal, holder) -> bool:
+        """Whether a `patient_id` REPLACE writes the pseudonym this store
+        mints for its `original_value` under the holder's scheme, and that
+        original names the holder (#644)."""
+        from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            _replacement_id_for, _unkeyed_replacement_id_for)
+
+        if holder is None or proposal.original_value is None:
+            return False
+        scheme = holder[1]
+        minted = (_unkeyed_replacement_id_for(proposal.original_value)
+                  if scheme == JITTER_SCHEME_UNKEYED
+                  else _replacement_id_for(proposal.original_value, self.project_secret))
+        return (proposal.new_value == minted
+                and self._belongs_to_holder(proposal.original_value, scheme, holder))
 
     @staticmethod
     def _remove_is_satisfied(entity, proposal) -> bool:
@@ -1055,7 +1150,8 @@ class RemediationService:
           the same entity will do; the pass can.
         - **The scan tally**, when `audit()` built one: every uid this
           pass's findings name is settled against the keys the pass
-          handled (applied, folded or already satisfied). An incomplete
+          handled (applied, folded, already satisfied, or inside a
+          sequence a pass removed, #644). An incomplete
           uid demotes every entity the pass's findings under it resolve
           to, and the instance holding a nested one. Keyed on the
           scan-time `entity_uid` strings, not live entities: a patient's
@@ -1082,7 +1178,7 @@ class RemediationService:
         `getattr`, because a hand-built entity need carry no status.
         """
         by_uid = {}
-        for key in handled | self._satisfied_keys:
+        for key in handled | self._satisfied_keys | self._gone_keys:
             by_uid.setdefault(key[0], set()).add(key)
         demote = list(self._declined_entities)
         if self._scan_tally is not None:
@@ -1213,6 +1309,31 @@ class RemediationService:
         `entity_path`, reads as a decline instead of as done.
         """
         self._removal_objects = self._MappingProxyType(dict(targets))
+
+    #: Keys of the findings `Session._live_findings` did not hand over
+    #: because a pass already removed or emptied the sequence their REPLACE
+    #: or SHIFT lived in (#644): nothing is at the address to write, and
+    #: no value reaches the export. Counted as handled by the scan tally,
+    #: as a satisfied proposal is -- without it, an instance whose
+    #: container an earlier partial pass emptied was demoted over nothing.
+    #: Rebound, never mutated, so the class default is safe to share.
+    _gone_keys = frozenset()
+
+    def _use_gone_keys(self, keys) -> None:
+        """Count `keys` as handled when this pass settles its statuses."""
+        self._gone_keys = frozenset(keys)
+
+    #: `id(entity) -> (patient_id, jitter_scheme)` of the live patient
+    #: holding it, read before the pass can replace an ID
+    #: (`Session._finding_holders`, #644): what a Patient ID REPLACE and a
+    #: SHIFT's seed must belong to. **None as the whole map means no
+    #: session**, and nothing is checked, as `_removal_objects` reads it.
+    #: A class attribute for `_instance_owners`' reason.
+    _holders = None
+
+    def _use_holders(self, holders) -> None:
+        """Name the patient holding each entity of this pass, as it begins."""
+        self._holders = self._MappingProxyType(dict(holders))
 
     def _removal_subject(self, finding: PhiFinding, entity):
         """What a removal's absence is read on: `entity` with no session,

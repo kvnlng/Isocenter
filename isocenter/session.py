@@ -5281,8 +5281,25 @@ class DicomSession:
         Apply remediation Actions to PHI Findings (Tag Anonymization).
 
         If `findings` is provided, only those specific findings are remediated.
-        If `findings` is None, a full audit is performed using the current configuration,
-        and all resulting findings are remediated ("Blind Execute").
+        If `findings` is None -- or empty: an empty list or an empty
+        `PhiReport` is treated the same way (#660) -- a full audit is
+        performed using the current configuration, and all resulting
+        findings are remediated ("Blind Execute").
+
+        Nothing outside `session.store` is written (#644). A finding whose
+        `entity` is itself in the graph is acted on as it is. Any other is
+        resolved against the live graph at its `entity_uid` and
+        `entity_path` -- an instance's UID from before `redact()`, and a
+        patient's original Patient ID after the pseudonym this store
+        minted for it, included -- and acts on the object found there, so
+        a report kept across `close()` and a reopen cleans the graph
+        `export()` writes. A finding whose address names no single object
+        declines; one inside a sequence a pass already removed or emptied
+        is satisfied. A Patient ID is written, and a date shifted, only
+        with a value that belongs to the live patient holding it -- this
+        store's pseudonym, and an offset seeded on that patient under its
+        own scheme -- and declines otherwise. The findings passed are not
+        modified.
 
         Two patients left holding one Patient ID -- a study ingested under
         a patient's original ID after that patient was anonymized -- are
@@ -5329,8 +5346,21 @@ class DicomSession:
 
         count = 0
         if findings:
-            remediator._use_instance_owners(self._nested_finding_owners(findings))
-            remediator._use_removal_targets(self._removal_targets(findings))
+            # Resolved against the live graph before the service sees them
+            # (#644), and only here, after the blind-execution check above:
+            # a report every finding of which a pass already settled
+            # resolves to an empty list, and that is not the `None` that
+            # asks for a full audit and pass. One UID map for the three
+            # readers, so "the instance at this address" cannot mean one
+            # thing to the resolver and another to the owners or the
+            # removal targets.
+            by_uid = self._instances_by_uid()
+            findings, gone = self._live_findings(list(findings), project_secret, by_uid)
+            owners = self._nested_finding_owners(findings, by_uid)
+            remediator._use_gone_keys(gone)
+            remediator._use_instance_owners(owners)
+            remediator._use_holders(self._finding_holders(findings, owners))
+            remediator._use_removal_targets(self._removal_targets(findings, by_uid))
             remediator._use_scan_tally(self._scan_tally, findings)
             count = remediator.apply_remediation(findings)
 
@@ -6218,7 +6248,193 @@ class DicomSession:
             elif f.entity_type == "Instance":
                 f.entity = self._live_target(instance_map.get(f.entity_uid), f)
 
-    def _nested_finding_owners(self, findings) -> dict:
+    def _instances_by_uid(self) -> dict:
+        """`uid -> [Instance, ...]` over the session's graph, for the three
+        readers `anonymize(findings)` resolves an address with (#644).
+
+        Each instance is filed under its SOP Instance UID and, when
+        `redact()` replaced that UID, under the one it replaced
+        (`SOURCE_SOP_UID_ATTR`): a report raised before the redaction
+        names the old UID, and read under the new one alone every finding
+        on the redacted instance named no instance. Only the first
+        redaction's UID is recorded (`regenerate_uid`), so a report taken
+        between a first and a `force=True` second one still names nothing.
+        A list, because a hand-built graph can give two instances one UID
+        (`docs/api/stability.md`), and an ambiguous address must stay
+        visible as one.
+        """
+        by_uid = {}
+        for patient in self.store.patients:
+            for study in patient.studies:
+                for series in study.series:
+                    for inst in series.instances:
+                        by_uid.setdefault(inst.sop_instance_uid, []).append(inst)
+                        source = inst.attributes.get(SOURCE_SOP_UID_ATTR)
+                        if source and source != inst.sop_instance_uid:
+                            by_uid.setdefault(source, []).append(inst)
+        return by_uid
+
+    def _finding_holders(self, findings, owners) -> dict:
+        """`id(entity) -> (patient_id, jitter_scheme)` of the live patient
+        holding it, read before the pass can replace an ID (#644).
+
+        What the service checks a Patient ID REPLACE and a SHIFT's seed
+        against: a resolved report can reach a patient other than the one
+        it was raised for (another store, another site's IDs, a legacy
+        store's scheme), and a value that does not belong to the holder is
+        not written. Every patient, study, series and instance is filed
+        under its patient. A nested item is found through `owners` (its
+        instance) by the service; an item no owner names -- a live item
+        handed over with another item's path -- is filed here by walking
+        the item trees, and only when such a finding is present.
+        """
+        holders = {}
+        for patient in self.store.patients:
+            mine = (patient.patient_id, patient._jitter_scheme)
+            holders[id(patient)] = mine
+            for study in patient.studies:
+                holders[id(study)] = mine
+                for series in study.series:
+                    holders[id(series)] = mine
+                    for inst in series.instances:
+                        holders[id(inst)] = mine
+        loose = {id(f.entity) for f in findings if f.entity is not None
+                 and id(f.entity) not in holders and id(f.entity) not in owners}
+        if loose:
+            for patient in self.store.patients:
+                for study in patient.studies:
+                    for series in study.series:
+                        for inst in series.instances:
+                            for item, _ in iter_item_tree(inst):
+                                if id(item) in loose:
+                                    holders[id(item)] = holders[id(inst)]
+        return holders
+
+    def _live_findings(self, findings, secret, by_uid) -> tuple:
+        """`(findings, gone)`: each finding resolved against the live graph,
+        and the keys of those a pass already settled (#644).
+
+        `anonymize(findings)` does not rehydrate `finding.entity`, and every
+        remediation arm writes to that object. Until this, a report kept
+        across `close()` and a reopen -- or a hand-built finding whose
+        `entity` was a copy -- wrote to objects nothing exports and filed a
+        success row for each write: an audit-only reopen of CT_small and
+        MR_small graded PASS over 231 such rows with every identifier in
+        the export (55ee01d). Here rather than in the service, because
+        every reader downstream reads `finding.entity`, and because nothing
+        may be added above the service's pinned lines (#310).
+
+        For each finding with a proposal and an entity, in order:
+
+        1. **At its address** -- the object at `entity_uid` and
+           `entity_path` is the entity itself (an instance's path walked
+           from each instance under the UID): handed over unchanged. The
+           ordinary `audit()` -> `anonymize(report)` path, so no copy.
+        2. **Live, but not at its address:** handed over unchanged.
+           `_removal_targets` declines a REMOVE on it (review of #639); a
+           REPLACE or SHIFT acts on that live entity, as it did.
+        3. **Dead:** where the address names exactly one object, a copy
+           bound to it. For an instance the path is walked strictly, by
+           `_removal_address` and never by `resolve_item_path`: `-1` and
+           `True` read as positions there, and a misspelt segment as a
+           removed sequence (review of #639 r4). Where the walk reaches
+           nothing because a pass removed or emptied the sequence, a
+           REMOVE is bound to the empty item `_removal_address` answers
+           (its end state holds), and a REPLACE or SHIFT is not handed
+           over at all -- nothing is at the address to write, and no value
+           reaches the export -- and its key is returned in `gone`, so the
+           scan tally counts it as handled (#626's walk rule, for the
+           other two actions). Where the address names no object or two,
+           a copy with no entity, which declines as "could not be resolved
+           against the live graph".
+
+        A patient is looked up by `patient_id` under its `entity_uid`, and
+        under the pseudonym this store mints for that ID (the keyed one,
+        and the unkeyed one for a patient its store classed legacy): a
+        saved pass replaced the ID the report names. Skipped when the
+        `entity_uid` is itself a replacement. A study is looked up by its
+        Study Instance UID. Any other entity type resolves only by
+        identity -- live, it is handed over; dead, it declines.
+
+        **Copies, never in place.** The caller's findings keep the entity
+        they had: a finding bound to None in place would stay unresolvable
+        in a later session that could resolve it, and a report passed
+        twice would behave differently the second time.
+
+        Imports are local so no module-level line of this file moves
+        (`tests/test_packaging_contract.py` cites one by number).
+        """
+        import dataclasses  # pylint: disable=import-outside-toplevel
+        from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            _replacement_id_for, _unkeyed_replacement_id_for)
+        from .remediation import _remediation_key  # pylint: disable=import-outside-toplevel
+
+        by_pid, by_study, instances, top = {}, {}, [], set()
+        for patient in self.store.patients:
+            by_pid.setdefault(patient.patient_id, []).append(patient)
+            top.add(id(patient))
+            for study in patient.studies:
+                by_study.setdefault(study.study_instance_uid, []).append(study)
+                top.add(id(study))
+                for series in study.series:
+                    top.add(id(series))
+                    for inst in series.instances:
+                        top.add(id(inst))
+                        instances.append(inst)
+        items = None
+        resolved, gone = [], set()
+        for finding in findings:
+            proposal, entity = finding.remediation_proposal, finding.entity
+            if proposal is None or entity is None:
+                resolved.append(finding)
+                continue
+            uid = finding.entity_uid
+            if finding.entity_type == "Instance":
+                candidates = by_uid.get(uid, ())
+                if any(resolve_item_path(inst, finding.entity_path) is entity
+                       for inst in candidates):
+                    resolved.append(finding)
+                    continue
+            elif finding.entity_type == "Patient":
+                candidates = list(by_pid.get(uid, ()))
+                if uid and not _is_replacement_id(uid):
+                    candidates += by_pid.get(_replacement_id_for(uid, secret), ())
+                    candidates += [
+                        p for p in by_pid.get(_unkeyed_replacement_id_for(uid), ())
+                        if p._jitter_scheme == JITTER_SCHEME_UNKEYED]
+            elif finding.entity_type == "Study":
+                candidates = by_study.get(uid, ())
+            else:
+                candidates = ()
+            unique = {id(c): c for c in candidates}
+            if id(entity) in unique:
+                resolved.append(finding)
+                continue
+            if id(entity) not in top and items is None:
+                # Built once, and only when a finding's entity is neither
+                # at its address nor a top-level object.
+                items = {id(item) for inst in instances
+                         for item, _ in iter_item_tree(inst)}
+            if id(entity) in top or id(entity) in items:
+                resolved.append(finding)
+                continue
+            if len(unique) != 1:
+                resolved.append(dataclasses.replace(finding, entity=None))
+                continue
+            (target,) = unique.values()
+            if finding.entity_type == "Instance":
+                item = self._removal_address(target, finding.entity_path,
+                                             proposal.target_attr)
+                if (item is not None and proposal.action_type != "REMOVE_TAG"
+                        and resolve_item_path(target, finding.entity_path) is not item):
+                    gone.add(_remediation_key(finding))
+                    continue
+                target = item
+            resolved.append(dataclasses.replace(finding, entity=target))
+        return resolved, frozenset(gone)
+
+    def _nested_finding_owners(self, findings, by_uid) -> dict:
         """`id(item) -> Instance` for each finding raised inside a sequence.
 
         What `RemediationService._use_instance_owners` needs so that a
@@ -6230,18 +6446,18 @@ class DicomSession:
         would stamp and dirty the wrong one. A finding whose item is under
         no instance in the session names no owner, and is remediated on
         the item alone, as before.
+
+        `by_uid` is `_instances_by_uid()`, the map the findings were
+        resolved with (#644), so it carries the UID `redact()` replaced:
+        read under the new UID alone, a nested finding from before the
+        redaction had its item written and its instance neither marked
+        modified nor stamped, and the next save skipped the write.
         """
         nested = [f for f in findings
                   if f.entity_path and f.entity is not None
                   and f.entity_type == "Instance"]
         if not nested:
             return {}
-        by_uid = {}
-        for p in self.store.patients:
-            for st in p.studies:
-                for se in st.series:
-                    for inst in se.instances:
-                        by_uid.setdefault(inst.sop_instance_uid, []).append(inst)
         owners = {}
         for f in nested:
             for inst in by_uid.get(f.entity_uid, ()):
@@ -6250,7 +6466,7 @@ class DicomSession:
                     break
         return owners
 
-    def _removal_targets(self, findings) -> dict:
+    def _removal_targets(self, findings, by_uid) -> dict:
         """`id(finding) -> live object at its address` for each `REMOVE_TAG`.
 
         What `RemediationService._use_removal_targets` reads a removal's
@@ -6285,20 +6501,18 @@ class DicomSession:
         pass may have removed or emptied the sequence a nested finding
         lived in, and a clean reuse must still read that as done.
 
-        The entity itself is not replaced: REPLACE and SHIFT on a stale
-        report still act on the dead objects, which is #644.
+        Since #644 the findings reach here already resolved by
+        `_live_findings`, over the same `by_uid` (`_instances_by_uid()`,
+        the UID `redact()` replaced included): a finding rebound to the
+        live object matches by identity, a gone removal walks to the empty
+        item again, and what still reaches the `else` with a live entity
+        is one filed at another address, which declines.
         """
         removes = [f for f in findings
                    if f.remediation_proposal is not None and f.entity is not None
                    and f.remediation_proposal.action_type == "REMOVE_TAG"]
         if not removes:
             return {}
-        by_uid = {}
-        for p in self.store.patients:
-            for st in p.studies:
-                for se in st.series:
-                    for inst in se.instances:
-                        by_uid.setdefault(inst.sop_instance_uid, []).append(inst)
         targets = {}
         for f in removes:
             target = None
