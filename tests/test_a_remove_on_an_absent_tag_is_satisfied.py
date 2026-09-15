@@ -530,8 +530,9 @@ def test_a_satisfied_remove_logs_one_info_line_naming_the_tag_and_uid_only(caplo
 # declines, PASS, Institution Name and Patient's Name exported. The same
 # class reaches a hand-built finding whose `entity` is not the object at its
 # `entity_uid`/`entity_path`. The session now resolves that address and the
-# satisfied test reads the object it finds; nothing found, nothing
-# satisfied. REPLACE and SHIFT on a stale report are #644.
+# satisfied test reads the object it finds; a UID that names no single
+# instance satisfies nothing, and a nested path that breaks is the next
+# section's question. REPLACE and SHIFT on a stale report are #644.
 
 HELD_VALUES = ("JFK IMAGING CENTER", "TOSHIBA", "CompressedSamples", "CT01")
 STALE = "not the object this session holds at"
@@ -675,12 +676,41 @@ def _no_such_uid(session):
     return finding, ct, lambda: True
 
 
-def _no_such_item(session):
-    """The right instance, and a path to an item it does not have."""
+def _shorter_sequence_still_held(session):
+    """The right instance, a path to index 1 of a sequence that now holds
+    one item, and that one item still holds the tag -- the value a shift
+    moved, or one the finding never covered. The path breaks at the
+    sequence, and a remaining item holds the tag, so nothing says the
+    element is gone. The instance's own top level lacks the tag, so reading
+    it instead (review of #639 r3, `w1`) would call this satisfied."""
     ct, _ = _ct_and_mr(session)
-    finding = _finding(DicomItem(), "REMOVE_TAG", ABSENT,
-                       uid=ct.sop_instance_uid, path=(("0008,1140", 7),))
-    return finding, ct, lambda: True
+    held = DicomItem()
+    held.set_attr("0010,1000", "SHIFTED-PHI")
+    ct.add_sequence_item("0008,1140", held)
+    assert "0010,1000" not in ct.attributes
+    finding = _finding(DicomItem(), "REMOVE_TAG", "0010,1000",
+                       uid=ct.sop_instance_uid, path=(("0008,1140", 1),))
+    return finding, ct, lambda: held.attributes.get("0010,1000") == "SHIFTED-PHI"
+
+
+def _study_sharing_the_instance_uid(session):
+    """A Study whose Study Instance UID is its instance's SOP Instance UID
+    (hand-built), with Study Date deleted from the instance, and a
+    tag-keyed REMOVE filed against the Study. A Study has no `attributes`,
+    so a removal on it is never satisfied -- unless its address is looked
+    up among the instances, where the colliding instance lacks the tag
+    (review of #639 r3, F1: `n9`, `w2`)."""
+    ct, _ = _ct_and_mr(session)
+    study = next(st for p in session.store.patients for st in p.studies
+                 if ct in st.series[0].instances)
+    study.study_instance_uid = ct.sop_instance_uid
+    del ct.attributes["0008,0020"]
+    finding = PhiFinding(
+        entity_uid=ct.sop_instance_uid, entity_type="Study",
+        field_name="0008,0020", value=None, reason="test", tag="0008,0020",
+        entity=study, remediation_proposal=PhiRemediation(
+            action_type="REMOVE_TAG", target_attr="0008,0020", metadata={}))
+    return finding, ct, lambda: study.phi_status is not PhiStatus.REMEDIATED
 
 
 def _shared_uid(session):
@@ -700,35 +730,185 @@ def _shared_uid(session):
     pytest.param(_wrong_uid, id="wrong_uid"),
     pytest.param(_nested_mismatch, id="nested_mismatch"),
     pytest.param(_no_such_uid, id="no_such_uid"),
-    pytest.param(_no_such_item, id="no_such_item"),
+    pytest.param(_shorter_sequence_still_held, id="shorter_sequence_still_held"),
     pytest.param(_shared_uid, id="shared_uid"),
+    pytest.param(_study_sharing_the_instance_uid, id="study_sharing_the_instance_uid"),
 ])
-def test_a_remove_whose_entity_is_not_at_its_address_declines(tmp_path, build):
+def test_a_remove_whose_entity_is_not_at_its_address_declines(tmp_path, build, caplog):
     """Hand-built, through `anonymize(findings)`, beside a real removal of
     Patient's Birth Date on the CT so the pass has one success. Absence
     on an object the finding does not address is no evidence the element
     is gone. Red on 063ed59: 0 declines and PASS -- for `wrong_uid` and
     `nested_mismatch` with `TOSHIBA` and `OTHER-PID-123` exported.
 
+    Every finding carries a sentinel `value`, which neither the row nor
+    the log may repeat (review of #639 r3, `w5`). The Study's decline is
+    the arm's own (`matched no applicable arm`), not the address's.
+
     Kills: absence read on `finding.entity`; an address that resolves to
     nothing read as satisfied; liveness by UID alone, ignoring the path;
-    an ambiguous UID resolved to its first instance (`shared_uid`)."""
+    an ambiguous UID resolved to its first instance (`shared_uid`); a
+    broken path read on the instance's top level, or read satisfied though
+    a remaining item holds the tag (`shorter_sequence_still_held`); a
+    non-Instance finding resolved among the instances
+    (`study_sharing_the_instance_uid`); a value in the decline."""
     session = _session(tmp_path, ["CT_small.dcm", "MR_small.dcm"])
     with session:
         finding, ct, still_there = build(session)
+        finding.value = VALUE_SENTINEL
         assert "0010,0030" in ct.attributes
         companion = _finding(ct, "REMOVE_TAG", "0010,0030",
                              uid=ct.sop_instance_uid)
 
-        assert session.anonymize([finding, companion]) == 1
+        with caplog.at_level(logging.DEBUG, logger="isocenter"):
+            assert session.anonymize([finding, companion]) == 1
 
         assert "0010,0030" not in ct.attributes
         assert still_there()
         declines = _declined(session)
         assert len(declines) == 1, declines
-        assert STALE in declines[0], declines
-        assert not any(v in declines[0] for v in ("TOSHIBA", "OTHER-PID-123")), declines
+        expected = NO_ARM if finding.entity_type == "Study" else STALE
+        assert expected in declines[0], declines
+        assert not any(v in declines[0] for v in (
+            "TOSHIBA", "OTHER-PID-123", "SHIFTED-PHI", VALUE_SENTINEL)), declines
+        assert VALUE_SENTINEL not in caplog.text
         assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]
+
+
+VALUE_SENTINEL = "VALUE-SENTINEL-626"
+
+
+def test_a_shared_uid_resolves_to_the_instance_the_finding_names(tmp_path):
+    """Two instances holding one UID: A lacks Institution Name, B holds
+    it. A finding whose entity is A is at its address -- A's path leads to
+    A -- so its removal is satisfied on A, and B keeps its value, which
+    the finding never named. The ambiguous case, an entity at neither, is
+    `shared_uid` above. A guard, green before.
+
+    Kills: the identity match dropped, so a shared UID resolves only when
+    one instance holds it (review of #639 r3, `w3`)."""
+    session = _session(tmp_path, ["CT_small.dcm", "MR_small.dcm"])
+    with session:
+        a, b = _ct_and_mr(session)
+        b.sop_instance_uid = a.sop_instance_uid
+        del a.attributes[ABSENT]
+        assert b.attributes.get(ABSENT) == "TOSHIBA"
+
+        session.anonymize([_finding(a, "REMOVE_TAG", ABSENT, uid=a.sop_instance_uid)])
+
+        assert _declined(session) == []
+        assert a.phi_status is PhiStatus.REMEDIATED
+        assert b.attributes.get(ABSENT) == "TOSHIBA"
+
+
+# ---------------------------------------------------------------------------
+# A path the first pass broke
+# ---------------------------------------------------------------------------
+#
+# Review of #639 r3 (M1). Reading "nothing at the address" as a decline
+# regressed a clean reuse: a nested removal whose sequence the first pass
+# removed or emptied names an address that no longer resolves, and
+# OBXXXX1A.dcm's second pass wrote 42 declines and graded REVIEW_REQUIRED
+# on d7a2a3d, where 063ed59 graded PASS. The path is now walked as deep as
+# it resolves; a break at a sequence is satisfied when that sequence is
+# gone from the deepest live parent, or when no item it still holds holds
+# the tag -- and never by reading the instance's own top level.
+
+
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_obxxxx1a_reused_writes_no_decline_and_grades_pass(tmp_path, mode):
+    """The review's fixture: pydicom's `OBXXXX1A.dcm`, whose private
+    sequences the default floor removes whole, `anonymize(report)` twice.
+    Red on d7a2a3d: 42 declines on the second call, REVIEW_REQUIRED."""
+    session = _session(tmp_path, ["OBXXXX1A.dcm"])
+    with session:
+        report = session.audit()
+        nested = [f for f in _removes(report) if f.entity_path]
+        assert len(nested) > 10, len(nested)
+        session.anonymize(report)
+        assert _declined(session) == [], mode
+
+        session.anonymize(report)
+
+        assert _declined(session) == [], mode
+        assert _grade(session, tmp_path) == ["PASS"]
+
+
+def _private_sequence(session, tmp_path):
+    """A private sequence whose item holds private tags: the floor's sweep
+    removes the nested tags, then the sequence."""
+    (inst,) = _instances(session)
+    item = DicomItem()
+    item.set_attr("0029,0010", "PRIVCREATOR")
+    item.set_attr("0029,1051", "PRIVATE-PHI-51")
+    inst.add_sequence_item("0029,1050", item)
+    return lambda: "0029,1050" not in inst.sequences
+
+
+def _emptied_sequence(session, tmp_path):
+    """`0008,1140: EMPTY` over an item holding `0010,1000` under
+    `REMOVE`: the pass removes the nested tag, then empties the sequence,
+    so the path's index is past a sequence of zero items."""
+    (inst,) = _instances(session)
+    item = DicomItem()
+    item.set_attr("0008,1150", SOP_CLASS)
+    item.set_attr("0008,1155", "1.2.3.4.5")
+    item.set_attr("0010,1000", "OTHER-PID-123")
+    inst.add_sequence_item("0008,1140", item)
+    path = tmp_path / "cfg.yaml"
+    path.write_text(json.dumps({"phi_tags": {
+        "0008,1140": {"name": "r", "action": "EMPTY"},
+        "0010,1000": {"name": "o", "action": "REMOVE"}}}), encoding="utf-8")
+    session.load_config(str(path))
+    return lambda: len(inst.sequences["0008,1140"].items) == 0
+
+
+@pytest.mark.parametrize("build", [
+    pytest.param(_private_sequence, id="private_sequence_removed"),
+    pytest.param(_emptied_sequence, id="sequence_emptied"),
+])
+@pytest.mark.parametrize("mode", MODES, indirect=True)
+def test_a_sequence_the_first_pass_detached_reuses_cleanly(tmp_path, build, mode):
+    """The review's minimal shapes. Red on d7a2a3d: 2 declines on the
+    private sequence, 1 on the emptied one, REVIEW_REQUIRED.
+
+    Kills: a broken path read as a decline whatever the live parent holds."""
+    session = _session(tmp_path, ["CT_small.dcm"])
+    with session:
+        detached = build(session, tmp_path)
+        report = session.audit()
+        assert [f for f in _removes(report) if f.entity_path], report.findings
+        session.anonymize(report)
+        assert detached()
+        assert _declined(session) == [], mode
+
+        session.anonymize(report)
+
+        assert _declined(session) == [], mode
+        assert _grade(session, tmp_path) == ["PASS"]
+
+
+def test_a_nested_remove_never_reads_the_instance_top_level(tmp_path):
+    """A nested finding under a sequence the instance no longer holds is
+    satisfied -- nothing is at its address -- and the instance's own
+    top-level element under the same tag is neither read nor removed: the
+    finding never named it. Top-level Institution Name is held here, so
+    reading the instance for the broken path would decline instead.
+
+    Kills: a broken path read on the instance (review of #639 r3, `w1`, in
+    the direction the shorter-sequence decline does not reach)."""
+    session = _session(tmp_path, ["CT_small.dcm", "MR_small.dcm"])
+    with session:
+        ct, _ = _ct_and_mr(session)
+        assert "0008,1140" not in ct.sequences
+        assert ct.attributes.get(ABSENT) == "JFK IMAGING CENTER"
+        finding = _finding(DicomItem(), "REMOVE_TAG", ABSENT,
+                           uid=ct.sop_instance_uid, path=(("0008,1140", 0),))
+
+        session.anonymize([finding])
+
+        assert _declined(session) == []
+        assert ct.attributes.get(ABSENT) == "JFK IMAGING CENTER"
 
 
 def test_without_the_session_absence_is_read_on_the_finding_entity():

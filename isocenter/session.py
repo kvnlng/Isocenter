@@ -6046,8 +6046,10 @@ class DicomSession:
 
         What `RemediationService._use_removal_targets` reads a removal's
         "already gone" against (review of #639): the object this session
-        holds at the finding's `entity_uid` and `entity_path`, or None when
-        nothing is there. `anonymize(findings)` does not rehydrate
+        holds at the finding's `entity_uid` and `entity_path` -- an empty
+        item where a nested path breaks at what a pass removed
+        (`_removal_address`) -- or None when the address cannot be read as
+        done. `anonymize(findings)` does not rehydrate
         `finding.entity`, so a report kept across `close()` and a reopen
         points at the first session's objects -- which its first pass
         cleaned -- and read there, every removal of an unsaved pass was
@@ -6062,9 +6064,17 @@ class DicomSession:
         the one whose path leads to the finding's own entity wins, as in
         `_nested_finding_owners`; failing that, a UID only one instance
         holds is followed, and an ambiguous one resolves to nothing. Only
-        `Instance` findings resolve: no other entity type has the
-        `attributes` dict a removal is satisfied against, so the rest map
-        to None and decline as they did.
+        `Instance` findings resolve, and only among the instances: a
+        finding on a Study, Series or Patient is looked up in its own
+        type's collection, and none of those has the `attributes` dict a
+        removal is satisfied against, so the rest map to None and decline
+        as they did. Looked up among the instances instead, a Study whose
+        UID a hand-built instance shares read that instance's absence
+        (review of #639 r3, F1).
+
+        A path that breaks is `_removal_address`'s question: the first
+        pass may have removed or emptied the sequence a nested finding
+        lived in, and a clean reuse must still read that as done.
 
         The entity itself is not replaced: REPLACE and SHIFT on a stale
         report still act on the dead objects, which is #644.
@@ -6090,9 +6100,56 @@ class DicomSession:
                     break
             else:
                 if len(candidates) == 1:
-                    target = resolve_item_path(candidates[0], f.entity_path)
+                    target = self._removal_address(
+                        candidates[0], f.entity_path,
+                        f.remediation_proposal.target_attr)
             targets[id(f)] = target
         return targets
+
+    @staticmethod
+    def _removal_address(instance, path, tag):
+        """The object a removal's absence is read on, for a finding whose
+        UID resolved to `instance` but whose entity is not the item there.
+
+        `path` is walked as deep as it resolves (review of #639 r3):
+
+        - **It resolves:** the item at its end, read as any item is.
+        - **It breaks at a sequence the deepest live parent does not
+          hold:** an empty `DicomItem` -- nothing is at the address, so
+          the removal's end state holds. This is the clean reuse the walk
+          exists for: the floor's private sweep removes a private sequence
+          after the tags inside it, and on d7a2a3d `OBXXXX1A.dcm`'s second
+          pass read each of its 42 nested removals as a decline.
+        - **It breaks at an index past the items that sequence still
+          holds:** an empty `DicomItem` only when no remaining item holds
+          the tag anywhere beneath it -- zero items, after an `EMPTY`,
+          satisfies vacuously -- and None otherwise. **Not** "shorter
+          means gone": an item that shifted into a lower index, or one the
+          finding never covered, still carries the value into the export,
+          and an address names a position, not a value.
+
+        **Never the instance itself** for a nested path. Its top-level
+        element under the same tag is not the element the finding names;
+        reading it would call a nested removal done because a different
+        element was absent, and would decline one because a different
+        element was held. #57's decoy, read in the other direction.
+        """
+        from .entities import DicomItem, _canonical_tag  # pylint: disable=import-outside-toplevel
+
+        item = instance
+        for sequence_tag, index in path or ():
+            sequence = item.sequences.get(sequence_tag)
+            if sequence is None:
+                return DicomItem()
+            if index >= len(sequence.items):
+                key = _canonical_tag(tag)
+                for remaining in sequence.items:
+                    for nested, _ in iter_item_tree(remaining):
+                        if key in nested.attributes or key in nested.sequences:
+                            return None
+                return DicomItem()
+            item = sequence.items[index]
+        return item
 
     @staticmethod
     def _live_target(instance, finding):

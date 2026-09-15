@@ -1019,8 +1019,8 @@ class RemediationService:
         And only on the object the finding addresses. Under a session the
         caller passes `_removal_subject`'s answer, the live object at the
         finding's `entity_uid` and `entity_path`, not `finding.entity`, and
-        None when nothing is there, which has no `attributes` and so
-        declines: a report kept across a reopen, or a hand-built finding
+        None when the address cannot be read as done, which has no
+        `attributes` and so declines: a report kept across a reopen, or a hand-built finding
         filed under another instance's UID, read absence on an object
         export never writes (review of #639 r2).
 
@@ -1191,7 +1191,8 @@ class RemediationService:
         self._instance_owners = self._MappingProxyType(dict(owners))
 
     #: `id(finding) -> the object the session holds at its address` for
-    #: the `REMOVE_TAG` findings of this pass, None where nothing is there
+    #: the `REMOVE_TAG` findings of this pass, None where the address
+    #: cannot be read as done
     #: (`Session._removal_targets`, review of #639). **None as the whole
     #: map means no session**, not "resolved nothing": a service used
     #: without one -- the direct tests, hand-built findings -- has no graph
