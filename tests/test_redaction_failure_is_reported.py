@@ -1081,8 +1081,7 @@ def test_a_failed_persist_on_the_serial_arm_raises_and_leaves_the_instance_as_fo
 
     assert fired == [1], "the persist never reached its write"
     assert [uid for uid, _ in excinfo.value.failures] == [before[0]]
-    # Spelled by its `strerror`, without `[Errno 5]` (#591).
-    assert "OSError: EIO injected" in excinfo.value.failures[0][1]
+    assert "OSError: [Errno 5] EIO injected" in excinfo.value.failures[0][1]
     _assert_left_as_found(session, inst, before, db, "EIO injected")
 
 

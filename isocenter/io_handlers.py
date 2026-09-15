@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1631 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1634 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1626 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1629 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -2933,13 +2933,9 @@ def ingest_worker(fp: str) -> Tuple:
             except Exception as e:
                 # If decompression fails (missing codec), we cannot ingest safely for sidecar usage.
                 # The path rides the meta slot, as in the blanket except
-                # below: the parent keys the ERROR row by it and hands it
-                # back in `IngestSummary.failures` (#211, #591). The
-                # reason is spelled without paths, because it is the
-                # row's text and an `OSError` names the file it failed on.
+                # below, so the parent's ERROR row can name the file (#211).
                 return ({'path': fp}, None, None, None, None, None, None,
-                        "Decompression Failed: "
-                        f"{describe_exception_without_paths(e)}")
+                        f"Decompression Failed: {describe_exception(e)}")
 
         elif any(kw in ds for kw in ("FloatPixelData", "DoubleFloatPixelData")):
             # The float pair rides the sidecar too, and until #183 it did
@@ -3099,59 +3095,12 @@ def ingest_worker(fp: str) -> Tuple:
         return (meta, inst, p_bytes, p_hash, p_alg, w_bytes, w_hash, None)
     except Exception as e:
         # `{'path': fp}` rather than None in the meta slot, so the
-        # parent can key its ERROR row by the file and return the path
-        # in `IngestSummary.failures` without parsing the prose; the
-        # arity -- unpacked at every call site -- does not change
-        # (#211). The reason is spelled without paths (#591): it is the
-        # row's text, and `str()` of an `OSError` built on a source path
-        # is `[Errno 13] Permission denied: '/.../Smith_John/x.dcm'`,
-        # whose folder is often named for the patient.
+        # parent can name the file in its ERROR row without parsing the
+        # prose. The reason travels as the error string it always was;
+        # the arity -- unpacked at every call site -- does not change
+        # (#211).
         return ({'path': fp}, None, None, None, None, None, None,
-                describe_exception_without_paths(e))
-
-
-def _ingest_file_key(path) -> str:
-    """How an ingest row names a source file: a key, not the path (#591).
-
-    The first eight hex digits of the sha256 of the path's filesystem
-    bytes. Source trees are often named for the patient
-    (`Smith_John_MRN4455/`), and a row is read in the report, the
-    console and the audit table before any de-identification has run,
-    so the path itself goes only to `isocenter.log` (the pairing line
-    `_file_key_logged` writes) and to `IngestSummary.failures`, which
-    the caller already holds. The string hashed is exactly the path in
-    `IngestSummary.failures`, so a caller can recompute a row's key.
-
-    **A digest, not a secret.** Anyone who can guess a file's full path
-    can recompute its key and confirm the guess. That was ruled
-    acceptable for 0.9.8 (ruled on #591): a keyed form either changes per
-    session, so a decline row could not name a holder ingested earlier,
-    or needs the project secret, which ingest must not create. The
-    derivation lives here alone so that changing it is one line.
-
-    **`os.fsencode`, not `str.encode`.** `os.walk` hands back a
-    filename that is not valid UTF-8 as surrogate escapes, and encoding
-    such a string as UTF-8 raises `UnicodeEncodeError` -- inside
-    `_record_failure`, replacing the failure being recorded with a new
-    one. `os.fsencode` gives the file's real name back.
-    """
-    return hashlib.sha256(os.fsencode(path)).hexdigest()[:8]
-
-
-def _file_key_logged(logger, path) -> str:
-    """`_ingest_file_key`, after one INFO line pairing the key with the path.
-
-    INFO, because with the default handlers INFO reaches `isocenter.log`
-    and not the console (`configure_logger`): the log is where an
-    operator turns a key back into a file, and the console is read in
-    places the path must not reach. Under `ISOCENTER_LOG_LEVEL=WARNING`
-    or above the log loses the pairing; `IngestSummary.failures` still
-    carries each failed file's path, and a declined file's key can be
-    recomputed from a path the caller already has.
-    """
-    key = _ingest_file_key(path)
-    logger.info("Ingest file key %s is %s", key, path)
-    return key
+                describe_exception(e))
 
 
 @dataclass
@@ -3167,8 +3116,7 @@ class IngestSummary:
     A file takes exactly one of four routes, and they are four fields
     because they answer different questions: `ingested` reached the
     graph; `failures` were rejected with a reason (and each has an
-    `ERROR` audit row, keyed `_ingest_file_key(path)`, that carries the
-    reason and never the path, #591); `declined` were refused because the session
+    `ERROR` audit row); `declined` were refused because the session
     already holds their SOP Instance UID -- as the redacted copy's
     pre-redaction identity (#238), or as the UID of another instance
     (#431) -- each audited as `WARNING` and never read into the store;
@@ -3177,10 +3125,8 @@ class IngestSummary:
     declines it again.
     """
     ingested: int = 0
-    #: `(path, reason)` per rejected file. The `ERROR` audit row carries
-    #: the same reason under `_ingest_file_key(path)` rather than the
-    #: path (#591), so the summary and the trail still cannot disagree:
-    #: the key is recomputable from the path here.
+    #: `(path, reason)` per rejected file -- the same pair the `ERROR`
+    #: audit row carries, so the summary and the trail cannot disagree.
     failures: List[Tuple[str, str]] = field(default_factory=list)
     declined: int = 0
     skipped: int = 0
@@ -3236,7 +3182,7 @@ class DicomImporter:
         # #431 keeps the first file linked for a duplicated SOP Instance
         # UID, so without this the same folder kept a different file on a
         # different volume (#450). The key is the path string as built
-        # above, the one the declined row's file key hashes: not `abspath` or
+        # above, the one the declined row prints: not `abspath` or
         # `realpath`, which would reorder a symlinked tree, and not
         # locale-aware, which would differ by machine.
         all_files.sort()
@@ -3430,28 +3376,21 @@ class DicomImporter:
             #181 gave the export side's failures, and the same reader:
             `get_audit_errors()` feeds the report's Exceptions section
             and bars the PASS grade, so a cohort that lost files does
-            not grade as though it did not. A file that failed to parse
-            has no SOP Instance UID to be named by, so the row names it
-            by `_ingest_file_key(path)`, in the entity column and in the
-            detail. That was the path until #591, and a source tree is
-            often named for the patient: the path reached the report,
-            the console and the audit table before any de-identification
-            could run. The path itself goes to `isocenter.log`, paired
-            with the key at INFO, and to `IngestSummary.failures`; the
-            reason is spelled without paths by the worker and the
-            linkage arm. Flattened and pipe-escaped for the same reason
-            as `_report_export_failures`: the detail is rendered
-            straight into a markdown table row.
+            not grade as though it did not. The path stands in the
+            entity column because a file that failed to parse has no
+            SOP Instance UID to be named by -- the fallback
+            `_report_export_failures` already uses. Flattened and
+            pipe-escaped for the same reason as there: the detail is
+            rendered straight into a markdown table row.
             """
-            key = _file_key_logged(logger, path)
             detail = " ".join(
-                f"Ingest failed for the file keyed {key}: {reason}".split()
+                f"Ingest failed for {path}: {reason}".split()
             ).replace("|", "\\|")
             logger.error(detail)
             failures.append((path, str(reason)))
             if store_backend is not None:
                 store_backend.log_audit(
-                    action_type="ERROR", entity_uid=key, details=detail)
+                    action_type="ERROR", entity_uid=path, details=detail)
 
         def _record_high_bit(uid, detail):
             """One HighBit row, at the top level or on a carried icon.
@@ -3524,11 +3463,9 @@ class DicomImporter:
                     # write here would also strand the frame (#235).
                     supersedes = superseded.get(inst.sop_instance_uid)
                     if supersedes:
-                        # By key, not path (#591): see `_record_failure`.
-                        key = _file_key_logged(logger, inst.file_path)
                         detail = (
-                            f"Not importing the file keyed {key}: SOP "
-                            f"Instance UID {inst.sop_instance_uid} is the "
+                            f"Not importing {inst.file_path}: SOP Instance "
+                            f"UID {inst.sop_instance_uid} is the "
                             f"pre-redaction identity of {supersedes}, which "
                             f"this session already holds. The file still "
                             f"carries the un-redacted original.")
@@ -3581,21 +3518,15 @@ class DicomImporter:
                     # because `held` is seeded from the graph (#450).
                     holder = held.get(inst.sop_instance_uid)
                     if holder is not None:
-                        # Both files by key, not path (#591): see
-                        # `_record_failure`. The log pairs each key with
-                        # its path; the holder's key is recomputable from
-                        # a path a later session still reads.
                         holder_path = holder.source_path or holder.file_path
                         holder_words = (
-                            "the instance ingested from the file keyed "
-                            f"{_file_key_logged(logger, holder_path)}"
+                            f"the instance ingested from {holder_path}"
                             if holder_path else
                             "an instance in this session that has no "
                             "source file")
-                        key = _file_key_logged(logger, inst.file_path)
                         detail = " ".join((
-                            f"Not importing the file keyed {key}: SOP "
-                            f"Instance UID {inst.sop_instance_uid} is already held by "
+                            f"Not importing {inst.file_path}: SOP Instance "
+                            f"UID {inst.sop_instance_uid} is already held by "
                             f"{holder_words}. A "
                             f"session holds one instance per SOP Instance "
                             f"UID; the first was kept and this file was not "
@@ -4072,20 +4003,15 @@ class DicomImporter:
                 except Exception as e:
                     # A parent-side failure is the same failure to the
                     # caller as a worker-side one: the file is not in the
-                    # store. It takes the same route (#211), and its
-                    # reason is spelled without paths for the same reason
-                    # as the worker's (#591).
-                    _record_failure(
-                        inst.file_path or '<unknown>',
-                        "Linkage Failed: "
-                        f"{describe_exception_without_paths(e)}")
+                    # store. It takes the same route (#211).
+                    _record_failure(inst.file_path or '<unknown>',
+                                    f"Linkage Failed: {describe_exception(e)}")
 
         logger.info(f"Successfully ingested {count} instances.")
         if failures:
             logger.warning(
                 f"Rejected {len(failures)} file(s) at ingest; each has an "
-                "ERROR audit row naming the file by its key and the "
-                "reason; isocenter.log pairs each key with its path.")
+                "ERROR audit row naming the file and the reason.")
         if declined_superseded:
             logger.warning(
                 f"Declined {declined_superseded} file(s) whose SOP Instance "
@@ -4095,7 +4021,7 @@ class DicomImporter:
             logger.warning(
                 f"Declined {declined_duplicate} file(s) whose SOP Instance "
                 "UID an instance in this session already holds; each has a "
-                "WARNING audit row naming both files by key.")
+                "WARNING audit row naming both files.")
 
         return IngestSummary(
             ingested=count, failures=failures,

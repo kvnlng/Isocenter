@@ -8,6 +8,7 @@ This module contains the core service logic for:
 
 import hashlib
 import json
+import traceback
 import gc
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -18,7 +19,7 @@ from .entities import (Instance, DicomItem, DicomSequence, PhiStatus,
                        iter_item_tree)
 from .pixel_geometry import PixelGeometry, resolve_pixel_geometry
 from .store import DicomStore
-from .logger import describe_exception, describe_exception_without_paths, get_logger
+from .logger import describe_exception, get_logger
 from .parallel import progress_bar
 
 
@@ -867,21 +868,13 @@ class RedactionService:
             # room for the programming error would drop real failed
             # redactions and re-open #213. Do not add traceback-frame
             # inspection to tell the two apart (#217).
-            #
-            # The traceback goes to the log at DEBUG, not to stderr through
-            # `traceback.print_exc()` (#591): a read failure's chained
-            # `OSError` names the source file, and a source tree is often
-            # named for the patient. The reason is spelled without paths
-            # for the same reason: it is the parent's `ERROR` row.
-            self.logger.debug("Redaction failed for %s", original_uid,
-                              exc_info=True)
-            reason = describe_exception_without_paths(e)
+            traceback.print_exc()
             # `original_uid`, not the live attribute: this line names the
             # identity the parent's failure row carries, and a sibling
             # worker may have moved `inst.sop_instance_uid` by now (#257).
-            self.logger.error(f"  Failed {original_uid}: {reason}")
+            self.logger.error(f"  Failed {original_uid}: {describe_exception(e)}")
             return RedactionOutcome(ok=False, sop_instance_uid=original_uid,
-                                    error=reason)
+                                    error=describe_exception(e))
         finally:
             # Memory cleanup only. No persist lives here any more: the
             # one in the `try` body is the only append this path makes
@@ -1152,13 +1145,12 @@ class RedactionService:
             except Exception as e:
                 # Broad on purpose, and a missing-argument `TypeError` is
                 # audited here like any other failure -- see the note in
-                # `execute_redaction_task` (#217). Spelled without paths,
-                # as there (#591).
-                reason = describe_exception_without_paths(e)
+                # `execute_redaction_task` (#217).
                 failures.append(
                     (original_uid,
-                     f"Redaction failed for {original_uid}: {reason}"))
-                self.logger.error(f"  Failed {inst.sop_instance_uid}: {reason}")
+                     f"Redaction failed for {original_uid}: "
+                     f"{describe_exception(e)}"))
+                self.logger.error(f"  Failed {inst.sop_instance_uid}: {describe_exception(e)}")
             finally:
                 # Memory cleanup only; the persist is in the `try` (#474).
                 #

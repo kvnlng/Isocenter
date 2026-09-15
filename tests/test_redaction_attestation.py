@@ -355,7 +355,7 @@ def test_a_yes_flag_without_an_image_type_does_not_break_the_risk_scan(
     **Detection, and it is not the failure mode #235 predicted.**
     Measured on `84113ab`, both levers: `redact()` raises
     `TypeError: 'NoneType' object is not iterable` from
-    `scan_burned_in_annotations` (`services.py:490`).
+    `scan_burned_in_annotations` (`services.py:491`).
 
     The route is the null write itself. `_apply_redaction_outcomes`
     copies `{"0008,0008": None, ...}` onto an instance whose source
@@ -375,7 +375,7 @@ def test_a_yes_flag_without_an_image_type_does_not_break_the_risk_scan(
 
     Fixed by not writing the null, not by hardening the reader. A guard
     on the read (`img_type = inst.attributes.get("0008,0008", [])` at
-    services.py line 510) would make the scan survive a value the graph
+    services.py line 511) would make the scan survive a value the graph
     should never have held; #235 is that the value is written at all.
     """
     monkeypatch.setenv(lever, "1")

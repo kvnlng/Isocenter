@@ -12,7 +12,7 @@ import numpy as np
 
 from . import Exporter, register
 from ..io_handlers import (ExportError, export_folder_names,
-                           format_study_date, LOSS_SCOPE_STANDARD, _NO_SOP_UID)
+                           format_study_date, LOSS_SCOPE_STANDARD)
 from ..logger import describe_exception_without_paths, get_logger
 from ..waveform import Waveform, WaveformChannel
 
@@ -593,17 +593,17 @@ class WfdbExporter(Exporter):
             # `EXPORT` line sum. That would need a third counter, which
             # #338 rules out.
             # `entity_uid` is the locating column of the compliance
-            # report's section 3.1 table. It chained on to
-            # `instance.source_path` for an instance with no SOP Instance
-            # UID, so a row nobody could look up by `UNKNOWN` could still
-            # be found -- and so the source path, whose folder is often
-            # named for the patient, reached the report (#591). It falls
-            # back to `"UNKNOWN"` now, like the `except` arm above. What
-            # that costs: two UID-less instances in one run file two
-            # rows that cannot be told apart by their entity. An instance
-            # with no SOP Instance UID is hand-built (ingest refuses
-            # one), so its caller holds the object.
-            uid = instance.sop_instance_uid or "UNKNOWN"
+            # report's section 3.1 table, so it chains the way
+            # `_report_export_losses` chains its own `DATA_LOSS` rows
+            # (`r.sop_instance_uid or r.output_path`) rather than
+            # collapsing straight to `"UNKNOWN"` like the `except` arm
+            # above -- that arm falls back on a worker result that may
+            # carry nothing at all, and this one has an instance in hand.
+            # A row keyed `UNKNOWN` is a row nobody can look up, and a
+            # second UID-less instance in the same run would file a
+            # second one indistinguishable from the first.
+            uid = (instance.sop_instance_uid or instance.source_path
+                   or "UNKNOWN")
             cause = ("nothing is held for this instance" if samples is None
                      else "a loader produced an empty array")
             # Single line and no `|`: this renders straight into a
@@ -614,8 +614,7 @@ class WfdbExporter(Exporter):
             detail = (
                 "Declared a Waveform Sequence but no sample data reached "
                 f"this export ({cause}), so no record was written.")
-            logger.warning(
-                f"{instance.sop_instance_uid or _NO_SOP_UID}: {detail}")
+            logger.warning(f"{uid}: {detail}")
             if store_backend is not None:
                 # `log_audit`, never `log_audit_batch` -- the reason is
                 # at the loop's `except` arm above.

@@ -58,7 +58,7 @@ from pydicom.uid import (ExplicitVRLittleEndian, ImplicitVRLittleEndian,
                          generate_uid)
 
 from isocenter.entities import Instance
-from isocenter.io_handlers import _ingest_file_key, ingest_worker
+from isocenter.io_handlers import ingest_worker
 from isocenter.session import DicomSession
 from isocenter.sidecar import SidecarManager
 
@@ -467,5 +467,5 @@ def test_a_file_with_no_file_meta_still_takes_the_decompression_failed_row(
     rows = _error_rows(db_path)
     assert len(rows) == 1, rows
     uid, details = rows[0]
-    assert uid == _ingest_file_key(str(path))
+    assert uid == str(path)
     assert "Decompression Failed" in details, details

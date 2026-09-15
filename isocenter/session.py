@@ -17,7 +17,7 @@ from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportError, ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
                           export_stamp_attributes, GRADED_LOSS_SCOPES,
-                          redaction_in_effect, _file_key_logged)
+                          redaction_in_effect)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
@@ -27,8 +27,7 @@ from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
 from .privacy import (PhiInspector, PhiFinding, PhiReport,
                       _is_replacement_id, _is_replacement_name, _owned_rule)
-from .logger import (configure_logger, describe_exception,
-                     describe_exception_without_paths, get_logger)
+from .logger import configure_logger, describe_exception, get_logger
 from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_REMOVED,
                         GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, generate_manifest_file
@@ -1139,12 +1138,6 @@ class DicomSession:
         already been mentioned would be state answering a question the
         graph answers. Zero unsaved instances is silent, so an ordinary
         double close says nothing extra.
-
-        **One emitter.** The message is a `WARNING` log line, and the
-        logger's console handler is what puts it on stdout. It was also
-        `print`ed, so every warning appeared on stdout twice (#643). The
-        cost of one emitter: under `ISOCENTER_LOG_LEVEL=ERROR` or above
-        the warning reaches neither the console nor the log.
         """
         try:
             unsaved = [inst
@@ -1172,16 +1165,9 @@ class DicomSession:
                 # `source_path` and not `file_path` -- redaction detaches
                 # `file_path` (see the field in `entities.py`), and
                 # redaction is exactly what leaves an instance dirty at
-                # close. Named by #591's file key, not the path: the path
-                # printed here on the console, and a source tree is often
-                # named for the patient (#643). The key still locates --
-                # `_file_key_logged` pairs it with the path in
-                # `isocenter.log`, at INFO, which the console does not
-                # show. `instance_number` is `int = 0` and never `None`,
+                # close. `instance_number` is `int = 0` and never `None`,
                 # so the last arm is total and the chain cannot raise.
-                i.sop_instance_uid
-                or (i.source_path and "the instance from the file keyed "
-                    f"{_file_key_logged(get_logger(), i.source_path)}")
+                i.sop_instance_uid or i.source_path
                 or f"<unidentified instance {i.instance_number}>"
                 for i in unsaved[:3])
             if len(unsaved) > 3:
@@ -1192,6 +1178,7 @@ class DicomSession:
                 f"{named}. Call save(sync=True) before close() to keep "
                 f"them.")
             get_logger().warning(message)
+            print(f"WARNING: {message}")
         except Exception:  # pylint: disable=broad-except
             # A diagnostic that cannot run is a diagnostic that is
             # missing, which is what the caller had before this existed.
@@ -2063,7 +2050,7 @@ class DicomSession:
         (bounded as above) and then proceeds. Each frame is appended
         under the sidecar gate; a result whose write cannot get the gate
         in time is rejected like any other failed file, with an ERROR
-        audit row naming the file by its key and the reason (#591).
+        audit row naming the path and the reason.
         """
         print(f"Ingesting from '{directory}'...")
         # The pass-lock (#368), shared, around the import and not the
@@ -2112,9 +2099,8 @@ class DicomSession:
             new_files = summary.ingested + summary.failed + summary.declined
             print(f"  - {summary.failed} file(s) REJECTED -- ingested "
                   f"{summary.ingested} of {new_files} new files; see the "
-                  f"returned IngestSummary.failures for the paths, and the "
-                  f"ERROR audit rows, which name each file by a key that "
-                  f"isocenter.log pairs with its path, for the reasons.")
+                  f"returned IngestSummary.failures and the ERROR audit "
+                  f"rows for the paths and reasons.")
         if summary.declined:
             print(f"  - {summary.declined} file(s) DECLINED -- see the "
                   f"returned IngestSummary.declined and the WARNING audit "
@@ -5038,12 +5024,9 @@ class DicomSession:
                 # with `yield_exceptions=True` (#232). There is no outcome
                 # to name the instance with, and the row still has to
                 # exist.
-                # Without paths (#591): an `OSError` a worker died on
-                # names the file in its own `str()`.
                 failures.append(
                     ("UNKNOWN",
-                     "Redaction worker failed: "
-                     f"{describe_exception_without_paths(outcome)}"))
+                     f"Redaction worker failed: {describe_exception(outcome)}"))
                 continue
             else:
                 failures.append(

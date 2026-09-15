@@ -6,7 +6,7 @@ import pydicom
 from pydicom.dataset import Dataset
 from pydicom.pixels import apply_voi_lut
 from isocenter.entities import Instance
-from isocenter.logger import describe_exception, describe_exception_without_paths, get_logger
+from isocenter.logger import describe_exception, get_logger
 from isocenter.pixel_geometry import resolve_pixel_geometry
 
 logger = logging.getLogger(__name__)
@@ -389,11 +389,8 @@ def _load_and_ocr(instance: Instance) -> _InstanceOcr:
     try:
         pixel_array = instance.get_pixel_data()
     except Exception as e:  # pylint: disable=broad-exception-caught
-        # Without paths (#591): the read's chained `OSError` names the
-        # source file, and this reason reaches the export's rows.
         return _InstanceOcr(
-            [], False,
-            f"pixels could not be read: {describe_exception_without_paths(e)}")
+            [], False, f"pixels could not be read: {describe_exception(e)}")
     # An ingested SR carries its source file and no pixel element, and
     # `get_pixel_data()` answers `None` for it: neither read nor failed.
     if pixel_array is None:

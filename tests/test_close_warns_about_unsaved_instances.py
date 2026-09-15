@@ -35,13 +35,6 @@ and that matters: after #322 a redacted instance is nulled *and*
 `mark_modified()`, so a redaction session closed without saving fires
 this warning correctly. Building on that fixture would couple the two
 fixes' tests together.
-
-**No source path on stdout (#643).** An instance with no SOP Instance UID
-was named on the console by its `source_path`, and a source tree is often
-named for the patient. It is named by #591's file key now, and
-`isocenter.log` pairs the key with the path. The message reaches stdout
-once, through the logger's console handler: `close()` also `print`ed it,
-so every warning appeared twice.
 """
 from datetime import date
 
@@ -49,7 +42,6 @@ import numpy as np
 import pytest
 
 from isocenter.entities import Instance, Patient, Series, Study
-from isocenter.io_handlers import _ingest_file_key
 from isocenter.session import DicomSession
 
 CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
@@ -199,14 +191,6 @@ def test_an_unsaved_instance_edit_is_named_at_close(tmp_path, capsys):
     assert inst.sop_instance_uid in out, (
         "the warning names a count but not which instance, so a caller "
         "cannot tell what they are about to lose")
-    # The whole rendered message, once (#643): the logger's console
-    # handler prints it, and a second `print` beside it doubled every
-    # line.
-    message = (
-        f"Closing with 1 instance(s) holding unsaved changes; they will not "
-        f"reach the store. Affected: {inst.sop_instance_uid}. Call "
-        f"save(sync=True) before close() to keep them.")
-    assert out.count(message) == 1, out
 
 
 def test_a_dirty_parent_alone_does_not_warn(tmp_path, capsys):
@@ -287,9 +271,7 @@ def test_an_unsaved_instance_with_no_uid_is_still_warned_about(
 
     `source_path` and not `file_path` in the fallback: redaction detaches
     `file_path` (`entities.py` says so at the field), and redaction is
-    exactly what leaves an instance dirty at close. Named by its #591
-    key, not the path itself (#643): the key still locates, through the
-    pairing line in `isocenter.log`.
+    exactly what leaves an instance dirty at close.
     """
     session = _session(tmp_path, name="nouid")
     inst = _instances(session)[0]
@@ -306,12 +288,9 @@ def test_an_unsaved_instance_with_no_uid_is_still_warned_about(
         "None UID and the guard swallowed it, so a caller about to drop "
         "an unidentifiable instance was told nothing")
     assert "1 instance(s)" in out
-    assert (f"Affected: the instance from the file keyed "
-            f"{_ingest_file_key('/tmp/whatever.dcm')}.") in out, (
+    assert "whatever.dcm" in out, (
         "the warning fired but does not locate the instance; '1 unsaved "
         "instance' is the non-information #307 exists to replace")
-    assert "whatever.dcm" not in out, (
-        "the source path reached stdout (#643)")
 
 
 def test_an_unsaved_instance_with_an_empty_uid_is_still_located(
@@ -337,45 +316,9 @@ def test_an_unsaved_instance_with_an_empty_uid_is_still_located(
     out = capsys.readouterr().out
 
     assert WARNING_FRAGMENT in out
-    assert _ingest_file_key("/tmp/empty-uid.dcm") in out, (
+    assert "empty-uid.dcm" in out, (
         "the empty UID joined to nothing and the warning named no "
         "instance at all")
-    assert "empty-uid.dcm" not in out, (
-        "the source path reached stdout (#643)")
-
-
-def test_the_source_path_reaches_the_log_file_not_stdout(
-        tmp_path, capfd, monkeypatch):
-    """The key locates only if the log says which file it is (#643).
-
-    A source folder named for the patient: nothing on stdout or stderr
-    carries it, and `isocenter.log` has one line pairing the key in the
-    message with the full path. The log file is set before the session
-    is built, because every `Session()` replaces the handlers (#611).
-    """
-    log_file = tmp_path / "isocenter.log"
-    monkeypatch.setenv("ISOCENTER_LOG_FILE", str(log_file))
-    monkeypatch.delenv("ISOCENTER_LOG_LEVEL", raising=False)
-    mark = "Doe_Jane_MRN4455"
-    source = str(tmp_path / mark / "ct.dcm")
-
-    session = _session(tmp_path, name="logged")
-    inst = _instances(session)[0]
-    inst.sop_instance_uid = ""
-    inst.source_path = source
-    inst.mark_modified()
-
-    capfd.readouterr()
-    session.close()
-    captured = capfd.readouterr()
-    key = _ingest_file_key(source)
-
-    assert f"Affected: the instance from the file keyed {key}." in captured.out
-    assert mark not in captured.out + captured.err
-    assert any(key in line and source in line
-               for line in log_file.read_text().splitlines()), (
-        "isocenter.log does not pair the key with the path, so the key "
-        "on the console locates nothing")
 
 
 def test_an_instance_with_neither_uid_nor_source_path_is_still_located(
@@ -441,7 +384,9 @@ def test_the_truncation_still_counts_when_the_first_three_are_unidentified(
     assert "4 instance(s)" in out
     # One string, not three `in` checks: the point is that exactly three
     # are named, in order, through the terminal arm, and that the fourth
-    # is counted rather than named.
+    # is counted rather than named. `out` carries the message twice (the
+    # logger's console handler and the `print`), so counting occurrences
+    # would measure the channel rather than the rendering.
     assert ("Affected: <unidentified instance 1>, <unidentified instance 2>, "
             "<unidentified instance 3>, and 1 more." in out), (
         f"four instances with neither a UID nor a source path did not "
