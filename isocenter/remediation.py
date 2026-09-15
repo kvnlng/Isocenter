@@ -455,7 +455,7 @@ class RemediationService:
                                f"from {finding.entity_uid}")
                     action_type = "REMEDIATION_REMOVE"
             # 2. Python Object Attribute
-            elif hasattr(entity, proposal.target_attr):
+            elif self._holds_attr_to_remove(entity, proposal.target_attr):
                 setattr(entity, proposal.target_attr, None)
                 if hasattr(entity, "mark_modified"):
                     entity.mark_modified()
@@ -520,16 +520,19 @@ class RemediationService:
             return True
         else:
             # Every other non-success path above `return`s, so reaching
-            # here with an empty `action_type` means one of three things,
+            # here with an empty `action_type` means one of four things,
             # and none of them wrote a word before #301: a `REMOVE_TAG`
             # whose target is in neither `attributes` nor `sequences`; a
             # `REMOVE_TAG` against an entity with no `attributes` dict
             # *and* no matching Python attribute (the arm at the bottom
             # of that block is an `elif` on the outer `hasattr`, so both
-            # fall past it); or a proposal carrying an action type this
-            # method does not implement.
+            # fall past it); a `REMOVE_TAG` on a `Patient` or `Study`
+            # field the exporter stamps that is already None and on no
+            # instance beneath it, which the arm above now declines to
+            # write (`_holds_attr_to_remove`, #661); or a proposal
+            # carrying an action type this method does not implement.
             #
-            # The first of the three is the end state REMOVE asks for,
+            # The first and the third are the end state REMOVE asks for,
             # already there: satisfied, as an EMPTY on a sequence at
             # zero items is (#567), not a decline. As a decline,
             # `anonymize(report)` handed one report twice wrote a
@@ -539,14 +542,17 @@ class RemediationService:
             # instance to IDENTIFIED and graded a clean graph
             # REVIEW_REQUIRED (#626). The other two still decline.
             # `_remove_is_satisfied` says what "gone" means: a
-            # well-formed `gggg,eeee` tag absent under its canonical key.
-            # Any other spelling -- `00080080`, `InstitutionName` -- still
-            # declines, because its absence says nothing about the value.
+            # well-formed `gggg,eeee` tag absent under its canonical key,
+            # and for an owner a field the exporter stamps, None, with no
+            # instance copy left. Any other spelling -- `00080080`,
+            # `InstitutionName`, a Python attribute the export never
+            # writes -- still declines, because its absence says nothing
+            # about the value.
             #
             # One `else` here rather than an `else` nested in the
             # `attributes` arm: nested, it would cover only the first of
-            # the three, and it would stop covering a fourth if one were
-            # ever added above.
+            # the four, and neither the third, which arrives from the arm
+            # below it, nor a fifth if one were ever added above.
             #
             # Absence is read on the object the session holds at the
             # finding's address, not on `entity` (review of #639): a
@@ -838,10 +844,12 @@ class RemediationService:
     def _satisfied(self, finding: PhiFinding, declined) -> bool:
         """A proposal whose end state the item already holds (#567, #626).
 
-        Two callers, one case each: `_replace_on_item` returning `(None,
+        Two callers, three cases: `_replace_on_item` returning `(None,
         None)`, an `EMPTY` on a sequence already at zero items; and the
         bottom `else` of `_apply_single_remediation`, a `REMOVE_TAG`
-        whose tag is already gone from the item (`_remove_is_satisfied`).
+        whose tag is already gone from the item (#626), or whose
+        `Patient` or `Study` field is already None with no instance copy
+        of it left (#661) -- `_remove_is_satisfied` for both.
         Nothing was written,
         so there is no row and nothing is counted as applied -- and
         nothing is left to remove either, so the entity (and the instance
@@ -1049,6 +1057,83 @@ class RemediationService:
                     "patient it would be written to, so it is not written")
         return None
 
+    @classmethod
+    def _holds_attr_to_remove(cls, entity, attr) -> bool:
+        """Whether the `REMOVE_TAG` Python-attribute arm has something to
+        remove on `entity` (#661).
+
+        The arm's test was `hasattr(entity, attr)`, which is True of a
+        slots field holding None -- `_replace_attr_refused`'s trap
+        (#625), one arm over. So `0010,0010: {action: REMOVE}` over a
+        graph whose `patient_name` a pass had already cleared wrote
+        `Cleared Attribute patient_name on <uid>; removed from 0 instance
+        copies`, counted it as applied and stamped REMEDIATED: a row and
+        a count for work nothing did. Measured on 5e2d62d over CT_small
+        and MR_small, one report handed over twice in one session wrote
+        4 such rows and returned 24 where 20 remediations happened.
+
+        False where the field is already gone (`_owner_field_gone`). The
+        removal then falls past every arm to the bottom `else`, where it
+        is satisfied when the object at its address reads gone too, and
+        declines otherwise -- the route a removal whose tag an item no
+        longer holds has taken since #626.
+
+        Pure, with no `audit_buffer`, as `_replace_attr_refused` is, and
+        below the five pinned `mark_modified()` lines for the same
+        reason (#310): the arm's condition is a same-line swap.
+        """
+        return hasattr(entity, attr) and not cls._owner_field_gone(entity, attr)
+
+    @classmethod
+    def _owner_field_gone(cls, entity, attr) -> bool:
+        """Whether the end state a `REMOVE_TAG` asks for on a `Patient` or
+        `Study` field is already there (#661).
+
+        All four hold:
+
+        - `attr` is a field the exporter stamps from the entity
+          (`ENTITY_FIELD_TAGS`). The mirror of `_remove_is_satisfied`'s
+          well-formed-tag gate: absence under a name the export never
+          writes is no evidence about an element, so a removal on any
+          other name is the arm's business and behaves exactly as it did
+          (the arm's looseness there is #679).
+        - The entity is not a `DicomItem` (no `set_attr`): an item's
+          removal is the arm above this one.
+        - It has the attribute, and the attribute holds None. A `""` is a
+          present, empty value and is removed with its row, as #625 rules
+          for REPLACE -- and nothing turns one into the other behind this
+          reader's back: `Study.__setattr__` runs `normalize_study_date`
+          on every assignment, and `normalize_study_date("")` returns
+          `""`.
+        - No instance beneath the entity still holds the field's tag at
+          the top level. The same walk `_write_to_instances` does, reading
+          `attributes` the same raw way, so the writer and this reader
+          cannot disagree about one instance: a field cleared by hand
+          while the copies survive is **not** gone, and the removal takes
+          those copies away with its row, folding the instance-level
+          findings on the tag into it (#492, #496). Where something is
+          still there to write, it is written.
+
+        `getattr` with defaults throughout, because the arm fires for any
+        object carrying the field, test doubles included.
+        """
+        tag = cls.ENTITY_FIELD_TAGS.get(attr)
+        if tag is None or hasattr(entity, "set_attr") or not hasattr(entity, attr):
+            return False
+        if getattr(entity, attr) is not None:
+            return False
+        # A Patient walks its studies; a Study walks its own series and
+        # no sibling's -- `_write_to_instances`' walk, in its words.
+        studies = getattr(entity, "studies", None)
+        if studies is None:
+            studies = [entity]
+        for study in studies:
+            for series in getattr(study, "series", []):
+                for instance in getattr(series, "instances", []):
+                    if tag in getattr(instance, "attributes", {}):
+                        return False
+        return True
+
     def _belongs_to_holder(self, patient_id, scheme, holder) -> bool:
         """Whether `patient_id`, read under `scheme`, names the patient
         `holder`: a `(patient_id, jitter_scheme)` pair from `_use_holders`,
@@ -1087,13 +1172,25 @@ class RemediationService:
     @staticmethod
     def _remove_is_satisfied(entity, proposal) -> bool:
         """Whether a `REMOVE_TAG` that matched no arm is one whose target
-        is already gone from a `DicomItem` (#626).
+        is already gone -- from a `DicomItem` (#626), or from a `Patient`
+        or `Study` whose own field it names (#661).
 
-        True only when all three hold: the entity has an `attributes`
-        dict; `target_attr` lower-cased is a well-formed `gggg,eeee` tag
-        (`config_manager._is_tag_key`, the check a config's tag keys
-        already pass); and neither `attributes` nor `sequences` holds
-        that canonical key. Anything else declines, as it did.
+        **An item.** True only when all three hold: the entity has an
+        `attributes` dict; `target_attr` lower-cased is a well-formed
+        `gggg,eeee` tag (`config_manager._is_tag_key`, the check a
+        config's tag keys already pass); and neither `attributes` nor
+        `sequences` holds that canonical key. Anything else declines, as
+        it did.
+
+        **A Patient or a Study**, which has no `attributes` dict and so
+        was an immediate False until #661: `_owner_field_gone` answers,
+        and says what "gone" means for a field the exporter stamps from
+        the entity. Nothing else about an entity without that dict
+        changed -- a name outside `ENTITY_FIELD_TAGS`, a field still
+        holding a value, an instance copy still holding the tag, and
+        None (an address that named no object) are all False, so the
+        hand-built shapes that declined with `matched no applicable arm`
+        still do.
 
         Read canonically because the REMOVE arms above test the raw
         `target_attr`: a hand-built upper-case tag the item holds
@@ -1119,9 +1216,8 @@ class RemediationService:
         filed under another instance's UID, read absence on an object
         export never writes (review of #639 r2).
 
-        An entity with no `attributes` dict, and an action this method
-        does not implement, are the other two ways to the bottom `else`,
-        and both stay declines.
+        An action this method does not implement is the other way to the
+        bottom `else`, and stays a decline.
         """
         # pylint: disable=import-outside-toplevel
         from .config_manager import _is_tag_key
@@ -1131,7 +1227,10 @@ class RemediationService:
             return False
         attributes = getattr(entity, "attributes", None)
         if not isinstance(attributes, dict):
-            return False
+            # A Patient or a Study: its own field, not an element of an
+            # item, and read by the fields the exporter stamps (#661).
+            return RemediationService._owner_field_gone(
+                entity, proposal.target_attr)
         tag = _canonical_tag(proposal.target_attr)
         if not (isinstance(tag, str) and _is_tag_key(tag)):
             return False
