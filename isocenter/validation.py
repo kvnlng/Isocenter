@@ -1,4 +1,5 @@
 from pydicom.dataset import Dataset
+from pydicom.tag import BaseTag, Tag
 from typing import List
 
 
@@ -8,6 +9,15 @@ class IODValidator:
 
     Checks for the presence of Type 1 and Type 2 attributes based on SOP Class rules.
     Currently implements a subset of "Common" and "CTImage" modules.
+
+    **Validate, and fill.** The export worker asks `absent_type2` before it
+    asks `validate`, and writes each tag it names zero-length (#600): Type 2
+    means present and empty when unknown, so an absent one is a gap the
+    writer can close faithfully rather than a reason to refuse the file.
+    Both read `_modules_for`, so the fill covers exactly what the Type 2 arm
+    of `validate` would report and nothing this table does not know.
+    `validate`'s Type 2 arm is kept: it is the guard that goes red if the
+    fill ever stops running. Type 1 is never filled.
     """
 
     _MODULE_DEFINITIONS = {
@@ -42,6 +52,37 @@ class IODValidator:
     }
 
     @staticmethod
+    def _modules_for(ds: Dataset) -> List[str]:
+        """The module names this table holds for `ds`'s SOP class, or `[]`.
+
+        The SOP class is the file meta's when the dataset has one -- the
+        export worker's `FileDataset` always does -- and the dataset's own
+        `SOPClassUID` otherwise. One spelling for `validate` and
+        `absent_type2`, so the fill and the refusal cannot read two SOP
+        classes.
+        """
+        sop = ds.file_meta.MediaStorageSOPClassUID if hasattr(
+            ds, 'file_meta') else ds.get("SOPClassUID")
+        return IODValidator._SOP_RULES.get(sop, [])
+
+    @staticmethod
+    def absent_type2(ds: Dataset) -> List[BaseTag]:
+        """Every Type 2 tag of `ds`'s modules that `ds` does not hold (#600).
+
+        Exactly the set `validate` reports as `[Type 2 Error]`: absent, not
+        empty, since an empty Type 2 element is conformant. Type 1 tags are
+        never named, absent or empty.
+        """
+        absent = []
+        for module in IODValidator._modules_for(ds):
+            for tag_str, req in IODValidator._MODULE_DEFINITIONS.get(
+                    module, {}).items():
+                tag = Tag(*(int(part, 16) for part in tag_str.split(',')))
+                if req == '2' and tag not in ds:
+                    absent.append(tag)
+        return absent
+
+    @staticmethod
     def validate(ds: Dataset) -> List[str]:
         """
         Validates the dataset against internal IOD rules based on SOP Class.
@@ -53,13 +94,7 @@ class IODValidator:
             List[str]: A list of error messages describing missing Type 1/2 attributes.
         """
         errors = []
-        sop = ds.file_meta.MediaStorageSOPClassUID if hasattr(
-            ds, 'file_meta') else ds.get("SOPClassUID")
-
-        if sop not in IODValidator._SOP_RULES:
-            return []
-
-        for module in IODValidator._SOP_RULES[sop]:
+        for module in IODValidator._modules_for(ds):
             for tag_str, req in IODValidator._MODULE_DEFINITIONS.get(module, {}).items():
                 group, elem = map(lambda x: int(x, 16), tag_str.split(','))
                 tag = (group, elem)
