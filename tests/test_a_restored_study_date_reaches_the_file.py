@@ -7,11 +7,14 @@ Measured on 57400d1 (3.12 and 3.14t, `probes-E/p566.py`): instance
 `20040119`, study shifted, the exported file shifted, and the split
 survived a save and reopen.
 
-The token is captured from the patient's *first* instance, so for a
-patient with several studies it holds one study's date (#583). Writing it
-onto every `Study` would export study 1's original date as study 2's, a
-fabrication; so only a single-study patient's `Study` takes it, and a
-multi-study restore leaves every study alone and says so once, by count.
+Until #583 the token was captured from the patient's *first* instance, so
+for a patient with several studies it held one study's date: writing it
+onto every `Study` would have exported study 1's original date as study
+2's, so only a single-study patient's `Study` took it, and a multi-study
+restore left every study alone and said so once, by count. Since #583 the
+lock writes one token per distinct set of values, captured per instance,
+so each study's instances carry a token holding that study's own date,
+and each `Study` takes its own, with no WARNING.
 """
 import logging
 from datetime import date
@@ -92,10 +95,17 @@ def test_a_single_study_restore_reaches_the_file_and_the_store(tmp_path):
         assert format_study_date(study.study_date) == first_shift
 
 
-def test_a_multi_study_restore_leaves_every_study_and_warns_once(tmp_path, caplog):
-    """Kills a sync onto every study. One WARNING, a count, no date, no ID."""
+def test_a_multi_study_restore_gives_each_study_its_own_date(tmp_path, caplog):
+    """Each study's instances carry their own token since #583, so each
+    `Study` takes its own date back, the store and the exported files say
+    so, and no Study Date WARNING is logged. Until #583 the one token held
+    study 1's date, every study kept its de-identified date, and one
+    WARNING gave the count. Kills the sync taken from the first token for
+    every study (M8: study 2 would export `20040119`) and #566's
+    single-study guard kept (every study keeps its shifted date)."""
     db, key, pseudonym, shifted = _locked_and_anonymized(
         tmp_path, ["20040119", "20050505"])
+    assert set(shifted.values()).isdisjoint({"20040119", "20050505"})
     with Session(db) as session:
         session.enable_reversible_anonymization(key)
         caplog.clear()
@@ -103,16 +113,17 @@ def test_a_multi_study_restore_leaves_every_study_and_warns_once(tmp_path, caplo
             session.recover_patient_identity(pseudonym, restore=True)
         after = {st.study_instance_uid: format_study_date(st.study_date)
                  for st in session.store.patients[0].studies}
-    assert after == shifted
-    warnings = [r.getMessage() for r in caplog.records
+        session.save(sync=True)
+        session.export(str(tmp_path / "out"), use_compression=False)
+    assert after == {study_uid("5661"): "20040119", study_uid("5662"): "20050505"}
+    assert not [r for r in caplog.records
                 if r.name == "isocenter" and r.levelno == logging.WARNING
-                and "Study Date" in r.getMessage()]
-    assert len(warnings) == 1, caplog.text
-    assert "2 studies" in warnings[0]
-    forbidden = ["20040119", "20050505", "2004-01-19", "2005-05-05", PID, pseudonym,
-                 *shifted.values()]
-    for text in forbidden:
-        assert text not in warnings[0], warnings[0]
+                and "Study Date" in r.getMessage()], caplog.text
+    assert _exported_study_dates(tmp_path / "out") == [
+        (study_uid("5661"), "20040119"), (study_uid("5662"), "20050505")]
+    with Session(db) as session:
+        assert {st.study_instance_uid: format_study_date(st.study_date)
+                for st in session.store.patients[0].studies} == after
 
 
 def test_the_study_count_is_taken_before_the_merge(tmp_path, caplog):
