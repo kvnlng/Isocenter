@@ -128,9 +128,9 @@ class ReversibilityService:
             # #2 and a reopened session answers with capture #1, with
             # nothing saying so. That is #173's shape one module over.
             #
-            # Stamped **before** the write, at this one site (#607):
-            # `embed_original_data` comes through here too, so every
-            # token this library embeds is vouched for. Before and not
+            # Stamped **before** the write, at this one site (#607): it
+            # is the only place this library embeds a token, so every
+            # token it embeds is vouched for. Before and not
             # after, for `record_remediation`'s reason -- a background
             # save between the two stores either a stamp without its
             # token (harmless: the stamp is keyed on the token) or, the
@@ -149,32 +149,6 @@ class ReversibilityService:
             # without saying how (#487, #435's class).
             self.logger.error(
                 f"Failed to embed token: {describe_exception(e)}")
-            raise
-
-    def embed_original_data(self, instance: Instance, original_attributes: Dict[str, Any]):
-        """
-        Serializes, encrypts, and embeds the provided attributes into the instance.
-
-        This is a higher-level wrapper for `generate_identity_token` + `embed_identity_token`.
-
-        Args:
-            instance (Instance): The instance to modify.
-            original_attributes (Dict[str, Any]): attributes to encrypt and store.
-        """
-        if not original_attributes:
-            return
-
-        try:
-            token = self.generate_identity_token(original_attributes)
-            self.embed_identity_token(instance, token)
-            self.logger.debug(
-                f"Embedded {
-                    len(token)} bytes of encrypted data into {
-                    instance.sop_instance_uid}.")
-
-        except Exception as e:
-            self.logger.error(
-                f"Failed to embed original data: {describe_exception(e)}")
             raise
 
     #: The first byte of every Fernet token: the format's version, of
@@ -208,9 +182,11 @@ class ReversibilityService:
         """
         if isinstance(content, str):
             # A lone surrogate is unencodable and raised out of every
-            # lock in the session, because the Q8 sniff walks every
-            # instance before any plan and the batch collects only
-            # `RuntimeError` (review of #633 round 2, P-4). Not ours,
+            # lock in the session where no key file existed yet, because
+            # the Q8 sniff walks every instance before any plan, and out
+            # of every lock of the patient carrying it otherwise; the
+            # batch collects only `RuntimeError` (review of #633 round 2,
+            # P-4; the scope measured in round 3, P-3). Not ours,
             # wherever the surrogate sits: no token of ours is spelled
             # outside base64url, so there is nothing for the key to
             # refuse -- and not `surrogateescape`, which would call a

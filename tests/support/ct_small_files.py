@@ -24,16 +24,21 @@ def study_uid(suffix):
     return f"{ROOT}.{suffix}"
 
 
-def write_ct(path, patient_id, suffix, study_date="keep", name=None):
+def write_ct(path, patient_id, suffix, study_date="keep", name=None,
+             accession=None):
     """Write CT_small under one study, one series and one instance.
 
     `study_date="keep"` leaves CT_small's own StudyDate; `None` deletes
     the element, so the scan raises no SHIFT_DATE and the study stays
     clean through a pass; any other value is written as the DA string.
+    `accession`, when given, is written as the Accession Number (CT_small
+    carries it blank).
     """
     ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
     ds.PatientID = patient_id
     ds.PatientName = name or f"Test^{patient_id}"
+    if accession is not None:
+        ds.AccessionNumber = accession
     ds.StudyInstanceUID = study_uid(suffix)
     ds.SeriesInstanceUID = f"{study_uid(suffix)}.1"
     ds.SOPInstanceUID = f"{study_uid(suffix)}.1.1"

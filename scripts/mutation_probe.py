@@ -278,7 +278,7 @@ TARGETS = {
                                     "tests/test_documented_zones_are_zone_space.py",
                                     "tests/test_floor_policy.py",
                                     "tests/test_redaction_export.py"], 30),
-    # 18 sites, exhaustive: 15 killed. Three files, 2s per pass.
+    # 45 sites, exhaustive: 45 killed. Six files, 18s per pass (3.12.14).
     #
     # tests/test_relock_identity_token.py is a hand extra (#441): it reaches
     # the module through `Session.lock_identities`, which the scan cannot
@@ -286,10 +286,10 @@ TARGETS = {
     # `item.set_attr(self.TAG_TRANSFER_SYNTAX_UID, ...)` (its
     # test_the_token_item_names_its_payload_transfer_syntax) and the
     # deleted `instance.mark_modified()` (its
-    # test_a_re_lock_reaches_the_store). On the two demanded files alone
-    # the row prints 6 survivors. tests/test_reversibility.py was measured
-    # as a candidate too, and stays off: before #439's tests it killed
-    # six mutants, and after them it kills nothing these three miss.
+    # test_a_re_lock_reaches_the_store); the four demanded files alone
+    # leave exactly those 2. tests/test_reversibility.py was measured
+    # as a candidate in #489, and stays off: before #439's tests it killed
+    # six mutants, and after them nothing the row's three files then missed.
     #
     # Three more were gaps until #439 and are killed since by
     # tests/test_relock_identity_token.py and
@@ -303,11 +303,11 @@ TARGETS = {
     # log gets, and it named a bare raise with an empty tail), and
     # tests/test_reversibility_coverage.py kills it since.
     #
-    # The three survivors, all inside `embed_original_data`: its call to
-    #     `self.embed_identity_token(instance, token)`, its DEBUG line, and
-    #     the ERROR in its `except`, which re-raises. The method has no
-    #     caller in isocenter/ and its two tests pass empty or raising
-    #     input, so the whole wrapper is dead (#488).
+    # No survivors since #488 deleted `embed_original_data`, a wrapper with
+    # no caller, 4 sites and the last 2 survivors (its DEBUG line, and the
+    # ERROR in its `except`, which re-raises): 47 of 49 became 45 of 45.
+    # tests/test_recovery_needs_the_key_it_was_locked_with.py (#615) kills
+    # nothing the other five miss: the row without it is also 45 of 45.
     "isocenter/reversibility.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                     "tests/test_a_lock_under_the_wrong_key_refuses.py",
                                     "tests/test_recovery_needs_the_key_it_was_locked_with.py",
@@ -559,6 +559,7 @@ TARGETS = {
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
     "isocenter/persistence.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_a_lock_whose_store_write_fails_raises.py",
                                   "tests/test_api_coherence.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_pre_096_store_is_not_reshifted.py",
@@ -680,6 +681,9 @@ TARGETS = {
     # budget.
     "isocenter/session.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                              "tests/test_a_restore_reads_the_token_it_was_given.py",
+                              "tests/test_a_lock_that_stashes_nothing_is_refused.py",
+                              "tests/test_a_lock_whose_store_write_fails_raises.py",
                               "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                               "tests/test_a_private_re_vr_is_recorded.py",
                               "tests/test_both_write_doors_stamp_one_answer.py",
@@ -925,6 +929,8 @@ TARGETS = {
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                "tests/test_a_lock_under_the_wrong_key_refuses.py",
+                               "tests/test_a_restore_reads_the_token_it_was_given.py",
+                               "tests/test_a_lock_that_stashes_nothing_is_refused.py",
                                "tests/test_an_empty_patient_id_is_still_a_patient.py",
                                "tests/test_a_private_re_vr_is_recorded.py",
                                "tests/test_both_write_doors_stamp_one_answer.py",
