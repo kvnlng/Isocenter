@@ -35,6 +35,10 @@ and that matters: after #322 a redacted instance is nulled *and*
 `mark_modified()`, so a redaction session closed without saving fires
 this warning correctly. Building on that fixture would couple the two
 fixes' tests together.
+
+**Once on stdout.** The message reaches stdout through the logger's
+console handler. `close()` also `print`ed it, so every warning appeared
+there twice; the `print` is gone.
 """
 from datetime import date
 
@@ -191,6 +195,13 @@ def test_an_unsaved_instance_edit_is_named_at_close(tmp_path, capsys):
     assert inst.sop_instance_uid in out, (
         "the warning names a count but not which instance, so a caller "
         "cannot tell what they are about to lose")
+    # The whole rendered message, once: the logger's console handler
+    # prints it, and a second `print` beside it doubled every line.
+    message = (
+        f"Closing with 1 instance(s) holding unsaved changes; they will not "
+        f"reach the store. Affected: {inst.sop_instance_uid}. Call "
+        f"save(sync=True) before close() to keep them.")
+    assert out.count(message) == 1, out
 
 
 def test_a_dirty_parent_alone_does_not_warn(tmp_path, capsys):
@@ -384,9 +395,7 @@ def test_the_truncation_still_counts_when_the_first_three_are_unidentified(
     assert "4 instance(s)" in out
     # One string, not three `in` checks: the point is that exactly three
     # are named, in order, through the terminal arm, and that the fourth
-    # is counted rather than named. `out` carries the message twice (the
-    # logger's console handler and the `print`), so counting occurrences
-    # would measure the channel rather than the rendering.
+    # is counted rather than named.
     assert ("Affected: <unidentified instance 1>, <unidentified instance 2>, "
             "<unidentified instance 3>, and 1 more." in out), (
         f"four instances with neither a UID nor a source path did not "
