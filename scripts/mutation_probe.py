@@ -536,7 +536,8 @@ TARGETS = {
                                   "tests/test_htj2k_decode.py",
                                   "tests/test_mid_stream_corruption_is_a_documented_limit.py",
                                   "tests/test_jpeg_extended_decode.py",
-                                  "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
+                                  "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py",
+                                  "tests/test_a_lossy_source_records_lossy_image_compression.py"], 30),
     # 453 sites. Until #383 this module had no row at all, so no mutant
     # of `_hold_sidecar_gate`, `_hold_pass_lock`, `_refuse_while_pass_open`,
     # `_flock_within`, `_SIDECAR_GATE_TIMEOUT_S`, the `:memory:` temp-file
@@ -876,7 +877,8 @@ TARGETS = {
                               "tests/test_a_shift_date_declines_a_target_that_moved.py",
                               "tests/test_a_replace_on_a_cleared_attribute_declines.py",
                               "tests/test_a_remove_on_an_absent_tag_is_satisfied.py",
-                              "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"],
+                              "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py",
+                              "tests/test_a_lossy_source_records_lossy_image_compression.py"],
                              30),
     # 196 sites. Until #419 this module had no row, so the persistence
     # bookkeeping every CLAUDE.md trap is about -- `mark_modified`,
@@ -1185,7 +1187,8 @@ TARGETS = {
                                           "tests/test_high_bit_is_a_header_warning.py",
                                           "tests/test_htj2k_decode.py",
                                           "tests/test_mid_stream_corruption_is_a_documented_limit.py",
-                                          "tests/test_jpeg_extended_decode.py"],
+                                          "tests/test_jpeg_extended_decode.py",
+                                          "tests/test_a_lossy_source_records_lossy_image_compression.py"],
                                          60),
 }
 
