@@ -30,7 +30,11 @@ from isocenter.entities import Instance, Patient, Series, Study
 from isocenter.io_handlers import ExportError
 from isocenter.session import DicomSession
 from isocenter.validation import IODValidator
-from tests.test_both_write_doors_stamp_one_answer import (
+# By module name, as `support.` is imported: pytest puts `tests/` on
+# `sys.path` for every module it collects. `tests.` resolves only once
+# some earlier module has put the repository root there, which a CI
+# checkout does not do before this file is collected.
+from test_both_write_doors_stamp_one_answer import (
     _hand_built, _image, _read_one, _session_export, _tree_export)
 
 CT_STORAGE = "1.2.840.10008.5.1.4.1.1.2"
