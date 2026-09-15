@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1619 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1622 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1620 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1623 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -5189,11 +5189,22 @@ def _write_back_nested_pixels(ds, inst, ctx, losses, *, warnings,
         # it is deliberate. An icon is a thumbnail, the saving is nil, and
         # a second encoder call per instance is not.
         item.add_new(Tag(group, element), vr, decoded.tobytes())
+        # A 1-bit icon is written as the top level writes a 1-bit image
+        # (#649): BitsAllocated from the array, which the loader returns
+        # one byte per sample, so BitsAllocated 8 with BitsStored 1 below.
+        # Left at the declared 1, the file held 15 unpacked bytes where a
+        # reader unpacks 2, and pydicom's `pixel_array` raised `TypeError`.
+        # PS3.3 C.7.6.1.1.6 permits 1 or 8. Re-packing to keep the declared
+        # 1 would be a second rule at a second depth. The graph keeps the
+        # declared value; only the file changes.
+        if bits == 1:
+            item.BitsAllocated = decoded.itemsize * 8
         # BitsStored and HighBit, by the top level's rule (#598). Only
         # where the item declares a BitsStored: a hand-built item with
-        # none is not given one. BitsAllocated and PixelRepresentation
-        # are left as declared -- the loader's dtype was built from them
-        # (`_nested_loader_metadata`), so the array already agrees.
+        # none is not given one. PixelRepresentation, and BitsAllocated
+        # other than 1, are left as declared -- the loader's dtype was
+        # built from them (`_nested_loader_metadata`), so the array
+        # already agrees.
         if declared_int(graph_item.attributes, "0028,0101") is not None:
             item.BitsStored, widened = _stored_width(
                 decoded, graph_item.attributes)

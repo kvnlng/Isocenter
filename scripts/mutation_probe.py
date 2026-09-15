@@ -681,7 +681,8 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_big_endian_source_keeps_its_values.py",
+    "isocenter/session.py": (["tests/test_a_one_bit_icon_exports_readable.py",
+                              "tests/test_a_big_endian_source_keeps_its_values.py",
                               "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
                               "tests/test_a_restore_reads_the_token_it_was_given.py",
