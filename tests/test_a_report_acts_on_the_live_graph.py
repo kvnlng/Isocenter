@@ -784,6 +784,12 @@ def test_a_report_from_another_store_writes_no_pseudonym_minted_there(tmp_path):
 
         got = _datasets(b, root / "out")
         assert {str(ds.PatientID) for ds in got.values()} == {"1CT1", "4MR1"}
+        # Every element, nested ones included: a nested Patient ID REPLACE
+        # writes through another arm than the top-level attribute does.
+        leaked = [(modality, el.tag, el.value) for modality, ds in got.items()
+                  for el in ds.iterall() if el.VR != "SQ"
+                  and any(p in str(el.value) for p in minted_by_a)]
+        assert not leaked, leaked
         declines = _declined(b)
         assert len(declines) == 2 and all(FOREIGN in d for d in declines), declines
         assert not any(p in _reason(d) or "1CT1" in _reason(d) for p in minted_by_a

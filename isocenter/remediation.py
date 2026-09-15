@@ -1012,8 +1012,8 @@ class RemediationService:
         under this service's secret is refused, whatever the entity. A
         legacy unkeyed pseudonym is not keyed-shaped and passes; so does
         anything with no secret to check against. Refused in the safe
-        direction too: a real Patient ID that happens to have the keyed
-        shape is not written over by one that does not verify.
+        direction too: a replacement value that merely has the keyed
+        shape and does not verify is not written, whatever produced it.
 
         Pure, with no `audit_buffer`: Pin A in
         `tests/test_frozen_surface.py` refuses a new callee that takes
