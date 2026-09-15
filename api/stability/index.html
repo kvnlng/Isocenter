@@ -1526,7 +1526,17 @@ in the graph; it is never a worker's copy (#412). The object is found
 by its UID. <code>ingest()</code> does not admit a second instance with an SOP
 Instance UID the graph already holds (#431), so only a graph built or
 edited by hand can carry one UID on more than one instance, and findings
-on such a UID all resolve to a single one of those instances.</p>
+on such a UID all resolve to a single one of those instances.
+<code>anonymize(findings)</code> never writes to an object outside
+<code>session.store</code> (#644). A finding whose <code>entity</code> is itself in the graph
+is acted on as it is, whatever its address says. Any other finding is
+resolved against the live graph at its <code>entity_uid</code> and <code>entity_path</code>
+(an instance's UID from before <code>redact()</code>, and a patient's original
+Patient ID after its pseudonym, included) and acts on the object found
+there, or declines when the address names no single object. A Patient
+ID is written, and a date shifted, only with a value that belongs to the
+live patient holding it; otherwise the finding declines. The findings
+passed are not modified.</p>
 <p><code>PhiReport.failures</code> is a list of <code>(entity_uid, reason)</code>, one per
 instance <code>scan_pixel_content()</code> could not read in full, and is always a
 list; <code>audit()</code>'s is always empty, because a failure in its workers
