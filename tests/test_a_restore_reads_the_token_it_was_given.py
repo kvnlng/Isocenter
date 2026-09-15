@@ -49,9 +49,10 @@ SEQ, CONTENT, SYNTAX = "0400,0500", "0400,0510", "0400,0520"
 TAGS = ["0010,0010", "0010,0020"]
 NO_TOKEN = ("no encrypted identity token on this patient's instances; was it "
             "locked with lock_identities() before anonymize()?")
-#: "Its de-identified Study Date", the words #566's multi-study sibling
-#: uses, not "the date it holds": where only the instance copy was blank,
-#: what the Study holds is the shifted date (review of #640, P-5).
+#: "Its de-identified Study Date", the words #566's multi-study WARNING
+#: used until #583 retired it, not "the date it holds": where only the
+#: instance copy was blank, what the Study holds is the shifted date
+#: (review of #640, P-5).
 UNREADABLE = ("The restored Study Date could not be read as a date, so the "
               "Study keeps its de-identified Study Date (#619).")
 
