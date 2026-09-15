@@ -271,12 +271,18 @@ def test_a_big_endian_un_value_is_kept_as_read_and_said(tmp_path):
     folder = _save(tmp_path, ds)
     db = str(tmp_path / "s.db")
     out = tmp_path / "out"
+    report = tmp_path / "report.md"
     with DicomSession(persistence_file=db) as session:
         assert not session.ingest(folder).failures
         session.export(str(out), use_compression=True)
+        session.generate_report(str(report))
     (written,) = _files(out)
     back = pydicom.dcmread(written)
 
+    # The WARNING bars PASS: on 448eb75 this source graded PASS with no row.
+    assert [line for line in report.read_text(encoding="utf-8").splitlines()
+            if "Validation Status" in line] == [
+        "| **Validation Status** | **REVIEW_REQUIRED** |"]
     assert bytes(back[0x00091010].value) == b"\x00\x01\x00\x02\x00\x03"
     assert bytes(_find(back, ((0x00111010, 0),), 0x00131010).value) == \
         b"\x00\x01\x00\x02"
