@@ -155,7 +155,15 @@ def describe_exception_without_paths(exc: BaseException) -> str:
     (`io_handlers._export_instance_worker`), `get_pixel_data()`'s
     `Lazy load failed for <source path>` and `Failed to decompress pixel
     data for <file name>`, and `_verify_readback`'s inner exception.
-    Name any further one here.
+    Then #591, at the ingest and pixel-read doors: `ingest_worker`'s
+    reasons and the linkage arm of `import_files` (a source file's
+    `OSError`); `get_pixel_data()`'s `Pixels missing and file not found`
+    `FileNotFoundError`, which names the instance and is raised in the
+    two-argument form so its `strerror` survives here; the redaction
+    reasons (`execute_redaction_task`, `redact_machine_instances`, and a
+    redaction worker that died) and the pre-export scan's `pixels could
+    not be read`, each of which spelled a read failure's chained
+    `OSError` whole. Name any further one here.
     """
     text = _type_and_reason(exc)
     cause = exc.__cause__

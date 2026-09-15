@@ -166,6 +166,7 @@ TARGETS = {
     "isocenter/automation.py": (["tests/test_automation.py"], 30),
     # 5 sites, exhaustive: all 5 killed. Seven files, 20.3s per pass.
     "isocenter/exporters/__init__.py": (["tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py",
+                                         "tests/test_an_ingest_row_names_no_path.py",
                                          "tests/test_murmur_annotations.py",
                                          "tests/test_study_date_roundtrip.py",
                                          "tests/test_wfdb_option_strictness.py",
@@ -425,6 +426,7 @@ TARGETS = {
                                   "tests/test_a_remove_on_an_absent_tag_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_an_ingest_row_names_no_path.py",
                                   "tests/test_a_missing_type_2_element_is_written_empty.py",
                                   "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                   "tests/test_a_restored_study_date_reaches_the_file.py",
@@ -684,6 +686,7 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                              "tests/test_an_ingest_row_names_no_path.py",
                               "tests/test_a_missing_type_2_element_is_written_empty.py",
                               "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
@@ -935,6 +938,7 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                               "tests/test_an_ingest_row_names_no_path.py",
                                "tests/test_a_missing_type_2_element_is_written_empty.py",
                                "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                "tests/test_a_lock_under_the_wrong_key_refuses.py",

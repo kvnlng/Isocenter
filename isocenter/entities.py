@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import os
 import threading
@@ -1894,7 +1895,16 @@ class Instance(DicomItem):
                     f"{describe_exception_without_paths(e)}"
                 ) from e
 
-        raise FileNotFoundError(f"Pixels missing and file not found: {self.file_path}")
+        # Named by the instance, not `self.file_path` (#591): the message
+        # reaches export and redaction rows, and a source tree is often
+        # named for the patient. The two-argument form is load-bearing:
+        # it sets `strerror`, which is what `describe_exception_without_paths`
+        # keeps of an `OSError`; built from a message alone, `strerror` is
+        # None and the rows would read a bare `FileNotFoundError`.
+        raise FileNotFoundError(
+            errno.ENOENT,
+            "Pixels missing and file not found for instance "
+            f"{self.sop_instance_uid}")
 
     def unload_waveform_data(self) -> bool:
         """Clear cached waveform samples to free memory.

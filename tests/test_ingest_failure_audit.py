@@ -19,8 +19,10 @@ scope.
 
 Three surfaces, each pinned below:
 
-- an `ERROR` audit row per rejected file, carrying the path and the
-  reason -- the same row shape `_report_export_failures` writes;
+- an `ERROR` audit row per rejected file, carrying the file's key and
+  the reason -- the same row shape `_report_export_failures` writes; the
+  key replaced the path in #591, which keeps a patient-named source
+  folder out of the report;
 - an `IngestSummary` returned by `session.ingest()` (and by
   `DicomImporter.import_files`), so "ingested 460 of 500" is
   discoverable without reading console output;
@@ -168,19 +170,19 @@ def test_the_summary_reaches_the_caller_with_the_count_and_the_reason(
 
 
 def test_a_rejected_file_writes_an_error_audit_row(partial_ingest):
-    """Path and reason, in the compliance trail rather than a log file.
+    """The file and the reason, in the compliance trail rather than a log file.
 
     `ERROR` and not `DATA_LOSS`: the scoping decision. Loss rows
     describe elements missing from ingested data; this file was never
     indexed at all, which is the failure vocabulary #181 gave the
-    export side. The entity column carries the path because a file that
-    failed to parse has no SOP Instance UID to be named by -- the same
-    fallback `_report_export_failures` uses.
+    export side. A file that failed to parse has no SOP Instance UID to
+    be named by, so the entity column carries the file's key: the path
+    until #591, which put a patient-named source folder in the report.
     """
     rows = _error_rows(partial_ingest["db_path"])
     assert len(rows) == 1, rows
     uid, details = rows[0]
-    assert uid == partial_ingest["bad_path"]
+    assert uid == io_handlers._ingest_file_key(partial_ingest["bad_path"])
     assert "|" not in details and "\n" not in details, (
         "the detail is rendered into a markdown table row")
 
@@ -408,7 +410,8 @@ def test_a_blanket_failure_with_no_message_is_recorded_and_named(
     assert len(calls) == 2, "the patched call was not reached by both files"
     assert summary.ingested == 0
     assert sorted(summary.failures) == sorted((p, "KeyError") for p in paths)
-    assert sorted(uid for uid, _d in rows) == sorted(paths), rows
+    assert sorted(uid for uid, _d in rows) == sorted(
+        io_handlers._ingest_file_key(p) for p in paths), rows
     assert all(d.endswith(": KeyError") for _u, d in rows), rows
 
 
@@ -431,7 +434,8 @@ def test_an_empty_reason_is_still_a_failure(tmp_path, monkeypatch):
 
     assert summary.ingested == 0
     assert summary.failures == [(paths[0], "")]
-    assert [uid for uid, _d in rows] == paths, rows
+    assert [uid for uid, _d in rows] == [
+        io_handlers._ingest_file_key(p) for p in paths], rows
 
 
 def test_a_linkage_failure_with_no_message_names_its_type(tmp_path, monkeypatch):

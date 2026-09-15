@@ -9,7 +9,9 @@ in was stored with no instances at all. A reload held one instance
 where the session had reported three, and nothing said so.
 
 The ruling: keep the first, decline the rest, each with a `WARNING` row
-naming the UID and both paths. The same holds across calls and across
+naming the UID and both files -- by path until #591, by each file's
+`_ingest_file_key` since, which keeps a patient-named source folder out
+of the report. The same holds across calls and across
 sessions, because both reduce to "the graph already holds this UID".
 
 Which file is kept is pinned: the one whose path sorts first among the
@@ -26,8 +28,10 @@ Each file's pixels are a constant array of a distinct value, so the
 kept instance's pixels say which file it came from, and so every file
 compresses to the same number of sidecar bytes (U5 compares sizes).
 Paths are `src/one/x.dcm` and `src/two/y.dcm`: neither is a substring of
-the other, so "the detail names both paths" cannot be satisfied by one.
+the other, so "the detail names both paths" could not be satisfied by
+one when the row carried paths; their keys are distinct too.
 """
+import errno
 import os
 import sqlite3
 
@@ -36,6 +40,7 @@ import pytest
 from pydicom.dataset import FileDataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
+from isocenter.io_handlers import _ingest_file_key
 from isocenter.session import DicomSession
 
 SC = "1.2.840.10008.5.1.4.1.1.7"
@@ -100,13 +105,17 @@ def _warning_rows(session):
 def _declined_and_holder(detail, paths):
     """Which path the row declines and which it names as the holder.
 
-    Read from the row itself, so the test never assumes an order.
+    Read from the row itself, so the test never assumes an order. The
+    row names each file by its key (#591), and no path at all.
     """
-    declined = [p for p in paths if detail.startswith(f"Not importing {p}:")]
+    declined = [p for p in paths if detail.startswith(
+        f"Not importing the file keyed {_ingest_file_key(p)}:")]
     assert len(declined) == 1, detail
     holder = [p for p in paths if p != declined[0]]
     assert len(holder) == 1
-    assert f"held by the instance ingested from {holder[0]}" in detail, detail
+    assert ("held by the instance ingested from the file keyed "
+            f"{_ingest_file_key(holder[0])}.") in detail, detail
+    assert not any(p in detail for p in paths), detail
     return declined[0], holder[0]
 
 
@@ -211,8 +220,10 @@ def test_a_second_call_duplicating_an_instance_in_the_graph_is_declined(
         assert second.failures == []
 
         (row,) = _warning_rows(session)
-        assert row[1].startswith(f"Not importing {y}:"), row[1]
-        assert f"held by the instance ingested from {x}" in row[1]
+        assert row[1].startswith(
+            f"Not importing the file keyed {_ingest_file_key(y)}:"), row[1]
+        assert ("held by the instance ingested from the file keyed "
+                f"{_ingest_file_key(x)}.") in row[1]
         _assert_the_holder_is_what_is_held(session, uid, x,
                                            {x: X_VALUE, y: Y_VALUE})
     finally:
@@ -240,11 +251,13 @@ def test_a_new_session_declines_a_duplicate_of_a_stored_instance(tmp_path):
         summary = reopened.ingest(str(tmp_path / "second"))
         assert (summary.ingested, summary.declined) == (0, 1)
         (row,) = _warning_rows(reopened)
-        assert row[1].startswith(f"Not importing {y}:"), row[1]
+        assert row[1].startswith(
+            f"Not importing the file keyed {_ingest_file_key(y)}:"), row[1]
         # The holder is a hydrated instance: its path comes back from the
-        # store's `source_path` column, and the row must name it rather
-        # than say it has none.
-        assert f"held by the instance ingested from {x}" in row[1], row[1]
+        # store's `source_path` column, and the row must name it -- by
+        # its key -- rather than say it has none.
+        assert ("held by the instance ingested from the file keyed "
+                f"{_ingest_file_key(x)}.") in row[1], row[1]
         _assert_the_holder_is_what_is_held(reopened, uid, x,
                                            {x: X_VALUE, y: Y_VALUE})
     finally:
@@ -377,7 +390,11 @@ def test_a_file_whose_linkage_failed_does_not_hold_the_uid(tmp_path,
         def first_write_fails(*args, **kwargs):
             calls.append(None)
             if len(calls) == 1:
-                raise OSError("injected: the first frame write fails")
+                # The errno form: an `OSError` is spelled by its
+                # `strerror` alone in the row (#591), and one built from a
+                # message alone has none.
+                raise OSError(errno.EIO,
+                              "injected: the first frame write fails")
             return real_write(*args, **kwargs)
 
         monkeypatch.setattr(sidecar, "write_frame", first_write_fails)
@@ -417,7 +434,8 @@ def test_a_holder_with_no_source_file_is_called_that(tmp_path):
         assert (summary.ingested, summary.declined) == (0, 1)
         (row,) = _warning_rows(session)
         detail = row[1]
-        assert detail.startswith(f"Not importing {y}:"), detail
+        assert detail.startswith(
+            f"Not importing the file keyed {_ingest_file_key(y)}:"), detail
         assert ("is already held by an instance in this session that has "
                 "no source file.") in detail, detail
         assert "ingested from" not in detail, detail

@@ -27,7 +27,8 @@ from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
 from .privacy import (PhiInspector, PhiFinding, PhiReport,
                       _is_replacement_id, _is_replacement_name, _owned_rule)
-from .logger import configure_logger, describe_exception, get_logger
+from .logger import (configure_logger, describe_exception,
+                     describe_exception_without_paths, get_logger)
 from .reporting import (ComplianceReport, PixelScanSummary, get_renderer, GAP_REMOVED,
                         GAP_RETAINED, GAP_UNRESOLVED)
 from .manifest import Manifest, ManifestItem, generate_manifest_file
@@ -2042,7 +2043,7 @@ class DicomSession:
         (bounded as above) and then proceeds. Each frame is appended
         under the sidecar gate; a result whose write cannot get the gate
         in time is rejected like any other failed file, with an ERROR
-        audit row naming the path and the reason.
+        audit row naming the file by its key and the reason (#591).
         """
         print(f"Ingesting from '{directory}'...")
         # The pass-lock (#368), shared, around the import and not the
@@ -2091,8 +2092,9 @@ class DicomSession:
             new_files = summary.ingested + summary.failed + summary.declined
             print(f"  - {summary.failed} file(s) REJECTED -- ingested "
                   f"{summary.ingested} of {new_files} new files; see the "
-                  f"returned IngestSummary.failures and the ERROR audit "
-                  f"rows for the paths and reasons.")
+                  f"returned IngestSummary.failures for the paths, and the "
+                  f"ERROR audit rows, which name each file by a key that "
+                  f"isocenter.log pairs with its path, for the reasons.")
         if summary.declined:
             print(f"  - {summary.declined} file(s) DECLINED -- see the "
                   f"returned IngestSummary.declined and the WARNING audit "
@@ -4820,9 +4822,12 @@ class DicomSession:
                 # with `yield_exceptions=True` (#232). There is no outcome
                 # to name the instance with, and the row still has to
                 # exist.
+                # Without paths (#591): an `OSError` a worker died on
+                # names the file in its own `str()`.
                 failures.append(
                     ("UNKNOWN",
-                     f"Redaction worker failed: {describe_exception(outcome)}"))
+                     "Redaction worker failed: "
+                     f"{describe_exception_without_paths(outcome)}"))
                 continue
             else:
                 failures.append(

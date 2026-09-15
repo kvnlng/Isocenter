@@ -778,20 +778,18 @@ def test_an_instance_with_no_waveform_sequence_files_nothing(tmp_path):
         session.close()
 
 
-def test_a_uid_less_instance_files_a_row_keyed_on_its_source_file(tmp_path):
+def test_a_uid_less_instance_files_a_row_keyed_unknown(tmp_path):
     """The fallback arm of the row's key, which nothing else reaches (#338).
 
     `entity_uid` is the locating column of section 3.1 of the compliance
-    report, and this arm is the only thing standing between a UID-less
-    instance and a row headed `UNKNOWN` -- which nobody can look up, and
-    which a second UID-less instance in the same run would duplicate
-    exactly. Every other test here has a UID, so without this the
-    fallback is code with no cover: it could collapse to a constant and
-    the suite would not notice.
-
-    `source_path` and not `file_path`, the same choice `close()`'s
-    warning makes for the same reason (#337): redaction detaches
-    `file_path` and leaves `source_path` true.
+    report. Until #591 this arm keyed a UID-less instance's row by its
+    `source_path`, and this test pinned that: a row headed `UNKNOWN` is
+    one nobody can look up. But a source tree is often named for the
+    patient, and the path put that name in the report. The row is keyed
+    `UNKNOWN` now, as the loop's `except` arm keys its own; the cost is
+    that two UID-less instances in one run file rows whose entities
+    cannot be told apart. Every other test here has a UID, so without
+    this the fallback is code with no cover.
     """
     import logging
 
@@ -811,12 +809,12 @@ def test_a_uid_less_instance_files_a_row_keyed_on_its_source_file(tmp_path):
             store_backend=session.store_backend)
 
         assert result is None
-        assert _data_loss_rows(session, "UNKNOWN") == [], (
-            "the row was keyed UNKNOWN while the instance carried a source "
-            "path; section 3.1 now names something nobody can look up")
-        rows = _data_loss_rows(session, instance.source_path)
+        assert _data_loss_rows(session, instance.source_path) == [], (
+            "the row was keyed by the source path, which puts a "
+            "patient-named folder in the report (#591)")
+        rows = _data_loss_rows(session, "UNKNOWN")
         assert len(rows) == 1, (
-            f"expected the row to be keyed on the source file, got {rows!r}")
+            f"expected the row to be keyed UNKNOWN, got {rows!r}")
     finally:
         session.close()
 
