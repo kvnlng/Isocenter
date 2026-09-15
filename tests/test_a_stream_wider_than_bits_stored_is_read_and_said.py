@@ -20,14 +20,16 @@ Measured on abcb3aa, a 12-bit stream under BitsAllocated 16 / BitsStored 8:
 For a conformant stream (precision at most BitsStored) nothing here
 changes: the guards at the bottom pin that.
 
-**The pylibjpeg half is argued here and measured elsewhere.** Only
-Pillow's route (`.50`, 8-bit) is available to this suite on pydicom's
-side; JPEG Lossless has no pydicom plugin here and decodes through the
-imagecodecs fallback. pydicom with pylibjpeg-libjpeg was measured in a
-throwaway environment for #622 (`.57`/`.70` 12-bit under BitsStored 8):
-masked by default, unmasked with `correct_unused_bits=False`, and equal to
-the source once sign-extended at the stream's precision, which is what
-`_decode_pixels` now does.
+**The pylibjpeg half is measured, not in CI.** Only Pillow's route
+(`.50`, 8-bit) is available to this suite on pydicom's side; JPEG Lossless
+has no pydicom plugin here and decodes through the imagecodecs fallback.
+pydicom with pylibjpeg-libjpeg was measured in a throwaway environment for
+#622 (pylibjpeg 2.1.0, pylibjpeg-libjpeg 2.4.0, pydicom 3.0.2; `.57`/`.70`
+12-bit under BitsStored 8): masked by default, unmasked with
+`correct_unused_bits=False`, and equal to the source once sign-extended at
+the stream's precision, which is what `_decode_pixels` now does. This
+file's wider-stream tests pass in that environment, and fail there with
+either half of that removed.
 """
 import logging
 import os

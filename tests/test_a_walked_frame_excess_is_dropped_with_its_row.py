@@ -272,6 +272,11 @@ def test_a_native_excess_is_kept_to_the_declared_frames(tmp_path):
     assert got["array"].reshape(-1).tolist() == list(range(8))
     assert len(got["written"]) == 1
     assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
+    # The read door refuses it too, where it returned three frames.
+    with pytest.raises(RuntimeError) as exc:
+        Instance(generate_uid(), SOP_CLASS, 1, file_path=path).get_pixel_data()
+    assert ("Pixel Data's length holds 3 whole frames; NumberOfFrames "
+            "declares 2") in str(exc.value), str(exc.value)
 
 
 def test_a_padded_native_frame_is_not_an_excess(tmp_path):
