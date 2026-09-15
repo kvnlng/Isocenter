@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1622 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1625 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1626 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1629 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -2827,11 +2827,13 @@ def ingest_worker(fp: str) -> Tuple:
         if "PixelData" in ds:
             # The offset table against NumberOfFrames, before the decode
             # (#418). Asked here, not left to the decoder: pydicom returns
-            # every frame the table names, so an excess used to be stored
-            # whole under a header that declared fewer, and the instance
-            # was accepted with no row and could never be read back -- the
-            # loader refused it later with an Integrity Error, against
-            # the wrong cause.
+            # every frame the table names -- and, with no table it walks
+            # by, every frame its walk of the fragments finds, or every
+            # whole frame a native element's length holds (#620) -- so an
+            # excess used to be stored whole under a header that declared
+            # fewer, and the instance was accepted with no row and could
+            # never be read back -- the loader refused it later with an
+            # Integrity Error, against the wrong cause.
             #
             # Excess: keep the declared frames. NumberOfFrames is the
             # dataset's declared shape, and frames beyond it are not

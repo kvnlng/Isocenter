@@ -1,7 +1,10 @@
 """A pixel decoder built on `imagecodecs`, and the frame-count check (#418).
 
 `offset_table_frame_count` compares the frame count an encapsulated
-`PixelData`'s offset table names with the one `NumberOfFrames` declares.
+`PixelData`'s offset table names -- or, with no table pydicom walks by,
+the frames pydicom's walk of the fragments finds, and for native data the
+whole frames the element's length holds (#620) -- with the one
+`NumberOfFrames` declares.
 It is shared by `Instance.get_pixel_data`'s file arm, by `ingest_worker`
 for the top level, by `_decode_nested_pixels` for an icon (#433), by
 `_decode_pixels`' imagecodecs fallback (#416) and by #524's
@@ -44,25 +47,31 @@ which every door reaches. The conversions the codec has already made
 **Its limit, stated.** An *empty* Basic Offset Table with no Extended
 Offset Table is legal (PS3.5 A.4) and names no frames, and the fragments
 alone do not say where one frame ends and the next begins -- one frame
-may legally span several fragments. So a multi-fragment file with an
-empty table cannot be checked. pydicom's decoder then walks the fragments
-by their codestreams' end markers and returns every frame it finds, not
-frame 0: a fragment beyond NumberOfFrames comes back as a frame the
-header does not declare, from `Instance.get_pixel_data()`, and ingest
-stores an array its geometry cannot reload, with no row (measured in the
-review of #606, F-r2-2; the same holds for an Extended Offset Table
-pydicom drops, `extended_offsets`). That is a known silence, not a
-closed one.
+may legally span several fragments. pydicom's decoder then walks the
+fragments by their codestreams' end markers and returns every frame it
+finds; until #620 nothing counted that walk, so a fragment beyond
+NumberOfFrames came back from `Instance.get_pixel_data()` as a frame the
+header does not declare, and ingest stored an array its geometry could
+not reload, with no row (review of #606, F-r2-2). `_walked_excess` now
+counts it with pydicom's own generator. Two shapes remain uncounted.
+NumberOfFrames 1, or absent, over several fragments with no table: the
+walk joins every fragment into one frame, so no excess is visible before
+the decode, and none after it either. And a native 1-bit frame that is
+not a whole number of bytes, where pydicom's own excess arithmetic
+raises rather than return the frames (`_native_excess`).
 """
 import struct
 import sys
+from io import BytesIO
 from itertools import islice
 from typing import Optional, Tuple, Union
 
 import numpy as np
 from pydicom.uid import UID
-from pydicom.encaps import generate_frames, parse_basic_offsets
+from pydicom.encaps import (generate_fragmented_frames, generate_frames,
+                            parse_basic_offsets, parse_fragments)
 from pydicom.pixels import convert_color_space
+from pydicom.pixels.decoders.base import DecodeRunner
 
 from .logger import describe_exception
 IMPORT_ERROR = None
@@ -255,12 +264,19 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     Returns:
         ``(table_frames, declared_frames, declared_raw, table_name)``,
         or None when there is nothing to compare: the transfer syntax is
-        not encapsulated (or cannot be read at all -- a `force=True` read
-        of a header-less file has an empty `file_meta`, #281), there is no
-        `PixelData`, the offset table is empty with no Extended Offset
-        Table beside it (the documented limit in the module docstring), or
-        the table does not parse. In every None case the caller decodes as
-        it did before this check existed; None never means "consistent".
+        cannot be read at all (a `force=True` read of a header-less file
+        has an empty `file_meta`, #281), there is no `PixelData`, the
+        table does not parse, or there is no table to count by and neither
+        pydicom's walk of the fragments (`_walked_excess`) nor, for native
+        data, the element's length (`_native_excess`) holds more frames
+        than declared. Those two report an excess only, never fewer, and
+        not the shapes the module docstring's limit names. In every None
+        case the caller decodes as it did before this check existed; None
+        never means "consistent".
+
+        ``table_name`` is the table's name, or `WALKED_FRAMES` or
+        `NATIVE_FRAMES` when no table counted (#620), and
+        `frame_count_mismatch_words` words each by what it is.
 
         ``declared_frames`` is ``NumberOfFrames`` as the decoder reads it,
         which is 1 when the element is absent or 0. Measured on pydicom
@@ -286,8 +302,7 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     # name the UID; this check runs outside `ingest_worker`'s decode `try`,
     # so raising here replaced that reason with one that did not.
     try:
-        if not ds.file_meta.TransferSyntaxUID.is_encapsulated:
-            return None
+        encapsulated = ds.file_meta.TransferSyntaxUID.is_encapsulated
     except (AttributeError, ValueError):
         return None
     if "PixelData" not in ds:
@@ -306,6 +321,11 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
                 if isinstance(declared_raw, int) and declared_raw > 0
                 else 1)
 
+    # Native: no table, and no fragments -- the element's length is what
+    # pydicom reads frames from (#620).
+    if not encapsulated:
+        return _native_excess(ds, declared, declared_raw)
+
     # The EOT first: when it is present the BOT is required to be empty
     # (PS3.5 A.4), so a BOT-only count would see nothing. Eight bytes per
     # frame, one 64-bit offset each. `ds.get` hands back the raw bytes
@@ -319,11 +339,22 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
     # and says it discarded one (measured, dev-F1/m1_count_*.raw). Read
     # through the walks' rule instead, the row went and frame 1 was lost
     # in silence. The count decides whether to report; it walks nothing.
+    #
+    # **A table whose count equals the declared one is not the last word
+    # when pydicom drops it** (#620). Its offsets then say nothing about
+    # the frames the decoder reads: pydicom walks the fragments, and the
+    # walk can find more. So that one shape -- a table pydicom will not
+    # walk by, agreeing with NumberOfFrames -- is asked of the walk too.
+    # A table that disagrees is reported from the table, as above; one
+    # pydicom walks by names every frame it reads.
     eot = ds.get("ExtendedOffsetTable")
     if eot:
         eot_bytes = getattr(eot, "value", eot)
-        return (len(eot_bytes) // 8, declared, declared_raw,
-                "Extended Offset Table")
+        counted = (len(eot_bytes) // 8, declared, declared_raw,
+                   "Extended Offset Table")
+        if counted[0] != declared or extended_offsets(ds) is not None:
+            return counted
+        return _walked_excess(ds, declared, declared_raw) or counted
 
     try:
         offsets = parse_basic_offsets(ds.PixelData)
@@ -334,8 +365,110 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
         # that runs next refuses such a buffer on its own terms.
         return None
     if not offsets:
-        return None
+        return _walked_excess(ds, declared, declared_raw)
     return (len(offsets), declared, declared_raw, "Basic Offset Table")
+
+
+#: The source `offset_table_frame_count` names when no table counted the
+#: frames: pydicom's walk of the fragments by their end markers, and a
+#: native element's length (#620). `frame_count_mismatch_words` gives
+#: these their own verb.
+WALKED_FRAMES = "Pixel Data's fragments"
+NATIVE_FRAMES = "Pixel Data's length"
+
+
+def _walked_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
+    """The frames pydicom's walk finds beyond NumberOfFrames, or None (#620).
+
+    Asked only where no table pydicom walks by names the frames: an empty
+    Basic Offset Table, or an Extended Offset Table it drops. pydicom's
+    decoder then walks the fragments (`generate_fragmented_frames`), and
+    with more fragments than declared frames it ends a frame at every
+    fragment whose last ten bytes hold an end marker -- which can find
+    more frames than NumberOfFrames, every one of them returned. Counted
+    here with that generator, so the count and the decoder cannot
+    disagree about how many there are.
+
+    Excess only: a walk that finds as many or fewer is None, and the
+    decode proceeds as it did. Fewer is not reported because the walk
+    cannot tell a short file from frames that span fragments without end
+    markers the search recognises; the decoder refuses a real shortfall
+    in its own words.
+
+    **NumberOfFrames 1 (or absent) is not walked**: pydicom joins every
+    fragment into one frame there, so no excess can be found -- the
+    stated limit in the module docstring. Nor is a buffer with no more
+    fragments than declared frames: pydicom reads one fragment per frame.
+
+    The walk's `warn_and_log` for a trailing fragment with no end marker
+    is **not suppressed**. It is the warning pydicom's own decode of this
+    file emits, and `warnings.catch_warnings` was ruled out in #472: on
+    3.12 it mutates the process-global filters, and this runs on threads.
+
+    Cost: one pass over the item headers (`parse_fragments`) on
+    encapsulated data with no table to count by; the walk, which copies
+    each fragment's bytes transiently, only when there are more fragments
+    than declared frames and at least two are declared.
+    """
+    if declared < 2:
+        return None
+    try:
+        buf = BytesIO(ds.PixelData)
+        # Past the Basic Offset Table item, as pydicom's generator reads
+        # it: counted on the raw bytes, the table item is a fragment too.
+        parse_basic_offsets(buf)
+        fragments, _offsets = parse_fragments(buf)
+        if fragments <= declared:
+            return None
+        walked = sum(1 for _frame in generate_fragmented_frames(
+            ds.PixelData, number_of_frames=declared))
+    except Exception:  # pylint: disable=broad-except
+        # Not this check's refusal to make: the decoder that runs next
+        # meets the same buffer and refuses it in its own words.
+        return None
+    if walked > declared:
+        return (walked, declared, declared_raw, WALKED_FRAMES)
+    return None
+
+
+def _native_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
+    """The whole frames a native element holds beyond NumberOfFrames (#620).
+
+    pydicom's rule, read from `DecodeRunner._validate_buffer`: a native
+    `PixelData` longer than its declared frames plus the one trailing pad
+    byte (PS3.5 7.1.1) holds `len // frame_length` whole frames, and when
+    that is more than NumberOfFrames the decoder returns every one. The
+    frame length is the runner's own, so a descriptor pydicom reads one
+    way cannot be counted another.
+
+    None when pydicom would not return an excess: no more whole frames
+    than declared; a frame length that is not a whole number of bytes (a
+    1-bit frame such as 3x5, where pydicom's own excess arithmetic raises
+    `TypeError` -- not silent, and the stated limit); `YBR_FULL_422`,
+    whose longer buffer pydicom reads as a wrong label rather than as
+    frames; a NumberOfFrames pydicom refuses (negative, or empty), for
+    which it returns no frames at all. Never raises: a dataset pydicom
+    cannot set up a runner for is refused by the decode that follows, in
+    its words.
+    """
+    if not (declared_raw is None or isinstance(declared_raw, int)
+            and declared_raw >= 0):
+        return None
+    try:
+        runner = DecodeRunner(ds.file_meta.TransferSyntaxUID)
+        runner.set_source(ds)
+        frame_length = runner.frame_length(unit="bytes")
+        if (not isinstance(frame_length, int) or frame_length <= 0
+                or runner.photometric_interpretation == "YBR_FULL_422"):
+            return None
+        actual = len(ds.PixelData)
+    except Exception:  # pylint: disable=broad-except
+        return None
+    expected = frame_length * declared
+    whole = actual // frame_length
+    if actual > expected + expected % 2 and whole > declared:
+        return (whole, declared, declared_raw, NATIVE_FRAMES)
+    return None
 
 
 def frame_count_mismatch(ds) -> Optional[str]:
@@ -376,7 +509,19 @@ def frame_count_mismatch_words(counted: FrameCount) -> str:
         declared_words = f"NumberOfFrames is {declared_raw} (invalid)"
     else:
         declared_words = f"NumberOfFrames declares {declared}"
-    return f"{table_name} names {table_frames} frames; {declared_words}"
+    # A table names its frames. The walk and the length do not name
+    # anything, and "names" would claim a count the file wrote (#620):
+    # the walk finds frames by end markers, and the length holds whole
+    # frames' worth of bytes, neither of which is a statement that they
+    # are frames.
+    if table_name == WALKED_FRAMES:
+        counted_words = (f"{table_name} hold {table_frames} frames by "
+                         f"their end markers")
+    elif table_name == NATIVE_FRAMES:
+        counted_words = f"{table_name} holds {table_frames} whole frames"
+    else:
+        counted_words = f"{table_name} names {table_frames} frames"
+    return f"{counted_words}; {declared_words}"
 
 
 #: The declared colour spaces whose decoded samples this handler converts
@@ -929,12 +1074,12 @@ def signed_codestream_refusal(ds) -> Optional[str]:
     frame the offset table names beyond NumberOfFrames is not read: ingest
     drops it with its #418 row, and its sign is not a reason to refuse the
     frames it keeps. The count is `offset_table_frame_count`'s reading.
-    **That is only an excess the count reports.** A fragment beyond
-    NumberOfFrames that no table names -- an empty offset table, or an
-    Extended one pydicom drops -- is not read here either, but pydicom's
-    walk decodes it as a further frame, Pillow shifts it if it is signed,
-    and nothing drops it: see the module docstring's limit (review of
-    #606, F-r2-2).
+    **That includes an excess no table names** (#620). A fragment beyond
+    NumberOfFrames under an empty offset table, or an Extended one pydicom
+    drops, is counted by pydicom's own walk, so the decode is asked with
+    `allow_excess_frames=False` and a signed codestream there -- which
+    Pillow would shift -- never reaches a reader. Until #620 nothing
+    dropped it (review of #606, F-r2-2).
 
     **It never raises of its own.** A buffer `generate_frames` cannot walk,
     or a frame whose SIZ does not parse (`_j2k_sample_layout` returns
