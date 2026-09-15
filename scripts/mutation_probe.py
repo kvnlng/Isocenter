@@ -422,6 +422,9 @@ TARGETS = {
                                   "tests/test_a_remove_on_an_absent_tag_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                                  "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+                                  "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
+                                  "tests/test_a_big_endian_source_keeps_its_values.py",
                                   "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                   "tests/test_a_missing_type_2_element_is_written_empty.py",
                                   "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
@@ -682,6 +685,10 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                              "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+                              "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
+                              "tests/test_a_one_bit_icon_exports_readable.py",
+                              "tests/test_a_big_endian_source_keeps_its_values.py",
                               "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                               "tests/test_a_missing_type_2_element_is_written_empty.py",
                               "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
@@ -934,7 +941,8 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/entities.py": (["tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
+                               "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                "tests/test_a_missing_type_2_element_is_written_empty.py",
                                "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                "tests/test_a_lock_under_the_wrong_key_refuses.py",
@@ -1175,7 +1183,8 @@ TARGETS = {
     # no test had; `test_the_signedness_gate_counts_frames_with_no_offset_table`
     # now pins it and kills both by a real edit. The decode-error print is
     # gone with `get_pixel_data`, and `is_available()`'s print is killed.
-    "isocenter/imagecodecs_handler.py": (["tests/test_codecs_strict.py",
+    "isocenter/imagecodecs_handler.py": (["tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
+                                          "tests/test_codecs_strict.py",
                                           "tests/test_imagecodecs_edge_cases.py",
                                           "tests/test_ingest_imagecodecs_fallback.py",
                                           "tests/test_j2k_signedness_against_pixel_representation.py",
