@@ -1258,7 +1258,7 @@
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_LOG_LEVEL</code></strong></td>
 <td style="text-align: left;"><code>DEBUG</code></td>
-<td style="text-align: left;">Logging verbosity (<code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>).</td>
+<td style="text-align: left;">Logging verbosity (<code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>). It gates the console as well as the log file: at <code>ERROR</code> or <code>CRITICAL</code>, <code>close()</code>'s unsaved-instances warning reaches neither stdout nor <code>isocenter.log</code>.</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong><code>ISOCENTER_LOG_FILE</code></strong></td>
