@@ -2011,6 +2011,13 @@ class DicomSession:
         the `WARNING` row prints. A declined file is not recorded as
         imported, so ingesting the same folder again declines it again.
 
+        A big-endian source's values in words wider than a byte -- `OW`,
+        `OL`, `OF`, `OD`, `OV` and the waveform samples -- are stored
+        little-endian, as its pixels are (#657, #648). What cannot be
+        converted whole (a `UN` value, a length that is not a whole
+        number of words, samples with no usable Waveform Bits Allocated)
+        is kept as read and gets one `WARNING` audit row per element.
+
         Neither `ISOCENTER_FORCE_THREADS` nor
         `ISOCENTER_MAX_TASKS_PER_CHILD` has any effect here: `ingest()`
         runs on the session's own process pool, which has no threads

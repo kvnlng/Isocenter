@@ -31,6 +31,12 @@ TAG_CODE_VALUE = "0008,0100"
 TAG_CODING_SCHEME = "0008,0102"
 TAG_CODE_MEANING = "0008,0104"
 
+# `<` is a contract with ingest, not an assumption about the source: the
+# sidecar holds samples little-endian, because `ingest_worker` converts a
+# big-endian source's Waveform Data by Waveform Bits Allocated before it
+# writes them (#657). Do not thread a byte order through here -- there is
+# none left to thread, and the exporters write these same bytes back
+# verbatim under a little-endian syntax.
 _DTYPES = {
     "SS": "<i2",
     "US": "<u2",
