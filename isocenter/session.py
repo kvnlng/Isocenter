@@ -1138,6 +1138,12 @@ class DicomSession:
         already been mentioned would be state answering a question the
         graph answers. Zero unsaved instances is silent, so an ordinary
         double close says nothing extra.
+
+        **One emitter.** The message is a `WARNING` log line, and the
+        logger's console handler is what puts it on stdout. It was also
+        `print`ed, so every warning appeared on stdout twice. The cost of
+        one emitter: under `ISOCENTER_LOG_LEVEL=ERROR` or above the
+        warning reaches neither the console nor the log.
         """
         try:
             unsaved = [inst
@@ -1178,7 +1184,6 @@ class DicomSession:
                 f"{named}. Call save(sync=True) before close() to keep "
                 f"them.")
             get_logger().warning(message)
-            print(f"WARNING: {message}")
         except Exception:  # pylint: disable=broad-except
             # A diagnostic that cannot run is a diagnostic that is
             # missing, which is what the caller had before this existed.

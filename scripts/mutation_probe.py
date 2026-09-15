@@ -232,18 +232,15 @@ TARGETS = {
     "isocenter/verification.py": (["tests/test_ocr_formal.py",
                                    "tests/test_scan_reports_what_it_could_not_read.py",
                                    "tests/test_verification_logic.py"], 30),
-    # 13 sites, exhaustive: 12 killed (10 before #439's Type 2 test). Five
-    # files, 5.7s per pass.
+    # 17 sites, exhaustive: 17 killed, no survivor (measured in the review
+    # of #600, 3.12, budget 100). Nine files.
     #   - The Type 2 check inverted (`req == '2'` to `!=`) and its
     #     `errors.append` deleted both survived until #439: nothing built a
     #     CT missing a Type 2 element. Killed since by
     #     tests/test_validation.py::
     #     test_a_missing_type_2_element_is_reported_and_an_empty_one_is_not.
-    #   - The survivor, `if sop not in IODValidator._SOP_RULES: return []`
-    #     returning None, is equivalent: the one caller,
-    #     `DicomExporter._finalize_dataset` in io_handlers.py, only
-    #     truth-tests the result.
     "isocenter/validation.py": (["tests/test_export_error.py",
+                                 "tests/test_a_missing_type_2_element_is_written_empty.py",
                                  "tests/test_missing_study_date.py",
                                  "tests/test_floor_policy.py", "tests/test_io.py",
                                  "tests/test_structured_export.py",
@@ -426,6 +423,8 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                                  "tests/test_a_missing_type_2_element_is_written_empty.py",
+                                  "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                   "tests/test_a_restored_study_date_reaches_the_file.py",
                                   "tests/test_a_private_re_vr_is_recorded.py",
                                   "tests/test_both_write_doors_stamp_one_answer.py",
@@ -683,6 +682,8 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                              "tests/test_a_missing_type_2_element_is_written_empty.py",
+                              "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                               "tests/test_a_lock_under_the_wrong_key_refuses.py",
                               "tests/test_a_restore_reads_the_token_it_was_given.py",
                               "tests/test_one_token_per_value_set.py",
@@ -934,6 +935,8 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+                               "tests/test_a_missing_type_2_element_is_written_empty.py",
+                               "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
                                "tests/test_a_lock_under_the_wrong_key_refuses.py",
                                "tests/test_a_restore_reads_the_token_it_was_given.py",
                                "tests/test_one_token_per_value_set.py",
