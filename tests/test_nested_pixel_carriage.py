@@ -1871,3 +1871,122 @@ def test_decode_nested_pixels_requires_high_bits():
         io_handlers._decode_nested_pixels).parameters["high_bits"]
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
     assert parameter.default is inspect.Parameter.empty
+
+
+# --- 6. A native icon inside a compressed file (#645) ---------------------
+#
+# PS3.5 A.4: an icon's pixel data "may or may not be compressed", so a
+# file's transfer syntax does not say how its icon is encoded. The element
+# does: a defined length is native, an undefined length is encapsulated.
+# `_decode_nested_pixels` borrowed the file's syntax for every icon, so a
+# native icon inside a JPEG 2000 file was decoded as a codestream, failed,
+# and was dropped with the unrouted `DATA_LOSS` row -- and that is the shape
+# this library's own `use_compression=True` export writes.
+
+J2K_LOSSLESS = "1.2.840.10008.1.2.4.90"
+
+
+@pytest.mark.parametrize("icon, raw", [
+    (lambda: _icon_item(), ICON_BYTES),
+    (lambda: _icon_item(VALUES12.tobytes(), bits=16, stored=12, high=11),
+     VALUES12.tobytes()),
+    (lambda: _icon_item(bytes(range(12)), samples=3, photometric="RGB",
+                        planar=0), bytes(range(12))),
+], ids=["8-bit", "16-bit", "rgb"])
+def test_a_compressed_export_re_ingests_with_its_icon(tmp_path, icon, raw):
+    """The round trip: export compressed, re-ingest, the icon survives.
+
+    Killing mutation (m25): the file's transfer syntax borrowed for every
+    icon again, whatever its element's length.
+    """
+    db, _src = _ingest(tmp_path, "c645", icons=[icon()])
+    out = tmp_path / "out"
+    with DicomSession(persistence_file=db) as session:
+        session.export(str(out), format="dicom", use_compression=True,
+                       show_progress=False)
+    exported = _exported(out)
+    assert str(exported.file_meta.TransferSyntaxUID) == J2K_LOSSLESS
+    assert not exported.IconImageSequence[0]["PixelData"].is_undefined_length
+
+    db2 = str(tmp_path / "again.db")
+    with DicomSession(persistence_file=db2) as session:
+        summary = session.ingest(str(out))
+    assert summary.ingested == 1, summary
+    assert _data_loss_rows(db2) == []
+    assert [k for k in _blob_kinds(db2) if ICON_SEQ in k], _blob_kinds(db2)
+
+    out2 = tmp_path / "out2"
+    _export(db2, out2)
+    assert _exported(out2).IconImageSequence[0].PixelData == raw
+
+
+def test_a_native_icon_in_a_compressed_file_is_read_as_native(tmp_path):
+    """The seam with #598: the HighBit facts are asked under the item's own
+    encoding, so a native icon inside a JPEG 2000 file gets the native
+    row's words, not a codestream's.
+    """
+    db, _src = _ingest(tmp_path, "seam", icons=[_icon_item(high=6)],
+                       transfer_syntax=J2K_LOSSLESS, top_level_pixels=False)
+
+    assert _data_loss_rows(db) == []
+    assert [k for k in _blob_kinds(db) if ICON_SEQ in k], _blob_kinds(db)
+    rows = _high_bit_rows(db)
+    assert len(rows) == 1, rows
+    assert "Read as pydicom reads it: the low 8 bits of each sample" \
+        in rows[0], rows
+
+
+def test_a_native_file_lends_its_own_syntax_to_its_icon(tmp_path):
+    """A native file's icon is decoded under the file's own syntax, byte
+    order included: a 16-bit BitsStored 12 icon in an Explicit VR Big Endian
+    file decodes to its values. Read as Explicit VR Little Endian, pydicom
+    masks the swapped samples to 12 bits and the values are gone. Killing
+    mutation (m27): every defined-length icon read as Explicit VR Little
+    Endian, native file or not.
+
+    Asked of `_decode_nested_pixels` directly, and of the samples in the
+    order the decode returns them (`>u2`): what the store then does with a
+    big-endian array is a separate question from which syntax decoded it.
+    """
+    from pydicom.uid import ExplicitVRBigEndian
+    src = tmp_path / "src"
+    src.mkdir()
+    # An OW value is written as the bytes it holds, so they are given in
+    # big-endian order, and the file is re-encoded explicitly.
+    path = _write_src(str(src), icons=[_icon_item(
+        VALUES12.astype(">u2").tobytes(), bits=16, stored=12, high=11)],
+        top_level_pixels=False)
+    ds = pydicom.dcmread(path)
+    ds.file_meta.TransferSyntaxUID = ExplicitVRBigEndian
+    pydicom.dcmwrite(path, ds, implicit_vr=False, little_endian=False,
+                     force_encoding=True)
+    ds = pydicom.dcmread(path)
+    assert str(ds.file_meta.TransferSyntaxUID) == str(ExplicitVRBigEndian)
+
+    dropped = []
+    carried = io_handlers._decode_nested_pixels(
+        ds, [((), "7fe0,0010", "OW", ds.IconImageSequence[0])], dropped,
+        None, offset_tables=[], high_bits=[])
+
+    assert dropped == []
+    assert np.frombuffer(carried[0][3], ">u2").tolist() == VALUES12.tolist()
+
+
+def test_an_encapsulated_icon_still_borrows_the_files_syntax():
+    """The other half: an undefined-length icon is decoded under the file's
+    syntax, and an undefined-length icon in a native file is not given one.
+    """
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    dropped = []
+    carried = io_handlers._decode_nested_pixels(
+        ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped, None,
+        offset_tables=[], high_bits=[])
+    assert (carried, dropped) == ([], [("7fe0,0010", "OB")])
+
+    ds.file_meta.TransferSyntaxUID = JPEGBaseline8Bit
+    carried = io_handlers._decode_nested_pixels(
+        ds, [((), "7fe0,0010", "OB", _jpeg_icon_item())], dropped, None,
+        offset_tables=[], high_bits=[])
+    assert len(carried) == 1

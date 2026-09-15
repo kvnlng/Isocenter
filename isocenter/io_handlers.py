@@ -2411,6 +2411,36 @@ def _nested_row_prefix(tag, vr, path) -> str:
     return f"Standard tag {tag} ({vr}) at {_item_path_words(path)}: "
 
 
+def _nested_item_syntax(transfer_syntax, item_ds, tag_str) -> str:
+    """The transfer syntax a nested pixel element is encoded under (#645).
+
+    The file's, unless the file's is encapsulated and the element has a
+    defined length: then the element is native, and is read as Explicit
+    VR Little Endian, which is what every encapsulated syntax's native
+    encoding is. PS3.5 A.4 lets an icon be compressed or not whatever the
+    file carries, and the element's own length is how a reader tells --
+    an encapsulated value is always undefined-length (A.4). Measured: a
+    `use_compression=True` export writes its icon native inside a
+    JPEG 2000 file, and re-ingesting it borrowed the file's syntax, failed
+    the decode, and dropped the icon with the unrouted `DATA_LOSS` row.
+
+    An undefined-length element inside a native file is left under the
+    file's syntax: it is not a shape a native file can carry, and its
+    decode fails into the loss row it always had.
+    """
+    try:
+        encapsulated = pydicom.uid.UID(transfer_syntax).is_encapsulated
+    except (ValueError, AttributeError):
+        return transfer_syntax
+    if not encapsulated:
+        return transfer_syntax
+    group, element = (int(x, 16) for x in tag_str.split(','))
+    elem = item_ds.get(Tag(group, element))
+    if elem is None or getattr(elem, "is_undefined_length", True):
+        return transfer_syntax
+    return str(pydicom.uid.ExplicitVRLittleEndian)
+
+
 def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                           offset_tables, high_bits) -> list:
     """Decode every nested (7fe0,0010) `populate_attrs` collected (#183).
@@ -2479,7 +2509,8 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
         getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", "") or "")
 
     for path, tag_str, vr, item_ds in candidates:
-        if transfer_syntax not in _CARRIABLE_TRANSFER_SYNTAXES:
+        item_syntax = _nested_item_syntax(transfer_syntax, item_ds, tag_str)
+        if item_syntax not in _CARRIABLE_TRANSFER_SYNTAXES:
             dropped.append((tag_str, vr))
             continue
 
@@ -2487,11 +2518,18 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # pydicom cannot decode a sequence item's pixel data on its own
             # -- `icon.pixel_array` raises `AttributeError: Unable to decode
             # the pixel data as the dataset's 'file_meta' has no (0002,0010)
-            # 'Transfer Syntax UID'`. An icon shares the file's transfer
-            # syntax by construction, so borrowing the enclosing dataset's
-            # `file_meta` is not an approximation; it is the right answer.
-            # Measured to decode correctly through RLE encapsulation too.
-            item_ds.file_meta = ds.file_meta
+            # 'Transfer Syntax UID'`. So the item is given one: the file's,
+            # when the item is encoded as the file is, and measured to
+            # decode correctly through RLE encapsulation; otherwise a
+            # native one (`_nested_item_syntax`, #645). An icon does NOT
+            # share the file's transfer syntax by construction -- PS3.5
+            # A.4 lets it be native inside a compressed file, and this
+            # library's own compressed export writes exactly that.
+            if item_syntax == transfer_syntax:
+                item_ds.file_meta = ds.file_meta
+            else:
+                item_ds.file_meta = FileMetaDataset()
+                item_ds.file_meta.TransferSyntaxUID = item_syntax
             # The top level's #418 check, at this depth (#433). After the
             # borrow, because it reads the transfer syntax off
             # `file_meta`. An excess is truncated to the declared frames,
