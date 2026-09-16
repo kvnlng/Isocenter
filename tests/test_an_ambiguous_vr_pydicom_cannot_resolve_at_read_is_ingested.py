@@ -264,9 +264,11 @@ def test_an_implicit_icon_under_a_root_pixel_representation_reads_signed_without
     every sequence item it reads, so an icon's `US or SS` element resolves at
     read and never raises: the fallback is reached only where no ancestor
     declares one, and then walking the real chain would find nothing more.
-    Pinned both ways: the value is the signed -5 the root's 1 names (not the
-    unsigned 65531 the fallback's default would give), and the resolver the
-    fallback calls is never entered on the read.
+    Pinned both ways: the value is the signed -5 the root's 1 names (a chain
+    with no declarer would read 65531), and the resolver the fallback calls
+    is never entered on the read. The second is the one that pins the
+    claim: an item pydicom has stamped with `_pixel_rep` would read -5
+    through the resolver too.
     """
     ds = _dataset(pr=1)
     icon = Dataset()
