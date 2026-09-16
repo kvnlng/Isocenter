@@ -427,6 +427,7 @@ TARGETS = {
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                                  "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
                                   "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
                                   "tests/test_a_big_endian_word_value_keeps_its_values.py",
                                   "tests/test_lut_data_read_as_numbers_exports.py",
@@ -692,6 +693,7 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                              "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
                               "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
                               "tests/test_a_big_endian_word_value_keeps_its_values.py",
                               "tests/test_lut_data_read_as_numbers_exports.py",
