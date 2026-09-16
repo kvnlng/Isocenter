@@ -247,6 +247,207 @@ def test_what_has_no_byte_order_is_unchanged(tmp_path):
     assert _rows(db) == []
 
 
+def test_a_waveform_padding_value_is_one_sample_wide(tmp_path):
+    """(5400,100A) is one sample too, and sits in the group, not the channel.
+
+    `OB or OW` like the samples and the two channel values, and pydicom's
+    own `_AMBIGUOUS_OB_OW_TAGS` is exactly these four tags. A 32-bit
+    padding value of `-200` would be stored `ff ff 38 ff` by a 2-byte-word
+    conversion. Its item does hold Waveform Bits Allocated, so unlike
+    Channel Minimum and Maximum Value (#674) this one exports.
+    """
+    ds = _dataset()
+    item = _waveform_item(32, "SL", np.array([0, 1, 2, 3], ">i4").tobytes())
+    item.add_new(0x5400100A, "OW", np.array([-200], ">i4").tobytes())
+    ds.WaveformSequence = Sequence([item])
+    folder = _save(tmp_path, ds)
+    db = str(tmp_path / "s.db")
+    out = tmp_path / "out"
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        stored = inst.sequences["5400,0100"].items[0].attributes["5400,100a"]
+        session.export(str(out), use_compression=False)
+    (written,) = _files(out)
+    back = pydicom.dcmread(written)[0x54000100].value[0][0x5400100A].value
+
+    assert np.frombuffer(stored, "<i4").tolist() == [-200]
+    assert np.frombuffer(back, "<i4").tolist() == [-200]
+    assert _rows(db) == []
+
+
+def _curve(inst):
+    return inst.attributes["5000,3000"]
+
+
+@pytest.mark.parametrize("repr_value, code, values", [
+    pytest.param(0, "u2", [0, 1000, 40000, 65535], id="0-US"),
+    pytest.param(1, "i2", [-200, 0, 3000, 32767], id="1-SS"),
+    pytest.param(2, "f4", [0.5, -1.25, 1000.0, 3.0], id="2-FL"),
+    pytest.param(3, "f8", [0.5, -1.25, 1000.0, 3.0], id="3-FD"),
+    pytest.param(4, "i4", [1, -2, 100000, 7], id="4-SL"),
+])
+def test_curve_data_is_as_wide_as_its_data_value_representation(
+        tmp_path, repr_value, code, values):
+    """(50xx,3000) holds words as wide as Data Value Representation says.
+
+    PS3.3-2004 C.10.2.1.2 enumerates (50xx,0103): 0 unsigned short,
+    1 signed short, 2 floating point single, 3 floating point double,
+    4 signed long. The VR is `OB or OW`, so a VR-keyed conversion reads
+    every one of them as 2-byte words and stores an `SL` `[1, -2, 100000,
+    7]` as `[65536, -65537, -2036334591, 458752]` -- Waveform Bits
+    Allocated's argument one tag over (#657, review finding 1).
+
+    The graph is asserted, fresh and reopened, and not the export: pydicom
+    refuses to write `OB or OW` for this tag at all, on a little-endian
+    source too (`ValueError: Cannot write ambiguous VR of 'OB or OW' for
+    data element with tag (5000,3000)`), which is #674's family.
+    """
+    ds = _dataset()
+    ds.add_new(0x50000103, "US", repr_value)
+    ds.add_new(0x50003000, "OW", np.array(values, ">" + code).tobytes())
+    folder = _save(tmp_path, ds)
+    db = str(tmp_path / "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        fresh = _curve(inst)
+    with DicomSession(persistence_file=db) as session:
+        (inst,) = _instances(session)
+        reopened = _curve(inst)
+
+    for stored in (fresh, reopened):
+        assert np.frombuffer(stored, "<" + code).tolist() == values
+    assert _rows(db) == []
+
+
+@pytest.mark.parametrize("fmt, code, values", [
+    pytest.param(0, "i2", [0, -200, 3000, 32767], id="0-16-bit"),
+    pytest.param(1, "i1", [0, -2, 100, 127], id="1-8-bit"),
+])
+def test_audio_sample_data_is_as_wide_as_its_format(
+        tmp_path, fmt, code, values):
+    """(50xx,200C) holds words as wide as Audio Sample Format says.
+
+    PS3.3-2004 Table C.10-3 enumerates (50xx,2002): 0 is 16-bit two's
+    complement, 1 is 8-bit two's complement. The 8-bit case converts to
+    itself and draws no row, as an 8-bit waveform sample does.
+    """
+    ds = _dataset()
+    ds.add_new(0x50002002, "US", fmt)
+    ds.add_new(0x5000200C, "OW", np.array(values, ">" + code).tobytes())
+    folder = _save(tmp_path, ds)
+    db = str(tmp_path / "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        stored = inst.attributes["5000,200c"]
+
+    assert np.frombuffer(stored, "<" + code).tolist() == values
+    assert _rows(db) == []
+
+
+@pytest.mark.parametrize("build, tag, vr, row", [
+    pytest.param(
+        lambda ds: None, "5000,3000", "OW",
+        "Standard tag 5000,3000 (OW): 16 bytes read from a big-endian "
+        "source with no usable Data Value Representation (5000,0103), so "
+        "the value width and byte order are unknown. The bytes were kept "
+        "in the byte order they were read in.",
+        id="curve-no-representation"),
+    pytest.param(
+        lambda ds: ds.add_new(0x50000103, "US", [4, 4]), "5000,3000", "OW",
+        "Standard tag 5000,3000 (OW): 16 bytes read from a big-endian "
+        "source with no usable Data Value Representation (5000,0103), so "
+        "the value width and byte order are unknown. The bytes were kept "
+        "in the byte order they were read in.",
+        id="curve-two-representations"),
+    pytest.param(
+        lambda ds: ds.add_new(0x50000103, "US", 9), "5000,3000", "OW",
+        "Standard tag 5000,3000 (OW): 16 bytes read from a big-endian "
+        "source with no usable Data Value Representation (5000,0103), so "
+        "the value width and byte order are unknown. The bytes were kept "
+        "in the byte order they were read in.",
+        id="curve-representation-not-enumerated"),
+    pytest.param(
+        lambda ds: ds.add_new(0x50002002, "US", 7), "5000,200c", "OW",
+        "Standard tag 5000,200c (OW): 16 bytes read from a big-endian "
+        "source with no usable Audio Sample Format (5000,2002), so the "
+        "value width and byte order are unknown. The bytes were kept in "
+        "the byte order they were read in.",
+        id="audio-format-not-enumerated"),
+    pytest.param(
+        lambda ds: ds.add_new(0x50000103, "US", 4), "5000,3000", "OB",
+        "Standard tag 5000,3000 (OB): 16 bytes read from a big-endian "
+        "source whose value representation is OB, which has no byte "
+        "order, while Data Value Representation (5000,0103) declares "
+        "4-byte values, so its byte order cannot be established. The "
+        "bytes were kept in the byte order they were read in.",
+        id="curve-ob"),
+])
+def test_a_width_sibling_that_gives_no_width_is_kept_and_said(
+        tmp_path, build, tag, vr, row):
+    """No usable sibling, no conversion: the bytes are kept and the row says so.
+
+    One `WARNING` per element, in the same family as the waveform's
+    no-bits row. An `OB` value is never converted whatever the sibling
+    declares, as at the waveform tags.
+    """
+    ds = _dataset()
+    build(ds)
+    payload = np.arange(4, dtype=">i4").tobytes()
+    ds.add_new(int(tag.replace(",", ""), 16), vr, payload)
+    folder = _save(tmp_path, ds)
+    db = str(tmp_path / "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        assert inst.attributes[tag] == payload
+
+    assert _rows(db) == [("WARNING", row)]
+
+
+def test_a_curve_whose_length_is_not_whole_values_is_kept_and_said(tmp_path):
+    """A declared width the length does not divide by is not to be trusted.
+
+    Unlike the `OF` ragged case, nothing here is converted: an `OF` value's
+    word size is its VR's, so the whole words are still words, but a curve
+    whose length is not a multiple of the width its own sibling declares
+    has one of the two wrong, and which is unknown.
+    """
+    ds = _dataset()
+    ds.add_new(0x50000103, "US", 3)
+    ds.add_new(0x50003000, "OW", b"\x3f\xe0\x00\x00\x00\x00")
+    folder = _save(tmp_path, ds)
+    db = str(tmp_path / "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        assert _curve(inst) == b"\x3f\xe0\x00\x00\x00\x00"
+
+    assert _rows(db) == [
+        ("WARNING",
+         "Standard tag 5000,3000 (OW): 6 bytes read from a big-endian "
+         "source are not a whole number of the 8-byte values Data Value "
+         "Representation (5000,0103) declares. The bytes were kept in the "
+         "byte order they were read in."),
+    ]
+
+
+def test_a_little_endian_curve_is_untouched(tmp_path):
+    """The guard: a little-endian curve keeps its bytes and draws no row."""
+    ds = _dataset(big=False)
+    ds.add_new(0x50000103, "US", 4)
+    ds.add_new(0x50003000, "OW", np.array([1, -2], "<i4").tobytes())
+    folder = _save(tmp_path, ds, big=False)
+    db = str(tmp_path / "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        assert np.frombuffer(_curve(inst), "<i4").tolist() == [1, -2]
+    assert _rows(db) == []
+
+
 def test_a_bare_dataset_is_not_taken_for_big_endian():
     """`populate_attrs` on a hand-built Dataset: (None, None) is not big-endian."""
     from isocenter.entities import DicomItem

@@ -184,10 +184,14 @@ def test_lut_data_read_as_bytes_keeps_its_words(tmp_path, compress):
     ("US or OW", [0, 65535], "US"),
     ("US or OW", 7, "US"),
     ("US or SS or OW", [0, 65535], "US"),
+    # US before SS where both fit, which is ruling Q1: trying SS first
+    # writes `SS` here and passes every other case (review finding 4).
+    ("US or SS or OW", [0, 100], "US"),
     ("US or SS or OW", [-1, 2], "SS"),
     ("US or SS or OW", [-32768, 32767], "SS"),
     ("US or OW", b"\x00\x01", "US or OW"),
     ("US or OW", bytearray(b"\x00\x01"), "US or OW"),
+    ("US or OW", memoryview(b"\x00\x01"), "US or OW"),
     ("US or OW", [], "US or OW"),
     ("US or OW", None, "US or OW"),
     ("US or SS", [1, 2], "US or SS"),
@@ -246,6 +250,45 @@ def test_lut_data_that_fits_no_numeric_arm_is_one_element_lost(tmp_path):
 
     assert 0x00283006 not in item
     assert item[0x00283003].value == "J7"
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT action_type, details FROM audit_log WHERE action_type "
+            "IN ('WARNING', 'DATA_LOSS', 'ERROR')").fetchall()
+    assert rows == [(
+        "DATA_LOSS",
+        "Tag 0028,3006 not exported (data loss): ValueError: the value fits "
+        "no numeric arm of US or OW, and OW holds only bytes")]
+
+
+def test_a_caller_set_numpy_table_is_one_element_lost(tmp_path):
+    """A `numpy` array under an ambiguous numeric tag now costs its element.
+
+    The behaviour change the review measured (finding 3): `_numeric_arm`
+    takes only `bytes`, `bytearray` and `memoryview` for a buffer, so an
+    `ndarray` -- which pydicom's `write_OWvalue` accepted, since it takes
+    anything `pack` can consume -- raises and becomes one `DATA_LOSS` row.
+    The wider refusal is deliberate: "anything the buffer protocol
+    accepts" would also swallow a numpy *scalar*, which is a number and
+    belongs in the `US` arm. No ingest produces an array here; a caller's
+    `set_attr` does, and `tobytes()` is the one-line fix for one.
+    """
+    import numpy as np
+
+    ds = _dataset(ExplicitVRLittleEndian)
+    _place(ds, ((0x00283010, 0),), _lut_item(TABLE))
+    folder = _save(tmp_path, ds, ExplicitVRLittleEndian)
+    db = str(tmp_path / "s.db")
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = [i for p in session.store.patients for st in p.studies
+                   for se in st.series for i in se.instances]
+        inst.sequences["0028,3010"].items[0].set_attr(
+            "0028,3006", np.array([1, 2, 3, 4], "<u2"))
+        session.export(str(tmp_path / "out"), use_compression=False)
+    (written,) = _files(tmp_path / "out")
+    item = pydicom.dcmread(written)[0x00283010].value[0]
+
+    assert 0x00283006 not in item
     with sqlite3.connect(db) as conn:
         rows = conn.execute(
             "SELECT action_type, details FROM audit_log WHERE action_type "

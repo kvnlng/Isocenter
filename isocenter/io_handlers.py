@@ -1647,17 +1647,87 @@ _WORD_BYTES = {'OW': 2, 'OL': 4, 'OF': 4, 'OD': 8, 'OV': 8}
 
 #: The elements whose word is one waveform sample, so whose width is
 #: Waveform Bits Allocated (5400,1004) and not their wire VR's word: the
-#: samples, and the Channel Minimum and Maximum Value each channel states
-#: in the same encoding (PS3.3 C.10.9.1). All three are `OB or OW`, and `OW`
-#: holds 32- and 64-bit samples too, so a VR-keyed conversion reverses a
-#: 32-bit sample as two 2-byte words and stores it wrong (#657).
-_SAMPLE_TAGS = frozenset({"5400,1010", "5400,0110", "5400,0112"})
+#: samples, the Channel Minimum and Maximum Value each channel states in
+#: the same encoding, and the Waveform Padding Value the group states in it
+#: (PS3.3 C.10.9.1). All four are `OB or OW` -- pydicom's own
+#: `_AMBIGUOUS_OB_OW_TAGS` is this set -- and `OW` holds 32- and 64-bit
+#: samples too, so a VR-keyed conversion reverses a 32-bit sample as two
+#: 2-byte words and stores it wrong (#657).
+_SAMPLE_TAGS = frozenset({"5400,1010", "5400,0110", "5400,0112",
+                          "5400,100a"})
 
 #: Bytes per sample for each Waveform Bits Allocated PS3.3 C.10.9.1.4.2
 #: allows. Anything else, absence included, has no width to convert by.
 #: 8 is here at one byte a word, so an 8-bit sample converts to itself and
 #: draws no row: a byte has no order.
 _SAMPLE_BYTES = {8: 1, 16: 2, 32: 4, 64: 8}
+
+#: The other `OB or OW` containers whose word a sibling declares, keyed on
+#: the element number inside the repeating groups 5000-50FF: `(sibling
+#: element, its name, bytes per declared value)`. Both are retired and both
+#: were read as 2-byte words before this, which is right at one enumerated
+#: value each (#657, review finding 1):
+#:
+#: * Curve Data (50xx,3000) takes its width from Data Value Representation
+#:   (50xx,0103), whose Enumerated Values PS3.3-2004 C.10.2.1.2 gives as
+#:   0 unsigned short, 1 signed short, 2 floating point single, 3 floating
+#:   point double, 4 signed long.
+#: * Audio Sample Data (50xx,200C) takes its width from Audio Sample Format
+#:   (50xx,2002), whose Enumerated Values PS3.3-2004 Table C.10-3 gives as
+#:   0 "16 bit 2's complement" and 1 "8 bit 2's complement".
+_WIDTH_SIBLINGS = {
+    0x3000: (0x0103, "Data Value Representation", {0: 2, 1: 2, 2: 4, 3: 8,
+                                                   4: 4}),
+    0x200C: (0x2002, "Audio Sample Format", {0: 2, 1: 1}),
+}
+
+
+def _width_sibling(tag: str):
+    """`(element, name, widths)` if `tag` is a 50xx width-by-sibling container.
+
+    Args:
+        tag (str): `"gggg,eeee"`.
+
+    Returns:
+        The `_WIDTH_SIBLINGS` entry, or None for every other tag.
+    """
+    group, element = (int(part, 16) for part in tag.split(","))
+    if 0x5000 <= group <= 0x50FF:
+        return _WIDTH_SIBLINGS.get(element)
+    return None
+
+
+def _declared_width(ds: Any, tag: str):
+    """What the width sibling of a 50xx container declares, if anything.
+
+    Read from the dataset holding the element, because that is where the
+    curve and audio modules put it: both are top-level modules, and the
+    repeating group ties the pair together, so a second curve in 5002
+    declares its own width.
+
+    Both call sites read the sibling only for a big-endian source. This
+    walk sees every retained element of every file, and a little-endian
+    value is returned untouched before the width is looked at, so asking
+    on that path is a tag split and two `int()` calls per element for an
+    answer nothing reads.
+
+    Args:
+        ds: The dataset holding `tag`.
+        tag (str): `"gggg,eeee"`.
+
+    Returns:
+        The sibling's value as an `int`, or None when `tag` has no width
+        sibling, or the sibling is absent, or its value is not one number
+        (a `MultiValue` cannot key the width table; `bool` is refused
+        because it is an `int` no enumeration means).
+    """
+    rule = _width_sibling(tag)
+    if rule is None:
+        return None
+    elem = ds.get(Tag(int(tag[:4], 16), rule[0]))
+    value = getattr(elem, "value", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        else None
 
 
 def _little_endian_words(value: bytes, word: int) -> bytes:
@@ -1672,7 +1742,7 @@ def _little_endian_words(value: bytes, word: int) -> bytes:
 
 
 def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
-                       waveform_bits=None):
+                       waveform_bits=None, declared=None):
     """A retained binary value as the graph holds it: little-endian (#657).
 
     The graph's contract, not the source's. `_merge` writes these bytes
@@ -1697,12 +1767,17 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
         big_endian (bool): Whether the dataset holding the element was read
             big-endian. False is a no-op, whatever the value.
         unconverted (list or None): Collects `(kind, path, tag, vr, length,
-            word)` for what could not be converted whole; `kind` is `"un"`,
-            `"ragged"`, `"no-bits"` or `"ob"`, and an `"ob"` entry carries
-            the declared bits where the others carry a word size. See
-            `_byte_order_words`.
+            word)` for what could not be converted whole; `kind` is
+            `"un"`, `"ragged"`, `"no-bits"`, `"ob"`, `"no-width"`,
+            `"bad-width"` or `"ob-value"`, and the last slot carries
+            whatever that kind's row needs -- a word size, the bits a
+            waveform declared, or the width sibling's name with its width.
+            See `_byte_order_words`.
         waveform_bits: Waveform Bits Allocated of the enclosing Waveform
             Sequence item, read only for `_SAMPLE_TAGS`.
+        declared: What this element's width sibling declares, for the two
+            50xx containers that have one (`_declared_width` reads it).
+            Ignored for every other tag.
 
     Returns:
         The value as the graph should hold it: `bytes`, converted, for
@@ -1732,6 +1807,30 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
                 unconverted.append(
                     ("no-bits", path, tag, vr, len(value), None))
             return value
+    elif _width_sibling(tag) is not None:
+        # A second width-by-sibling rule, for the two other `OB or OW`
+        # containers whose word its VR does not give: the retired Curve
+        # Data and Audio Sample Data. Nothing is converted unless the
+        # sibling names a width the length is made of, because a width
+        # that does not divide the length is one of the two being wrong.
+        sibling, name, widths = _width_sibling(tag)
+        named = f"{name} ({tag[:4]},{sibling:04x})"
+        word = widths.get(declared)
+        if vr == 'OB' and word not in (None, 1):
+            if unconverted is not None:
+                unconverted.append(
+                    ("ob-value", path, tag, vr, len(value), (named, word)))
+            return value
+        if word is None:
+            if unconverted is not None:
+                unconverted.append(
+                    ("no-width", path, tag, vr, len(value), named))
+            return value
+        if len(value) % word:
+            if unconverted is not None:
+                unconverted.append(
+                    ("bad-width", path, tag, vr, len(value), (named, word)))
+            return value
     elif vr in _WORD_BYTES:
         word = _WORD_BYTES[vr]
     else:
@@ -1757,9 +1856,10 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     A retained value in words wider than a byte, read from a big-endian
     dataset, is stored little-endian: `OW` in 2-byte words, `OL` and `OF`
     in 4, `OD` and `OV` in 8, and a Channel Minimum or Maximum Value in
-    samples of Waveform Bits Allocated (#657). An `OB` value is never
-    converted, whatever its tag: PS3.5 6.2 gives it no byte order. See
-    `_stored_byte_order`.
+    samples of Waveform Bits Allocated (#657). Curve Data and Audio Sample
+    Data take their width from their own sibling the same way. An `OB`
+    value is never converted, whatever its tag: PS3.5 6.2 gives it no byte
+    order. See `_stored_byte_order`.
 
     Skipping is not the same as routing, and since #151 neither is the
     same as a VR. `PixelData` and `WaveformData` are extracted and
@@ -1974,7 +2074,8 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 b_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
                 item.set_attr(b_tag, _stored_byte_order(
                     bytes(value), elem.VR, b_tag, path, big_endian,
-                    unconverted, waveform_bits))
+                    unconverted, waveform_bits,
+                    _declared_width(ds, b_tag) if big_endian else None))
                 continue
             if dropped is not None:
                 dropped.append(
@@ -2061,7 +2162,8 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             # `OV` and `UN` land here, not in the `BINARY_VRS` arm.
             item.set_attr(tag, _stored_byte_order(
                 _process_safe(elem.value), elem.VR, tag, path, big_endian,
-                unconverted, waveform_bits))
+                unconverted, waveform_bits,
+                _declared_width(ds, tag) if big_endian else None))
             _record_private_vr(item, tag, elem)
 
 
@@ -2947,6 +3049,18 @@ def _byte_order_words(kind, path, tag, vr, length, word) -> str:
                 f"byte order, while the waveform declares {word} bits a "
                 f"sample, so the sample's byte order cannot be "
                 f"established. {kept}")
+    if kind == "ob-value":
+        named, width = word
+        return (f"{head} whose value representation is OB, which has no "
+                f"byte order, while {named} declares {width}-byte values, "
+                f"so its byte order cannot be established. {kept}")
+    if kind == "no-width":
+        return (f"{head} with no usable {word}, so the value width and "
+                f"byte order are unknown. {kept}")
+    if kind == "bad-width":
+        named, width = word
+        return (f"{head} are not a whole number of the {width}-byte values "
+                f"{named} declares. {kept}")
     return (f"{head} are not a whole number of {word}-byte words. The "
             f"whole words were converted to little-endian; the trailing "
             f"{length % word} byte(s) were kept as read.")
