@@ -17,7 +17,7 @@ from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
                           ExportError, ExportSummary, SidecarPixelLoader,
                           SidecarWaveformLoader, export_folder_names,
                           export_stamp_attributes, GRADED_LOSS_SCOPES,
-                          redaction_in_effect)
+                          normalize_patient_id_subset, redaction_in_effect)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
@@ -5551,7 +5551,9 @@ class DicomSession:
                 the option in silence and a mistyped `patient_ids`
                 exported every patient. Nothing is written either way.
                 The two formats do not accept the same options, so a
-                caller forwarding one dict to both must split it.
+                caller forwarding one dict to both must split it. Also
+                for a bytes-like `patient_ids`, on both formats, since
+                no `PatientID` in the graph could match it (#678).
             io_handlers.ExportError: From either exporter, when zero of
                 N attempted instances reached disk and at least one
                 failed -- the DICOM path since #191, the WFDB path since
@@ -5622,7 +5624,20 @@ class DicomSession:
                 stating they already know; it silences the warning and skips
                 the audit entry. The export itself is unchanged either way --
                 this reports, it does not withhold.
-            patient_ids (List[str], optional): Limit export to specific Patient IDs.
+            patient_ids (List[str], optional): Limit export to specific
+                Patient IDs. Only `None`, or the parameter omitted,
+                means every patient: an empty list, tuple or set is a
+                filter that selected nobody and nothing is written
+                (#678, and #142 for the same rule on
+                `SqliteStore.get_flattened_instances`). A bare `str`
+                names exactly one id and logs a warning rather than
+                substring-matching; a bytes-like value is refused with
+                `TypeError`, since no `PatientID` in the graph could
+                match it. An iterator is read once before the walk, so
+                a generator is not consumed by the first patient.
+                `exporters.wfdb.WfdbExporter.export` reads its own
+                `patient_ids` option through the same helper, so the
+                two formats agree.
             show_progress (bool): If True, shows progress bar.
             subset (Union[str, list, pd.DataFrame]): Filter the export
                 using a query string, a list of UIDs, or a DataFrame.
@@ -5685,8 +5700,20 @@ class DicomSession:
                 (x1.06). Each worker holds one more decoded array while
                 it checks.
         """
-        target_ids = (patient_ids if patient_ids is not None
-                      else [p.patient_id for p in self.store.patients])
+        # One helper for both write doors, so `patient_ids` means the
+        # same thing whichever format was named (#678): only `None` is
+        # every patient, an iterator is materialised before the walk can
+        # eat it, a bare `str` names one id rather than substring-matching,
+        # and a bytes-like value is refused. The wfdb door calls the same
+        # function -- reading the argument here and not there is how the
+        # two doors came to disagree in the first place.
+        #
+        # First statement in the method, and before the `save(sync=True)`
+        # below on purpose: a refusal that arrives after the flush has
+        # already moved the session for an export that will not happen.
+        target_ids = normalize_patient_id_subset(patient_ids)
+        if target_ids is None:
+            target_ids = frozenset(p.patient_id for p in self.store.patients)
 
         # None means "no safety filter"; an empty set means "the scan ran and
         # found nothing". The two are not the same and the walk treats them

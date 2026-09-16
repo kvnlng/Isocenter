@@ -8514,6 +8514,108 @@ def export_folder_names(patient, study, series):
     return subj_name, study_folder, series_folder
 
 
+def normalize_patient_id_subset(patient_ids, option="patient_ids"):
+    """The patient ids an export was asked for, or `None` for every patient.
+
+    The third question both write doors have to answer the same way,
+    beside `export_folder_names` ("where does the export write") and
+    `export_stamp_attributes` ("what does it stamp"): **who** does it
+    write. `DicomSession._export_dicom` and
+    `exporters.wfdb.WfdbExporter.export` both call this, so the same
+    argument reads the same way whichever format the caller named. They
+    answered it separately until #678 and disagreed -- which is the
+    divergence #410 closed for option *names*, reappearing in their
+    values. Anything that changes here must change for both doors, and
+    calling this from only one of them is the defect, not a smaller fix.
+
+    Three readings, each measured on 0.9.8 before this existed:
+
+    - **An empty container is a filter that selected nobody**, and
+      `None` is the only spelling of "every patient". `[]`, `()`,
+      `set()` and `frozenset()` are all falsy, and the wfdb door read
+      them as "no filter given" and wrote the whole cohort to a caller
+      who asked for none of it (#678). `SqliteStore.get_flattened_instances`
+      was the same defect, fixed as Breaking in #142. The empty
+      frozenset returned here is deliberately not `None`: "asked for
+      nobody" and "asked for everybody" must not collapse into one
+      value again.
+    - **An iterator is consumed by the first membership test.** A
+      generator passed straight through was exhausted on the first
+      patient the walk reached, so every later patient was compared
+      against nothing: a generator yielding the *second* patient in
+      store order exported nothing at all, on both doors. Materialising
+      once, here, is what lets both walks keep their plain `not in`
+      test.
+    - **A bare `str` substring-matches.** `"PAT-A" in "PAT-APAT-B"` is
+      True, so a caller who wrote a string where a list was meant got a
+      fuzzy match that looked like it worked -- a concatenation of two
+      ids selected both patients and a shared prefix selected none. A
+      string names exactly one id, which is the only honest reading of
+      it, and it is logged: the export writes the closest honest output
+      rather than refusing (the write path's tie-breaker), and the
+      warning is how a caller who passed the wrong type still hears
+      about it.
+
+    `bytes` is the one refusal, and the asymmetry with `str` is the
+    point. Every `PatientID` in the graph is a `str`, so wrapping
+    `b"PAT-A"` would select **no** patient and report a clean zero
+    export -- the silence #678 is about, arriving through the fix for
+    it. There is no encoding to decode it under either, so it raises,
+    before anything is written.
+
+    Neither the refusal nor the warning names the value. A Patient ID is
+    an identifier, and this text reaches a log file that outlives the
+    session; the caller supplied the value and does not need it read
+    back (#588 is the same reasoning for an audit row).
+
+    Args:
+        patient_ids: `None` for every patient, a bare `str` naming one
+            patient id, or any iterable of ids -- list, tuple, set, or a
+            one-shot iterator.
+        option (str): How the caller spelled the option, used in the
+            refusal and the warning. A parameter rather than a literal
+            so the message names what the caller typed; both doors pass
+            the default.
+
+    Returns:
+        Optional[frozenset]: `None` when every patient is wanted;
+            otherwise exactly the ids to write, which may be empty.
+
+    Raises:
+        TypeError: If `patient_ids` is bytes-like, or is neither `None`
+            nor iterable. Raised before any file is written on either
+            door, and before `_export_dicom`'s flush.
+    """
+    if patient_ids is None:
+        return None
+    if isinstance(patient_ids, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            f"{option} was given a bytes-like value "
+            f"({type(patient_ids).__name__}); every PatientID in the "
+            f"graph is a str, so no patient could ever match it and the "
+            f"export would write nothing and call it a success. Pass a "
+            f"str naming one patient, or an iterable of str.")
+    if isinstance(patient_ids, str):
+        # Best-effort with a warning rather than a refusal, the way the
+        # write path treats everything it can read but not honour
+        # exactly: one id is the only reading of a bare string. The
+        # warning is not decoration -- until #678 the string was matched
+        # as a substring, so a caller who has been passing one and
+        # getting several back is owed the sentence that says so.
+        get_logger().warning(
+            "%s was a bare str, so it names exactly one patient id. "
+            "Until #678 it was matched as a substring, so any patient "
+            "whose id merely contained it was exported too. Pass a "
+            "list, tuple or set of ids to select more than one.", option)
+        return frozenset({patient_ids})
+    try:
+        return frozenset(patient_ids)
+    except TypeError as exc:
+        raise TypeError(
+            f"{option} must be None, a str naming one patient id, or an "
+            f"iterable of ids; got {type(patient_ids).__name__}.") from exc
+
+
 def export_stamp_attributes(patient, study, series):
     """The patient, study and series tags stamped onto every exported
     instance, for both write doors (#570).

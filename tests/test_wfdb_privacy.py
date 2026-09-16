@@ -807,6 +807,134 @@ def test_the_wfdb_export_patient_ids_option_limits_the_export(tmp_path):
         f"patient_ids=[{first!r}] leaked {second}'s records: {sorted(written)}")
 
 
+#: The four empty containers a caller actually produces: `[]` from a list
+#: comprehension that matched nothing, `()` from a tuple unpack, `set()`
+#: from an intersection of two arms, `frozenset()` from a frozen cohort.
+#: All four are falsy, which is what made them mean "no filter" (#678).
+_EMPTY_SUBSETS = ([], (), set(), frozenset())
+
+
+def _record_files(folder):
+    """Every `.hea`/`.dat` anywhere under `folder`, walked not returned.
+
+    The return value of `export()` is one of the two things under test,
+    so it cannot also be the evidence about what reached disk: a guard
+    that wrote the files and forgot to append them to the list would
+    pass an assertion made against the list alone.
+    """
+    found = []
+    for root, _dirs, names in os.walk(folder):
+        for name in names:
+            if name.endswith((".hea", ".dat")):
+                found.append(os.path.relpath(os.path.join(root, name), folder))
+    return found
+
+
+def test_an_empty_patient_ids_selects_nobody_on_the_wfdb_path(tmp_path):
+    """`export(format="wfdb", patient_ids=[])` must write nothing (#678).
+
+    The guard was `if patient_ids and patient.patient_id not in
+    patient_ids:`, so an empty container was falsy and read as "no
+    filter given". Measured on 0.9.8 over this fixture: `[]`, `()`,
+    `set()` and `frozenset()` each wrote **both** patients -- 2 records
+    and 4 files -- for a call that selected nobody. `get_cohort_report`
+    and `_export_dicom` were always `is not None`, and
+    `SqliteStore.get_flattened_instances` was this same defect, fixed as
+    Breaking in #142; this was the fourth and last reader of an empty
+    `patient_ids` and the only one that still read it as "everyone".
+
+    The control export with the option **omitted** comes first and is
+    not decoration: "no record was written" is also what a guard that
+    rejects every patient produces, and what an export broken for
+    everyone produces. Both directions, in the existing subset test's
+    words.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    first, second = _write_two_patient_waveform_fixture(src)
+
+    session = DicomSession(persistence_file=str(tmp_path / "empty.db"))
+    try:
+        session.ingest(str(src))
+        assert {p.patient_id for p in session.store.patients} == {first, second}
+
+        control = session.export(str(tmp_path / "everyone"), format="wfdb")
+        control_files = _record_files(tmp_path / "everyone")
+        assert len(control) == 2, (
+            f"the control export wrote {control}; with the option omitted "
+            "both patients must be written, or the empty-container "
+            "assertions below cannot tell a fixed filter from a broken "
+            "export")
+        assert len(control_files) == 4, control_files
+
+        for index, subset in enumerate(_EMPTY_SUBSETS):
+            folder = tmp_path / f"empty_{index}"
+            written = session.export(str(folder), format="wfdb",
+                                     patient_ids=subset)
+            assert written == [], (
+                f"patient_ids={subset!r} returned {written}; an empty "
+                "container is a filter that selected nobody, and only "
+                "None means every patient (#678)")
+            assert _record_files(folder) == [], (
+                f"patient_ids={subset!r} left "
+                f"{_record_files(folder)} under {folder.name}; the whole "
+                "cohort's waveforms reached a caller who asked for none "
+                "of them (#678)")
+    finally:
+        session.close()
+
+
+def test_an_empty_patient_ids_records_an_export_row_saying_nothing_was_written(
+        tmp_path):
+    """The zero export still attests itself in the audit log (#678, #153).
+
+    `generate_report` keys its export boundary on the `EXPORT` row's
+    absence, so "the export ran and wrote nothing" has to be recorded
+    rather than merely leave no trace -- an absent row reads as "no
+    export happened" and the report says so. The row's template is
+    pinned at `2, 0` and `0, 2` by
+    `tests/test_wfdb_partial_export_is_audited.py` and at `1, 0` by
+    `tests/test_wfdb_writer.py`; nothing built the `0, 0` instance
+    before this test, which is why the zero case is asserted rather than
+    assumed.
+
+    No `ExportError` either: #541's guard is `failed and not written`,
+    and nothing was attempted.
+    """
+    import sqlite3
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_two_patient_waveform_fixture(src)
+
+    folder = tmp_path / "out"
+    session = DicomSession(persistence_file=str(tmp_path / "row.db"))
+    try:
+        session.ingest(str(src))
+        written = session.export(str(folder), format="wfdb", patient_ids=[])
+        assert written == []
+        # Through the barrier: `log_audit` enqueues and the writer thread
+        # drains on its own schedule, so a bare SELECT answers `[]` for a
+        # store that has the row -- and `[]` is also the unfixed answer.
+        session.store_backend.flush_audit_queue()
+        with sqlite3.connect(session.persistence_file) as conn:
+            rows = conn.execute(
+                "SELECT entity_uid, details FROM audit_log "
+                "WHERE action_type='EXPORT'").fetchall()
+    finally:
+        session.close()
+
+    assert len(rows) == 1, (
+        f"expected exactly one EXPORT row, got {rows}; every export run "
+        "writes one whatever the format (#166), and two would mean the "
+        "zero case takes a second path")
+    assert f"WFDB export to {folder}: wrote 0 records, 0 instances failed." \
+        in rows[0][1], (
+            f"the EXPORT row reads {rows[0][1]!r}; an export that selected "
+            "no patients attempted nothing and wrote nothing, and the row "
+            "is where the report reads that (#153)")
+
+
 def test_the_wfdb_export_options_are_the_two_the_page_freezes():
     """The options `WfdbExporter.export` reads are exactly the frozen two.
 
