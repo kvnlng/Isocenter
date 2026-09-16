@@ -2075,6 +2075,13 @@ class DicomSession:
         the `WARNING` row prints. A declined file is not recorded as
         imported, so ingesting the same folder again declines it again.
 
+        A big-endian source's values in words wider than a byte -- `OW`,
+        `OL`, `OF`, `OD`, `OV` and the waveform samples -- are stored
+        little-endian, as its pixels are (#657, #648). What cannot be
+        converted whole (a `UN` value, a length that is not a whole
+        number of words, samples with no usable Waveform Bits Allocated)
+        is kept as read and gets one `WARNING` audit row per element.
+
         Neither `ISOCENTER_FORCE_THREADS` nor
         `ISOCENTER_MAX_TASKS_PER_CHILD` has any effect here: `ingest()`
         runs on the session's own process pool, which has no threads
@@ -5374,14 +5381,22 @@ class DicomSession:
         """
         Apply remediation Actions to PHI Findings (Tag Anonymization).
 
-        If `findings` is provided, only those specific findings are remediated.
-        If `findings` is None -- or empty: an empty list or an empty
-        `PhiReport` is treated the same way (#660) -- a full audit is
-        performed using the current configuration, and all resulting
-        findings are remediated ("Blind Execute").
+        If `findings` is provided, only those specific findings are
+        remediated -- an empty list, tuple, `PhiReport` or iterator
+        included, which applies nothing and returns 0: a filtered report
+        that matched nothing is not a request to remediate everything
+        (#660). Only `findings=None`, or no argument at all, performs a
+        full audit using the current configuration and remediates every
+        finding it raises ("Blind Execute"). An empty call still reads
+        the store's project secret, so a store that has lost it refuses
+        rather than returning 0.
 
         Nothing outside `session.store` is written (#644). A finding whose
-        `entity` is itself in the graph is acted on as it is. Any other is
+        `entity` is itself in the graph is acted on as it is -- except a
+        `REMOVE_TAG`, whose "already gone" is read on the object at the
+        finding's address, on an `Instance` since #626 and on a `Patient`
+        or `Study` since #661, and which declines where the two differ.
+        Any other is
         resolved against the live graph at its `entity_uid` and
         `entity_path` -- an instance's UID from before `redact()`, and a
         patient's original Patient ID after the pseudonym this store
@@ -5419,10 +5434,19 @@ class DicomSession:
         """
         from .remediation import RemediationService
 
-        if not findings:
+        if findings is None:
             # Blind execution: scan with the current configuration, then
             # remediate. First, so the secret below is read after the
             # scan's own first use and its notices are written once.
+            #
+            # `is None`, not `not findings`: `PhiReport` has `__len__`,
+            # so an empty report was falsy and read as "no argument" --
+            # `anonymize([])` and any filtered report that matched
+            # nothing ran a full audit and a full pass (222 applied over
+            # CT_small and MR_small under the floor, #660), while an
+            # empty *iterator* applied 0, because an iterator is truthy.
+            # An empty argument is a request for nothing, whatever
+            # container it arrives in.
             findings = self.audit()
 
         # Asked for here as well as in `audit()`, and never skipped: the
@@ -5444,7 +5468,11 @@ class DicomSession:
             # (#644), and only here, after the blind-execution check above:
             # a report every finding of which a pass already settled
             # resolves to an empty list, and that is not the `None` that
-            # asks for a full audit and pass. One UID map for the three
+            # asks for a full audit and pass. Since #660 an argument that
+            # arrived empty reaches here too, and what this guard saves
+            # then is cost, not behaviour: the three resolvers would walk
+            # the whole graph for nothing and `apply_remediation([])`
+            # would return 0 either way. One UID map for the three
             # readers, so "the instance at this address" cannot mean one
             # thing to the resolver and another to the owners or the
             # removal targets.
@@ -5454,7 +5482,8 @@ class DicomSession:
             remediator._use_gone_keys(gone)
             remediator._use_instance_owners(owners)
             remediator._use_holders(self._finding_holders(findings, owners))
-            remediator._use_removal_targets(self._removal_targets(findings, by_uid))
+            remediator._use_removal_targets(
+                self._removal_targets(findings, by_uid, project_secret))
             remediator._use_scan_tally(self._scan_tally, findings)
             count = remediator.apply_remediation(findings)
 
@@ -6448,7 +6477,10 @@ class DicomSession:
         saved pass replaced the ID the report names. Skipped when the
         `entity_uid` is itself a replacement. A study is looked up by its
         Study Instance UID. Any other entity type resolves only by
-        identity -- live, it is handed over; dead, it declines.
+        identity -- live, it is handed over; dead, it declines. That
+        lookup is `_owner_candidates`, shared with `_removal_targets`
+        since #661, so an owner's address cannot mean one thing to the
+        resolver and another to the removal it resolves.
 
         **Copies, never in place.** The caller's findings keep the entity
         they had: a finding bound to None in place would stay unresolvable
@@ -6459,9 +6491,6 @@ class DicomSession:
         (`tests/test_packaging_contract.py` cites one by number).
         """
         import dataclasses  # pylint: disable=import-outside-toplevel
-        from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
-        from .privacy import (  # pylint: disable=import-outside-toplevel
-            _replacement_id_for, _unkeyed_replacement_id_for)
         from .remediation import _remediation_key  # pylint: disable=import-outside-toplevel
 
         by_pid, by_study, instances, top = {}, {}, [], set()
@@ -6490,17 +6519,8 @@ class DicomSession:
                        for inst in candidates):
                     resolved.append(finding)
                     continue
-            elif finding.entity_type == "Patient":
-                candidates = list(by_pid.get(uid, ()))
-                if uid and not _is_replacement_id(uid):
-                    candidates += by_pid.get(_replacement_id_for(uid, secret), ())
-                    candidates += [
-                        p for p in by_pid.get(_unkeyed_replacement_id_for(uid), ())
-                        if p._jitter_scheme == JITTER_SCHEME_UNKEYED]
-            elif finding.entity_type == "Study":
-                candidates = by_study.get(uid, ())
             else:
-                candidates = ()
+                candidates = self._owner_candidates(finding, by_pid, by_study, secret)
             unique = {id(c): c for c in candidates}
             if id(entity) in unique:
                 resolved.append(finding)
@@ -6527,6 +6547,49 @@ class DicomSession:
                 target = item
             resolved.append(dataclasses.replace(finding, entity=target))
         return resolved, frozenset(gone)
+
+    @staticmethod
+    def _owner_candidates(finding, by_pid, by_study, secret) -> list:
+        """The live `Patient`s or `Study`s a finding's address names (#644).
+
+        A patient under its `entity_uid`, under this store's keyed
+        pseudonym for that ID, and under the unkeyed one for a patient
+        its store classed legacy -- a saved pass replaced the ID the
+        report names, and there has been no unkeyed derivation since
+        0.9.7 for a store that is not legacy. A study under its Study
+        Instance UID. Any other type names none, and resolves by identity
+        alone.
+
+        Extracted from `_live_findings` so `_removal_targets` reads an
+        owner's address by exactly the same rule (#661): a removal
+        satisfied because the field at its address is gone, and a finding
+        rebound because its entity is dead, must agree about which object
+        that address names.
+
+        `secret` is this store's project secret, which the pseudonym
+        lookups need; a missing one would turn a lookup that should find
+        the patient into a failure, so both callers pass the value they
+        already hold.
+
+        Imports are local so no module-level line of this file moves
+        (`tests/test_packaging_contract.py` cites one by number).
+        """
+        from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
+        from .privacy import (  # pylint: disable=import-outside-toplevel
+            _replacement_id_for, _unkeyed_replacement_id_for)
+
+        uid = finding.entity_uid
+        if finding.entity_type == "Patient":
+            candidates = list(by_pid.get(uid, ()))
+            if uid and not _is_replacement_id(uid):
+                candidates += by_pid.get(_replacement_id_for(uid, secret), ())
+                candidates += [
+                    p for p in by_pid.get(_unkeyed_replacement_id_for(uid), ())
+                    if p._jitter_scheme == JITTER_SCHEME_UNKEYED]
+            return candidates
+        if finding.entity_type == "Study":
+            return list(by_study.get(uid, ()))
+        return []
 
     def _nested_finding_owners(self, findings, by_uid) -> dict:
         """`id(item) -> Instance` for each finding raised inside a sequence.
@@ -6560,7 +6623,7 @@ class DicomSession:
                     break
         return owners
 
-    def _removal_targets(self, findings, by_uid) -> dict:
+    def _removal_targets(self, findings, by_uid, secret) -> dict:
         """`id(finding) -> live object at its address` for each `REMOVE_TAG`.
 
         What `RemediationService._use_removal_targets` reads a removal's
@@ -6582,14 +6645,25 @@ class DicomSession:
         instances share a UID (a hand-built graph, `docs/api/stability.md`)
         the one whose path leads to the finding's own entity wins, as in
         `_nested_finding_owners`; failing that, a UID only one instance
-        holds is followed, and an ambiguous one resolves to nothing. Only
-        `Instance` findings resolve, and only among the instances: a
-        finding on a Study, Series or Patient is looked up in its own
-        type's collection, and none of those has the `attributes` dict a
-        removal is satisfied against, so the rest map to None and decline
-        as they did. Looked up among the instances instead, a Study whose
+        holds is followed, and an ambiguous one resolves to nothing.
+
+        An `Instance` finding resolves among the instances and a
+        `Patient` or `Study` finding in its own collection
+        (`_owner_candidates`, the lookup `_live_findings` uses -- a
+        patient under the pseudonym a saved pass gave it included), never
+        the other way round: looked up among the instances, a Study whose
         UID a hand-built instance shares read that instance's absence
-        (review of #639 r3, F1).
+        (review of #639 r3). An owner resolves to its own entity where
+        that is one of the candidates, to the single candidate where
+        there is exactly one, and to None where the address names none or
+        two. Since #661 that answer decides an owner removal too: a
+        `Patient` or `Study` field the exporter stamps, already None with
+        no instance copy left, is satisfied at its address and declines
+        at another's, where before this it wrote `REMEDIATION_REMOVE` and
+        counted as applied wherever the entity came from. A `Series`, and
+        any other type, still maps to None and declines as it did -- it
+        has neither an `attributes` dict nor a field in
+        `ENTITY_FIELD_TAGS`.
 
         A path that breaks is `_removal_address`'s question: the first
         pass may have removed or emptied the sequence a nested finding
@@ -6607,9 +6681,27 @@ class DicomSession:
                    and f.remediation_proposal.action_type == "REMOVE_TAG"]
         if not removes:
             return {}
+        # A Patient's and a Study's own collections, built only when a
+        # removal names one: the walk is the graph's patients and their
+        # studies, which an instance-only pass has no reason to pay for.
+        by_pid, by_study = {}, {}
+        if any(f.entity_type in ("Patient", "Study") for f in removes):
+            for patient in self.store.patients:
+                by_pid.setdefault(patient.patient_id, []).append(patient)
+                for study in patient.studies:
+                    by_study.setdefault(study.study_instance_uid, []).append(study)
         targets = {}
         for f in removes:
             target = None
+            if f.entity_type in ("Patient", "Study"):
+                unique = {id(c): c for c in
+                          self._owner_candidates(f, by_pid, by_study, secret)}
+                if id(f.entity) in unique:
+                    target = f.entity
+                elif len(unique) == 1:
+                    (target,) = unique.values()
+                targets[id(f)] = target
+                continue
             candidates = by_uid.get(f.entity_uid, ()) if f.entity_type == "Instance" else ()
             for inst in candidates:
                 if resolve_item_path(inst, f.entity_path) is f.entity:
