@@ -537,18 +537,26 @@ def test_no_exported_element_keeps_an_ambiguous_value_representation(tmp_path):
     assert list(ambiguous(pydicom.dcmread(written))) == []
 
 
-def test_an_export_of_an_export_is_byte_identical(tmp_path):
+@pytest.mark.parametrize("build, compress", [
+    (lambda: _waveform(_dataset(), bits=16), True),
+    (lambda: _lut(_dataset(), descriptor=None), False),
+], ids=["waveform-j2k", "descriptorless-lut-native"])
+def test_an_export_of_an_export_is_byte_identical(tmp_path, build, compress):
     """Our own output re-ingests and re-exports to the same bytes: the arm
-    chosen at the first write is the arm read back at the second."""
-    ds = _waveform(_dataset(), bits=16)
-    first, _db = _export(tmp_path, ds, compress=True, out="first")
+    chosen at the first write is the arm read back at the second.
+
+    The native descriptorless LUT was the one exception until #691: that
+    export is Implicit VR LE, which carries no arm, and pydicom's read-time
+    resolution refused the file. Ingest now resolves it by this same rule
+    (`io_handlers._read_element`)."""
+    first, _db = _export(tmp_path, build(), compress=compress, out="first")
     again = tmp_path / "again"
     again.mkdir()
     shutil.copy(first, str(again / "two.dcm"))
     with DicomSession(persistence_file=str(tmp_path / "b.db")) as session:
         assert not session.ingest(str(again)).failures
         assert session.export(str(tmp_path / "second"),
-                              use_compression=True).written == 1
+                              use_compression=compress).written == 1
     (second,) = _files(tmp_path / "second")
     assert filecmp.cmp(first, second, shallow=False)
 
@@ -709,22 +717,3 @@ def test_a_waveform_only_instance_takes_the_unsigned_arm(tmp_path):
                  b"\x04\x00\x00\x00\x10\x00")
     _resolve_ambiguous_vrs(bare, [], [])
     assert str(bare[GRAY_LUT_DESCRIPTOR].VR) == "US"
-
-
-def test_an_implicit_export_of_a_descriptorless_lut_cannot_be_reingested(
-        tmp_path):
-    """The one limit this fix does not remove, pinned rather than left to be
-    found later: pydicom resolves an ambiguous VR at *read* too, with no
-    ancestors, so LUT Data with no LUT Descriptor in an Implicit VR file is
-    unreadable element-wise -- including in the file we write. The bytes are
-    there and the arm is not, because Implicit VR LE cannot carry one."""
-    ds = _lut(_dataset(), descriptor=None)
-    written, _db = _export(tmp_path, ds, compress=False)
-    again = tmp_path / "again"
-    again.mkdir()
-    shutil.copy(written, str(again / "two.dcm"))
-    with DicomSession(persistence_file=str(tmp_path / "b.db")) as session:
-        summary = session.ingest(str(again))
-    assert summary.ingested == 0
-    ((_uid, reason),) = summary.failures
-    assert "Failed to resolve ambiguous VR for tag (0028,3006)" in reason

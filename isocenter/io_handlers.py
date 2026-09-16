@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1660 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1663 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1663 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1666 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -2033,7 +2033,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     if path and path[-1][0] == "5400,0100":
         waveform_bits = getattr(ds, "WaveformBitsAllocated", None)
 
-    for elem in ds:
+    # Over the tags, not `for elem in ds`: `Dataset.__iter__` is a
+    # generator over `self[tag]`, so an element whose read raises ends the
+    # walk and refuses the whole file (#691, `_read_element`). `sorted`
+    # because that is exactly what `__iter__` does -- `item.attributes`
+    # keeps its insertion order for a hand-built dataset too, by
+    # construction rather than by the accident of a file read's `_dict`
+    # already being in tag order.
+    for tag_key in sorted(ds.keys()):
+        elem = _read_element(ds, tag_key)
         if elem.tag.group == 0x7fe0:
             # Still skipped -- the group check stays because it is not
             # only about binary VRs. (7fe0,0001) and (7fe0,0002), the
@@ -2188,6 +2196,64 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 unconverted, waveform_bits,
                 _declared_width(ds, tag) if big_endian else None))
             _record_private_vr(item, tag, elem)
+
+
+def _read_element(ds, tag):
+    """`ds[tag]`, or the element whose VR pydicom could not resolve (#691).
+
+    **The trap.** pydicom resolves an ambiguous VR when an element is
+    *read*, not only when it is written: `Dataset.__getitem__` hands a raw
+    element to `correct_ambiguous_vr_element` with no ancestors, and that
+    raises `AttributeError: Failed to resolve ambiguous VR for tag
+    (0028,3006): 'Dataset' object has no attribute 'LUTDescriptor'`
+    wherever the deciding sibling is absent from the nearest dataset.
+    Under Implicit VR no arm is on the wire, so that is every such element:
+    LUT Data in a LUT with no LUT Descriptor, and a `US or SS` element in a
+    sequence item that carries Pixel Data where nothing declares Pixel
+    Representation. The Explicit VR twin of each ingests, and our own
+    native export of the first is one of these files.
+
+    **Why the stored element is the source's.** `__getitem__` stores the
+    converted element *before* it asks the question, so `get_item` returns
+    a `DataElement` with the file's bytes under its ambiguous VR. Should a
+    pydicom release reverse that order, `get_item` returns the raw element,
+    whose VR under Implicit VR is None, the check below re-raises, and the
+    file is refused as it was before this -- loudly, and every test that
+    says such a file is ingested goes red.
+
+    **Why resolving it here is not a second answer.**
+    `_resolve_one_ambiguous_vr` is the export pass's own rule, called at a
+    second site, not a second table (`_numeric_arm` names that trap): `OW`
+    for bytes under `US or OW`, Pixel Representation's arm for `US or SS`,
+    unsigned where nothing declares one. The graph then holds what the
+    Explicit VR twin's holds, and LUT Data, now `OW`, takes
+    `populate_attrs`'s binary arm and its retention threshold, as the twin
+    does. Left under `US or OW` it would reach the generic arm, which has no
+    threshold, and what is retained would depend on the transfer syntax
+    (#151's shape). `[ds]` is the whole ancestor chain that matters: pydicom
+    raised, so neither the item nor any ancestor that propagated a
+    `_pixel_rep` into it declares Pixel Representation, and a LUT's
+    descriptor is by definition in the LUT's own item.
+
+    **No row.** The rows and losses the resolver collects are discarded:
+    the Explicit VR twin gets none at ingest, and the export's pass
+    resolves again with the true ancestor chain and writes the `WARNING`
+    row the caller reads, for both twins, word for word.
+
+    **Why the VR check, and not the message.** Any other `AttributeError`
+    out of `ds[tag]` is re-raised and refuses the file exactly as before;
+    matching pydicom's wording would break on a rephrase. The resolver call
+    sits after the `try` so that a failure inside it is not reported as
+    "during handling of" pydicom's.
+    """
+    try:
+        return ds[tag]
+    except AttributeError:
+        elem = ds.get_item(tag)
+        if str(elem.VR) not in AMBIGUOUS_VR:
+            raise
+    _resolve_one_ambiguous_vr(elem, ds, [ds], [], [])
+    return elem
 
 
 def _process_safe(value):
@@ -8759,13 +8825,17 @@ def _pixel_representation(ancestors):
         if rep is not None:
             return int(rep)
     # Nothing in the chain declares one. pydicom's arm splits here -- 0 for
-    # a dataset with neither the element nor pixels, 1 otherwise -- and the
-    # second half of that split is unreachable from this library: a source
-    # with Pixel Data and no Pixel Representation is refused at ingest,
-    # measured on both routes. Guessing 1 for it would be an untestable
-    # branch, so callers take unsigned, which is also what the write-path
-    # ruling asks for: the bytes are the source's either way, and the arm
-    # is the one more readers will read correctly. None rather than 0
+    # a dataset with neither the element nor pixels, 1 otherwise -- and
+    # callers take unsigned for both halves. A source whose *top-level*
+    # Pixel Data has no Pixel Representation is refused at ingest on both
+    # routes, while decompressing. A sequence item with Pixel Data and none
+    # -- an icon -- is not refused: its pixels are dropped with a
+    # `DATA_LOSS` row, and its `US or SS` elements are read unsigned (by
+    # this rule, through `_read_element`, under Implicit VR; #691). So the
+    # items that reach this with pixels are items whose pixels are not
+    # written. Unsigned is also what the write-path ruling asks for: the
+    # bytes are the source's either way, and the arm is the one more
+    # readers will read correctly (#700 is what a signed source loses). None rather than 0
     # because only the caller that *reports* the choice needs to know the
     # difference, and it must not report a header the file lacks.
     return None
