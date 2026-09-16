@@ -412,6 +412,13 @@ def test_a_descriptor_under_pixel_representation_one_is_written_signed(
         pytest.param(GRAY_LUT_DESCRIPTOR, (), 0, "SS", [4, -2048, 16],
                      b"\x04\x00\x00\xf8\x10\x00", "SS", "US",
                      id="omitted-tag-negative-under-PR-0"),
+        # And the mirror, because one direction pins only half of the
+        # clause: with `named` hardcoded to `US` the case above still
+        # passes, and a caller with this source reads "written US, Pixel
+        # Representation names US and the value needs US".
+        pytest.param(GRAY_LUT_DESCRIPTOR, (), 1, "US", [4, 40000, 16],
+                     b"\x04\x00@\x9c\x10\x00", "US", "SS",
+                     id="omitted-tag-over-32767-under-PR-1"),
     ])
 def test_a_descriptor_the_pixel_representation_cannot_hold_is_written_otherwise(
         tmp_path, tag, seq_path, pr, source_vr, values, raw, vr, named):
@@ -497,7 +504,8 @@ def test_the_veto_drops_a_value_neither_arm_holds():
     ds.add_new(SMALLEST_PIXEL, "US or SS", [70000])
     ds[SMALLEST_PIXEL].VR = "US"            # the arm pydicom would name
     losses, rows = [], []
-    _veto_ambiguous_arm(ds[SMALLEST_PIXEL], ds, ["US", "SS"], losses, rows)
+    _veto_ambiguous_arm(ds[SMALLEST_PIXEL], ds, ["US", "SS"], losses, rows,
+                        "US")
     assert SMALLEST_PIXEL not in ds
     assert (rows, losses) == ([], [
         ("STANDARD", "Tag (0028,0106) not exported (data loss): its value "
@@ -566,7 +574,7 @@ def test_pixel_data_keeps_the_answer_pydicom_gives_it(tmp_path, bits, vr):
 
 def test_pixel_representation_is_the_nearest_ancestor_that_declares_one():
     """The rule pydicom's `US or SS` arm walks, spelled out for the tags its
-    table omits: nearest first, root last, and `US` when no one says.
+    table omits: nearest first, root last, and None when no one says.
 
     Asserted directly because the pipeline cannot separate the arms of it:
     a sequence item in an exported dataset carries pydicom's own propagated
@@ -582,7 +590,9 @@ def test_pixel_representation_is_the_nearest_ancestor_that_declares_one():
     assert _pixel_representation([bare, root]) == 1
     assert _pixel_representation([unsigned_item, root]) == 0
     assert _pixel_representation([root]) == 1
-    assert _pixel_representation([bare]) == 0
+    # None, not 0: callers take unsigned either way, and only the row that
+    # reports the choice needs to know the source declared nothing.
+    assert _pixel_representation([bare]) is None
     propagated = Dataset()
     propagated._pixel_rep = 1
     assert _pixel_representation([propagated]) == 1
@@ -630,6 +640,51 @@ def test_a_descriptor_whose_bytes_exceed_32767_stays_unsigned(tmp_path):
     assert _rows(db, "WARNING") == []
 
 
+def _pixel_less(ds):
+    """The same dataset as an ECG: no Pixel Data and no image descriptors,
+    so nothing in it declares a Pixel Representation."""
+    for tag in (0x7FE00010, 0x00280103, 0x00280100, 0x00280101, 0x00280102,
+                0x00280010, 0x00280011, 0x00280002, 0x00280004):
+        if tag in ds:
+            del ds[tag]
+    ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.9.1.1"              # 12-lead ECG
+    ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID
+    ds.Modality = "ECG"
+    return ds
+
+
+@pytest.mark.parametrize("tag, raw", [
+    # The omitted tag reaches the numbers branch (pydicom answers nothing
+    # for it); the tabulated one reaches the veto (pydicom's `US or SS`
+    # arm answers `US` for a dataset with neither the element nor pixels,
+    # without raising). Both sites must say the same true thing.
+    pytest.param(GRAY_LUT_DESCRIPTOR, b"\x04\x00\x00\xf8\x10\x00",
+                 id="omitted-tag"),
+    pytest.param(SMALLEST_PIXEL, b"\xfb\xff", id="tabulated-tag"),
+])
+def test_a_row_about_an_undeclared_pixel_representation_says_so(
+        tmp_path, tag, raw):
+    """A `WARNING` row is read as a fact about the caller's data, so it may
+    not name an element the file does not contain. A pixel-less instance
+    declares no Pixel Representation anywhere: the unsigned arm is this
+    library's default there -- pydicom's own answer for a dataset with
+    neither the element nor pixels -- and where the value cannot fit it,
+    the row says that, rather than "Pixel Representation names US" about a
+    header nothing wrote."""
+    ds = _pixel_less(_waveform(_dataset(), bits=16))
+    ds.add_new(tag, "SS", [4, -2048, 16] if tag == GRAY_LUT_DESCRIPTOR else -5)
+    written, db = _export(tmp_path, ds, compress=False)
+    named_tag = f"{tag >> 16:04x},{tag & 0xFFFF:04x}"
+    assert _element(written, (), tag)[1] == raw
+    assert _rows(db, "WARNING") == [
+        f"Ambiguous value representation ({named_tag}): no Pixel "
+        f"Representation is declared anywhere above it, and the unsigned "
+        f"arm it defaults to cannot hold the value, so SS was written. The "
+        f"written bytes are the source's; what this library had to choose "
+        f"is the value representation the file declares, which decides how "
+        f"a reader interprets those bytes."]
+
+
 def test_a_waveform_only_instance_takes_the_unsigned_arm(tmp_path):
     """No Pixel Data and no Pixel Representation anywhere: pydicom's own
     rule ends at `US` for a dataset that has neither, and a waveform
@@ -640,14 +695,7 @@ def test_a_waveform_only_instance_takes_the_unsigned_arm(tmp_path):
     no VR on the wire, and `[4, 0, 16]` writes the same six bytes under `US`
     as under `SS` -- so end to end this shape can only say the export did
     not fail. The arm itself is asserted where it is chosen."""
-    ds = _waveform(_dataset(), bits=16)
-    for tag in (0x7FE00010, 0x00280103, 0x00280100, 0x00280101, 0x00280102,
-                0x00280010, 0x00280011, 0x00280002, 0x00280004):
-        if tag in ds:
-            del ds[tag]
-    ds.SOPClassUID = "1.2.840.10008.5.1.4.1.1.9.1.1"          # 12-lead ECG
-    ds.file_meta.MediaStorageSOPClassUID = ds.SOPClassUID
-    ds.Modality = "ECG"
+    ds = _pixel_less(_waveform(_dataset(), bits=16))
     ds.add_new(GRAY_LUT_DESCRIPTOR, "US", [4, 0, 16])
     written, db = _export(tmp_path, ds, compress=False)
     assert _element(written, (), GRAY_LUT_DESCRIPTOR)[1] == \

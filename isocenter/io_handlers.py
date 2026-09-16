@@ -8630,11 +8630,16 @@ def _int_values(value):
 
 
 def _pixel_representation(ancestors):
-    """Pixel Representation for the `US or SS` family, pydicom's own rule.
+    """Pixel Representation for the `US or SS` family, or None if none.
 
     Mirrors `pydicom.filewriter._correct_ambiguous_vr_element`'s `US or SS`
     arm: the nearest ancestor that carries one, else the `_pixel_rep` a read
-    propagated into sequence items, else 0. Spelled out because that arm is
+    propagated into sequence items. **None means the chain declares none**,
+    which callers read as unsigned -- the arm pydicom itself answers for a
+    dataset with neither the element nor pixels -- while keeping the two
+    cases apart, because a `WARNING` row that said "Pixel Representation
+    names US" about a file carrying no such element would be a false
+    statement about the caller's data (#674). Spelled out because that arm is
     reached only for the twenty tags pydicom tabulates, and the same rule is
     the right answer for the five it leaves out -- all retired, per its own
     docstring -- and because its last branch reads
@@ -8656,10 +8661,12 @@ def _pixel_representation(ancestors):
     # second half of that split is unreachable from this library: a source
     # with Pixel Data and no Pixel Representation is refused at ingest,
     # measured on both routes. Guessing 1 for it would be an untestable
-    # branch, so this says unsigned, which is also what the write-path
+    # branch, so callers take unsigned, which is also what the write-path
     # ruling asks for: the bytes are the source's either way, and the arm
-    # is the one more readers will read correctly.
-    return 0
+    # is the one more readers will read correctly. None rather than 0
+    # because only the caller that *reports* the choice needs to know the
+    # difference, and it must not report a header the file lacks.
+    return None
 
 
 def _waveform_bits(ancestors):
@@ -8693,10 +8700,23 @@ def _ambiguous_veto_clause(tag, written, named):
 
     Two sites reach this: the arm pydicom named and the arm this pass named
     for a tag pydicom's tables omit. The same fact is being stated -- the
-    source's own header names an arm its value cannot fit -- so the
+    arm chosen is not the one the source's header calls for -- so the
     sentence a caller reads must not depend on which of them chose it, and
     an edit to the wording must not be able to leave one site stale.
+
+    `named` is None where **no** Pixel Representation is declared anywhere
+    in the chain, and then the sentence says so instead of naming an
+    element the file does not carry: the arm is a default of this library's
+    (unsigned, pydicom's own answer for a dataset with neither the element
+    nor pixels), not a claim the source made, and a `WARNING` row is read
+    as a fact about the caller's data. That case leads with the omission
+    like the other two omission clauses; the contradiction case leads with
+    the arm, because there the arm is the fact (`_ambiguous_vr_warning`).
     """
+    if named is None:
+        return (f"({tag}): no Pixel Representation is declared anywhere "
+                f"above it, and the unsigned arm it defaults to cannot "
+                f"hold the value, so {written} was written")
     return (f"({tag}) written {written}, Pixel Representation names "
             f"{named} and the value needs {written}")
 
@@ -8715,10 +8735,15 @@ def _ambiguous_vr_warning(clauses) -> Optional[str]:
     the source's file and takes no row: the bytes written are theirs and
     nothing about their data is wrong.
 
-    The two omission clauses lead with what the source does not carry
-    rather than with the arm chosen, because that is the fact about the
-    caller's data; the contradiction clause leads with the arm, because
-    there the arm *is* the fact.
+    The omission clauses lead with what the source does not carry rather
+    than with the arm chosen, because that is the fact about the caller's
+    data; the contradiction clause leads with the arm, because there the
+    arm *is* the fact. There are three of the first kind -- no Waveform
+    Bits Allocated, no LUT Descriptor, no Pixel Representation at all --
+    and one of the second, and the last two are the same value-versus-arm
+    situation told from opposite ends: where the header names an arm the
+    value contradicts it, and where no header names one the arm is this
+    library's default and the sentence says so.
 
     The waveform clause fires **below the top level only**, and that is
     pydicom's line rather than a choice made here: a *top-level*
@@ -8827,7 +8852,13 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
         # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
         unresolved = True
     if not unresolved and str(elem.VR) not in AMBIGUOUS_VR:
-        _veto_ambiguous_arm(elem, ds, arms, losses, rows)
+        # pydicom answered, so what it answered is what the header names
+        # -- except where the chain declares no Pixel Representation at
+        # all, and its `US or SS` arm defaults to `US` for a dataset with
+        # no pixels either. `None` then, so the row cannot name an element
+        # the file does not carry (#674).
+        _veto_ambiguous_arm(elem, ds, arms, losses, rows,
+                            _named_arm(ancestors, elem.VR))
         return
 
     value = elem.value
@@ -8862,11 +8893,15 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
         else:
             # `US or SS` over bytes: pydicom's Pixel Representation rule,
             # extended to the tags its table leaves out.
-            rep = _pixel_representation(ancestors)
+            # `or 0`: a chain that declares nothing takes the unsigned
+            # arm, exactly as a declared 0 does. Only the row needs the
+            # two cases apart, and `_named_arm` is what keeps them apart.
+            rep = _pixel_representation(ancestors) or 0
             elem.VR = "US" if rep == 0 else "SS"
             elem.value = convert_numbers(bytes(value or b""), True,
                                          "H" if rep == 0 else "h")
-            _veto_ambiguous_arm(elem, ds, arms, losses, rows)
+            _veto_ambiguous_arm(elem, ds, arms, losses, rows,
+                                _named_arm(ancestors, elem.VR))
         return
 
     values = _int_values(value)
@@ -8878,7 +8913,7 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
         # mean the same element. Pixel Representation is what pydicom
         # applies to the twenty tags it tabulates; the value only speaks
         # where the header's answer cannot hold it.
-        rep = _pixel_representation(ancestors)
+        rep = _pixel_representation(ancestors) or 0
         preferred = "US" if rep == 0 else "SS"
         if _fitting_arm([preferred], values) is not None:
             elem.VR = preferred
@@ -8886,7 +8921,8 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
         other = _fitting_arm(arms, values)
         if other is not None:
             elem.VR = other
-            rows.append(_ambiguous_veto_clause(tag, other, preferred))
+            rows.append(_ambiguous_veto_clause(
+                tag, other, _named_arm(ancestors, preferred)))
             return
         values = None           # no arm holds it: the loss below
     arm = _fitting_arm(arms, values) if values else None
@@ -8896,7 +8932,21 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
     elem.VR = arm
 
 
-def _veto_ambiguous_arm(elem, ds, arms, losses, rows):
+def _named_arm(ancestors, resolved):
+    """The arm the source's header names, or None if it names none.
+
+    `resolved` is the arm already chosen, which for the `US or SS` family
+    *is* what a declared Pixel Representation names -- pydicom's rule and
+    this module's are the same rule. The only thing this adds is the
+    distinction pydicom's answer cannot carry: whether any ancestor
+    declares the element at all (#674).
+    """
+    if _pixel_representation(ancestors) is None:
+        return None
+    return str(resolved)
+
+
+def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
     """Refuse an arm the value does not fit, and say so (#681).
 
     pydicom resolves the `US or SS` family from Pixel Representation, which
@@ -8931,7 +8981,7 @@ def _veto_ambiguous_arm(elem, ds, arms, losses, rows):
         _ambiguous_arm_loss(ds, elem, losses, tag, arms)
         return
     elem.VR = other
-    rows.append(_ambiguous_veto_clause(tag, other, vr))
+    rows.append(_ambiguous_veto_clause(tag, other, named))
 
 
 def _numeric_arm(vr, value):
@@ -8946,7 +8996,7 @@ def _numeric_arm(vr, value):
 
     **Keyed on the dictionary VR string, not on a tag.** A tag-keyed branch
     would be a second ambiguity table that drifts from pydicom's. All four
-    ambiguous strings reach the gate -- 36 tags and 2 repeater patterns --
+    ambiguous strings reach the gate -- 34 tags and 4 repeater patterns --
     and two entries have both an `OW` arm and a numeric one, which are the
     two whose arm is *chosen* here: LUT Data (0028,3006) and the retired
     Gray LUT Data (0028,1200). Everything else that arrives is either
