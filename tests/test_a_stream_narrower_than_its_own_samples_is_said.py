@@ -30,20 +30,35 @@ deliberately contains no `precision is`, the substring
 
 **Two limits ship with it, and both are pinned here.**
 
-*Signed streams are not reported*, and rev-098j9 corrected the reason.
-`_sign_extend` masks at `max(precision, BitsStored)`, so a signed sample
-is pushed back inside the precision only where **BitsStored <=
-precision** -- not for every signed file, as this file used to claim "by
-construction". Above it the divergence is visible: one precision-12
-stream under PixelRepresentation 1 reads `[-1996, 1470]` at BitsStored
-12 (masked), `[-3992, 3570]` at 13 and `[0, 4970]` at 16, against `[0,
-4095]` on the plugin route, 16 of 64 cells apart
-(`test_a_signed_stream_beyond_its_precision_writes_no_row`, parametrised
-over the three, with per-arm assertions because a shared set is what let
-the false claim stand). The visible half is unreported because the bound
-that would catch it fires on conformant signed files too
-(`test_the_signed_bound_would_fire_on_a_conformant_stream`). That is
-#682, now split into a masked half and a detectable one.
+*Signed streams are reported for T.81 above the precision, and for
+nothing else.* rev-098j9 took three rounds to get this right, and the
+reason is that one gate covers three families whose decoders treat
+signedness three different ways -- the answers come from
+`_sign_extend`'s three call sites, not from the check:
+
+* **T.81 (`.57`/`.70`)** -- the precision is passed only when *wider*
+  than BitsStored (#622), so the width is `max(precision, BitsStored)`
+  and masking into the precision happens only where BitsStored <=
+  precision. One precision-12 stream reads `[-1996, 1470]` at BitsStored
+  12 (masked, no row), and `[-3992, 3570]` at 13 and `[0, 4970]` at 16
+  against `[0, 4095]` on the plugin route, 16 of 64 cells apart -- the
+  reported half (`test_a_signed_t81_stream_above_its_precision_writes_
+  the_row`, per-arm, since 13 exercises the low half alone and 16 the
+  high).
+* **JPEG-LS (`.80`/`.81`)** -- the frame's precision is passed
+  *unconditionally* (#478), so a signed sample is always masked inside
+  it and "by construction" is true here without qualification
+  (`test_a_signed_jpegls_stream_is_masked_at_its_own_precision`).
+* **JPEG 2000** -- the SIZ segment carries the signedness, so negatives
+  are ordinary data and say nothing about precision
+  (`test_the_unscoped_signed_bound_would_fire_on_a_signed_codestream`).
+
+Two candidate bounds were refused on measurement and both are pinned by
+a test rather than by prose: `[-2^(P-1), 2^(P-1) - 1]` fires on a
+conformant signed T.81 stream both routes read identically, and the
+unsigned bound applied across the whole gate fires on `693_J2KR.dcm`
+from pydicom's own test data. #682 keeps the masked T.81 half, which
+needs a hook inside the decoder rather than a bound outside it.
 
 *It is not visible on pydicom's plugin route*, which has already clamped
 the samples, so a clamped array always fits. **That half needs pylibjpeg
@@ -79,8 +94,8 @@ from isocenter.io_handlers import (_beyond_precision_words,
                                    _decode_pixels,
                                    _samples_beyond_stream_precision)
 from isocenter.session import DicomSession
-from support.decode_doors import (LJPEG, LJPEG_SV1, dataset,  # noqa: F401
-                                  pydicom_cannot, write)
+from support.decode_doors import (J2K_LOSSLESS, JPEGLS, LJPEG,  # noqa: F401
+                                  LJPEG_SV1, dataset, pydicom_cannot, write)
 
 _YY, _XX = np.mgrid[0:8, 0:8]
 
@@ -342,51 +357,40 @@ def test_one_log_cap_per_rule(tmp_path, pydicom_cannot, caplog):
 
 
 # ---------------------------------------------------------------------------
-# T18: the signed limit, pinned -- and only half of it is masked
+# T18: the signed arm -- T.81 above its precision, and nothing else
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("bits_stored, bounds, masked", [
-    (12, (-1996, 1470), True),
-    (13, (-3992, 3570), False),
-    (16, (0, 4970), False),
-], ids=["bs12-masked", "bs13-visible", "bs16-visible"])
-def test_a_signed_stream_beyond_its_precision_writes_no_row(
-        tmp_path, pydicom_cannot, bits_stored, bounds, masked):
-    """The stated limit (#682) -- and *why* it is a limit, per arm.
+@pytest.mark.parametrize("bits_stored, bounds, sample", [
+    (13, (-3992, 3570), -3992),
+    (16, (0, 4970), 4970),
+], ids=["bs13-low-half", "bs16-high-half"])
+def test_a_signed_t81_stream_above_its_precision_writes_the_row(
+        tmp_path, pydicom_cannot, bits_stored, bounds, sample):
+    """The reported signed half: T.81, BitsStored above the precision.
 
-    The claim this test used to carry was that `_sign_extend` masks every
-    signed sample back inside `[-2^(P-1), 2^(P-1) - 1]` **by
-    construction**, so nothing after the decode could see the divergence.
-    That is false for half the population, and rev-098j9 measured it:
-    `_sign_extend`'s width is `max(precision, BitsStored)`, so masking
-    into the precision happens only where **BitsStored <= precision**.
+    `_decode_frame` passes a T.81 stream's precision to `_sign_extend`
+    only when it is *wider* than BitsStored (#622), so the extension
+    width is `max(precision, BitsStored)` and above the precision nothing
+    masks the samples back inside it. A negative there can only have come
+    from a pattern above `2^P - 1`, which is why the unsigned bound's low
+    half is a true proxy for over-precision on this family.
 
-    Measured on this branch, one precision-12 stream under three
-    BitsStored values (`.agent/scratch-098/dev-J9/p671signed-ci312.json`,
-    `-ci314t.json`, `-ljp312.json`; identical on 3.12 and 3.14t):
+    Measured, one precision-12 stream, identical on 3.12 and 3.14t
+    (`.agent/scratch-098/dev-J9/p671signed-*.json`):
 
-    * **BitsStored 12** -- width 12, so the samples really are masked to
-      `[-1996, 1470]`, inside `[-2048, 2047]`. Nothing post-decode can
-      see it. The original claim, true here only.
-    * **BitsStored 13** -- width 13, `[-3992, 3570]`, well outside. The
-      plugin route reads `[0, 4095]`: 16 of 64 cells apart.
-    * **BitsStored 16** -- width 16, `[0, 4970]`, outside. The plugin
-      route reads `[0, 4095]`: 16 of 64 cells apart.
+    * **BitsStored 13** -- `[-3992, 3570]`. The high side *fits* 4095;
+      only the negative is outside, so this arm exercises the low half
+      alone and the row names `-3992`.
+    * **BitsStored 16** -- `[0, 4970]`. Nothing is negative, so this arm
+      exercises the high half and the row names `4970`.
 
-    So the divergence *is* visible for the latter two, and no row is
-    written for them today. That is the open half of #682, and it is
-    deliberately still open: the signed-aware bound
-    `[-2^(P-1), 2^(P-1) - 1]` that would catch them also fires on a
-    stream whose every sample is a legal 12-bit pattern under BitsStored
-    13 or 16 -- measured, both routes reading `[0, 3570]`, identical in
-    all 64 cells -- so it would claim "another reader may see different
-    values" about files no reader disagrees about. Reported for a ruling
-    rather than shipped.
+    Both read `[0, 4095]` on pydicom's plugin route, 16 of 64 cells
+    apart, which is the divergence the row is about.
 
-    Per-arm expectations, deliberately: one shared assertion set (`min >=
-    -2048 and max <= 2047`) is what let the false "by construction" claim
-    stand, because it passes for the masked arm and was only ever run
-    there.
+    Per-arm expectations, deliberately: one shared assertion set
+    (`min >= -2048 and max <= 2047`) is what let the earlier false "by
+    construction" claim stand, because it passes for the masked arm and
+    was only ever run there.
     """
     got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(FILED, 12)],
                                bits_stored=bits_stored, pr=1), pydicom_cannot)
@@ -394,31 +398,63 @@ def test_a_signed_stream_beyond_its_precision_writes_no_row(
 
     assert got["stored"].dtype == np.dtype("int16")
     assert (low, high) == bounds
-    # The claim under test: masked into the precision, or not.
-    inside = -2048 <= low and high <= 2047
-    assert inside is masked, (low, high)
-    # No row on any arm, which is the limit as it ships.
+    # Not masked into the precision -- the premise of reporting it.
+    assert not (-2048 <= low and high <= 2047), (low, high)
+    (row,) = _beyond_rows(got["rows"])
+    assert row[0] == "WARNING"
+    assert f"reads {sample}," in row[1], row[1]
+    assert "at most 4095 here" in row[1], row[1]
+    assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
+    # Nothing rewritten. Read back through `_decode_pixels`, not
+    # `pixel_array`: the export keeps the source's transfer syntax and
+    # `pydicom_cannot` is still in effect, so this is the fallback route
+    # the row is about.
+    decoded, _label = _decode_pixels(got["exported"])
+    assert (int(decoded.min()), int(decoded.max())) == bounds
+
+
+def test_a_signed_t81_stream_at_its_precision_writes_no_row(tmp_path,
+                                                            pydicom_cannot):
+    """The masked half, which stays #682's and stays silent.
+
+    At BitsStored 12 the extension width is 12, so the samples really are
+    pushed back inside `[-2048, 2047]` and read `[-1996, 1470]` on both
+    routes. Nothing after the decode can see the divergence, so there is
+    nothing honest to say about it -- this is the half of #682 that needs
+    a hook inside the decoder rather than a bound outside it.
+    """
+    got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(FILED, 12)],
+                               bits_stored=12, pr=1), pydicom_cannot)
+    low, high = int(got["stored"].min()), int(got["stored"].max())
+
+    assert got["stored"].dtype == np.dtype("int16")
+    assert (low, high) == (-1996, 1470)
+    assert -2048 <= low and high <= 2047, "masked into the precision"
     assert not _beyond_rows(got["rows"]), got["rows"]
     assert "PASS" in got["grade"], got["grade"]
 
 
 def test_the_signed_bound_would_fire_on_a_conformant_stream(tmp_path,
                                                             pydicom_cannot):
-    """Why the signed half is reported rather than fixed (rev-098j9 F1).
+    """The first refused bound, pinned (rev-098j9 F1).
 
-    The ruled extension was a signed bound `[-2^(P-1), 2^(P-1) - 1]` for
-    PixelRepresentation 1, on the premise that it "fires exactly where the
-    extension does not mask". It does fire there -- and also here, on a
-    stream every one of whose samples is a legal 12-bit pattern, which
-    both routes read identically.
+    The bound first ruled for the signed arm was
+    `[-2^(P-1), 2^(P-1) - 1]`, on the premise that it "fires exactly
+    where the extension does not mask". It does fire there -- and also
+    here, on a stream every one of whose samples is a legal 12-bit
+    pattern, which both routes read identically.
 
     `_sign_extend`'s width is `max(precision, BitsStored)` = 16, so the
     12-bit patterns are not sign-extended at all and come back as the
-    unsigned values `[0, 3570]`. Those exceed `2^11 - 1`, so the ruled
-    bound fires; and the plugin route reads the same `[0, 3570]` in all 64
-    cells, so the row's "another reader may see different values" would be
-    false. This test pins the shape so the premise cannot be re-adopted
-    without the counter-example going red.
+    unsigned values `[0, 3570]`. Those exceed `2^11 - 1`, so that bound
+    fires; and the plugin route reads the same `[0, 3570]` in all 64
+    cells, so the row's "another reader may see different values" would
+    be false of the file.
+
+    **The bound that shipped does not fire here**, and that is what the
+    no-row assertion below now measures rather than merely recording:
+    `3570` fits `2^12 - 1`, and nothing is negative. The premise cannot
+    be re-adopted without this going red.
     """
     conformant = (FILED & 0xFFF).astype(np.uint16)
     got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(conformant, 12)],
@@ -428,9 +464,80 @@ def test_the_signed_bound_would_fire_on_a_conformant_stream(tmp_path,
     # Every sample a legal 12-bit pattern, so nothing exceeds precision 12.
     assert int(conformant.max()) <= 4095
     assert (low, high) == (0, 3570)
-    # ... yet it is outside the signed range the ruled bound would use.
+    # ... yet it is outside the signed range the refused bound would use.
     assert high > (1 << 11) - 1
-    # No row, which is correct: no reader disagrees about this file.
+    # ... and inside the one that shipped, which is why there is no row.
+    assert low >= 0 and high <= (1 << 12) - 1
+    assert not _beyond_rows(got["rows"]), got["rows"]
+    assert "PASS" in got["grade"], got["grade"]
+
+
+def test_the_unscoped_signed_bound_would_fire_on_a_signed_codestream(
+        tmp_path, pydicom_cannot):
+    """The second refused bound, pinned (rev-098j9 round 3).
+
+    The bound ruled next was the unsigned one, `[0, 2^P - 1]` with its
+    low half, applied to PixelRepresentation 1 wherever BitsStored
+    exceeded the precision -- across the whole gate. The gate admits
+    JPEG 2000, and **a codestream carries its own signedness** in the SIZ
+    segment, so its decoders return negatives with no sign extension
+    involved at all and `lowest < 0` says nothing about precision.
+
+    The corpus sweep found it on a real file: `693_J2KR.dcm` from
+    pydicom's test data, precision 14, BitsStored 16,
+    PixelRepresentation 1, read `int16 [-2000, 2492]` by Pillow *and* by
+    the imagecodecs fallback, identical in all 262144 cells, every sample
+    legal at 14 bits. The unscoped bound fires on `-2000` and flips the
+    grade to `REVIEW_REQUIRED`, claiming 14 bits cannot hold a legal
+    14-bit value (`.agent/scratch-098/dev-J9/p693-ci312.json`,
+    `p693-ci314t.json`, `sweep3/`).
+
+    This is that shape, built small: a signed codestream under
+    PixelRepresentation 1 with BitsStored above its precision, every
+    sample inside the precision, negatives present. It must write no row.
+    """
+    samples = (_XX * 500 + _YY * 10 - 1800).astype(np.int16)
+    stream = imagecodecs.jpeg2k_encode(samples, level=0, reversible=True,
+                                       bitspersample=12, codecformat="J2K")
+    got = _run(tmp_path, _file(J2K_LOSSLESS, [stream], bits_stored=16, pr=1),
+               pydicom_cannot)
+    low, high = int(got["stored"].min()), int(got["stored"].max())
+
+    # The shape: signed, negatives present, BitsStored above the precision.
+    assert got["stored"].dtype == np.dtype("int16")
+    assert (low, high) == (-1800, 1770)
+    assert low < 0, "the half the unscoped bound fired on"
+    # Every sample legal at precision 12, so there is nothing to report.
+    assert -(1 << 11) <= low and high <= (1 << 11) - 1
+    assert not _beyond_rows(got["rows"]), got["rows"]
+    assert "PASS" in got["grade"], got["grade"]
+
+
+def test_a_signed_jpegls_stream_is_masked_at_its_own_precision(tmp_path,
+                                                               pydicom_cannot):
+    """The third family, and why its masking claim needs no BitsStored test.
+
+    `_decode_frame` passes a JPEG-LS frame's own precision to
+    `_sign_extend` **unconditionally** (#478) -- not "when wider than
+    BitsStored", as the T.81 arm does -- so the extension width is the
+    precision at every BitsStored and a signed sample always lands inside
+    `[-2^(P-1), 2^(P-1) - 1]`. The "masked by construction" claim that
+    was false for T.81 is unconditionally true here.
+
+    Measured: an 8-bit sample of 150 under BitsStored 16 reads `-106`.
+    That is the masking, not a divergence, which is why the signed arm is
+    scoped to T.81 and this family stays silent however far BitsStored
+    sits above the precision.
+    """
+    samples = (_XX * 30 + _YY).astype(np.uint8)
+    assert int(samples.max()) > 127, "a sample the masking will make negative"
+    got = _run(tmp_path, _file(JPEGLS, [imagecodecs.jpegls_encode(samples)],
+                               bits_stored=16, pr=1), pydicom_cannot)
+    low, high = int(got["stored"].min()), int(got["stored"].max())
+
+    # Masked into precision 8 despite BitsStored 16.
+    assert (low, high) == (-106, 127)
+    assert -(1 << 7) <= low and high <= (1 << 7) - 1
     assert not _beyond_rows(got["rows"]), got["rows"]
     assert "PASS" in got["grade"], got["grade"]
 

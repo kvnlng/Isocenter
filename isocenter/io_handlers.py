@@ -3062,36 +3062,55 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     time, so neither a JPEG-LS nor a JPEG 2000 stream with over-precision
     samples can be built with the tools here.
 
-    **Unsigned only, and only half of that is because the signed half is
-    masked.** The claim here used to be that a signed decode is always
-    masked back inside its precision by sign extension, so no check after
-    the decode could see the divergence. That is true of *half* the
-    population and rev-098j9 measured the other half:
-    `imagecodecs_handler._sign_extend` masks at
-    `max(precision, BitsStored)`, so a signed sample lands inside
-    `[-2^(P-1), 2^(P-1) - 1]` only where **BitsStored <= precision**.
-    Above it the divergence is plainly visible -- one precision-12 stream
-    under PixelRepresentation 1, measured on 3.12 and 3.14t alike:
-    BitsStored 12 reads `[-1996, 1470]` (masked, invisible), BitsStored 13
-    reads `[-3992, 3570]` and BitsStored 16 reads `[0, 4970]`, against
-    `[0, 4095]` on the plugin route, 16 of 64 cells apart.
+    **Signed: one gate, three families, three answers.** The claim here
+    used to be that a signed decode is always masked back inside its
+    precision by sign extension, so no check after the decode could see
+    the divergence. rev-098j9 measured that and it is true of one family
+    conditionally, one unconditionally, and the third not at all. The
+    answers come from `_sign_extend`'s three call sites in
+    `imagecodecs_handler`, not from this function:
 
-    That visible half is **still not reported**, and the reason is a
-    measurement rather than an omission. A signed-aware bound
-    `[-2^(P-1), 2^(P-1) - 1]` catches it, and also fires on a stream
-    every one of whose samples is a legal `P`-bit pattern: under
-    BitsStored 13 or 16 those are not sign-extended at all, so a
-    conformant signed 12-bit image reads `[0, 3570]` on **both** routes,
-    identical in all 64 cells, and the row's "another reader may see
-    different values" would be false of it
-    (`.agent/scratch-098/dev-J9/p671signed-*.json`,
-    `test_the_signed_bound_would_fire_on_a_conformant_stream`). So the
-    signed arm is open rather than half-closed: #682 carries it, narrowed
-    to the two halves it actually has.
+    * **T.81 (`.57`/`.70`) -- reported, above the precision only.**
+      `_decode_frame` passes the stream's precision only when it is
+      *wider* than BitsStored (#622), so the extension width is
+      `max(precision, BitsStored)` and a sample is masked back inside
+      `[-2^(P-1), 2^(P-1) - 1]` only where **BitsStored <= precision**.
+      Above it a negative can only have come from a pattern above
+      `2^P - 1`, so the unsigned bound's low half is a true proxy for
+      over-precision. Measured, one precision-12 stream, 3.12 and 3.14t
+      alike: BitsStored 12 reads `[-1996, 1470]` (masked, invisible, and
+      still #682's), BitsStored 13 reads `[-3992, 3570]` and BitsStored
+      16 reads `[0, 4970]`, against `[0, 4095]` on the plugin route,
+      16 of 64 cells apart. Those two are the reported half.
+    * **JPEG-LS (`.80`/`.81`) -- never reported, because always masked.**
+      `_decode_frame` passes the frame's own precision *unconditionally*
+      (#478), so the width is the precision at every BitsStored and a
+      signed sample is always inside `[-2^(P-1), 2^(P-1) - 1]`. Measured:
+      an 8-bit sample of 150 under BitsStored 16 reads `-106`, which is
+      the masking, not a divergence.
+    * **JPEG 2000 -- never reported, because signedness is the stream's
+      own.** The SIZ segment carries it, so the decoders return negatives
+      with no sign extension involved and a negative says nothing about
+      precision. `693_J2KR.dcm` from pydicom's test data is the measured
+      case: precision 14, BitsStored 16, PixelRepresentation 1,
+      `int16 [-2000, 2492]` from Pillow *and* from the fallback,
+      identical in all 262144 cells, every sample legal at 14 bits.
 
-    The low half of the bound below (`lowest < 0`) is what makes the
-    PixelRepresentation guard testable: remove the guard and a signed
-    array's negatives fall outside `[0, 2^P - 1]` at once.
+    Two candidate bounds were refused on measurement and each is pinned
+    by a test rather than by this paragraph, so neither can be re-adopted
+    quietly: `[-2^(P-1), 2^(P-1) - 1]` fires on a conformant signed T.81
+    stream both routes read identically
+    (`test_the_signed_bound_would_fire_on_a_conformant_stream`), and the
+    unsigned bound applied to every family fires on `693_J2KR.dcm`
+    (`test_the_unscoped_signed_bound_would_fire_on_a_signed_codestream`).
+    Artefacts: `.agent/scratch-098/dev-J9/p671signed-*.json`,
+    `p671j2k-*.json`, `p693-*.json`, `sweep3/`.
+
+    The low half of the bound below (`lowest < 0`) carries the T.81
+    BitsStored-13 case, where the high side fits and only the negative is
+    outside; it is also what makes the signed gate testable, since
+    dropping the gate lets a masked array's negatives fall outside
+    `[0, 2^P - 1]` at once.
 
     **Not visible on pydicom's plugin route**, which has already clamped
     the samples, so a clamped array always fits. The row therefore fires
@@ -3110,8 +3129,6 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
     if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
                           or ts in T81_SYNTAXES):
-        return None
-    if int(getattr(ds, "PixelRepresentation", 0) or 0) != 0:
         return None
     if arr is None or arr.size == 0:
         return None
@@ -3136,6 +3153,15 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     # pins the behaviour so the limit is visible rather than latent.
     stream, precision = max(readings, key=lambda reading: reading[1])
     if precision < 1:
+        return None
+    # The signed arm, T.81 only and only above the precision. One gate,
+    # three families, three different answers -- see the docstring: this
+    # is where `_sign_extend` leaves a signed sample outside its
+    # precision, and a negative there can only have come from a pattern
+    # above `2^P - 1`. On the other two a negative is ordinary data.
+    if int(getattr(ds, "PixelRepresentation", 0) or 0) != 0 and not (
+            ts in T81_SYNTAXES
+            and int(getattr(ds, "BitsStored", 0) or 0) > precision):
         return None
     # Precision P holds 0 .. 2^P - 1. `2^P` itself is beyond it, and that
     # one-value difference is the whole of this test.
