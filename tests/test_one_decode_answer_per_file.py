@@ -471,11 +471,18 @@ def test_an_encapsulation_the_gate_cannot_walk_is_left_to_pydicom(tmp_path):
     """Attack A12: a buffer `generate_frames` cannot parse is not the gate's.
 
     The second item's tag is `(0000,0000)`. Through `_decode_pixels` the
-    answer is pydicom's own `ValueError` whether or not the gate swallows
+    answer carries pydicom's own words whether or not the gate swallows
     it -- the gate would raise those same words -- so the gate is asked
     directly: it returns None rather than raising, which is what its
     docstring promises and what keeps a future gate from inventing its
     own refusal for a file pydicom describes better.
+
+    Since #663 a `ValueError` reaches the imagecodecs fallback too, and
+    imagecodecs cannot parse this buffer either, so the refusal is the
+    fallback's `RuntimeError` with **pydicom's reason first** and
+    imagecodecs' after it -- the shape `_decode_with_imagecodecs.refused`
+    has always built. The words are what this test is about; the class
+    the wrapper carries is #683's question.
     """
     from isocenter import imagecodecs_handler  # pylint: disable=import-outside-toplevel
     codestream = _j2k(SIGNED16)
@@ -486,8 +493,11 @@ def test_an_encapsulation_the_gate_cannot_walk_is_left_to_pydicom(tmp_path):
     ds["PixelData"].is_undefined_length = True
     assert imagecodecs_handler.signed_codestream_refusal(ds) is None
     decoded = at_decode_pixels(write(tmp_path, ds))
-    assert isinstance(decoded, ValueError), decoded
-    assert "Unexpected tag '(0000,0000)'" in str(decoded), str(decoded)
+    assert isinstance(decoded, RuntimeError), decoded
+    assert str(decoded).startswith(
+        "Unexpected tag '(0000,0000)' at offset 8 when parsing the "
+        "encapsulated pixel data fragment items; imagecodecs could not "
+        "decode it either: "), str(decoded)
 
 
 def test_a_signed_codestream_with_no_pixel_representation_is_refused_by_pydicom(

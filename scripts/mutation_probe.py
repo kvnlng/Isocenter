@@ -427,7 +427,11 @@ TARGETS = {
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                                  "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
                                   "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+                                  "tests/test_a_stream_narrower_than_its_own_samples_is_said.py",
+                                  "tests/test_a_plugin_value_error_reaches_the_fallback.py",
+                                  "tests/test_an_rle_fragment_is_a_frame.py",
                                   "tests/test_a_big_endian_word_value_keeps_its_values.py",
                                   "tests/test_lut_data_read_as_numbers_exports.py",
                                   "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
@@ -692,6 +696,10 @@ TARGETS = {
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
     "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                              "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
+                              "tests/test_a_plugin_value_error_reaches_the_fallback.py",
+                              "tests/test_a_stream_narrower_than_its_own_samples_is_said.py",
+                              "tests/test_an_rle_fragment_is_a_frame.py",
                               "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
                               "tests/test_a_big_endian_word_value_keeps_its_values.py",
                               "tests/test_lut_data_read_as_numbers_exports.py",
@@ -954,6 +962,7 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
+                               "tests/test_an_rle_fragment_is_a_frame.py",
                                "tests/test_a_big_endian_word_value_keeps_its_values.py",
                                "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                "tests/test_a_missing_type_2_element_is_written_empty.py",
@@ -1213,7 +1222,9 @@ TARGETS = {
                                           "tests/test_htj2k_decode.py",
                                           "tests/test_mid_stream_corruption_is_a_documented_limit.py",
                                           "tests/test_jpeg_extended_decode.py",
-                                          "tests/test_a_lossy_source_records_lossy_image_compression.py"],
+                                          "tests/test_a_lossy_source_records_lossy_image_compression.py",
+                                          "tests/test_an_rle_fragment_is_a_frame.py",
+                                          "tests/test_a_stream_narrower_than_its_own_samples_is_said.py"],
                                          60),
 }
 

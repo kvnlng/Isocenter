@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1649 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1652 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1660 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1663 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -132,6 +132,7 @@ import hashlib
 import numbers
 import struct
 from math import ceil
+from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
 from datetime import datetime, date
 from dataclasses import dataclass, field
@@ -170,7 +171,8 @@ try:
     from pydicom.encapsulate import encapsulate
 except ImportError:
     from pydicom.encaps import encapsulate
-from pydicom.encaps import generate_frames
+from pydicom.encaps import (generate_frames, parse_basic_offsets,
+                            parse_fragments)
 from pydicom.multival import MultiValue
 from pydicom.valuerep import validate_value
 from pydicom.sequence import Sequence
@@ -179,7 +181,9 @@ from pydicom.charset import default_encoding
 from pydicom.dataelem import DataElement
 from pydicom.filebase import DicomBytesIO
 from pydicom.filereader import read_sequence
-from pydicom.filewriter import write_sequence
+from pydicom.filewriter import (AMBIGUOUS_VR, write_sequence,
+                                correct_ambiguous_vr_element)
+from pydicom.values import convert_numbers
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path)
@@ -198,11 +202,12 @@ from .pixel_geometry import (
 )
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
-                                  T81_SYNTAXES,
+                                  RLE_FRAGMENTS, T81_SYNTAXES,
                                   _j2k_irreversible,
                                   _jpeg_frame_type, _sign_extend,
                                   _jpegls_near, _stream_precision,
                                   colour_conversion, convert_colour,
+                                  declared_frame_count,
                                   decode_declared_frames, extended_offsets,
                                   frame_precisions,
                                   frame_count_mismatch_words,
@@ -2314,8 +2319,8 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
         parent_item.add_sequence_item(tag, seq_item)
 
 
-def _decode_pixels(ds, *, allow_excess_frames=None,
-                   as_rgb=None) -> Tuple[np.ndarray, str]:
+def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
+                   number_of_frames=None) -> Tuple[np.ndarray, str]:
     """The array `Dataset.pixel_array` returns, and the colour space it is in.
 
     `pixel_array` calls exactly this -- `as_array` on `get_decoder(ts)`,
@@ -2353,19 +2358,77 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     `False` does, so passing the default through would silently truncate
     every decode, nested icons included.
 
+    **`number_of_frames` tells pydicom how many frames an RLE buffer's
+    fragments hold (#664).** RLE streams carry no end marker, so pydicom's
+    fragment walk finds no boundary, joins every fragment into one frame,
+    and then raises a bare `StopIteration` when asked for frame 1 -- or,
+    under NumberOfFrames 1, silently keeps frame 0 and loses the rest.
+    `imagecodecs_handler.offset_table_frame_count`'s RLE arm counts the
+    fragments instead, and the same two callers that pass
+    `allow_excess_frames=False` pass that count here, which takes
+    pydicom's `nr_fragments == number_of_frames` branch and returns every
+    frame. `allow_excess_frames` then has nothing to truncate against --
+    the count it would compare with is the one just overridden -- so the
+    excess is dropped here, keeping `declared_frame_count(ds)` frames:
+    the same reading the row names, so the frames kept and the frames
+    reported cannot drift apart. A single kept frame is returned in
+    `pixel_array`'s shape for one frame, without a leading axis.
+
     **When pydicom cannot decode, `imagecodecs` may (#416).** pydicom is
     asked first, always, so a file that decoded before decodes to the same
     bytes and the same colour-space label; `imagecodecs` first would
-    change both for files already accepted. Only a `RuntimeError` falls
+    change both for files already accepted. A `RuntimeError` falls
     through -- pydicom's "all plugins are missing dependencies" and "raised
-    by all available plugins" -- and only for
-    `_IMAGECODECS_FALLBACK_SYNTAXES`. Its validation failures are
-    `AttributeError` and `ValueError` (pydicom 3.0.2 `_validate_options`),
-    and they stay refusals in its words: imagecodecs ignores
+    by all available plugins" -- and **so does a `ValueError` (#663)**, for
+    `_IMAGECODECS_FALLBACK_SYNTAXES` only. See `_decode_with_imagecodecs`
+    for what it then refuses. Both depths get it, because both call this:
+    one rule for both depths.
+
+    **Why a `ValueError` too (#663).** pydicom's runner reads a plugin's
+    output buffer with the *header's* dtype rather than widening the
+    stream's own container as `imagecodecs_handler._in_declared_container`
+    does, so with pylibjpeg-libjpeg installed a precision-8 JPEG Lossless
+    stream -- returned one byte per sample -- raises numpy's `ValueError:
+    could not broadcast input array from shape (32,) into shape (64,)` out
+    of `DecodeRunner` under BitsAllocated 16. That is an upstream pydicom
+    shape, not a malformed file: *precision 8, BitsStored 8, BitsAllocated
+    16* is fully conformant, and the fallback reads it correctly. Catching
+    only `RuntimeError` lost it -- 0 instances, an `ERROR` row and
+    `REVIEW_REQUIRED` on a machine with the plugin, `PASS` without it,
+    which is the #453 split reopened. Measured over 128 `.57`/`.70` cells:
+    72 raised that `ValueError` and the fallback decodes 60 of them; the
+    other 12 are a stream *wider* than its container and the fallback
+    refuses them on its own dtype terms, with pydicom's reason still
+    first in the row.
+
+    **No row when the fallback reads it, and that is a decision rather
+    than an omission (#663).** The file is read whole and correctly; what
+    the row would report is which decoder the *reader* has installed,
+    which is neither a property of the file nor anything its sender can
+    act on. Writing one would also put the two machines back on opposite
+    grades -- `REVIEW_REQUIRED` with the plugin, `PASS` without, for
+    identical bytes -- which is the split this arm exists to close. A
+    stream the fallback cannot read either is still refused, with
+    pydicom's reason first; that refusal is the row.
+
+    **A validation `ValueError` cannot be masked by that.**
+    `_validate_like_pydicom` (#453) runs before the fallback and outside
+    it, and raises pydicom's own header refusal verbatim: measured over
+    eight malformed headers under both a plugin route and Pillow's,
+    `as_array` and `_validate_like_pydicom` raise the same class with the
+    same message in 16 of 16 cases. The clause that used to stand here --
+    that a `ValueError` stays a refusal because "imagecodecs ignores
     PlanarConfiguration, so catching those would ingest a file missing a
-    Type 1 element. See `_decode_with_imagecodecs` for what it then
-    refuses. Both depths get it, because both call this: one rule for
-    both depths.
+    Type 1 element" -- was written for #416 and was true then; #453 made
+    it false, because such a file is now refused before imagecodecs is
+    asked at all.
+
+    **`AttributeError` is deliberately not added.** The #281 population (a
+    `force=True` read with no `file_meta`) raises it from
+    `ds.file_meta.TransferSyntaxUID`, which is read outside the `try` on
+    purpose, and a validation `AttributeError` is already pydicom's own
+    words through `_validate_like_pydicom` -- so catching it would widen
+    the blast radius for no measured gain.
 
     **And the fallback validates first, as pydicom would have (#453).**
     pydicom validates the header only once it has found a plugin:
@@ -2433,6 +2496,8 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         kwargs["allow_excess_frames"] = allow_excess_frames
     if as_rgb is not None:
         kwargs["as_rgb"] = as_rgb
+    if number_of_frames is not None:
+        kwargs["number_of_frames"] = number_of_frames
     # A T.81 stream wider than BitsStored is read by its own precision on
     # pydicom's route too (#622). pydicom masks every T.81 decode to
     # BitsStored (`correct_unused_bits`, its default for these syntaxes),
@@ -2457,7 +2522,22 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     try:
         arr, meta = get_decoder(ts).as_array(ds, **kwargs)
         photometric = meta["photometric_interpretation"]
-    except RuntimeError as exc:
+    except StopIteration as exc:
+        # Encapsulated fragments with no frame boundary at all (#664).
+        # pydicom's walk found no end marker, joined every fragment into
+        # one frame and warned; `_as_array_encapsulated` then called
+        # `next()` for frame 1 and got this, which `describe_exception`
+        # renders as the bare word `StopIteration` -- an ingest row naming
+        # nothing. RLE is counted by its fragments before it can reach
+        # here (`imagecodecs_handler._rle_fragment_frames`); what is left
+        # is a syntax whose fragments carry no recognisable marker, where
+        # the count genuinely is not knowable. So it is a refusal, and the
+        # refusal names both numbers. Narrow, and re-raised: a bare
+        # `except StopIteration` that returned anything would be the
+        # silent-failure shape this project keeps out. Raised inside this
+        # clause, so the sibling fallback clause below cannot catch it.
+        raise RuntimeError(_no_frame_boundary_words(ds)) from exc
+    except (RuntimeError, ValueError) as exc:
         if str(ts) not in _IMAGECODECS_FALLBACK_SYNTAXES:
             raise
         # Before the fallback and outside it, so the refusal is pydicom's
@@ -2476,6 +2556,13 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         # ask it.
         if wider is not None:
             arr = _extend_each_frame(arr, ds, wider)
+    # The RLE excess, dropped here because `allow_excess_frames` cannot
+    # drop it: the count it truncates against is the `number_of_frames`
+    # just overridden (#664). Read through `declared_frame_count`, the
+    # same reading the row names.
+    if number_of_frames is not None and allow_excess_frames is False:
+        kept = declared_frame_count(ds)
+        arr = arr[0] if kept == 1 else arr[:kept]
     # Native byte order, at the one exit every door leaves by (#648).
     # pydicom returns a big-endian source in the file's own order (`>u2`,
     # `>i2`, `>u4`) with the right *values*, and every caller that stores
@@ -2488,6 +2575,53 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     if arr.dtype.byteorder not in ('=', '|'):
         arr = arr.astype(arr.dtype.newbyteorder('='))
     return np.ascontiguousarray(arr), photometric
+
+
+def _no_frame_boundary_words(ds) -> str:
+    """The refusal for fragments pydicom can find no frame boundary in (#664).
+
+    Both counts, where the decoder's own answer was a message-less
+    `StopIteration`. The fragment count is read the way pydicom's
+    generator reads it; where even that cannot be parsed the sentence
+    still names the declared frames, because a refusal that names nothing
+    is what this replaces.
+
+    The words carry none of the three substrings
+    `Instance.get_pixel_data`'s file arm routes on -- "no pixel data",
+    "decompress", "missing dependencies" -- so the read door raises them
+    as they stand rather than turning them into a codecs-missing message.
+
+    **"with no offset table" is true of everything that reaches here, and
+    that is now checked rather than assumed** (rev-098j9 P1). The clause
+    is unconditional and this function does not test it, which the review
+    was right to call out. What makes it true is upstream, not here: a
+    file whose Basic or Extended Offset Table names a frame count is
+    refused by `imagecodecs_handler.offset_table_frame_count` before any
+    decode, in its own words ("Basic Offset Table names 1 frames;
+    NumberOfFrames declares 2"), so a table that disagrees with the
+    fragments never gets this far. Measured on 3.12 for both table shapes;
+    `tests/test_an_rle_fragment_is_a_frame.py::test_only_a_file_with_no_
+    offset_table_reaches_the_no_boundary_refusal` pins it, so the day that
+    guard stops answering first this sentence goes red instead of quietly
+    telling a reader their file has no table.
+
+    A conditional clause here instead would read the table twice and add
+    two branches the ingest path cannot reach -- untestable surface
+    defending an invariant a test already holds. The `except` branch says
+    nothing about the table, because it has parsed nothing to say it from.
+    """
+    declared = declared_frame_count(ds)
+    try:
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        fragments, _offsets = parse_fragments(buf)
+        held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
+                f"with no offset table")
+    except Exception:  # pylint: disable=broad-except
+        held = "holds fragments pydicom could not count"
+    return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
+            f"pydicom found no frame boundary in them, so the declared "
+            f"frames cannot be read")
 
 
 def _t81_frames_wider(ds, ts) -> Optional[list]:
@@ -2892,6 +3026,227 @@ def _precision_words(facts) -> str:
             f"BitsStored from the samples.")
 
 
+def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
+    """The facts for ingest's over-precision row, or None (#671).
+
+    A lossless JPEG, and a JPEG 2000 codestream, state the sample
+    precision every decoder reconstructs against (the SOFn `P` field
+    `_jpeg_precision` reads, ITU-T T.81 B.2.2; the SIZ segment's for
+    a codestream). A stream whose decoded samples exceed it is
+    one the decoders **disagree about, silently**: measured on a8b6d3f, a
+    `.70` frame written at `bitspersample=12` holding samples up to 4970
+    came back `0..4970` through the imagecodecs fallback -- what the
+    stream encodes -- and `0..4095` through pydicom with
+    pylibjpeg-libjpeg, which *saturates*. Neither wrote a row and both
+    graded `PASS`.
+
+    Nothing is rewritten. The samples are read as decoded and exported as
+    read (#468 writes BitsStored from them, which is 16 for that file on
+    the fallback route and 12 with the plugin); the row says how this
+    library read the file and that another reader may read it
+    differently. Making the fallback saturate would mean writing 4095 over
+    the 4200 the stream encodes -- altering pixels to match another
+    library's silent alteration -- and masking would give 104, which no
+    door produces today.
+
+    **A different question from `_precision_mismatch`'s, and both can
+    fire.** That asks whether a decoded sample fits *BitsStored*; this
+    asks whether it fits *the stream's own precision*. The same file under
+    BitsStored 8 fails both and writes both rows. The words deliberately
+    contain no `precision is` -- `tests/test_a_stream_wider_than_bits_
+    stored_is_read_and_said.py` filters #622's rows on that substring --
+    and do not repeat #622's opening, so a reader can tell them apart.
+
+    Gated on the same syntax families `_precision_mismatch` is gated on,
+    so the two are decided the same way. Only T.81 lossless is known to
+    produce the shape and it is the only one tested (#684): `jpegls_encode`
+    takes no precision argument, and `jpeg2k_encode` clamps at encode
+    time, so neither a JPEG-LS nor a JPEG 2000 stream with over-precision
+    samples can be built with the tools here.
+
+    **Signed: one gate, three families, three answers.** The claim here
+    used to be that a signed decode is always masked back inside its
+    precision by sign extension, so no check after the decode could see
+    the divergence. rev-098j9 measured that and it is true of one family
+    conditionally, one unconditionally, and the third not at all. The
+    answers come from `_sign_extend`'s three call sites in
+    `imagecodecs_handler`, not from this function:
+
+    * **Lossless T.81 (`.57`/`.70`) -- reported, above the precision
+      only.** `_decode_frame` passes the stream's precision only when it
+      is *wider* than BitsStored (#622), so the extension width is
+      `max(precision, BitsStored)` and a sample is masked back inside
+      `[-2^(P-1), 2^(P-1) - 1]` only where **BitsStored <= precision**.
+      Above it a negative can only have come from a pattern above
+      `2^P - 1`, so the unsigned bound's low half is a true proxy for
+      over-precision. Measured, one precision-12 stream, 3.12 and 3.14t
+      alike: BitsStored 12 reads `[-1996, 1470]` (masked, invisible, and
+      still #682's), BitsStored 13 reads `[-3992, 3570]` and BitsStored
+      16 reads `[0, 4970]`, against `[0, 4095]` on the plugin route,
+      16 of 64 cells apart. Those two are the reported half.
+    * **`.50`/`.51` are in `T81_SYNTAXES` too, and the reason above is
+      not their reason** (rev-098j9 round 2, P1). Their `_decode_frame`
+      arm returns `imagecodecs.jpeg_decode` with **no sign extension and
+      no container widening**, so `max(precision, BitsStored)` is not a
+      fact about them. The gate admits the family whole because this
+      check is codec-agnostic, and the signed arm is **measured inert**
+      for those two across six shapes and both environments: the
+      fallback's dtype check refuses a `uint8`/`uint16` decode under
+      BitsAllocated 16 with PixelRepresentation 1 before any row can be
+      computed, at BitsAllocated 8 only BitsStored == precision is legal
+      and the gate's `BitsStored > precision` excludes it, and on the
+      plugin route the stream is already clamped so nothing is outside.
+      Behaviour safe, premise narrower than the constant's name.
+    * **JPEG-LS (`.80`/`.81`) -- never reported, because always masked.**
+      `_decode_frame` passes the frame's own precision *unconditionally*
+      (#478), so the width is the precision at every BitsStored and a
+      signed sample is always inside `[-2^(P-1), 2^(P-1) - 1]`. Measured:
+      an 8-bit sample of 150 under BitsStored 16 reads `-106`, which is
+      the masking, not a divergence.
+    * **JPEG 2000 -- never reported, and for two different reasons,
+      because the family has two sub-cases** (rev-098j9 round 2, F1).
+      (a) A **signed** codestream: the SIZ segment's sign bit carries the
+      signedness, the decoders return negatives directly with no sign
+      extension involved, and a negative says nothing about precision.
+      `693_J2KR.dcm` from pydicom's test data is the measured case:
+      precision 14, BitsStored 16, PixelRepresentation 1,
+      `int16 [-2000, 2492]` from Pillow *and* from the fallback,
+      identical in all 262144 cells, every sample legal at 14 bits.
+      (b) An **unsigned** codestream under PixelRepresentation 1, which
+      *is* sign-extended: `_against_pixel_representation` reinterprets it
+      and passes the **codestream's own precision** to `_sign_extend`
+      (#460), which is JPEG-LS's mechanism rather than T.81's -- so the
+      samples are masked inside the precision at every BitsStored and
+      there is nothing outside it to report. Measured, a precision-12
+      unsigned codestream under PixelRepresentation 1 at BitsStored 12,
+      13 and 16: `int16 [-1996, 1470]` on both routes in every case,
+      0 of 64 cells differing, no row. An earlier draft of this bullet
+      said the family never sign-extends, which was true of (a) and
+      false of (b).
+
+    Two candidate bounds were refused on measurement and each is pinned
+    by a test rather than by this paragraph, so neither can be re-adopted
+    quietly: `[-2^(P-1), 2^(P-1) - 1]` fires on a conformant signed T.81
+    stream both routes read identically
+    (`test_the_signed_bound_would_fire_on_a_conformant_stream`), and the
+    unsigned bound applied to every family fires on `693_J2KR.dcm`
+    (`test_the_unscoped_signed_bound_would_fire_on_a_signed_codestream`).
+    Artefacts: `.agent/scratch-098/dev-J9/p671signed-*.json`,
+    `p671j2k-*.json`, `p693-*.json`, `sweep3/`.
+
+    The low half of the bound below (`lowest < 0`) carries the T.81
+    BitsStored-13 case, where the high side fits and only the negative is
+    outside; it is also what makes the signed gate testable, since
+    dropping the gate lets a masked array's negatives fall outside
+    `[0, 2^P - 1]` at once.
+
+    **Not visible on pydicom's plugin route**, which has already clamped
+    the samples, so a clamped array always fits. The row therefore fires
+    where imagecodecs decoded and not where a plugin did -- honest, since
+    there is nothing left to see, and recorded in `docs/installation.md`
+    beside the other decoder-dependent limits.
+
+    Returns:
+        ``{precision, stream, sample, limit}``, plain types, so it rides
+        `meta` out of a spawned worker -- `_precision_mismatch`'s
+        requirement, inherited: a `np.uint16` straight off `arr.max()` is
+        the shape that breaks it, which is why every number here is
+        `int()`. `sample` is the one farthest outside the precision;
+        `limit` is `2^precision - 1`, the most a clamping decoder reads.
+    """
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
+                          or ts in T81_SYNTAXES):
+        return None
+    if arr is None or arr.size == 0:
+        return None
+    readings = [(stream, precision) for stream, precision
+                in frame_precisions(ds) if precision is not None]
+    if not readings:
+        return None
+    # The **widest** declared frame, never frame 0's for all: a sample
+    # from a wider frame behind a conformant frame 0 would be measured
+    # against a precision it was not written at. `_precision_mismatch`
+    # names the widest for the same reason.
+    #
+    # The limit that buys (rev-098j9 P4): one precision per instance, so a
+    # *narrow* frame's own over-precision samples go unreported behind a
+    # wider sibling. Measured -- frame 0 at precision 8 holding 300 and
+    # frame 1 at precision 12 holding 3000 gives `max` 12, 3000 fits it,
+    # and no row; frame 0 alone reports `sample 300, limit 255`. Reporting
+    # it would mean a per-frame comparison, which needs the frame axis
+    # this function is not given (it takes the whole array), and the row
+    # would then have to name a frame. Filed rather than guessed at;
+    # `test_a_narrow_frames_excess_is_not_reported_behind_a_wider_one`
+    # pins the behaviour so the limit is visible rather than latent.
+    stream, precision = max(readings, key=lambda reading: reading[1])
+    if precision < 1:
+        return None
+    # The signed arm, T.81 only and only above the precision. One gate,
+    # three families, three different answers -- see the docstring: this
+    # is where `_sign_extend` leaves a signed sample outside its
+    # precision, and a negative there can only have come from a pattern
+    # above `2^P - 1`. On the other two a negative is ordinary data.
+    if int(getattr(ds, "PixelRepresentation", 0) or 0) != 0 and not (
+            ts in T81_SYNTAXES
+            and int(getattr(ds, "BitsStored", 0) or 0) > precision):
+        return None
+    # Precision P holds 0 .. 2^P - 1. `2^P` itself is beyond it, and that
+    # one-value difference is the whole of this test.
+    limit = (1 << precision) - 1
+    lowest, highest = int(arr.min()), int(arr.max())
+    beyond = [(highest - limit, highest)] if highest > limit else []
+    if lowest < 0:
+        beyond.append((-lowest, lowest))
+    if not beyond:
+        return None
+    return {
+        "precision": precision,
+        "stream": stream,
+        "sample": max(beyond)[1],
+        "limit": limit,
+    }
+
+
+def _beyond_precision_words(facts) -> str:
+    """The over-precision row, from `_samples_beyond_stream_precision`'s facts.
+
+    "declares a sample precision of N" is a fact about what this code
+    parsed, not an unchecked claim about a standard, and it carries no
+    `precision is` (see the function above). It says *what* the stream
+    declared without naming *where*, deliberately: the gate admits T.81,
+    JPEG-LS and JPEG 2000, and `_stream_precision` reads a SOFn, a SOF55
+    and a **SIZ** segment for those three. A J2K codestream has no frame
+    header, so the clause this sentence used to carry ("in its frame
+    header") was false of a quarter of its own gate -- unexercised only
+    because no `.90` fixture with this shape can be built today (#684).
+
+    **The clamp clause names the property, not the bound, and that is the
+    fix for a second false quarter** (coordinator ruling, round 3 of
+    rev-098j9). It read "would read at most `2^N - 1` here", which is the
+    unsigned maximum and reads absurdly on the signed low half: a T.81
+    stream at BitsStored 13 reports `-3992`, and "would read at most
+    4095" is true of the plugin route's `[0, 4095]` while saying nothing
+    a reader can use about a negative sample. "Reads a value inside the
+    range `N` bits can hold" is true of both halves and of either
+    signedness, because that is what clamping *is* -- and it stays a
+    statement about what such a decoder would read rather than a claim
+    that some decoder does, since only pylibjpeg-libjpeg was measured
+    clamping, and only on T.81. `facts["limit"]` still carries `2^N - 1`
+    for callers that want the number; the sentence no longer does. The
+    file is not called malformed -- that is a conformance judgement
+    nothing here measures; the row states the disagreement.
+    """
+    precision = facts["precision"]
+    return (f"The {facts['stream']} declares a sample precision of "
+            f"{precision}, and a decoded sample reads {facts['sample']}, "
+            f"which {precision} bits cannot hold. Read as decoded, and "
+            f"exported as read; a decoder that clamps a sample to the "
+            f"declared precision reads a value inside the range "
+            f"{precision} bits can hold, so another reader may see "
+            f"different values.")
+
+
 #: The two transfer syntaxes whose frames are read for a DCT frame header
 #: (#601). The syntax names the frame's process and does not prove it: a
 #: lossless SOF3 frame under either decodes bit-exact (review J2 M1).
@@ -3115,7 +3470,8 @@ def _nested_item_syntax(transfer_syntax, item_ds, tag_str) -> str:
 
 
 def _decode_nested_pixels(ds, candidates, dropped, instance, *,
-                          offset_tables, high_bits, precisions) -> list:
+                          offset_tables, high_bits, precisions,
+                          beyond_precisions) -> list:
     """Decode every nested (7fe0,0010) `populate_attrs` collected (#183).
 
     Runs in `ingest_worker`, immediately after the walk that produced
@@ -3170,6 +3526,10 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             every **carried** candidate with a sample its BitsStored
             cannot hold from a stream wider than it, `facts` being
             `_precision_mismatch`'s (#622), on `high_bits`' terms.
+        beyond_precisions (list): Appended to with `(path, tag, vr, facts)`
+            for every **carried** candidate with a decoded sample its own
+            stream's declared precision cannot hold, `facts` being
+            `_samples_beyond_stream_precision`'s (#671), on the same terms.
 
     Returns:
         list: `(path, terminal_tag, vr, raw_bytes, sha256)` per carried
@@ -3225,6 +3585,11 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                                           "fewer"))
                     continue
                 decode_kwargs["allow_excess_frames"] = False
+                # The top level's #664 keyword, at this depth: without it
+                # an icon with an empty table and excess RLE fragments
+                # gets the row and then still joins its fragments.
+                if counted[3] == RLE_FRAGMENTS:
+                    decode_kwargs["number_of_frames"] = counted[0]
             # The top level's #455 header rule, at this depth (#598).
             # After the borrow, because it reads the transfer syntax off
             # `file_meta`; asked before the decode, as at the top level,
@@ -3235,6 +3600,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # inside the borrow, because it walks the frames by the
             # borrowed transfer syntax.
             precision = _precision_mismatch(item_ds, arr)
+            beyond = _samples_beyond_stream_precision(item_ds, arr)
             if decode_kwargs:
                 offset_tables.append((path, tag_str, vr, counted, "excess"))
         except Exception:  # pylint: disable=broad-except
@@ -3262,6 +3628,8 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             high_bits.append((path, tag_str, vr, facts))
         if precision is not None:
             precisions.append((path, tag_str, vr, precision))
+        if beyond is not None:
+            beyond_precisions.append((path, tag_str, vr, beyond))
 
         # The same correction the top-level arm makes just below, for the
         # same reason: pydicom de-planarises on read, so the bytes are
@@ -3619,14 +3987,17 @@ def ingest_worker(fp: str) -> Tuple:
         nested_offset_tables = []
         nested_high_bits = []
         nested_precisions = []
+        nested_beyond = []
         meta['nested_pixels'] = _decode_nested_pixels(
             ds, nested, dropped, inst, offset_tables=nested_offset_tables,
-            high_bits=nested_high_bits, precisions=nested_precisions)
+            high_bits=nested_high_bits, precisions=nested_precisions,
+            beyond_precisions=nested_beyond)
         meta['nested_offset_table'] = nested_offset_tables
         # Ints, bools, strs and None only, so it pickles from a spawned
         # worker like the rest of `meta` (#598).
         meta['nested_high_bit'] = nested_high_bits
         meta['nested_precision'] = nested_precisions
+        meta['nested_beyond_precision'] = nested_beyond
         meta['dropped_private_binary'] = dropped
         # Rides `meta` for the same reason as `dropped_private_binary`
         # above: this worker may be in a subprocess with no store
@@ -3674,6 +4045,13 @@ def ingest_worker(fp: str) -> Tuple:
                     return ({'path': fp}, None, None, None, None, None, None,
                             frame_count_mismatch_words(counted))
                 decode_kwargs['allow_excess_frames'] = False
+                # An RLE buffer counted fragment by fragment has to be
+                # decoded by that count too, or pydicom joins the
+                # fragments again and `allow_excess_frames` truncates
+                # nothing (#664). One counter feeds both, so the frames
+                # decoded and the frames this row names are one number.
+                if counted[3] == RLE_FRAGMENTS:
+                    decode_kwargs['number_of_frames'] = counted[0]
                 meta['offset_table_excess'] = counted
             # Asked of the header before the decode, so both decoders'
             # files get it; attached only once the decode succeeds (#455).
@@ -3719,6 +4097,14 @@ def ingest_worker(fp: str) -> Tuple:
                 precision_mismatch = _precision_mismatch(ds, arr)
                 if precision_mismatch is not None:
                     meta['precision_mismatch'] = precision_mismatch
+                # And a sample the *stream's own* precision cannot hold
+                # (#671): the other question about the same array, asked
+                # here for the same reason -- it is the decode that
+                # answers it. Plain types, so it rides `meta` out of a
+                # spawned worker.
+                beyond_precision = _samples_beyond_stream_precision(ds, arr)
+                if beyond_precision is not None:
+                    meta['beyond_precision'] = beyond_precision
                 if lossy is not None:
                     # In the worker, on an Instance nothing has linked yet,
                     # beside the relabel above; the row rides `meta`.
@@ -4196,6 +4582,7 @@ class DicomImporter:
         high_bit_rows = 0
         lossy_rows = 0
         precision_rows = 0
+        beyond_precision_rows = 0
         byte_order_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
@@ -4298,6 +4685,27 @@ class DicomImporter:
                 logger.warning(
                     "... (suppressing further per-instance messages for "
                     "a stream wider than BitsStored) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_beyond_precision(uid, detail):
+            """One over-precision row (#671), top level or icon, on its own cap.
+
+            Its own counter, for `_record_lossy`'s reason: one rule, one
+            cap, so a cohort that trips this rule cannot suppress another
+            file's HighBit or BitsStored line before it is printed
+            (`test_one_log_cap_per_rule`). One counter for both depths, as
+            `_record_precision` has.
+            """
+            nonlocal beyond_precision_rows
+            beyond_precision_rows += 1
+            if beyond_precision_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif beyond_precision_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance messages for "
+                    "a sample beyond the stream's own precision) ...")
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
@@ -4472,6 +4880,19 @@ class DicomImporter:
                         _record_precision(inst.sop_instance_uid,
                                           _precision_words(wider))
 
+                    # A sample the stream's own declared precision cannot
+                    # hold (#671). A `WARNING` on the same terms as the
+                    # row above and for the same reason: a value that
+                    # cannot be trusted across readers is a review, not a
+                    # loss. Both can fire for one file -- they are
+                    # different facts, and suppressing either would leave
+                    # a reader guessing which they had checked.
+                    beyond = meta.get('beyond_precision')
+                    if beyond:
+                        _record_beyond_precision(
+                            inst.sop_instance_uid,
+                            _beyond_precision_words(beyond))
+
                     # LossyImageCompression recorded from the pixel data
                     # (#601, owner ruling Q1). A `WARNING`: the stamp is a
                     # permanent claim this library derived, and the row is
@@ -4615,6 +5036,10 @@ class DicomImporter:
                         (h_path, h_tag): (h_vr, h_facts)
                         for h_path, h_tag, h_vr, h_facts
                         in meta.get('nested_high_bit', ())}
+                    nested_beyond = {
+                        (p_path, p_tag): (p_vr, p_facts)
+                        for p_path, p_tag, p_vr, p_facts
+                        in meta.get('nested_beyond_precision', ())}
                     nested_precision = {
                         (p_path, p_tag): (p_vr, p_facts)
                         for p_path, p_tag, p_vr, p_facts
@@ -4681,6 +5106,16 @@ class DicomImporter:
                                 inst.sop_instance_uid,
                                 f"{_nested_row_prefix(n_tag, w_vr, n_path)}"
                                 f"{_precision_words(w_facts)}")
+                        # And the over-precision row (#671), on the same
+                        # terms: the icon is read as decoded and written
+                        # back as read, so the sentence is true here too.
+                        n_beyond = nested_beyond.get((n_path, n_tag))
+                        if n_beyond is not None:
+                            b_vr, b_facts = n_beyond
+                            _record_beyond_precision(
+                                inst.sop_instance_uid,
+                                f"{_nested_row_prefix(n_tag, b_vr, n_path)}"
+                                f"{_beyond_precision_words(b_facts)}")
                         kind = serialize_blob_kind('pixels', n_path, n_tag)
                         # Site 2 of six (#368): append and row commit under
                         # one hold, per icon, for the reason at site 1.
@@ -5036,8 +5471,10 @@ class ExportOutcome:
     corrections: List[str] = field(default_factory=list)
     #: One sentence per claim in the source's own header that the file
     #: just written could not honour, for the parent to log at WARNING
-    #: *and audit* (#502): today, a Photometric Interpretation the
-    #: written transfer syntax does not admit. The other half of the
+    #: *and audit* (#502). Two sources today: a Photometric Interpretation
+    #: the written transfer syntax does not admit, and an ambiguous value
+    #: representation whose decider the source omits or contradicts
+    #: (#674, #681, `_ambiguous_vr_warning`). The other half of the
     #: write-path ruling's pair, and the distinction is not cosmetic --
     #: `corrections` is a fact about this library (an exact, value-
     #: preserving rewrite of our own making: INFO, no row, grade
@@ -7060,6 +7497,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if warning is not None:
                 warnings.append(warning)
 
+        # Every ambiguous VR gets a concrete arm here, while the dataset
+        # is complete and before `save_as` asks the same question and
+        # fails the file over it (#674, #675, #681). `save_as` asks again
+        # and finds nothing left to decide, which is why every file that
+        # exported before exports byte for byte as it did.
+        _resolve_ambiguous_vrs(ds, losses, warnings)
+
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
 
@@ -8238,8 +8682,412 @@ def export_stamp_attributes(patient, study, series):
     return patient_attributes, study_attributes, series_attributes
 
 
+#: (7FE0,0010) Pixel Data, the one ambiguous VR this pass must not answer:
+#: see `_resolve_ambiguous_vrs`.
+_PIXEL_DATA_TAG = 0x7FE00010
+
+#: (5400,0110) Channel Minimum Value, (5400,0112) Channel Maximum Value,
+#: (5400,100A) Waveform Padding Value, (5400,1010) Waveform Data -- the four
+#: whose `OB or OW` pydicom resolves from Waveform Bits Allocated, read from
+#: the *nearest* dataset only. Spelled here rather than imported from
+#: `pydicom.filewriter._AMBIGUOUS_OB_OW_TAGS` because what this module needs
+#: is not pydicom's table but the set whose width lives one level up.
+_AMBIGUOUS_WAVEFORM_TAGS = frozenset({0x54000110, 0x54000112,
+                                      0x5400100A, 0x54001010})
+
+#: (0028,3006) LUT Data, whose `US or OW` pydicom resolves from the first
+#: value of the LUT Descriptor beside it -- the other Type 1 omission a
+#: source can make that this pass has to choose an arm for.
+_LUT_DATA_TAG = 0x00283006
+
+#: How many elements `_ambiguous_vr_warning` names before counting the rest,
+#: for the same reason `_RE_VR_NAMED` exists: a 12-channel ECG whose waveform
+#: item never declared its bit depth has 25 of them.
+_AMBIGUOUS_NAMED = 10
+
+
+def _fitting_arm(arms, values):
+    """`US` or `SS`, whichever is in `arms` and holds every value.
+
+    `US` first: both arms write identical bytes for a value both hold, so
+    the choice only shows in an explicit-VR file's VR field, and #653's
+    ruling is unsigned-first there.
+    """
+    if "US" in arms and all(0 <= x <= 0xFFFF for x in values):
+        return "US"
+    if "SS" in arms and all(-0x8000 <= x <= 0x7FFF for x in values):
+        return "SS"
+    return None
+
+
+def _int_values(value):
+    """`value` as a list of ints, or None if it is not all integers."""
+    if isinstance(value, (bytes, bytearray, memoryview)) or value is None:
+        return None
+    values = list(value) if isinstance(value, (list, tuple, MultiValue)) \
+        else [value]
+    if not values or not all(isinstance(x, numbers.Integral) for x in values):
+        return None
+    return [int(x) for x in values]
+
+
+def _pixel_representation(ancestors):
+    """Pixel Representation for the `US or SS` family, or None if none.
+
+    Mirrors `pydicom.filewriter._correct_ambiguous_vr_element`'s `US or SS`
+    arm: the nearest ancestor that carries one, else the `_pixel_rep` a read
+    propagated into sequence items. **None means the chain declares none**,
+    which callers read as unsigned -- the arm pydicom itself answers for a
+    dataset with neither the element nor pixels -- while keeping the two
+    cases apart, because a `WARNING` row that said "Pixel Representation
+    names US" about a file carrying no such element would be a false
+    statement about the caller's data (#674). Spelled out because that arm is
+    reached only for the twenty tags pydicom tabulates, and the same rule is
+    the right answer for the five it leaves out -- all retired, per its own
+    docstring -- and because its last branch reads
+    `ds.PixelRepresentation == 0` after establishing the element is absent,
+    which raises `AttributeError` for a dataset with pixels and no Pixel
+    Representation instead of returning the 1 it means (#674, filed
+    upstream as #693).
+    """
+    for anc in ancestors:
+        rep = getattr(anc, "PixelRepresentation", None)
+        if rep is not None:
+            return int(rep)
+    for anc in ancestors:
+        rep = getattr(anc, "_pixel_rep", None)
+        if rep is not None:
+            return int(rep)
+    # Nothing in the chain declares one. pydicom's arm splits here -- 0 for
+    # a dataset with neither the element nor pixels, 1 otherwise -- and the
+    # second half of that split is unreachable from this library: a source
+    # with Pixel Data and no Pixel Representation is refused at ingest,
+    # measured on both routes. Guessing 1 for it would be an untestable
+    # branch, so callers take unsigned, which is also what the write-path
+    # ruling asks for: the bytes are the source's either way, and the arm
+    # is the one more readers will read correctly. None rather than 0
+    # because only the caller that *reports* the choice needs to know the
+    # difference, and it must not report a header the file lacks.
+    return None
+
+
+def _waveform_bits(ancestors):
+    """Waveform Bits Allocated from the nearest ancestor that declares it."""
+    for anc in ancestors:
+        bits = getattr(anc, "WaveformBitsAllocated", None)
+        if bits is not None:
+            return int(bits)
+    return None
+
+
+def _ambiguous_arm_loss(ds, elem, losses, tag, arms):
+    """Drop an element no arm of its ambiguous VR can hold, with one row.
+
+    Both halves of one rule end here -- the arm this pass chose for a tag
+    pydicom's tables omit, and the arm pydicom chose and the value vetoed
+    -- so a caller reads one sentence, written in one place. The element
+    goes rather than staying: kept, it would hand `save_as` a VR no writer
+    can serve, and that is the whole-file failure this pass exists to
+    prevent (#674, #681).
+    """
+    del ds[elem.tag]
+    losses.append((
+        loss_scope_for_tag(tag),
+        f"Tag ({tag}) not exported (data loss): its value fits no numeric "
+        f"arm of {' or '.join(arms)}."))
+
+
+def _ambiguous_veto_clause(tag, written, named):
+    """The one spelling of the contradiction clause (#681).
+
+    Two sites reach this: the arm pydicom named and the arm this pass named
+    for a tag pydicom's tables omit. The same fact is being stated -- the
+    arm chosen is not the one the source's header calls for -- so the
+    sentence a caller reads must not depend on which of them chose it, and
+    an edit to the wording must not be able to leave one site stale.
+
+    `named` is None where **no** Pixel Representation is declared anywhere
+    in the chain, and then the sentence says so instead of naming an
+    element the file does not carry: the arm is a default of this library's
+    (unsigned, pydicom's own answer for a dataset with neither the element
+    nor pixels), not a claim the source made, and a `WARNING` row is read
+    as a fact about the caller's data. That case leads with the omission
+    like the other two omission clauses; the contradiction case leads with
+    the arm, because there the arm is the fact (`_ambiguous_vr_warning`).
+    """
+    if named is None:
+        return (f"({tag}): no Pixel Representation is declared anywhere "
+                f"above it, and the unsigned arm it defaults to cannot "
+                f"hold the value, so {written} was written")
+    return (f"({tag}) written {written}, Pixel Representation names "
+            f"{named} and the value needs {written}")
+
+
+def _ambiguous_vr_warning(clauses) -> Optional[str]:
+    """The one `WARNING` sentence for an instance's unresolvable ambiguous
+    VRs, or None when there are none (#674, #681).
+
+    One row per instance, not per element, for the reason `_RE_VR_NAMED`
+    gives. Only the choices a *reader* could see differently are named
+    here, which is `ExportOutcome.warnings`'s own line from #502: where the
+    standard names an attribute that decides the VR and the source does not
+    carry it, or carries one the value contradicts. A tag the standard
+    gives no decider at all -- DICONDE, Curve Data, Audio Sample Data,
+    Variable Pixel Data, the retired descriptors -- is not a shortcoming of
+    the source's file and takes no row: the bytes written are theirs and
+    nothing about their data is wrong.
+
+    The omission clauses lead with what the source does not carry rather
+    than with the arm chosen, because that is the fact about the caller's
+    data; the contradiction clause leads with the arm, because there the
+    arm *is* the fact. There are three of the first kind -- no Waveform
+    Bits Allocated, no LUT Descriptor, no Pixel Representation at all --
+    and one of the second, and the last two are the same value-versus-arm
+    situation told from opposite ends: where the header names an arm the
+    value contradicts it, and where no header names one the arm is this
+    library's default and the sentence says so.
+
+    The waveform clause fires **below the top level only**, and that is
+    pydicom's line rather than a choice made here: a *top-level*
+    (5400,0110), (5400,0112) or (5400,100A) with no Waveform Bits Allocated
+    anywhere is answered `OW` from the root dataset's `original_encoding`,
+    identically before this change and after, so nothing was chosen and a
+    row would claim otherwise. The same element inside a Waveform Sequence
+    item has no encoding to fall back on, which is where the omission
+    becomes ours to resolve and to report.
+    """
+    if not clauses:
+        return None
+    named = "; ".join(clauses[:_AMBIGUOUS_NAMED])
+    rest = len(clauses) - min(len(clauses), _AMBIGUOUS_NAMED)
+    return (f"Ambiguous value representation{'s' if len(clauses) > 1 else ''} "
+            f"{named}" + (f"; and {rest} more" if rest else "") + ". The "
+            f"written bytes are the source's; what this library had to "
+            f"choose is the value representation the file declares, which "
+            f"decides how a reader interprets those bytes.")
+
+
+def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
+    """Give every ambiguous VR in `ds` a concrete arm, before `save_as`.
+
+    pydicom stays the authority: each element goes to the public
+    `correct_ambiguous_vr_element` with the ancestors list its `US or SS`
+    arm walks, and this pass intervenes only where pydicom raised, left the
+    VR ambiguous, or named an arm the value does not fit. Anything else
+    would be a second ambiguity table drifting from pydicom's -- the trap
+    `_numeric_arm` names.
+
+    Here, and not in `_merge`, because the deciding sibling is a *sibling*:
+    LUT Descriptor, Waveform Bits Allocated and Pixel Representation may be
+    merged after the element that needs them, and a nested element's
+    decider lives one or more levels up, in an item `_merge` has not been
+    handed. The dataset is only complete at the write, which is also where
+    pydicom itself asks the question.
+
+    It never raises, and that is the point: pydicom's own resolution
+    failure is an `AttributeError` from inside `dcmwrite`, past every
+    per-element `try`, so it cost the whole file (#674). An element this
+    pass cannot place is dropped with one `DATA_LOSS` row instead.
+    Postcondition: no element leaves with a VR in `AMBIGUOUS_VR`.
+    """
+    ancestors = [ds] if ancestors is None else ancestors
+    rows = [] if rows is None else rows
+    for tag in list(ds.keys()):
+        # `ds[tag]`, not `get_item`, and the difference matters: for a
+        # `RawDataElement` `Dataset.__getitem__` resolves the ambiguous VR
+        # itself, with no ancestors, and re-raises pydicom's
+        # `AttributeError` from here -- outside the per-element `try`
+        # below, so it would be the whole-file failure of #674 again, or a
+        # second answer to the question this pass exists to answer. It is
+        # safe only because every element in this dataset was put there by
+        # `_merge`/`add_new` and none of them is raw.
+        elem = ds[tag]
+        if elem.VR == "SQ":
+            for item in elem.value:
+                _resolve_ambiguous_vrs(item, losses, warnings,
+                                       [item] + ancestors, rows)
+            continue
+        if str(elem.VR) not in AMBIGUOUS_VR:
+            continue
+        if int(tag) == _PIXEL_DATA_TAG:
+            # The one ambiguous VR whose answer depends on something the
+            # write path establishes *after* this pass. PS3.5 A.4's `OB`
+            # follows from the undefined length `save_as` gives an
+            # encapsulated stream, and here the element still carries a
+            # defined length and an `original_encoding` of (True, True),
+            # which sends pydicom down its Implicit VR arm and answers
+            # `OW` -- for a file we are not writing. Measured: asking the
+            # question early turns every compressed export's `OB` into
+            # `OW`, at 8 bits and at 16. pydicom asks it again at the
+            # write, where the flag is true, so leaving it alone is both
+            # correct and complete. Pixel Data is the only arm in pydicom
+            # 3.0.2 that reads write-time state; re-read
+            # `_correct_ambiguous_vr_element` on every pydicom bump.
+            continue
+        try:
+            _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows)
+        except Exception as exc:  # noqa: BLE001 -- see the docstring
+            del ds[tag]
+            losses.append((
+                loss_scope_for_tag(f"{tag.group:04x},{tag.element:04x}"),
+                f"Tag ({tag.group:04x},{tag.element:04x}) not exported (data "
+                f"loss): its value representation is {elem.VR}, and no arm "
+                f"of it could be given to the value "
+                f"({describe_exception(exc)})."))
+    if ancestors[1:]:
+        return
+    warning = _ambiguous_vr_warning(rows)
+    if warning is not None:
+        warnings.append(warning)
+
+
+def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
+    """One element of `_resolve_ambiguous_vrs`. Appends to `rows` the
+    choices a reader could see differently; see `_ambiguous_vr_warning`."""
+    arms = str(elem.VR).split(" or ")
+    tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+    unresolved = False
+    try:
+        correct_ambiguous_vr_element(elem, ds, True, ancestors)
+    except AttributeError:
+        # pydicom's wrapped raise: the sibling its rule reads is absent
+        # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
+        unresolved = True
+    if not unresolved and str(elem.VR) not in AMBIGUOUS_VR:
+        # pydicom answered, so what it answered is what the header names
+        # -- except where the chain declares no Pixel Representation at
+        # all, and its `US or SS` arm defaults to `US` for a dataset with
+        # no pixels either. `None` then, so the row cannot name an element
+        # the file does not carry (#674).
+        _veto_ambiguous_arm(elem, ds, arms, losses, rows,
+                            _named_arm(ancestors, elem.VR))
+        return
+
+    value = elem.value
+    if value is None or isinstance(value, (bytes, bytearray, memoryview)):
+        if "OW" in arms:
+            # Every ambiguous VR string that can hold bytes has an `OW`
+            # arm: `OB or OW`, `US or OW`, `US or SS or OW`. `US or SS`
+            # has none, and is the branch below.
+            bits = (_waveform_bits(ancestors)
+                    if elem.tag in _AMBIGUOUS_WAVEFORM_TAGS else None)
+            if bits is not None:
+                # PS3.5 8.3: `OB` at 8 bits or fewer, `OW` above.
+                elem.VR = "OW" if bits > 8 else "OB"
+            else:
+                # `OW`. The two writers write the same bytes and pad an
+                # odd length the same way, so for a byte stream this
+                # shows only in an explicit-VR file's VR field -- and a
+                # value read from a file is never odd, because every
+                # element length in a DICOM file is even.
+                elem.VR = "OW"
+                if elem.tag in _AMBIGUOUS_WAVEFORM_TAGS:
+                    rows.append(
+                        f"({tag}): no Waveform Bits Allocated is declared "
+                        f"anywhere above it, and PS3.5 8.3 decides between "
+                        f"OB and OW by the bit depth, so {elem.VR} was "
+                        f"written")
+                elif elem.tag == _LUT_DATA_TAG:
+                    rows.append(
+                        f"({tag}): the LUT it belongs to declares no LUT "
+                        f"Descriptor, whose first value decides between US "
+                        f"and OW, so {elem.VR} was written")
+        else:
+            # `US or SS` over bytes: pydicom's Pixel Representation rule,
+            # extended to the tags its table leaves out.
+            # `or 0`: a chain that declares nothing takes the unsigned
+            # arm, exactly as a declared 0 does. Only the row needs the
+            # two cases apart, and `_named_arm` is what keeps them apart.
+            rep = _pixel_representation(ancestors) or 0
+            elem.VR = "US" if rep == 0 else "SS"
+            elem.value = convert_numbers(bytes(value or b""), True,
+                                         "H" if rep == 0 else "h")
+            _veto_ambiguous_arm(elem, ds, arms, losses, rows,
+                                _named_arm(ancestors, elem.VR))
+        return
+
+    values = _int_values(value)
+    if values is not None and "OW" not in arms:
+        # `US or SS` over numbers: the same decider as the bytes branch
+        # above, so one tag does not get two answers depending on which
+        # syntax its source was written in -- an Implicit VR source hands
+        # these back as bytes and an Explicit VR one as numbers, and both
+        # mean the same element. Pixel Representation is what pydicom
+        # applies to the twenty tags it tabulates; the value only speaks
+        # where the header's answer cannot hold it.
+        rep = _pixel_representation(ancestors) or 0
+        preferred = "US" if rep == 0 else "SS"
+        if _fitting_arm([preferred], values) is not None:
+            elem.VR = preferred
+            return
+        other = _fitting_arm(arms, values)
+        if other is not None:
+            elem.VR = other
+            rows.append(_ambiguous_veto_clause(
+                tag, other, _named_arm(ancestors, preferred)))
+            return
+        values = None           # no arm holds it: the loss below
+    arm = _fitting_arm(arms, values) if values else None
+    if arm is None:
+        _ambiguous_arm_loss(ds, elem, losses, tag, arms)
+        return
+    elem.VR = arm
+
+
+def _named_arm(ancestors, resolved):
+    """The arm the source's header names, or None if it names none.
+
+    `resolved` is the arm already chosen, which for the `US or SS` family
+    *is* what a declared Pixel Representation names -- pydicom's rule and
+    this module's are the same rule. The only thing this adds is the
+    distinction pydicom's answer cannot carry: whether any ancestor
+    declares the element at all (#674).
+    """
+    if _pixel_representation(ancestors) is None:
+        return None
+    return str(resolved)
+
+
+def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
+    """Refuse an arm the value does not fit, and say so (#681).
+
+    pydicom resolves the `US or SS` family from Pixel Representation, which
+    is the better answer whenever the value fits it. A Modality LUT
+    Descriptor whose first-mapped value is negative over unsigned pixels is
+    a source contradicting its own header, and writing the arm the header
+    names costs the whole file: `struct.error: 'H' format requires
+    0 <= number <= 65535`, raised inside `dcmwrite`.
+    """
+    vr = str(elem.VR)
+    if vr not in ("US", "SS"):
+        return
+    # Derived rather than passed: one fewer argument, and the caller's
+    # spelling of the tag is the same one.
+    tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+    values = _int_values(elem.value)
+    if not values or _fitting_arm([vr], values) is not None:
+        return
+    other = _fitting_arm([a for a in arms if a != vr], values)
+    if other is None:
+        # No arm holds the value, so the same answer the unresolved path
+        # gives: one element's `DATA_LOSS` row, never the file's failure.
+        # Spelled out rather than left as a bare `return` so the
+        # postcondition is structural -- an element kept here would leave
+        # with a VR no writer can serve, and `save_as` would raise
+        # `OSError` for the whole file, which is rule (b)'s failure from
+        # inside the code that exists to prevent it. Nothing reaches it
+        # today: `_merge`'s widened `_numeric_arm` refuses such a value
+        # first, measured for a top-level and a nested element and for a
+        # tabulated and an omitted tag, which is why the test that covers
+        # this line calls this function directly.
+        _ambiguous_arm_loss(ds, elem, losses, tag, arms)
+        return
+    elem.VR = other
+    rows.append(_ambiguous_veto_clause(tag, other, named))
+
+
 def _numeric_arm(vr, value):
-    """The arm of an `US or OW` or `US or SS or OW` VR that `value` fits (#653).
+    """The arm an ambiguous VR's `value` fits, or a refusal (#653, #674).
 
     One element two ways: numbers under `US`/`SS`, words under `OW`. An
     explicit-VR source that wrote `US` hands back ints -- a list once the
@@ -8249,14 +9097,28 @@ def _numeric_arm(vr, value):
     per-element `try`, so it failed the whole file.
 
     **Keyed on the dictionary VR string, not on a tag.** A tag-keyed branch
-    would be a second ambiguity table that drifts from pydicom's. Two
-    entries match today: LUT Data (0028,3006) and the retired Gray LUT Data
-    (0028,1200).
+    would be a second ambiguity table that drifts from pydicom's. All four
+    ambiguous strings reach the gate -- 34 tags and 4 repeater patterns --
+    and two entries have both an `OW` arm and a numeric one, which are the
+    two whose arm is *chosen* here: LUT Data (0028,3006) and the retired
+    Gray LUT Data (0028,1200). Everything else that arrives is either
+    refused here or left to the export-time pass (#674).
 
-    **An `OW` arm and a numeric arm are both required.** `US or SS` (Smallest
-    Image Pixel Value and its kin) has no `OW` arm, and pydicom resolves it
-    from Pixel Representation, which is the better answer there. `OB or OW`
-    has no numeric arm.
+    **Any ambiguous VR is refused here; only the `OW` family is decided
+    here.** The gate is `AMBIGUOUS_VR`, all four strings, because "this
+    value fits no arm at all" is one behaviour and belongs in one place
+    (#674). What is *chosen* here is still only the `OW` family: `US or SS`
+    (Smallest Image Pixel Value and its kin) has no `OW` arm, and pydicom
+    resolves it from Pixel Representation, which is the better answer there
+    -- unless the value itself proves that answer impossible, which the
+    export-time pass vetoes with a `WARNING` row rather than this one
+    guessing from a partial dataset (#681). `OB or OW` has no numeric arm,
+    so a number under it fits none and is refused.
+
+    That narrowing is deliberate: for `US or SS` the standard names a
+    decider, so the header decides and the value only vetoes. #653's
+    "the value chooses the VR" holds where no header answers, which is the
+    `OW` family.
 
     **Bytes are never numbers here.** `list(b"\x00\x01")` is a list of
     ints, so a bytes-like value is tested first and keeps pydicom's
@@ -8280,7 +9142,7 @@ def _numeric_arm(vr, value):
         ValueError: `value` is neither bytes nor numbers any arm fits.
     """
     arms = vr.split(" or ")
-    if "OW" not in arms or not {"US", "SS"} & set(arms):
+    if vr not in AMBIGUOUS_VR:
         return vr
     if value is None or isinstance(value, (bytes, bytearray, memoryview)):
         return vr
@@ -8289,12 +9151,20 @@ def _numeric_arm(vr, value):
     if not values:
         return vr
     if all(isinstance(x, numbers.Integral) for x in values):
-        if "US" in arms and all(0 <= x <= 0xFFFF for x in values):
-            return "US"
-        if "SS" in arms and all(-0x8000 <= x <= 0x7FFF for x in values):
-            return "SS"
-    raise ValueError(f"the value fits no numeric arm of {vr}, and OW holds "
-                     f"only bytes")
+        arm = _fitting_arm(arms, values)
+        if arm is not None:
+            # Only the `OW` family is decided here. `US or SS` keeps
+            # pydicom's Pixel Representation answer, which is the better
+            # one when the value fits it -- and when it does not, the
+            # export-time pass refuses that answer rather than this one
+            # guessing from a partial dataset (#674).
+            return arm if "OW" in arms else vr
+    if "OW" in arms:
+        raise ValueError(f"the value fits no numeric arm of {vr}, and OW "
+                         f"holds only bytes")
+    # One spelling for one behaviour: `US or SS` has no `OW` arm to
+    # mention, and the rest of the sentence is the same refusal.
+    raise ValueError(f"the value fits no numeric arm of {vr}")
 
 
 class DicomExporter:
