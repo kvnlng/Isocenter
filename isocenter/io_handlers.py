@@ -3191,10 +3191,21 @@ def _beyond_precision_words(facts) -> str:
     and a **SIZ** segment for those three. A J2K codestream has no frame
     header, so the clause this sentence used to carry ("in its frame
     header") was false of a quarter of its own gate -- unexercised only
-    because no `.90` fixture with this shape can be built today (#684). "would read at
-    most `2^N - 1`" is arithmetic: only pylibjpeg-libjpeg was measured
-    clamping to it, and only on T.81, so the sentence says what a clamping
-    decoder would read rather than asserting that some decoder does. The
+    because no `.90` fixture with this shape can be built today (#684).
+
+    **The clamp clause names the property, not the bound, and that is the
+    fix for a second false quarter** (coordinator ruling, round 3 of
+    rev-098j9). It read "would read at most `2^N - 1` here", which is the
+    unsigned maximum and reads absurdly on the signed low half: a T.81
+    stream at BitsStored 13 reports `-3992`, and "would read at most
+    4095" is true of the plugin route's `[0, 4095]` while saying nothing
+    a reader can use about a negative sample. "Reads a value inside the
+    range `N` bits can hold" is true of both halves and of either
+    signedness, because that is what clamping *is* -- and it stays a
+    statement about what such a decoder would read rather than a claim
+    that some decoder does, since only pylibjpeg-libjpeg was measured
+    clamping, and only on T.81. `facts["limit"]` still carries `2^N - 1`
+    for callers that want the number; the sentence no longer does. The
     file is not called malformed -- that is a conformance judgement
     nothing here measures; the row states the disagreement.
     """
@@ -3203,8 +3214,9 @@ def _beyond_precision_words(facts) -> str:
             f"{precision}, and a decoded sample reads {facts['sample']}, "
             f"which {precision} bits cannot hold. Read as decoded, and "
             f"exported as read; a decoder that clamps a sample to the "
-            f"declared precision would read at most {facts['limit']} here, "
-            f"so another reader may see different values.")
+            f"declared precision reads a value inside the range "
+            f"{precision} bits can hold, so another reader may see "
+            f"different values.")
 
 
 #: The two transfer syntaxes whose frames are read for a DCT frame header

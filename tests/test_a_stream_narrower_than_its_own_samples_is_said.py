@@ -117,8 +117,8 @@ FILED_ROW = (
     "The JPEG Lossless stream declares a sample precision of 12, "
     "and a decoded sample reads 4970, which 12 bits cannot hold. Read as "
     "decoded, and exported as read; a decoder that clamps a sample to the "
-    "declared precision would read at most 4095 here, so another reader may "
-    "see different values.")
+    "declared precision reads a value inside the range 12 bits can hold, "
+    "so another reader may see different values.")
 
 
 def _ljpeg(samples, bits):
@@ -243,7 +243,7 @@ def test_the_bound_is_two_to_the_precision_minus_one(
     assert len(rows) == rows_wanted, got["rows"]
     if rows_wanted:
         assert f"a decoded sample reads {sample}," in rows[0][1], rows[0][1]
-        assert "would read at most 4095 here" in rows[0][1], rows[0][1]
+        assert "the range 12 bits can hold" in rows[0][1], rows[0][1]
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +254,7 @@ def test_the_widest_declared_frames_precision_is_the_one_reported(
         tmp_path, pydicom_cannot):
     """Frame 0 declares precision 8 and frame 1 declares 12.
 
-    Read from frame 0 the row would say "precision 8 ... at most 255",
+    Read from frame 0 the row would say "precision 8 ... sample 300",
     which is false of the frame the sample came from.
     """
     ds = _file(LJPEG_SV1, [_ljpeg(NARROW, 8), _ljpeg(FILED, 12)],
@@ -403,7 +403,7 @@ def test_a_signed_t81_stream_above_its_precision_writes_the_row(
     (row,) = _beyond_rows(got["rows"])
     assert row[0] == "WARNING"
     assert f"reads {sample}," in row[1], row[1]
-    assert "at most 4095 here" in row[1], row[1]
+    assert "the range 12 bits can hold" in row[1], row[1]
     assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
     # Nothing rewritten. Read back through `_decode_pixels`, not
     # `pixel_array`: the export keeps the source's transfer syntax and
