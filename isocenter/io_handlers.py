@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1658 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1661 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1660 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1663 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -181,7 +181,9 @@ from pydicom.charset import default_encoding
 from pydicom.dataelem import DataElement
 from pydicom.filebase import DicomBytesIO
 from pydicom.filereader import read_sequence
-from pydicom.filewriter import write_sequence
+from pydicom.filewriter import (AMBIGUOUS_VR, write_sequence,
+                                correct_ambiguous_vr_element)
+from pydicom.values import convert_numbers
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path)
@@ -5469,8 +5471,10 @@ class ExportOutcome:
     corrections: List[str] = field(default_factory=list)
     #: One sentence per claim in the source's own header that the file
     #: just written could not honour, for the parent to log at WARNING
-    #: *and audit* (#502): today, a Photometric Interpretation the
-    #: written transfer syntax does not admit. The other half of the
+    #: *and audit* (#502). Two sources today: a Photometric Interpretation
+    #: the written transfer syntax does not admit, and an ambiguous value
+    #: representation whose decider the source omits or contradicts
+    #: (#674, #681, `_ambiguous_vr_warning`). The other half of the
     #: write-path ruling's pair, and the distinction is not cosmetic --
     #: `corrections` is a fact about this library (an exact, value-
     #: preserving rewrite of our own making: INFO, no row, grade
@@ -7493,6 +7497,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
             if warning is not None:
                 warnings.append(warning)
 
+        # Every ambiguous VR gets a concrete arm here, while the dataset
+        # is complete and before `save_as` asks the same question and
+        # fails the file over it (#674, #675, #681). `save_as` asks again
+        # and finds nothing left to decide, which is why every file that
+        # exported before exports byte for byte as it did.
+        _resolve_ambiguous_vrs(ds, losses, warnings)
+
         # Ensure dir exists (race safe)
         os.makedirs(os.path.dirname(ctx.output_path), exist_ok=True)
 
@@ -8569,8 +8580,412 @@ def export_stamp_attributes(patient, study, series):
     return patient_attributes, study_attributes, series_attributes
 
 
+#: (7FE0,0010) Pixel Data, the one ambiguous VR this pass must not answer:
+#: see `_resolve_ambiguous_vrs`.
+_PIXEL_DATA_TAG = 0x7FE00010
+
+#: (5400,0110) Channel Minimum Value, (5400,0112) Channel Maximum Value,
+#: (5400,100A) Waveform Padding Value, (5400,1010) Waveform Data -- the four
+#: whose `OB or OW` pydicom resolves from Waveform Bits Allocated, read from
+#: the *nearest* dataset only. Spelled here rather than imported from
+#: `pydicom.filewriter._AMBIGUOUS_OB_OW_TAGS` because what this module needs
+#: is not pydicom's table but the set whose width lives one level up.
+_AMBIGUOUS_WAVEFORM_TAGS = frozenset({0x54000110, 0x54000112,
+                                      0x5400100A, 0x54001010})
+
+#: (0028,3006) LUT Data, whose `US or OW` pydicom resolves from the first
+#: value of the LUT Descriptor beside it -- the other Type 1 omission a
+#: source can make that this pass has to choose an arm for.
+_LUT_DATA_TAG = 0x00283006
+
+#: How many elements `_ambiguous_vr_warning` names before counting the rest,
+#: for the same reason `_RE_VR_NAMED` exists: a 12-channel ECG whose waveform
+#: item never declared its bit depth has 25 of them.
+_AMBIGUOUS_NAMED = 10
+
+
+def _fitting_arm(arms, values):
+    """`US` or `SS`, whichever is in `arms` and holds every value.
+
+    `US` first: both arms write identical bytes for a value both hold, so
+    the choice only shows in an explicit-VR file's VR field, and #653's
+    ruling is unsigned-first there.
+    """
+    if "US" in arms and all(0 <= x <= 0xFFFF for x in values):
+        return "US"
+    if "SS" in arms and all(-0x8000 <= x <= 0x7FFF for x in values):
+        return "SS"
+    return None
+
+
+def _int_values(value):
+    """`value` as a list of ints, or None if it is not all integers."""
+    if isinstance(value, (bytes, bytearray, memoryview)) or value is None:
+        return None
+    values = list(value) if isinstance(value, (list, tuple, MultiValue)) \
+        else [value]
+    if not values or not all(isinstance(x, numbers.Integral) for x in values):
+        return None
+    return [int(x) for x in values]
+
+
+def _pixel_representation(ancestors):
+    """Pixel Representation for the `US or SS` family, or None if none.
+
+    Mirrors `pydicom.filewriter._correct_ambiguous_vr_element`'s `US or SS`
+    arm: the nearest ancestor that carries one, else the `_pixel_rep` a read
+    propagated into sequence items. **None means the chain declares none**,
+    which callers read as unsigned -- the arm pydicom itself answers for a
+    dataset with neither the element nor pixels -- while keeping the two
+    cases apart, because a `WARNING` row that said "Pixel Representation
+    names US" about a file carrying no such element would be a false
+    statement about the caller's data (#674). Spelled out because that arm is
+    reached only for the twenty tags pydicom tabulates, and the same rule is
+    the right answer for the five it leaves out -- all retired, per its own
+    docstring -- and because its last branch reads
+    `ds.PixelRepresentation == 0` after establishing the element is absent,
+    which raises `AttributeError` for a dataset with pixels and no Pixel
+    Representation instead of returning the 1 it means (#674, filed
+    upstream as #693).
+    """
+    for anc in ancestors:
+        rep = getattr(anc, "PixelRepresentation", None)
+        if rep is not None:
+            return int(rep)
+    for anc in ancestors:
+        rep = getattr(anc, "_pixel_rep", None)
+        if rep is not None:
+            return int(rep)
+    # Nothing in the chain declares one. pydicom's arm splits here -- 0 for
+    # a dataset with neither the element nor pixels, 1 otherwise -- and the
+    # second half of that split is unreachable from this library: a source
+    # with Pixel Data and no Pixel Representation is refused at ingest,
+    # measured on both routes. Guessing 1 for it would be an untestable
+    # branch, so callers take unsigned, which is also what the write-path
+    # ruling asks for: the bytes are the source's either way, and the arm
+    # is the one more readers will read correctly. None rather than 0
+    # because only the caller that *reports* the choice needs to know the
+    # difference, and it must not report a header the file lacks.
+    return None
+
+
+def _waveform_bits(ancestors):
+    """Waveform Bits Allocated from the nearest ancestor that declares it."""
+    for anc in ancestors:
+        bits = getattr(anc, "WaveformBitsAllocated", None)
+        if bits is not None:
+            return int(bits)
+    return None
+
+
+def _ambiguous_arm_loss(ds, elem, losses, tag, arms):
+    """Drop an element no arm of its ambiguous VR can hold, with one row.
+
+    Both halves of one rule end here -- the arm this pass chose for a tag
+    pydicom's tables omit, and the arm pydicom chose and the value vetoed
+    -- so a caller reads one sentence, written in one place. The element
+    goes rather than staying: kept, it would hand `save_as` a VR no writer
+    can serve, and that is the whole-file failure this pass exists to
+    prevent (#674, #681).
+    """
+    del ds[elem.tag]
+    losses.append((
+        loss_scope_for_tag(tag),
+        f"Tag ({tag}) not exported (data loss): its value fits no numeric "
+        f"arm of {' or '.join(arms)}."))
+
+
+def _ambiguous_veto_clause(tag, written, named):
+    """The one spelling of the contradiction clause (#681).
+
+    Two sites reach this: the arm pydicom named and the arm this pass named
+    for a tag pydicom's tables omit. The same fact is being stated -- the
+    arm chosen is not the one the source's header calls for -- so the
+    sentence a caller reads must not depend on which of them chose it, and
+    an edit to the wording must not be able to leave one site stale.
+
+    `named` is None where **no** Pixel Representation is declared anywhere
+    in the chain, and then the sentence says so instead of naming an
+    element the file does not carry: the arm is a default of this library's
+    (unsigned, pydicom's own answer for a dataset with neither the element
+    nor pixels), not a claim the source made, and a `WARNING` row is read
+    as a fact about the caller's data. That case leads with the omission
+    like the other two omission clauses; the contradiction case leads with
+    the arm, because there the arm is the fact (`_ambiguous_vr_warning`).
+    """
+    if named is None:
+        return (f"({tag}): no Pixel Representation is declared anywhere "
+                f"above it, and the unsigned arm it defaults to cannot "
+                f"hold the value, so {written} was written")
+    return (f"({tag}) written {written}, Pixel Representation names "
+            f"{named} and the value needs {written}")
+
+
+def _ambiguous_vr_warning(clauses) -> Optional[str]:
+    """The one `WARNING` sentence for an instance's unresolvable ambiguous
+    VRs, or None when there are none (#674, #681).
+
+    One row per instance, not per element, for the reason `_RE_VR_NAMED`
+    gives. Only the choices a *reader* could see differently are named
+    here, which is `ExportOutcome.warnings`'s own line from #502: where the
+    standard names an attribute that decides the VR and the source does not
+    carry it, or carries one the value contradicts. A tag the standard
+    gives no decider at all -- DICONDE, Curve Data, Audio Sample Data,
+    Variable Pixel Data, the retired descriptors -- is not a shortcoming of
+    the source's file and takes no row: the bytes written are theirs and
+    nothing about their data is wrong.
+
+    The omission clauses lead with what the source does not carry rather
+    than with the arm chosen, because that is the fact about the caller's
+    data; the contradiction clause leads with the arm, because there the
+    arm *is* the fact. There are three of the first kind -- no Waveform
+    Bits Allocated, no LUT Descriptor, no Pixel Representation at all --
+    and one of the second, and the last two are the same value-versus-arm
+    situation told from opposite ends: where the header names an arm the
+    value contradicts it, and where no header names one the arm is this
+    library's default and the sentence says so.
+
+    The waveform clause fires **below the top level only**, and that is
+    pydicom's line rather than a choice made here: a *top-level*
+    (5400,0110), (5400,0112) or (5400,100A) with no Waveform Bits Allocated
+    anywhere is answered `OW` from the root dataset's `original_encoding`,
+    identically before this change and after, so nothing was chosen and a
+    row would claim otherwise. The same element inside a Waveform Sequence
+    item has no encoding to fall back on, which is where the omission
+    becomes ours to resolve and to report.
+    """
+    if not clauses:
+        return None
+    named = "; ".join(clauses[:_AMBIGUOUS_NAMED])
+    rest = len(clauses) - min(len(clauses), _AMBIGUOUS_NAMED)
+    return (f"Ambiguous value representation{'s' if len(clauses) > 1 else ''} "
+            f"{named}" + (f"; and {rest} more" if rest else "") + ". The "
+            f"written bytes are the source's; what this library had to "
+            f"choose is the value representation the file declares, which "
+            f"decides how a reader interprets those bytes.")
+
+
+def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
+    """Give every ambiguous VR in `ds` a concrete arm, before `save_as`.
+
+    pydicom stays the authority: each element goes to the public
+    `correct_ambiguous_vr_element` with the ancestors list its `US or SS`
+    arm walks, and this pass intervenes only where pydicom raised, left the
+    VR ambiguous, or named an arm the value does not fit. Anything else
+    would be a second ambiguity table drifting from pydicom's -- the trap
+    `_numeric_arm` names.
+
+    Here, and not in `_merge`, because the deciding sibling is a *sibling*:
+    LUT Descriptor, Waveform Bits Allocated and Pixel Representation may be
+    merged after the element that needs them, and a nested element's
+    decider lives one or more levels up, in an item `_merge` has not been
+    handed. The dataset is only complete at the write, which is also where
+    pydicom itself asks the question.
+
+    It never raises, and that is the point: pydicom's own resolution
+    failure is an `AttributeError` from inside `dcmwrite`, past every
+    per-element `try`, so it cost the whole file (#674). An element this
+    pass cannot place is dropped with one `DATA_LOSS` row instead.
+    Postcondition: no element leaves with a VR in `AMBIGUOUS_VR`.
+    """
+    ancestors = [ds] if ancestors is None else ancestors
+    rows = [] if rows is None else rows
+    for tag in list(ds.keys()):
+        # `ds[tag]`, not `get_item`, and the difference matters: for a
+        # `RawDataElement` `Dataset.__getitem__` resolves the ambiguous VR
+        # itself, with no ancestors, and re-raises pydicom's
+        # `AttributeError` from here -- outside the per-element `try`
+        # below, so it would be the whole-file failure of #674 again, or a
+        # second answer to the question this pass exists to answer. It is
+        # safe only because every element in this dataset was put there by
+        # `_merge`/`add_new` and none of them is raw.
+        elem = ds[tag]
+        if elem.VR == "SQ":
+            for item in elem.value:
+                _resolve_ambiguous_vrs(item, losses, warnings,
+                                       [item] + ancestors, rows)
+            continue
+        if str(elem.VR) not in AMBIGUOUS_VR:
+            continue
+        if int(tag) == _PIXEL_DATA_TAG:
+            # The one ambiguous VR whose answer depends on something the
+            # write path establishes *after* this pass. PS3.5 A.4's `OB`
+            # follows from the undefined length `save_as` gives an
+            # encapsulated stream, and here the element still carries a
+            # defined length and an `original_encoding` of (True, True),
+            # which sends pydicom down its Implicit VR arm and answers
+            # `OW` -- for a file we are not writing. Measured: asking the
+            # question early turns every compressed export's `OB` into
+            # `OW`, at 8 bits and at 16. pydicom asks it again at the
+            # write, where the flag is true, so leaving it alone is both
+            # correct and complete. Pixel Data is the only arm in pydicom
+            # 3.0.2 that reads write-time state; re-read
+            # `_correct_ambiguous_vr_element` on every pydicom bump.
+            continue
+        try:
+            _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows)
+        except Exception as exc:  # noqa: BLE001 -- see the docstring
+            del ds[tag]
+            losses.append((
+                loss_scope_for_tag(f"{tag.group:04x},{tag.element:04x}"),
+                f"Tag ({tag.group:04x},{tag.element:04x}) not exported (data "
+                f"loss): its value representation is {elem.VR}, and no arm "
+                f"of it could be given to the value "
+                f"({describe_exception(exc)})."))
+    if ancestors[1:]:
+        return
+    warning = _ambiguous_vr_warning(rows)
+    if warning is not None:
+        warnings.append(warning)
+
+
+def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
+    """One element of `_resolve_ambiguous_vrs`. Appends to `rows` the
+    choices a reader could see differently; see `_ambiguous_vr_warning`."""
+    arms = str(elem.VR).split(" or ")
+    tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+    unresolved = False
+    try:
+        correct_ambiguous_vr_element(elem, ds, True, ancestors)
+    except AttributeError:
+        # pydicom's wrapped raise: the sibling its rule reads is absent
+        # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
+        unresolved = True
+    if not unresolved and str(elem.VR) not in AMBIGUOUS_VR:
+        # pydicom answered, so what it answered is what the header names
+        # -- except where the chain declares no Pixel Representation at
+        # all, and its `US or SS` arm defaults to `US` for a dataset with
+        # no pixels either. `None` then, so the row cannot name an element
+        # the file does not carry (#674).
+        _veto_ambiguous_arm(elem, ds, arms, losses, rows,
+                            _named_arm(ancestors, elem.VR))
+        return
+
+    value = elem.value
+    if value is None or isinstance(value, (bytes, bytearray, memoryview)):
+        if "OW" in arms:
+            # Every ambiguous VR string that can hold bytes has an `OW`
+            # arm: `OB or OW`, `US or OW`, `US or SS or OW`. `US or SS`
+            # has none, and is the branch below.
+            bits = (_waveform_bits(ancestors)
+                    if elem.tag in _AMBIGUOUS_WAVEFORM_TAGS else None)
+            if bits is not None:
+                # PS3.5 8.3: `OB` at 8 bits or fewer, `OW` above.
+                elem.VR = "OW" if bits > 8 else "OB"
+            else:
+                # `OW`. The two writers write the same bytes and pad an
+                # odd length the same way, so for a byte stream this
+                # shows only in an explicit-VR file's VR field -- and a
+                # value read from a file is never odd, because every
+                # element length in a DICOM file is even.
+                elem.VR = "OW"
+                if elem.tag in _AMBIGUOUS_WAVEFORM_TAGS:
+                    rows.append(
+                        f"({tag}): no Waveform Bits Allocated is declared "
+                        f"anywhere above it, and PS3.5 8.3 decides between "
+                        f"OB and OW by the bit depth, so {elem.VR} was "
+                        f"written")
+                elif elem.tag == _LUT_DATA_TAG:
+                    rows.append(
+                        f"({tag}): the LUT it belongs to declares no LUT "
+                        f"Descriptor, whose first value decides between US "
+                        f"and OW, so {elem.VR} was written")
+        else:
+            # `US or SS` over bytes: pydicom's Pixel Representation rule,
+            # extended to the tags its table leaves out.
+            # `or 0`: a chain that declares nothing takes the unsigned
+            # arm, exactly as a declared 0 does. Only the row needs the
+            # two cases apart, and `_named_arm` is what keeps them apart.
+            rep = _pixel_representation(ancestors) or 0
+            elem.VR = "US" if rep == 0 else "SS"
+            elem.value = convert_numbers(bytes(value or b""), True,
+                                         "H" if rep == 0 else "h")
+            _veto_ambiguous_arm(elem, ds, arms, losses, rows,
+                                _named_arm(ancestors, elem.VR))
+        return
+
+    values = _int_values(value)
+    if values is not None and "OW" not in arms:
+        # `US or SS` over numbers: the same decider as the bytes branch
+        # above, so one tag does not get two answers depending on which
+        # syntax its source was written in -- an Implicit VR source hands
+        # these back as bytes and an Explicit VR one as numbers, and both
+        # mean the same element. Pixel Representation is what pydicom
+        # applies to the twenty tags it tabulates; the value only speaks
+        # where the header's answer cannot hold it.
+        rep = _pixel_representation(ancestors) or 0
+        preferred = "US" if rep == 0 else "SS"
+        if _fitting_arm([preferred], values) is not None:
+            elem.VR = preferred
+            return
+        other = _fitting_arm(arms, values)
+        if other is not None:
+            elem.VR = other
+            rows.append(_ambiguous_veto_clause(
+                tag, other, _named_arm(ancestors, preferred)))
+            return
+        values = None           # no arm holds it: the loss below
+    arm = _fitting_arm(arms, values) if values else None
+    if arm is None:
+        _ambiguous_arm_loss(ds, elem, losses, tag, arms)
+        return
+    elem.VR = arm
+
+
+def _named_arm(ancestors, resolved):
+    """The arm the source's header names, or None if it names none.
+
+    `resolved` is the arm already chosen, which for the `US or SS` family
+    *is* what a declared Pixel Representation names -- pydicom's rule and
+    this module's are the same rule. The only thing this adds is the
+    distinction pydicom's answer cannot carry: whether any ancestor
+    declares the element at all (#674).
+    """
+    if _pixel_representation(ancestors) is None:
+        return None
+    return str(resolved)
+
+
+def _veto_ambiguous_arm(elem, ds, arms, losses, rows, named):
+    """Refuse an arm the value does not fit, and say so (#681).
+
+    pydicom resolves the `US or SS` family from Pixel Representation, which
+    is the better answer whenever the value fits it. A Modality LUT
+    Descriptor whose first-mapped value is negative over unsigned pixels is
+    a source contradicting its own header, and writing the arm the header
+    names costs the whole file: `struct.error: 'H' format requires
+    0 <= number <= 65535`, raised inside `dcmwrite`.
+    """
+    vr = str(elem.VR)
+    if vr not in ("US", "SS"):
+        return
+    # Derived rather than passed: one fewer argument, and the caller's
+    # spelling of the tag is the same one.
+    tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+    values = _int_values(elem.value)
+    if not values or _fitting_arm([vr], values) is not None:
+        return
+    other = _fitting_arm([a for a in arms if a != vr], values)
+    if other is None:
+        # No arm holds the value, so the same answer the unresolved path
+        # gives: one element's `DATA_LOSS` row, never the file's failure.
+        # Spelled out rather than left as a bare `return` so the
+        # postcondition is structural -- an element kept here would leave
+        # with a VR no writer can serve, and `save_as` would raise
+        # `OSError` for the whole file, which is rule (b)'s failure from
+        # inside the code that exists to prevent it. Nothing reaches it
+        # today: `_merge`'s widened `_numeric_arm` refuses such a value
+        # first, measured for a top-level and a nested element and for a
+        # tabulated and an omitted tag, which is why the test that covers
+        # this line calls this function directly.
+        _ambiguous_arm_loss(ds, elem, losses, tag, arms)
+        return
+    elem.VR = other
+    rows.append(_ambiguous_veto_clause(tag, other, named))
+
+
 def _numeric_arm(vr, value):
-    """The arm of an `US or OW` or `US or SS or OW` VR that `value` fits (#653).
+    """The arm an ambiguous VR's `value` fits, or a refusal (#653, #674).
 
     One element two ways: numbers under `US`/`SS`, words under `OW`. An
     explicit-VR source that wrote `US` hands back ints -- a list once the
@@ -8580,14 +8995,28 @@ def _numeric_arm(vr, value):
     per-element `try`, so it failed the whole file.
 
     **Keyed on the dictionary VR string, not on a tag.** A tag-keyed branch
-    would be a second ambiguity table that drifts from pydicom's. Two
-    entries match today: LUT Data (0028,3006) and the retired Gray LUT Data
-    (0028,1200).
+    would be a second ambiguity table that drifts from pydicom's. All four
+    ambiguous strings reach the gate -- 34 tags and 4 repeater patterns --
+    and two entries have both an `OW` arm and a numeric one, which are the
+    two whose arm is *chosen* here: LUT Data (0028,3006) and the retired
+    Gray LUT Data (0028,1200). Everything else that arrives is either
+    refused here or left to the export-time pass (#674).
 
-    **An `OW` arm and a numeric arm are both required.** `US or SS` (Smallest
-    Image Pixel Value and its kin) has no `OW` arm, and pydicom resolves it
-    from Pixel Representation, which is the better answer there. `OB or OW`
-    has no numeric arm.
+    **Any ambiguous VR is refused here; only the `OW` family is decided
+    here.** The gate is `AMBIGUOUS_VR`, all four strings, because "this
+    value fits no arm at all" is one behaviour and belongs in one place
+    (#674). What is *chosen* here is still only the `OW` family: `US or SS`
+    (Smallest Image Pixel Value and its kin) has no `OW` arm, and pydicom
+    resolves it from Pixel Representation, which is the better answer there
+    -- unless the value itself proves that answer impossible, which the
+    export-time pass vetoes with a `WARNING` row rather than this one
+    guessing from a partial dataset (#681). `OB or OW` has no numeric arm,
+    so a number under it fits none and is refused.
+
+    That narrowing is deliberate: for `US or SS` the standard names a
+    decider, so the header decides and the value only vetoes. #653's
+    "the value chooses the VR" holds where no header answers, which is the
+    `OW` family.
 
     **Bytes are never numbers here.** `list(b"\x00\x01")` is a list of
     ints, so a bytes-like value is tested first and keeps pydicom's
@@ -8611,7 +9040,7 @@ def _numeric_arm(vr, value):
         ValueError: `value` is neither bytes nor numbers any arm fits.
     """
     arms = vr.split(" or ")
-    if "OW" not in arms or not {"US", "SS"} & set(arms):
+    if vr not in AMBIGUOUS_VR:
         return vr
     if value is None or isinstance(value, (bytes, bytearray, memoryview)):
         return vr
@@ -8620,12 +9049,20 @@ def _numeric_arm(vr, value):
     if not values:
         return vr
     if all(isinstance(x, numbers.Integral) for x in values):
-        if "US" in arms and all(0 <= x <= 0xFFFF for x in values):
-            return "US"
-        if "SS" in arms and all(-0x8000 <= x <= 0x7FFF for x in values):
-            return "SS"
-    raise ValueError(f"the value fits no numeric arm of {vr}, and OW holds "
-                     f"only bytes")
+        arm = _fitting_arm(arms, values)
+        if arm is not None:
+            # Only the `OW` family is decided here. `US or SS` keeps
+            # pydicom's Pixel Representation answer, which is the better
+            # one when the value fits it -- and when it does not, the
+            # export-time pass refuses that answer rather than this one
+            # guessing from a partial dataset (#674).
+            return arm if "OW" in arms else vr
+    if "OW" in arms:
+        raise ValueError(f"the value fits no numeric arm of {vr}, and OW "
+                         f"holds only bytes")
+    # One spelling for one behaviour: `US or SS` has no `OW` arm to
+    # mention, and the rest of the sentence is the same refusal.
+    raise ValueError(f"the value fits no numeric arm of {vr}")
 
 
 class DicomExporter:

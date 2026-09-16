@@ -194,9 +194,10 @@ def test_lut_data_read_as_bytes_keeps_its_words(tmp_path, compress):
     ("US or OW", memoryview(b"\x00\x01"), "US or OW"),
     ("US or OW", [], "US or OW"),
     ("US or OW", None, "US or OW"),
+    # `US or SS` keeps pydicom's Pixel Representation answer when an arm
+    # fits, because the header is the standard's decider there (#674); and
+    # `OW` is not ambiguous at all, so nothing is decided for it.
     ("US or SS", [1, 2], "US or SS"),
-    ("US or SS", [70000], "US or SS"),
-    ("OB or OW", [1, 2], "OB or OW"),
     ("OW", [1, 2], "OW"),
 ])
 def test_the_value_chooses_the_numeric_arm(vr, value, arm):
@@ -213,12 +214,27 @@ def test_the_value_chooses_the_numeric_arm(vr, value, arm):
     pytest.param("US or SS or OW", [-40000], id="below-SS"),
     pytest.param("US or OW", [1.5, 2.0], id="floats"),
     pytest.param("US or OW", "0\\1", id="text"),
+    # The refusal covers all four ambiguous VRs since #674: a value no arm
+    # holds is one behaviour, so it is one raise, whether or not the VR has
+    # an `OW` arm to say only bytes fit it.
+    pytest.param("US or SS", [70000], id="US-or-SS-above-US"),
+    pytest.param("OB or OW", [1, 2], id="OB-or-OW-numbers"),
+    # The first value outside each arm, under a VR carrying both, because
+    # the cases above pin what is *inside* the bounds and an off-by-one in
+    # `_fitting_arm` is not a wrong arm but a whole file lost at
+    # `dcmwrite` -- the failure class #674 exists to remove. This one
+    # helper is now the decider in three places: here, the export-time
+    # pass, and its veto.
+    pytest.param("US or SS", [65536], id="one-above-US"),
+    pytest.param("US or SS", [-32769], id="one-below-SS"),
 ])
 def test_a_value_that_fits_no_numeric_arm_is_refused(vr, value):
     """pydicom's `OW` writer takes only bytes, so no arm can write these (#653).
 
     Refused here, inside `_merge`'s per-element `try`, so the element is one
-    `DATA_LOSS` row instead of `dcmwrite` failing the whole file.
+    `DATA_LOSS` row instead of `dcmwrite` failing the whole file. The two
+    `match`-sharing messages are why the grammar is one sentence: `US or SS`
+    has no `OW` arm to mention and the refusal is otherwise the same (#674).
     """
     from isocenter.io_handlers import _numeric_arm
 
