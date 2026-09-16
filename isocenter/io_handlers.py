@@ -2157,8 +2157,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     # reads either, so a declared one still wins; and
                     # deeper sequences inherit from the stamp, since
                     # pydicom propagates from each item's `_pixel_rep`
-                    # and this branch does from each `ds`'s.
-                    rep = _pixel_representation([ds])
+                    # and this branch does from each `ds`'s. The value is
+                    # copied unconverted, as pydicom copies it: its arm
+                    # compares the raw value, so a malformed `[1, 0]` reads
+                    # signed in a standard sequence, and `int()` on it --
+                    # `_pixel_representation` -- raised `TypeError` and
+                    # refused a file that ingested before this stamp.
+                    rep = getattr(ds, "PixelRepresentation", None)
+                    if rep is None:
+                        rep = getattr(ds, "_pixel_rep", None)
                     if rep is not None:
                         for parsed_item in parsed:
                             parsed_item._pixel_rep = rep

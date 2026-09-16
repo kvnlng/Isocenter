@@ -472,3 +472,24 @@ def test_an_ambiguous_element_carried_as_un_is_read_in_the_sources_byte_order(
             graphs[label] = _graph(session)
     assert _smallest_values(graphs["un"]) == [((("0088,0200", 0),), 3)]
     assert graphs["un"] == graphs["us"]
+
+
+def test_a_malformed_root_pixel_representation_reaches_a_private_item_as_a_standard_one(
+        tmp_path):
+    """The propagation into a re-parsed private item copies the parent's
+    Pixel Representation as pydicom's own `_set_pixel_representation` does:
+    unconverted. A root carrying a malformed two-valued `[1, 0]` is not a
+    number, so converting it raised `TypeError` and refused a file that
+    ingested before the propagation existed; and pydicom's arm compares the
+    raw value (`[1, 0] == 0` is false), so the item in a standard sequence
+    reads signed. -5 rather than 3, because only a value outside 0..32767
+    tells a private item that reads as the standard one from one left
+    unstamped."""
+    ds = _dataset(pixels=False)
+    ds.add_new(0x00280103, "US", [1, 0])
+    _private_sequence(ds, _icon(pixels=False))
+    ds.IconImageSequence = Sequence([_icon(pixels=False)])
+    summary, fresh, _reopened, _db = _ingest(tmp_path, ds, True, "implicit")
+    assert summary.failures == []
+    assert _smallest_values(fresh) == [
+        ((("0009,1010", 0),), -5), ((("0088,0200", 0),), -5)]
