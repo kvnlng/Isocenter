@@ -1,7 +1,7 @@
 """A stream whose decoded samples exceed its own declared precision is said (#671).
 
-A lossless JPEG's frame header states the sample precision every decoder
-reconstructs against. A stream whose samples exceed it is one the decoders
+A lossless JPEG, and a JPEG 2000 codestream, state the sample precision
+every decoder reconstructs against. A stream whose samples exceed it is one the decoders
 disagree about, and they disagree *silently*. Measured on a8b6d3f, a `.70`
 frame written by `imagecodecs.ljpeg_encode(..., bitspersample=12)` holding
 samples up to 4970 (16 of 64 cells above 4095):
@@ -30,14 +30,20 @@ deliberately contains no `precision is`, the substring
 
 **Two limits ship with it, and both are pinned here.**
 
-*Signed streams are not reported* (`test_a_signed_stream_beyond_its_
-precision_writes_no_row`). A signed decode is masked back inside its
-precision when it is sign-extended, on both routes, so no check after the
-decode can see the divergence -- and it is there: the same file under
-PixelRepresentation 1 reads `104` through the fallback and `-1` with
-pylibjpeg, differing in 16 of 64 cells, with no row and `PASS` on both
-(`.agent/scratch-098/probes-J9/p671b-ljp312.log`, `p671b-ljp314t.log`).
-That is #682.
+*Signed streams are not reported*, and rev-098j9 corrected the reason.
+`_sign_extend` masks at `max(precision, BitsStored)`, so a signed sample
+is pushed back inside the precision only where **BitsStored <=
+precision** -- not for every signed file, as this file used to claim "by
+construction". Above it the divergence is visible: one precision-12
+stream under PixelRepresentation 1 reads `[-1996, 1470]` at BitsStored
+12 (masked), `[-3992, 3570]` at 13 and `[0, 4970]` at 16, against `[0,
+4095]` on the plugin route, 16 of 64 cells apart
+(`test_a_signed_stream_beyond_its_precision_writes_no_row`, parametrised
+over the three, with per-arm assertions because a shared set is what let
+the false claim stand). The visible half is unreported because the bound
+that would catch it fires on conformant signed files too
+(`test_the_signed_bound_would_fire_on_a_conformant_stream`). That is
+#682, now split into a masked half and a detectable one.
 
 *It is not visible on pydicom's plugin route*, which has already clamped
 the samples, so a clamped array always fits. **That half needs pylibjpeg
@@ -56,6 +62,7 @@ ingest cannot pass for a measurement.
 **Only T.81 lossless can be built with this shape** -- see
 `test_the_shape_is_only_constructible_for_t81`.
 """
+import logging
 import os
 import sqlite3
 
@@ -92,7 +99,7 @@ UNDER_LIMIT[7, 7] = 4095
 NARROW = (FILED % 200).astype(np.uint16)
 
 FILED_ROW = (
-    "The JPEG Lossless stream declares precision 12 in its frame header, "
+    "The JPEG Lossless stream declares a sample precision of 12, "
     "and a decoded sample reads 4970, which 12 bits cannot hold. Read as "
     "decoded, and exported as read; a decoder that clamps a sample to the "
     "declared precision would read at most 4095 here, so another reader may "
@@ -155,7 +162,7 @@ def _run(tmp_path, ds, cannot, name="s"):
 
 
 def _beyond_rows(rows):
-    return [r for r in rows if "declares precision" in r[1]]
+    return [r for r in rows if "declares a sample precision of" in r[1]]
 
 
 def _bits_stored_rows(rows):
@@ -261,7 +268,7 @@ def test_both_rows_are_written_when_a_sample_fits_neither(
     assert wider[1].startswith("BitsStored 8 with BitsAllocated 16, and the ")
     # Distinguishable at a glance, and by a substring filter.
     assert "precision is" not in beyond[1]
-    assert "declares precision" not in wider[1]
+    assert "declares a sample precision of" not in wider[1]
     assert len(got["rows"]) == 2, got["rows"]
 
 
@@ -281,28 +288,151 @@ def test_the_622_filter_does_not_pick_up_the_new_row(
 
 
 # ---------------------------------------------------------------------------
-# T18: the signed limit, pinned
+# Its own log cap (rev-098j9 P3)
 # ---------------------------------------------------------------------------
 
-def test_a_signed_stream_beyond_its_precision_writes_no_row(
-        tmp_path, pydicom_cannot):
-    """The stated limit (#682), so an "improvement" that fires is red.
+def test_one_log_cap_per_rule(tmp_path, pydicom_cannot, caplog):
+    """Seven over-precision rows print five lines and one suppression line.
 
-    `_sign_extend` keeps the low `precision` bits and extends the sign, so
-    after extension every signed sample is inside
-    `[-2^(P-1), 2^(P-1) - 1]` **by construction** and no post-decode check
-    can see the divergence -- while the two routes differ in 16 of 64
-    cells (`-1` against `104`). Firing here would mean reporting every
-    signed file, or reporting nothing that is true.
+    The cap shipped untested, so both of its numbers were live mutants:
+    `<= 5` could become `<= 0` and print nothing, and `== 6` could become
+    any other number and never print the suppression line. Seven
+    instances in one ingest is the shape that reads both.
+
+    It also asserts the cap is this rule's own, `_record_lossy`'s reason:
+    an eighth file tripping #622's BitsStored rule still prints its line,
+    so a cohort that trips this rule cannot suppress another rule's
+    output. And the audit rows are **not** capped -- the cap is on the
+    log, not the record -- so all seven are in `audit_log`.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    stream = _ljpeg(FILED, 12)
+    for index in range(7):
+        ds = _file(LJPEG_SV1, [stream], bits_stored=12)
+        ds.save_as(str(src / f"a{index}.dcm"), enforce_file_format=False)
+    # BitsStored 8: #622's row as well, and the only file here with one.
+    ds = _file(LJPEG_SV1, [stream], bits_stored=8)
+    ds.save_as(str(src / "z-wider.dcm"), enforce_file_format=False)
+    db = str(tmp_path / "cap.db")
+    before = dict(pydicom_cannot)
+    with DicomSession(persistence_file=db) as session:
+        # After construction: every Session() replaces the log handler.
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            summary = session.ingest(str(src))
+    assert summary.ingested == 8, summary
+    assert pydicom_cannot["n"] > before["n"], "the fallback was never asked"
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert len([m for m in messages
+                if "declares a sample precision of" in m]) == 5, messages
+    assert len([m for m in messages if "suppressing further per-instance "
+                "messages for a sample beyond the stream's own precision"
+                in m]) == 1, messages
+    # #622's cap is untouched by this rule's eight files.
+    assert len([m for m in messages
+                if "stream's precision is" in m]) == 1, messages
+
+    with sqlite3.connect(db) as conn:
+        (count,) = conn.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE action_type = 'WARNING' "
+            "AND details LIKE ?", ("%declares a sample precision of%",)
+        ).fetchone()
+    assert count == 8, "the cap is on the log, not the audit row"
+
+
+# ---------------------------------------------------------------------------
+# T18: the signed limit, pinned -- and only half of it is masked
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("bits_stored, bounds, masked", [
+    (12, (-1996, 1470), True),
+    (13, (-3992, 3570), False),
+    (16, (0, 4970), False),
+], ids=["bs12-masked", "bs13-visible", "bs16-visible"])
+def test_a_signed_stream_beyond_its_precision_writes_no_row(
+        tmp_path, pydicom_cannot, bits_stored, bounds, masked):
+    """The stated limit (#682) -- and *why* it is a limit, per arm.
+
+    The claim this test used to carry was that `_sign_extend` masks every
+    signed sample back inside `[-2^(P-1), 2^(P-1) - 1]` **by
+    construction**, so nothing after the decode could see the divergence.
+    That is false for half the population, and rev-098j9 measured it:
+    `_sign_extend`'s width is `max(precision, BitsStored)`, so masking
+    into the precision happens only where **BitsStored <= precision**.
+
+    Measured on this branch, one precision-12 stream under three
+    BitsStored values (`.agent/scratch-098/dev-J9/p671signed-ci312.json`,
+    `-ci314t.json`, `-ljp312.json`; identical on 3.12 and 3.14t):
+
+    * **BitsStored 12** -- width 12, so the samples really are masked to
+      `[-1996, 1470]`, inside `[-2048, 2047]`. Nothing post-decode can
+      see it. The original claim, true here only.
+    * **BitsStored 13** -- width 13, `[-3992, 3570]`, well outside. The
+      plugin route reads `[0, 4095]`: 16 of 64 cells apart.
+    * **BitsStored 16** -- width 16, `[0, 4970]`, outside. The plugin
+      route reads `[0, 4095]`: 16 of 64 cells apart.
+
+    So the divergence *is* visible for the latter two, and no row is
+    written for them today. That is the open half of #682, and it is
+    deliberately still open: the signed-aware bound
+    `[-2^(P-1), 2^(P-1) - 1]` that would catch them also fires on a
+    stream whose every sample is a legal 12-bit pattern under BitsStored
+    13 or 16 -- measured, both routes reading `[0, 3570]`, identical in
+    all 64 cells -- so it would claim "another reader may see different
+    values" about files no reader disagrees about. Reported for a ruling
+    rather than shipped.
+
+    Per-arm expectations, deliberately: one shared assertion set (`min >=
+    -2048 and max <= 2047`) is what let the false "by construction" claim
+    stand, because it passes for the masked arm and was only ever run
+    there.
     """
     got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(FILED, 12)],
-                               bits_stored=12, pr=1), pydicom_cannot)
+                               bits_stored=bits_stored, pr=1), pydicom_cannot)
+    low, high = int(got["stored"].min()), int(got["stored"].max())
 
     assert got["stored"].dtype == np.dtype("int16")
-    assert int(got["stored"].min()) < 0
-    assert -2048 <= int(got["stored"].min())
-    assert int(got["stored"].max()) <= 2047
+    assert (low, high) == bounds
+    # The claim under test: masked into the precision, or not.
+    inside = -2048 <= low and high <= 2047
+    assert inside is masked, (low, high)
+    # No row on any arm, which is the limit as it ships.
     assert not _beyond_rows(got["rows"]), got["rows"]
+    assert "PASS" in got["grade"], got["grade"]
+
+
+def test_the_signed_bound_would_fire_on_a_conformant_stream(tmp_path,
+                                                            pydicom_cannot):
+    """Why the signed half is reported rather than fixed (rev-098j9 F1).
+
+    The ruled extension was a signed bound `[-2^(P-1), 2^(P-1) - 1]` for
+    PixelRepresentation 1, on the premise that it "fires exactly where the
+    extension does not mask". It does fire there -- and also here, on a
+    stream every one of whose samples is a legal 12-bit pattern, which
+    both routes read identically.
+
+    `_sign_extend`'s width is `max(precision, BitsStored)` = 16, so the
+    12-bit patterns are not sign-extended at all and come back as the
+    unsigned values `[0, 3570]`. Those exceed `2^11 - 1`, so the ruled
+    bound fires; and the plugin route reads the same `[0, 3570]` in all 64
+    cells, so the row's "another reader may see different values" would be
+    false. This test pins the shape so the premise cannot be re-adopted
+    without the counter-example going red.
+    """
+    conformant = (FILED & 0xFFF).astype(np.uint16)
+    got = _run(tmp_path, _file(LJPEG_SV1, [_ljpeg(conformant, 12)],
+                               bits_stored=16, pr=1), pydicom_cannot)
+    low, high = int(got["stored"].min()), int(got["stored"].max())
+
+    # Every sample a legal 12-bit pattern, so nothing exceeds precision 12.
+    assert int(conformant.max()) <= 4095
+    assert (low, high) == (0, 3570)
+    # ... yet it is outside the signed range the ruled bound would use.
+    assert high > (1 << 11) - 1
+    # No row, which is correct: no reader disagrees about this file.
+    assert not _beyond_rows(got["rows"]), got["rows"]
+    assert "PASS" in got["grade"], got["grade"]
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +474,68 @@ def test_the_facts_are_plain_types_that_ride_out_of_a_worker():
     for value in facts.values():
         assert type(value) in (int, str), (value, type(value))
     assert _beyond_precision_words(facts) == FILED_ROW
+
+
+def test_a_negative_sample_under_pixel_representation_0_is_the_one_reported():
+    """The low half of the bound, directly (rev-098j9 R10/R11).
+
+    `lowest < 0` and `max(beyond)[1]` shipped unexercised: every ingest
+    fixture is unsigned and non-negative, so only the high half ran, and
+    a bound written without the `lowest < 0` clause -- or one that
+    reported the *nearest* sample instead of the farthest -- passed.
+
+    An array that is negative under PixelRepresentation 0 is what makes
+    the clause reachable at all: it is the shape the guard above lets
+    through, and it is why that guard is testable.
+
+    The two distances are measured from different places, which is worth
+    stating because it is not obvious and it decides the row: the high
+    side is `highest - limit` (how far past the precision), the low side
+    is `-lowest` (how far below zero). So both orderings are pinned here.
+    """
+    ds = _file(LJPEG_SV1, [_ljpeg(FILED, 12)], bits_stored=12)
+    facts = _samples_beyond_stream_precision(
+        ds, np.array([[-5]], dtype=np.int16))
+
+    assert facts is not None
+    assert facts["sample"] == -5
+    assert facts["limit"] == 4095
+    assert facts["precision"] == 12
+
+    # The farthest wins, not the first found, and each side can win.
+    high_wins = _samples_beyond_stream_precision(
+        ds, np.array([[-5, 4970]], dtype=np.int16))
+    assert high_wins["sample"] == 4970, high_wins
+    low_wins = _samples_beyond_stream_precision(
+        ds, np.array([[-5000, 4970]], dtype=np.int16))
+    assert low_wins["sample"] == -5000, low_wins
+
+
+def test_a_narrow_frames_excess_is_not_reported_behind_a_wider_one():
+    """The one-precision-per-instance limit, pinned (rev-098j9 P4).
+
+    The widest declared frame decides, so a narrow frame's own
+    over-precision samples are invisible behind a wider sibling. Frame 0
+    at precision 8 holding 300 exceeds its own 8 bits; behind frame 1 at
+    precision 12 the comparison is against 12 and 300 fits, so no row.
+    Alone, frame 0 reports it.
+
+    Stated as a limit rather than fixed: a per-frame comparison needs the
+    frame axis this function is not given, and the row would then have to
+    name a frame.
+    """
+    narrow = np.full((8, 8), 300, dtype=np.uint16)
+    wide = np.full((8, 8), 3000, dtype=np.uint16)
+    both = _file(LJPEG_SV1, [_ljpeg(narrow, 8), _ljpeg(wide, 12)],
+                 bits_stored=12, frames=2)
+    assert _samples_beyond_stream_precision(both, np.stack([narrow, wide])) \
+        is None
+
+    alone = _file(LJPEG_SV1, [_ljpeg(narrow, 8)], bits_stored=12)
+    facts = _samples_beyond_stream_precision(alone, narrow)
+    assert facts is not None
+    assert (facts["precision"], facts["sample"], facts["limit"]) \
+        == (8, 300, 255)
 
 
 def test_a_native_file_has_no_stream_precision_to_exceed():

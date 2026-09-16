@@ -3027,9 +3027,10 @@ def _precision_words(facts) -> str:
 def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     """The facts for ingest's over-precision row, or None (#671).
 
-    A lossless JPEG's frame header states the sample precision every
-    decoder reconstructs against (the SOFn `P` field `_jpeg_precision`
-    reads, ITU-T T.81 B.2.2). A stream whose decoded samples exceed it is
+    A lossless JPEG, and a JPEG 2000 codestream, state the sample
+    precision every decoder reconstructs against (the SOFn `P` field
+    `_jpeg_precision` reads, ITU-T T.81 B.2.2; the SIZ segment's for
+    a codestream). A stream whose decoded samples exceed it is
     one the decoders **disagree about, silently**: measured on a8b6d3f, a
     `.70` frame written at `bitspersample=12` holding samples up to 4970
     came back `0..4970` through the imagecodecs fallback -- what the
@@ -3061,16 +3062,34 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     time, so neither a JPEG-LS nor a JPEG 2000 stream with over-precision
     samples can be built with the tools here.
 
-    **Unsigned only, and the bound is unsigned by construction.** A signed
-    decode is masked back inside its precision when it is sign-extended
-    (`imagecodecs_handler._sign_extend` keeps the low `width` bits and
-    extends bit `width - 1`), on both routes, so after extension every
-    signed sample is inside `[-2^(P-1), 2^(P-1) - 1]` and no check after
-    the decode can see the divergence -- which is there: the same file
-    under PixelRepresentation 1 reads `104` through the fallback and `-1`
-    with pylibjpeg, differing in 16 of 64 cells, with no row on either.
-    That is #682, stated as a limit rather than half-answered here. The
-    low half of the bound below (`lowest < 0`) is what makes the
+    **Unsigned only, and only half of that is because the signed half is
+    masked.** The claim here used to be that a signed decode is always
+    masked back inside its precision by sign extension, so no check after
+    the decode could see the divergence. That is true of *half* the
+    population and rev-098j9 measured the other half:
+    `imagecodecs_handler._sign_extend` masks at
+    `max(precision, BitsStored)`, so a signed sample lands inside
+    `[-2^(P-1), 2^(P-1) - 1]` only where **BitsStored <= precision**.
+    Above it the divergence is plainly visible -- one precision-12 stream
+    under PixelRepresentation 1, measured on 3.12 and 3.14t alike:
+    BitsStored 12 reads `[-1996, 1470]` (masked, invisible), BitsStored 13
+    reads `[-3992, 3570]` and BitsStored 16 reads `[0, 4970]`, against
+    `[0, 4095]` on the plugin route, 16 of 64 cells apart.
+
+    That visible half is **still not reported**, and the reason is a
+    measurement rather than an omission. A signed-aware bound
+    `[-2^(P-1), 2^(P-1) - 1]` catches it, and also fires on a stream
+    every one of whose samples is a legal `P`-bit pattern: under
+    BitsStored 13 or 16 those are not sign-extended at all, so a
+    conformant signed 12-bit image reads `[0, 3570]` on **both** routes,
+    identical in all 64 cells, and the row's "another reader may see
+    different values" would be false of it
+    (`.agent/scratch-098/dev-J9/p671signed-*.json`,
+    `test_the_signed_bound_would_fire_on_a_conformant_stream`). So the
+    signed arm is open rather than half-closed: #682 carries it, narrowed
+    to the two halves it actually has.
+
+    The low half of the bound below (`lowest < 0`) is what makes the
     PixelRepresentation guard testable: remove the guard and a signed
     array's negatives fall outside `[0, 2^P - 1]` at once.
 
@@ -3104,6 +3123,17 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     # from a wider frame behind a conformant frame 0 would be measured
     # against a precision it was not written at. `_precision_mismatch`
     # names the widest for the same reason.
+    #
+    # The limit that buys (rev-098j9 P4): one precision per instance, so a
+    # *narrow* frame's own over-precision samples go unreported behind a
+    # wider sibling. Measured -- frame 0 at precision 8 holding 300 and
+    # frame 1 at precision 12 holding 3000 gives `max` 12, 3000 fits it,
+    # and no row; frame 0 alone reports `sample 300, limit 255`. Reporting
+    # it would mean a per-frame comparison, which needs the frame axis
+    # this function is not given (it takes the whole array), and the row
+    # would then have to name a frame. Filed rather than guessed at;
+    # `test_a_narrow_frames_excess_is_not_reported_behind_a_wider_one`
+    # pins the behaviour so the limit is visible rather than latent.
     stream, precision = max(readings, key=lambda reading: reading[1])
     if precision < 1:
         return None
@@ -3127,9 +3157,15 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
 def _beyond_precision_words(facts) -> str:
     """The over-precision row, from `_samples_beyond_stream_precision`'s facts.
 
-    "declares precision N **in its frame header**" is a fact about what
-    this code parsed, not an unchecked claim about a standard, and it
-    carries no `precision is` (see the function above). "would read at
+    "declares a sample precision of N" is a fact about what this code
+    parsed, not an unchecked claim about a standard, and it carries no
+    `precision is` (see the function above). It says *what* the stream
+    declared without naming *where*, deliberately: the gate admits T.81,
+    JPEG-LS and JPEG 2000, and `_stream_precision` reads a SOFn, a SOF55
+    and a **SIZ** segment for those three. A J2K codestream has no frame
+    header, so the clause this sentence used to carry ("in its frame
+    header") was false of a quarter of its own gate -- unexercised only
+    because no `.90` fixture with this shape can be built today (#684). "would read at
     most `2^N - 1`" is arithmetic: only pylibjpeg-libjpeg was measured
     clamping to it, and only on T.81, so the sentence says what a clamping
     decoder would read rather than asserting that some decoder does. The
@@ -3137,8 +3173,8 @@ def _beyond_precision_words(facts) -> str:
     nothing here measures; the row states the disagreement.
     """
     precision = facts["precision"]
-    return (f"The {facts['stream']} declares precision {precision} in its "
-            f"frame header, and a decoded sample reads {facts['sample']}, "
+    return (f"The {facts['stream']} declares a sample precision of "
+            f"{precision}, and a decoded sample reads {facts['sample']}, "
             f"which {precision} bits cannot hold. Read as decoded, and "
             f"exported as read; a decoder that clamps a sample to the "
             f"declared precision would read at most {facts['limit']} here, "
