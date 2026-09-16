@@ -425,6 +425,7 @@ TARGETS = {
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+                                  "tests/test_a_stream_narrower_than_its_own_samples_is_said.py",
                                   "tests/test_a_plugin_value_error_reaches_the_fallback.py",
                                   "tests/test_an_rle_fragment_is_a_frame.py",
                                   "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
@@ -690,6 +691,7 @@ TARGETS = {
     # budget.
     "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                               "tests/test_a_plugin_value_error_reaches_the_fallback.py",
+                              "tests/test_a_stream_narrower_than_its_own_samples_is_said.py",
                               "tests/test_an_rle_fragment_is_a_frame.py",
                               "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
                               "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
@@ -1208,7 +1210,8 @@ TARGETS = {
                                           "tests/test_mid_stream_corruption_is_a_documented_limit.py",
                                           "tests/test_jpeg_extended_decode.py",
                                           "tests/test_a_lossy_source_records_lossy_image_compression.py",
-                                          "tests/test_an_rle_fragment_is_a_frame.py"],
+                                          "tests/test_an_rle_fragment_is_a_frame.py",
+                                          "tests/test_a_stream_narrower_than_its_own_samples_is_said.py"],
                                          60),
 }
 

@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1644 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1647 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1647 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1650 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -2733,6 +2733,127 @@ def _precision_words(facts) -> str:
             f"BitsStored from the samples.")
 
 
+def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
+    """The facts for ingest's over-precision row, or None (#671).
+
+    A lossless JPEG's frame header states the sample precision every
+    decoder reconstructs against (the SOFn `P` field `_jpeg_precision`
+    reads, ITU-T T.81 B.2.2). A stream whose decoded samples exceed it is
+    one the decoders **disagree about, silently**: measured on a8b6d3f, a
+    `.70` frame written at `bitspersample=12` holding samples up to 4970
+    came back `0..4970` through the imagecodecs fallback -- what the
+    stream encodes -- and `0..4095` through pydicom with
+    pylibjpeg-libjpeg, which *saturates*. Neither wrote a row and both
+    graded `PASS`.
+
+    Nothing is rewritten. The samples are read as decoded and exported as
+    read (#468 writes BitsStored from them, which is 16 for that file on
+    the fallback route and 12 with the plugin); the row says how this
+    library read the file and that another reader may read it
+    differently. Making the fallback saturate would mean writing 4095 over
+    the 4200 the stream encodes -- altering pixels to match another
+    library's silent alteration -- and masking would give 104, which no
+    door produces today.
+
+    **A different question from `_precision_mismatch`'s, and both can
+    fire.** That asks whether a decoded sample fits *BitsStored*; this
+    asks whether it fits *the stream's own precision*. The same file under
+    BitsStored 8 fails both and writes both rows. The words deliberately
+    contain no `precision is` -- `tests/test_a_stream_wider_than_bits_
+    stored_is_read_and_said.py` filters #622's rows on that substring --
+    and do not repeat #622's opening, so a reader can tell them apart.
+
+    Gated on the same syntax families `_precision_mismatch` is gated on,
+    so the two are decided the same way. Only T.81 lossless is known to
+    produce the shape and it is the only one tested (#684): `jpegls_encode`
+    takes no precision argument, and `jpeg2k_encode` clamps at encode
+    time, so neither a JPEG-LS nor a JPEG 2000 stream with over-precision
+    samples can be built with the tools here.
+
+    **Unsigned only, and the bound is unsigned by construction.** A signed
+    decode is masked back inside its precision when it is sign-extended
+    (`imagecodecs_handler._sign_extend` keeps the low `width` bits and
+    extends bit `width - 1`), on both routes, so after extension every
+    signed sample is inside `[-2^(P-1), 2^(P-1) - 1]` and no check after
+    the decode can see the divergence -- which is there: the same file
+    under PixelRepresentation 1 reads `104` through the fallback and `-1`
+    with pylibjpeg, differing in 16 of 64 cells, with no row on either.
+    That is #682, stated as a limit rather than half-answered here. The
+    low half of the bound below (`lowest < 0`) is what makes the
+    PixelRepresentation guard testable: remove the guard and a signed
+    array's negatives fall outside `[0, 2^P - 1]` at once.
+
+    **Not visible on pydicom's plugin route**, which has already clamped
+    the samples, so a clamped array always fits. The row therefore fires
+    where imagecodecs decoded and not where a plugin did -- honest, since
+    there is nothing left to see, and recorded in `docs/installation.md`
+    beside the other decoder-dependent limits.
+
+    Returns:
+        ``{precision, stream, sample, limit}``, plain types, so it rides
+        `meta` out of a spawned worker -- `_precision_mismatch`'s
+        requirement, inherited: a `np.uint16` straight off `arr.max()` is
+        the shape that breaks it, which is why every number here is
+        `int()`. `sample` is the one farthest outside the precision;
+        `limit` is `2^precision - 1`, the most a clamping decoder reads.
+    """
+    ts = getattr(getattr(ds, "file_meta", None), "TransferSyntaxUID", None)
+    if ts is None or not (ts in J2K_SYNTAXES or ts in JPEGLS_SYNTAXES
+                          or ts in T81_SYNTAXES):
+        return None
+    if int(getattr(ds, "PixelRepresentation", 0) or 0) != 0:
+        return None
+    if arr is None or arr.size == 0:
+        return None
+    readings = [(stream, precision) for stream, precision
+                in frame_precisions(ds) if precision is not None]
+    if not readings:
+        return None
+    # The **widest** declared frame, never frame 0's for all: a sample
+    # from a wider frame behind a conformant frame 0 would be measured
+    # against a precision it was not written at. `_precision_mismatch`
+    # names the widest for the same reason.
+    stream, precision = max(readings, key=lambda reading: reading[1])
+    if precision < 1:
+        return None
+    # Precision P holds 0 .. 2^P - 1. `2^P` itself is beyond it, and that
+    # one-value difference is the whole of this test.
+    limit = (1 << precision) - 1
+    lowest, highest = int(arr.min()), int(arr.max())
+    beyond = [(highest - limit, highest)] if highest > limit else []
+    if lowest < 0:
+        beyond.append((-lowest, lowest))
+    if not beyond:
+        return None
+    return {
+        "precision": precision,
+        "stream": stream,
+        "sample": max(beyond)[1],
+        "limit": limit,
+    }
+
+
+def _beyond_precision_words(facts) -> str:
+    """The over-precision row, from `_samples_beyond_stream_precision`'s facts.
+
+    "declares precision N **in its frame header**" is a fact about what
+    this code parsed, not an unchecked claim about a standard, and it
+    carries no `precision is` (see the function above). "would read at
+    most `2^N - 1`" is arithmetic: only pylibjpeg-libjpeg was measured
+    clamping to it, and only on T.81, so the sentence says what a clamping
+    decoder would read rather than asserting that some decoder does. The
+    file is not called malformed -- that is a conformance judgement
+    nothing here measures; the row states the disagreement.
+    """
+    precision = facts["precision"]
+    return (f"The {facts['stream']} declares precision {precision} in its "
+            f"frame header, and a decoded sample reads {facts['sample']}, "
+            f"which {precision} bits cannot hold. Read as decoded, and "
+            f"exported as read; a decoder that clamps a sample to the "
+            f"declared precision would read at most {facts['limit']} here, "
+            f"so another reader may see different values.")
+
+
 #: The two transfer syntaxes whose frames are read for a DCT frame header
 #: (#601). The syntax names the frame's process and does not prove it: a
 #: lossless SOF3 frame under either decodes bit-exact (review J2 M1).
@@ -2911,7 +3032,8 @@ def _nested_item_syntax(transfer_syntax, item_ds, tag_str) -> str:
 
 
 def _decode_nested_pixels(ds, candidates, dropped, instance, *,
-                          offset_tables, high_bits, precisions) -> list:
+                          offset_tables, high_bits, precisions,
+                          beyond_precisions) -> list:
     """Decode every nested (7fe0,0010) `populate_attrs` collected (#183).
 
     Runs in `ingest_worker`, immediately after the walk that produced
@@ -2966,6 +3088,10 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             every **carried** candidate with a sample its BitsStored
             cannot hold from a stream wider than it, `facts` being
             `_precision_mismatch`'s (#622), on `high_bits`' terms.
+        beyond_precisions (list): Appended to with `(path, tag, vr, facts)`
+            for every **carried** candidate with a decoded sample its own
+            stream's declared precision cannot hold, `facts` being
+            `_samples_beyond_stream_precision`'s (#671), on the same terms.
 
     Returns:
         list: `(path, terminal_tag, vr, raw_bytes, sha256)` per carried
@@ -3036,6 +3162,7 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             # inside the borrow, because it walks the frames by the
             # borrowed transfer syntax.
             precision = _precision_mismatch(item_ds, arr)
+            beyond = _samples_beyond_stream_precision(item_ds, arr)
             if decode_kwargs:
                 offset_tables.append((path, tag_str, vr, counted, "excess"))
         except Exception:  # pylint: disable=broad-except
@@ -3063,6 +3190,8 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
             high_bits.append((path, tag_str, vr, facts))
         if precision is not None:
             precisions.append((path, tag_str, vr, precision))
+        if beyond is not None:
+            beyond_precisions.append((path, tag_str, vr, beyond))
 
         # The same correction the top-level arm makes just below, for the
         # same reason: pydicom de-planarises on read, so the bytes are
@@ -3417,14 +3546,17 @@ def ingest_worker(fp: str) -> Tuple:
         nested_offset_tables = []
         nested_high_bits = []
         nested_precisions = []
+        nested_beyond = []
         meta['nested_pixels'] = _decode_nested_pixels(
             ds, nested, dropped, inst, offset_tables=nested_offset_tables,
-            high_bits=nested_high_bits, precisions=nested_precisions)
+            high_bits=nested_high_bits, precisions=nested_precisions,
+            beyond_precisions=nested_beyond)
         meta['nested_offset_table'] = nested_offset_tables
         # Ints, bools, strs and None only, so it pickles from a spawned
         # worker like the rest of `meta` (#598).
         meta['nested_high_bit'] = nested_high_bits
         meta['nested_precision'] = nested_precisions
+        meta['nested_beyond_precision'] = nested_beyond
         meta['dropped_private_binary'] = dropped
         # Rides `meta` for the same reason as `dropped_private_binary`
         # above: this worker may be in a subprocess with no store
@@ -3524,6 +3656,14 @@ def ingest_worker(fp: str) -> Tuple:
                 precision_mismatch = _precision_mismatch(ds, arr)
                 if precision_mismatch is not None:
                     meta['precision_mismatch'] = precision_mismatch
+                # And a sample the *stream's own* precision cannot hold
+                # (#671): the other question about the same array, asked
+                # here for the same reason -- it is the decode that
+                # answers it. Plain types, so it rides `meta` out of a
+                # spawned worker.
+                beyond_precision = _samples_beyond_stream_precision(ds, arr)
+                if beyond_precision is not None:
+                    meta['beyond_precision'] = beyond_precision
                 if lossy is not None:
                     # In the worker, on an Instance nothing has linked yet,
                     # beside the relabel above; the row rides `meta`.
@@ -3977,6 +4117,7 @@ class DicomImporter:
         high_bit_rows = 0
         lossy_rows = 0
         precision_rows = 0
+        beyond_precision_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -4063,6 +4204,27 @@ class DicomImporter:
                 logger.warning(
                     "... (suppressing further per-instance messages for "
                     "a stream wider than BitsStored) ...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_beyond_precision(uid, detail):
+            """One over-precision row (#671), top level or icon, on its own cap.
+
+            Its own counter, for `_record_lossy`'s reason: one rule, one
+            cap, so a cohort that trips this rule cannot suppress another
+            file's HighBit or BitsStored line before it is printed
+            (`test_one_log_cap_per_rule`). One counter for both depths, as
+            `_record_precision` has.
+            """
+            nonlocal beyond_precision_rows
+            beyond_precision_rows += 1
+            if beyond_precision_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif beyond_precision_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-instance messages for "
+                    "a sample beyond the stream's own precision) ...")
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
@@ -4237,6 +4399,19 @@ class DicomImporter:
                         _record_precision(inst.sop_instance_uid,
                                           _precision_words(wider))
 
+                    # A sample the stream's own declared precision cannot
+                    # hold (#671). A `WARNING` on the same terms as the
+                    # row above and for the same reason: a value that
+                    # cannot be trusted across readers is a review, not a
+                    # loss. Both can fire for one file -- they are
+                    # different facts, and suppressing either would leave
+                    # a reader guessing which they had checked.
+                    beyond = meta.get('beyond_precision')
+                    if beyond:
+                        _record_beyond_precision(
+                            inst.sop_instance_uid,
+                            _beyond_precision_words(beyond))
+
                     # LossyImageCompression recorded from the pixel data
                     # (#601, owner ruling Q1). A `WARNING`: the stamp is a
                     # permanent claim this library derived, and the row is
@@ -4380,6 +4555,10 @@ class DicomImporter:
                         (h_path, h_tag): (h_vr, h_facts)
                         for h_path, h_tag, h_vr, h_facts
                         in meta.get('nested_high_bit', ())}
+                    nested_beyond = {
+                        (p_path, p_tag): (p_vr, p_facts)
+                        for p_path, p_tag, p_vr, p_facts
+                        in meta.get('nested_beyond_precision', ())}
                     nested_precision = {
                         (p_path, p_tag): (p_vr, p_facts)
                         for p_path, p_tag, p_vr, p_facts
@@ -4446,6 +4625,16 @@ class DicomImporter:
                                 inst.sop_instance_uid,
                                 f"{_nested_row_prefix(n_tag, w_vr, n_path)}"
                                 f"{_precision_words(w_facts)}")
+                        # And the over-precision row (#671), on the same
+                        # terms: the icon is read as decoded and written
+                        # back as read, so the sentence is true here too.
+                        n_beyond = nested_beyond.get((n_path, n_tag))
+                        if n_beyond is not None:
+                            b_vr, b_facts = n_beyond
+                            _record_beyond_precision(
+                                inst.sop_instance_uid,
+                                f"{_nested_row_prefix(n_tag, b_vr, n_path)}"
+                                f"{_beyond_precision_words(b_facts)}")
                         kind = serialize_blob_kind('pixels', n_path, n_tag)
                         # Site 2 of six (#368): append and row commit under
                         # one hold, per icon, for the reason at site 1.
