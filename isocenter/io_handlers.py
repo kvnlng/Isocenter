@@ -1660,14 +1660,16 @@ _WORD_BYTES = {'OW': 2, 'OL': 4, 'OF': 4, 'OD': 8, 'OV': 8}
 _SAMPLE_TAGS = frozenset({"5400,1010", "5400,0110", "5400,0112",
                           "5400,100a"})
 
-#: Bytes per sample for each Waveform Bits Allocated PS3.3 C.10.9.1.4.2
-#: allows. Anything else, absence included, has no width to convert by.
+#: Bytes per sample for each Waveform Bits Allocated PS3.5 8.3 allows:
+#: "This Data Element defines the size of each waveform data sample within
+#: the Waveform Data (5400,1010). Allowed Values are 8, 16, 32 and 64
+#: bits." Anything else, absence included, has no width to convert by.
 #: 8 is here at one byte a word, so an 8-bit sample converts to itself and
 #: draws no row: a byte has no order.
 _SAMPLE_BYTES = {8: 1, 16: 2, 32: 4, 64: 8}
 
 #: The other `OB or OW` containers whose word a sibling declares, keyed on
-#: the element number inside the repeating groups 5000-50FF: `(sibling
+#: the element number inside the repeating groups 5000-501E: `(sibling
 #: element, its name, bytes per declared value)`. Both are retired and both
 #: were read as 2-byte words before this, which is right at one enumerated
 #: value each (#657, review finding 1):
@@ -1689,6 +1691,18 @@ _WIDTH_SIBLINGS = {
 def _width_sibling(tag: str):
     """`(element, name, widths)` if `tag` is a 50xx width-by-sibling container.
 
+    Even groups only, and only the sixteen the standard repeats over.
+    PS3.5 7.6: "Repeating Groups shall only be allowed in the even Groups
+    (6000-601E,eeee) and even Groups (5000-501E,eeee) cases", and its note
+    adds that private groups 5001-501F "may still be used, but there is no
+    implication of repeating semantics, nor any implied shadowing of the
+    standard repeating groups". So `5001,3000` is a private element whose
+    meaning is its vendor's, `5001,0103` is not Data Value Representation,
+    and a word value there is converted by its VR like any other private
+    one -- reading a sibling would be wrong twice over, in the bytes and in
+    the row that named an attribute the standard says cannot be there
+    (review round 2, finding 1).
+
     Args:
         tag (str): `"gggg,eeee"`.
 
@@ -1696,7 +1710,7 @@ def _width_sibling(tag: str):
         The `_WIDTH_SIBLINGS` entry, or None for every other tag.
     """
     group, element = (int(part, 16) for part in tag.split(","))
-    if 0x5000 <= group <= 0x50FF:
+    if 0x5000 <= group <= 0x501E and not group % 2:
         return _WIDTH_SIBLINGS.get(element)
     return None
 

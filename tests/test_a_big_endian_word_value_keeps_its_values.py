@@ -434,6 +434,71 @@ def test_a_curve_whose_length_is_not_whole_values_is_kept_and_said(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("group, sibling", [
+    pytest.param(0x5001, False, id="private-group-no-sibling"),
+    pytest.param(0x5001, True, id="private-group-lookalike-sibling"),
+    pytest.param(0x5020, True, id="even-group-past-the-repeating-range"),
+])
+def test_a_word_value_outside_the_repeating_groups_converts_by_its_vr(
+        tmp_path, group, sibling):
+    """Only the even groups 5000-501E are curves; the rest go by their VR.
+
+    PS3.5 7.6 allows repeating groups in the even groups 5000-501E only,
+    and says of the odd ones that there is "no implication of repeating
+    semantics, nor any implied shadowing of the standard repeating
+    groups". So `5001,0103` is not Data Value Representation, whatever it
+    holds, and `5001,3000` is an ordinary private `OW` value: two-byte
+    words, no row. Measured on 6ffb32c, which read the sibling in every
+    50xx group: `[0, 1000, 40000, 65535]` came back `[0, 59395, 16540,
+    65535]` with a `WARNING` row naming an attribute that cannot exist
+    there, where 286f99b had it right (review round 2, finding 1).
+
+    `5020,3000` is the same question above the range: even, but not one of
+    the sixteen groups the standard repeats over.
+    """
+    ds = _dataset()
+    if sibling:
+        ds.add_new((group << 16) + 0x0103, "US", 4)
+    payload = np.array([0, 1000, 40000, 65535], ">u2").tobytes()
+    ds.add_new((group << 16) + 0x3000, "OW", payload)
+    folder = _save(tmp_path, ds)
+    db = str(tmp_path / "s.db")
+    tag = f"{group:04x},3000"
+    with DicomSession(persistence_file=db) as session:
+        assert not session.ingest(folder).failures
+        (inst,) = _instances(session)
+        assert np.frombuffer(inst.attributes[tag], "<u2").tolist() == [
+            0, 1000, 40000, 65535]
+
+    assert _rows(db) == []
+
+
+def test_a_width_sibling_that_is_a_bool_is_no_width(tmp_path):
+    """`True` is an `int` no enumeration means, so it declares nothing.
+
+    A file cannot carry one -- pydicom writes `True` into a `US` element
+    as 1 -- so this drives `populate_attrs` directly, as the bare-dataset
+    guard above does, with the source encoding set big-endian by hand.
+    Without the `bool` guard in `_declared_width`, `True` keys the table
+    at 1 and the value is converted as signed shorts.
+    """
+    from isocenter.entities import DicomItem
+    from isocenter.io_handlers import populate_attrs
+
+    ds = Dataset()
+    ds.set_original_encoding(False, False)
+    ds.add_new(0x50000103, "US", True)
+    payload = np.arange(4, dtype=">i4").tobytes()
+    ds.add_new(0x50003000, "OW", payload)
+    item = DicomItem()
+    unconverted = []
+    populate_attrs(ds, item, unconverted=unconverted)
+
+    assert item.attributes["5000,3000"] == payload
+    assert [(kind, tag) for kind, _path, tag, *_rest in unconverted] == [
+        ("no-width", "5000,3000")]
+
+
 def test_a_little_endian_curve_is_untouched(tmp_path):
     """The guard: a little-endian curve keeps its bytes and draws no row."""
     ds = _dataset(big=False)
@@ -622,7 +687,11 @@ def test_an_ob_sample_element_is_kept_and_said(tmp_path, tag, where):
 
     Owner ruling, 2026-09-15: the VR governs the byte order, and PS3.5 6.2
     gives `OB` none, so the enclosing waveform's Bits Allocated does not
-    convert one. C.10.9.1.4.2 reserves `OB` for 8-bit samples, which a
+    convert one. PS3.5 8.3 -- "OB shall be used in cases where Waveform
+    Bits Allocated has a Value of 8, but only with Transfer Syntaxes where
+    the Value Representation is explicitly conveyed" -- reserves `OB` for
+    8-bit samples (the citation in round 1 was PS3.3 C.10.9.1.4.2, which
+    is Channel Sensitivity; review round 2, P1), which a
     conversion would leave alone anyway, so an `OB` element under a wider
     Bits Allocated is off-spec either way: the bytes are kept and the row
     says why. An 8-bit `OB` element still draws no row -- a byte has no
