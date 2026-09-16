@@ -76,61 +76,40 @@ python -m tests.benchmarks.run_stress_test
 
 ## 4. Release Process
 
-Releases publish themselves. `.github/workflows/publish.yml` uploads to
-PyPI by Trusted Publishing -- GitHub authenticates over OIDC and PyPI
-matches the request against a publisher pinned to this repository, the
-workflow's *filename*, and its environment name. There is no API token
-in repository secrets, in CI, or on anyone's machine. Renaming
-`publish.yml` or its environments breaks publishing until PyPI's
+The procedure -- how changes reach `main`, how a release branch is cut,
+tagged and published, how patch releases work -- lives in
+[`RELEASING.md`](https://github.com/kvnlng/Isocenter/blob/main/RELEASING.md)
+in the repository root, next to the code it releases. In short: `main` is
+the development branch; each minor line is cut to a frozen `release/X.Y`
+branch; a version is the tag `vX.Y.Z` on it; and nothing publishes itself.
+
+Publishing is a manual run of `.github/workflows/publish.yml` against the
+tag. It uploads to PyPI by Trusted Publishing -- GitHub authenticates over
+OIDC and PyPI matches the request against a publisher pinned to this
+repository, the workflow's *filename*, and its environment name. There is
+no API token in repository secrets, in CI, or on anyone's machine.
+Renaming `publish.yml` or its environments breaks publishing until PyPI's
 publisher configuration is updated to match.
 
-1. Move `[Unreleased]` in `CHANGELOG.md` to a new `[x.y.z] - YYYY-MM-DD`
-   section.
-2. Bump `__version__` in `isocenter/_version.py`. That is the only
-   place the number is declared; `setup.py` parses it and
-   `isocenter.__version__` re-exports it.
-3. Update `version` and `date-released` in `CITATION.cff`.
-4. Merge to `main` with CI green.
-5. **Rehearse on TestPyPI before tagging**: run `publish.yml` manually
-   (`workflow_dispatch`) with `target: testpypi`. It runs the same build
-   gates and the same four-version matrix as a real release, but while
-   the version number is still spendable. This matters because
-   `test-supported` (3.13, 3.14) runs *after* the tag on a real release
-   and only reports -- it cannot block the upload -- so a break there
-   ships with the number already spent. PRs gate 3.12 and 3.14t only, so
-   3.13 and 3.14 are otherwise unobserved between merge and release.
-6. Tag `vx.y.z`. **The tag must match the declared version exactly** --
-   the build job reads the version out of the built wheel and refuses to
-   publish a mismatch. Publishing
-   `v0.7.1` from a tree that still says `0.7.0` would produce a release
-   nobody can install under the name they were given, and permanently
-   spend the version it did claim, since PyPI never allows reuse.
-7. **Publish a GitHub Release.** This is the trigger; pushing a tag alone
-   does nothing. That is deliberate -- a release is a decision someone
-   makes, whereas a mistyped `git push --tags` should not be able to burn
-   a version number.
+Before anything is uploaded the build job refuses the run unless the ref
+is a `v*` tag and the tag, the built wheel and `isocenter/_version.py` --
+the one place the version is declared -- all agree. It then installs the
+built wheel into a clean environment *outside the source tree* and asserts
+it carries its own `resources/*.json`. That gate exists because those
+resources once shipped in no distribution at all and nothing failed --
+every loader guards on `os.path.exists` and degrades to a default, so a
+published release audited against an empty PHI policy and reported clean.
 
-The build job then runs two gates before anything is uploaded: the tag
-check above, and an installation of the built wheel into a clean
-environment *outside the source tree*, asserting it carries its own
-`resources/*.json`. That second gate exists because those resources once
-shipped in no distribution at all and nothing failed -- every loader
-guards on `os.path.exists` and degrades to a default, so a published
-release audited against an empty PHI policy and reported clean.
-
-Neither index allows re-uploading a version, so the step-5 rehearsal
-consumes that version number on TestPyPI. That is the whole cost, and it
-buys the only look at 3.13 and 3.14 that happens while the real version
-number can still be spent.
-
-**If `test-supported` is red, that is a decision, not a formality.** Either
-fix it and re-tag, or delete that classifier from `setup.py` before
-releasing -- `setup.py` says outright that a classifier CI does not back is
-the same unbacked promise the old `python_requires=">=3.9"` was. Note that
-a red job here is *more* likely to be a flake than a real break (v0.9.1's
-publish had 3.13 fail and pass on rerun), which is exactly what makes it
-dangerous: "just rerun it" is the reading that ships a real break. Rerun to
-learn whether it is deterministic, not to make it go away.
+**If `test-supported` (3.13, 3.14) is red, that is a decision, not a
+formality.** It only reports; it cannot block the upload. Either fix it,
+or delete that classifier from `setup.py` before releasing -- `setup.py`
+says outright that a classifier CI does not back is the same unbacked
+promise the old `python_requires=">=3.9"` was. A red job here is *more*
+likely to be a flake than a real break (v0.9.1's publish had 3.13 fail and
+pass on rerun), which is exactly what makes it dangerous: "just rerun it"
+is the reading that ships a real break. Rerun to learn whether it is
+deterministic, not to make it go away. That is why `RELEASING.md` rehearses
+on TestPyPI, from the release branch, before tagging.
 
 ### Archiving and DOIs
 
@@ -145,10 +124,9 @@ switched on; it does not backfill -- its own guide says "once connected,
 new releases from the repository will be automatically ingested and
 archived". So enabling it does nothing to the releases already published:
 the first deposit comes from the next release, or from deleting and
-re-creating an existing GitHub Release, which fires `release: published`
-again. Note that re-firing it also re-runs the PyPI publish, which will
-fail on a version the index already has; nothing is uploaded, but the run
-goes red.
+re-creating an existing GitHub Release. Creating a GitHub Release uploads
+nothing: publishing is a separate manual run (`RELEASING.md`), so the
+Release can be made, or re-made for Zenodo, without touching PyPI.
 
 The integration is enabled and the first deposit exists, from v0.8.1.
 The **concept** DOI is `10.5281/zenodo.22104298` -- that is what

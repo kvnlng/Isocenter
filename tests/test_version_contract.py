@@ -101,8 +101,11 @@ def test_the_release_runbook_points_at_the_file_that_declares_the_version():
     Following it would edit a file that no longer holds the number, and
     produce a tag the build job rejects. Same drift this module exists to
     catch, one level up: the instruction and the code disagreed.
+
+    The runbook is `RELEASING.md` since the release-branch procedure;
+    `docs/developer_guide.md` points at it rather than restating it.
     """
-    runbook = (ROOT / "docs" / "developer_guide.md").read_text(encoding="utf-8")
+    runbook = (ROOT / "RELEASING.md").read_text(encoding="utf-8")
 
     assert "isocenter/_version.py" in runbook, (
         "the release runbook does not name the file that declares the "

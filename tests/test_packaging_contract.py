@@ -1974,7 +1974,7 @@ DOCS_WORKFLOW = REPO / ".github" / "workflows" / "docs.yml"
 
 
 def test_the_docs_deploy_builds_strict_from_the_docs_extra():
-    """`docs.yml` builds `--strict`, deploys only from `main`, and caps every step.
+    """`docs.yml` builds `--strict`, deploys only from release tags, and caps every step.
 
     Five assertions about the only workflow in the repository that
     publishes somewhere a reader can see: `mkdocs gh-deploy` pushes
@@ -1996,15 +1996,18 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
     `gh_deploy_command` calls `build.build(cfg)` inside a `try/finally`
     and reaches `gh_deploy.gh_deploy(...)` only afterwards, and strict
     makes `build.build` raise `Abort` (mkdocs 1.6.1). A warning costs a
-    red run on `main` and a site still serving its previous build; it
+    red deploy run and a site still serving its previous build; it
     cannot publish a broken one.
 
-    **The branch filter** was pinned by nothing before this test, and its
-    own 22-line comment records the two unreviewed deploys from a feature
-    branch it exists to prevent. The trigger set is asserted as an
-    equality for the same reason the hang probe's is: a `pull_request`
-    trigger on a workflow that deploys to the live site is not a thing
-    to notice in review.
+    **The ref filter** was pinned by nothing before this test, and its
+    comment records the two unreviewed deploys from a feature branch it
+    exists to prevent. Since the release-branch procedure (`RELEASING.md`)
+    it is release tags rather than `main`: `main` is the development
+    branch, and the documentation follows the latest published release.
+    The trigger set is asserted as an equality for the same reason the
+    hang probe's is: a `pull_request` trigger on a workflow that deploys
+    to the live site is not a thing to notice in review. Which tag may
+    deploy is the next test's.
 
     **The package list has one home.** The workflow hand-copied five
     distributions, naming `pymdown-extensions` (absent from `setup.py`'s
@@ -2056,21 +2059,26 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
         "strict failure cannot publish a broken site: gh-deploy builds "
         "before it pushes and aborts inside the build")
 
-    # 2. The branch filter.
+    # 2. The ref filter: release tags only, never a branch. `main` is the
+    #    development branch, and the site follows the latest published
+    #    release, not what has merged since.
     triggers = workflow[True]
-    assert triggers["push"]["branches"] == ["main"], (
-        f"docs.yml deploys on pushes to "
-        f"{triggers['push']['branches']!r}; `mkdocs gh-deploy` publishes "
-        "straight to the live site, and any branch here means an "
-        "unreviewed feature branch does -- which happened twice during "
-        "the isocenter rename, as the comment above the filter records")
+    assert triggers["push"] == {"tags": ["v*"]}, (
+        f"docs.yml deploys on pushes matching {triggers['push']!r}; it "
+        "must deploy on release tags (`v*`) and nothing else. A branch "
+        "here publishes unreleased documentation -- `main` is the "
+        "development branch -- and a feature branch here is the "
+        "unreviewed deploy that happened twice during the isocenter "
+        "rename. A `paths` filter here would skip the deploy of a release "
+        "whose docs did not change since the last tag, leaving the "
+        "previous release's API reference live")
 
     # 3. The trigger set.
     assert set(triggers) == {"push", "workflow_dispatch"}, (
         f"docs.yml triggers on {sorted(str(key) for key in triggers)}; it "
-        "must be push (filtered to main) and workflow_dispatch and "
-        "nothing else -- a `pull_request` trigger on a workflow that "
-        "deploys to the live site publishes every pull request")
+        "must be push (release tags) and workflow_dispatch and nothing "
+        "else -- a `pull_request` trigger on a workflow that deploys to "
+        "the live site publishes every pull request")
 
     # 4. One home for the package list.
     installing = [step for step in steps
@@ -2113,3 +2121,255 @@ def test_the_docs_deploy_builds_strict_from_the_docs_extra():
         "unreachable and a hang there dies as 'cancelled' with no failing "
         "step in the log -- the shape of #243/#250, and the state docs.yml "
         "was in when #635 was written")
+
+
+def _step_named(workflow_path, job, name):
+    """One step of a workflow job, by its `name`, or fail saying which."""
+    import yaml
+
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = [step for step in workflow["jobs"][job]["steps"]
+             if step.get("name") == name]
+    assert len(steps) == 1, (
+        f"{workflow_path.name} job {job!r} has {len(steps)} steps named "
+        f"{name!r}; this test runs that step's script, so it must exist "
+        "exactly once under that name")
+    return steps[0]
+
+
+def _run_step_script(step, cwd, env):
+    """Run a workflow step's `run:` script under bash, as the runner does.
+
+    Refuses a script containing a `${{ }}` expression: GitHub substitutes
+    those before bash sees the text, so a script that uses one cannot be
+    executed faithfully here -- and interpolating an input into a script
+    is the injection shape Actions' own hardening guide warns about.
+    Values reach the script through the step's `env:` instead. The runner
+    starts `run:` steps as `bash -e`, so this does too.
+    """
+    import os
+    import shutil
+
+    script = step["run"]
+    assert "${{" not in script, (
+        f"step {step.get('name')!r} interpolates an expression into its "
+        "script; pass it through `env:` so the script is the script that "
+        "runs, and so this test can run it")
+    bash = shutil.which("bash")
+    assert bash, "bash is required to run a workflow step's script"
+    return subprocess.run(
+        [bash, "-e", "-c", script], cwd=str(cwd), capture_output=True,
+        text=True, env={"PATH": os.environ["PATH"], **env}, check=False)
+
+
+DOCS_LATEST_TAG_STEP = "Deploy only the latest release tag"
+
+
+def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
+    """The site follows the latest published release, and only that.
+
+    A `v*` tag trigger alone would redeploy the site from whichever tag
+    was pushed last. Under the release-branch procedure that is not
+    always the newest release: a patch to an older line (a `v0.9.9` on
+    `release/0.9` after `v0.10.0` shipped) would replace the newer
+    documentation with the older line's. And `workflow_dispatch` can be
+    started from any branch, including `main`, the development branch.
+
+    So a step before the deploy refuses unless the ref is a `v*` tag and
+    that tag is the highest `v*` tag by version order. The script is
+    executed here, against a scratch repository with real tags, rather
+    than grepped: a guard that names the right strings and compares them
+    wrongly passes a text search.
+    """
+    import os
+
+    import yaml
+
+    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["deploy"]["steps"]
+    guard = _step_named(DOCS_WORKFLOW, "deploy", DOCS_LATEST_TAG_STEP)
+    order = [step.get("name") or step.get("uses") for step in steps]
+    deploy_at = next(i for i, step in enumerate(steps)
+                     if "gh-deploy" in (step.get("run") or ""))
+    assert steps.index(guard) < deploy_at, (
+        f"the latest-tag guard runs after the deploy ({order}); a guard "
+        "after `mkdocs gh-deploy` has already published the site")
+    assert "if" not in guard, (
+        "the latest-tag guard is conditional; a condition is a way for "
+        "some trigger to skip it")
+    checkout = next(step for step in steps
+                    if str(step.get("uses", "")).startswith("actions/checkout"))
+    assert checkout.get("with", {}).get("fetch-depth") == 0, (
+        "the checkout does not fetch full history, so the runner has no "
+        "tags to compare against and the guard cannot know the latest")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git_env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+               "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+               "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+
+    def run_git(*args):
+        subprocess.run(["git", *args], cwd=str(repo), check=True,
+                       capture_output=True,
+                       env={"PATH": os.environ["PATH"], **git_env})
+
+    run_git("init", "-q")
+    # Tagged out of version order on purpose: v0.9.9 is created last and
+    # sorts after v0.10.0 as text, and v0.10.0 is still the latest.
+    for tag in ("v0.9.7", "v0.9.8", "v0.10.0", "v0.9.9"):
+        run_git("commit", "-q", "--allow-empty", "-m", tag)
+        run_git("tag", tag)
+
+    def guarded(ref):
+        return _run_step_script(guard, repo, {
+            **git_env, "GITHUB_REF": ref,
+            "GITHUB_REF_NAME": ref.split("/", 2)[-1]})
+
+    latest = guarded("refs/tags/v0.10.0")
+    assert latest.returncode == 0, (
+        f"the guard refused the latest release tag:\n{latest.stdout}"
+        f"{latest.stderr}")
+    for ref in ("refs/tags/v0.9.9", "refs/tags/v0.9.8", "refs/heads/main",
+                "refs/heads/release/0.10"):
+        result = guarded(ref)
+        assert result.returncode != 0, (
+            f"the guard let {ref} deploy the site; only the latest `v*` "
+            "tag may, or a patch to an older line (or `main`) replaces the "
+            "current release's documentation")
+
+
+PUBLISH_WORKFLOW = REPO / ".github" / "workflows" / "publish.yml"
+PUBLISH_TAG_STEP = "The ref must be a release tag matching the version"
+
+
+def test_publishing_is_a_manual_run_with_no_event_that_uploads_by_itself():
+    """`publish.yml` runs only when someone dispatches it.
+
+    Under the release-branch procedure (`RELEASING.md`) nothing publishes
+    as a side effect: not a pushed tag, and not a published GitHub
+    Release -- which Zenodo still archives, so creating one must upload
+    nothing. The dispatch input decides the index, and anything that is
+    not exactly `pypi` goes to TestPyPI. Every expression that read
+    `github.event_name` is gone: with one trigger it could only ever
+    evaluate one way, and a dead branch in an upload expression is where
+    the next edit hides a real upload.
+    """
+    import yaml
+
+    text = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+    triggers = workflow[True]
+    assert set(triggers) == {"workflow_dispatch"}, (
+        f"publish.yml triggers on {sorted(str(key) for key in triggers)}; "
+        "publishing must be a deliberate manual run and nothing else")
+    target = triggers["workflow_dispatch"]["inputs"]["target"]
+    assert target["options"] == ["testpypi", "pypi"], target
+    assert target["default"] == "testpypi", (
+        "the dispatch default is not TestPyPI; a run started without "
+        "choosing would spend a real version number")
+    # Over the parsed values, not the text: the comments are allowed to
+    # say what the check used to be gated on.
+    assert "event_name" not in json.dumps(workflow, default=str), (
+        "publish.yml still reads github.event_name; with a single trigger "
+        "that expression can only take one value")
+
+    publish = workflow["jobs"]["publish"]
+    assert publish["environment"]["name"] == "${{ inputs.target }}", (
+        "the publish environment is not the dispatched target; PyPI's "
+        "trusted publisher matches on the environment name")
+    assert set(publish["needs"]) == {"build", "test-floor"}, publish["needs"]
+    upload = next(step for step in publish["steps"]
+                  if "gh-action-pypi-publish" in str(step.get("uses", "")))
+    assert upload["with"]["repository-url"] == (
+        "${{ inputs.target == 'pypi' && 'https://upload.pypi.org/legacy/' "
+        "|| 'https://test.pypi.org/legacy/' }}"), (
+        "the upload URL is not keyed so that only an exact `pypi` reaches "
+        "the real index")
+    assert publish["environment"]["url"] == (
+        "${{ inputs.target == 'pypi' && 'https://pypi.org/p/isocenter' "
+        "|| 'https://test.pypi.org/p/isocenter' }}"), publish["environment"]
+
+
+@pytest.mark.parametrize("target, ref, packaged, declared, allowed", [
+    ("pypi", "refs/tags/v1.2.3", "1.2.3", "1.2.3", True),
+    ("pypi", "refs/heads/release/1.2", "1.2.3", "1.2.3", False),
+    ("pypi", "refs/heads/main", "1.2.3", "1.2.3", False),
+    ("pypi", "refs/tags/1.2.3", "1.2.3", "1.2.3", False),
+    ("pypi", "refs/tags/v1.2.4", "1.2.3", "1.2.3", False),
+    ("pypi", "refs/tags/v1.2.3", "1.2.3", "1.2.4", False),
+    ("pypi", "refs/tags/v1.2.3", "1.2.4", "1.2.3", False),
+    ("testpypi", "refs/heads/release/1.2", "1.2.3", "1.2.3", True),
+    ("testpypi", "refs/heads/release/1.2", "1.2.3", "1.2.4", False),
+    ("testpypi", "refs/tags/v1.2.4", "1.2.3", "1.2.3", False),
+], ids=["pypi-from-matching-tag", "pypi-from-release-branch",
+        "pypi-from-main", "pypi-from-tag-without-v",
+        "pypi-tag-disagrees-with-both", "pypi-source-disagrees",
+        "pypi-wheel-disagrees", "testpypi-rehearsal-from-branch",
+        "testpypi-source-disagrees", "testpypi-from-mismatched-tag"])
+def test_a_publish_run_refuses_a_ref_or_version_that_does_not_match(
+        tmp_path, target, ref, packaged, declared, allowed):
+    """The version check runs on every dispatch, not only on a release event.
+
+    It was gated `if: github.event_name == 'release'`, so a manual run to
+    `pypi` uploaded with no tag or version check at all. Now, on every run:
+
+    * the wheel's version must equal `isocenter/_version.py`'s, the one
+      place the number is declared;
+    * a run to `pypi` must be dispatched from a `v*` tag, and that tag
+      must equal both -- publishing `v0.7.1` from a tree that says
+      `0.7.0` spends a version nobody can install by the name they were
+      given, and PyPI never gives it back;
+    * a TestPyPI rehearsal may run from a branch, but if it runs from a
+      tag, the tag must match too.
+
+    The step's script is executed with each combination rather than read,
+    and `_version.py` is a real file in a scratch tree.
+    """
+    step = _step_named(PUBLISH_WORKFLOW, "build", PUBLISH_TAG_STEP)
+    assert "if" not in step, (
+        "the ref and version check is conditional; it must run on every "
+        "dispatch, which is the gap it replaces")
+    assert step["env"] == {
+        "TARGET": "${{ inputs.target }}",
+        "PACKAGED": "${{ steps.packaged.outputs.version }}"}, step["env"]
+
+    (tmp_path / "isocenter").mkdir()
+    (tmp_path / "isocenter" / "_version.py").write_text(
+        f'"""Docstring."""\n\n__version__ = "{declared}"\n', encoding="utf-8")
+    result = _run_step_script(step, tmp_path, {
+        "TARGET": target, "PACKAGED": packaged, "GITHUB_REF": ref,
+        "GITHUB_REF_NAME": ref.split("/", 2)[-1]})
+    assert (result.returncode == 0) is allowed, (
+        f"target={target} ref={ref} wheel={packaged} source={declared}: "
+        f"exit {result.returncode}, expected "
+        f"{'success' if allowed else 'refusal'}\n{result.stdout}"
+        f"{result.stderr}")
+
+
+def test_the_publish_check_parses_the_real_version_file(tmp_path):
+    """The check reads `isocenter/_version.py` as it actually is.
+
+    The script reads `__version__` with a pattern rather than by importing
+    the package, which the build runner cannot do. If `_version.py`
+    changes shape -- an annotation, single quotes -- the pattern finds
+    nothing and every dispatch is refused. That refusal is safe, but it
+    would first be seen on release day, so it is checked here against the
+    real file's text.
+    """
+    import isocenter
+
+    step = _step_named(PUBLISH_WORKFLOW, "build", PUBLISH_TAG_STEP)
+    (tmp_path / "isocenter").mkdir()
+    (tmp_path / "isocenter" / "_version.py").write_text(
+        (REPO / "isocenter" / "_version.py").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    version = isocenter.__version__
+    result = _run_step_script(step, tmp_path, {
+        "TARGET": "pypi", "PACKAGED": version,
+        "GITHUB_REF": f"refs/tags/v{version}",
+        "GITHUB_REF_NAME": f"v{version}"})
+    assert result.returncode == 0, (
+        f"the check refused the real _version.py ({version}) against a "
+        f"matching tag and wheel:\n{result.stdout}{result.stderr}")

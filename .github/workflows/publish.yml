@@ -8,13 +8,18 @@ name: Publish
 # until the publisher is updated at pypi.org/manage/project/isocenter/settings/publishing/
 
 on:
-  # Publishing to real PyPI is deliberately tied to a GitHub Release rather
-  # than a tag push: a release is a decision someone makes in the UI, and a
-  # mistyped `git push --tags` should not be able to burn a version number
-  # forever. PyPI never allows re-uploading a version, even a broken one.
-  release:
-    types: [published]
-  # TestPyPI, and re-runs, on demand.
+  # Manual only. Publishing is a decision someone makes, run as a command
+  # against a release tag (RELEASING.md): nothing uploads as a side effect
+  # of an event. Not a tag push -- a mistyped `git push --tags` must not be
+  # able to burn a version number, and PyPI never allows re-uploading one,
+  # even a broken one. And no longer a published GitHub Release: Zenodo
+  # archives those, and creating the Release (which this procedure does
+  # *after* the upload) must not upload anything.
+  #
+  # Dispatch from the tag: `gh workflow run publish.yml --ref vX.Y.Z -f
+  # target=pypi`. The build job refuses a run to `pypi` from anything that
+  # is not a `v*` tag matching the wheel and `isocenter/_version.py`.
+  # TestPyPI rehearsals may run from the release branch before tagging.
   workflow_dispatch:
     inputs:
       target:
@@ -53,13 +58,11 @@ jobs:
           python -m pip install --upgrade pip build twine
           python -m build
 
-      # Read on every run, not just releases. The comparison below can
-      # only happen on a release -- a workflow_dispatch has no tag -- but
-      # reading the version is the part that can break, so it must run on
-      # the TestPyPI rehearsals too. It did not, and the consequence was
-      # that this gate failed the first time it was ever executed, on a
-      # real release: it called `python setup.py --version`, and the
-      # runner's Python has no setuptools.
+      # Read on every run, rehearsals included. Reading the version is the
+      # part that can break, and when it only ran on releases this gate
+      # failed the first time it was ever executed, on a real release: it
+      # called `python setup.py --version`, and the runner's Python has no
+      # setuptools.
       - name: Read the packaged version
         id: packaged
         run: |
@@ -82,20 +85,56 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "packaged version: $version"
 
-      - name: Release tag must match the packaged version
-        if: github.event_name == 'release'
+      # Unconditional. This step was `if: github.event_name == 'release'`,
+      # so a manual run to `pypi` uploaded with no tag or version check at
+      # all -- and a manual run is now the only way to publish. Publishing
+      # v0.7.1 from a tree that still says 0.7.0 produces a release nobody
+      # can install by the name they were given, and the version it *did*
+      # claim is then permanently spent. Fail here instead, before the
+      # upload job can start.
+      #
+      # Values arrive through `env:`, never `${{ }}` inside the script:
+      # interpolating an input into shell text is the injection shape the
+      # Actions hardening guide warns about, and
+      # tests/test_packaging_contract.py runs this script as written, which
+      # only works if the script is the script that runs.
+      - name: The ref must be a release tag matching the version
+        env:
+          TARGET: ${{ inputs.target }}
+          PACKAGED: ${{ steps.packaged.outputs.version }}
         run: |
-          # Publishing v0.7.1 from a tree that still says 0.7.0 produces a
-          # release nobody can install by the name they were given, and the
-          # version it *did* claim is then permanently spent. Fail here
-          # instead.
-          tag="${GITHUB_REF_NAME#v}"
-          version="${{ steps.packaged.outputs.version }}"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::release tag ${GITHUB_REF_NAME} does not match packaged version ${version}"
+          # The one place the number is declared. Parsed, not imported:
+          # importing isocenter needs pydicom and numpy, which this runner
+          # does not install.
+          declared=$(sed -nE 's/^__version__ = "([^"]+)"$/\1/p' isocenter/_version.py)
+          if [ -z "$declared" ]; then
+            echo "::error::could not read __version__ from isocenter/_version.py"
             exit 1
           fi
-          echo "tag ${GITHUB_REF_NAME} matches packaged version ${version}"
+          if [ "$PACKAGED" != "$declared" ]; then
+            echo "::error::the wheel says ${PACKAGED} but isocenter/_version.py declares ${declared}"
+            exit 1
+          fi
+          case "$GITHUB_REF" in
+            refs/tags/v*)
+              tag="${GITHUB_REF_NAME#v}"
+              if [ "$tag" != "$declared" ]; then
+                echo "::error::tag ${GITHUB_REF_NAME} does not match version ${declared}"
+                exit 1
+              fi
+              echo "tag ${GITHUB_REF_NAME} matches the wheel and isocenter/_version.py (${declared})"
+              ;;
+            *)
+              # Only a rehearsal may run from a branch. Anything that is
+              # not exactly `pypi` uploads to TestPyPI (see the publish
+              # job), so this is the same test the upload URL uses.
+              if [ "$TARGET" = "pypi" ]; then
+                echo "::error::a run to pypi must be dispatched from a v* release tag, not ${GITHUB_REF}"
+                exit 1
+              fi
+              echo "rehearsal from ${GITHUB_REF}: wheel and isocenter/_version.py agree (${declared})"
+              ;;
+          esac
 
       - name: Metadata must be acceptable to the index
         run: twine check dist/*
@@ -198,13 +237,15 @@ jobs:
     needs: [build, test-floor]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The environment name is half of what PyPI matches against. `release`
-    # events always go to real PyPI; a manual run goes wherever it was
-    # asked to. Environments are also where you hang a required reviewer,
-    # if you ever want publishing to need a second pair of eyes.
+    # The environment name is half of what PyPI matches against, and it is
+    # the dispatched target. The URL expressions below test for exactly
+    # `pypi` and send everything else to TestPyPI, so only that one value
+    # reaches the real index. Environments are also where you hang a
+    # required reviewer, if you ever want publishing to need a second pair
+    # of eyes.
     environment:
-      name: ${{ github.event_name == 'release' && 'pypi' || inputs.target }}
-      url: ${{ github.event_name == 'release' && 'https://pypi.org/p/isocenter' || 'https://test.pypi.org/p/isocenter' }}
+      name: ${{ inputs.target }}
+      url: ${{ inputs.target == 'pypi' && 'https://pypi.org/p/isocenter' || 'https://test.pypi.org/p/isocenter' }}
     permissions:
       # The OIDC token. Kept inline in this file rather than moved into a
       # reusable workflow: PyPI matches the *workflow filename* that holds
@@ -226,4 +267,4 @@ jobs:
       # publish under our identity.
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
         with:
-          repository-url: ${{ (github.event_name != 'release' && inputs.target == 'testpypi') && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          repository-url: ${{ inputs.target == 'pypi' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
