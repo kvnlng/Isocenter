@@ -141,7 +141,8 @@ TARGETS = {
     # the mutation those files exist to kill -- an attribution computed
     # after the `force_threads` short-circuit. Extras cost the guard
     # nothing.
-    "isocenter/parallel.py": (["tests/test_progress_bars_honour_the_environment.py", "tests/test_redaction_optimization.py", "tests/test_logging.py",
+    "isocenter/parallel.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                               "tests/test_progress_bars_honour_the_environment.py", "tests/test_redaction_optimization.py", "tests/test_logging.py",
                                "tests/test_packaging_contract.py",
                                "tests/test_parallel_config.py",
                                "tests/test_parallel_contract.py",
@@ -425,7 +426,10 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+    "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                                  "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+                                  "tests/test_a_big_endian_word_value_keeps_its_values.py",
+                                  "tests/test_lut_data_read_as_numbers_exports.py",
                                   "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
                                   "tests/test_a_big_endian_source_keeps_its_values.py",
                                   "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
@@ -687,7 +691,10 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+    "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                              "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
+                              "tests/test_a_big_endian_word_value_keeps_its_values.py",
+                              "tests/test_lut_data_read_as_numbers_exports.py",
                               "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
                               "tests/test_a_one_bit_icon_exports_readable.py",
                               "tests/test_a_big_endian_source_keeps_its_values.py",
@@ -947,6 +954,7 @@ TARGETS = {
     #
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
+                               "tests/test_a_big_endian_word_value_keeps_its_values.py",
                                "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                "tests/test_a_missing_type_2_element_is_written_empty.py",
                                "tests/test_an_unpicklable_worker_result_is_one_failed_file.py",
