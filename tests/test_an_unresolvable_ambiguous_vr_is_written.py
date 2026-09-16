@@ -395,24 +395,41 @@ def test_a_descriptor_under_pixel_representation_one_is_written_signed(
 
 # --- #681: the arm the header names cannot hold the value -------------------
 
-@pytest.mark.parametrize("pr, source_vr, values, raw, vr, named", [
-    pytest.param(0, "SS", [4, -2048, 16], b"\x04\x00\x00\xf8\x10\x00",
-                 "SS", "US", id="negative-under-PR-0"),
-    pytest.param(1, "US", [4, 40000, 16], b"\x04\x00@\x9c\x10\x00",
-                 "US", "SS", id="over-32767-under-PR-1"),
-])
+@pytest.mark.parametrize(
+    "tag, seq_path, pr, source_vr, values, raw, vr, named", [
+        pytest.param(LUT_DESCRIPTOR, LUT_PATH, 0, "SS", [4, -2048, 16],
+                     b"\x04\x00\x00\xf8\x10\x00", "SS", "US",
+                     id="negative-under-PR-0"),
+        pytest.param(LUT_DESCRIPTOR, LUT_PATH, 1, "US", [4, 40000, 16],
+                     b"\x04\x00@\x9c\x10\x00", "US", "SS",
+                     id="over-32767-under-PR-1"),
+        # A tag pydicom's tables omit takes the same row by the other
+        # route: pydicom names no arm at all, so the arm and the veto are
+        # decided in one place here rather than pydicom's answer being
+        # refused. Without this case that branch's row is written by
+        # nothing under test, and a caller loses the clause with every
+        # end-to-end test still green.
+        pytest.param(GRAY_LUT_DESCRIPTOR, (), 0, "SS", [4, -2048, 16],
+                     b"\x04\x00\x00\xf8\x10\x00", "SS", "US",
+                     id="omitted-tag-negative-under-PR-0"),
+    ])
 def test_a_descriptor_the_pixel_representation_cannot_hold_is_written_otherwise(
-        tmp_path, pr, source_vr, values, raw, vr, named):
+        tmp_path, tag, seq_path, pr, source_vr, values, raw, vr, named):
     """A source contradicting its own header cost the whole file:
     `'H' format requires 0 <= number <= 65535`, raised inside `dcmwrite`."""
     ds = _dataset(pr=pr)
-    ds.add_new(MODALITY_LUT, "SQ", Sequence([Dataset()]))
-    ds[MODALITY_LUT].value[0].add_new(LUT_DESCRIPTOR, source_vr, values)
-    ds[MODALITY_LUT].value[0].add_new(LUT_DATA, "OW", bytes(8))
+    if seq_path:
+        item = Dataset()
+        item.add_new(tag, source_vr, values)
+        item.add_new(LUT_DATA, "OW", bytes(8))
+        ds.add_new(MODALITY_LUT, "SQ", Sequence([item]))
+    else:
+        ds.add_new(tag, source_vr, values)
     written, db = _export(tmp_path, ds, compress=True)
-    assert _element(written, LUT_PATH, LUT_DESCRIPTOR) == (vr, raw)
+    named_tag = f"{tag >> 16:04x},{tag & 0xFFFF:04x}"
+    assert _element(written, seq_path, tag) == (vr, raw)
     assert _rows(db, "WARNING") == [
-        f"Ambiguous value representation (0028,3002) written {vr}, Pixel "
+        f"Ambiguous value representation ({named_tag}) written {vr}, Pixel "
         f"Representation names {named} and the value needs {vr}. The written "
         f"bytes are the source's; what this library had to choose is the "
         f"value representation the file declares, which decides how a reader "
@@ -462,6 +479,29 @@ def test_a_value_no_arm_holds_is_one_elements_loss(tmp_path, tag, value, detail)
                           set_attrs=[(tag, value)])
     assert _rows(db, "DATA_LOSS") == [detail]
     assert int(tag.replace(",", ""), 16) not in pydicom.dcmread(written)
+
+
+def test_the_veto_drops_a_value_neither_arm_holds():
+    """The veto's fall-through, asserted by calling it directly.
+
+    Nothing reaches it through the pipeline -- `_merge`'s widened
+    `_numeric_arm` refuses a value no arm holds first, which is the case
+    above -- so the line that drops the element is here because the two
+    halves of one rule must be spelled the same way, not because a source
+    can trip it. Kept undefended it would be the one path left inside this
+    fix that can still fail a whole file: an element written under an arm
+    its value overflows raises `OSError` from `dcmwrite`."""
+    from isocenter.io_handlers import _veto_ambiguous_arm
+
+    ds = Dataset()
+    ds.add_new(SMALLEST_PIXEL, "US or SS", [70000])
+    ds[SMALLEST_PIXEL].VR = "US"            # the arm pydicom would name
+    losses, rows = [], []
+    _veto_ambiguous_arm(ds[SMALLEST_PIXEL], ds, ["US", "SS"], losses, rows)
+    assert SMALLEST_PIXEL not in ds
+    assert (rows, losses) == ([], [
+        ("STANDARD", "Tag (0028,0106) not exported (data loss): its value "
+                     "fits no numeric arm of US or SS.")])
 
 
 # --- the postcondition, the round trip, and what is left alone -------------
@@ -593,7 +633,13 @@ def test_a_descriptor_whose_bytes_exceed_32767_stays_unsigned(tmp_path):
 def test_a_waveform_only_instance_takes_the_unsigned_arm(tmp_path):
     """No Pixel Data and no Pixel Representation anywhere: pydicom's own
     rule ends at `US` for a dataset that has neither, and a waveform
-    instance carrying a retired descriptor is what reaches that branch."""
+    instance carrying a retired descriptor is what reaches that branch.
+
+    The arm is asserted twice, and the second half is the one with teeth: a
+    pixel-less instance can only take the native route, Implicit VR LE puts
+    no VR on the wire, and `[4, 0, 16]` writes the same six bytes under `US`
+    as under `SS` -- so end to end this shape can only say the export did
+    not fail. The arm itself is asserted where it is chosen."""
     ds = _waveform(_dataset(), bits=16)
     for tag in (0x7FE00010, 0x00280103, 0x00280100, 0x00280101, 0x00280102,
                 0x00280010, 0x00280011, 0x00280002, 0x00280004):
@@ -607,6 +653,14 @@ def test_a_waveform_only_instance_takes_the_unsigned_arm(tmp_path):
     assert _element(written, (), GRAY_LUT_DESCRIPTOR)[1] == \
         b"\x04\x00\x00\x00\x10\x00"
     assert _rows(db, "WARNING") == []
+
+    from isocenter.io_handlers import _resolve_ambiguous_vrs
+
+    bare = Dataset()
+    bare.add_new(GRAY_LUT_DESCRIPTOR, "US or SS",
+                 b"\x04\x00\x00\x00\x10\x00")
+    _resolve_ambiguous_vrs(bare, [], [])
+    assert str(bare[GRAY_LUT_DESCRIPTOR].VR) == "US"
 
 
 def test_an_implicit_export_of_a_descriptorless_lut_cannot_be_reingested(

@@ -219,6 +219,14 @@ def test_the_value_chooses_the_numeric_arm(vr, value, arm):
     # an `OW` arm to say only bytes fit it.
     pytest.param("US or SS", [70000], id="US-or-SS-above-US"),
     pytest.param("OB or OW", [1, 2], id="OB-or-OW-numbers"),
+    # The first value outside each arm, under a VR carrying both, because
+    # the cases above pin what is *inside* the bounds and an off-by-one in
+    # `_fitting_arm` is not a wrong arm but a whole file lost at
+    # `dcmwrite` -- the failure class #674 exists to remove. This one
+    # helper is now the decider in three places: here, the export-time
+    # pass, and its veto.
+    pytest.param("US or SS", [65536], id="one-above-US"),
+    pytest.param("US or SS", [-32769], id="one-below-SS"),
 ])
 def test_a_value_that_fits_no_numeric_arm_is_refused(vr, value):
     """pydicom's `OW` writer takes only bytes, so no arm can write these (#653).

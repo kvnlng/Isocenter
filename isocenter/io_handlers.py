@@ -8238,6 +8238,36 @@ def _waveform_bits(ancestors):
     return None
 
 
+def _ambiguous_arm_loss(ds, elem, losses, tag, arms):
+    """Drop an element no arm of its ambiguous VR can hold, with one row.
+
+    Both halves of one rule end here -- the arm this pass chose for a tag
+    pydicom's tables omit, and the arm pydicom chose and the value vetoed
+    -- so a caller reads one sentence, written in one place. The element
+    goes rather than staying: kept, it would hand `save_as` a VR no writer
+    can serve, and that is the whole-file failure this pass exists to
+    prevent (#674, #681).
+    """
+    del ds[elem.tag]
+    losses.append((
+        loss_scope_for_tag(tag),
+        f"Tag ({tag}) not exported (data loss): its value fits no numeric "
+        f"arm of {' or '.join(arms)}."))
+
+
+def _ambiguous_veto_clause(tag, written, named):
+    """The one spelling of the contradiction clause (#681).
+
+    Two sites reach this: the arm pydicom named and the arm this pass named
+    for a tag pydicom's tables omit. The same fact is being stated -- the
+    source's own header names an arm its value cannot fit -- so the
+    sentence a caller reads must not depend on which of them chose it, and
+    an edit to the wording must not be able to leave one site stale.
+    """
+    return (f"({tag}) written {written}, Pixel Representation names "
+            f"{named} and the value needs {written}")
+
+
 def _ambiguous_vr_warning(clauses) -> Optional[str]:
     """The one `WARNING` sentence for an instance's unresolvable ambiguous
     VRs, or None when there are none (#674, #681).
@@ -8256,6 +8286,15 @@ def _ambiguous_vr_warning(clauses) -> Optional[str]:
     rather than with the arm chosen, because that is the fact about the
     caller's data; the contradiction clause leads with the arm, because
     there the arm *is* the fact.
+
+    The waveform clause fires **below the top level only**, and that is
+    pydicom's line rather than a choice made here: a *top-level*
+    (5400,0110), (5400,0112) or (5400,100A) with no Waveform Bits Allocated
+    anywhere is answered `OW` from the root dataset's `original_encoding`,
+    identically before this change and after, so nothing was chosen and a
+    row would claim otherwise. The same element inside a Waveform Sequence
+    item has no encoding to fall back on, which is where the omission
+    becomes ours to resolve and to report.
     """
     if not clauses:
         return None
@@ -8294,6 +8333,14 @@ def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
     ancestors = [ds] if ancestors is None else ancestors
     rows = [] if rows is None else rows
     for tag in list(ds.keys()):
+        # `ds[tag]`, not `get_item`, and the difference matters: for a
+        # `RawDataElement` `Dataset.__getitem__` resolves the ambiguous VR
+        # itself, with no ancestors, and re-raises pydicom's
+        # `AttributeError` from here -- outside the per-element `try`
+        # below, so it would be the whole-file failure of #674 again, or a
+        # second answer to the question this pass exists to answer. It is
+        # safe only because every element in this dataset was put there by
+        # `_merge`/`add_new` and none of them is raw.
         elem = ds[tag]
         if elem.VR == "SQ":
             for item in elem.value:
@@ -8347,7 +8394,7 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
         # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
         unresolved = True
     if not unresolved and str(elem.VR) not in AMBIGUOUS_VR:
-        _veto_ambiguous_arm(elem, arms, rows, tag)
+        _veto_ambiguous_arm(elem, ds, arms, losses, rows)
         return
 
     value = elem.value
@@ -8386,7 +8433,7 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
             elem.VR = "US" if rep == 0 else "SS"
             elem.value = convert_numbers(bytes(value or b""), True,
                                          "H" if rep == 0 else "h")
-            _veto_ambiguous_arm(elem, arms, rows, tag)
+            _veto_ambiguous_arm(elem, ds, arms, losses, rows)
         return
 
     values = _int_values(value)
@@ -8406,22 +8453,17 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
         other = _fitting_arm(arms, values)
         if other is not None:
             elem.VR = other
-            rows.append(f"({tag}) written {other}, Pixel Representation "
-                        f"names {preferred} and the value needs {other}")
+            rows.append(_ambiguous_veto_clause(tag, other, preferred))
             return
         values = None           # no arm holds it: the loss below
     arm = _fitting_arm(arms, values) if values else None
     if arm is None:
-        del ds[elem.tag]
-        losses.append((
-            loss_scope_for_tag(tag),
-            f"Tag ({tag}) not exported (data loss): its value fits no "
-            f"numeric arm of {' or '.join(arms)}."))
+        _ambiguous_arm_loss(ds, elem, losses, tag, arms)
         return
     elem.VR = arm
 
 
-def _veto_ambiguous_arm(elem, arms, rows, tag):
+def _veto_ambiguous_arm(elem, ds, arms, losses, rows):
     """Refuse an arm the value does not fit, and say so (#681).
 
     pydicom resolves the `US or SS` family from Pixel Representation, which
@@ -8434,19 +8476,33 @@ def _veto_ambiguous_arm(elem, arms, rows, tag):
     vr = str(elem.VR)
     if vr not in ("US", "SS"):
         return
+    # Derived rather than passed: one fewer argument, and the caller's
+    # spelling of the tag is the same one.
+    tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
     values = _int_values(elem.value)
     if not values or _fitting_arm([vr], values) is not None:
         return
     other = _fitting_arm([a for a in arms if a != vr], values)
     if other is None:
+        # No arm holds the value, so the same answer the unresolved path
+        # gives: one element's `DATA_LOSS` row, never the file's failure.
+        # Spelled out rather than left as a bare `return` so the
+        # postcondition is structural -- an element kept here would leave
+        # with a VR no writer can serve, and `save_as` would raise
+        # `OSError` for the whole file, which is rule (b)'s failure from
+        # inside the code that exists to prevent it. Nothing reaches it
+        # today: `_merge`'s widened `_numeric_arm` refuses such a value
+        # first, measured for a top-level and a nested element and for a
+        # tabulated and an omitted tag, which is why the test that covers
+        # this line calls this function directly.
+        _ambiguous_arm_loss(ds, elem, losses, tag, arms)
         return
     elem.VR = other
-    rows.append(f"({tag}) written {other}, Pixel Representation names "
-                f"{vr} and the value needs {other}")
+    rows.append(_ambiguous_veto_clause(tag, other, vr))
 
 
 def _numeric_arm(vr, value):
-    """The arm of an `US or OW` or `US or SS or OW` VR that `value` fits (#653).
+    """The arm an ambiguous VR's `value` fits, or a refusal (#653, #674).
 
     One element two ways: numbers under `US`/`SS`, words under `OW`. An
     explicit-VR source that wrote `US` hands back ints -- a list once the
@@ -8456,9 +8512,12 @@ def _numeric_arm(vr, value):
     per-element `try`, so it failed the whole file.
 
     **Keyed on the dictionary VR string, not on a tag.** A tag-keyed branch
-    would be a second ambiguity table that drifts from pydicom's. Two
-    entries match today: LUT Data (0028,3006) and the retired Gray LUT Data
-    (0028,1200).
+    would be a second ambiguity table that drifts from pydicom's. All four
+    ambiguous strings reach the gate -- 36 tags and 2 repeater patterns --
+    and two entries have both an `OW` arm and a numeric one, which are the
+    two whose arm is *chosen* here: LUT Data (0028,3006) and the retired
+    Gray LUT Data (0028,1200). Everything else that arrives is either
+    refused here or left to the export-time pass (#674).
 
     **Any ambiguous VR is refused here; only the `OW` family is decided
     here.** The gate is `AMBIGUOUS_VR`, all four strings, because "this
