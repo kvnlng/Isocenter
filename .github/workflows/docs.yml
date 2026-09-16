@@ -15,10 +15,10 @@ on:
   # whose `docs/` did not change since the last tag still has to replace
   # the previous release's site.
   #
-  # The trigger is necessary, not sufficient: the first step after checkout
-  # refuses any ref but the *latest* `v*` tag, so a patch tagged on an older
-  # release line cannot replace a newer release's documentation, and a
-  # manual run from a branch deploys nothing.
+  # The trigger is necessary, not sufficient: the `guard` job refuses any
+  # ref but the *latest* `v*` tag, so a patch tagged on an older release
+  # line cannot replace a newer release's documentation, and a manual run
+  # from a branch deploys nothing.
   push:
     tags:
       - 'v*'
@@ -27,29 +27,24 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
-concurrency:
-  group: docs-deploy
-  cancel-in-progress: true
+# No workflow-level concurrency group, on purpose; see the deploy job's.
 
 jobs:
-  deploy:
+  # Its own job, outside the deploy's concurrency group. When the group
+  # sat at workflow level, a run this guard was about to refuse -- a patch
+  # tag on an older line, a dispatch from a branch, the second of two tags
+  # pushed together -- joined the group first, cancelled the latest
+  # release's deploy in progress, and then refused itself, leaving the
+  # site on whatever was live before that release.
+  guard:
     runs-on: ubuntu-latest
-    # The inequality `tests.yml` and `hang-probe.yml` both carry, and the
-    # direction is the load-bearing half: this cap must EXCEED the sum of
-    # every step cap below (3 + 1 + 3 + 1 + 3 + 5 + 4 = 20), so whatever
-    # hangs, the timeout that fires belongs to a step and the log names
-    # it. It was the other way round until #635 -- a job cap of 10 over
-    # step caps totalling 11, with three steps uncapped entirely -- so a
-    # slow pip step was killed by the job cap, which says only "the docs
-    # job hung". Raise this before raising any step cap, never after.
-    # `tests/test_packaging_contract.py::test_the_docs_deploy_builds_strict_from_the_docs_extra`
-    # holds both halves.
-    timeout-minutes: 22
-
+    # Above the sum of its step caps (3 + 1 = 4), for the same reason the
+    # deploy job's cap is; see there.
+    timeout-minutes: 6
     steps:
-    # `fetch-depth: 0` fetches every tag, which the guard below compares
+    # `fetch-depth: 0` fetches every tag, which the guard compares
     # against. A shallow checkout has no tags to compare with.
     - name: Checkout Repository
       uses: actions/checkout@v7
@@ -57,14 +52,15 @@ jobs:
         fetch-depth: 0
       timeout-minutes: 3
 
-    # Before anything is built, so a refused run changes nothing. The
-    # highest `v*` tag by *version* order, not creation order or text
+    # The highest `v*` tag by *version* order, not creation order or text
     # order: under the release-branch procedure `v0.9.9` can be tagged on
     # `release/0.9` after `v0.10.0` shipped, and as text it sorts after
-    # `v0.10.0` too. A pre-release suffix sorts after its release under
-    # git's default version sort (`v1.0.0rc1` > `v1.0.0`); tag release
-    # candidates with a different prefix, or set `versionsort.suffix`,
-    # before relying on one here.
+    # `v0.10.0` too. The `versionsort.suffix` settings sort `a`, `b` and
+    # `rc` as pre-releases: without them git ranks `v1.0.0rc1` above
+    # `v1.0.0`, and the release would be refused for as long as its
+    # candidate's tag existed. A pre-release of a *later* version still
+    # outranks the current release (`v1.0.1rc1` > `v1.0.0`), and blocks its
+    # deploy; RELEASING.md says so.
     # tests/test_packaging_contract.py runs this script against real tags.
     - name: Deploy only the latest release tag
       timeout-minutes: 1
@@ -76,12 +72,42 @@ jobs:
             exit 1
             ;;
         esac
-        latest=$(git tag --list 'v*' --sort=-version:refname | head -n 1)
+        latest=$(git -c versionsort.suffix=a -c versionsort.suffix=b -c versionsort.suffix=rc \
+          tag --list 'v*' --sort=-version:refname | head -n 1)
         if [ "$GITHUB_REF_NAME" != "$latest" ]; then
           echo "::error::${GITHUB_REF_NAME} is not the latest release tag (${latest}); deploying it would replace newer documentation"
           exit 1
         fi
         echo "deploying the documentation for ${GITHUB_REF_NAME}, the latest release tag"
+
+  deploy:
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Newest deploy wins, and only runs that passed the guard get here, so
+    # "newest" is always a deploy of the latest release tag.
+    concurrency:
+      group: docs-deploy
+      cancel-in-progress: true
+    # The inequality `tests.yml` and `hang-probe.yml` both carry, and the
+    # direction is the load-bearing half: this cap must EXCEED the sum of
+    # every step cap below (3 + 3 + 1 + 3 + 5 + 4 = 19), so whatever
+    # hangs, the timeout that fires belongs to a step and the log names
+    # it. It was the other way round until #635 -- a job cap of 10 over
+    # step caps totalling 11, with three steps uncapped entirely -- so a
+    # slow pip step was killed by the job cap, which says only "the docs
+    # job hung". Raise this before raising any step cap, never after.
+    # `tests/test_packaging_contract.py::test_the_docs_deploy_builds_strict_from_the_docs_extra`
+    # holds both halves.
+    timeout-minutes: 22
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+      timeout-minutes: 3
 
     - name: Set up Python 3.14
       uses: actions/setup-python@v6

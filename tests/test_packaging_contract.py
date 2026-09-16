@@ -2166,7 +2166,7 @@ DOCS_LATEST_TAG_STEP = "Deploy only the latest release tag"
 
 
 def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
-    """The site follows the latest published release, and only that.
+    """The site follows the latest release tag, and only that.
 
     A `v*` tag trigger alone would redeploy the site from whichever tag
     was pushed last. Under the release-branch procedure that is not
@@ -2175,8 +2175,11 @@ def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
     documentation with the older line's. And `workflow_dispatch` can be
     started from any branch, including `main`, the development branch.
 
-    So a step before the deploy refuses unless the ref is a `v*` tag and
-    that tag is the highest `v*` tag by version order. The script is
+    So a job the deploy needs refuses unless the ref is a `v*` tag and
+    that tag is the highest `v*` tag by version order, with `a`, `b` and
+    `rc` sorted as pre-releases: under git's default version sort
+    `v1.0.0rc1` outranks `v1.0.0`, and the 1.0.0 release would be refused
+    for as long as its release candidate's tag existed. The script is
     executed here, against a scratch repository with real tags, rather
     than grepped: a guard that names the right strings and compares them
     wrongly passes a text search.
@@ -2186,22 +2189,16 @@ def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
     import yaml
 
     workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["deploy"]["steps"]
-    guard = _step_named(DOCS_WORKFLOW, "deploy", DOCS_LATEST_TAG_STEP)
-    order = [step.get("name") or step.get("uses") for step in steps]
-    deploy_at = next(i for i, step in enumerate(steps)
-                     if "gh-deploy" in (step.get("run") or ""))
-    assert steps.index(guard) < deploy_at, (
-        f"the latest-tag guard runs after the deploy ({order}); a guard "
-        "after `mkdocs gh-deploy` has already published the site")
+    guard = _step_named(DOCS_WORKFLOW, "guard", DOCS_LATEST_TAG_STEP)
     assert "if" not in guard, (
         "the latest-tag guard is conditional; a condition is a way for "
         "some trigger to skip it")
-    checkout = next(step for step in steps
+    checkout = next(step for step in workflow["jobs"]["guard"]["steps"]
                     if str(step.get("uses", "")).startswith("actions/checkout"))
     assert checkout.get("with", {}).get("fetch-depth") == 0, (
-        "the checkout does not fetch full history, so the runner has no "
-        "tags to compare against and the guard cannot know the latest")
+        "the guard's checkout does not fetch full history, so the runner "
+        "has no tags to compare against and the guard cannot know the "
+        "latest")
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -2217,37 +2214,107 @@ def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
                        capture_output=True,
                        env={"PATH": os.environ["PATH"], **git_env, **dated})
 
-    run_git("init", "-q")
-    # Tagged out of version order on purpose: v0.9.9 is created last, a
-    # day after v0.10.0, and sorts after v0.10.0 as text -- and v0.10.0 is
-    # still the latest. The dates are explicit so creation order is
-    # unambiguous; created in one second they tie, and a guard sorting by
-    # creation date would pass by accident.
-    for day, tag in enumerate(("v0.9.7", "v0.9.8", "v0.10.0", "v0.9.9"),
-                              start=1):
-        when = f"2026-01-{day:02d}T12:00:00+00:00"
-        run_git("commit", "-q", "--allow-empty", "-m", tag, when=when)
-        run_git("tag", tag, when=when)
-    # A branch spelled like the latest tag: its short name is the latest
-    # tag's, so only the ref filter refuses it.
-    run_git("branch", "v0.10.0")
+    days = iter(range(1, 29))
+
+    def tag(name):
+        when = f"2026-01-{next(days):02d}T12:00:00+00:00"
+        run_git("commit", "-q", "--allow-empty", "-m", name, when=when)
+        run_git("tag", name, when=when)
 
     def guarded(ref):
         return _run_step_script(guard, repo, {
             **git_env, "GITHUB_REF": ref,
             "GITHUB_REF_NAME": ref.split("/", 2)[-1]})
 
-    latest = guarded("refs/tags/v0.10.0")
-    assert latest.returncode == 0, (
-        f"the guard refused the latest release tag:\n{latest.stdout}"
-        f"{latest.stderr}")
-    for ref in ("refs/tags/v0.9.9", "refs/tags/v0.9.8", "refs/heads/main",
-                "refs/heads/release/0.10", "refs/heads/v0.10.0"):
-        result = guarded(ref)
-        assert result.returncode != 0, (
-            f"the guard let {ref} deploy the site; only the latest `v*` "
-            "tag may, or a patch to an older line (or `main`) replaces the "
-            "current release's documentation")
+    def deploys(latest, refused):
+        result = guarded(latest)
+        assert result.returncode == 0, (
+            f"the guard refused {latest}, the latest release tag:\n"
+            f"{result.stdout}{result.stderr}")
+        for ref in refused:
+            result = guarded(ref)
+            assert result.returncode != 0, (
+                f"the guard let {ref} deploy the site; only the latest `v*` "
+                f"tag ({latest}) may, or an older release, a pre-release or "
+                "a branch replaces the current release's documentation")
+
+    run_git("init", "-q")
+    # Tagged out of version order on purpose: v0.9.9 is created last, a
+    # day after v0.10.0, and sorts after v0.10.0 as text -- and v0.10.0 is
+    # still the latest. The dates are explicit so creation order is
+    # unambiguous; created in one second they tie, and a guard sorting by
+    # creation date would pass by accident.
+    for name in ("v0.9.7", "v0.9.8", "v0.10.0", "v0.9.9"):
+        tag(name)
+    # A tag outside the release pattern that sorts above every `v*` tag,
+    # so a guard that drops the `v*` pattern compares against it.
+    tag("zz-not-a-release")
+    # A branch spelled like the latest tag: its short name is the latest
+    # tag's, so only the ref filter refuses it.
+    run_git("branch", "v0.10.0")
+    deploys("refs/tags/v0.10.0",
+            ("refs/tags/v0.9.9", "refs/tags/v0.9.8",
+             "refs/tags/zz-not-a-release", "refs/heads/main",
+             "refs/heads/release/0.10", "refs/heads/v0.10.0"))
+
+    # A release candidate, then its release. Under git's default version
+    # sort `v1.0.0rc1` outranks `v1.0.0`, and the release is refused.
+    tag("v1.0.0rc1")
+    tag("v1.0.0")
+    deploys("refs/tags/v1.0.0", ("refs/tags/v1.0.0rc1", "refs/tags/v0.10.0"))
+
+
+def test_a_refused_docs_run_cannot_cancel_a_deploy():
+    """The guard is its own job, and only the deploy job is in the group.
+
+    The deploy uses `concurrency` with `cancel-in-progress`, so the newest
+    deploy wins -- which is right only among runs that will deploy. When
+    the group sat at workflow level, a run the guard was about to refuse
+    (a patch tag on an older line, a dispatch from a branch, the second
+    of two tags pushed together) joined it first, cancelled the latest
+    release's deploy in progress, then refused itself: the site stayed on
+    whatever was live before that release. With the guard in a job with
+    no group, and the deploy needing it, only runs that passed the guard
+    compete.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+    assert set(jobs) == {"guard", "deploy"}, sorted(jobs)
+    assert "concurrency" not in workflow, (
+        "docs.yml has a workflow-level concurrency group; a run its guard "
+        "refuses joins it and cancels the latest release's deploy in "
+        "progress")
+    assert "concurrency" not in jobs["guard"], (
+        "the guard job is in a concurrency group; a refused run must not "
+        "be able to cancel anything")
+    assert jobs["deploy"].get("needs") in ("guard", ["guard"]), (
+        "the deploy job does not need the guard, so it runs whether or not "
+        "the ref is the latest release tag")
+    assert "if" not in jobs["deploy"], (
+        "the deploy job is conditional; `if: always()` or similar runs it "
+        "after a refused guard")
+    concurrency = jobs["deploy"].get("concurrency") or {}
+    assert concurrency.get("cancel-in-progress") is True \
+        and concurrency.get("group"), (
+            "the deploy job has no concurrency group with "
+            "cancel-in-progress; two deploys of the latest tag could "
+            "interleave their pushes to gh-pages")
+    assert not any(step.get("name") == DOCS_LATEST_TAG_STEP
+                   for step in jobs["deploy"]["steps"]), (
+        "the latest-tag guard runs in the deploy job, inside its "
+        "concurrency group")
+
+    steps = jobs["guard"]["steps"]
+    uncapped = [step.get("name") or step.get("uses") for step in steps
+                if "timeout-minutes" not in step]
+    assert not uncapped, f"guard steps without timeout-minutes: {uncapped}"
+    step_total = sum(step["timeout-minutes"] for step in steps)
+    assert jobs["guard"].get("timeout-minutes", 0) > step_total, (
+        f"jobs.guard.timeout-minutes does not exceed the sum of its step "
+        f"allowances ({step_total}); a hang there dies as 'cancelled' with "
+        "no failing step in the log")
 
 
 PUBLISH_WORKFLOW = REPO / ".github" / "workflows" / "publish.yml"
@@ -2313,11 +2380,19 @@ def test_publishing_is_a_manual_run_with_no_event_that_uploads_by_itself():
     ("testpypi", "refs/heads/release/1.2", "1.2.3", "1.2.3", True),
     ("testpypi", "refs/heads/release/1.2", "1.2.3", "1.2.4", False),
     ("testpypi", "refs/tags/v1.2.4", "1.2.3", "1.2.3", False),
+    ("PyPI", "refs/heads/main", "1.2.3", "1.2.3", False),
+    ("PYPI", "refs/tags/v1.2.3", "1.2.3", "1.2.3", False),
+    ("pypi ", "refs/heads/main", "1.2.3", "1.2.3", False),
+    ("TestPyPI", "refs/heads/release/1.2", "1.2.3", "1.2.3", False),
+    ("", "refs/heads/release/1.2", "1.2.3", "1.2.3", False),
 ], ids=["pypi-from-matching-tag", "pypi-from-release-branch",
         "pypi-from-main", "pypi-from-tag-without-v",
         "pypi-tag-disagrees-with-both", "pypi-source-disagrees",
         "pypi-wheel-disagrees", "testpypi-rehearsal-from-branch",
-        "testpypi-source-disagrees", "testpypi-from-mismatched-tag"])
+        "testpypi-source-disagrees", "testpypi-from-mismatched-tag",
+        "PyPI-from-main", "PYPI-even-from-a-matching-tag",
+        "pypi-with-a-trailing-space", "TestPyPI-from-branch",
+        "empty-target"])
 def test_a_publish_run_refuses_a_ref_or_version_that_does_not_match(
         tmp_path, target, ref, packaged, declared, allowed):
     """The version check runs on every dispatch, not only on a release event.
@@ -2332,7 +2407,15 @@ def test_a_publish_run_refuses_a_ref_or_version_that_does_not_match(
       `0.7.0` spends a version nobody can install by the name they were
       given, and PyPI never gives it back;
     * a TestPyPI rehearsal may run from a branch, but if it runs from a
-      tag, the tag must match too.
+      tag, the tag must match too;
+    * the target must be exactly `pypi` or `testpypi`, checked first.
+      GitHub compares expression strings case-insensitively and matches
+      environment names the same way, so `PyPI` selects the `pypi`
+      environment and the real upload URL; a script comparing
+      case-sensitively would call the same run a rehearsal and let it
+      upload from a branch. Refusing every other spelling is what keeps
+      the script and the expressions agreeing on which runs are real,
+      whatever the dispatch API does or does not validate.
 
     The step's script is executed with each combination rather than read,
     and `_version.py` is a real file in a scratch tree.

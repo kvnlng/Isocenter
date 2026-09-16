@@ -58,14 +58,16 @@ fixes, never features.
      `isocenter.__version__` re-exports it.
    - `CITATION.cff`: `version` and `date-released`.
    - `CHANGELOG.md`: rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`.
-     On a release branch there is no `[Unreleased]` section; the file
-     describes the code on the branch.
+     Right after a release commit a release branch has no `[Unreleased]`
+     section; the file describes the code on the branch. A patch's first
+     fix adds one back (see "Patch releases").
 
    Run the full suite on both interpreters at this commit
    (`tests/test_version_contract.py` checks that the three files agree).
    Open it as a PR into `release/X.Y`, have it reviewed, and merge it the
    same way as any other PR.
-4. **Rehearse on TestPyPI**, from the branch:
+4. **Rehearse on TestPyPI**, from the branch, and **do not tag until the
+   rehearsal passes**:
    `gh workflow run publish.yml --ref release/X.Y -f target=testpypi`.
    This runs the same build gates and the full four-version matrix while
    the real version number is still unspent. `test-supported` (3.13, 3.14)
@@ -73,10 +75,12 @@ fixes, never features.
    decision: fix it, or delete that classifier from `setup.py` in this
    release. Rerun a red job to learn whether it is deterministic, not to
    make it go away. A rehearsal consumes the version number on TestPyPI
-   only.
+   only, so a second rehearsal of the same version cannot upload; its
+   build gates and test matrix still run.
 5. **Tag** the release commit: `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
-   `release/X.Y`, then `git push origin vX.Y.Z`. Pushing the tag deploys
-   the documentation (see below); nothing else runs.
+   `release/X.Y`, then `git push origin vX.Y.Z`. **Pushing the tag deploys
+   the documentation** for vX.Y.Z (see below), before the version is on
+   PyPI; nothing else runs. That window is why step 4 must pass first.
 6. **Publish** from the tag:
    `gh workflow run publish.yml --ref vX.Y.Z -f target=pypi`. The build job
    refuses the run unless the ref is a `v*` tag and the tag, the built
@@ -87,46 +91,87 @@ fixes, never features.
 7. **Create the GitHub Release** for `vX.Y.Z`, with the `[X.Y.Z]` changelog
    section as its notes. This does not publish anything. Zenodo archives it
    and mints the version DOI.
-8. **Bring the release record back to `main`**: a PR that copies the
-   `## [X.Y.Z] - YYYY-MM-DD` section into `main`'s `CHANGELOG.md`, below
-   `[Unreleased]`, with the entries it contains removed from `[Unreleased]`.
-   Leave `main`'s `_version.py` and `CITATION.cff` alone; `main` moves to
-   the next number when the next release is cut.
+8. **Bring the release record back to `main`** in an ordinary PR into
+   `main`, made of ordinary commits, never a merge of the release branch
+   (see "Never merge a release branch into `main`"). It:
+   - copies the `## [X.Y.Z] - YYYY-MM-DD` section into `main`'s
+     `CHANGELOG.md`, below `[Unreleased]`, and removes the entries it
+     contains from `[Unreleased]`;
+   - sets `main`'s `isocenter/_version.py` and `CITATION.cff` to `X.Y.Z`, if
+     X.Y is the newest release line. Between releases, `main` declares the
+     newest version released from it, and `[Unreleased]` above that
+     section holds everything since. A patch to an older line leaves
+     `main`'s version alone.
 
 If the publish run fails before the upload job starts, nothing is spent.
 Fix the release branch, delete the tag locally and on `origin`, re-tag,
-and dispatch again. Once the upload has succeeded, the version is spent
-forever. A defect found then is a patch release, never a re-tag.
+and dispatch again. The docs deployed from the first tag stay live until
+the new tag's push redeploys them. Once the upload has succeeded, the
+version is spent forever. A defect found then is a patch release, never
+a re-tag.
 
 ## Patch releases
 
 1. Branch the fix from `release/X.Y`, not from `main`. Give it a work branch
    name as usual.
 2. Develop and review it exactly as a change to `main` is, with the PR
-   targeting `release/X.Y`. Add its changelog entry under a new
-   `## [X.Y.Z+1] - YYYY-MM-DD` heading on the branch.
-3. After it merges, **merge `release/X.Y` into `main`** in a PR. On
-   `CHANGELOG.md`, the release branch is authoritative for the sections it
-   has released, and `main` keeps its own `[Unreleased]` on top. The
-   fix's entry goes in the released section, not in `[Unreleased]`.
-4. Release it from step 3 of "Cutting a release", with version `X.Y.Z+1`
-   on the same `release/X.Y` branch.
+   targeting `release/X.Y`. Keep the fix and its tests in their own commits,
+   and put the changelog entry in a separate commit, under
+   `## [Unreleased]` at the top of the branch's `CHANGELOG.md`. The first
+   fix of a patch adds that heading back.
+3. **Forward-port the fix to `main` by cherry-pick**, in an ordinary PR
+   into `main`: `git cherry-pick -x <fix commits>` onto a work branch off
+   `main`. Leave out the changelog commit. Resolve any conflict as the code
+   on `main` requires, and have the PR reviewed like any other. If the
+   fix does not apply to `main` (the code is gone there), say so in the
+   release-branch PR instead. The changelog entry reaches `main` with the
+   released section in step 8, once the patch ships.
+4. Release it by following "Cutting a release" from step 3, with version
+   `X.Y.Z+1`. The branch already exists, so steps 1 and 2 do not apply.
+   Step 3 renames the branch's `[Unreleased]` to `[X.Y.Z+1]`, and step 8
+   copies that section to `main`.
 
 A fix that applies only to `main` (already gone from the release line) is an
 ordinary change to `main`.
 
+### Never merge a release branch into `main`
+
+A merge of `release/X.Y` into `main` carries the release commits across
+with the fixes, and git merges them without a conflict:
+- `main`'s `isocenter/_version.py` and `CITATION.cff` silently take the
+  release branch's number;
+- `main`'s `[Unreleased]` heading is replaced by the release's dated
+  heading, filing `main`'s unreleased work under a version that never
+  contained it.
+
+The three version files still agree with each other afterwards, so the
+version contract tests stay green. That is why fixes travel by
+cherry-pick and the release record by an ordinary copy commit (step 8).
+`tests/test_version_contract.py::test_the_changelog_opens_with_unreleased_or_the_declared_release`
+catches the common shape: a top heading naming a version `_version.py`
+does not. It cannot catch a merge that also carried `_version.py` to the
+same number.
+
 ## Documentation site
 
-The site follows the **latest published release**, not `main`. `docs.yml`
-runs on a pushed `v*` tag and on manual dispatch, and its first step after
-checkout refuses anything but the highest `v*` tag by version order. As a
-result:
+The site follows the **latest release tag**, not `main`. `docs.yml` runs on
+a pushed `v*` tag and on manual dispatch. Its `guard` job refuses anything
+but the highest `v*` tag by version order, and the `deploy` job runs only
+after the guard passes. As a result:
 
-- Pushing the tag for the newest release deploys its documentation.
+- Pushing the tag for the newest release deploys its documentation. That
+  happens when the tag is pushed, before the version is published (step 5).
 - A patch tag on an older line, such as `v0.9.9` after `v0.10.0`, deploys
-  nothing. The newer release's site stays.
+  nothing. A refused run is outside the deploy's concurrency group, so it
+  cannot cancel a deploy in progress either. The newer release's site
+  stays.
 - A manual run from a branch deploys nothing. To redeploy the current
   release, dispatch from its tag: `gh workflow run docs.yml --ref vX.Y.Z`.
+- Pre-releases: `a`, `b` and `rc` suffixes sort below their release
+  (`v1.0.0rc1` < `v1.0.0`), so a candidate's tag does not block its
+  release. A pre-release of a **later** version does outrank the current
+  release (`v1.0.1rc1` > `v1.0.0`) and blocks the current release's deploy
+  until the later version is released or the pre-release tag is deleted.
 
 The deploy pushes the built site to the `gh-pages` branch. GitHub Pages
 serves it from there, under the `github-pages` environment, whose

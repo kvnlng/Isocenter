@@ -103,6 +103,22 @@ jobs:
           TARGET: ${{ inputs.target }}
           PACKAGED: ${{ steps.packaged.outputs.version }}
         run: |
+          # The target first, and exactly. GitHub compares strings in
+          # expressions case-insensitively and matches environment names
+          # case-insensitively, so `PyPI` would select the `pypi`
+          # environment and the real upload URL below -- while a
+          # case-sensitive `= "pypi"` further down would wave it through as
+          # a rehearsal from any branch. Whether the dispatch API rejects a
+          # choice outside `options` case-sensitively is not documented, so
+          # this script does not rely on it: only these two exact values
+          # get past this line.
+          case "$TARGET" in
+            pypi|testpypi) ;;
+            *)
+              echo "::error::target must be exactly pypi or testpypi, not '${TARGET}'"
+              exit 1
+              ;;
+          esac
           # The one place the number is declared. Parsed, not imported:
           # importing isocenter needs pydicom and numpy, which this runner
           # does not install.
@@ -125,9 +141,10 @@ jobs:
               echo "tag ${GITHUB_REF_NAME} matches the wheel and isocenter/_version.py (${declared})"
               ;;
             *)
-              # Only a rehearsal may run from a branch. Anything that is
-              # not exactly `pypi` uploads to TestPyPI (see the publish
-              # job), so this is the same test the upload URL uses.
+              # Only a rehearsal may run from a branch. TARGET is exactly
+              # `pypi` or `testpypi` by now, so this comparison and the
+              # publish job's case-insensitive expressions agree on which
+              # runs are real.
               if [ "$TARGET" = "pypi" ]; then
                 echo "::error::a run to pypi must be dispatched from a v* release tag, not ${GITHUB_REF}"
                 exit 1
@@ -238,11 +255,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The environment name is half of what PyPI matches against, and it is
-    # the dispatched target. The URL expressions below test for exactly
-    # `pypi` and send everything else to TestPyPI, so only that one value
-    # reaches the real index. Environments are also where you hang a
-    # required reviewer, if you ever want publishing to need a second pair
-    # of eyes.
+    # the dispatched target. The URL expressions below send `pypi` to the
+    # real index and everything else to TestPyPI -- but expression string
+    # comparison is case-insensitive, so `PyPI` would count as `pypi` here.
+    # What makes "only an exact `pypi` is real" true is the build job's
+    # check, which refuses any target but the two exact values before this
+    # job can start. Environments are also where you hang a required
+    # reviewer, if you ever want publishing to need a second pair of eyes.
     environment:
       name: ${{ inputs.target }}
       url: ${{ inputs.target == 'pypi' && 'https://pypi.org/p/isocenter' || 'https://test.pypi.org/p/isocenter' }}

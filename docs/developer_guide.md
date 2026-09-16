@@ -91,9 +91,12 @@ no API token in repository secrets, in CI, or on anyone's machine.
 Renaming `publish.yml` or its environments breaks publishing until PyPI's
 publisher configuration is updated to match.
 
-Before anything is uploaded the build job refuses the run unless the ref
-is a `v*` tag and the tag, the built wheel and `isocenter/_version.py` --
-the one place the version is declared -- all agree. It then installs the
+Before anything is uploaded, the build job checks the run. The target must
+be exactly `pypi` or `testpypi`. The built wheel must match
+`isocenter/_version.py`, the one place the version is declared. A run to
+`pypi` must be dispatched from a `v*` tag that matches both; a TestPyPI
+rehearsal may run from the release branch, and a tag, if it runs from one,
+must match too. It then installs the
 built wheel into a clean environment *outside the source tree* and asserts
 it carries its own `resources/*.json`. That gate exists because those
 resources once shipped in no distribution at all and nothing failed --
