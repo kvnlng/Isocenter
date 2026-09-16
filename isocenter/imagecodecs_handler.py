@@ -53,10 +53,21 @@ finds; until #620 nothing counted that walk, so a fragment beyond
 NumberOfFrames came back from `Instance.get_pixel_data()` as a frame the
 header does not declare, and ingest stored an array its geometry could
 not reload, with no row (review of #606, F-r2-2). `_walked_excess` now
-counts it with pydicom's own generator. Two shapes remain uncounted.
-NumberOfFrames 1, or absent, over several fragments with no table: the
-walk joins every fragment into one frame, so no excess is visible before
-the decode, and none after it either. And a native 1-bit frame that is
+counts it with pydicom's own generator.
+
+**RLE has no end marker for that walk to find (#664)**, so the walk
+joined every fragment into one frame whatever NumberOfFrames said, and
+the decoder then raised a bare `StopIteration` for frame 1 -- or, under
+NumberOfFrames 1, kept frame 0 and lost the rest in silence.
+`_rle_fragment_frames` counts an RLE buffer's fragments as its frames
+instead, where there are more of them than declared frames and every one
+begins an RLE frame header, and `io_handlers._decode_pixels` is told that
+count so pydicom reads them one per frame.
+
+Two shapes remain uncounted. NumberOfFrames 1, or absent, over several
+fragments with no table **under any syntax but RLE**: the walk joins
+every fragment into one frame, so no excess is visible before the decode,
+and none after it either. And a native 1-bit frame that is
 not a whole number of bytes, where pydicom's own excess arithmetic
 raises rather than return the frames (`_native_excess`).
 """
@@ -68,8 +79,9 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 from pydicom.uid import UID
-from pydicom.encaps import (generate_fragmented_frames, generate_frames,
-                            parse_basic_offsets, parse_fragments)
+from pydicom.encaps import (generate_fragmented_frames, generate_fragments,
+                            generate_frames, parse_basic_offsets,
+                            parse_fragments)
 from pydicom.pixels import convert_color_space
 from pydicom.pixels.decoders.base import DecodeRunner
 
@@ -146,6 +158,7 @@ JPEGLSLossy = UID("1.2.840.10008.1.2.4.81")
 HTJ2KLossless = UID("1.2.840.10008.1.2.4.201")
 HTJ2KLosslessRPCL = UID("1.2.840.10008.1.2.4.202")
 HTJ2K = UID("1.2.840.10008.1.2.4.203")
+RLELossless = UID("1.2.840.10008.1.2.5")
 
 #: The syntaxes whose frames are JPEG 2000 codestreams, and so carry a
 #: SIZ marker `_j2k_sample_layout` reads, and the JPEG-LS ones, whose
@@ -317,9 +330,7 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
             declared_raw = int(ds.NumberOfFrames)
         except (TypeError, ValueError):
             return None
-    declared = (declared_raw
-                if isinstance(declared_raw, int) and declared_raw > 0
-                else 1)
+    declared = declared_frame_count(ds)
 
     # Native: no table, and no fragments -- the element's length is what
     # pydicom reads frames from (#620).
@@ -365,8 +376,157 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
         # that runs next refuses such a buffer on its own terms.
         return None
     if not offsets:
+        # RLE before the walk (#664). An RLE stream carries no end marker
+        # for the walk to find, so `_walked_excess` sees one joined frame
+        # and reports nothing, and the decoder then asks for frame 1 and
+        # raises a bare `StopIteration`. Counted by fragments instead, and
+        # only in the excess direction -- see `_rle_fragment_frames`.
+        fragments = _rle_fragment_frames(ds, declared)
+        if fragments is not None:
+            return (fragments, declared, declared_raw, RLE_FRAGMENTS)
         return _walked_excess(ds, declared, declared_raw)
     return (len(offsets), declared, declared_raw, "Basic Offset Table")
+
+
+def declared_frame_count(ds) -> int:
+    """`NumberOfFrames` as pydicom's decoder reads it, or 1 (#664).
+
+    One spelling of the reading `offset_table_frame_count` compares a
+    count against: 1 where the element is absent, empty, 0, negative or
+    not an integer at all. `io_handlers._decode_pixels` keeps this many
+    frames after it has told pydicom to read an RLE buffer's fragments one
+    per frame, so the frames it keeps and the frames the row names are one
+    number rather than two readings that can drift.
+
+    It is not a judgement about the file: a negative or empty value is one
+    the decoder *refuses*, and 1 here is only so a count has something to
+    be compared with. `declared_raw` carries what the file actually wrote,
+    and `frame_count_mismatch_words` words each case from it.
+    """
+    try:
+        declared = int(ds.NumberOfFrames)
+    except (AttributeError, TypeError, ValueError):
+        return 1
+    return declared if declared > 0 else 1
+
+
+#: The 64-byte RLE frame header PS3.5 G.3 puts at the head of every RLE
+#: frame: a segment count and fifteen offsets, all little-endian `uint32`.
+_RLE_HEADER_BYTES = 64
+_RLE_MAX_SEGMENTS = 15
+
+
+def _is_rle_frame_header(fragment) -> bool:
+    """Do this fragment's first 64 bytes begin an RLE frame? (#664)
+
+    PS3.5 G.3: an RLE frame opens with a 64-byte header -- a `uint32`
+    number of segments, then fifteen `uint32` segment offsets. The first
+    offset is 64 (the segment data begins straight after the header), the
+    used ones rise and lie inside the frame, and the unused ones are zero.
+
+    A fragment that is the *second half* of a split frame normally carries
+    compressed bytes there and fails these tests: measured over the eight
+    #664 fixtures, the second fragment of a frame split in two reads a
+    segment count of 100,992,003. That is the whole reason the test is
+    here -- see `_rle_fragment_frames`.
+
+    **This is a measured heuristic, not a proof, and it has a
+    counter-example** (rev-098j9 P2). Nothing stops a frame's *segment
+    data* from holding bytes that parse as a header. Measured: a 256-byte
+    frame laid out header(64) + data(64) + header(64) + data(64), split
+    into two 128-byte fragments, has **both** halves pass this test, so
+    the arm would read one frame as two and pydicom's segment-table
+    refusal would then turn a readable file into an `ERROR` row -- the
+    exact failure the test exists to prevent, on a file shaped to defeat
+    it. It was built by hand; no encoder is known to emit one, since the
+    layout needs a 64-byte first segment whose data begins with a legal
+    offset table. The test is kept because it is right about every file
+    that has been measured and the alternative is firing on all of them,
+    not because it cannot be fooled.
+
+    Read as bytes only; nothing is decoded. "Inside the fragment" is as
+    much as one fragment can be asked, because a frame that spans
+    fragments would put its later segments past this one's end -- and
+    such a frame's continuation is what fails the test above in every
+    measured case.
+    """
+    if len(fragment) < _RLE_HEADER_BYTES:
+        return False
+    head = struct.unpack("<16I", bytes(fragment[:_RLE_HEADER_BYTES]))
+    count, offsets = head[0], head[1:]
+    if not 1 <= count <= _RLE_MAX_SEGMENTS:
+        return False
+    if offsets[0] != _RLE_HEADER_BYTES:
+        return False
+    used = offsets[:count]
+    if any(later <= earlier for earlier, later in zip(used, used[1:])):
+        return False
+    if any(offset >= len(fragment) for offset in used):
+        return False
+    return all(offset == 0 for offset in offsets[count:])
+
+
+def _rle_fragment_frames(ds, declared) -> Optional[int]:
+    """An RLE buffer's fragments, read as its frames, or None (#664).
+
+    Asked only where no offset table names the frames. RLE is the one
+    encapsulated syntax with nothing for pydicom's walk to find: the walk
+    searches each fragment's last ten bytes for `FF D9`, which an RLE
+    stream never contains, so it joins every fragment into one frame and
+    warns, and `DecodeRunner._as_array_encapsulated` then asks for frame 1
+    and raises `StopIteration` with no message at all. Under
+    NumberOfFrames 1 it raises nothing and two frames are lost in silence.
+
+    **Two gates, and the second is the one that matters.**
+
+    *More fragments than declared frames*, never fewer. pydicom already
+    names a shortfall in its own words -- "there are fewer fragments than
+    frames; the dataset may be corrupt or the number of frames may be
+    incorrect" -- for every shape but a single fragment under
+    NumberOfFrames >= 2, which its generator short-circuits to one frame
+    before it consults the count and which
+    `io_handlers._decode_pixels` names instead. One spelling per
+    behaviour: do not add a second shortfall message beside pydicom's.
+    (This corrects `_walked_excess`'s clause that "the decoder refuses a
+    real shortfall in its own words": for RLE it refused with a bare
+    `StopIteration`.)
+
+    *Every fragment begins an RLE frame* (`_is_rle_frame_header`). Without
+    this the arm fires on a file whose one frame is genuinely split across
+    two fragments -- which pydicom joins and decodes correctly today --
+    counts two frames against one declared, and the decode it then asks
+    for is refused by pydicom's own RLE decoder ("The amount of decoded
+    RLE segment data doesn't match the expected amount"). A refusal
+    protects the stored pixels; it does not protect a file that read fine,
+    and turning that file into an `ERROR` row would be a regression. The
+    test asks its question *before* the decode rather than relying on the
+    decoder to refuse afterwards.
+
+    The fragment count is read first and the headers only if it exceeds
+    the declared frames, because `generate_fragments` copies each
+    fragment's bytes.
+    """
+    try:
+        if ds.file_meta.TransferSyntaxUID != RLELossless:
+            return None
+    except (AttributeError, ValueError):
+        return None
+    try:
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        fragments, _offsets = parse_fragments(buf)
+        if fragments <= declared:
+            return None
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        if not all(_is_rle_frame_header(fragment)
+                   for fragment in generate_fragments(buf)):
+            return None
+    except Exception:  # pylint: disable=broad-except
+        # Not this check's refusal to make: the decoder that runs next
+        # meets the same buffer and refuses it in its own words.
+        return None
+    return fragments
 
 
 #: The source `offset_table_frame_count` names when no table counted the
@@ -375,6 +535,14 @@ def offset_table_frame_count(ds) -> Optional[FrameCount]:
 #: these their own verb.
 WALKED_FRAMES = "Pixel Data's fragments"
 NATIVE_FRAMES = "Pixel Data's length"
+
+#: And for an RLE buffer counted fragment by fragment (#664). A **marker,
+#: not the phrase**: the row's subject is "Pixel Data's fragments" too,
+#: and `frame_count_mismatch_words` dispatches on this value, so a
+#: constant equal to `WALKED_FRAMES` would word every RLE row "by their
+#: end markers" -- which is false of a stream that has no end marker. The
+#: two share a subject and not a verb, so they cannot share a value.
+RLE_FRAGMENTS = "RLE fragments"
 
 
 def _walked_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
@@ -393,7 +561,14 @@ def _walked_excess(ds, declared, declared_raw) -> Optional[FrameCount]:
     decode proceeds as it did. Fewer is not reported because the walk
     cannot tell a short file from frames that span fragments without end
     markers the search recognises; the decoder refuses a real shortfall
-    in its own words.
+    in its own words -- **except for two shapes, corrected here in #664**.
+    An RLE buffer has no end marker at all, so the walk joins every
+    fragment into one frame and the decoder's "own words" were a bare
+    `StopIteration`; `_rle_fragment_frames` now counts those fragments
+    before this runs. And a *single* fragment under NumberOfFrames >= 2 is
+    short-circuited to one frame before pydicom consults the count, which
+    raised the same nameless `StopIteration`;
+    `io_handlers._decode_pixels` names both counts for it.
 
     **NumberOfFrames 1 (or absent) is not walked**: pydicom joins every
     fragment into one frame there, so no excess can be found -- the
@@ -514,7 +689,14 @@ def frame_count_mismatch_words(counted: FrameCount) -> str:
     # the walk finds frames by end markers, and the length holds whole
     # frames' worth of bytes, neither of which is a statement that they
     # are frames.
-    if table_name == WALKED_FRAMES:
+    # An RLE fragment holds one frame because it *is* one fragment, and
+    # the row says only that: there is no end marker it was found by
+    # (#664). Spelled out rather than taken from `RLE_FRAGMENTS`, which is
+    # the marker and not the phrase.
+    if table_name == RLE_FRAGMENTS:
+        counted_words = (f"{WALKED_FRAMES} hold {table_frames} frames, "
+                         f"one per fragment")
+    elif table_name == WALKED_FRAMES:
         counted_words = (f"{table_name} hold {table_frames} frames by "
                          f"their end markers")
     elif table_name == NATIVE_FRAMES:
