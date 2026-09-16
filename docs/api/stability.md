@@ -139,8 +139,19 @@ edited by hand can carry one UID on more than one instance, and findings
 on such a UID all resolve to a single one of those instances.
 `anonymize(findings)` never writes to an object outside
 `session.store` (#644). A finding whose `entity` is itself in the graph
-is acted on as it is, whatever its address says. Any other finding is
-resolved against the live graph at its `entity_uid` and `entity_path`
+is acted on as it is, whatever its address says -- except a
+`REMOVE_TAG`, whose "already gone" is read on the object this session
+holds at the finding's address rather than on the entity as handed in:
+on an `Instance` since #626, and on a `Patient` or `Study` since #661.
+The object at an address is the finding's own entity where the address
+names it, the single object where the address names exactly one, and
+none where it names none, or two of which neither is the entity. So a
+removal whose entity reads gone where the object at its address still
+holds the value declines, and so does one whose address names nothing
+at all; where the entity is itself among the objects the address names,
+the entity is read, and a removal that reads gone there is satisfied
+with no row. Any other
+finding is resolved against the live graph at its `entity_uid` and `entity_path`
 (an instance's UID from before `redact()`, and a patient's original
 Patient ID after its pseudonym, included) and acts on the object found
 there, or declines when the address names no single object. A Patient
