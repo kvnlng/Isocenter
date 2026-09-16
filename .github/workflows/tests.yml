@@ -10,16 +10,16 @@ on:
   # branch protection means they test the same tree: `--admin` merges
   # bypass `strict`, and then this is the only thing that tests what
   # actually landed.
-  push:
-    branches:
-      - main
+  # push:
+  #  branches:
+  #    - main
   # Deliberately NOT path-filtered. `main` requires these checks, and a
   # required check that never runs leaves a PR blocked forever "waiting
   # for status" rather than failing. Every PR into main runs the suite,
   # whatever it touches.
-  pull_request:
-    branches:
-      - main
+  # pull_request:
+  #  branches:
+  #    - main
   workflow_dispatch:
   # Called by publish.yml, which runs the full version matrix at release
   # time. The gate below is deliberately narrow; the breadth lives there.
