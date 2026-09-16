@@ -2041,7 +2041,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # construction rather than by the accident of a file read's `_dict`
     # already being in tag order.
     for tag_key in sorted(ds.keys()):
-        elem = _read_element(ds, tag_key)
+        elem = _read_element(ds, tag_key, not big_endian)
         if elem.tag.group == 0x7fe0:
             # Still skipped -- the group check stays because it is not
             # only about binary VRs. (7fe0,0001) and (7fe0,0002), the
@@ -2145,6 +2145,23 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             if raw.startswith(_ITEM_TAG_LE):
                 parsed = _sequence_from_un_bytes(raw, elem.tag, encoding)
                 if parsed is not None:
+                    # Propagate Pixel Representation into the re-parsed
+                    # items, as pydicom's own `SQ` read does
+                    # (`Dataset._set_pixel_representation`) and
+                    # `read_sequence` does not. Without it an item's
+                    # `US or SS` element never sees a root's 1: a signed
+                    # -5 read as 65531, and `_read_element`'s `[ds]` would
+                    # not be the whole chain on this route (#691). Every
+                    # item is stamped, because pydicom reads an item's own
+                    # Pixel Representation before `_pixel_rep` wherever it
+                    # reads either, so a declared one still wins; and
+                    # deeper sequences inherit from the stamp, since
+                    # pydicom propagates from each item's `_pixel_rep`
+                    # and this branch does from each `ds`'s.
+                    rep = _pixel_representation([ds])
+                    if rep is not None:
+                        for parsed_item in parsed:
+                            parsed_item._pixel_rep = rep
                     process_sequence(tag, parsed, item, dropped, unscanned,
                                      nested=nested, path=path,
                                      unconverted=unconverted,
@@ -2198,7 +2215,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             _record_private_vr(item, tag, elem)
 
 
-def _read_element(ds, tag):
+def _read_element(ds, tag, little_endian=True):
     """`ds[tag]`, or the element whose VR pydicom could not resolve (#691).
 
     **The trap.** pydicom resolves an ambiguous VR when an element is
@@ -2207,10 +2224,11 @@ def _read_element(ds, tag):
     raises `AttributeError: Failed to resolve ambiguous VR for tag
     (0028,3006): 'Dataset' object has no attribute 'LUTDescriptor'`
     wherever the deciding sibling is absent from the nearest dataset.
-    Under Implicit VR no arm is on the wire, so that is every such element:
+    Under Implicit VR no arm is on the wire, and an element an explicit
+    syntax carries as `UN` has none either, so that is every such element:
     LUT Data in a LUT with no LUT Descriptor, and a `US or SS` element in a
     sequence item that carries Pixel Data where nothing declares Pixel
-    Representation. The Explicit VR twin of each ingests, and our own
+    Representation. The twin that names the arm ingests, and our own
     native export of the first is one of these files.
 
     **Why the stored element is the source's.** `__getitem__` stores the
@@ -2233,7 +2251,16 @@ def _read_element(ds, tag):
     (#151's shape). `[ds]` is the whole ancestor chain that matters: pydicom
     raised, so neither the item nor any ancestor that propagated a
     `_pixel_rep` into it declares Pixel Representation, and a LUT's
-    descriptor is by definition in the LUT's own item.
+    descriptor is by definition in the LUT's own item. **That holds only
+    because every item carries the `_pixel_rep` its ancestors imply.**
+    pydicom stamps it when it reads an `SQ`, and nothing stamps an item
+    `_sequence_from_un_bytes` re-parses from a private `UN` sequence, which
+    is why `populate_attrs` stamps those itself: without it this
+    fallback saw a root's Pixel Representation of 1 as no declarer at all.
+
+    **Byte order.** `little_endian` is the source's, from `populate_attrs`:
+    the resolver converts `US or SS` bytes itself, and an Explicit VR Big
+    Endian file carrying the element as `UN` reaches here too.
 
     **No row.** The rows and losses the resolver collects are discarded:
     the Explicit VR twin gets none at ingest, and the export's pass
@@ -2252,7 +2279,7 @@ def _read_element(ds, tag):
         elem = ds.get_item(tag)
         if str(elem.VR) not in AMBIGUOUS_VR:
             raise
-    _resolve_one_ambiguous_vr(elem, ds, [ds], [], [])
+    _resolve_one_ambiguous_vr(elem, ds, [ds], [], [], little_endian)
     return elem
 
 
@@ -8831,13 +8858,14 @@ def _pixel_representation(ancestors):
     # routes, while decompressing. A sequence item with Pixel Data and none
     # -- an icon -- is not refused: its pixels are dropped with a
     # `DATA_LOSS` row, and its `US or SS` elements are read unsigned (by
-    # this rule, through `_read_element`, under Implicit VR; #691). So the
-    # items that reach this with pixels are items whose pixels are not
-    # written. Unsigned is also what the write-path ruling asks for: the
-    # bytes are the source's either way, and the arm is the one more
-    # readers will read correctly (#700 is what a signed source loses). None rather than 0
-    # because only the caller that *reports* the choice needs to know the
-    # difference, and it must not report a header the file lacks.
+    # this rule, through `_read_element`, under Implicit VR or as `UN`;
+    # #691). So the items that reach this with pixels are items whose
+    # pixels are not written. Unsigned is also what the write-path ruling
+    # asks for: the bytes are the source's either way, and the arm is the
+    # one more readers will read correctly (#700 is what a signed source
+    # loses). None rather than 0 because only the caller that *reports*
+    # the choice needs to know the difference, and it must not report a
+    # header the file lacks.
     return None
 
 
@@ -9011,14 +9039,21 @@ def _resolve_ambiguous_vrs(ds, losses, warnings, ancestors=None, rows=None):
         warnings.append(warning)
 
 
-def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
+def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows,
+                              little_endian=True):
     """One element of `_resolve_ambiguous_vrs`. Appends to `rows` the
-    choices a reader could see differently; see `_ambiguous_vr_warning`."""
+    choices a reader could see differently; see `_ambiguous_vr_warning`.
+
+    `little_endian` is the byte order of a byte value handed in. The export
+    pass always writes little-endian and leaves the default; the read-side
+    caller, `_read_element`, passes the source's, because a big-endian
+    source's `US or SS` bytes converted as little-endian read 3 as 768
+    (#691)."""
     arms = str(elem.VR).split(" or ")
     tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
     unresolved = False
     try:
-        correct_ambiguous_vr_element(elem, ds, True, ancestors)
+        correct_ambiguous_vr_element(elem, ds, little_endian, ancestors)
     except AttributeError:
         # pydicom's wrapped raise: the sibling its rule reads is absent
         # from the nearest dataset. Not `elem.VR`'s fault and not fatal.
@@ -9070,7 +9105,7 @@ def _resolve_one_ambiguous_vr(elem, ds, ancestors, losses, rows):
             # two cases apart, and `_named_arm` is what keeps them apart.
             rep = _pixel_representation(ancestors) or 0
             elem.VR = "US" if rep == 0 else "SS"
-            elem.value = convert_numbers(bytes(value or b""), True,
+            elem.value = convert_numbers(bytes(value or b""), little_endian,
                                          "H" if rep == 0 else "h")
             _veto_ambiguous_arm(elem, ds, arms, losses, rows,
                                 _named_arm(ancestors, elem.VR))

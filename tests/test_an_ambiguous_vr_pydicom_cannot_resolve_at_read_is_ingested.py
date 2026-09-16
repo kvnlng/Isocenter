@@ -3,9 +3,10 @@ ingested as its Explicit VR twin is (#691).
 
 pydicom resolves `US or OW`, `US or SS` and the rest when an element is
 read, with no ancestors, and raises where the deciding sibling is absent
-from the nearest dataset. Under Implicit VR nothing on the wire answers
-instead, so `populate_attrs`' walk ended at that element and the file was
-refused, while the Explicit VR copy of the same dataset ingested.
+from the nearest dataset. Under Implicit VR, or for an element carried as
+`UN`, nothing on the wire answers instead, so `populate_attrs`' walk ended
+at that element and the file was refused, while the copy that names the
+arm ingested.
 
 Each test builds its dataset once and writes it both ways, so "as its
 explicit twin is" compares one source read through two syntaxes. The
@@ -299,3 +300,175 @@ def test_an_implicit_icon_under_a_root_pixel_representation_reads_signed_without
     ((item, _path),) = [(i, p) for i, p in iter_item_tree(instance)
                         if p == (("0088,0200", 0),)]
     assert item.attributes["0028,0106"] == -5
+
+
+def _icon(*, value=-5, vr="SS", pixels=True, pr=None):
+    item = Dataset()
+    item.Rows = item.Columns = 2
+    item.BitsAllocated = item.BitsStored = 8
+    item.HighBit = 7
+    item.SamplesPerPixel = 1
+    item.PhotometricInterpretation = "MONOCHROME2"
+    if pr is not None:
+        item.PixelRepresentation = pr
+    item.add_new(SMALLEST_PIXEL, vr, value)
+    if pixels:
+        item.PixelData = bytes(4)
+    return item
+
+
+def _private_sequence(owner, item, creator="J12PRIV"):
+    owner.private_block(0x0009, creator, create=True).add_new(
+        0x10, "SQ", Sequence([item]))
+    return owner
+
+
+def _smallest_values(graph):
+    return sorted((path, attrs["0028,0106"]) for path, attrs in graph.items()
+                  if "0028,0106" in attrs)
+
+
+def _private_icon(root_pr):
+    return _private_sequence(_dataset(pr=root_pr), _icon())
+
+
+def _pixel_less_private_item(root_pr):
+    return _private_sequence(_dataset(pr=root_pr), _icon(pixels=False))
+
+
+def _standard_icon_inside_a_private_item(root_pr):
+    holder = Dataset()
+    holder.IconImageSequence = Sequence([_icon()])
+    return _private_sequence(_dataset(pr=root_pr), holder)
+
+
+def _private_sequence_inside_a_private_item(root_pr):
+    return _private_sequence(
+        _dataset(pr=root_pr),
+        _private_sequence(Dataset(), _icon(), creator="J12NEST"))
+
+
+def _private_sequence_inside_a_standard_item(root_pr):
+    ds = _dataset(pr=root_pr)
+    holder = Dataset()
+    ds.ModalityLUTSequence = Sequence([
+        _private_sequence(holder, _icon(), creator="J12NEST")])
+    return ds
+
+
+ROOT_SIGNED_SHAPES = [
+    pytest.param(_private_icon, id="private-item-with-pixels"),
+    pytest.param(_pixel_less_private_item, id="pixel-less-private-item"),
+    pytest.param(_standard_icon_inside_a_private_item,
+                 id="standard-sequence-inside-a-private-item"),
+    pytest.param(_private_sequence_inside_a_private_item,
+                 id="private-sequence-inside-a-private-item"),
+    pytest.param(_private_sequence_inside_a_standard_item,
+                 id="private-sequence-inside-a-standard-item"),
+]
+
+
+@pytest.mark.parametrize("build", ROOT_SIGNED_SHAPES)
+def test_a_private_sequence_inherits_the_root_pixel_representation_as_its_explicit_twin_does(
+        tmp_path, build):
+    """Under Implicit VR a private sequence arrives as `UN` bytes, and
+    re-parsing them (`_sequence_from_un_bytes`) propagated no `_pixel_rep`
+    into its items the way pydicom's own `SQ` read does. A root's Pixel
+    Representation of 1 then never reached the item: a signed -5 read as
+    65531, and the export wrote a `WARNING` row contradicting a header the
+    source never contradicted. The pixel-less item is the shape that
+    already ingested before #691, reading 65531; it now reads what its
+    explicit twin reads."""
+    ds = build(1)
+    implicit = _ingest(tmp_path, ds, True, "implicit")
+    explicit = _ingest(tmp_path, ds, False, "explicit")
+    assert implicit[0].failures == explicit[0].failures == []
+    assert [v for _p, v in _smallest_values(implicit[1])] == [-5]
+    assert implicit[1] == explicit[1]
+    assert implicit[2] == explicit[2]
+
+
+def test_a_private_icon_under_a_root_pixel_representation_exports_with_no_warning_and_no_fallback(
+        tmp_path, monkeypatch):
+    """The export half of the case above, and the ancestor claim behind it:
+    with the root's Pixel Representation propagated, pydicom resolves the
+    element at read, so the #691 fallback -- which sees only the item -- is
+    never entered."""
+    folder = _save(str(tmp_path / "implicit"), _private_icon(1), True)
+    db = str(tmp_path / "implicit.db")
+    with DicomSession(persistence_file=db) as session:
+        assert session.ingest(folder).failures == []
+        assert session.export(str(tmp_path / "out"),
+                              use_compression=False).written == 1
+    assert _rows(db, "WARNING") == []
+
+    import isocenter.io_handlers as io_handlers
+
+    def entered(*_args, **_kwargs):
+        raise AssertionError("the #691 fallback was entered")
+
+    monkeypatch.setattr(io_handlers, "_resolve_one_ambiguous_vr", entered)
+    read = pydicom.dcmread(os.path.join(folder, "one.dcm"), force=True)
+    instance = Instance(read.SOPInstanceUID, CT_IMAGE, 1)
+    populate_attrs(read, instance)
+    assert [v for _p, v in _smallest_values(
+        {p: i.attributes for i, p in iter_item_tree(instance)})] == [-5]
+
+
+@pytest.mark.parametrize("root_pr, item_pr", [(0, None), (1, 0)],
+                         ids=["root-unsigned", "item-declares-its-own"])
+def test_a_private_item_takes_the_nearest_declared_pixel_representation(
+        tmp_path, root_pr, item_pr):
+    """The negative cases of that propagation: an unsigned root stays
+    unsigned, and an item's own Pixel Representation outranks the root's."""
+    ds = _private_sequence(_dataset(pr=root_pr),
+                           _icon(value=65531, vr="US", pr=item_pr))
+    implicit = _ingest(tmp_path, ds, True, "implicit")
+    explicit = _ingest(tmp_path, ds, False, "explicit")
+    assert implicit[0].failures == []
+    assert [v for _p, v in _smallest_values(implicit[1])] == [65531]
+    assert implicit[1] == explicit[1]
+
+
+# The (0028,0106) element of `_icon(value=3, vr="US")` as `dcmwrite` puts it
+# on the wire, and the same element relabelled `UN` (PS3.5 7.1.2: two
+# reserved bytes and a 4-byte length).
+_US_ELEMENT = {True: (b"\x28\x00\x06\x01US\x02\x00\x03\x00",
+                      b"\x28\x00\x06\x01UN\x00\x00\x02\x00\x00\x00\x03\x00"),
+               False: (b"\x00\x28\x01\x06US\x00\x02\x00\x03",
+                       b"\x00\x28\x01\x06UN\x00\x00\x00\x00\x00\x02\x00\x03")}
+
+
+@pytest.mark.parametrize("little_endian", [True, False],
+                         ids=["explicit-little-endian", "explicit-big-endian"])
+def test_an_ambiguous_element_carried_as_un_is_read_in_the_sources_byte_order(
+        tmp_path, little_endian):
+    """An element written with VR `UN` reaches the #691 fallback under an
+    explicit syntax too, and the fallback converts `US or SS` bytes itself:
+    it must read them in the byte order the source was written in. A
+    big-endian 3 is not 768."""
+    ds = _dataset(pixels=False)
+    ds.IconImageSequence = Sequence([_icon(value=3, vr="US")])
+    ds.file_meta.TransferSyntaxUID = (
+        "1.2.840.10008.1.2.1" if little_endian else "1.2.840.10008.1.2.2")
+    graphs = {}
+    for label, relabel in (("un", True), ("us", False)):
+        folder = tmp_path / label
+        folder.mkdir()
+        path = str(folder / "one.dcm")
+        pydicom.dcmwrite(path, ds, implicit_vr=False,
+                         little_endian=little_endian, force_encoding=True)
+        if relabel:
+            old, new = _US_ELEMENT[little_endian]
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            assert raw.count(old) == 1
+            with open(path, "wb") as fh:
+                fh.write(raw.replace(old, new))
+        with DicomSession(persistence_file=str(tmp_path / (label + ".db"))) \
+                as session:
+            summary = session.ingest(str(folder))
+            assert summary.failures == []
+            graphs[label] = _graph(session)
+    assert _smallest_values(graphs["un"]) == [((("0088,0200", 0),), 3)]
+    assert graphs["un"] == graphs["us"]
