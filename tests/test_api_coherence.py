@@ -874,28 +874,48 @@ def test_a_bare_string_patient_ids_names_one_patient_on_both_formats(
 
 
 @pytest.mark.parametrize("fmt", ["dicom", "wfdb"])
-def test_bytes_as_patient_ids_is_refused_on_both_formats(tmp_path, fmt):
-    """`bytes` is refused, because best-effort would select nobody.
+@pytest.mark.parametrize("value", [b"COH-A", bytearray(b"COH-A"),
+                                   memoryview(b"COH-A")],
+                         ids=["bytes", "bytearray", "memoryview"])
+def test_bytes_as_patient_ids_is_refused_on_both_formats(tmp_path, fmt, value):
+    """Every bytes-like `patient_ids` is refused, and by its own name.
 
     A `str` can be read as one patient id. `b"COH-A"` cannot: every
     `patient_id` in the graph is a `str`, so wrapping the bytes would
     silently select **no** patient and report a clean zero export --
     exactly the silence #678 is about. There is no encoding to decode it
-    under either. Measured on 0.9.8 both doors already raised
-    `TypeError`, but from inside the walk and with the message
+    under either.
+
+    All three arms of the refusal tuple are driven, because the three
+    behaved differently before it and the worst of them is the least
+    obvious. Measured on 0.9.8: `bytes` and `bytearray` raised
+    `TypeError` from inside the walk with Python's own
     `a bytes-like object is required, not 'str'`, which names neither
-    the option nor the mistake; the refusal now names both and is raised
-    before anything is written.
+    the option nor the mistake -- but a `memoryview` is truthy (it has
+    `__len__`) and has no `__contains__`, so `"COH-A" not in mv` fell
+    back to element-wise comparison against ints, was True for every
+    patient, and **exported nothing at all, silently, on both doors**.
+    That is precisely the clean zero export that reads as success, so
+    `memoryview` is the arm whose absence costs the most, and a
+    parametrize axis that stops at `bytes` leaves the other two pinned
+    by nothing (measured: dropping `bytearray, memoryview` from the
+    tuple survived the whole file).
+
+    The type assertion is on `type(value).__name__` rather than the
+    literal `"bytes"`: the message says "bytes-like", so a literal check
+    passes for all three without ever testing that the message names the
+    type it actually refused.
     """
-    with _two_patient_waveform_session(tmp_path, f"bytes_{fmt}") as session:
+    label = type(value).__name__
+    with _two_patient_waveform_session(tmp_path, f"bl_{label}_{fmt}") as sess:
         with pytest.raises(TypeError) as caught:
-            _patients_written(session, tmp_path / f"bytes_{fmt}", fmt,
-                              patient_ids=b"COH-A")
+            _patients_written(sess, tmp_path / f"bl_{label}_{fmt}", fmt,
+                              patient_ids=value)
 
     message = str(caught.value)
     assert "patient_ids" in message, (
-        f"format={fmt!r} refused bytes with {message!r}, which does not "
+        f"format={fmt!r} refused {label} with {message!r}, which does not "
         "name the option the caller got wrong")
-    assert "bytes" in message, (
-        f"format={fmt!r} refused bytes with {message!r}, which does not "
-        "name the type it refused")
+    assert label in message, (
+        f"format={fmt!r} refused {label} with {message!r}, which does not "
+        f"name the type it refused ({label})")
