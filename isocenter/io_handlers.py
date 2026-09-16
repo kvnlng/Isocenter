@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1638 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1641 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1643 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1646 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -129,6 +129,7 @@ import os
 import pickle
 import sys
 import hashlib
+import numbers
 import struct
 from math import ceil
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
@@ -1643,15 +1644,240 @@ def _sequence_from_un_bytes(raw: bytes, tag, encoding) -> Optional[Sequence]:
     return parsed if out.getvalue() == raw else None
 
 
+#: Bytes per word of the wire VRs whose values are words wider than a byte
+#: (PS3.5 6.2). `OB` is absent because it has no byte order; `UN` because
+#: its word size is the one thing nobody knows (#657).
+_WORD_BYTES = {'OW': 2, 'OL': 4, 'OF': 4, 'OD': 8, 'OV': 8}
+
+#: The elements whose word is one waveform sample, so whose width is
+#: Waveform Bits Allocated (5400,1004) and not their wire VR's word: the
+#: samples, the Channel Minimum and Maximum Value each channel states in
+#: the same encoding, and the Waveform Padding Value the group states in it
+#: (PS3.3 C.10.9.1). All four are `OB or OW` -- pydicom's own
+#: `_AMBIGUOUS_OB_OW_TAGS` is this set -- and `OW` holds 32- and 64-bit
+#: samples too, so a VR-keyed conversion reverses a 32-bit sample as two
+#: 2-byte words and stores it wrong (#657).
+_SAMPLE_TAGS = frozenset({"5400,1010", "5400,0110", "5400,0112",
+                          "5400,100a"})
+
+#: Bytes per sample for each Waveform Bits Allocated PS3.5 8.3 allows:
+#: "This Data Element defines the size of each waveform data sample within
+#: the Waveform Data (5400,1010). Allowed Values are 8, 16, 32 and 64
+#: bits." Anything else, absence included, has no width to convert by.
+#: 8 is here at one byte a word, so an 8-bit sample converts to itself and
+#: draws no row: a byte has no order.
+_SAMPLE_BYTES = {8: 1, 16: 2, 32: 4, 64: 8}
+
+#: The other `OB or OW` containers whose word a sibling declares, keyed on
+#: the element number inside the repeating groups 5000-501E: `(sibling
+#: element, its name, bytes per declared value)`. Both are retired and both
+#: were read as 2-byte words before this, which is right at one enumerated
+#: value each (#657, review finding 1):
+#:
+#: * Curve Data (50xx,3000) takes its width from Data Value Representation
+#:   (50xx,0103), whose Enumerated Values PS3.3-2004 C.10.2.1.2 gives as
+#:   0 unsigned short, 1 signed short, 2 floating point single, 3 floating
+#:   point double, 4 signed long.
+#: * Audio Sample Data (50xx,200C) takes its width from Audio Sample Format
+#:   (50xx,2002), whose Enumerated Values PS3.3-2004 Table C.10-3 gives as
+#:   0 "16 bit 2's complement" and 1 "8 bit 2's complement".
+_WIDTH_SIBLINGS = {
+    0x3000: (0x0103, "Data Value Representation", {0: 2, 1: 2, 2: 4, 3: 8,
+                                                   4: 4}),
+    0x200C: (0x2002, "Audio Sample Format", {0: 2, 1: 1}),
+}
+
+
+def _width_sibling(tag: str):
+    """`(element, name, widths)` if `tag` is a 50xx width-by-sibling container.
+
+    Even groups only, and only the sixteen the standard repeats over.
+    PS3.5 7.6: "Repeating Groups shall only be allowed in the even Groups
+    (6000-601E,eeee) and even Groups (5000-501E,eeee) cases", and its note
+    adds that private groups 5001-501F "may still be used, but there is no
+    implication of repeating semantics, nor any implied shadowing of the
+    standard repeating groups". So `5001,3000` is a private element whose
+    meaning is its vendor's, `5001,0103` is not Data Value Representation,
+    and a word value there is converted by its VR like any other private
+    one -- reading a sibling would be wrong twice over, in the bytes and in
+    the row that named an attribute the standard says cannot be there
+    (review round 2, finding 1).
+
+    Args:
+        tag (str): `"gggg,eeee"`.
+
+    Returns:
+        The `_WIDTH_SIBLINGS` entry, or None for every other tag.
+    """
+    group, element = (int(part, 16) for part in tag.split(","))
+    if 0x5000 <= group <= 0x501E and not group % 2:
+        return _WIDTH_SIBLINGS.get(element)
+    return None
+
+
+def _declared_width(ds: Any, tag: str):
+    """What the width sibling of a 50xx container declares, if anything.
+
+    Read from the dataset holding the element, because that is where the
+    curve and audio modules put it: both are top-level modules, and the
+    repeating group ties the pair together, so a second curve in 5002
+    declares its own width.
+
+    Both call sites read the sibling only for a big-endian source. This
+    walk sees every retained element of every file, and a little-endian
+    value is returned untouched before the width is looked at, so asking
+    on that path is a tag split and two `int()` calls per element for an
+    answer nothing reads.
+
+    Args:
+        ds: The dataset holding `tag`.
+        tag (str): `"gggg,eeee"`.
+
+    Returns:
+        The sibling's value as an `int`, or None when `tag` has no width
+        sibling, or the sibling is absent, or its value is not one number
+        (a `MultiValue` cannot key the width table; `bool` is refused
+        because it is an `int` no enumeration means).
+    """
+    rule = _width_sibling(tag)
+    if rule is None:
+        return None
+    elem = ds.get(Tag(int(tag[:4], 16), rule[0]))
+    value = getattr(elem, "value", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        else None
+
+
+def _little_endian_words(value: bytes, word: int) -> bytes:
+    """`value` with every whole `word`-byte word reversed; a ragged tail kept.
+
+    Unsigned views, whatever the VR: reversing a word's bytes does not
+    depend on what the word means, floats included.
+    """
+    whole = len(value) // word * word
+    swapped = np.frombuffer(value, dtype=f">u{word}", count=whole // word)
+    return swapped.astype(f"<u{word}").tobytes() + value[whole:]
+
+
+def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
+                       waveform_bits=None, declared=None):
+    """A retained binary value as the graph holds it: little-endian (#657).
+
+    The graph's contract, not the source's. `_merge` writes these bytes
+    verbatim under a little-endian syntax, and the sidecar's waveform
+    samples are read with `<` by `decode_samples` and written back verbatim
+    by both exporters -- so bytes left big-endian were exported with every
+    word reversed, `verify_readback` passing, and nothing anywhere saying
+    so. The conversion is here, at ingest, because this is the last place
+    that knows both facts it needs: the source's byte order (pydicom's
+    `original_encoding` on the dataset) and the wire VR. Neither survives
+    to the export: a private word value is written `UN` (#154).
+
+    Args:
+        value: The value as read. Anything but a non-empty bytes-like
+            value is returned untouched. `bytes`, `bytearray` and
+            `memoryview` are all converted, so which of the three a
+            refactor of `_process_safe` hands over cannot turn the
+            conversion off.
+        vr (str): The element's VR as pydicom holds it.
+        tag (str): `"gggg,eeee"`.
+        path (tuple): The item path, for the row.
+        big_endian (bool): Whether the dataset holding the element was read
+            big-endian. False is a no-op, whatever the value.
+        unconverted (list or None): Collects `(kind, path, tag, vr, length,
+            word)` for what could not be converted whole; `kind` is
+            `"un"`, `"ragged"`, `"no-bits"`, `"ob"`, `"no-width"`,
+            `"bad-width"` or `"ob-value"`, and the last slot carries
+            whatever that kind's row needs -- a word size, the bits a
+            waveform declared, or the width sibling's name with its width.
+            See `_byte_order_words`.
+        waveform_bits: Waveform Bits Allocated of the enclosing Waveform
+            Sequence item, read only for `_SAMPLE_TAGS`.
+        declared: What this element's width sibling declares, for the two
+            50xx containers that have one (`_declared_width` reads it).
+            Ignored for every other tag.
+
+    Returns:
+        The value as the graph should hold it: `bytes`, converted, for
+        every value the source's byte order applies to.
+    """
+    # The type test before the emptiness test: this sees every value the
+    # walk retains, and the truth of an array-like is an exception.
+    if not big_endian or not isinstance(
+            value, (bytes, bytearray, memoryview)) or not len(value):
+        return value
+    value = bytes(value)
+    if tag in _SAMPLE_TAGS:
+        # Keyed on the tag before the VR: a sample is as wide as the
+        # waveform says, whatever word its wire VR implies -- except `OB`,
+        # which PS3.5 6.2 gives no byte order at all, so nothing the
+        # waveform declares can establish one (owner ruling, 2026-09-15).
+        # An 8-bit sample is a byte either way, and converts to itself.
+        word = (_SAMPLE_BYTES.get(waveform_bits)
+                if isinstance(waveform_bits, int) else None)
+        if vr == 'OB' and word not in (None, 1):
+            if unconverted is not None:
+                unconverted.append(
+                    ("ob", path, tag, vr, len(value), waveform_bits))
+            return value
+        if word is None:
+            if unconverted is not None:
+                unconverted.append(
+                    ("no-bits", path, tag, vr, len(value), None))
+            return value
+    elif _width_sibling(tag) is not None:
+        # A second width-by-sibling rule, for the two other `OB or OW`
+        # containers whose word its VR does not give: the retired Curve
+        # Data and Audio Sample Data. Nothing is converted unless the
+        # sibling names a width the length is made of, because a width
+        # that does not divide the length is one of the two being wrong.
+        sibling, name, widths = _width_sibling(tag)
+        named = f"{name} ({tag[:4]},{sibling:04x})"
+        word = widths.get(declared)
+        if vr == 'OB' and word not in (None, 1):
+            if unconverted is not None:
+                unconverted.append(
+                    ("ob-value", path, tag, vr, len(value), (named, word)))
+            return value
+        if word is None:
+            if unconverted is not None:
+                unconverted.append(
+                    ("no-width", path, tag, vr, len(value), named))
+            return value
+        if len(value) % word:
+            if unconverted is not None:
+                unconverted.append(
+                    ("bad-width", path, tag, vr, len(value), (named, word)))
+            return value
+    elif vr in _WORD_BYTES:
+        word = _WORD_BYTES[vr]
+    else:
+        if vr == 'UN' and unconverted is not None:
+            unconverted.append(("un", path, tag, vr, len(value), None))
+        return value
+    if len(value) % word and unconverted is not None:
+        unconverted.append(("ragged", path, tag, vr, len(value), word))
+    return _little_endian_words(value, word)
+
+
 def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                    is_root: bool = True, unscanned: list = None,
-                   nested: list = None, path: tuple = ()):
+                   nested: list = None, path: tuple = (),
+                   unconverted: list = None, waveform_bits=None):
     """
     Standalone function to populate attributes for pickle-compatibility in workers.
 
     Extracts standard DICOM elements from a pydicom Dataset and populates the
     Isocenter DicomItem. Handles Sequences recursively. Skips large binary blobs
     to keep the object graph lightweight.
+
+    A retained value in words wider than a byte, read from a big-endian
+    dataset, is stored little-endian: `OW` in 2-byte words, `OL` and `OF`
+    in 4, `OD` and `OV` in 8, and a Channel Minimum or Maximum Value in
+    samples of Waveform Bits Allocated (#657). Curve Data and Audio Sample
+    Data take their width from their own sibling the same way. An `OB`
+    value is never converted, whatever its tag: PS3.5 6.2 gives it no byte
+    order. See `_stored_byte_order`.
 
     Skipping is not the same as routing, and since #151 neither is the
     same as a VR. `PixelData` and `WaveformData` are extracted and
@@ -1735,9 +1961,23 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
             tests passes -- behaviour is exactly what it was.
         path (tuple): The `iter_item_tree` route from the instance to
             `ds`: a tuple of `(sequence_tag, index)` steps, empty at the
-            root. Only `nested` reads it; it is what becomes the blob
-            kind's path segment, and it is the same shape
+            root. `nested` and `unconverted` read it; it is what becomes
+            the blob kind's path segment, and it is the same shape
             `PhiFinding.entity_path` and `resolve_item_path` already use.
+        unconverted (list, optional): A list the caller owns. Each value
+            from a big-endian dataset that could not be converted to
+            little-endian whole appends `(kind, path, tag, vr, length,
+            word)`: a `UN` value, whose word size is unknown; a length
+            that is not a whole number of words, whose whole words are
+            converted; a sample with no usable Waveform Bits Allocated.
+            Nothing is lost in any of the three, so it is not `dropped`.
+            None records nothing; the conversion happens either way.
+        waveform_bits: Waveform Bits Allocated (5400,1004) of the nearest
+            enclosing Waveform Sequence item, for a Channel Minimum or
+            Maximum Value inside its Channel Definition Sequence. Set here
+            when `ds` is itself a Waveform Sequence item and forwarded
+            below it: the channel item that holds those two elements does
+            not carry the width they are encoded in.
     """
 
     # The wire VRs whose values are bulk bytes. Since #151 membership
@@ -1773,6 +2013,20 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # with a Specific Character Set gives `['latin_1']` -- so no
     # normalization is needed; do not add any.
     encoding = getattr(ds, "_character_set", default_encoding)
+
+    # Per dataset, not per file: pydicom stamps `original_encoding` on
+    # every item it reads, and a sequence rebuilt from `UN` bytes is
+    # little-endian whatever the file was (#657). A bare `Dataset` says
+    # (None, None) and is left as it is -- which is why this is `is False`
+    # and not `is not True`: the waveform and Murmur tests hand this a
+    # hand-built item whose bytes are already little-endian.
+    big_endian = getattr(ds, "original_encoding", (None, None))[1] is False
+
+    # A Waveform Sequence item is where the sample width lives; its
+    # Channel Definition items, one level down, hold samples in that width
+    # and no width of their own (#657). Everything below it inherits.
+    if path and path[-1][0] == "5400,0100":
+        waveform_bits = getattr(ds, "WaveformBitsAllocated", None)
 
     for elem in ds:
         if elem.tag.group == 0x7fe0:
@@ -1835,9 +2089,11 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 value = b""
             if isinstance(value, (bytes, bytearray, memoryview)) \
                     and len(value) <= BINARY_RETENTION_MAX_BYTES:
-                item.set_attr(
-                    f"{elem.tag.group:04x},{elem.tag.element:04x}",
-                    bytes(value))
+                b_tag = f"{elem.tag.group:04x},{elem.tag.element:04x}"
+                item.set_attr(b_tag, _stored_byte_order(
+                    bytes(value), elem.VR, b_tag, path, big_endian,
+                    unconverted, waveform_bits,
+                    _declared_width(ds, b_tag) if big_endian else None))
                 continue
             if dropped is not None:
                 dropped.append(
@@ -1877,7 +2133,9 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 parsed = _sequence_from_un_bytes(raw, elem.tag, encoding)
                 if parsed is not None:
                     process_sequence(tag, parsed, item, dropped, unscanned,
-                                     nested=nested, path=path)
+                                     nested=nested, path=path,
+                                     unconverted=unconverted,
+                                     waveform_bits=waveform_bits)
                     continue
                 if (unscanned is not None
                         and len(raw) <= BINARY_RETENTION_MAX_BYTES):
@@ -1911,13 +2169,19 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
 
         if elem.VR == 'SQ':
             process_sequence(tag, elem, item, dropped, unscanned,
-                             nested=nested, path=path)
+                             nested=nested, path=path,
+                             unconverted=unconverted,
+                             waveform_bits=waveform_bits)
         elif elem.VR == 'PN':
             # Sanitize PersonName for pickle safety
             item.set_attr(tag, str(elem.value))
             _record_private_vr(item, tag, elem)
         else:
-            item.set_attr(tag, _process_safe(elem.value))
+            # `OV` and `UN` land here, not in the `BINARY_VRS` arm.
+            item.set_attr(tag, _stored_byte_order(
+                _process_safe(elem.value), elem.VR, tag, path, big_endian,
+                unconverted, waveform_bits,
+                _declared_width(ds, tag) if big_endian else None))
             _record_private_vr(item, tag, elem)
 
 
@@ -1995,7 +2259,8 @@ def _record_private_vr(item, tag: str, elem) -> None:
 
 def process_sequence(tag, elem, parent_item, dropped: list = None,
                      unscanned: list = None, nested: list = None,
-                     path: tuple = ()):
+                     path: tuple = (), unconverted: list = None,
+                     waveform_bits=None):
     """Recursively parses Sequence (SQ) items.
 
     Everything below the instance is `is_root=False`, at every depth: an
@@ -2022,6 +2287,12 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
     it, so leaving it out would carry the bytes and then fail to find their
     home (#167).
 
+    `unconverted` and `waveform_bits` are forwarded too, so a big-endian
+    value at any depth is converted and, when it cannot be whole, said
+    (#657). For a sequence recovered from `UN` bytes the forward is
+    uniformity rather than reach: `_sequence_from_un_bytes` parses
+    Implicit VR Little Endian, so nothing below it is big-endian.
+
     **A zero-item sequence is carried, and that is what the
     `add_sequence` call below is for.** This loop used to be the only way
     a sequence reached the graph, so a source element saying "present, no
@@ -2038,7 +2309,8 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
         seq_item = DicomItem()
         populate_attrs(ds_item, seq_item, dropped, is_root=False,
                        unscanned=unscanned, nested=nested,
-                       path=path + ((tag, index),))
+                       path=path + ((tag, index),),
+                       unconverted=unconverted, waveform_bits=waveform_bits)
         parent_item.add_sequence_item(tag, seq_item)
 
 
@@ -2767,6 +3039,51 @@ def _nested_row_prefix(tag, vr, path) -> str:
     return f"Standard tag {tag} ({vr}) at {_item_path_words(path)}: "
 
 
+def _byte_order_words(kind, path, tag, vr, length, word) -> str:
+    """The #657 row: what a big-endian value's byte order could not become.
+
+    One per `unconverted` entry (see `_stored_byte_order`), keyed on the
+    entry's `kind` and never on its tag. The rows carry a tag, a VR and a
+    length, never a value. Each stops at what ingest knows: the bytes were
+    kept, not that they were exported -- `remove_private_tags=True` deletes
+    a private element at `anonymize()`, which is what #167's `SCAN_GAP`
+    row was corrected for.
+    """
+    scope = "Private" if int(tag[:4], 16) % 2 else "Standard"
+    where = f" at {_item_path_words(path)}" if path else ""
+    head = (f"{scope} tag {tag} ({vr}){where}: {length} bytes read from a "
+            f"big-endian source")
+    kept = "The bytes were kept in the byte order they were read in."
+    if kind == "un":
+        return (f"{head} whose value representation is UN, so the word "
+                f"size and byte order are unknown. {kept}")
+    if kind == "no-bits":
+        return (f"{head} with no usable Waveform Bits Allocated, so the "
+                f"sample width and byte order are unknown. {kept}")
+    if kind == "ob":
+        # `word` carries the declared bits for this kind: an OB value has
+        # no word, which is the whole reason for the row.
+        return (f"{head} whose value representation is OB, which has no "
+                f"byte order, while the waveform declares {word} bits a "
+                f"sample, so the sample's byte order cannot be "
+                f"established. {kept}")
+    if kind == "ob-value":
+        named, width = word
+        return (f"{head} whose value representation is OB, which has no "
+                f"byte order, while {named} declares {width}-byte values, "
+                f"so its byte order cannot be established. {kept}")
+    if kind == "no-width":
+        return (f"{head} with no usable {word}, so the value width and "
+                f"byte order are unknown. {kept}")
+    if kind == "bad-width":
+        named, width = word
+        return (f"{head} are not a whole number of the {width}-byte values "
+                f"{named} declares. {kept}")
+    return (f"{head} are not a whole number of {word}-byte words. The "
+            f"whole words were converted to little-endian; the trailing "
+            f"{length % word} byte(s) were kept as read.")
+
+
 def _nested_item_syntax(transfer_syntax, item_ds, tag_str) -> str:
     """The transfer syntax a nested pixel element is encoded under (#645).
 
@@ -3291,7 +3608,10 @@ def ingest_worker(fp: str) -> Tuple:
         dropped = []
         unscanned = []
         nested = []
-        populate_attrs(ds, inst, dropped, unscanned=unscanned, nested=nested)
+        unconverted = []
+        populate_attrs(ds, inst, dropped, unscanned=unscanned, nested=nested,
+                       unconverted=unconverted)
+        meta['big_endian_unconverted'] = unconverted
         # Between the walk and `meta['dropped_private_binary']`, so the
         # candidates that failed to decode land in `dropped` before it is
         # handed over. `_decode_nested_pixels` appends them itself: it is
@@ -3500,6 +3820,20 @@ def ingest_worker(fp: str) -> Tuple:
             raw = getattr(wf_item, "WaveformData", None)
             if raw:
                 w_bytes = bytes(raw)
+                # Little-endian in the sidecar, whatever the source (#657):
+                # `decode_samples` reads `<` and both exporters write these
+                # bytes back verbatim. The word is the sample, and
+                # (5400,1004) is what says how wide a sample is -- `OW`
+                # holds 32-bit samples too. The hash below is of what is
+                # stored, because the sidecar's contract is what `read_raw`
+                # returns.
+                w_bytes = _stored_byte_order(
+                    w_bytes, wf_item[0x54001010].VR, "5400,1010",
+                    (("5400,0100", 0),),
+                    getattr(wf_item, "original_encoding",
+                            (None, None))[1] is False,
+                    unconverted,
+                    getattr(wf_item, "WaveformBitsAllocated", None))
                 w_hash = hashlib.sha256(w_bytes).hexdigest()
 
         # The samples of groups 1..n are discarded just above; their
@@ -3528,6 +3862,16 @@ def ingest_worker(fp: str) -> Tuple:
         wf_seq = inst.sequences.get("5400,0100")
         if wf_seq is not None and len(wf_seq.items) > 1:
             del wf_seq.items[1:]
+
+            # And what ingest had to say about their byte order (#657):
+            # a row about an element of a discarded group would say its
+            # bytes were kept, and the group's own DATA_LOSS row is the
+            # true account of them. The Waveform Sequence here is the
+            # instance's, so its groups are the first step of a path.
+            unconverted[:] = [
+                u for u in unconverted
+                if not (u[1] and u[1][0][0] == "5400,0100"
+                        and u[1][0][1] >= 1)]
 
             # And the references to what the del removed (#177).
             # Waveform Annotation Sequence (0040,B020) sits at instance
@@ -3852,6 +4196,7 @@ class DicomImporter:
         high_bit_rows = 0
         lossy_rows = 0
         precision_rows = 0
+        byte_order_rows = 0
         count = 0
         failures: List[Tuple[str, str]] = []
 
@@ -3918,6 +4263,21 @@ class DicomImporter:
                     "... (suppressing further per-instance messages for "
                     "LossyImageCompression recorded from the pixel data) "
                     "...")
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=uid, details=detail)
+
+        def _record_byte_order(uid, detail):
+            """One big-endian byte-order row (#657), on its own log cap."""
+            nonlocal byte_order_rows
+            byte_order_rows += 1
+            if byte_order_rows <= 5:
+                logger.warning(f"{uid}: {detail}")
+            elif byte_order_rows == 6:
+                logger.warning(
+                    "... (suppressing further per-element messages for "
+                    "big-endian values whose byte order could not be "
+                    "converted) ...")
             if store_backend is not None:
                 store_backend.log_audit(
                     action_type="WARNING", entity_uid=uid, details=detail)
@@ -4451,6 +4811,15 @@ class DicomImporter:
                                 entity_uid=inst.sop_instance_uid,
                                 details=detail,
                                 element_tag=tag)
+
+                    # A binary value read from a big-endian source that
+                    # the graph could not bring to little-endian whole
+                    # (#657): the words were converted and this says what
+                    # was not. WARNING, not DATA_LOSS -- every byte is
+                    # carried; what is uncertain is their order.
+                    for entry in meta.get('big_endian_unconverted', ()):
+                        _record_byte_order(inst.sop_instance_uid,
+                                           _byte_order_words(*entry))
 
                     # Persist Waveform Samples to Sidecar
                     #
@@ -6573,10 +6942,13 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
         # original bytes makes that mismatch structurally impossible
         # rather than merely tested against.
         #
-        # Endianness is inherited, not assumed here: ingest never records
-        # the source transfer syntax and `decode_samples` hardcodes
-        # little-endian, so the whole pipeline already requires a
-        # little-endian source. This adds no new assumption.
+        # Little-endian, whatever the source: ingest converts a big-endian
+        # source's samples by Waveform Bits Allocated before they reach the
+        # sidecar (`_stored_byte_order`, #657), and that is why writing
+        # them back verbatim under a little-endian syntax is right. Until
+        # #657 this said the pipeline "already requires a little-endian
+        # source" -- nothing enforced that, and a big-endian source's
+        # samples were exported with every word reversed.
         if "WaveformSequence" in ds and len(ds.WaveformSequence) > 0:
             w_raw = inst.get_waveform_bytes()
             if w_raw:
@@ -7764,6 +8136,65 @@ def export_stamp_attributes(patient, study, series):
     return patient_attributes, study_attributes, series_attributes
 
 
+def _numeric_arm(vr, value):
+    """The arm of an `US or OW` or `US or SS or OW` VR that `value` fits (#653).
+
+    One element two ways: numbers under `US`/`SS`, words under `OW`. An
+    explicit-VR source that wrote `US` hands back ints -- a list once the
+    store has held it (#651) -- and pydicom's write-time resolution still
+    chose `OW` for them from the LUT Descriptor, whose writer then refuses
+    anything but bytes. The raise was in `dcmwrite`, past `_merge`'s
+    per-element `try`, so it failed the whole file.
+
+    **Keyed on the dictionary VR string, not on a tag.** A tag-keyed branch
+    would be a second ambiguity table that drifts from pydicom's. Two
+    entries match today: LUT Data (0028,3006) and the retired Gray LUT Data
+    (0028,1200).
+
+    **An `OW` arm and a numeric arm are both required.** `US or SS` (Smallest
+    Image Pixel Value and its kin) has no `OW` arm, and pydicom resolves it
+    from Pixel Representation, which is the better answer there. `OB or OW`
+    has no numeric arm.
+
+    **Bytes are never numbers here.** `list(b"\x00\x01")` is a list of
+    ints, so a bytes-like value is tested first and keeps pydicom's
+    resolution, as does an empty or `None` value: both write a zero-length
+    element under either arm.
+
+    **What fits no arm is refused, here.** Numbers outside `US` and `SS`,
+    floats, text: pydicom's `OW` writer takes only bytes, so each of them
+    failed the whole file at `dcmwrite`. The `ValueError` is raised inside
+    `_merge`'s per-element `try`, which makes it that element's `DATA_LOSS`
+    row and writes the rest of the file. No ingest reaches it -- an
+    explicit source's `US` is in range by construction -- only a caller's
+    `set_attr`.
+
+    `US` has a 2-byte explicit length, so 32767 entries at most. No ingest
+    exceeds it either (an Explicit VR source has the same cap, and an
+    Implicit one hands back bytes); a longer caller list raises at
+    `dcmwrite`, as it did before.
+
+    Raises:
+        ValueError: `value` is neither bytes nor numbers any arm fits.
+    """
+    arms = vr.split(" or ")
+    if "OW" not in arms or not {"US", "SS"} & set(arms):
+        return vr
+    if value is None or isinstance(value, (bytes, bytearray, memoryview)):
+        return vr
+    values = list(value) if isinstance(value, (list, tuple, MultiValue)) \
+        else [value]
+    if not values:
+        return vr
+    if all(isinstance(x, numbers.Integral) for x in values):
+        if "US" in arms and all(0 <= x <= 0xFFFF for x in values):
+            return "US"
+        if "SS" in arms and all(-0x8000 <= x <= 0x7FFF for x in values):
+            return "SS"
+    raise ValueError(f"the value fits no numeric arm of {vr}, and OW holds "
+                     f"only bytes")
+
+
 class DicomExporter:
     """
     Handles writing the Object Graph back to standard DICOM files.
@@ -8482,6 +8913,18 @@ class DicomExporter:
                     encoded = DicomExporter._fallback_encoding(v)
 
             try:
+                # An ambiguous VR with an `OW` arm, holding numbers: the
+                # value decides the arm, not pydicom (#653). pydicom
+                # picks `OW` from a sibling descriptor and then writes a
+                # list of ints as bytes, which raises in `dcmwrite` and
+                # fails the file. A value no arm fits raises here instead,
+                # and becomes this element's loss row below.
+                # Here, inside the loss arm's `try`, and not beside
+                # `dictionary_VR` above: that `except` is the private-tag
+                # fallback, and a standard tag routed through it would be
+                # re-encoded silently instead of reported.
+                if vr is not None:
+                    vr = _numeric_arm(vr, v)
                 if vr is None:
                     if encoded is None:
                         raise ValueError(
