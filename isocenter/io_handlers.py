@@ -2588,6 +2588,25 @@ def _no_frame_boundary_words(ds) -> str:
     `Instance.get_pixel_data`'s file arm routes on -- "no pixel data",
     "decompress", "missing dependencies" -- so the read door raises them
     as they stand rather than turning them into a codecs-missing message.
+
+    **"with no offset table" is true of everything that reaches here, and
+    that is now checked rather than assumed** (rev-098j9 P1). The clause
+    is unconditional and this function does not test it, which the review
+    was right to call out. What makes it true is upstream, not here: a
+    file whose Basic or Extended Offset Table names a frame count is
+    refused by `imagecodecs_handler.offset_table_frame_count` before any
+    decode, in its own words ("Basic Offset Table names 1 frames;
+    NumberOfFrames declares 2"), so a table that disagrees with the
+    fragments never gets this far. Measured on 3.12 for both table shapes;
+    `tests/test_an_rle_fragment_is_a_frame.py::test_only_a_file_with_no_
+    offset_table_reaches_the_no_boundary_refusal` pins it, so the day that
+    guard stops answering first this sentence goes red instead of quietly
+    telling a reader their file has no table.
+
+    A conditional clause here instead would read the table twice and add
+    two branches the ingest path cannot reach -- untestable surface
+    defending an invariant a test already holds. The `except` branch says
+    nothing about the table, because it has parsed nothing to say it from.
     """
     declared = declared_frame_count(ds)
     try:
@@ -2597,7 +2616,7 @@ def _no_frame_boundary_words(ds) -> str:
         held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
                 f"with no offset table")
     except Exception:  # pylint: disable=broad-except
-        held = "holds fragments with no offset table"
+        held = "holds fragments pydicom could not count"
     return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
             f"pydicom found no frame boundary in them, so the declared "
             f"frames cannot be read")

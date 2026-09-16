@@ -424,16 +424,31 @@ def _is_rle_frame_header(fragment) -> bool:
     offset is 64 (the segment data begins straight after the header), the
     used ones rise and lie inside the frame, and the unused ones are zero.
 
-    A fragment that is the *second half* of a split frame carries
+    A fragment that is the *second half* of a split frame normally carries
     compressed bytes there and fails these tests: measured over the eight
     #664 fixtures, the second fragment of a frame split in two reads a
     segment count of 100,992,003. That is the whole reason the test is
     here -- see `_rle_fragment_frames`.
 
+    **This is a measured heuristic, not a proof, and it has a
+    counter-example** (rev-098j9 P2). Nothing stops a frame's *segment
+    data* from holding bytes that parse as a header. Measured: a 256-byte
+    frame laid out header(64) + data(64) + header(64) + data(64), split
+    into two 128-byte fragments, has **both** halves pass this test, so
+    the arm would read one frame as two and pydicom's segment-table
+    refusal would then turn a readable file into an `ERROR` row -- the
+    exact failure the test exists to prevent, on a file shaped to defeat
+    it. It was built by hand; no encoder is known to emit one, since the
+    layout needs a 64-byte first segment whose data begins with a legal
+    offset table. The test is kept because it is right about every file
+    that has been measured and the alternative is firing on all of them,
+    not because it cannot be fooled.
+
     Read as bytes only; nothing is decoded. "Inside the fragment" is as
     much as one fragment can be asked, because a frame that spans
     fragments would put its later segments past this one's end -- and
-    such a frame's continuation is exactly what fails the test above.
+    such a frame's continuation is what fails the test above in every
+    measured case.
     """
     if len(fragment) < _RLE_HEADER_BYTES:
         return False

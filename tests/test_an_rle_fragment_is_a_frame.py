@@ -49,7 +49,8 @@ from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from isocenter import imagecodecs_handler
 from isocenter.entities import Instance
-from isocenter.io_handlers import LOSS_SCOPE_SIGNAL, LOSS_SCOPE_STANDARD
+from isocenter.io_handlers import (LOSS_SCOPE_SIGNAL, LOSS_SCOPE_STANDARD,
+                                   _decode_pixels)
 from isocenter.session import DicomSession
 from support.decode_doors import (J2K_LOSSLESS, LJPEG_SV1, SOP_CLASS, dataset,
                                   write)
@@ -254,6 +255,32 @@ def test_a_single_declared_frame_over_several_rle_fragments_says_what_it_dropped
     assert "REVIEW_REQUIRED" in got["grade"], got["grade"]
 
 
+@pytest.mark.parametrize("declared, shape", [(1, (8, 8)), (2, (2, 8, 8))],
+                         ids=["one-frame", "two-frames"])
+def test_the_dropped_excess_returns_pixel_arrays_shape(declared, shape):
+    """`_decode_pixels`' own return, not the sidecar's (rev-098j9 P7/R3).
+
+    The docstring promises "a single kept frame is returned in
+    `pixel_array`'s shape for one frame, without a leading axis", and
+    `arr[0] if kept == 1 else arr[:kept]` is what keeps it. Nothing
+    asserted it: the pipeline tests read `Instance.get_pixel_data()`
+    after an `unload_pixel_data()`, and the sidecar loader rebuilds the
+    shape from Rows, Columns and NumberOfFrames -- so `arr[:kept]` in
+    place of `arr[0]` round-trips to `(8, 8)` anyway and the mutant
+    survived. This calls the function.
+
+    Both arms, so neither `arr[0]` nor `arr[:kept]` can answer for both.
+    """
+    ds = _no_bot(RLE_LOSSLESS, STREAMS, frames=declared)
+    arr, _label = _decode_pixels(ds, allow_excess_frames=False,
+                                 number_of_frames=len(STREAMS))
+
+    assert arr.shape == shape
+    expected = (FRAMES[0] if declared == 1
+                else np.stack(FRAMES[:declared]))
+    assert arr.tolist() == expected.tolist()
+
+
 def test_four_rle_fragments_under_two_declared_frames_are_counted_too(
         tmp_path):
     """Four fragments, NumberOfFrames 2 -- the second shape that raised."""
@@ -428,6 +455,49 @@ def test_two_rle_fragments_under_three_declared_frames_take_pydicoms_words(
         "incorrect")
 
 
+@pytest.mark.parametrize("table, refusal", [
+    ("basic", "Basic Offset Table names 1 frames; NumberOfFrames declares 2"),
+    ("extended",
+     "Extended Offset Table names 1 frames; NumberOfFrames declares 2"),
+], ids=["populated-bot", "extended-table"])
+def test_only_a_file_with_no_offset_table_reaches_the_no_boundary_refusal(
+        tmp_path, table, refusal):
+    """What makes `_no_frame_boundary_words`' table clause true (rev-098j9 P1).
+
+    That sentence says "with no offset table" unconditionally, and the
+    review was right that the function does not check it. The check
+    belongs here, because the reason is upstream: `offset_table_frame_
+    count` refuses a file whose Basic or Extended Offset Table disagrees
+    with NumberOfFrames *before* any decode, in its own words, so neither
+    table shape can reach the `StopIteration` arm.
+
+    It is not a theoretical guard. Calling `_decode_pixels` directly on
+    the populated-table file -- bypassing this one -- does reach the arm
+    and does produce the clause, so nothing about the decoder makes the
+    sentence true; only the order of the two refusals does. If that order
+    ever changes, this goes red and the clause must become conditional.
+
+    Per-arm refusals, deliberately: one shared assertion would pass with
+    either guard answering for both.
+    """
+    ds = _no_bot(RLE_LOSSLESS, [STREAMS[0]], frames=2)
+    if table == "basic":
+        ds.PixelData = encapsulate([STREAMS[0]], has_bot=True)
+        ds["PixelData"].is_undefined_length = True
+    else:
+        ds.ExtendedOffsetTable = struct.pack("<Q", 0)
+        ds.ExtendedOffsetTableLengths = struct.pack("<Q", len(STREAMS[0]))
+    counted = imagecodecs_handler.offset_table_frame_count(ds)
+    assert counted is not None and counted[0] == 1, counted
+    assert counted[3] == refusal.split(" names")[0], counted
+    path = write(tmp_path, ds)
+    got = _pipeline(tmp_path, path)
+
+    assert len(got["failures"]) == 1, got["failures"]
+    assert got["failures"][0][1] == refusal
+    assert "no offset table" not in got["failures"][0][1]
+
+
 # ---------------------------------------------------------------------------
 # The 64-byte header test, clause by clause
 # ---------------------------------------------------------------------------
@@ -474,6 +544,29 @@ def test_the_split_fragments_second_half_is_not_a_header():
     first, second = _split(RAMP_STREAM)
     assert imagecodecs_handler._is_rle_frame_header(first) is True
     assert imagecodecs_handler._is_rle_frame_header(second) is False
+
+
+def test_a_split_frame_can_be_built_whose_both_halves_are_headers():
+    """The heuristic's counter-example, measured (rev-098j9 P2).
+
+    The test above is the mechanism the whole arm rests on, and it is a
+    heuristic: nothing stops a frame's *segment data* from holding bytes
+    that parse as a header. A 256-byte frame laid out
+    header + data + header + data, split down the middle, has both halves
+    pass -- so on such a file the arm reads one frame as two and pydicom's
+    segment-table refusal turns a readable file into an `ERROR` row.
+
+    Pinned here so the limit is a measured fact rather than a sentence in
+    a docstring, and so a future clause added to `_is_rle_frame_header`
+    that happened to exclude this shape would show up as a change here.
+    No encoder is known to emit it: the layout needs a 64-byte first
+    segment whose data begins with a legal offset table.
+    """
+    frame = _header(1, [64]) + _header(1, [64])
+    assert len(frame) == 256
+    first, second = frame[:128], frame[128:]
+    assert imagecodecs_handler._is_rle_frame_header(first) is True
+    assert imagecodecs_handler._is_rle_frame_header(second) is True
 
 
 def test_every_excess_fixtures_fragments_are_headers():
