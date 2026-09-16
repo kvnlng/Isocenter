@@ -147,7 +147,7 @@ jobs:
     #
     # What it newly catches is ONE class: a broken relative file link
     # under `docs/`. Measured by mutation for #635, that is red under
-    # `--strict` and green on all 38 documentation tests the PR gate
+    # `--strict` and green on all 38 documentation tests the suite
     # runs. The griffe class of warning (an `Args:` entry naming a
     # parameter the def does not have) is already red pre-merge on
     # `tests/test_api_docstrings_render_cleanly.py`, and that test is NOT

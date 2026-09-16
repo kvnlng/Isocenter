@@ -222,7 +222,7 @@ jobs:
   # on a job that calls a reusable workflow, so the distinction is drawn
   # by what `publish` lists in `needs:` instead.
   #
-  # Both test the source tree, exactly as the PR gate does. Testing the
+  # Both test the source tree, exactly as a run of tests.yml does. Testing the
   # built wheel would be stronger and is a separate change.
   test-floor:
     # Blocks the upload. These are the two promises the package actually

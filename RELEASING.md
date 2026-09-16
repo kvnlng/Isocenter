@@ -15,6 +15,13 @@ deploys that release's documentation.
 | A release line | `release/X.Y` | `release/0.9` |
 | A published version | tag `vX.Y.Z` | `v0.9.8` |
 
+`v*` tags are admin-only. The repository ruleset "Protect release tags"
+covers `refs/tags/v*` and restricts creating, updating and deleting them
+and non-fast-forward pushes; only the repository admin role bypasses it.
+Every step below that creates, moves or deletes a `v*` tag is an admin's
+step. Pushing one also deploys the documentation (see "Documentation
+site"), so the restriction covers that too.
+
 There is one branch per minor line, not per version. `release/0.9` holds
 `v0.9.8` and every `0.9.z` patch after it. A branch name and a tag name
 never collide, so `git checkout v0.9.8` always means the published commit.
@@ -37,10 +44,12 @@ never collide, so `git checkout v0.9.8` always means the published commit.
 5. When the reviewer passes, merge into `main` pinned to that SHA
    (`gh pr merge --match-head-commit <sha>`), and delete the work branch.
 
-`main` has no required status checks. `tests.yml` still runs on pull
-requests into `main` and on pushes to `main`, and its result is information
-for the reviewer. It does not run on pull requests into a release branch.
-The gate is the local suite on both interpreters and the review.
+`main` has no required status checks, and no CI runs on a push or a pull
+request, into `main` or into a release branch. `tests.yml` runs only when
+dispatched by hand (`gh workflow run tests.yml --ref <branch>`) or when
+`publish.yml` calls it at release. A dispatched run is information for the
+reviewer, not a gate. The gate is the local suite on both interpreters and
+the review.
 
 ## Cutting a release
 
@@ -77,7 +86,7 @@ fixes, never features.
    make it go away. A rehearsal consumes the version number on TestPyPI
    only, so a second rehearsal of the same version cannot upload; its
    build gates and test matrix still run.
-5. **Tag** the release commit: `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
+5. **Tag** the release commit (an admin step): `git tag -a vX.Y.Z -m "Isocenter X.Y.Z"` on
    `release/X.Y`, then `git push origin vX.Y.Z`. **Pushing the tag deploys
    the documentation** for vX.Y.Z (see below), before the version is on
    PyPI; nothing else runs. That window is why step 4 must pass first.
@@ -105,7 +114,8 @@ fixes, never features.
 
 If the publish run fails before the upload job starts, nothing is spent.
 Fix the release branch, delete the tag locally and on `origin`, re-tag,
-and dispatch again. The docs deployed from the first tag stay live until
+and dispatch again (deleting and re-pushing a `v*` tag needs the admin
+bypass, see "Names"). The docs deployed from the first tag stay live until
 the new tag's push redeploys them. Once the upload has succeeded, the
 version is spent forever. A defect found then is a patch release, never
 a re-tag.
