@@ -2041,10 +2041,23 @@ class DicomSession:
         workers in a row cannot run even a trivial task, no file is to
         blame: every file left is rejected as "Not read", with a reason
         naming the causes that do this -- a script without the main guard
-        among them -- and the call returns. A fresh pool costs a few tenths of
-        a second to start, and a fatal file costs two of them and up to
-        2 x `ISOCENTER_MAX_WORKERS` + 1 files read one at a time. Any
-        other failure of the worker pool still raises.
+        among them -- and the call returns.
+
+        **What this costs.** A fresh pool costs a few tenths of a second
+        to start. A fatal file costs two or three of them -- two when it
+        is the first file of the one-at-a-time batch, three otherwise --
+        and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files read one at a
+        time, which is the bound per death. But a pool start is the price
+        of every death, not only of a death that names a file: a death on
+        a later file of a one-at-a-time round costs one more fresh pool,
+        and so does a trivial task that dies once, so a **clean** ingest
+        can pay for several. A decoder that leaks until every worker ends
+        on its second file is the measured worst case: one fresh pool per
+        file a round gets through, 9 to 11 of them for 12 good files
+        (scheduling decides), taking 2.8 s and 3.6 s against 0.3 s for the
+        same files with no death, and rejecting nothing and writing no row
+        (measured on both builds in the review of #672 and again here).
+        Any other failure of the worker pool still raises.
 
         A file whose SOP Instance UID an instance in this session already
         holds -- ingested earlier in this call, by an earlier call, or

@@ -3033,9 +3033,10 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
     - the rest at full width, on a fresh pool, until the next death.
 
     If the one-worker pool dies on the trivial task, it is given one more
-    fresh pool; if that one dies on it too, no worker can start and no file
-    is to blame: every file left is yielded as failed with
-    `_NO_INGEST_WORKER_STARTS`, and the generator stops.
+    fresh pool; if that one dies on it too -- two in a row, not two in the
+    call, so a canary that runs starts the count again -- no worker can
+    start and no file is to blame: every file left is yielded as failed
+    with `_NO_INGEST_WORKER_STARTS`, and the generator stops.
 
     **The bound.** Every round after the first is one of three kinds, and
     each either consumes a file or is followed by one that must:
@@ -3087,7 +3088,7 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
     pending = list(files)
     first = True
     alone = 0          # > 0: read this many of `pending` one at a time
-    canary_deaths = 0  # consecutive trivial tasks that died; two stop it
+    canary_deaths = 0  # trivial tasks that died in a row; two stop it
     while pending:
         pool = None
         failure = None
