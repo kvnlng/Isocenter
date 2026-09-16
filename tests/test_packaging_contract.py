@@ -2210,17 +2210,27 @@ def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
                "GIT_COMMITTER_NAME": "t",
                "GIT_COMMITTER_EMAIL": "t@example.invalid"}
 
-    def run_git(*args):
+    def run_git(*args, when=None):
+        dated = ({"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+                 if when else {})
         subprocess.run(["git", *args], cwd=str(repo), check=True,
                        capture_output=True,
-                       env={"PATH": os.environ["PATH"], **git_env})
+                       env={"PATH": os.environ["PATH"], **git_env, **dated})
 
     run_git("init", "-q")
-    # Tagged out of version order on purpose: v0.9.9 is created last and
-    # sorts after v0.10.0 as text, and v0.10.0 is still the latest.
-    for tag in ("v0.9.7", "v0.9.8", "v0.10.0", "v0.9.9"):
-        run_git("commit", "-q", "--allow-empty", "-m", tag)
-        run_git("tag", tag)
+    # Tagged out of version order on purpose: v0.9.9 is created last, a
+    # day after v0.10.0, and sorts after v0.10.0 as text -- and v0.10.0 is
+    # still the latest. The dates are explicit so creation order is
+    # unambiguous; created in one second they tie, and a guard sorting by
+    # creation date would pass by accident.
+    for day, tag in enumerate(("v0.9.7", "v0.9.8", "v0.10.0", "v0.9.9"),
+                              start=1):
+        when = f"2026-01-{day:02d}T12:00:00+00:00"
+        run_git("commit", "-q", "--allow-empty", "-m", tag, when=when)
+        run_git("tag", tag, when=when)
+    # A branch spelled like the latest tag: its short name is the latest
+    # tag's, so only the ref filter refuses it.
+    run_git("branch", "v0.10.0")
 
     def guarded(ref):
         return _run_step_script(guard, repo, {
@@ -2232,7 +2242,7 @@ def test_the_docs_deploy_refuses_any_ref_but_the_latest_release_tag(tmp_path):
         f"the guard refused the latest release tag:\n{latest.stdout}"
         f"{latest.stderr}")
     for ref in ("refs/tags/v0.9.9", "refs/tags/v0.9.8", "refs/heads/main",
-                "refs/heads/release/0.10"):
+                "refs/heads/release/0.10", "refs/heads/v0.10.0"):
         result = guarded(ref)
         assert result.returncode != 0, (
             f"the guard let {ref} deploy the site; only the latest `v*` "
