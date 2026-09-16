@@ -36,22 +36,33 @@ reason is that one gate covers three families whose decoders treat
 signedness three different ways -- the answers come from
 `_sign_extend`'s three call sites, not from the check:
 
-* **T.81 (`.57`/`.70`)** -- the precision is passed only when *wider*
-  than BitsStored (#622), so the width is `max(precision, BitsStored)`
-  and masking into the precision happens only where BitsStored <=
-  precision. One precision-12 stream reads `[-1996, 1470]` at BitsStored
-  12 (masked, no row), and `[-3992, 3570]` at 13 and `[0, 4970]` at 16
-  against `[0, 4095]` on the plugin route, 16 of 64 cells apart -- the
-  reported half (`test_a_signed_t81_stream_above_its_precision_writes_
-  the_row`, per-arm, since 13 exercises the low half alone and 16 the
-  high).
+* **Lossless T.81 (`.57`/`.70`)** -- the precision is passed only when
+  *wider* than BitsStored (#622), so the width is
+  `max(precision, BitsStored)` and masking into the precision happens
+  only where BitsStored <= precision. One precision-12 stream reads
+  `[-1996, 1470]` at BitsStored 12 (masked, no row), and
+  `[-3992, 3570]` at 13 and `[0, 4970]` at 16 against `[0, 4095]` on the
+  plugin route, 16 of 64 cells apart -- the reported half
+  (`test_a_signed_t81_stream_above_its_precision_writes_the_row`,
+  per-arm, since 13 exercises the low half alone and 16 the high).
+  `T81_SYNTAXES` also holds `.50`/`.51`, whose arm sign-extends nothing
+  at all, so that reasoning is not theirs; the signed arm is measured
+  unreachable for them (rev-098j9 round 2, P1) and the gate admits the
+  family whole because the check is codec-agnostic.
 * **JPEG-LS (`.80`/`.81`)** -- the frame's precision is passed
   *unconditionally* (#478), so a signed sample is always masked inside
   it and "by construction" is true here without qualification
   (`test_a_signed_jpegls_stream_is_masked_at_its_own_precision`).
-* **JPEG 2000** -- the SIZ segment carries the signedness, so negatives
-  are ordinary data and say nothing about precision
+* **JPEG 2000** -- unreported for **two** reasons, because the family has
+  two sub-cases (rev-098j9 round 2, F1). A *signed* codestream carries
+  its signedness in the SIZ segment, so negatives are ordinary data and
+  say nothing about precision
   (`test_the_unscoped_signed_bound_would_fire_on_a_signed_codestream`).
+  An *unsigned* codestream under PixelRepresentation 1 **is**
+  sign-extended -- `_against_pixel_representation` passes the
+  codestream's own precision (#460), JPEG-LS's mechanism -- so its
+  samples are always inside that precision and there is nothing to
+  report either way.
 
 Two candidate bounds were refused on measurement and both are pinned by
 a test rather than by prose: `[-2^(P-1), 2^(P-1) - 1]` fires on a

@@ -3070,9 +3070,9 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
     answers come from `_sign_extend`'s three call sites in
     `imagecodecs_handler`, not from this function:
 
-    * **T.81 (`.57`/`.70`) -- reported, above the precision only.**
-      `_decode_frame` passes the stream's precision only when it is
-      *wider* than BitsStored (#622), so the extension width is
+    * **Lossless T.81 (`.57`/`.70`) -- reported, above the precision
+      only.** `_decode_frame` passes the stream's precision only when it
+      is *wider* than BitsStored (#622), so the extension width is
       `max(precision, BitsStored)` and a sample is masked back inside
       `[-2^(P-1), 2^(P-1) - 1]` only where **BitsStored <= precision**.
       Above it a negative can only have come from a pattern above
@@ -3082,19 +3082,45 @@ def _samples_beyond_stream_precision(ds, arr) -> Optional[dict]:
       still #682's), BitsStored 13 reads `[-3992, 3570]` and BitsStored
       16 reads `[0, 4970]`, against `[0, 4095]` on the plugin route,
       16 of 64 cells apart. Those two are the reported half.
+    * **`.50`/`.51` are in `T81_SYNTAXES` too, and the reason above is
+      not their reason** (rev-098j9 round 2, P1). Their `_decode_frame`
+      arm returns `imagecodecs.jpeg_decode` with **no sign extension and
+      no container widening**, so `max(precision, BitsStored)` is not a
+      fact about them. The gate admits the family whole because this
+      check is codec-agnostic, and the signed arm is **measured inert**
+      for those two across six shapes and both environments: the
+      fallback's dtype check refuses a `uint8`/`uint16` decode under
+      BitsAllocated 16 with PixelRepresentation 1 before any row can be
+      computed, at BitsAllocated 8 only BitsStored == precision is legal
+      and the gate's `BitsStored > precision` excludes it, and on the
+      plugin route the stream is already clamped so nothing is outside.
+      Behaviour safe, premise narrower than the constant's name.
     * **JPEG-LS (`.80`/`.81`) -- never reported, because always masked.**
       `_decode_frame` passes the frame's own precision *unconditionally*
       (#478), so the width is the precision at every BitsStored and a
       signed sample is always inside `[-2^(P-1), 2^(P-1) - 1]`. Measured:
       an 8-bit sample of 150 under BitsStored 16 reads `-106`, which is
       the masking, not a divergence.
-    * **JPEG 2000 -- never reported, because signedness is the stream's
-      own.** The SIZ segment carries it, so the decoders return negatives
-      with no sign extension involved and a negative says nothing about
-      precision. `693_J2KR.dcm` from pydicom's test data is the measured
-      case: precision 14, BitsStored 16, PixelRepresentation 1,
+    * **JPEG 2000 -- never reported, and for two different reasons,
+      because the family has two sub-cases** (rev-098j9 round 2, F1).
+      (a) A **signed** codestream: the SIZ segment's sign bit carries the
+      signedness, the decoders return negatives directly with no sign
+      extension involved, and a negative says nothing about precision.
+      `693_J2KR.dcm` from pydicom's test data is the measured case:
+      precision 14, BitsStored 16, PixelRepresentation 1,
       `int16 [-2000, 2492]` from Pillow *and* from the fallback,
       identical in all 262144 cells, every sample legal at 14 bits.
+      (b) An **unsigned** codestream under PixelRepresentation 1, which
+      *is* sign-extended: `_against_pixel_representation` reinterprets it
+      and passes the **codestream's own precision** to `_sign_extend`
+      (#460), which is JPEG-LS's mechanism rather than T.81's -- so the
+      samples are masked inside the precision at every BitsStored and
+      there is nothing outside it to report. Measured, a precision-12
+      unsigned codestream under PixelRepresentation 1 at BitsStored 12,
+      13 and 16: `int16 [-1996, 1470]` on both routes in every case,
+      0 of 64 cells differing, no row. An earlier draft of this bullet
+      said the family never sign-extends, which was true of (a) and
+      false of (b).
 
     Two candidate bounds were refused on measurement and each is pinned
     by a test rather than by this paragraph, so neither can be re-adopted
