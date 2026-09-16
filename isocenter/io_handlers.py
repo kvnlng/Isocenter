@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1638 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1641 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1644 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1647 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -131,6 +131,7 @@ import sys
 import hashlib
 import struct
 from math import ceil
+from io import BytesIO
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
 from datetime import datetime, date
 from dataclasses import dataclass, field
@@ -169,7 +170,8 @@ try:
     from pydicom.encapsulate import encapsulate
 except ImportError:
     from pydicom.encaps import encapsulate
-from pydicom.encaps import generate_frames
+from pydicom.encaps import (generate_frames, parse_basic_offsets,
+                            parse_fragments)
 from pydicom.multival import MultiValue
 from pydicom.valuerep import validate_value
 from pydicom.sequence import Sequence
@@ -197,11 +199,12 @@ from .pixel_geometry import (
 )
 from .blob_kind import serialize_blob_kind
 from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
-                                  T81_SYNTAXES,
+                                  RLE_FRAGMENTS, T81_SYNTAXES,
                                   _j2k_irreversible,
                                   _jpeg_frame_type, _sign_extend,
                                   _jpegls_near, _stream_precision,
                                   colour_conversion, convert_colour,
+                                  declared_frame_count,
                                   decode_declared_frames, extended_offsets,
                                   frame_precisions,
                                   frame_count_mismatch_words,
@@ -2042,8 +2045,8 @@ def process_sequence(tag, elem, parent_item, dropped: list = None,
         parent_item.add_sequence_item(tag, seq_item)
 
 
-def _decode_pixels(ds, *, allow_excess_frames=None,
-                   as_rgb=None) -> Tuple[np.ndarray, str]:
+def _decode_pixels(ds, *, allow_excess_frames=None, as_rgb=None,
+                   number_of_frames=None) -> Tuple[np.ndarray, str]:
     """The array `Dataset.pixel_array` returns, and the colour space it is in.
 
     `pixel_array` calls exactly this -- `as_array` on `get_decoder(ts)`,
@@ -2081,19 +2084,77 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     `False` does, so passing the default through would silently truncate
     every decode, nested icons included.
 
+    **`number_of_frames` tells pydicom how many frames an RLE buffer's
+    fragments hold (#664).** RLE streams carry no end marker, so pydicom's
+    fragment walk finds no boundary, joins every fragment into one frame,
+    and then raises a bare `StopIteration` when asked for frame 1 -- or,
+    under NumberOfFrames 1, silently keeps frame 0 and loses the rest.
+    `imagecodecs_handler.offset_table_frame_count`'s RLE arm counts the
+    fragments instead, and the same two callers that pass
+    `allow_excess_frames=False` pass that count here, which takes
+    pydicom's `nr_fragments == number_of_frames` branch and returns every
+    frame. `allow_excess_frames` then has nothing to truncate against --
+    the count it would compare with is the one just overridden -- so the
+    excess is dropped here, keeping `declared_frame_count(ds)` frames:
+    the same reading the row names, so the frames kept and the frames
+    reported cannot drift apart. A single kept frame is returned in
+    `pixel_array`'s shape for one frame, without a leading axis.
+
     **When pydicom cannot decode, `imagecodecs` may (#416).** pydicom is
     asked first, always, so a file that decoded before decodes to the same
     bytes and the same colour-space label; `imagecodecs` first would
-    change both for files already accepted. Only a `RuntimeError` falls
+    change both for files already accepted. A `RuntimeError` falls
     through -- pydicom's "all plugins are missing dependencies" and "raised
-    by all available plugins" -- and only for
-    `_IMAGECODECS_FALLBACK_SYNTAXES`. Its validation failures are
-    `AttributeError` and `ValueError` (pydicom 3.0.2 `_validate_options`),
-    and they stay refusals in its words: imagecodecs ignores
+    by all available plugins" -- and **so does a `ValueError` (#663)**, for
+    `_IMAGECODECS_FALLBACK_SYNTAXES` only. See `_decode_with_imagecodecs`
+    for what it then refuses. Both depths get it, because both call this:
+    one rule for both depths.
+
+    **Why a `ValueError` too (#663).** pydicom's runner reads a plugin's
+    output buffer with the *header's* dtype rather than widening the
+    stream's own container as `imagecodecs_handler._in_declared_container`
+    does, so with pylibjpeg-libjpeg installed a precision-8 JPEG Lossless
+    stream -- returned one byte per sample -- raises numpy's `ValueError:
+    could not broadcast input array from shape (32,) into shape (64,)` out
+    of `DecodeRunner` under BitsAllocated 16. That is an upstream pydicom
+    shape, not a malformed file: *precision 8, BitsStored 8, BitsAllocated
+    16* is fully conformant, and the fallback reads it correctly. Catching
+    only `RuntimeError` lost it -- 0 instances, an `ERROR` row and
+    `REVIEW_REQUIRED` on a machine with the plugin, `PASS` without it,
+    which is the #453 split reopened. Measured over 128 `.57`/`.70` cells:
+    72 raised that `ValueError` and the fallback decodes 60 of them; the
+    other 12 are a stream *wider* than its container and the fallback
+    refuses them on its own dtype terms, with pydicom's reason still
+    first in the row.
+
+    **No row when the fallback reads it, and that is a decision rather
+    than an omission (#663).** The file is read whole and correctly; what
+    the row would report is which decoder the *reader* has installed,
+    which is neither a property of the file nor anything its sender can
+    act on. Writing one would also put the two machines back on opposite
+    grades -- `REVIEW_REQUIRED` with the plugin, `PASS` without, for
+    identical bytes -- which is the split this arm exists to close. A
+    stream the fallback cannot read either is still refused, with
+    pydicom's reason first; that refusal is the row.
+
+    **A validation `ValueError` cannot be masked by that.**
+    `_validate_like_pydicom` (#453) runs before the fallback and outside
+    it, and raises pydicom's own header refusal verbatim: measured over
+    eight malformed headers under both a plugin route and Pillow's,
+    `as_array` and `_validate_like_pydicom` raise the same class with the
+    same message in 16 of 16 cases. The clause that used to stand here --
+    that a `ValueError` stays a refusal because "imagecodecs ignores
     PlanarConfiguration, so catching those would ingest a file missing a
-    Type 1 element. See `_decode_with_imagecodecs` for what it then
-    refuses. Both depths get it, because both call this: one rule for
-    both depths.
+    Type 1 element" -- was written for #416 and was true then; #453 made
+    it false, because such a file is now refused before imagecodecs is
+    asked at all.
+
+    **`AttributeError` is deliberately not added.** The #281 population (a
+    `force=True` read with no `file_meta`) raises it from
+    `ds.file_meta.TransferSyntaxUID`, which is read outside the `try` on
+    purpose, and a validation `AttributeError` is already pydicom's own
+    words through `_validate_like_pydicom` -- so catching it would widen
+    the blast radius for no measured gain.
 
     **And the fallback validates first, as pydicom would have (#453).**
     pydicom validates the header only once it has found a plugin:
@@ -2161,6 +2222,8 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         kwargs["allow_excess_frames"] = allow_excess_frames
     if as_rgb is not None:
         kwargs["as_rgb"] = as_rgb
+    if number_of_frames is not None:
+        kwargs["number_of_frames"] = number_of_frames
     # A T.81 stream wider than BitsStored is read by its own precision on
     # pydicom's route too (#622). pydicom masks every T.81 decode to
     # BitsStored (`correct_unused_bits`, its default for these syntaxes),
@@ -2185,7 +2248,22 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     try:
         arr, meta = get_decoder(ts).as_array(ds, **kwargs)
         photometric = meta["photometric_interpretation"]
-    except RuntimeError as exc:
+    except StopIteration as exc:
+        # Encapsulated fragments with no frame boundary at all (#664).
+        # pydicom's walk found no end marker, joined every fragment into
+        # one frame and warned; `_as_array_encapsulated` then called
+        # `next()` for frame 1 and got this, which `describe_exception`
+        # renders as the bare word `StopIteration` -- an ingest row naming
+        # nothing. RLE is counted by its fragments before it can reach
+        # here (`imagecodecs_handler._rle_fragment_frames`); what is left
+        # is a syntax whose fragments carry no recognisable marker, where
+        # the count genuinely is not knowable. So it is a refusal, and the
+        # refusal names both numbers. Narrow, and re-raised: a bare
+        # `except StopIteration` that returned anything would be the
+        # silent-failure shape this project keeps out. Raised inside this
+        # clause, so the sibling fallback clause below cannot catch it.
+        raise RuntimeError(_no_frame_boundary_words(ds)) from exc
+    except (RuntimeError, ValueError) as exc:
         if str(ts) not in _IMAGECODECS_FALLBACK_SYNTAXES:
             raise
         # Before the fallback and outside it, so the refusal is pydicom's
@@ -2204,6 +2282,13 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
         # ask it.
         if wider is not None:
             arr = _extend_each_frame(arr, ds, wider)
+    # The RLE excess, dropped here because `allow_excess_frames` cannot
+    # drop it: the count it truncates against is the `number_of_frames`
+    # just overridden (#664). Read through `declared_frame_count`, the
+    # same reading the row names.
+    if number_of_frames is not None and allow_excess_frames is False:
+        kept = declared_frame_count(ds)
+        arr = arr[0] if kept == 1 else arr[:kept]
     # Native byte order, at the one exit every door leaves by (#648).
     # pydicom returns a big-endian source in the file's own order (`>u2`,
     # `>i2`, `>u4`) with the right *values*, and every caller that stores
@@ -2216,6 +2301,34 @@ def _decode_pixels(ds, *, allow_excess_frames=None,
     if arr.dtype.byteorder not in ('=', '|'):
         arr = arr.astype(arr.dtype.newbyteorder('='))
     return np.ascontiguousarray(arr), photometric
+
+
+def _no_frame_boundary_words(ds) -> str:
+    """The refusal for fragments pydicom can find no frame boundary in (#664).
+
+    Both counts, where the decoder's own answer was a message-less
+    `StopIteration`. The fragment count is read the way pydicom's
+    generator reads it; where even that cannot be parsed the sentence
+    still names the declared frames, because a refusal that names nothing
+    is what this replaces.
+
+    The words carry none of the three substrings
+    `Instance.get_pixel_data`'s file arm routes on -- "no pixel data",
+    "decompress", "missing dependencies" -- so the read door raises them
+    as they stand rather than turning them into a codecs-missing message.
+    """
+    declared = declared_frame_count(ds)
+    try:
+        buf = BytesIO(ds.PixelData)
+        parse_basic_offsets(buf)
+        fragments, _offsets = parse_fragments(buf)
+        held = (f"holds {fragments} fragment{'' if fragments == 1 else 's'} "
+                f"with no offset table")
+    except Exception:  # pylint: disable=broad-except
+        held = "holds fragments with no offset table"
+    return (f"Pixel Data {held}, and NumberOfFrames declares {declared}: "
+            f"pydicom found no frame boundary in them, so the declared "
+            f"frames cannot be read")
 
 
 def _t81_frames_wider(ds, ts) -> Optional[list]:
@@ -2908,6 +3021,11 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
                                           "fewer"))
                     continue
                 decode_kwargs["allow_excess_frames"] = False
+                # The top level's #664 keyword, at this depth: without it
+                # an icon with an empty table and excess RLE fragments
+                # gets the row and then still joins its fragments.
+                if counted[3] == RLE_FRAGMENTS:
+                    decode_kwargs["number_of_frames"] = counted[0]
             # The top level's #455 header rule, at this depth (#598).
             # After the borrow, because it reads the transfer syntax off
             # `file_meta`; asked before the decode, as at the top level,
@@ -3354,6 +3472,13 @@ def ingest_worker(fp: str) -> Tuple:
                     return ({'path': fp}, None, None, None, None, None, None,
                             frame_count_mismatch_words(counted))
                 decode_kwargs['allow_excess_frames'] = False
+                # An RLE buffer counted fragment by fragment has to be
+                # decoded by that count too, or pydicom joins the
+                # fragments again and `allow_excess_frames` truncates
+                # nothing (#664). One counter feeds both, so the frames
+                # decoded and the frames this row names are one number.
+                if counted[3] == RLE_FRAGMENTS:
+                    decode_kwargs['number_of_frames'] = counted[0]
                 meta['offset_table_excess'] = counted
             # Asked of the header before the decode, so both decoders'
             # files get it; attached only once the decode succeeds (#455).
