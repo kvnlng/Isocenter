@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1640 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1643 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1643 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1646 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -123,6 +123,8 @@ their wording would pin a rendering, not a fact.
 
 import concurrent.futures
 import contextlib
+import dataclasses
+import multiprocessing
 import os
 import pickle
 import sys
@@ -133,6 +135,7 @@ from math import ceil
 from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
 from datetime import datetime, date
 from dataclasses import dataclass, field
+from concurrent.futures.process import BrokenProcessPool
 
 import pydicom
 import numpy as np
@@ -205,7 +208,8 @@ from .imagecodecs_handler import (J2K_SYNTAXES, JPEGLS_SYNTAXES,
                                   frame_count_mismatch_words,
                                   offset_table_frame_count,
                                   signed_codestream_refusal)
-from .parallel import run_parallel, _resolve_strategy
+from .parallel import (run_parallel, _resolve_strategy,
+                       resolve_worker_initializer)
 from .validation import IODValidator
 from .sidecar import SidecarManager
 from .waveform import filter_dangling_annotation_refs
@@ -3273,6 +3277,264 @@ def _decode_nested_pixels(ds, candidates, dropped, instance, *,
 _UNCROSSABLE_RESULT = ("Its parsed result could not be returned from the "
                        "ingest worker")
 
+#: The reason a file is failed with when a worker process ended with it not
+#: yet returned, and then a fresh one-worker pool, which had run a trivial
+#: task and nothing else, ended on this file as the first it was given
+#: (#654). Every clause is what happened, and nothing more: the first death
+#: is not claimed to have been on this file, because at full width it
+#: cannot be known. The exception is appended in parentheses. A constant
+#: because tests match its prefix and the CHANGELOG quotes it.
+_WORKER_ENDED_READING = (
+    "An ingest worker process ended before this file was returned, and a "
+    "fresh worker process given this file alone, as its first file, ended "
+    "while reading it")
+
+#: The reason for every file left when a fresh worker process could not
+#: run even a trivial task, so no file is to blame and none is retried
+#: (#654). The pool does not say why a worker ended, so this names the
+#: causes that end one this early rather than choosing among them; the
+#: first is the one measured, a script with no main guard whose
+#: re-imported copy raises in the child (README).
+_NO_INGEST_WORKER_STARTS = (
+    "Not read: a fresh ingest worker process ended before it could read "
+    "any file, so the failure is not this file's. A script that opens a "
+    "Session outside an `if __name__ == \"__main__\":` guard does this, "
+    "and so does a worker process that cannot import isocenter or is "
+    "killed as it starts")
+
+
+def _failed_result(fp, reason):
+    """`ingest_worker`'s tuple for a failed file, built in the parent.
+
+    The shape `import_files`' result loop unpacks, so a file the retry
+    rejects takes the loop's ordinary `err is not None` arm: one
+    `_record_failure`, one `ERROR` row, in the file's own slot.
+    """
+    return ({'path': fp}, None, None, None, None, None, None, reason)
+
+
+def _ingest_results(files, executor, strategy, on_executor_broken=None):
+    """`ingest_worker`'s result for each of `files`, in order, past a dead worker (#654).
+
+    Round 0 dispatches every file on `executor` (the session's shared
+    pool, or `None` for `run_parallel`'s own) exactly as `import_files`
+    did before. When a worker process **ends** -- `BrokenProcessPool`, the
+    out-of-memory killer, a decoder crash, `SIGKILL` -- the results already
+    returned are kept and the files not yet returned are read again on
+    pools built here:
+
+    - the next `2W+1` of them **one at a time**, on a one-worker pool that
+      first runs a trivial task. If the worker dies on the **first** file
+      after that task, the file is yielded as failed with
+      `_WORKER_ENDED_READING`, and reading goes back to full width from the
+      file after it. If it dies on a **later** file, no file is blamed: the
+      worker had read others first, so the death may be theirs or its own
+      (a leak, a thread that ends it after a result), and a new
+      one-at-a-time round starts at the file it died on. If the whole batch
+      comes back, the death did not recur, no file is blamed and nothing is
+      recorded but the `WARNING` line;
+    - the rest at full width, on a fresh pool, until the next death.
+
+    If the one-worker pool dies on the trivial task, it is given one more
+    fresh pool; if that one dies on it too -- two in a row, not two in the
+    call, so a canary that runs starts the count again -- no worker can
+    start and no file is to blame: every file left is yielded as failed
+    with `_NO_INGEST_WORKER_STARTS`, and the generator stops.
+
+    **The bound.** Every round after the first is one of three kinds, and
+    each either consumes a file or is followed by one that must:
+
+    - a one-at-a-time round whose trivial task ran consumes at least one
+      file -- the whole batch, the first file (named), or the `delivered
+      >= 1` files returned before the one it died on;
+    - one whose trivial task died consumes none, and is followed by at most
+      one more such round before the generator returns;
+    - a full-width round that dies is always followed by a one-at-a-time
+      round, and one that does not die consumes its whole batch.
+
+    So between two files consumed there are at most three rounds, and the
+    generator ends. No retry count and no variable.
+
+    Any failure of the pool that is **not** a dead worker is raised as it
+    was before (`RuntimeError: cannot schedule new futures after shutdown`
+    is the reachable one): it is not about these files. Turning it into
+    rows instead was measured while designing this, on a script with no
+    main guard, and let the re-imported copies write `ERROR` rows into
+    the parent's store.
+
+    `on_executor_broken(executor)` is called once, when round 0's pool --
+    the caller's -- breaks, so that the caller can replace it; the pools
+    built here are shut down here. It is called from inside the caller's
+    iteration, so it must only record: `ingest()` passes `list.append`
+    and rebuilds after the pass-lock is released.
+    """
+    logger = get_logger()
+    # Rounds after the first draw no progress bar and repeat no #185 line:
+    # `run_parallel` reads both fields on every call even when `executor=`
+    # is given, so each round would otherwise draw a new "Ingesting" bar
+    # (a death reads as a bar stopping short, then one per round) and
+    # announce the recycling override again. The `WARNING` below
+    # announces the retry instead.
+    #
+    # And one file per task, whatever `ISOCENTER_CHUNKSIZE` says -- the
+    # variable is not "honoured" here on purpose. `_resolve_strategy` lets
+    # it override `import_files`' explicit 1, and `executor.map` sends a
+    # chunk to a worker as one task: a death anywhere in the chunk loses
+    # every result in it, so "the first file not returned" is the chunk's
+    # first file, not the one the worker died on, and a good file beside a
+    # fatal one was rejected (review of #672). Round 0 keeps the caller's
+    # chunk size; a chunked death there can put the fatal file past the
+    # 2W+1 files below, which costs a round, never a file.
+    retry_strategy = dataclasses.replace(
+        strategy, show_progress=False, threads_request_overridden_by=None,
+        chunksize=1)
+    pending = list(files)
+    first = True
+    alone = 0          # > 0: read this many of `pending` one at a time
+    canary_deaths = 0  # trivial tasks that died in a row; two stop it
+    while pending:
+        pool = None
+        failure = None
+        cannot_start = None
+        delivered = 0
+        try:
+            if first:
+                round_executor, batch = executor, pending
+                round_strategy = strategy
+            else:
+                # A spawned `ProcessPoolExecutor`, built here, never
+                # `run_parallel(executor=None)`: that path is threads on
+                # 3.14t, where a file that ends its process ends the
+                # parent with it, and `multiprocessing.Pool` under
+                # `ISOCENTER_MAX_TASKS_PER_CHILD`, which waits forever on
+                # a killed worker. The spawn pin is the shared pool's
+                # (#220), and so is the initializer (#250) -- resolved
+                # through this module's binding, deliberately, and not
+                # `strategy.worker_initializer`, which is the same
+                # function read through `parallel`'s.
+                pool = concurrent.futures.ProcessPoolExecutor(
+                    max_workers=1 if alone else strategy.max_workers,
+                    mp_context=multiprocessing.get_context("spawn"),
+                    initializer=resolve_worker_initializer(strategy.disable_gc))
+                round_executor = pool
+                round_strategy = retry_strategy
+                batch = pending[:alone] if alone else pending
+                if alone:
+                    # The canary, and it is what lets a row blame a file.
+                    # A worker that cannot start dies on whatever it is
+                    # handed first; without this task ahead of the batch,
+                    # that is a file, and every file in turn would be
+                    # named as the one that ends a worker. `os.getpid` is
+                    # a builtin: it pickles by reference and touches no
+                    # file.
+                    try:
+                        pool.submit(os.getpid).result()
+                        canary_deaths = 0
+                    except BrokenProcessPool as exc:
+                        cannot_start = exc
+            if cannot_start is None:
+                # `yield_exceptions=True` changes nothing for a file that
+                # raises -- `ingest_worker` catches its own exceptions --
+                # and is here for the pool's own failure, which it yields
+                # once, as the last value, instead of raising it.
+                for result in run_parallel(ingest_worker, batch,
+                                           executor=round_executor,
+                                           return_generator=True,
+                                           ordered=True,
+                                           yield_exceptions=True,
+                                           strategy=round_strategy):
+                    if isinstance(result, Exception):
+                        failure = result
+                        break
+                    delivered += 1
+                    yield result
+        finally:
+            if pool is not None:
+                pool.shutdown(wait=True, cancel_futures=True)
+        if cannot_start is not None and not canary_deaths:
+            # Once is not "no worker can start": a worker killed as it
+            # started for a reason of the moment would otherwise cost every
+            # file left, good ones included (review of #672). One more
+            # fresh pool; a second death in a row is the answer.
+            canary_deaths = 1
+            logger.warning(
+                "A fresh ingest worker process ended before it could run "
+                "anything (%s); trying once more on another.",
+                describe_exception(cannot_start))
+            continue
+        if cannot_start is not None:
+            logger.warning(
+                "A fresh ingest worker process ended before it could run "
+                "anything (%s); not reading the %d file(s) left.",
+                describe_exception(cannot_start), len(pending))
+            for fp in pending:
+                yield _failed_result(fp, _NO_INGEST_WORKER_STARTS)
+            return
+        if failure is not None and not isinstance(failure, BrokenProcessPool):
+            raise failure
+        if (failure is not None and first and executor is not None
+                and on_executor_broken is not None):
+            on_executor_broken(executor)
+        first = False
+        if failure is None:
+            pending = pending[len(batch):]
+            alone = 0
+            continue
+        if alone and delivered:
+            # The worker died after returning `delivered` files of this
+            # round, so it had read other files first: the death may be
+            # theirs, or its own -- a leak that ends it on its Nth read, a
+            # thread that ends it after a result -- and not the held
+            # file's. Blaming it wrote "given this file alone, as its first
+            # file" for a file that was neither, and left a good file out
+            # of the store (review of #672). Start a new one-at-a-time
+            # round at that file instead, on a fresh pool, with no row.
+            # `alone` stays >= 1, because a failure means the batch did not
+            # all come back; this round consumed `delivered` >= 1 files,
+            # which is what keeps the bound.
+            pending = pending[delivered:]
+            alone -= delivered
+            logger.warning(
+                "An ingest worker process ended again (%s) after returning "
+                "%d file(s) one at a time; reading on from the file it held, "
+                "first on another fresh worker.",
+                describe_exception(failure), delivered)
+            continue
+        if alone:
+            # One worker, and it had run the canary and nothing else: the
+            # first file not returned is the file it died on. That rests on two CPython
+            # internals, read in `concurrent/futures/process.py` and
+            # `multiprocessing/queues.py` on 3.12.14 and 3.14.7t: the
+            # result queue is a `SimpleQueue`, whose `put` writes the
+            # whole result to the pipe before the worker takes its next
+            # task (no feeder thread), and the manager reads a ready
+            # result before it treats a dead worker's sentinel as broken.
+            # A future CPython that put the result path behind a feeder
+            # thread would blame the file before the fatal one; a
+            # per-file `submit` here would make this exact by
+            # construction, at the cost of a second copy of
+            # `run_parallel`'s exception handling.
+            yield _failed_result(
+                batch[0], f"{_WORKER_ENDED_READING} "
+                          f"({describe_exception(failure)})")
+            pending = pending[1:]
+            alone = 0
+            continue
+        pending = pending[delivered:]
+        # 2W+1 because the stdlib moves at most W+1 tasks into the call
+        # queue ahead of the W running (`EXTRA_QUEUED_CALLS`), so the file
+        # that ended a worker is among the first 2W+1 not returned. An
+        # internal detail, and a wrong guess costs time, never a file: a
+        # batch that comes back whole goes back to full width, and the
+        # next death starts another one-at-a-time round further on.
+        alone = min(len(pending), 2 * max(1, strategy.max_workers) + 1)
+        logger.warning(
+            "An ingest worker process ended (%s), during this call or "
+            "before it, with %d file(s) not yet returned; reading the next "
+            "%d one at a time on a fresh worker to find any file that ends "
+            "it.",
+            describe_exception(failure), len(pending), alone)
+
 
 def ingest_worker(fp: str) -> Tuple:
     """
@@ -3693,7 +3955,8 @@ class DicomImporter:
     """
     @staticmethod
     def import_files(file_paths: List[str], store: DicomStore, executor=None,
-                     sidecar_manager=None, store_backend=None):
+                     sidecar_manager=None, store_backend=None,
+                     on_executor_broken=None):
         """
         Parses a list of files or directories. Recurses into directories to find all files.
 
@@ -3708,6 +3971,12 @@ class DicomImporter:
             store_backend (optional): SqliteStore used to register sidecar
                 blob references. Waveform blobs are invisible to compaction
                 unless recorded here.
+            on_executor_broken (optional): Called with `executor` when a
+                worker process of that pool ends during the import, which
+                leaves the pool unusable. The import itself carries on
+                (#654): see `_ingest_results`. Called from inside the
+                import, so it should only record; `Session.ingest()`
+                passes `list.append` and replaces the pool afterwards.
 
         Returns:
             IngestSummary: what reached the graph and what did not.
@@ -3879,13 +4148,14 @@ class DicomImporter:
         # recycling pool, which a direct `import_files(executor=None)`
         # reaches under `ISOCENTER_MAX_TASKS_PER_CHILD`. The session's
         # shared executor is ordered already (#450).
-        results = run_parallel(
-            ingest_worker,
-            new_files,
-            executor=executor,
-            return_generator=True,
-            ordered=True,
-            strategy=strategy)
+        #
+        # `_ingest_results` makes that dispatch through `run_parallel`,
+        # still this module's binding, and survives a worker process that
+        # ends (#654): the file it ended on comes back in its own slot as
+        # a failed result, which the `err is not None` arm below records
+        # like any other rejected file, and the rest come back in order.
+        results = _ingest_results(new_files, executor, strategy,
+                                  on_executor_broken)
 
         # 3. Aggregation (Streaming)
         #

@@ -664,7 +664,11 @@ def run_parallel(
             pool can no longer deliver are over. Only for callers that
             branch on `isinstance(result, Exception)`; by default a raise
             is a raise, because a caller with no such arm must never
-            receive an exception as data (#232). One promise the recycling
+            receive an exception as data (#232). `ingest()` goes further
+            with the trailing failure than reporting it: when it is a dead
+            worker, `io_handlers._ingest_results` reads the files not yet
+            returned again and names the one that ends a worker (#654).
+            One promise the recycling
             pool cannot keep: `multiprocessing.Pool` answers a *killed*
             worker by respawning it and waiting forever for the lost task,
             so under `maxtasksperchild` that case hangs rather than

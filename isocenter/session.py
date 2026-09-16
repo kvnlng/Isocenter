@@ -991,9 +991,13 @@ class DicomSession:
         # lock order in CLAUDE.md and must not be made part of it: it is
         # taken and released at the top of `ingest()` with nothing held,
         # and again in that call's `finally` after the pass-lock has been
-        # released. `_ingest_executor()` keeps that true by capturing its
-        # decision as data and logging it, and retiring the pool it
-        # swapped out, only after the lock is released. The one thing
+        # released, and once more after `import_files` returns, when the
+        # pool broke during it, to replace it (`_restart_executor`, #654)
+        # -- after the pass-lock is released there too.
+        # `_ingest_executor()` keeps that true by capturing its decision
+        # as data and logging it, and retiring the pool it swapped out,
+        # only after the lock is released; `_restart_executor()` does the
+        # same with its log line and teardown. The one thing
         # under it that takes any lock at all is the replacement pool's
         # constructor, which takes the stdlib's own internal locks.
         self._executor_width = resolve_max_workers()
@@ -1227,13 +1231,31 @@ class DicomSession:
             self.persistence_manager.save_async(
                 self.store.patients, prune_absent_patients=True)
 
-    def _restart_executor(self, max_workers=None):
+    def _restart_executor(self, max_workers=None, *, broken=None):
         """
         Restarts the internal process pool executor, potentially with fewer workers.
-        Useful for recovering from BrokenProcessPool errors (OOM).
+        Recovers from a `BrokenProcessPool` (a worker killed by the OOM
+        killer, say): `ingest()` calls it, with `broken=`, after an import
+        during which a worker of the shared pool ended (#654). Until then
+        this docstring claimed the role and nothing called it, so a pool
+        that broke stayed broken and every later `ingest()` on the session
+        raised at once until `close()`.
 
         With no argument the width is resolved as construction resolves
         it: `ISOCENTER_MAX_WORKERS`, else one per CPU, re-read now.
+
+        `broken` makes the swap a **compare-and-swap**: the pool is
+        replaced only if `self._executor` is still that pool. Two
+        `ingest()` calls on two threads share the pool, so both see it
+        break and both call this; without the check the second would shut
+        down the replacement the first had just built -- a live pool,
+        which a third `ingest()` may already be dispatching on (#511's
+        peer rule). The check and the swap are one critical section under
+        `_ingest_lock`; the log line and the teardown run after it is
+        released, as in `_ingest_executor()`. **The replacement is built
+        before the old pool is retired**, for that method's reason: a
+        constructor that raises `OSError` (EMFILE, ENOMEM) leaves the
+        session exactly as it was.
 
         This is the **broken-pool** path, and its `cancel_futures=True`
         below is part of that contract: the pool it is replacing is
@@ -1248,30 +1270,37 @@ class DicomSession:
             # would undo the setting at exactly the moment memory is short
             # (#501).
             max_workers = resolve_max_workers()
+        with self._ingest_lock:
+            if broken is not None and self._executor is not broken:
+                # Another caller has replaced the pool that broke already;
+                # the one here now is live.
+                return
+            # Re-init, with the same spawn pin as construction: an OOM
+            # recovery must not quietly downgrade the pool to fork
+            # (#220), nor drop the worker setup construction resolved
+            # (#250).
+            replacement = concurrent.futures.ProcessPoolExecutor(
+                max_workers=max_workers,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=resolve_worker_initializer())
+            retired, self._executor = self._executor, replacement
+            # The recorded width follows every swap (#511). A restart
+            # that narrowed the pool for an OOM recovery and left this at
+            # the old number would make the next `ingest()` either
+            # rebuild for nothing or -- with the variable narrowed to
+            # match -- skip the rebuild it needed and run at the recovery
+            # width in silence.
+            self._executor_width = max_workers
         get_logger().warning(f"Restarting ProcessPoolExecutor (max_workers={max_workers})...")
-        if self._executor:
+        if retired:
             try:
                 # Force kill old processes if they are stuck/broken
-                self._executor.shutdown(wait=False, cancel_futures=True)
+                retired.shutdown(wait=False, cancel_futures=True)
             except (RuntimeError, OSError) as exc:
                 # The executor is being replaced regardless; a failure to
                 # shut the old one down is worth a line in the log, not a
                 # crash.
                 get_logger().debug("Could not shut down prior executor: %s", describe_exception(exc))
-
-        # Re-init, with the same spawn pin as construction: an OOM
-        # recovery must not quietly downgrade the pool to fork (#220),
-        # nor drop the worker setup construction resolved (#250).
-        self._executor = concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_workers,
-            mp_context=multiprocessing.get_context("spawn"),
-            initializer=resolve_worker_initializer())
-        # The recorded width follows every swap (#511). A restart that
-        # narrowed the pool for an OOM recovery and left this at the old
-        # number would make the next `ingest()` either rebuild for
-        # nothing or -- with the variable narrowed to match -- skip the
-        # rebuild it needed and run at the recovery width in silence.
-        self._executor_width = max_workers
 
     @contextlib.contextmanager
     def _ingest_executor(self):
@@ -1995,6 +2024,41 @@ class DicomSession:
         export write gets (#181, #211). Check the return value: a run
         that rejected files completes normally.
 
+        That includes a file that **ends the worker process reading it**
+        -- the out-of-memory killer, a decoder crash, `SIGKILL` (#654).
+        The results already returned are kept, and the files not yet
+        returned are read again one at a time on a fresh one-worker process
+        pool. A file is rejected only when that fresh worker ends on it as
+        the first file it was given, with the reason "An ingest worker
+        process ended before this file was returned, and a fresh worker
+        process given this file alone, as its first file, ended while
+        reading it". A worker that ends on a later file had read others
+        first, so that file is not blamed: reading starts again from it on
+        another fresh worker. The rest are read at full width, the call
+        saves as usual, and the session's pool is replaced so the next
+        `ingest()` runs normally. A death that does not recur costs no file
+        and writes no row; a `WARNING` log line records it. If two fresh
+        workers in a row cannot run even a trivial task, no file is to
+        blame: every file left is rejected as "Not read", with a reason
+        naming the causes that do this -- a script without the main guard
+        among them -- and the call returns.
+
+        **What this costs.** A fresh pool costs a few tenths of a second
+        to start. A fatal file costs two or three of them -- two when it
+        is the first file of the one-at-a-time batch, three otherwise --
+        and up to 2 x `ISOCENTER_MAX_WORKERS` + 1 files read one at a
+        time, which is the bound per death. But a pool start is the price
+        of every death, not only of a death that names a file: a death on
+        a later file of a one-at-a-time round costs one more fresh pool,
+        and so does a trivial task that dies once, so a **clean** ingest
+        can pay for several. A decoder that leaks until every worker ends
+        on its second file is the measured worst case: one fresh pool per
+        file a round gets through, 9 to 11 of them for 12 good files
+        (scheduling decides), taking 2.8 s and 3.6 s against 0.3 s for the
+        same files with no death, and rejecting nothing and writing no row
+        (measured on both builds in the review of #672 and again here).
+        Any other failure of the worker pool still raises.
+
         A file whose SOP Instance UID an instance in this session already
         holds -- ingested earlier in this call, by an earlier call, or
         loaded from the store -- is **declined** (#431): the first
@@ -2080,6 +2144,13 @@ class DicomSession:
         # `self._executor` is deliberately not read again below, so a
         # peer ingest that resizes between here and the dispatch cannot
         # pull this call's pool out from under it.
+        #
+        # `broken` receives that pool if a worker process of it ended
+        # during the import (#654). The import carries on by itself, on
+        # pools of its own; the shared pool is replaced below, outside
+        # both blocks, because `_restart_executor` takes `_ingest_lock`,
+        # which is never taken with the pass-lock held.
+        broken = []
         with self._ingest_executor() as executor:
             with self.store_backend._hold_pass_lock():
                 # Pass Sidecar Manager for eager pixel writing
@@ -2088,9 +2159,32 @@ class DicomSession:
                     self.store,
                     executor=executor,
                     sidecar_manager=self.store_backend.sidecar,
-                    store_backend=self.store_backend)
+                    store_backend=self.store_backend,
+                    on_executor_broken=broken.append)
 
         self.save(sync=True)
+        # Save first, then replace the pool -- not the natural order of
+        # "fix the pool, then save". A rebuild that came first and raised
+        # anything the guard below does not catch would skip this save,
+        # and leave every instance the import linked unsaved with its
+        # frames unreferenced in the sidecar, which is the loss #654
+        # fixes; `test_the_import_is_saved_before_the_pool_is_replaced`
+        # pins the order. `OSError` is what the constructor raises on a
+        # box out of descriptors or memory (EMFILE, ENOMEM); the import
+        # has completed and saved by then, so it is a log line, and the
+        # next `ingest()` finds the pool broken at its first file and
+        # heals through the same retry and this same call.
+        if broken:
+            try:
+                self._restart_executor(broken=broken[0])
+            except OSError as exc:
+                get_logger().warning(
+                    "A worker process of this session's shared ingest pool "
+                    "ended during ingest(), and the pool could not be "
+                    "replaced (%s). This ingest() completed and was saved; "
+                    "the next ingest() reads on fresh pools of its own and "
+                    "tries the replacement again.",
+                    describe_exception(exc))
 
         # Calculate stats
         n_p = len(self.store.patients)
