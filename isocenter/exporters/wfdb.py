@@ -12,7 +12,8 @@ import numpy as np
 
 from . import Exporter, register
 from ..io_handlers import (ExportError, export_folder_names,
-                           format_study_date, LOSS_SCOPE_STANDARD)
+                           format_study_date, LOSS_SCOPE_STANDARD,
+                           normalize_patient_id_subset)
 from ..logger import describe_exception_without_paths, get_logger
 from ..waveform import Waveform, WaveformChannel
 
@@ -322,7 +323,14 @@ class WfdbExporter(Exporter):
         Args:
             session (DicomSession): Active session.
             folder (str): Output root.
-            **options: `patient_ids` (list, optional) limits the export.
+            **options: `patient_ids` (list, optional) limits the export
+                to those patients. Only `None`, or the option omitted,
+                means every patient: an empty list, tuple or set is a
+                filter that selected nobody and the export writes
+                nothing (#678). A bare `str` names exactly one id and
+                logs a warning; bytes are refused. An iterator is
+                materialised, so a generator is not consumed by the
+                first patient walked.
                 `include_annotation_text` (bool, default False) releases
                 the operator-typed text in annotations.json: Unformatted
                 Text Value (0070,0006) into `note`, and a site-defined
@@ -339,8 +347,9 @@ class WfdbExporter(Exporter):
         Returns:
             List[str]: Paths of the `.hea` files written. Empty when the
             export attempted nothing -- no waveform instances in scope,
-            or only waveforms with no samples, each of which files its
-            own `STANDARD` `DATA_LOSS` row (#338). A partial export
+            only waveforms with no samples, each of which files its
+            own `STANDARD` `DATA_LOSS` row (#338), or a `patient_ids`
+            that selected no patient in the store. A partial export
             returns the records that did reach disk.
 
         Raises:
@@ -355,7 +364,9 @@ class WfdbExporter(Exporter):
                 `_WFDB_OPTIONS`. Until #410 an unrecognised option was
                 dropped without a word, so a mistyped `patient_ids`
                 exported every patient. Nothing is written when this
-                raises.
+                raises. Also when `patient_ids` is bytes-like, which no
+                `PatientID` in the graph could match, or is neither
+                `None` nor iterable (#678).
         """
         logger = get_logger()
         # First thing, before `patient_ids` is read and before any file
@@ -379,7 +390,13 @@ class WfdbExporter(Exporter):
                 f"{', '.join(repr(name) for name in unknown)}; the wfdb "
                 f"options are "
                 f"{', '.join(repr(name) for name in sorted(_WFDB_OPTIONS))}.")
-        patient_ids = options.get("patient_ids")
+        # Straight after the unknown-option refusal above and before any
+        # file is written, for the same reason: a refusal raised later
+        # arrives with records already on disk. `normalize_patient_id_subset`
+        # is the one reading of this option, shared with
+        # `DicomSession._export_dicom` (#678) -- see its docstring for the
+        # three forms it settles and why `bytes` is the only refusal.
+        patient_ids = normalize_patient_id_subset(options.get("patient_ids"))
         # Off by default: (0070,0006) is free-text clinical commentary, and
         # a site-defined Concept Name's Code Meaning is operator-typed too.
         # This is the auditor's override, not a debug switch -- it says the
@@ -401,7 +418,17 @@ class WfdbExporter(Exporter):
         used_names = {}  # out_dir -> set of record names already claimed
 
         for patient in session.store.patients:
-            if patient_ids and patient.patient_id not in patient_ids:
+            # `is not None`, never a truthiness test. This read
+            # `if patient_ids and ...` until #678, so an empty container
+            # was falsy and taken for a missing filter: `[]`, `()`,
+            # `set()` and `frozenset()` each wrote the whole cohort to a
+            # caller who had selected nobody -- a cohort query that came
+            # back empty delivered everybody's waveforms. The three
+            # siblings that answer the same question were always spelled
+            # this way: `_export_dicom`, `Session.get_cohort_report`, and
+            # `SqliteStore._iter_flattened_instances`, which was this
+            # same defect and was fixed as Breaking in #142.
+            if patient_ids is not None and patient.patient_id not in patient_ids:
                 continue
 
             for study in patient.studies:

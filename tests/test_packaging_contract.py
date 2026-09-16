@@ -1963,3 +1963,153 @@ def test_the_sidecar_gate_deadline_sits_inside_the_timeout_family():
     assert "_SIDECAR_GATE_TIMEOUT_S" in names, (
         "_hold_sidecar_gate no longer reads _SIDECAR_GATE_TIMEOUT_S; a "
         "re-inlined literal is exactly how 900.0 went unquestioned (#368)")
+
+
+# ---------------------------------------------------------------------------
+# The documentation deploy (#635) -- the one workflow that publishes to a
+# live site, and until this test nothing in the suite read it at all
+# ---------------------------------------------------------------------------
+
+DOCS_WORKFLOW = REPO / ".github" / "workflows" / "docs.yml"
+
+
+def test_the_docs_deploy_builds_strict_from_the_docs_extra():
+    """`docs.yml` builds `--strict`, deploys only from `main`, and caps every step.
+
+    Five assertions about the only workflow in the repository that
+    publishes somewhere a reader can see: `mkdocs gh-deploy` pushes
+    straight to the live documentation site.
+
+    **Strict.** Without `--strict` a mkdocs or griffe warning goes into
+    a log nobody reads and the site deploys anyway (#635). Measured by
+    mutation on 0.9.8: a broken relative link under `docs/` is red under
+    `--strict` and **green on all 38 documentation tests the PR gate
+    runs**, so the flag closes a class nothing else covers -- the gap
+    `tests/test_doc_anchors.py`'s module docstring already writes down.
+    It is not a superset of those tests and does not retire them: a
+    second line at the base indent under a `Returns:`, which griffe
+    renders as several untyped "returned value N" rows, draws no warning
+    at all and is caught only by
+    `tests/test_api_docstrings_render_cleanly.py` (#565).
+
+    Safe on a live site because `gh-deploy` builds before it pushes:
+    `gh_deploy_command` calls `build.build(cfg)` inside a `try/finally`
+    and reaches `gh_deploy.gh_deploy(...)` only afterwards, and strict
+    makes `build.build` raise `Abort` (mkdocs 1.6.1). A warning costs a
+    red run on `main` and a site still serving its previous build; it
+    cannot publish a broken one.
+
+    **The branch filter** was pinned by nothing before this test, and its
+    own 22-line comment records the two unreviewed deploys from a feature
+    branch it exists to prevent. The trigger set is asserted as an
+    equality for the same reason the hang probe's is: a `pull_request`
+    trigger on a workflow that deploys to the live site is not a thing
+    to notice in review.
+
+    **The package list has one home.** The workflow hand-copied five
+    distributions, naming `pymdown-extensions` (absent from `setup.py`'s
+    `docs` extra) and omitting `mkdocs` (present there). The two lists
+    resolved to the identical eleven packages at the identical versions
+    when measured, which is what a second source of truth looks like
+    right up to the edit that moves one of them.
+
+    **The caps** are the inequality `tests.yml` and `hang-probe.yml`
+    both carry -- job cap above the sum of the step caps, every step
+    capped -- so whatever hangs, the timeout that fires belongs to a
+    step and names it. `docs.yml` had it backwards: a job cap of 10 over
+    step caps of 3 + 3 + 5 = 11, with three steps uncapped entirely, so
+    a long pip step was killed by the job cap, which says only "the docs
+    job hung".
+
+    **PyYAML parses the bare `on` key as the boolean `True`** (YAML 1.1
+    treats `on`/`off`/`yes`/`no` as booleans), so the triggers live at
+    `workflow[True]`, not `workflow["on"]` -- a `KeyError` on the
+    string, and `assert "on" in workflow` would pass vacuously. Do not
+    "fix" the lookup.
+
+    Deliberately *not* here: any invocation of mkdocs. The build needs
+    the `docs` extra, which the `tests` environment does not have, and a
+    test that skips when mkdocs is absent reads as a pass --
+    `tests/test_doc_anchors.py`'s fourth deferral makes that argument.
+    """
+    import yaml
+
+    assert DOCS_WORKFLOW.exists(), (
+        f"{DOCS_WORKFLOW.relative_to(REPO)} does not exist; the API "
+        "reference is generated from docstrings, so nothing else "
+        "publishes it")
+    workflow = yaml.safe_load(DOCS_WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["deploy"]
+    steps = job["steps"]
+
+    # 1. Strict. Found by walking the steps for the deploy command, so a
+    #    flag moved to another step or another job is still found.
+    deploying = [step for step in steps
+                 if "gh-deploy" in (step.get("run") or "")]
+    assert len(deploying) == 1, (
+        f"{len(deploying)} steps run `mkdocs gh-deploy`; exactly one "
+        "must, or which one publishes the site is ambiguous")
+    assert "--strict" in deploying[0]["run"], (
+        f"the deploy step runs {deploying[0]['run']!r} without "
+        "`--strict`, so a mkdocs or griffe warning publishes the site "
+        "anyway and the warning lands in a log nobody reads (#635). A "
+        "strict failure cannot publish a broken site: gh-deploy builds "
+        "before it pushes and aborts inside the build")
+
+    # 2. The branch filter.
+    triggers = workflow[True]
+    assert triggers["push"]["branches"] == ["main"], (
+        f"docs.yml deploys on pushes to "
+        f"{triggers['push']['branches']!r}; `mkdocs gh-deploy` publishes "
+        "straight to the live site, and any branch here means an "
+        "unreviewed feature branch does -- which happened twice during "
+        "the isocenter rename, as the comment above the filter records")
+
+    # 3. The trigger set.
+    assert set(triggers) == {"push", "workflow_dispatch"}, (
+        f"docs.yml triggers on {sorted(str(key) for key in triggers)}; it "
+        "must be push (filtered to main) and workflow_dispatch and "
+        "nothing else -- a `pull_request` trigger on a workflow that "
+        "deploys to the live site publishes every pull request")
+
+    # 4. One home for the package list.
+    installing = [step for step in steps
+                  if "pip install" in (step.get("run") or "")]
+    assert len(installing) == 1, (
+        f"{len(installing)} steps run `pip install`; the packages the "
+        "docs build needs come from one place or from two")
+    install = installing[0]["run"]
+    assert ".[docs]" in install, (
+        f"the install step runs {install!r} rather than installing the "
+        "`docs` extra; a hand-copied package list is a second source of "
+        "truth for what the docs build needs, and it is what #635 filed "
+        "-- the old list named pymdown-extensions, which setup.py does "
+        "not, and omitted mkdocs, which it does")
+    declared = _setup_keyword("extras_require")["docs"]
+    restated = sorted(
+        name for name in (spec.split(">=")[0].split("==")[0].split("[")[0]
+                          for spec in declared)
+        if name in install)
+    assert not restated, (
+        f"the install step names {restated} itself as well as the `docs` "
+        "extra; the extra in setup.py is the one home for that list "
+        "(#635)")
+
+    # 5. The cap inequality, both halves.
+    uncapped = [step.get("name") or step.get("uses") or step.get("run")
+                for step in steps if "timeout-minutes" not in step]
+    assert not uncapped, (
+        f"docs.yml steps without their own timeout-minutes: {uncapped}; "
+        "an uncapped step makes the job cap the only thing that can stop "
+        "a hang there, and a job cap reports no failing step")
+    step_total = sum(step["timeout-minutes"] for step in steps)
+    job_cap = job.get("timeout-minutes")
+    assert job_cap is not None, (
+        "the deploy job has no timeout-minutes; the default is 360, "
+        "which lets a hung deploy burn a runner for six hours")
+    assert job_cap > step_total, (
+        f"jobs.deploy.timeout-minutes ({job_cap}) does not exceed the sum "
+        f"of the step allowances ({step_total}); some step's timeout is "
+        "unreachable and a hang there dies as 'cancelled' with no failing "
+        "step in the log -- the shape of #243/#250, and the state docs.yml "
+        "was in when #635 was written")

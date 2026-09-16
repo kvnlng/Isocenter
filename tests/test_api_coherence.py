@@ -6,6 +6,7 @@ parameters are removed rather than deprecated.
 import ast
 import dataclasses
 import inspect
+import logging
 import os
 
 import pytest
@@ -686,3 +687,215 @@ def test_get_flattened_instances_is_published_store_api():
         SqliteStore.get_flattened_instances).parameters)
 
     assert params == ["self", "patient_ids", "instance_uids", "page_size"]
+
+
+# --- #678: the two write doors read `patient_ids` the same way ----------
+#
+# `export_folder_names` answers "where does the export write" for both
+# doors and `export_stamp_attributes` answers "what does it stamp".
+# `patient_ids` is the third question -- *who* does it write -- and it
+# was answered twice, differently: `_export_dicom` read `is not None`
+# and `WfdbExporter.export` read the argument's truthiness, so an empty
+# container meant "nobody" on one door and "everybody" on the other
+# (#678). These tests are about the doors agreeing, which is why they
+# live here rather than in `tests/test_wfdb_privacy.py` where the
+# two-patient waveform fixture does; the wfdb half of #678 is pinned
+# there as well, against the audit row.
+
+_COH_A, _COH_B = "COH-A", "COH-B"
+
+
+def _two_patient_waveform_session(tmp_path, name):
+    """One session, two patients, one waveform-bearing instance each.
+
+    Waveform-bearing so the same store can be exported through both
+    doors: the `wfdb` exporter writes only waveform instances, and the
+    `dicom` exporter writes any instance.
+
+    Deliberately not anonymized -- `record_name_for` builds the wfdb
+    record name from `patient.patient_id`, so leaving the ingested ids
+    alone keeps these assertions about the filter rather than about
+    which pseudonym anonymization happened to mint.
+    """
+    from scripts.generate_waveform_test_data import write_fixture
+
+    source = tmp_path / f"src_{name}"
+    source.mkdir()
+    write_fixture(str(source / "a.dcm"), num_samples=64,
+                  patient_id=_COH_A, patient_name="Alpha^Ann")
+    write_fixture(str(source / "b.dcm"), num_samples=64,
+                  patient_id=_COH_B, patient_name="Beta^Bob")
+
+    session = DicomSession(persistence_file=str(tmp_path / f"{name}.db"))
+    session.ingest(str(source))
+    assert {p.patient_id for p in session.store.patients} == {_COH_A, _COH_B}, (
+        "the fixture did not ingest both patients; every assertion below "
+        "would pass vacuously on a one-patient store")
+    return session
+
+
+def _owner_by_uid(session):
+    return {instance.sop_instance_uid: patient.patient_id
+            for patient in session.store.patients
+            for study in patient.studies
+            for series in study.series
+            for instance in series.instances}
+
+
+def _patients_written(session, folder, fmt, **options):
+    """Which patients reached disk, read off what each door reports.
+
+    Per format, because the two doors return different shapes: the wfdb
+    exporter returns `.hea` paths whose basenames start with the patient
+    id, and the dicom exporter returns an `ExportSummary` whose
+    `written_uids` are mapped back through the graph. `show_progress`
+    goes to the dicom door only -- the wfdb door raises `TypeError` for
+    it, correctly, since #410.
+    """
+    owner = _owner_by_uid(session)
+    if fmt == "dicom":
+        options = {**options, "show_progress": False}
+    result = session.export(str(folder), format=fmt, **options)
+    if fmt == "dicom":
+        return {owner[uid] for uid in result.written_uids}
+    names = {os.path.basename(path) for path in result}
+    return {pid for pid in set(owner.values())
+            if any(name.startswith(f"{pid}_") for name in names)}
+
+
+@pytest.mark.parametrize("fmt", ["dicom", "wfdb"])
+def test_only_none_means_every_patient_on_both_export_formats(tmp_path, fmt):
+    """`patient_ids=[]` writes nothing and `None` writes everyone (#678).
+
+    The coherence half of #678, and the assertion that would have caught
+    it when #142 fixed the same defect on
+    `SqliteStore.get_flattened_instances`: three of the four readers of
+    an empty `patient_ids` in the package meant "nobody" and the fourth
+    meant "everybody". Measured on 0.9.8, `format="wfdb"` with
+    `patient_ids=[]` wrote both patients' records while `format="dicom"`
+    with the same argument wrote nothing.
+
+    Both halves are asserted per format, because "nothing was written"
+    is also what a door broken for every argument produces.
+    """
+    with _two_patient_waveform_session(tmp_path, f"none_{fmt}") as session:
+        everyone = _patients_written(session, tmp_path / f"all_{fmt}", fmt,
+                                     patient_ids=None)
+        nobody = _patients_written(session, tmp_path / f"empty_{fmt}", fmt,
+                                   patient_ids=[])
+
+    assert everyone == {_COH_A, _COH_B}, (
+        f"format={fmt!r} with patient_ids=None wrote {sorted(everyone)}; "
+        "None is the one spelling of every patient")
+    assert nobody == set(), (
+        f"format={fmt!r} with patient_ids=[] wrote {sorted(nobody)}; an "
+        "empty container is a filter that selected nobody, and a caller "
+        "whose cohort query came back empty got the whole cohort (#678)")
+
+
+@pytest.mark.parametrize("fmt", ["dicom", "wfdb"])
+def test_a_generator_of_patient_ids_selects_by_id_not_by_store_order(
+        tmp_path, fmt):
+    """An iterator must not be consumed by the first membership test.
+
+    `patient.patient_id not in patient_ids` exhausts a generator on the
+    first patient it walks, so every later patient is compared against
+    an empty iterator. Measured on 0.9.8 on both doors: a generator
+    yielding the *second* patient in store order exported **nothing**,
+    and one yielding the first exported that patient -- so which
+    patients survived depended on the order the store happened to hold
+    them in, not on the ids the caller named.
+
+    The second patient is the discriminating case; a generator yielding
+    the first passes today by accident and proves nothing. Both doors
+    normalise through `io_handlers.normalize_patient_id_subset`, which
+    is why this is parametrised over the two formats rather than written
+    twice.
+    """
+    with _two_patient_waveform_session(tmp_path, f"gen_{fmt}") as session:
+        second = _patients_written(session, tmp_path / f"gen2_{fmt}", fmt,
+                                   patient_ids=(x for x in [_COH_B]))
+        both = _patients_written(session, tmp_path / f"genboth_{fmt}", fmt,
+                                 patient_ids=iter([_COH_A, _COH_B]))
+
+    assert second == {_COH_B}, (
+        f"format={fmt!r} with a generator yielding {_COH_B!r} wrote "
+        f"{sorted(second)}; the membership test consumed the iterator "
+        "before it reached that patient")
+    assert both == {_COH_A, _COH_B}, (
+        f"format={fmt!r} with an iterator of both ids wrote "
+        f"{sorted(both)}; the first membership test ate the rest")
+
+
+@pytest.mark.parametrize("fmt", ["dicom", "wfdb"])
+def test_a_bare_string_patient_ids_names_one_patient_on_both_formats(
+        tmp_path, fmt, caplog):
+    """A bare `str` selects exactly that id, and never a substring match.
+
+    `"COH-A" in "COH-ACOH-B"` is True, so a caller who wrote a string
+    where a list was meant got a fuzzy match that looked like it worked.
+    Measured on 0.9.8, identically on both doors: `patient_ids="COH-A"`
+    exported A, `patient_ids="COH-ACOH-B"` exported **both** patients,
+    and a common prefix exported none.
+
+    Chosen over a refusal because the write path warns and writes the
+    closest honest output rather than refusing: one id is the only
+    reading of a bare string, and it is the reading the caller meant.
+    The warning is the other half -- a caller who passed the wrong type
+    hears about it even though the export succeeded. `bytes` is refused
+    instead; `test_bytes_as_patient_ids_is_refused_on_both_formats`
+    says why.
+    """
+    with _two_patient_waveform_session(tmp_path, f"str_{fmt}") as session:
+        # Inside the session, not around its construction:
+        # `DicomSession()` resets the `isocenter` logger's handlers, and
+        # a level set before that is set on a logger the session
+        # replaces the handlers of.
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            one = _patients_written(session, tmp_path / f"str1_{fmt}", fmt,
+                                    patient_ids=_COH_A)
+        concatenated = _patients_written(
+            session, tmp_path / f"str2_{fmt}", fmt,
+            patient_ids=_COH_A + _COH_B)
+
+    assert one == {_COH_A}, (
+        f"format={fmt!r} with patient_ids={_COH_A!r} wrote "
+        f"{sorted(one)}; a bare string names exactly one patient id")
+    assert concatenated == set(), (
+        f"format={fmt!r} with patient_ids={_COH_A + _COH_B!r} wrote "
+        f"{sorted(concatenated)}; no patient carries that id, and a "
+        "substring match handed the caller patients they never named")
+    warned = [record.getMessage() for record in caplog.records
+              if record.levelno >= logging.WARNING
+              and "patient_ids" in record.getMessage()]
+    assert warned, (
+        "a bare string passed as `patient_ids` was read as one id and "
+        f"logged nothing about it; records were {caplog.messages}")
+
+
+@pytest.mark.parametrize("fmt", ["dicom", "wfdb"])
+def test_bytes_as_patient_ids_is_refused_on_both_formats(tmp_path, fmt):
+    """`bytes` is refused, because best-effort would select nobody.
+
+    A `str` can be read as one patient id. `b"COH-A"` cannot: every
+    `patient_id` in the graph is a `str`, so wrapping the bytes would
+    silently select **no** patient and report a clean zero export --
+    exactly the silence #678 is about. There is no encoding to decode it
+    under either. Measured on 0.9.8 both doors already raised
+    `TypeError`, but from inside the walk and with the message
+    `a bytes-like object is required, not 'str'`, which names neither
+    the option nor the mistake; the refusal now names both and is raised
+    before anything is written.
+    """
+    with _two_patient_waveform_session(tmp_path, f"bytes_{fmt}") as session:
+        with pytest.raises(TypeError) as caught:
+            _patients_written(session, tmp_path / f"bytes_{fmt}", fmt,
+                              patient_ids=b"COH-A")
+
+    message = str(caught.value)
+    assert "patient_ids" in message, (
+        f"format={fmt!r} refused bytes with {message!r}, which does not "
+        "name the option the caller got wrong")
+    assert "bytes" in message, (
+        f"format={fmt!r} refused bytes with {message!r}, which does not "
+        "name the type it refused")

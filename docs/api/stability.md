@@ -84,6 +84,17 @@ options through `_export_dicom`'s signature, and
 they are the only two the exporter reads, and that `patient_ids`
 actually limits what is written.
 
+**`patient_ids` means the same thing on both formats, and only `None`
+means every patient.** An empty list, tuple or set is a filter that
+selected nobody, so nothing is written; a bare `str` names exactly one
+id and logs a warning rather than matching ids that merely contain it;
+a bytes-like value raises `TypeError`, because no `PatientID` in the
+graph could match it; and an iterator is read once, so a generator is
+not consumed by the first patient the export walks. Until 0.9.8 the
+`wfdb` path read an empty container as "no filter" and exported the
+whole cohort (#678). Both formats normalise the option through one
+helper, and `tests/test_api_coherence.py` pins that they agree.
+
 **An option name neither format recognises raises `TypeError`, and
 nothing is written.** The `dicom` path has always done this, because
 `_export_dicom` has a real signature; the `wfdb` path did not until

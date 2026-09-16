@@ -32,7 +32,17 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The inequality `tests.yml` and `hang-probe.yml` both carry, and the
+    # direction is the load-bearing half: this cap must EXCEED the sum of
+    # every step cap below (3 + 3 + 1 + 3 + 5 + 4 = 19), so whatever
+    # hangs, the timeout that fires belongs to a step and the log names
+    # it. It was the other way round until #635 -- a job cap of 10 over
+    # step caps totalling 11, with three steps uncapped entirely -- so a
+    # slow pip step was killed by the job cap, which says only "the docs
+    # job hung". Raise this before raising any step cap, never after.
+    # `tests/test_packaging_contract.py::test_the_docs_deploy_builds_strict_from_the_docs_extra`
+    # holds both halves.
+    timeout-minutes: 20
 
     steps:
     - name: Checkout Repository
@@ -49,14 +59,47 @@ jobs:
 
     - name: Set cache id
       run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
+      timeout-minutes: 1
 
     - name: Install and Deploy MkDocs Material
       uses: actions/cache@v6
+      timeout-minutes: 3
       with:
         key: mkdocs-material-${{ env.cache_id }}
         path: ~/.cache 
         restore-keys: |
           mkdocs-material-
-    - run: pip install mkdocs-material mkdocs-awesome-pages-plugin mkdocstrings pymdown-extensions mkdocstrings-python
+    # From the `docs` extra, not a hand-copied list. The workflow named
+    # five distributions of its own -- including `pymdown-extensions`,
+    # which setup.py does not, and omitting `mkdocs`, which it does. Both
+    # lists resolved to the identical eleven packages at the identical
+    # versions when measured for #635, which is what a second source of
+    # truth looks like right up to the edit that moves one of them.
+    # Measured at 10.4 s warm on 3.14.7, against this 5-minute cap.
+    - run: pip install -e ".[docs]"
       timeout-minutes: 5
-    - run: mkdocs gh-deploy
+    # `--strict` turns a mkdocs or griffe warning into a failed deploy.
+    # This is safe on a workflow that publishes to the live site, and the
+    # reason is the ordering inside mkdocs: `gh_deploy_command` runs
+    # `build.build(cfg)` in a `try/finally` and reaches
+    # `gh_deploy.gh_deploy(...)` only afterwards, and `--strict` makes
+    # `build.build` raise `Abort`. So a warning costs a red run on `main`
+    # and a site still serving its previous build -- it cannot publish a
+    # broken one.
+    #
+    # What it newly catches is ONE class: a broken relative file link
+    # under `docs/`. Measured by mutation for #635, that is red under
+    # `--strict` and green on all 38 documentation tests the PR gate
+    # runs. The griffe class of warning (an `Args:` entry naming a
+    # parameter the def does not have) is already red pre-merge on
+    # `tests/test_api_docstrings_render_cleanly.py`, and that test is NOT
+    # made redundant by this flag: a second line at the base indent under
+    # a `Returns:` renders as several untyped values, draws no mkdocs
+    # warning at all, and is caught only there. Neither guard subsumes
+    # the other.
+    #
+    # Do not "clean up" this flag after a red deploy. The warning count
+    # at 0.9.8 was zero, so a red here is new drift, and the fix is the
+    # docstring or the link -- not the flag.
+    - run: mkdocs gh-deploy --strict
+      timeout-minutes: 4
