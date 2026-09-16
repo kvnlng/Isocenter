@@ -60,9 +60,21 @@ def _rows(session):
 
 
 def _owner_rows(session, before):
-    """The rows a pass wrote about the two owner fields under test."""
+    """The rows a pass wrote about the two owner fields under test, and
+    every decline whatever it names.
+
+    A decline names no field: `Remediation declined for 1CT1: no entity
+    reference; the finding could not be resolved against the live graph`
+    holds neither `patient_name` nor `study_date`, so a filter on those
+    two read a pass that declined every finding as a pass with nothing
+    to do -- and the mutant that drops the pseudonym lookups
+    `test_a_saved_and_reopened_store_reads_its_owner_removals_as_done`
+    exists to catch survived it (review of #661). Kept by action type,
+    not by substring, for that reason.
+    """
     return [(a, d) for a, d in _rows(session)[before:]
-            if "patient_name" in (d or "") or "study_date" in (d or "")]
+            if a == "REMEDIATION_DECLINED"
+            or "patient_name" in (d or "") or "study_date" in (d or "")]
 
 
 def _finding(entity, entity_type, uid, attr):
@@ -93,7 +105,15 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
     """The issue's flow: the pass is saved, the store reopened, and the
     same report applied to the graph the first pass already cleaned. The
     patient's ID is this store's pseudonym by then, so the address is
-    read under the pseudonym as `_live_findings` reads it (#644)."""
+    read under the pseudonym as `_live_findings` reads it (#644).
+
+    The count is asserted, not just the rows: read under the pseudonym
+    the four owner removals are satisfied and the twenty `REPLACE`s are
+    re-applied, which is the CHANGELOG's 24 -> 20. Lose the pseudonym
+    lookup and the pass does not become quiet -- it declines every
+    finding, which `_owner_rows` now sees and this count would fail on
+    either way.
+    """
     with _session(tmp_path) as session:
         report = session.audit()
         session.anonymize(report)
@@ -105,8 +125,10 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
         second.load_config(str(tmp_path / "cfg.yaml"))
         before = len(_rows(second))
 
-        second.anonymize(report)
+        assert second.anonymize(report) == 20
 
+        rows = _rows(second)[before:]
+        assert [a for a, _ in rows].count("REMEDIATION_DECLINED") == 0, rows
         assert _owner_rows(second, before) == []
 
 
@@ -142,6 +164,36 @@ def test_a_cleared_attribute_whose_instance_copies_survive_is_still_removed(tmp_
         assert all("0010,0010" not in i.attributes
                    for p in session.store.patients for st in p.studies
                    for se in st.series for i in se.instances)
+
+
+def test_a_study_whose_own_instances_still_hold_the_date_is_removed(tmp_path):
+    """The Study half of the instance-copy walk.
+
+    A `Study` has no `studies` attribute, so `_owner_field_gone` walks
+    its own `series` through the fallback; a `Patient` finding never
+    reaches that line, which is why the test above cannot see it change.
+    Handed over **alone** -- not inside a report, whose instance-level
+    `0008,0020` findings take the copies away themselves and leave both
+    readings in the same graph state -- one `REMOVE_TAG` on a Study
+    whose field was cleared by hand while its own instance still carries
+    the tag is a real removal, and writes its row (review of #661).
+    """
+    with _session(tmp_path) as session:
+        study = session.store.patients[0].studies[0]
+        instances = [i for series in study.series for i in series.instances]
+        assert len(instances) == 1, instances
+        assert "0008,0020" in instances[0].attributes
+        study.study_date = None
+        finding = _finding(study, "Study", study.study_instance_uid,
+                           "study_date")
+        before = len(_rows(session))
+
+        assert session.anonymize([finding]) == 1
+
+        rows = _owner_rows(session, before)
+        assert [a for a, _ in rows] == ["REMEDIATION_REMOVE"], rows
+        assert "removed from 1 instance copy" in rows[0][1], rows
+        assert "0008,0020" not in instances[0].attributes
 
 
 def test_a_removal_filed_at_another_patients_address_declines(tmp_path):

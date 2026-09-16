@@ -141,10 +141,16 @@ on such a UID all resolve to a single one of those instances.
 `session.store` (#644). A finding whose `entity` is itself in the graph
 is acted on as it is, whatever its address says -- except a
 `REMOVE_TAG`, whose "already gone" is read on the object this session
-holds at the finding's address and never on the entity handed in: on an
-`Instance` since #626, and on a `Patient` or `Study` since #661. A
-removal whose entity reads gone where the object at its address does
-not, or where that address names no single object, declines. Any other
+holds at the finding's address rather than on the entity as handed in:
+on an `Instance` since #626, and on a `Patient` or `Study` since #661.
+The object at an address is the finding's own entity where the address
+names it, the single object where the address names exactly one, and
+none where it names none, or two of which neither is the entity. So a
+removal whose entity reads gone where the object at its address still
+holds the value declines, and so does one whose address names nothing
+at all; where the entity is itself among the objects the address names,
+the entity is read, and a removal that reads gone there is satisfied
+with no row. Any other
 finding is resolved against the live graph at its `entity_uid` and `entity_path`
 (an instance's UID from before `redact()`, and a patient's original
 Patient ID after its pseudonym, included) and acts on the object found

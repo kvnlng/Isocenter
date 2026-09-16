@@ -1211,8 +1211,9 @@ class RemediationService:
         And only on the object the finding addresses. Under a session the
         caller passes `_removal_subject`'s answer, the live object at the
         finding's `entity_uid` and `entity_path`, not `finding.entity`, and
-        None when the address cannot be read as done, which has no
-        `attributes` and so declines: a report kept across a reopen, or a hand-built finding
+        None when the address cannot be read as done, which has neither
+        an `attributes` dict nor a field of its own and so declines through
+        `_owner_field_gone`'s `hasattr`: a report kept across a reopen, or a hand-built finding
         filed under another instance's UID, read absence on an object
         export never writes (review of #639 r2).
 

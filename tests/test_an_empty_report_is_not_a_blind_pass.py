@@ -96,6 +96,60 @@ def test_no_argument_and_none_still_run_the_blind_pass(tmp_path, form):
         assert _names(session) == ["ANONYMIZED", "ANONYMIZED"]
 
 
+def _secret_rows(db_path):
+    with sqlite3.connect(str(db_path)) as conn:
+        return list(conn.execute("SELECT COUNT(*) FROM project_secret"))[0][0]
+
+
+def test_an_empty_call_still_reads_the_stores_project_secret(tmp_path):
+    """The read that stays above the guard.
+
+    An empty call applies nothing, but it is still a pass over this
+    store, and the store's project secret is what a pass is conducted
+    under: a fresh store gets its row, and a store whose row is gone
+    refuses rather than quietly returning 0. A call that refuses
+    consistently is easier to reason about than one that refuses only
+    when the list is non-empty (#660, ruling Q3).
+    """
+    with _session(tmp_path) as session:
+        assert _secret_rows(tmp_path / "m.db") == 0
+
+        assert session.anonymize([]) == 0
+
+        assert _secret_rows(tmp_path / "m.db") == 1
+
+
+def test_an_empty_call_on_a_store_that_lost_its_secret_refuses(tmp_path):
+    """The other half: the refusal is not skipped for an empty call."""
+    with _session(tmp_path) as session:
+        session.anonymize()
+        session.save(sync=True)
+    with sqlite3.connect(str(tmp_path / "m.db")) as conn:
+        conn.execute("DELETE FROM project_secret")
+
+    with DicomSession(str(tmp_path / "m.db")) as second:
+        with pytest.raises(RuntimeError) as raised:
+            second.anonymize([])
+
+    assert "no longer has" in str(raised.value)
+    assert "load_project_secret" in str(raised.value)
+
+
+def test_a_report_taken_after_an_empty_call_attests_nothing(tmp_path):
+    """The grade the empty call now earns: the truth about a graph
+    nothing cleaned, where before this it graded `PASS` over a pass the
+    caller never asked for (#660)."""
+    with _session(tmp_path) as session:
+        assert session.anonymize([]) == 0
+        out = tmp_path / "report.md"
+        session.generate_report(str(out))
+
+    text = out.read_text()
+    assert "REVIEW_REQUIRED" in text
+    assert ("the audit trail holds no rows, so nothing this run did is "
+            "attested (section 2)") in text
+
+
 def test_a_filtered_report_that_matched_nothing_remediates_nothing(tmp_path):
     """The shape that produced the report: a caller narrows a report and
     the filter matches nothing, so nothing is asked for."""
