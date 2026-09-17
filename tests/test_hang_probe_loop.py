@@ -28,7 +28,7 @@ nothing. `test_packaging_contract.py` pins the defaults, and checks that
 nothing in the workflow sets the knobs.
 
 **What each scenario costs.** The whole file took 45.5-48.3 s on 3.12.14 and
-46.4-48.7 s on 3.14.7t (macOS, ten runs each), all of it inside a full-suite run (the local gate, or the Run Tests step of `tests.yml` at release).
+46.4-48.7 s on 3.14.7t (macOS, ten runs each), all of it inside a full-suite run (the integration test at a release cut, or the Run Tests step of `tests.yml` at release).
 The script's clock is `date +%s`, which
 has one-second resolution, so no scenario may depend on a sub-second
 limit; every margin below is at least a whole second.
