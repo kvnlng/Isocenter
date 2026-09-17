@@ -9,9 +9,9 @@
 
 **Goal:** give a developer `pytest --changed` -- the tests that exercise the code they touched -- and run the suite on GitHub as four duration-balanced shards per Python version, with every test isolated in its own working directory.
 
-**Architecture:** three PRs in order. (1) An autouse `chdir(tmp_path)` fixture plus a session guard that fails the run if the repo root gained a file. (2) A `--shard=I/N` option backed by a pure, deterministic assignment function over a checked-in timings file, and a second matrix axis in `tests.yml`. (3) A generated, gitignored map from source lines to the tests that ran them, built from coverage's per-test contexts on 3.14t, and a selector that falls back to `scripts/mutation_probe.py`'s `TARGETS` and then to the full suite.
+**Architecture:** three PRs in order. (1) An autouse `chdir(tmp_path)` fixture plus a session guard that fails the run if the repo root gained a file. (2) A `--shard=I/N` option backed by a pure, deterministic assignment function over a checked-in timings file, and a second matrix axis in `tests.yml`. (3) A generated, gitignored map from source lines to the tests that ran them, built from per-test coverage contexts (switched by a conftest hook, so fixtures count) on 3.14t, and a selector that falls back to `scripts/mutation_probe.py`'s `TARGETS` and then to the full suite.
 
-**Tech Stack:** pytest 9 hooks in `tests/conftest.py`; `coverage` 7.16 (`dynamic_context`, `CoverageData.contexts_by_lineno`); stdlib `ast`, `subprocess`, `json`, `statistics`; GitHub Actions matrix. **No new dependency.**
+**Tech Stack:** pytest 9 hooks in `tests/conftest.py`; `coverage` 7.16 (`Coverage.current().switch_context`, `CoverageData.contexts_by_lineno`); stdlib `ast`, `subprocess`, `json`, `statistics`; GitHub Actions matrix. **No new dependency.**
 
 **Spec:** `docs/superpowers/specs/2026-09-17-test-suite-selection-and-shards-design.md`. Read it first; §3 holds the measurements this plan argues from.
 
@@ -370,7 +370,7 @@ print("ingest_worker body lines measured:",
 EOF
 ```
 
-Record both numbers in the PR body. On `main` (before Task 1) the second number is 37. If it is still about 37 here, coverage resolves the path in the parent and **this task reduces to Steps 2, 4 and 6** (the test stays; the conftest change is not made; say so in the PR body and in spec §10). If it is 0, continue.
+Record both numbers in the PR body. On `main` (before Task 1) the first is 49 and the second is 37. Expect 0 here: `CoverageData` makes its path absolute in the process that constructs it, and a spawned child constructs its own. If it is nevertheless still about 37, coverage resolves the path in the parent and **this task reduces to Steps 2, 4 and 6** (the test stays; the conftest change is not made; say so in the PR body and in spec §10). If it is 0, continue.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -438,13 +438,15 @@ def test_a_worker_executed_line_survives_combine(tmp_path):
 At module scope, above `pytest_configure`:
 
 ```python
-# `coverage run` exports COVERAGE_RUN. Spawned workers inherit the
-# environment but resolve a relative data file against *their* cwd, and
-# since #707 that is a tmp_path pytest deletes. An absolute COVERAGE_FILE
-# set before the first spawn is what every worker then writes beside.
-# Anchored on this file, not on the cwd, so a scratch copy of the tree
-# writes into the copy. Respects a COVERAGE_FILE the caller set.
-if os.environ.get("COVERAGE_RUN") and not os.environ.get("COVERAGE_FILE"):
+# Spawned workers inherit the environment but resolve a relative coverage
+# data file against *their* cwd, and since #707 that is a tmp_path pytest
+# deletes. An absolute COVERAGE_FILE set before the first spawn is what
+# every worker then writes beside. Set whether or not coverage is
+# running: it is inert without it, and keying it on another variable is
+# one more name to be wrong about. Anchored on this file, not on the cwd,
+# so a scratch copy of the tree writes into the copy. Respects a
+# COVERAGE_FILE the caller set.
+if not os.environ.get("COVERAGE_FILE"):
     os.environ["COVERAGE_FILE"] = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         ".coverage")
@@ -746,7 +748,7 @@ A later Part adds to `pytest_addoption` and `pytest_collection_modifyitems`; kee
 - [ ] **Step 6: Generate the first timings file** (one full run on 3.12, about 20 minutes):
 
 Run: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$PWD /Users/kevin/Developer/Isocenter/.venv/bin/python -u -m pytest -v --record-shard-timings=$PWD/tests/shard_timings.json`
-The path is absolute because the session finishes in whatever directory the last test left. Then print the four loads and confirm the largest is within 10% of the smallest:
+The path is absolute so the file lands in the tree whatever directory pytest was started from. Then print the four loads and confirm the largest is within 10% of the smallest:
 
 ```bash
 PYTHONPATH=$PWD/tests /Users/kevin/Developer/Isocenter/.venv/bin/python - <<'EOF'
@@ -868,9 +870,11 @@ Branch: `test/707-changed`, from `main` after Parts 1 and 2 merge. Spec §6.
 - Test: `tests/test_changed_code_selects_its_tests.py`
 
 **Interfaces:**
-- Produces: `test_map.MAP_FILE = ".test-map.json"`; `test_map.context_to_nodeid(context: str) -> str`; `test_map.from_coverage(data_path: Path, repo: Path, sha: str, python: str) -> dict` with keys `sha`, `python`, `lines` (`{path: {str(lineno): [nodeid, ...]}}`) and `workers` (`{path: [lineno, ...]}`).
+- Produces: a `pytest_runtest_protocol` hookwrapper in `conftest.py` that labels coverage with the running test's nodeid; `test_map.MAP_FILE = ".test-map.json"`; `test_map.context_to_nodeid(context: str) -> str`; `test_map.split_contexts(contexts_by_lineno: dict) -> tuple[dict, list]`; `test_map.from_coverage(data_path: Path, repo: Path, sha: str, python: str) -> dict` with keys `sha`, `python`, `lines` (`{path: {str(lineno): [nodeid, ...]}}`) and `workers` (`{path: [lineno, ...]}`).
 
-Coverage names a context `module.qualname` -- measured: `test_crypto.test_wrong_key`, and the empty string for a line no test frame was on the stack for. Parametrize ids are not part of it.
+**Why a hook and not `dynamic_context = test_function`** (found in plan review, measured 2026-09-17; spec §10 items 4-6). Coverage's `test_function` context starts when a `test*` frame is entered and ends when it returns, so everything a **fixture** executes -- `Session()` construction, an ingest inside `reloaded_redaction_session` -- is recorded under the empty context, exactly like a worker line, and would be mis-filed as worker-only. Switching the context ourselves around the whole test protocol (setup, call, teardown) is what `pytest-cov --cov-context=test` does, and it needs no dependency. Measured: a fixture-executed line in `builders.py` is recorded under `tests/test_zz_fixture_probe.py::test_uses_fixture`. Contexts are then nodeids, parametrize id included. Known limit, to be recorded and not fixed: a module- or session-scoped fixture is attributed to the first test that triggers it.
+
+`dynamic_context` and `switch_context` must not both be set; coverage warns about conflicting contexts. The build uses `.coveragerc` as it stands.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -883,35 +887,41 @@ pytest-testmon was tried first and rejected: it traces the pytest
 process only, so an edit to `ingest_worker` selected no tests at all.
 The last three tests in this file are that experiment, kept.
 """
+import sys
 from pathlib import Path
 
 import pytest
 
-from scripts import test_map
-
 REPO = Path(__file__).resolve().parent.parent
+# As tests/test_mutation_probe_targets.py does for the probe: the bare
+# `pytest` console script does not put the repo root on sys.path, so
+# `from scripts import …` works under `python -m pytest` and not under it.
+sys.path.insert(0, str(REPO / "scripts"))
+import test_map  # noqa: E402
 
 
 @pytest.mark.parametrize("context, nodeid", [
-    ("test_crypto.test_wrong_key", "tests/test_crypto.py::test_wrong_key"),
-    ("test_compaction.TestCompaction.test_compact_x",
-     "tests/test_compaction.py::TestCompaction::test_compact_x"),
-    ("tests.test_crypto.test_wrong_key",
+    ("tests/test_crypto.py::test_wrong_key",
      "tests/test_crypto.py::test_wrong_key"),
+    ("tests/test_a.py::TestK::test_y[p0-True]", "tests/test_a.py::TestK::test_y"),
 ])
-def test_a_coverage_context_names_a_node(context, nodeid):
+def test_a_context_is_a_nodeid_without_its_parametrize_id(context, nodeid):
+    # Selection is per test function: a change that one parameter set
+    # exercises re-runs them all, and ids with brackets in them cannot
+    # then break the match in conftest.
     assert test_map.context_to_nodeid(context) == nodeid
 
 
 def test_lines_with_a_test_go_to_lines_and_the_rest_to_workers():
-    contexts = {10: ["test_a.test_one", ""], 11: [""], 12: ["test_a.test_two"]}
+    contexts = {10: ["tests/test_a.py::test_one[x]", ""], 11: [""],
+                12: ["tests/test_a.py::test_two"]}
     lines, workers = test_map.split_contexts(contexts)
     assert lines == {"10": ["tests/test_a.py::test_one"],
                      "12": ["tests/test_a.py::test_two"]}
     assert workers == [11]
 ```
 
-`from scripts import test_map` works because the repo root is on `sys.path` under pytest's rootdir handling and `scripts/__init__.py` exists; `tests/test_mutation_probe_targets.py` imports `scripts.mutation_probe` the same way. Confirm by reading its imports before relying on it.
+The `sys.path` line mirrors `tests/test_mutation_probe_targets.py:33`; read it before changing the import.
 
 - [ ] **Step 2: Run and watch them fail** (`ImportError: cannot import name 'test_map'`).
 
@@ -927,12 +937,16 @@ The map is generated, gitignored and never edited. `TARGETS` in
 scripts/mutation_probe.py stays the one maintained module-to-tests map;
 this only narrows inside it.
 
-Built on 3.14t because per-test contexts cost 11.6x on 3.12 (process
-workers) against about 1.45x on the free-threaded build, measured on
-tests/test_multiprocessing.py + tests/test_crypto.py (spec §3.2). Worker
-lines are recorded under the empty context on both -- a spawned process
-has no test frame and neither does a worker thread's stack -- so they
-are kept apart as `workers` and selected through their dispatch sites.
+Contexts are nodeids, switched by a hook in tests/conftest.py around each
+test's whole protocol, so what a fixture runs is attributed to the test.
+
+Built on 3.14t because coverage over spawned workers is what is slow on
+3.12 -- 5.96 s bare against 68.3 s under .coveragerc, contexts or not,
+for tests/test_multiprocessing.py + tests/test_crypto.py -- where the
+free-threaded build pays 0.64 s against 0.89 s (spec §10). Lines a
+spawned worker runs are recorded under the empty context on both, since
+the context lives in the parent; they are kept apart as `workers` and
+selected through their dispatch sites.
 """
 import json
 import os
@@ -942,10 +956,7 @@ MAP_FILE = ".test-map.json"
 
 
 def context_to_nodeid(context):
-    module, _, qualname = context.partition(".")
-    if module == "tests":
-        module, _, qualname = qualname.partition(".")
-    return f"tests/{module}.py::" + qualname.replace(".", "::")
+    return context.split("[", 1)[0]
 
 
 def split_contexts(contexts_by_lineno):
@@ -981,14 +992,41 @@ def from_coverage(data_path, repo, sha, python):
 
 - [ ] **Step 4: Run and watch them pass.** Add `.test-map.json` to `.gitignore` under the coverage block.
 
-- [ ] **Step 5: Commit** (`test: turn coverage's per-test contexts into a line-to-tests map (#707)`).
+- [ ] **Step 5: Add the context hook to `tests/conftest.py`**
+
+```python
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Label coverage with the running test, fixtures included (#707).
+
+    `dynamic_context = test_function` stops at the test function's own
+    frame, so what a fixture executes is recorded under no test at all.
+    Inert unless coverage is measuring this process: `current()` is None.
+    """
+    try:
+        import coverage
+    except ImportError:
+        return (yield)
+    cov = coverage.Coverage.current()
+    if cov is not None:
+        cov.switch_context(item.nodeid)
+    try:
+        return (yield)
+    finally:
+        if cov is not None:
+            cov.switch_context("")
+```
+
+- [ ] **Step 6: Prove it by hand.** `find . -maxdepth 1 -name '.coverage.*' -delete` (never `rm -f .coverage*` -- that glob deletes `.coveragerc`, which silently turns off worker measurement; it cost this plan two invalid measurements), then `… -m coverage run -m pytest -q tests/test_crypto.py && … -m coverage combine`, then print `sorted(CoverageData(".coverage").measured_contexts())[:3]` after `.read()`. Expected: the empty string, then nodeids such as `tests/test_crypto.py::test_wrong_key`.
+
+- [ ] **Step 7: Commit** (`test: label coverage with the running test, and turn the labels into a line-to-tests map (#707)`).
 
 ### Task 11: from a diff to changed functions
 
 **Files:** Modify `scripts/test_map.py`; test: append to `tests/test_changed_code_selects_its_tests.py`.
 
 **Interfaces:**
-- Produces: `test_map.parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]` (old-side line ranges per path; a pure insertion after old line `a` is `(a, a + 1)`); `test_map.enclosing_function(source: str, start: int, end: int) -> tuple[int, int] | None`; `test_map.Region` = `namedtuple("Region", "path start end")` where `start is None` means "no enclosing function"; `test_map.changed_regions(repo: Path, sha: str) -> tuple[list[Region], list[str]]` (regions in tracked `.py` files under `isocenter/`; every other changed or untracked path).
+- Produces: `test_map.parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]` (old-side line ranges per path; a pure insertion after old line `a` is `(a, a)`: the line it follows, so an insertion at the end of a function still belongs to that function); `test_map.enclosing_function(source: str, start: int, end: int) -> tuple[int, int] | None`; `test_map.Region` = `namedtuple("Region", "path start end")` where `start is None` means "no enclosing function"; `test_map.changed_regions(repo: Path, sha: str) -> tuple[list[Region], list[str]]` (regions in tracked `.py` files under `isocenter/`; every other changed or untracked path).
 
 - [ ] **Step 1: Write the failing tests** (append):
 
@@ -1014,7 +1052,7 @@ diff --git a/docs/environment.md b/docs/environment.md
 
 def test_hunks_are_read_in_old_side_numbering():
     hunks = test_map.parse_hunks(DIFF)
-    assert hunks["isocenter/session.py"] == [(70, 71), (1612, 1613)]
+    assert hunks["isocenter/session.py"] == [(70, 70), (1612, 1613)]
     assert hunks["docs/environment.md"] == [(5, 5)]
 
 
@@ -1079,7 +1117,7 @@ def parse_hunks(diff_text):
             if match and path:
                 start = int(match.group(1))
                 count = 1 if match.group(2) is None else int(match.group(2))
-                end = start + 1 if count == 0 else start + count - 1
+                end = start if count == 0 else start + count - 1
                 hunks.setdefault(path, []).append((start, end))
     return hunks
 
@@ -1371,7 +1409,9 @@ def load(repo):
 
 
 def selection_for(repo):
-    from scripts.mutation_probe import TARGETS
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from mutation_probe import TARGETS  # as tests/test_mutation_probe_targets.py does
     mapping = load(repo)
     sha = mapping["sha"] if mapping else _git(repo, "merge-base", "HEAD",
                                               "origin/main").strip()
@@ -1395,16 +1435,14 @@ def build(repo, out_dir):
     import sys
     import tempfile
     repo = Path(repo).resolve()
-    if _git(repo, "status", "--porcelain").strip():
+    if _git(repo, "status", "--porcelain", "--untracked-files=no").strip():
         raise SystemExit("build wants a clean tree: the map's line numbers "
                          "are only meaningful at a commit")
     sha = _git(repo, "rev-parse", "HEAD").strip()
     with tempfile.TemporaryDirectory() as scratch:
-        rc = Path(scratch) / "coveragerc"
-        rc.write_text((repo / ".coveragerc").read_text(encoding="utf-8")
-                      .replace("sigterm = True",
-                               "sigterm = True\ndynamic_context = test_function"),
-                      encoding="utf-8")
+        # .coveragerc as it stands: the contexts come from conftest's
+        # pytest_runtest_protocol hook, not from a dynamic_context line.
+        rc = repo / ".coveragerc"
         env = dict(os.environ, COVERAGE_FILE=str(Path(scratch) / ".coverage"),
                    PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=str(repo))
         subprocess.run([sys.executable, "-m", "coverage", "run",
@@ -1460,7 +1498,8 @@ At the top of `pytest_collection_modifyitems`, before the `--shard` block (so th
 
 ```python
     if config.getoption("--changed"):
-        from scripts import test_map
+        sys.path.insert(0, str(config.rootpath / "scripts"))
+        import test_map
         sel, mapping, sha = test_map.selection_for(config.rootpath)
         reporter = config.pluginmanager.get_plugin("terminalreporter")
         if reporter is not None:
@@ -1476,8 +1515,6 @@ At the top of `pytest_collection_modifyitems`, before the `--shard` block (so th
             config.hook.pytest_deselected(items=drop)
             items[:] = keep
 ```
-
-`tests/conftest.py` importing `scripts.test_map` needs the repo root on `sys.path`; if the import fails under `pytest tests/x.py` from another directory, insert `str(config.rootpath)` into `sys.path` first.
 
 - [ ] **Step 5: Run the test, then try it by hand.** Add a blank line inside `Session.compact`'s body, run `… -m pytest --changed --collect-only -q`, read the reasons, `git checkout isocenter/session.py`. With no map yet, expect the `TARGETS` row for `session.py` and the "no map" reason.
 
@@ -1507,9 +1544,7 @@ def small_real_map(tmp_path_factory):
     proj = tmp_path_factory.mktemp("maprepo")
     subprocess.run(f"git archive HEAD | tar -x -C {proj}", shell=True,
                    cwd=REPO, check=True)
-    rc = proj / "ctx.rc"
-    rc.write_text((proj / ".coveragerc").read_text().replace(
-        "sigterm = True", "sigterm = True\ndynamic_context = test_function"))
+    rc = proj / ".coveragerc"  # contexts come from the copy's conftest hook
     env = {k: v for k, v in os.environ.items() if not k.startswith("COVERAGE_")}
     env.update(PYTHONPATH=str(proj), PYTHONDONTWRITEBYTECODE="1",
                COVERAGE_FILE=str(proj / ".coverage"))
@@ -1553,7 +1588,7 @@ def test_a_worker_edit_selects_the_test_that_runs_it_in_a_pool(
     assert "tests/test_crypto.py" not in _files(sel)
 ```
 
-On 3.12 the fixture's run pays the 11.6x contexts cost (about 70 s for `test_multiprocessing.py`); the 1500 s timeout covers it. Measure the fixture's wall time on both interpreters and put both in the PR body. If it exceeds 5 minutes on 3.12, the fixture must `pytest.skip` from its body when `sys._is_gil_enabled()` is true, with the measured figure in the message, and `tests/test_skip_contract.py` is updated to account for it.
+On 3.12 the fixture's run pays for coverage over spawned workers (about 70 s for `test_multiprocessing.py` alone, against 6 s bare -- contexts themselves are free); the 1500 s timeout covers it. Measure the fixture's wall time on both interpreters and put both in the PR body. If it exceeds 5 minutes on 3.12, the fixture must `pytest.skip` from its body when `sys._is_gil_enabled()` is true, with the measured figure in the message, and `tests/test_skip_contract.py` is updated to account for it.
 
 - [ ] **Step 2: Run on both interpreters.** Expected: 3 passed each. `git archive HEAD` exports the last commit, so commit Tasks 10-13 first.
 
@@ -1572,6 +1607,8 @@ time PYTHON_GIL=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$S \
 ```
 
 Compare against a plain 3.14t full run. This closes spec §9's second point. If the ratio is under about 2x, `RELEASING.md` says the 3.14t gate run *is* the map build; if not, it says the map is built on demand, and spec §10 records which.
+
+- [ ] **Step 1b: Find out how much of `workers` is really threads.** Measured while planning: with `.coveragerc`'s `concurrency = multiprocessing`, a 3.14t run of `test_multiprocessing.py` still left `ingest_worker` under the empty context and wrote 15 data files -- so that ingest spawned processes even on 3.14t -- while a run with **no** rcfile (coverage's default `concurrency = thread`) recorded 10 lines of `scan_worker` under the test's nodeid. `concurrency` replaces the default rather than adding to it, so worker *threads* may currently go unmeasured in the map. Build once more with a scratch rc whose line reads `concurrency = multiprocessing,thread`, diff the two maps' `workers` sections, and if lines move from `workers` to `lines`, have `build()` use that rc (written to its temp directory; `.coveragerc` itself is not changed, since its SIGTERM comment was measured under the present setting). Record the counts in spec §10.
 
 - [ ] **Step 2: Measure rule 2's breadth** (spec §9, third point). Insert a line in `ingest_worker`, run `python -m scripts.test_map select | tail -n +1 | grep -c '^tests/'`, revert. If the selected files exceed a third of `tests/test_*.py`, implement the per-worker refinement before the PR: `_worker_calls` already yields the worker name, so key `dispatch_sites` by name and, in rule 2, use only the sites of workers whose own function range contains or transitively calls the region -- and if "transitively" cannot be had cheaply, record the measured breadth in spec §10 and leave the coarse rule.
 
