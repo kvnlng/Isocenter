@@ -1355,7 +1355,12 @@ def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():
 #: 1213-1559 s on 3.14t, which put the peak at 91% of 30 minutes. One 3.12
 #: run for #614 was killed at 98% of the suite with no failing test.
 #: 45 minutes puts the measured peak at 61%.
-_RUN_TESTS_STEP_MINUTES_FLOOR = 45
+#:
+#: Raised to 75 in v0.9.8 (2026-09-16), before the tag. On PR #690 at
+#: 30d9e6b, run 35127628235, the 3.12 Run Tests step was killed at the
+#: 45-minute cap with 98% of the suite run and every listed test passing,
+#: and 3.14t finished at 44m37s wall. 75 minutes puts that peak near 60%.
+_RUN_TESTS_STEP_MINUTES_FLOOR = 75
 
 
 def test_the_run_tests_step_keeps_the_headroom_the_suite_needs():

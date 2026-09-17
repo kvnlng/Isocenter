@@ -89,7 +89,7 @@ jobs:
     # Run Tests step said 20, so #102's headroom was inert from the day it
     # landed and #250's three hangs each produced a log naming nothing.
     # test_packaging_contract.py pins the inequality.
-    timeout-minutes: 60
+    timeout-minutes: 95
 
     steps:
     - uses: actions/checkout@v7
@@ -167,7 +167,15 @@ jobs:
       # 3.12 and 1213-1559 s on 3.14t, a peak at 91% of 30 minutes. One
       # 3.12 run, for #614, was killed at 98% of the suite (1813 s, no
       # failing test). 45 puts the measured peak at 61%.
-      timeout-minutes: 45
+      #
+      # It reached the cap again before v0.9.8 was tagged. On PR #690 at
+      # 30d9e6b, run 35127628235, `test (3.12)`'s Run Tests was killed at
+      # 45 minutes with 98% of the suite run and every listed test
+      # passing, and `test (3.14t)` finished at 44m37s wall, 99% of the
+      # cap. 75 puts that peak near 60%. The job cap above rises to 95,
+      # over the step sum of 3+3+3+3+75+1 = 88, and faulthandler_timeout
+      # (300 s) stays under half of this.
+      timeout-minutes: 75
       run: |
         pytest -v
       env:
