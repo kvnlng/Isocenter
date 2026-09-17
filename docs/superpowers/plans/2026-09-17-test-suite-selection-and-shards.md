@@ -5,6 +5,7 @@
 **Date:** 2026-09-17
 **Issue:** #707
 **Status:** plan only. **No development starts until the owner says go** (owner, 2026-09-17).
+**Revised the same day** for the owner's merge-rule ruling (`RELEASING.md`, "Changes land on `main`"): a change merges on its own tests, run on 3.12 and 3.14t, and an adversarial review; the full suite is the integration test at release. Part 3 is rewritten around a function-keyed map, and every "local gate" below means that procedure. Spec §10 items 7-9.
 **Scope:** internal. Excluded from the docs site by `exclude_docs`. A dated record: deviations found at implementation are listed under a `**Deviations at implementation**` heading at the top, as `2026-09-06-bunch-e-hang-probe-and-export-sweep.md` does, and the spec's §10 Amendments log gets the same entries.
 
 **Goal:** give a developer `pytest --changed` -- the tests that exercise the code they touched -- and run the suite on GitHub as four duration-balanced shards per Python version, with every test isolated in its own working directory.
@@ -20,7 +21,7 @@
 - No new dependency, in any extra. No `pytest-xdist`, no `pytest-testmon`, no `pytest-split` (spec §2 ruling 4, §3.1).
 - Test files stay flat in `tests/`. No directories, no per-module markers (spec §2 ruling 1).
 - `scripts/mutation_probe.py`'s `TARGETS` and `NOT_PROBED` remain the only hand-maintained module-to-tests map. Import them; never copy them; never parse CLAUDE.md (spec §6.3).
-- The merge gate and the release gate stay the **full suite**. `--changed` is advisory and must print that it is (spec §1, §6.4).
+- **`--changed` is the pre-merge check, not advice** (`RELEASING.md` step 3; spec §10 item 7). Nothing runs the full suite between a merge and a release, so a selection that misses a test puts a regression on `main`. Every fallback widens -- no record, then the module's `TARGETS` row, then the suite -- and the tool prints which one it took.
 - `publish.yml` is not edited. Its filename and environment names are pinned by PyPI's publisher config.
 - Interpreters, named explicitly (the `python3` on `PATH` is a pyenv shim without the dependencies): `/Users/kevin/Developer/Isocenter/.venv/bin/python` (3.12) and `/Users/kevin/Developer/Isocenter/.venv314t/bin/python` (3.14.7t, run with `PYTHON_GIL=0`).
 - Every hand-run sets `PYTHONDONTWRITEBYTECODE=1` and `PYTHONPATH=<worktree>`, then prints `isocenter.__file__` and reads it (CLAUDE.md, "Running one mutation by hand"). `isocenter` is installed editable from the main checkout; a worktree imports the wrong tree without this.
@@ -28,7 +29,7 @@
 - New test files that import an `isocenter` module must be added to the matching `TARGETS` row or `tests/test_mutation_probe_targets.py` goes red. The files this plan creates import only `support.*`, `scripts.*` and the stdlib, so none needs a row; if an implementer adds an `isocenter` import, add the row in the same commit.
 - Skips are body-level `pytest.skip(...)` calls, never `@pytest.mark.skipif` -- `tests/test_skip_contract.py` flags the marker spelling.
 - Helper modules go in `tests/support/` and are imported as `from support.x import y` (there is no `tests/__init__.py`; `tests/` is on `sys.path`). A top-level `tests/*.py` that pytest does not collect fails `test_every_top_level_tests_module_is_one_pytest_collects`.
-- Commits are conventional-commit style with a trailing `(#707)`. One PR per Part. Each PR goes through the local gate in `RELEASING.md`: full suite on 3.12 and 3.14t at the pushed SHA, then an adversarial review naming that SHA.
+- Commits are conventional-commit style with a trailing `(#707)`. One PR per Part. Each PR follows `RELEASING.md`, "Changes land on `main`": rebase on current `main`; run the new tests and the tests covering what was touched on **both** 3.12 and 3.14t at the pushed SHA; an adversarial review of the change as rebased, naming that SHA; a merge pinned to it. **The full suite is not a merge requirement.** Where a task below runs the whole suite, it is because that task's own work needs it (Part 1's triage, Part 2's timings, Part 3's map), not as a gate.
 - CHANGELOG: one `### Internal` entry per PR. None of this is user-visible.
 
 ## File Structure
@@ -46,7 +47,7 @@
 | `tests/test_shards_partition_the_suite.py` (create) | 2 | The partition contract and the `tests.yml` pin. |
 | `.github/workflows/tests.yml` (modify) | 2 | `shard` matrix axis, run command, summary line, caps. |
 | `tests/test_packaging_contract.py` (modify) | 2 | `_RUN_TESTS_STEP_MINUTES_FLOOR` and its comment. |
-| `scripts/test_map.py` (create) | 3 | `build`, `changed_regions`, `dispatch_sites`, `select`, CLI. |
+| `scripts/test_map.py` (create) | 3 | `from_coverage`, `changed`, `dispatchers`, `select`, `build`, CLI. |
 | `tests/test_changed_code_selects_its_tests.py` (create) | 3 | Rule-by-rule unit tests and the three spike probes as permanent tests. |
 | `.gitignore`, `CLAUDE.md`, `RELEASING.md`, `CHANGELOG.md` (modify) | 1, 2, 3 | As each Part states. `CLAUDE.md` is untracked (local only); edit it in the main checkout, not the worktree. |
 
@@ -472,7 +473,7 @@ git commit -m "test: keep spawned workers' coverage data out of the per-test dir
 - [ ] **Step 2: `pytest.ini`.** In the `testpaths` comment, the sdist staging directory is still real; add one sentence: "Since #707 that test is `repo_root`-marked and the root guard allows its directory by name."
 - [ ] **Step 3: `RELEASING.md`.** Find the 3.14t `git archive` step. Keep it. Change its stated reason to: the copy proves which tree was tested (SHA purity). Remove any sentence giving file collisions as the reason.
 - [ ] **Step 4: `CHANGELOG.md`.** Under the unreleased heading, `### Internal`: what changed, that no public behaviour did, and the before/after wall times from Task 2.
-- [ ] **Step 5: Commit** (`docs: say where tests write now (#707)`), run the local gate, open the PR with the Task 2 list and the Task 4 numbers in the body.
+- [ ] **Step 5: Commit** (`docs: say where tests write now (#707)`), follow `RELEASING.md` steps 3-6, and open the PR with the Task 2 list and the Task 4 numbers in the body. Task 2's two full runs already cover this PR's blast radius -- a fixture every test uses -- so they are its step 3.
 
 ---
 
@@ -854,7 +855,7 @@ Expected: eight rows, all green. Record them. Let `peak` be the largest, in seco
 
 - [ ] **Step 5: Run `tests/test_packaging_contract.py` in full.** Expected: pass -- in particular `test_the_job_cap_cannot_fire_before_a_steps_own_timeout`, `test_a_hang_dumps_tracebacks_before_any_timeout_kills_it`, `test_the_stall_watchdog_fires_inside_the_run_tests_step`.
 
-- [ ] **Step 6: Dispatch once more and confirm eight greens under the new caps.** Then CHANGELOG `### Internal` entry with both sets of numbers, commit (`ci: size the step and job caps to a sharded run (#707)`), local gate, PR.
+- [ ] **Step 6: Dispatch once more and confirm eight greens under the new caps.** Then CHANGELOG `### Internal` entry with both sets of numbers, commit (`ci: size the step and job caps to a sharded run (#707)`), `RELEASING.md` steps 3-6, PR.
 
 ---
 
@@ -862,17 +863,24 @@ Expected: eight rows, all green. Record them. Let `peak` be the largest, in seco
 
 Branch: `test/707-changed`, from `main` after Parts 1 and 2 merge. Spec §6.
 
-### Task 10: coverage contexts become a map
+**Revised 2026-09-17, the day it was written, after the owner's merge-rule ruling** (`RELEASING.md`, "Changes land on `main`"; spec §10 items 7-9). The full suite no longer runs before a merge, so nothing rebuilds the map on every push and `--changed` is the pre-merge check, not a convenience. Two consequences shape every task below:
+
+- **The map is keyed by function name, not by line number.** A line-keyed map is only right at the commit it was built at, so it had to be diffed against that commit -- and a map weeks old would then select everyone's merged work. A name-keyed map stays right for every function that still exists under its name; a new or renamed one has no record and falls to its `TARGETS` row.
+- **The diff is the developer's own work:** working tree against the merge-base with `origin/main`, read in **new-side** numbering against the working-tree source.
+
+The pure functions in Tasks 10-12 were prototyped and run against the test cases given here before this was written.
+
+### Task 10: coverage contexts become a function-keyed map
 
 **Files:**
 - Create: `scripts/test_map.py`
-- Modify: `.gitignore` (add `.test-map.json`)
+- Modify: `tests/conftest.py` (the context hook), `.gitignore` (add `.test-map.json`)
 - Test: `tests/test_changed_code_selects_its_tests.py`
 
 **Interfaces:**
-- Produces: a `pytest_runtest_protocol` hookwrapper in `conftest.py` that labels coverage with the running test's nodeid; `test_map.MAP_FILE = ".test-map.json"`; `test_map.context_to_nodeid(context: str) -> str`; `test_map.split_contexts(contexts_by_lineno: dict) -> tuple[dict, list]`; `test_map.from_coverage(data_path: Path, repo: Path, sha: str, python: str) -> dict` with keys `sha`, `python`, `lines` (`{path: {str(lineno): [nodeid, ...]}}`) and `workers` (`{path: [lineno, ...]}`).
+- Produces: a `pytest_runtest_protocol` hookwrapper in `conftest.py` that labels coverage with the running test's nodeid; `test_map.MAP_FILE = ".test-map.json"`; `test_map.context_to_nodeid(context: str) -> str`; `test_map.functions_in(source: str) -> list[tuple[str, int, int]]` (qualname, first line, last line; methods as `Class.method`, nested as `outer.inner`); `test_map.function_at(source: str, line: int) -> str | None`; `test_map.split_functions(source: str, contexts_by_lineno: dict) -> tuple[dict[str, list[str]], list[str]]`; `test_map.from_coverage(data_path: Path, repo: Path, sha: str, python: str) -> dict` with keys `sha`, `python`, `functions` (`{path: {qualname: [nodeid, ...]}}`) and `workers` (`{path: [qualname, ...]}`).
 
-**Why a hook and not `dynamic_context = test_function`** (found in plan review, measured 2026-09-17; spec §10 items 4-6). Coverage's `test_function` context starts when a `test*` frame is entered and ends when it returns, so everything a **fixture** executes -- `Session()` construction, an ingest inside `reloaded_redaction_session` -- is recorded under the empty context, exactly like a worker line, and would be mis-filed as worker-only. Switching the context ourselves around the whole test protocol (setup, call, teardown) is what `pytest-cov --cov-context=test` does, and it needs no dependency. Measured: a fixture-executed line in `builders.py` is recorded under `tests/test_zz_fixture_probe.py::test_uses_fixture`. Contexts are then nodeids, parametrize id included. Known limit, to be recorded and not fixed: a module- or session-scoped fixture is attributed to the first test that triggers it.
+**Why a hook and not `dynamic_context = test_function`** (measured 2026-09-17; spec §10 items 4-6). Coverage's `test_function` context starts when a `test*` frame is entered and ends when it returns, so everything a **fixture** executes -- `Session()` construction, an ingest inside `reloaded_redaction_session` -- is recorded under the empty context, exactly like a worker line, and would be mis-filed as worker-only. Switching the context ourselves around the whole test protocol (setup, call, teardown) is what `pytest-cov --cov-context=test` does, and it needs no dependency. Measured: a fixture-executed line in `builders.py` is recorded under `tests/test_zz_fixture_probe.py::test_uses_fixture`. Contexts are then nodeids, parametrize id included. Known limit, recorded and not fixed: a module- or session-scoped fixture is attributed to the first test that triggers it.
 
 `dynamic_context` and `switch_context` must not both be set; coverage warns about conflicting contexts. The build uses `.coveragerc` as it stands.
 
@@ -882,6 +890,11 @@ Create `tests/test_changed_code_selects_its_tests.py`:
 
 ```python
 """`pytest --changed` runs the tests that exercise what was edited (#707).
+
+Since 2026-09-17 this selection is the pre-merge check (RELEASING.md,
+step 3): the full suite runs when a release is cut, not before a merge.
+A selection that misses a test puts a regression on `main`, so every
+fallback here widens -- to the module's TARGETS row, then to the suite.
 
 pytest-testmon was tried first and rejected: it traces the pytest
 process only, so an edit to `ingest_worker` selected no tests at all.
@@ -899,6 +912,32 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import test_map  # noqa: E402
 
+SOURCE = '''\
+import os
+
+LIMIT = 3
+
+
+class Session:
+    flag = True
+
+    def compact(self):
+        """Doc."""
+        return 1
+
+    def export(self):
+        def inner():
+            return 2
+        return inner()
+
+    def never_called(self):
+        return 3
+
+
+def scan_worker(args):
+    return args
+'''
+
 
 @pytest.mark.parametrize("context, nodeid", [
     ("tests/test_crypto.py::test_wrong_key",
@@ -906,36 +945,72 @@ import test_map  # noqa: E402
     ("tests/test_a.py::TestK::test_y[p0-True]", "tests/test_a.py::TestK::test_y"),
 ])
 def test_a_context_is_a_nodeid_without_its_parametrize_id(context, nodeid):
-    # Selection is per test function: a change that one parameter set
-    # exercises re-runs them all, and ids with brackets in them cannot
-    # then break the match in conftest.
+    # Selection is per test function: a change one parameter set exercises
+    # re-runs them all, and an id with brackets in it cannot break the match.
     assert test_map.context_to_nodeid(context) == nodeid
 
 
-def test_lines_with_a_test_go_to_lines_and_the_rest_to_workers():
-    contexts = {10: ["tests/test_a.py::test_one[x]", ""], 11: [""],
-                12: ["tests/test_a.py::test_two"]}
-    lines, workers = test_map.split_contexts(contexts)
-    assert lines == {"10": ["tests/test_a.py::test_one"],
-                     "12": ["tests/test_a.py::test_two"]}
-    assert workers == [11]
+def test_functions_are_named_the_way_a_reader_would_name_them():
+    assert test_map.functions_in(SOURCE) == [
+        ("Session.compact", 9, 11), ("Session.export", 13, 16),
+        ("Session.export.inner", 14, 15), ("Session.never_called", 18, 19),
+        ("scan_worker", 22, 23)]
+
+
+def test_a_line_belongs_to_its_innermost_function():
+    assert test_map.function_at(SOURCE, 11) == "Session.compact"
+    assert test_map.function_at(SOURCE, 15) == "Session.export.inner"
+    assert test_map.function_at(SOURCE, 16) == "Session.export"
+
+
+def test_a_module_or_class_body_line_belongs_to_no_function():
+    # Widening to the class would select every test that touches it --
+    # for Session, the suite. These fall to the module's TARGETS row.
+    assert test_map.function_at(SOURCE, 3) is None
+    assert test_map.function_at(SOURCE, 7) is None
+
+
+def test_functions_split_into_tested_and_worker_only():
+    contexts = {
+        9: [""], 11: ["tests/test_c.py::test_a[x]", ""],   # compact: a test ran it
+        18: [""],                                          # never_called: def line only
+        22: [""], 23: [""],                                # scan_worker: body, no test
+        3: ["tests/test_c.py::test_a"],                    # module scope: ignored
+    }
+    functions, workers = test_map.split_functions(SOURCE, contexts)
+    assert functions == {"Session.compact": ["tests/test_c.py::test_a"]}
+    assert workers == ["scan_worker"]
+
+
+def test_a_def_line_alone_does_not_make_a_function_worker_only():
+    # A `def` line runs when its class body does, at import, under no
+    # test. Counting it would file every never-called function as
+    # "ran only in a worker" and send its edits to the pool tests.
+    _functions, workers = test_map.split_functions(SOURCE, {18: [""]})
+    assert workers == []
 ```
 
-The `sys.path` line mirrors `tests/test_mutation_probe_targets.py:33`; read it before changing the import.
-
-- [ ] **Step 2: Run and watch them fail** (`ImportError: cannot import name 'test_map'`).
+- [ ] **Step 2: Run and watch them fail** (`ModuleNotFoundError: No module named 'test_map'`).
 
 - [ ] **Step 3: Write the first half of `scripts/test_map.py`**
 
 ```python
-"""Which tests exercise which source lines, and what a change selects (#707).
+"""Which tests exercise which functions, and what a change selects (#707).
 
     python -m scripts.test_map build     # 3.14t, clean tree at a known SHA
     python -m scripts.test_map select    # print what --changed would run
 
+Since 2026-09-17 the selection is the pre-merge check (RELEASING.md,
+step 3); the full suite runs when a release is cut. Every fallback here
+therefore widens: no record -> the module's TARGETS row -> the suite.
+
 The map is generated, gitignored and never edited. `TARGETS` in
 scripts/mutation_probe.py stays the one maintained module-to-tests map;
 this only narrows inside it.
+
+Keyed by function name, not line number, because nothing rebuilds it on
+every push: a name-keyed map stays right for every function that still
+exists under its name, however old the map is.
 
 Contexts are nodeids, switched by a hook in tests/conftest.py around each
 test's whole protocol, so what a fixture runs is attributed to the test.
@@ -943,11 +1018,12 @@ test's whole protocol, so what a fixture runs is attributed to the test.
 Built on 3.14t because coverage over spawned workers is what is slow on
 3.12 -- 5.96 s bare against 68.3 s under .coveragerc, contexts or not,
 for tests/test_multiprocessing.py + tests/test_crypto.py -- where the
-free-threaded build pays 0.64 s against 0.89 s (spec §10). Lines a
-spawned worker runs are recorded under the empty context on both, since
-the context lives in the parent; they are kept apart as `workers` and
-selected through their dispatch sites.
+free-threaded build pays 0.64 s against 0.89 s (spec §10). What a spawned
+worker runs is recorded under the empty context on both, since the
+context lives in the parent; those functions are kept apart as `workers`
+and selected through the functions that dispatch them.
 """
+import ast
 import json
 import os
 from pathlib import Path
@@ -959,16 +1035,55 @@ def context_to_nodeid(context):
     return context.split("[", 1)[0]
 
 
-def split_contexts(contexts_by_lineno):
-    lines, workers = {}, []
-    for lineno in sorted(contexts_by_lineno):
-        named = sorted({context_to_nodeid(c)
-                        for c in contexts_by_lineno[lineno] if c})
-        if named:
-            lines[str(lineno)] = named
-        else:
-            workers.append(lineno)
-    return lines, workers
+def functions_in(source):
+    """(qualname, first line, last line) for every function, outermost first."""
+    found = []
+
+    def walk(node, prefix):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef)):
+                name = prefix + child.name
+                if not isinstance(child, ast.ClassDef):
+                    found.append((name, child.lineno, child.end_lineno))
+                walk(child, name + ".")
+            else:
+                walk(child, prefix)
+
+    walk(ast.parse(source), "")
+    return found
+
+
+def _span_at(source, line):
+    best = None
+    for name, start, end in functions_in(source):
+        if start <= line <= end and (best is None or start >= best[1]):
+            best = (name, start)
+    return best
+
+
+def function_at(source, line):
+    """The innermost function holding `line`, or None."""
+    span = _span_at(source, line)
+    return span[0] if span else None
+
+
+def split_functions(source, contexts_by_lineno):
+    named, seen = {}, set()
+    for lineno, contexts in contexts_by_lineno.items():
+        span = _span_at(source, lineno)
+        # A `def` line runs when its module or class body does -- at import,
+        # under no test. Counting it would file every function that was
+        # never called as "ran only in a worker".
+        if span is None or span[1] == lineno:
+            continue
+        name = span[0]
+        seen.add(name)
+        tests = {context_to_nodeid(c) for c in contexts if c}
+        if tests:
+            named.setdefault(name, set()).update(tests)
+    functions = {name: sorted(tests) for name, tests in sorted(named.items())}
+    return functions, sorted(seen - set(functions))
 
 
 def from_coverage(data_path, repo, sha, python):
@@ -976,19 +1091,23 @@ def from_coverage(data_path, repo, sha, python):
     data = coverage.CoverageData(str(data_path))
     data.read()
     repo = Path(repo).resolve()
-    result = {"sha": sha, "python": python, "lines": {}, "workers": {}}
+    result = {"sha": sha, "python": python, "functions": {}, "workers": {}}
     for measured in sorted(data.measured_files()):
         try:
             rel = Path(measured).resolve().relative_to(repo).as_posix()
         except ValueError:
             continue
-        lines, workers = split_contexts(data.contexts_by_lineno(measured))
-        if lines:
-            result["lines"][rel] = lines
+        source = Path(measured).read_text(encoding="utf-8")
+        functions, workers = split_functions(
+            source, data.contexts_by_lineno(measured))
+        if functions:
+            result["functions"][rel] = functions
         if workers:
             result["workers"][rel] = workers
     return result
 ```
+
+`functions_in` is called once per line in `split_functions`; on `io_handlers.py` (about 10,000 lines) that is slow. If the build's `from_coverage` step takes more than a minute, compute `functions_in(source)` once per file and pass the list into `_span_at`; keep the public signatures.
 
 - [ ] **Step 4: Run and watch them pass.** Add `.test-map.json` to `.gitignore` under the coverage block.
 
@@ -1019,14 +1138,14 @@ def pytest_runtest_protocol(item, nextitem):
 
 - [ ] **Step 6: Prove it by hand.** `find . -maxdepth 1 -name '.coverage.*' -delete` (never `rm -f .coverage*` -- that glob deletes `.coveragerc`, which silently turns off worker measurement; it cost this plan two invalid measurements), then `… -m coverage run -m pytest -q tests/test_crypto.py && … -m coverage combine`, then print `sorted(CoverageData(".coverage").measured_contexts())[:3]` after `.read()`. Expected: the empty string, then nodeids such as `tests/test_crypto.py::test_wrong_key`.
 
-- [ ] **Step 7: Commit** (`test: label coverage with the running test, and turn the labels into a line-to-tests map (#707)`).
+- [ ] **Step 7: Commit** (`test: label coverage with the running test, and turn the labels into a function-to-tests map (#707)`).
 
-### Task 11: from a diff to changed functions
+### Task 11: from the developer's diff to changed functions
 
 **Files:** Modify `scripts/test_map.py`; test: append to `tests/test_changed_code_selects_its_tests.py`.
 
 **Interfaces:**
-- Produces: `test_map.parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]` (old-side line ranges per path; a pure insertion after old line `a` is `(a, a)`: the line it follows, so an insertion at the end of a function still belongs to that function); `test_map.enclosing_function(source: str, start: int, end: int) -> tuple[int, int] | None`; `test_map.Region` = `namedtuple("Region", "path start end")` where `start is None` means "no enclosing function"; `test_map.changed_regions(repo: Path, sha: str) -> tuple[list[Region], list[str]]` (regions in tracked `.py` files under `isocenter/`; every other changed or untracked path).
+- Produces: `test_map.Change` = `namedtuple("Change", "path qualname")`, where `qualname is None` means "outside any function"; `test_map.parse_hunks(diff_text: str) -> dict[str, list[tuple[int, int]]]` (**new-side** line ranges per path; a pure deletion is the one new-side line it sits at); `test_map.changes_in(path: str, source: str, ranges) -> set[Change]`; `test_map.merge_base(repo: Path) -> str`; `test_map.changed(repo: Path) -> tuple[set[Change], list[str]]` (changes in existing `.py` files under `isocenter/`; every other changed, added, deleted or untracked path).
 
 - [ ] **Step 1: Write the failing tests** (append):
 
@@ -1037,55 +1156,40 @@ diff --git a/isocenter/session.py b/isocenter/session.py
 +++ b/isocenter/session.py
 @@ -70,0 +71 @@ def scan_worker(args):
 +    probe = 1
-@@ -1612,2 +1613,3 @@ class DicomSession:
+@@ -1612,2 +1613,1 @@ class DicomSession:
 -        a = 1
 -        b = 2
 +        a = 3
-diff --git a/docs/environment.md b/docs/environment.md
---- a/docs/environment.md
-+++ b/docs/environment.md
-@@ -5 +5 @@
--old
-+new
+@@ -1700,2 +1699,0 @@ class DicomSession:
+-        gone = 1
+-        gone = 2
+diff --git a/isocenter/old.py b/isocenter/old.py
+--- a/isocenter/old.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-x
+-y
 """
 
 
-def test_hunks_are_read_in_old_side_numbering():
-    hunks = test_map.parse_hunks(DIFF)
-    assert hunks["isocenter/session.py"] == [(70, 70), (1612, 1613)]
-    assert hunks["docs/environment.md"] == [(5, 5)]
+def test_hunks_are_read_in_new_side_numbering():
+    # New side, because the source they are resolved against is the
+    # working tree's. A pure deletion has no new lines; it sits at one.
+    assert test_map.parse_hunks(DIFF) == {
+        "isocenter/session.py": [(71, 71), (1613, 1613), (1699, 1699)]}
 
 
-SOURCE = '''\
-import os
-
-LIMIT = 3
+def test_a_deleted_file_yields_no_hunks():
+    assert "isocenter/old.py" not in test_map.parse_hunks(DIFF)
 
 
-class Session:
-    flag = True
-
-    def compact(self):
-        """Doc."""
-        return 1
-
-    def export(self):
-        def inner():
-            return 2
-        return inner()
-'''
-
-
-def test_a_changed_line_widens_to_its_innermost_function():
-    assert test_map.enclosing_function(SOURCE, 11, 11) == (9, 11)
-    assert test_map.enclosing_function(SOURCE, 15, 15) == (14, 15)
-
-
-def test_a_module_or_class_body_line_has_no_enclosing_function():
-    # Widening to the class would select every test that touches it --
-    # for Session, the suite. These fall to the module's TARGETS row.
-    assert test_map.enclosing_function(SOURCE, 3, 3) is None
-    assert test_map.enclosing_function(SOURCE, 7, 7) is None
+def test_changed_lines_become_the_functions_that_hold_them():
+    changes = test_map.changes_in("m.py", SOURCE, [(11, 11), (3, 3), (15, 16)])
+    assert changes == {
+        test_map.Change("m.py", "Session.compact"),
+        test_map.Change("m.py", None),
+        test_map.Change("m.py", "Session.export.inner"),
+        test_map.Change("m.py", "Session.export")}
 ```
 
 - [ ] **Step 2: Run and watch them fail.**
@@ -1093,43 +1197,37 @@ def test_a_module_or_class_body_line_has_no_enclosing_function():
 - [ ] **Step 3: Implement** (append to `scripts/test_map.py`):
 
 ```python
-import ast
 import re
 import subprocess
 from collections import namedtuple
 
-Region = namedtuple("Region", "path start end")
+Change = namedtuple("Change", "path qualname")
 
-_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
 def parse_hunks(diff_text):
     hunks, path = {}, None
     for line in diff_text.splitlines():
-        # `--- a/` exactly: a removed source line that happens to begin
-        # `-- ` also renders as `--- …`, and must not be read as a header.
-        if line.startswith("--- a/"):
+        # `+++ b/` exactly: an added source line that happens to begin
+        # `++ ` also renders as `+++ …`, and must not be read as a header.
+        if line.startswith("+++ b/"):
             path = line[6:].strip()
-        elif line.startswith("--- /dev/null"):
-            path = None  # a new file has no old side; see `--diff-filter=A` below
+        elif line.startswith("+++ /dev/null"):
+            path = None  # deleted; reported through --diff-filter=D below
         else:
             match = _HUNK.match(line)
             if match and path:
-                start = int(match.group(1))
+                start = max(int(match.group(1)), 1)
                 count = 1 if match.group(2) is None else int(match.group(2))
                 end = start if count == 0 else start + count - 1
                 hunks.setdefault(path, []).append((start, end))
     return hunks
 
 
-def enclosing_function(source, start, end):
-    best = None
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.lineno <= start and end <= node.end_lineno:
-                if best is None or node.lineno >= best[0]:
-                    best = (node.lineno, node.end_lineno)
-    return best
+def changes_in(path, source, ranges):
+    return {Change(path, function_at(source, line))
+            for start, end in ranges for line in range(start, end + 1)}
 
 
 def _git(repo, *args):
@@ -1137,85 +1235,96 @@ def _git(repo, *args):
                           capture_output=True, text=True).stdout
 
 
-def changed_regions(repo, sha):
-    # Diffed against the map's own SHA, so old-side numbers are the map's
-    # numbers however stale the working tree is. Working tree vs SHA
-    # covers committed, staged and unstaged edits in one diff.
-    hunks = parse_hunks(_git(repo, "diff", "-U0", sha, "--", "."))
-    regions, other = [], []
-    for path, ranges in sorted(hunks.items()):
-        if not (path.startswith("isocenter/") and path.endswith(".py")):
-            other.append(path)
+def merge_base(repo):
+    for upstream in ("origin/main", "main"):
+        try:
+            return _git(repo, "merge-base", "HEAD", upstream).strip()
+        except subprocess.CalledProcessError:
             continue
-        source = _git(repo, "show", f"{sha}:{path}")
-        for start, end in ranges:
-            span = enclosing_function(source, start, end)
-            regions.append(Region(path, *(span or (None, None))))
-    added = _git(repo, "diff", "--name-only", "--diff-filter=A", sha, "--", ".")
-    untracked = _git(repo, "ls-files", "--others", "--exclude-standard")
-    other.extend(sorted(set(added.split()) | set(untracked.split())))
-    return sorted(set(regions), key=lambda r: (r.path, r.start or 0)), sorted(set(other))
+    raise SystemExit("--changed needs a `main` or `origin/main` to diff against")
+
+
+def changed(repo):
+    # The developer's own work: working tree against where the branch left
+    # main. One diff covers committed, staged and unstaged edits. After the
+    # rebase RELEASING.md step 3 asks for, the merge-base is main's tip.
+    base = merge_base(repo)
+    hunks = parse_hunks(_git(repo, "diff", "-U0", base, "--", "."))
+    changes, other = set(), set()
+    for path, ranges in hunks.items():
+        if path.startswith("isocenter/") and path.endswith(".py"):
+            source = (Path(repo) / path).read_text(encoding="utf-8")
+            changes |= changes_in(path, source, ranges)
+        else:
+            other.add(path)
+    for flag in ("A", "D"):
+        other |= set(_git(repo, "diff", "--name-only",
+                          f"--diff-filter={flag}", base, "--", ".").split())
+    other |= set(_git(repo, "ls-files", "--others",
+                      "--exclude-standard").split())
+    # An added isocenter module is in `hunks` too; every function in it is
+    # new, so it has no record and rule 3 sends it to its row or the suite.
+    return changes, sorted(other - {c.path for c in changes})
 ```
 
-A file added since the SHA has no old side, so it yields no hunk; it arrives through `--diff-filter=A` in `other`, and Task 12's rules send an added `isocenter/*.py` to its `TARGETS` row or the full suite.
-
 - [ ] **Step 4: Run and watch them pass.**
-- [ ] **Step 5: Commit** (`test: read a diff as the functions it changed (#707)`).
+- [ ] **Step 5: Commit** (`test: read the developer's diff as the functions it changed (#707)`).
 
 ### Task 12: the selection rules
 
 **Files:** Modify `scripts/test_map.py`; test: append.
 
 **Interfaces:**
-- Consumes: `Region`, the map dict from Task 10.
-- Produces: `test_map.dispatch_sites(repo: Path) -> dict[str, set[int]]`; `test_map.Selection` = dataclass(`full: bool`, `nodeids: set[str]`, `files: set[str]`, `reasons: list[str]`); `test_map.select(mapping: dict | None, regions: list[Region], other: list[str], targets: dict, repo: Path) -> Selection`. `targets` is `mutation_probe.TARGETS` as it stands: `{module_path: ([test_file, ...], budget)}`.
+- Consumes: `Change`, the map dict from Task 10.
+- Produces: `test_map.dispatchers(repo: Path) -> set[tuple[str, str]]` (the `(path, qualname)` of every function that hands a `*_worker` to a pool); `test_map.dispatched_workers(repo: Path) -> set[str]`; `test_map.Selection` = dataclass(`full: bool`, `nodeids: set[str]`, `files: set[str]`, `reasons: list[str]`); `test_map.select(mapping: dict | None, changes, other: list[str], targets: dict, repo: Path, dispatching=None) -> Selection`. `targets` is `mutation_probe.TARGETS` as it stands: `{module_path: ([test_file, ...], budget)}`.
 
-- [ ] **Step 1: Write the failing tests** (append). One per rule in spec §6.3, plus the order:
+- [ ] **Step 1: Write the failing tests** (append). One per rule in spec §6.3, plus the no-map case:
 
 ```python
 MAP = {
     "sha": "abc", "python": "3.14.7t",
-    "lines": {
-        "isocenter/session.py": {
-            "1612": ["tests/test_compaction.py::TestCompaction::test_a"],
-            "900": ["tests/test_multiprocessing.py::test_parallel"],
-        },
-    },
-    "workers": {"isocenter/io_handlers.py": [4030, 4031]},
+    "functions": {"isocenter/session.py": {
+        "DicomSession.compact": ["tests/test_compaction.py::TestCompaction::test_a"],
+        "DicomSession.ingest": ["tests/test_multiprocessing.py::test_parallel"],
+    }},
+    "workers": {"isocenter/io_handlers.py": ["ingest_worker"]},
 }
 TARGETS = {
     "isocenter/session.py": (["tests/test_session.py"], 80),
     "isocenter/io_handlers.py": (["tests/test_io.py"], 80),
 }
-SITES = {"isocenter/session.py": {900}}
+DISPATCHING = {("isocenter/session.py", "DicomSession.ingest")}
 
 
-def _select(regions=(), other=(), mapping=MAP):
-    return test_map.select(mapping, list(regions), list(other), TARGETS,
-                           REPO, sites=SITES)
+def _select(changes=(), other=(), mapping=MAP):
+    return test_map.select(mapping, set(changes), list(other), TARGETS,
+                           REPO, dispatching=DISPATCHING)
 
 
-def test_rule_1_a_function_with_named_contexts_selects_those_tests():
-    sel = _select([test_map.Region("isocenter/session.py", 1609, 1700)])
-    assert not sel.full
+def test_rule_1_a_function_a_test_ran_selects_those_tests():
+    sel = _select([test_map.Change("isocenter/session.py",
+                                   "DicomSession.compact")])
+    assert not sel.full and not sel.files
     assert sel.nodeids == {
         "tests/test_compaction.py::TestCompaction::test_a"}
 
 
-def test_rule_2_a_worker_only_function_selects_through_the_dispatch_sites():
-    sel = _select([test_map.Region("isocenter/io_handlers.py", 4021, 4100)])
+def test_rule_2_a_worker_only_function_selects_through_its_dispatchers():
+    sel = _select([test_map.Change("isocenter/io_handlers.py",
+                                   "ingest_worker")])
     assert sel.nodeids == {"tests/test_multiprocessing.py::test_parallel"}
 
 
-def test_rule_3_a_region_with_no_record_falls_to_the_targets_row():
-    sel = _select([test_map.Region("isocenter/session.py", 5000, 5010)])
+def test_rule_3_a_function_with_no_record_falls_to_the_targets_row():
+    sel = _select([test_map.Change("isocenter/session.py",
+                                   "DicomSession.brand_new")])
     assert sel.files == {"tests/test_session.py"} and not sel.full
-    sel = _select([test_map.Region("isocenter/session.py", None, None)])
+    sel = _select([test_map.Change("isocenter/session.py", None)])
     assert sel.files == {"tests/test_session.py"}
 
 
 def test_rule_4_a_module_with_no_row_selects_the_full_suite():
-    sel = _select([test_map.Region("isocenter/profiles.py", None, None)])
+    sel = _select([test_map.Change("isocenter/profiles.py", None)])
     assert sel.full and "isocenter/profiles.py" in " ".join(sel.reasons)
 
 
@@ -1236,19 +1345,25 @@ def test_rule_7_any_other_path_selects_the_tests_that_name_it():
     assert "tests/test_documented_env_vars.py" in sel.files
 
 
+def test_a_deleted_or_added_module_falls_to_its_row_or_the_suite():
+    assert _select(other=["isocenter/session.py"]).files == {
+        "tests/test_session.py"}
+    assert _select(other=["isocenter/brand_new.py"]).full
+
+
 def test_no_map_degrades_to_targets_rows_and_says_so():
-    sel = _select([test_map.Region("isocenter/session.py", 1609, 1700)],
-                  mapping=None)
+    sel = _select([test_map.Change("isocenter/session.py",
+                                   "DicomSession.compact")], mapping=None)
     assert sel.files == {"tests/test_session.py"}
     assert any("no map" in reason for reason in sel.reasons)
 
 
-def test_the_dispatch_site_finder_sees_every_worker_in_the_live_source():
+def test_the_dispatch_finder_sees_every_worker_in_the_live_source():
     found = test_map.dispatched_workers(REPO)
     assert {"scan_worker", "_verify_worker", "_discover_worker",
             "ingest_worker", "_export_instance_worker"} <= found, (
         "a worker function has no dispatch site the finder recognises, so "
-        "an edit to it would select nothing through rule 2")
+        "an edit to it would fall past rule 2")
 ```
 
 - [ ] **Step 2: Run and watch them fail.**
@@ -1271,33 +1386,30 @@ class Selection:
 
 
 def _worker_calls(repo):
-    """(path, lineno-range, worker-name) for every call handed a *_worker.
+    """(path, dispatching function, worker name) for every pool hand-off.
 
-    A dispatch site is a call one of whose positional arguments is a bare
-    name ending `_worker`: `run_parallel(ingest_worker, batch, ...)`, or
-    the export pool's call with `_export_instance_worker` on its own
-    line. By convention rather than by list, so a sixth worker is found
-    the day it is written.
+    A hand-off is a call one of whose positional arguments is a bare name
+    ending `_worker`: `run_parallel(ingest_worker, batch, ...)`, or the
+    export pool's call with `_export_instance_worker` on its own line. By
+    convention rather than by list, so a sixth worker is found the day it
+    is written.
     """
     for path in sorted((Path(repo) / "isocenter").rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        source = path.read_text(encoding="utf-8")
         rel = path.relative_to(repo).as_posix()
-        for node in ast.walk(tree):
+        for node in ast.walk(ast.parse(source)):
             if isinstance(node, ast.Call):
                 for arg in node.args:
                     if isinstance(arg, ast.Name) and arg.id.endswith("_worker"):
-                        yield rel, range(node.lineno, node.end_lineno + 1), arg.id
+                        yield rel, function_at(source, node.lineno), arg.id
 
 
-def dispatch_sites(repo):
-    sites = {}
-    for rel, lines, _name in _worker_calls(repo):
-        sites.setdefault(rel, set()).update(lines)
-    return sites
+def dispatchers(repo):
+    return {(rel, name) for rel, name, _worker in _worker_calls(repo) if name}
 
 
 def dispatched_workers(repo):
-    return {name for _rel, _lines, name in _worker_calls(repo)}
+    return {worker for _rel, _name, worker in _worker_calls(repo)}
 
 
 def _tests_naming(repo, path):
@@ -1307,16 +1419,16 @@ def _tests_naming(repo, path):
             if needle in test.read_text(encoding="utf-8")}
 
 
-def select(mapping, regions, other, targets, repo, sites=None):
+def select(mapping, changes, other, targets, repo, dispatching=None):
     sel = Selection()
     if mapping is None:
         sel.reasons.append(
             f"no map at {MAP_FILE}: falling back to TARGETS rows "
             "(build one with `python -m scripts.test_map build`)")
-    lines = (mapping or {}).get("lines", {})
+    functions = (mapping or {}).get("functions", {})
     workers = (mapping or {}).get("workers", {})
-    if sites is None:
-        sites = dispatch_sites(repo)
+    if dispatching is None:
+        dispatching = dispatchers(repo)
 
     def row(path, why):
         if path in targets:
@@ -1327,31 +1439,28 @@ def select(mapping, regions, other, targets, repo, sites=None):
             sel.reasons.append(
                 f"{path}: {why} and no TARGETS row -> the full suite")
 
-    for region in regions:
-        if region.start is None:
-            row(region.path, "changed outside any function")
-            continue
-        span = range(region.start, region.end + 1)
-        named = {node for ln in span
-                 for node in lines.get(region.path, {}).get(str(ln), ())}
-        if named:
-            sel.nodeids |= named
-            sel.reasons.append(
-                f"{region.path}:{region.start}-{region.end}: "
-                f"{len(named)} tests ran it")
-        elif any(ln in span for ln in workers.get(region.path, ())):
-            via = {node for site_path, site_lines in sites.items()
-                   for ln in site_lines
-                   for node in lines.get(site_path, {}).get(str(ln), ())}
+    for change in sorted(changes, key=lambda c: (c.path, c.qualname or "")):
+        where = f"{change.path}::{change.qualname}"
+        if change.qualname is None:
+            row(change.path, "changed outside any function")
+        elif change.qualname in functions.get(change.path, {}):
+            tests = functions[change.path][change.qualname]
+            sel.nodeids.update(tests)
+            sel.reasons.append(f"{where}: {len(tests)} tests ran it")
+        elif change.qualname in workers.get(change.path, ()):
+            via = {node for path, name in dispatching
+                   for node in functions.get(path, {}).get(name, ())}
             if via:
                 sel.nodeids |= via
                 sel.reasons.append(
-                    f"{region.path}:{region.start}-{region.end}: runs only "
-                    f"in workers -> the {len(via)} tests that dispatch one")
+                    f"{where}: runs only in workers -> the {len(via)} "
+                    "tests that dispatch one")
             else:
-                row(region.path, "runs only in workers, no dispatch recorded")
+                row(change.path,
+                    f"{change.qualname} runs only in workers and no "
+                    "dispatcher has a record")
         else:
-            row(region.path, f"{region.start}-{region.end} has no record")
+            row(change.path, f"{change.qualname} has no record")
 
     for path in other:
         if path.startswith(FULL_SUITE_PATHS):
@@ -1361,16 +1470,15 @@ def select(mapping, regions, other, targets, repo, sites=None):
             sel.files.add(path)
             sel.reasons.append(f"{path}: a changed test file -> itself")
         elif path.startswith("isocenter/") and path.endswith(".py"):
-            row(path, "new since the map")
+            row(path, "added or deleted")
         else:
             named = _tests_naming(repo, path)
             sel.files |= named
-            sel.reasons.append(
-                f"{path}: {len(named)} test files name it")
+            sel.reasons.append(f"{path}: {len(named)} test files name it")
     return sel
 ```
 
-- [ ] **Step 4: Run and watch them pass.** If `test_the_dispatch_site_finder_sees_every_worker_in_the_live_source` fails, read how the missing worker is dispatched (`grep -n "<name>" isocenter/*.py`) and extend `_worker_calls` to that spelling (a keyword argument, an `Attribute`) with a test case for it; do not weaken the assertion.
+- [ ] **Step 4: Run and watch them pass.** If `test_the_dispatch_finder_sees_every_worker_in_the_live_source` fails, read how the missing worker is dispatched (`grep -n "<name>" isocenter/*.py`) and extend `_worker_calls` to that spelling (a keyword argument, an `Attribute`) with a test case for it; do not weaken the assertion.
 
 - [ ] **Step 5: Commit** (`test: the rules that turn changed functions into a selection (#707)`).
 
@@ -1380,27 +1488,28 @@ def select(mapping, regions, other, targets, repo, sites=None):
 
 **Interfaces:**
 - Consumes: everything above; `mutation_probe.TARGETS`.
-- Produces: `test_map.load(repo) -> dict | None`; `test_map.selection_for(repo) -> Selection`; `test_map.main(argv)`; pytest option `--changed`.
+- Produces: `test_map.load(repo) -> dict | None`; `test_map.selection_for(repo) -> tuple[Selection, dict | None]`; `test_map.describe(sel, mapping, repo) -> str`; `test_map.build(repo, out_dir, sha=None)`; `test_map.main(argv)`; pytest option `--changed`.
 
 - [ ] **Step 1: Write the failing test** (append):
 
 ```python
-def test_changed_with_nothing_changed_runs_nothing_and_says_why(tmp_path):
-    import subprocess, sys
+def test_select_prints_its_reasons_and_what_it_is_for():
+    import subprocess
     out = subprocess.run(
         [sys.executable, "-m", "scripts.test_map", "select"],
         cwd=REPO, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
-    assert "advisory" in out.stdout
-    assert "the merge gate is the full suite on 3.12 and 3.14t" in out.stdout
+    assert "the pre-merge check (RELEASING.md step 3)" in out.stdout
+    assert "the full suite runs when a release is cut" in out.stdout
 ```
 
-- [ ] **Step 2: Run and watch it fail** (`No module named scripts.test_map.__main__` / no `main`).
+- [ ] **Step 2: Run and watch it fail** (no `main`).
 
 - [ ] **Step 3: Implement the CLI** (append):
 
 ```python
-ADVISORY = ("advisory -- the merge gate is the full suite on 3.12 and 3.14t")
+PURPOSE = ("this selection is the pre-merge check (RELEASING.md step 3): run "
+           "it on 3.12 and 3.14t; the full suite runs when a release is cut")
 
 
 def load(repo):
@@ -1413,32 +1522,40 @@ def selection_for(repo):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from mutation_probe import TARGETS  # as tests/test_mutation_probe_targets.py does
     mapping = load(repo)
-    sha = mapping["sha"] if mapping else _git(repo, "merge-base", "HEAD",
-                                              "origin/main").strip()
-    regions, other = changed_regions(repo, sha)
-    return select(mapping, regions, other, TARGETS, repo), mapping, sha
+    changes, other = changed(repo)
+    return select(mapping, changes, other, TARGETS, repo), mapping
 
 
-def describe(sel, mapping, sha, repo):
-    behind = _git(repo, "rev-list", "--count", f"{sha}..HEAD").strip()
-    out = [f"map: {sha[:9]} ({mapping['python']}), {behind} commits behind HEAD"
-           if mapping else f"map: none; diffing against {sha[:9]}"]
+def describe(sel, mapping, repo):
+    if mapping:
+        try:
+            behind = _git(repo, "rev-list", "--count",
+                          f"{mapping['sha']}..HEAD").strip()
+        except subprocess.CalledProcessError:
+            behind = "an unknown number of"
+        out = [f"map: built at {mapping['sha'][:9]} on {mapping['python']}, "
+               f"{behind} commits behind HEAD -- functions added or renamed "
+               "since then fall to their TARGETS row"]
+    else:
+        out = ["map: none"]
     out += [f"  {reason}" for reason in sel.reasons] or ["  nothing changed"]
     out.append("selected: the full suite" if sel.full else
                f"selected: {len(sel.nodeids)} tests + {len(sel.files)} files")
-    out.append(ADVISORY)
+    out.append(PURPOSE)
     return "\n".join(out)
 
 
-def build(repo, out_dir):
+def build(repo, out_dir, sha=None):
     """Run the suite under per-test contexts and write the map to out_dir."""
     import sys
     import tempfile
     repo = Path(repo).resolve()
-    if _git(repo, "status", "--porcelain", "--untracked-files=no").strip():
-        raise SystemExit("build wants a clean tree: the map's line numbers "
-                         "are only meaningful at a commit")
-    sha = _git(repo, "rev-parse", "HEAD").strip()
+    if sha is None:
+        # Untracked files do not move a tracked function; modified ones do.
+        if _git(repo, "status", "--porcelain", "--untracked-files=no").strip():
+            raise SystemExit("build wants a clean tree, so the map describes "
+                             "a commit and not an edit in progress")
+        sha = _git(repo, "rev-parse", "HEAD").strip()
     with tempfile.TemporaryDirectory() as scratch:
         # .coveragerc as it stands: the contexts come from conftest's
         # pytest_runtest_protocol hook, not from a dynamic_context line.
@@ -1450,13 +1567,13 @@ def build(repo, out_dir):
                        cwd=repo, env=env, check=False)
         subprocess.run([sys.executable, "-m", "coverage", "combine",
                         f"--rcfile={rc}"], cwd=repo, env=env, check=True)
+        gil = getattr(sys, "_is_gil_enabled", lambda: True)()
         mapping = from_coverage(Path(scratch) / ".coverage", repo, sha,
-                                sys.version.split()[0]
-                                + ("t" if not sys._is_gil_enabled() else ""))
+                                sys.version.split()[0] + ("" if gil else "t"))
     target = Path(out_dir) / MAP_FILE
     target.write_text(json.dumps(mapping), encoding="utf-8")
-    print(f"wrote {target}: {len(mapping['lines'])} files with named lines, "
-          f"{len(mapping['workers'])} with worker-only lines")
+    print(f"wrote {target}: {len(mapping['functions'])} files with tested "
+          f"functions, {len(mapping['workers'])} with worker-only functions")
 
 
 def main(argv=None):
@@ -1467,14 +1584,17 @@ def main(argv=None):
     built.add_argument("--out", default=".",
                        help="directory to write .test-map.json into; when "
                             "building in a `git archive` copy, the main checkout")
+    built.add_argument("--sha", default=None,
+                       help="the commit this tree is, for a `git archive` "
+                            "copy, which is not a git repository")
     sub.add_parser("select")
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parent.parent
     if args.command == "build":
-        build(repo, args.out)
+        build(repo, args.out, args.sha)
     else:
-        sel, mapping, sha = selection_for(repo)
-        print(describe(sel, mapping, sha, repo))
+        sel, mapping = selection_for(repo)
+        print(describe(sel, mapping, repo))
         for name in sorted(sel.nodeids | sel.files):
             print(name)
 
@@ -1483,15 +1603,13 @@ if __name__ == "__main__":
     main()
 ```
 
-`sys._is_gil_enabled` exists on 3.13+; on 3.12 guard it with `getattr(sys, "_is_gil_enabled", lambda: True)()`. A `git archive` copy is not a git repository, so `build` in one needs the SHA passed in: add `--sha` to the `build` parser and, when given, skip the clean-tree check and the `rev-parse`. Write that now, not later -- the gate copy is where this runs.
-
 - [ ] **Step 4: Wire `--changed` into `conftest.py`.** In `pytest_addoption`:
 
 ```python
     group.addoption(
         "--changed", action="store_true",
-        help="run only the tests that exercise what changed since the "
-             "test map was built (#707); advisory, never the gate")
+        help="run the tests that exercise what this branch changed since it "
+             "left main (#707); the pre-merge check in RELEASING.md step 3")
 ```
 
 At the top of `pytest_collection_modifyitems`, before the `--shard` block (so the two compose: select, then shard):
@@ -1500,11 +1618,10 @@ At the top of `pytest_collection_modifyitems`, before the `--shard` block (so th
     if config.getoption("--changed"):
         sys.path.insert(0, str(config.rootpath / "scripts"))
         import test_map
-        sel, mapping, sha = test_map.selection_for(config.rootpath)
+        sel, mapping = test_map.selection_for(config.rootpath)
         reporter = config.pluginmanager.get_plugin("terminalreporter")
         if reporter is not None:
-            reporter.write_line(
-                test_map.describe(sel, mapping, sha, config.rootpath))
+            reporter.write_line(test_map.describe(sel, mapping, config.rootpath))
         if not sel.full:
             keep, drop = [], []
             for item in items:
@@ -1516,7 +1633,7 @@ At the top of `pytest_collection_modifyitems`, before the `--shard` block (so th
             items[:] = keep
 ```
 
-- [ ] **Step 5: Run the test, then try it by hand.** Add a blank line inside `Session.compact`'s body, run `… -m pytest --changed --collect-only -q`, read the reasons, `git checkout isocenter/session.py`. With no map yet, expect the `TARGETS` row for `session.py` and the "no map" reason.
+- [ ] **Step 5: Run the test, then try it by hand.** Add a blank line inside `DicomSession.compact`'s body, run `… -m pytest --changed --collect-only -q`, read the reasons, `git checkout isocenter/session.py`. With no map yet, expect the `TARGETS` row for `session.py` and the "no map" reason.
 
 - [ ] **Step 6: Commit** (`test: pytest --changed (#707)`).
 
@@ -1536,7 +1653,7 @@ PROBE_FILES = ["tests/test_multiprocessing.py", "tests/test_compaction.py",
 @pytest.fixture(scope="module")
 def small_real_map(tmp_path_factory):
     """A map built from three real test files, in a scratch copy."""
-    import os, shutil, subprocess, sys
+    import os, subprocess
     try:
         import coverage  # noqa: F401
     except ImportError:
@@ -1556,39 +1673,34 @@ def small_real_map(tmp_path_factory):
     return proj, test_map.from_coverage(proj / ".coverage", proj, "HEAD", "probe")
 
 
-def _region_of(proj, path, def_line_prefix):
-    source = (proj / path).read_text(encoding="utf-8")
-    start = next(n for n, line in enumerate(source.split("\n"), 1)
-                 if line.startswith(def_line_prefix))
-    return test_map.Region(path, *test_map.enclosing_function(
-        source, start + 1, start + 1))
-
-
 def _files(sel):
     return {n.split("::")[0] for n in sel.nodeids} | sel.files
 
 
 def test_a_compact_edit_selects_the_compaction_tests_only(small_real_map):
     proj, mapping = small_real_map
-    region = _region_of(proj, "isocenter/session.py", "    def compact")
-    sel = test_map.select(mapping, [region], [], {}, proj)
+    change = test_map.Change("isocenter/session.py", "DicomSession.compact")
+    sel = test_map.select(mapping, {change}, [], {}, proj)
     assert _files(sel) == {"tests/test_compaction.py"}
 
 
-@pytest.mark.parametrize("path, prefix", [
-    ("isocenter/session.py", "def scan_worker"),
-    ("isocenter/io_handlers.py", "def ingest_worker"),
+@pytest.mark.parametrize("path, qualname", [
+    ("isocenter/session.py", "scan_worker"),
+    ("isocenter/io_handlers.py", "ingest_worker"),
 ])
 def test_a_worker_edit_selects_the_test_that_runs_it_in_a_pool(
-        small_real_map, path, prefix):
+        small_real_map, path, qualname):
     # pytest-testmon selected 0 of 28 for the ingest_worker edit.
     proj, mapping = small_real_map
-    sel = test_map.select(mapping, [_region_of(proj, path, prefix)], [], {}, proj)
+    sel = test_map.select(mapping, {test_map.Change(path, qualname)}, [], {},
+                          proj)
     assert "tests/test_multiprocessing.py" in _files(sel)
     assert "tests/test_crypto.py" not in _files(sel)
 ```
 
-On 3.12 the fixture's run pays for coverage over spawned workers (about 70 s for `test_multiprocessing.py` alone, against 6 s bare -- contexts themselves are free); the 1500 s timeout covers it. Measure the fixture's wall time on both interpreters and put both in the PR body. If it exceeds 5 minutes on 3.12, the fixture must `pytest.skip` from its body when `sys._is_gil_enabled()` is true, with the measured figure in the message, and `tests/test_skip_contract.py` is updated to account for it.
+Confirm the class is `DicomSession` in `isocenter/session.py` (`grep -n "^class " isocenter/session.py`) before relying on the qualname; `Session` is an alias.
+
+On 3.12 the fixture's run pays for coverage over spawned workers (about 70 s for `test_multiprocessing.py` alone, against 6 s bare -- contexts themselves are free); the 1500 s timeout covers it. Measure the fixture's wall time on both interpreters and put both in the PR body. If it exceeds 5 minutes on 3.12, the fixture must `pytest.skip` from its body when `getattr(sys, "_is_gil_enabled", lambda: True)()` is true, with the measured figure in the message, and `tests/test_skip_contract.py` is updated to account for it.
 
 - [ ] **Step 2: Run on both interpreters.** Expected: 3 passed each. `git archive HEAD` exports the last commit, so commit Tasks 10-13 first.
 
@@ -1606,11 +1718,11 @@ time PYTHON_GIL=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$S \
   --out /Users/kevin/Developer/Isocenter
 ```
 
-Compare against a plain 3.14t full run. This closes spec §9's second point. If the ratio is under about 2x, `RELEASING.md` says the 3.14t gate run *is* the map build; if not, it says the map is built on demand, and spec §10 records which.
+Compare against a plain 3.14t full run. This closes spec §9's second point. Nothing runs the full suite before a merge any more, so the map has exactly two prescribed build points, and `RELEASING.md` gets both in Step 4: **(a)** "Cutting a release", step 1 -- if the ratio is under about 2x, that step's 3.14t integration run *is* `python -m scripts.test_map build`, so every release leaves a fresh map; if not, the build is a separate command in the same step. **(b)** On demand, by whoever finds `--changed` falling to `TARGETS` rows too often. A name-keyed map ages by losing coverage of new and renamed functions, never by selecting wrongly, so an old map is safe and only less sharp.
 
 - [ ] **Step 1b: Find out how much of `workers` is really threads.** Measured while planning: with `.coveragerc`'s `concurrency = multiprocessing`, a 3.14t run of `test_multiprocessing.py` still left `ingest_worker` under the empty context and wrote 15 data files -- so that ingest spawned processes even on 3.14t -- while a run with **no** rcfile (coverage's default `concurrency = thread`) recorded 10 lines of `scan_worker` under the test's nodeid. `concurrency` replaces the default rather than adding to it, so worker *threads* may currently go unmeasured in the map. Build once more with a scratch rc whose line reads `concurrency = multiprocessing,thread`, diff the two maps' `workers` sections, and if lines move from `workers` to `lines`, have `build()` use that rc (written to its temp directory; `.coveragerc` itself is not changed, since its SIGTERM comment was measured under the present setting). Record the counts in spec §10.
 
-- [ ] **Step 2: Measure rule 2's breadth** (spec §9, third point). Insert a line in `ingest_worker`, run `python -m scripts.test_map select | tail -n +1 | grep -c '^tests/'`, revert. If the selected files exceed a third of `tests/test_*.py`, implement the per-worker refinement before the PR: `_worker_calls` already yields the worker name, so key `dispatch_sites` by name and, in rule 2, use only the sites of workers whose own function range contains or transitively calls the region -- and if "transitively" cannot be had cheaply, record the measured breadth in spec §10 and leave the coarse rule.
+- [ ] **Step 2: Measure rule 2's breadth** (spec §9, third point). Insert a line in `ingest_worker`, run `python -m scripts.test_map select | grep -c '^tests/'`, revert. If the selected files exceed a third of `tests/test_*.py`, implement the per-worker refinement before the PR: `_worker_calls` already yields the worker name, so have `dispatchers` return `{worker: {(path, qualname)}}` and, in rule 2, use only the dispatchers of the worker being edited. That handles an edit to a worker function itself; an edit to a helper only workers call has no worker name to key on, so it keeps the coarse rule -- record the measured breadth of both in spec §10.
 
 - [ ] **Step 3: Check whether export's pool takes threads on 3.14t** (spec §9, fourth point): `grep -n "maxtasksperchild\|multiprocessing.Pool\|ctx.Pool" isocenter/io_handlers.py`, read the strategy branch, and record the answer in spec §10.
 
@@ -1620,7 +1732,7 @@ Compare against a plain 3.14t full run. This closes spec §9's second point. If 
   - Spec §10: every deviation and measurement from this Part.
   - `CHANGELOG.md`: `### Internal`.
 
-- [ ] **Step 5: Commit, local gate on both interpreters, PR.** The PR body carries: the build time and ratio, rule 2's measured breadth, the Task 14 fixture times, and one worked example (`compact()` edit -> what `--changed` printed).
+- [ ] **Step 5: Commit, `RELEASING.md` steps 3-6, PR.** Step 3 here is this PR's own test file plus `pytest --changed` run on itself, on both interpreters. The PR body carries: the build time and ratio, rule 2's measured breadth, the Task 14 fixture times, and one worked example (`compact()` edit -> what `--changed` printed).
 
 ---
 
@@ -1638,14 +1750,14 @@ Compare against a plain 3.14t full run. This closes spec §9's second point. If 
 | §5 partition contract + workflow lists `1..N` | 6, 8 |
 | §5 `tests.yml` axis, summary line, concurrency group unchanged, `publish.yml` untouched | 8 |
 | §5 caps from a dispatched run; the four named pins | 9 |
-| §6.1 map on 3.14t, gitignored, `lines`/`workers`, no map degrades | 10, 13 |
-| §6.2 diff against the map's SHA, old-side numbers, widen to function | 11 |
+| §6.1 map on 3.14t, gitignored, `functions`/`workers` keyed by name (§10 item 8), no map degrades | 10, 13 |
+| §6.2 as amended by §10 item 8: diff against the merge-base with `main`, new-side numbers, resolved to function names | 11 |
 | §6.3 rules 1-7 and their order | 12 |
-| §6.4 `--changed`, reasons, SHA and age, advisory line, `select` CLI | 13 |
+| §6.4 `--changed`, reasons, map SHA and age, the purpose line (pre-merge check, per §10 item 7), `select` CLI | 13 |
 | §6.5 unit tests per rule, three probes kept, dispatch finder against live source | 12, 14 |
 | §8 CLAUDE.md table deleted, Commands block | 15 |
 | §9 four open points | 4 (first), 15 (other three) |
 
-Names checked across tasks: `Region(path, start, end)`, `Selection(full, nodeids, files, reasons)`, `select(mapping, regions, other, targets, repo, sites=None)`, `dispatch_sites`/`dispatched_workers`, `from_coverage`, `split_contexts`, `context_to_nodeid`, `shards.parse/assign/suite_files/load_timings/TimingRecorder`, `root_guard.snapshot/new_entries/ALLOWED_PREFIXES` -- each is defined once and used with that signature.
+Names checked across tasks: `Change(path, qualname)`, `Selection(full, nodeids, files, reasons)`, `select(mapping, changes, other, targets, repo, dispatching=None)`, `dispatchers`/`dispatched_workers`, `functions_in`/`function_at`/`split_functions`, `from_coverage`, `parse_hunks`/`changes_in`/`merge_base`/`changed`, `selection_for`/`describe`/`build`, `context_to_nodeid`, `shards.parse/assign/suite_files/load_timings/TimingRecorder`, `root_guard.snapshot/new_entries/ALLOWED_PREFIXES` -- each is defined once and used with that signature.
 
 One inconsistency found and fixed inline: spec §6.5 lists four workers for the dispatch finder; the live source has five (`_discover_worker` at `session.py:205`). Task 12 asserts five.

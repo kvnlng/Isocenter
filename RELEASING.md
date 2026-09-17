@@ -30,25 +30,47 @@ never collide, so `git checkout v0.9.8` always means the published commit.
 
 1. The architect writes the specification.
 2. The developer writes the tests first, then the code, on a work branch
-   off `main`. **Nothing is pushed until the full suite passes locally on
-   both gate interpreters**, 3.12 and 3.14t, at the commit being pushed.
-   Record the SHA in each run's log header. Run 3.14t in a `git archive`
-   copy of the same commit, so the two suites do not share repo-root
-   `*.db` and `*.lock` files.
-3. Open a pull request into `main`.
-4. An adversarial reviewer reviews the tests and the code. Changes go back
-   to the developer, who consults the architect where the design is in
+   off `main`.
+3. Before pushing, the developer rebases onto current `main` and runs, on
+   **both 3.12 and 3.14t** at the commit being pushed: the new tests, and
+   the tests that cover what the change touched. Until `pytest --changed`
+   exists (#707) that is each touched module's row in
+   `scripts/mutation_probe.py`'s `TARGETS`; afterwards it is what
+   `pytest --changed` selects. Both interpreters must pass. Record the SHA
+   in each run's log header. Run the two one after the other, or 3.14t in a
+   `git archive` copy of the same commit, so they do not share repo-root
+   `*.db` and `*.lock` files. **The full suite is not run.**
+4. Open a pull request into `main`.
+5. An adversarial reviewer reviews the tests and the code **as rebased on
+   current `main`**. A conflict with work merged since the branch was cut,
+   textual or semantic, is part of this review: two changes that each pass
+   alone and break together are the reviewer's finding. Changes go back to
+   the developer, who consults the architect where the design is in
    question. The first review covers the whole PR. A re-review may cover
    only the delta, or the whole PR if the delta touches what an earlier
-   pass relied on. **Every pass names the SHA it approved.**
-5. When the reviewer passes, merge into `main` pinned to that SHA
+   pass relied on. **Every pass names the SHA it approved.** If `main`
+   moves before the merge, the developer rebases and repeats step 3, and
+   the reviewer re-reviews the delta.
+6. When the reviewer passes, merge into `main` pinned to that SHA
    (`gh pr merge --match-head-commit <sha>`), and delete the work branch.
+
+**Code on `main` has been tested locally and reviewed. It has not been run
+against the full suite** (owner's ruling, 2026-09-17). The full suite is the
+integration test, and it runs when a release is about to happen: see
+"Cutting a release". A regression found there is fixed on `main` like any
+other change, and the release is cut again. Nothing between a merge and a
+release runs the full suite, and no step here depends on how work happens
+to be grouped into bunches or waves.
+
+Until 2026-09-17 step 3 required the full suite on both interpreters before
+every push. It cost about forty minutes a push and made the local tier and
+the release tier the same thing.
 
 `main` has no required status checks, and no CI runs on a push or a pull
 request, into `main` or into a release branch. `tests.yml` runs only when
 dispatched by hand (`gh workflow run tests.yml --ref <branch>`) or when
 `publish.yml` calls it at release. A dispatched run is information for the
-reviewer, not a gate. The gate is the local suite on both interpreters and
+reviewer, not a gate. The gate is the local tests on both interpreters and
 the review.
 
 ## Cutting a release
@@ -57,7 +79,9 @@ A release branch is a fully tested cut from `main`, then frozen: it takes
 fixes, never features.
 
 1. **Choose the commit** on `main`. Run the full suite on 3.12 and 3.14t at
-   that SHA.
+   that SHA. **This is the integration test**, and the first time this code
+   meets the whole suite. A failure is fixed on `main` by the procedure
+   above, and step 1 starts again at the new commit.
 2. **Cut the branch:** `git switch -c release/X.Y <sha>`, then
    `git push -u origin release/X.Y`. For a patch to an existing line, see
    below instead.

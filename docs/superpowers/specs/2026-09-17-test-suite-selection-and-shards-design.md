@@ -16,6 +16,11 @@ is the cost of coverage over spawned workers, not of contexts; and
 `dynamic_context = test_function` is replaced by a conftest hook, because
 it files everything a fixture runs under no test. §3.2 and §6.1 are marked
 in place.
+**Superseded in part:** the owner's merge-rule ruling of 2026-09-17
+(`RELEASING.md`, "Changes land on `main`") -- the full suite is the
+integration test at release, not a merge gate. §1's tier paragraph, §6.1's
+build point and line keys, §6.2's diff, §6.4's advisory line and §8's "local
+gate" are struck in place; §10 items 7-9 say what replaces them.
 
 ## 1. The problem, and why it is scheduled ahead of 1.0
 
@@ -38,10 +43,12 @@ itself only *during* L1--L14: thirty gate issues each pay the two-interpreter
 gate on every push, and a local selection that is right shortens every
 red-green cycle inside them. After 1.0 it is worth much less.
 
-**The tier rule is unchanged: the tier decides breadth, never depth.** The
+~~**The tier rule is unchanged: the tier decides breadth, never depth.** The
 local selection is advisory. The merge gate and the release gate remain the
 whole suite. A wrong selection costs a late discovery at the gate, never a
-shipped regression.
+shipped regression.~~ **Superseded, §10 item 7:** the selection is the
+pre-merge check; a wrong selection reaches `main` and the release
+integration run is what finds it.
 
 ## 2. Owner rulings (2026-09-17)
 
@@ -398,3 +405,38 @@ Found in the plan's review and measured the same day:
    recorded under the test's nodeid. The plan's Task 15 measures a build
    with `multiprocessing,thread`. The two-tier design is unchanged; how
    much lands in `workers` is what moves.
+
+Owner's merge-rule ruling, 2026-09-17, after the spec was approved
+(`RELEASING.md`, "Changes land on `main`"; CHANGELOG `[Unreleased]`):
+
+7. **`--changed` is the pre-merge check, not advice.** A change merges on
+   its own tests -- the new ones and those covering what it touched, on
+   3.12 and 3.14t -- and an adversarial review of the change as rebased on
+   current `main`. The full suite is the integration test, run when a
+   release is cut. Code on `main` has not met the whole suite, and the
+   owner accepts regressions surfacing at integration. So §1's "a wrong
+   selection costs a late discovery at the gate, never a shipped
+   regression" is false: it reaches `main`. The fallbacks were already
+   fail-safe (no record -> `TARGETS` row -> full suite) and stay; §6.4's
+   fixed line changes from *advisory -- the merge gate is the full suite*
+   to one saying the selection is `RELEASING.md` step 3 and is run on both
+   interpreters. §8's "each through the local gate" means that procedure.
+8. **The map is keyed by function name and the diff is the developer's
+   own.** §6.1-§6.2 keyed the map by line and diffed the working tree
+   against the map's SHA, which is only right if the map is rebuilt almost
+   every push -- it rode on the 3.14t gate run, which no longer exists. A
+   map weeks old would select everyone's merged work. Instead: `functions`
+   is `{path: {qualname: [nodeid]}}` and `workers` is `{path: [qualname]}`;
+   the diff is working tree against the merge-base with `origin/main`, read
+   in new-side numbering against the working-tree source and resolved to
+   qualnames. An old map stays right for every function that still exists
+   under its name; a new or renamed one has no record and falls to its
+   `TARGETS` row. A map ages by getting less sharp, never by selecting
+   wrongly. One trap found while prototyping: a `def` line executes at
+   import under no test, so counting it files every never-called function
+   as worker-only; body lines only.
+9. **The map's build points are prescribed, since no gate run builds it:**
+   "Cutting a release" step 1 (its 3.14t integration run, if the measured
+   overhead allows), and on demand. §7's "making the map a CI artifact"
+   stays out of scope. No step hangs off a bunch or a wave: the owner's
+   ruling is that those are a logical grouping, not a process boundary.

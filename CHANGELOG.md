@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A change merges to `main` on its own tests, not on the full suite; the full suite is the integration test at release (owner's ruling, 2026-09-17).** `RELEASING.md` had required the whole suite on 3.12 and 3.14t before every push since 2026-09-16, about forty minutes each time, which made the local tier and the release tier the same thing. The procedure is now: tests first; before pushing, rebase on current `main` and run the new tests and the tests covering what was touched on **both** 3.12 and 3.14t; an adversarial review of the change *as rebased*, in which a conflict with work merged since the branch was cut, textual or semantic, is the reviewer's finding; a merge pinned to the approved SHA. Code on `main` has been tested locally and reviewed and has not met the whole suite. It meets it when a release is cut ("Cutting a release", step 1) and again on all four versions in `publish.yml`, where 3.12 and 3.14t block the upload. A regression found there is fixed on `main` and the release is cut again. This makes #707's `pytest --changed` the pre-merge check rather than a convenience, which its spec records as an amendment. No library behaviour changes.
+
 ## [0.9.8] - 2026-09-16
 
 ### Breaking
