@@ -6,8 +6,9 @@ Isocenter requires **Python 3.12+** on a POSIX system (Linux or macOS). It does 
 pip install isocenter
 ```
 
-Releases are published to PyPI from a tagged GitHub Release, via Trusted
-Publishing. To install unreleased work from `main` instead:
+Releases are published to PyPI from a release tag, via Trusted Publishing.
+`main` is the development branch; to install unreleased work from it
+instead:
 
 ```bash
 pip install "git+https://github.com/kvnlng/Isocenter.git"

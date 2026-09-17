@@ -86,6 +86,67 @@ def test_the_changelog_documents_the_declared_version():
         "process describes.")
 
 
+def top_heading_problem(changelog: str, version: str):
+    """Why `changelog`'s first section heading is wrong, or None.
+
+    Two shapes are right. On `main` the first section is `[Unreleased]`.
+    On a release branch there is no `[Unreleased]`; the first section is
+    the release the branch carries, and it is the version `_version.py`
+    declares. Anything else is the shape a merge of `release/X.Y` into
+    `main` leaves behind, which `RELEASING.md` forbids: the merge carries
+    the release commit's renamed heading across, so `main` loses
+    `[Unreleased]` and its unreleased entries sit under a released
+    version's heading, with no conflict to stop it.
+    """
+    match = re.search(r"^## \[([^\]]+)\]", changelog, re.MULTILINE)
+    if match is None:
+        return "CHANGELOG.md has no `## [...]` section heading at all"
+    top = match.group(1)
+    if top == "Unreleased" or top == version:
+        return None
+    return (f"CHANGELOG.md's first section is [{top}], which is neither "
+            f"[Unreleased] (main) nor [{version}], the version "
+            "isocenter/_version.py declares (a release branch). A merge of "
+            "a release branch into main leaves this shape: forward-port "
+            "fixes by cherry-pick instead, as RELEASING.md says")
+
+
+def test_the_changelog_opens_with_unreleased_or_the_declared_release():
+    """`main` keeps `[Unreleased]` on top; a release branch opens with its release.
+
+    A cheap guard, not a complete one. It cannot tell `main` from a
+    release branch, so a merge that also carried `_version.py` to the
+    same number passes it. What it does catch is the common case: a
+    patch release merged forward, whose top heading (`[0.9.9]`) names a
+    version `main`'s `_version.py` does not.
+    """
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+    problem = top_heading_problem(changelog, isocenter.__version__)
+
+    assert problem is None, problem
+
+
+@pytest.mark.parametrize("changelog, version, right", [
+    ("# Changelog\n\n## [Unreleased]\n\n## [0.9.8] - 2026-09-20\n",
+     "0.9.8", True),
+    ("# Changelog\n\n## [0.9.9] - 2026-09-25\n\n## [0.9.8] - 2026-09-20\n",
+     "0.9.9", True),
+    ("# Changelog\n\n## [0.9.9] - 2026-09-25\n- fix C\n"
+     "## [0.9.8] - 2026-09-20\n- entry B\n", "0.9.8", False),
+    ("# Changelog\n\n## [0.9.8] - 2026-09-20\n\n## [Unreleased]\n",
+     "0.9.9", False),
+    ("# Changelog\n\nNo sections.\n", "0.9.8", False),
+], ids=["main", "release-branch", "merged-forward-patch",
+        "unreleased-not-on-top", "no-headings"])
+def test_the_top_heading_check_tells_the_shapes_apart(changelog, version,
+                                                      right):
+    """The check above, on the shapes it has to tell apart, including the
+    CHANGELOG a merge of `release/0.9` into `main` produced when simulated
+    in review of #704."""
+    assert (top_heading_problem(changelog, version) is None) is right
+
+
 def test_the_version_is_a_release_number_not_a_placeholder():
     """`0.0.0` was the old fallback for "not installed", and it shipped."""
     assert isocenter.__version__ != "0.0.0"
@@ -101,8 +162,11 @@ def test_the_release_runbook_points_at_the_file_that_declares_the_version():
     Following it would edit a file that no longer holds the number, and
     produce a tag the build job rejects. Same drift this module exists to
     catch, one level up: the instruction and the code disagreed.
+
+    The runbook is `RELEASING.md` since the release-branch procedure;
+    `docs/developer_guide.md` points at it rather than restating it.
     """
-    runbook = (ROOT / "docs" / "developer_guide.md").read_text(encoding="utf-8")
+    runbook = (ROOT / "RELEASING.md").read_text(encoding="utf-8")
 
     assert "isocenter/_version.py" in runbook, (
         "the release runbook does not name the file that declares the "
