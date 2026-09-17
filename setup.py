@@ -68,7 +68,7 @@ setup(
         # the promise can be stated -- and `run_parallel()` does take a
         # different path when there is no GIL (isocenter/parallel.py), so
         # it is a real promise, not an absence of one. Backed by 3.14t
-        # being both a required PR check and a publish blocker.
+        # being in publish.yml's test-floor, which blocks the upload.
         "Programming Language :: Python :: Free Threading :: 3 - Stable",
         "Topic :: Scientific/Engineering :: Medical Science Apps.",
         "Topic :: Security",
@@ -134,8 +134,8 @@ setup(
         "tqdm>=4.65.0",
     ],
     # dataclass(slots=True) needs 3.10, and the dependency set above
-    # resolves only on 3.12+. Every PR is gated on this floor and on
-    # 3.14t; publish.yml runs all four at release time.
+    # resolves only on 3.12+. publish.yml runs all four at release time,
+    # and this floor and 3.14t are the two that block the upload.
     python_requires=">=3.12",
     extras_require={
         # Optional: isocenter/pixel_analysis.py guards the import and sets

@@ -1202,8 +1202,15 @@ def test_every_version_classifier_is_run_by_the_release_matrix():
     The union of `test-floor` and `test-supported` is every version a
     release runs. A classifier outside it advertises a version nothing
     tests -- README's "a test fails if the matrix is narrowed without
-    removing the classifier". A `t` build counts for its version, since
-    3.14t runs 3.14 code.
+    removing the classifier".
+
+    **A `t` build does not stand in for its GIL version.** 3.14t and 3.14
+    take different `run_parallel()` paths (threads without a GIL,
+    processes with one), so a 3.14t job never runs the path a 3.14 user
+    gets. Stripping the `t` here let `test-supported` drop 3.14 with the
+    classifier kept and nothing red (#705 review). The versions are
+    compared literally; the free-threading classifier is backed by the
+    test above.
     """
     prefix = "Programming Language :: Python :: "
     advertised = sorted(
@@ -1212,7 +1219,7 @@ def test_every_version_classifier_is_run_by_the_release_matrix():
         and "." in item[len(prefix):])
     assert advertised, "no specific Python version classifiers declared"
 
-    run = {version.removesuffix("t")
+    run = {version
            for job in ("test-floor", "test-supported")
            for version in _release_versions(job)}
     untested = [version for version in advertised if version not in run]
