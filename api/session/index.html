@@ -13551,8 +13551,8 @@ below renders every frozen method; it rendered 16 of the 28 until 0.9.4.</p>
 <a id="__codelineno-0-6246" name="__codelineno-0-6246"></a><span class="sd">        task where pixels are resident -- across a pipe. Reversing it</span>
 <a id="__codelineno-0-6247" name="__codelineno-0-6247"></a><span class="sd">        means revisiting eight test files which assume this subprocess</span>
 <a id="__codelineno-0-6248" name="__codelineno-0-6248"></a><span class="sd">        boundary; `test_export_runs_in_processes_by_decision` names them</span>
-<a id="__codelineno-0-6249" name="__codelineno-0-6249"></a><span class="sd">        and pins the `25` below, and every one of the eight runs on</span>
-<a id="__codelineno-0-6250" name="__codelineno-0-6250"></a><span class="sd">        every push. (An uncollected ninth, `tests/profile_memory.py`,</span>
+<a id="__codelineno-0-6249" name="__codelineno-0-6249"></a><span class="sd">        and pins the `25` below, and every one of the eight is collected</span>
+<a id="__codelineno-0-6250" name="__codelineno-0-6250"></a><span class="sd">        by the full suite. (An uncollected ninth, `tests/profile_memory.py`,</span>
 <a id="__codelineno-0-6251" name="__codelineno-0-6251"></a><span class="sd">        was named here until #347 deleted it: it asserted `10` against</span>
 <a id="__codelineno-0-6252" name="__codelineno-0-6252"></a><span class="sd">        this `25` and nothing ever ran it.)</span>
 <a id="__codelineno-0-6253" name="__codelineno-0-6253"></a>

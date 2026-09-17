@@ -1347,59 +1347,40 @@ dependency set resolves only on 3.12 and later.</p>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>python<span class="w"> </span>-m<span class="w"> </span>tests.benchmarks.run_stress_test
 </code></pre></div>
 <h2 id="4-release-process">4. Release Process</h2>
-<p>Releases publish themselves. <code>.github/workflows/publish.yml</code> uploads to
-PyPI by Trusted Publishing -- GitHub authenticates over OIDC and PyPI
-matches the request against a publisher pinned to this repository, the
-workflow's <em>filename</em>, and its environment name. There is no API token
-in repository secrets, in CI, or on anyone's machine. Renaming
-<code>publish.yml</code> or its environments breaks publishing until PyPI's
+<p>The procedure -- how changes reach <code>main</code>, how a release branch is cut,
+tagged and published, how patch releases work -- lives in
+<a href="https://github.com/kvnlng/Isocenter/blob/main/RELEASING.md"><code>RELEASING.md</code></a>
+in the repository root, next to the code it releases. In short: <code>main</code> is
+the development branch; each minor line is cut to a frozen <code>release/X.Y</code>
+branch; a version is the tag <code>vX.Y.Z</code> on it; and nothing publishes itself.</p>
+<p>Publishing is a manual run of <code>.github/workflows/publish.yml</code> against the
+tag. It uploads to PyPI by Trusted Publishing -- GitHub authenticates over
+OIDC and PyPI matches the request against a publisher pinned to this
+repository, the workflow's <em>filename</em>, and its environment name. There is
+no API token in repository secrets, in CI, or on anyone's machine.
+Renaming <code>publish.yml</code> or its environments breaks publishing until PyPI's
 publisher configuration is updated to match.</p>
-<ol>
-<li>Move <code>[Unreleased]</code> in <code>CHANGELOG.md</code> to a new <code>[x.y.z] - YYYY-MM-DD</code>
-   section.</li>
-<li>Bump <code>__version__</code> in <code>isocenter/_version.py</code>. That is the only
-   place the number is declared; <code>setup.py</code> parses it and
-   <code>isocenter.__version__</code> re-exports it.</li>
-<li>Update <code>version</code> and <code>date-released</code> in <code>CITATION.cff</code>.</li>
-<li>Merge to <code>main</code> with CI green.</li>
-<li><strong>Rehearse on TestPyPI before tagging</strong>: run <code>publish.yml</code> manually
-   (<code>workflow_dispatch</code>) with <code>target: testpypi</code>. It runs the same build
-   gates and the same four-version matrix as a real release, but while
-   the version number is still spendable. This matters because
-   <code>test-supported</code> (3.13, 3.14) runs <em>after</em> the tag on a real release
-   and only reports -- it cannot block the upload -- so a break there
-   ships with the number already spent. PRs gate 3.12 and 3.14t only, so
-   3.13 and 3.14 are otherwise unobserved between merge and release.</li>
-<li>Tag <code>vx.y.z</code>. <strong>The tag must match the declared version exactly</strong> --
-   the build job reads the version out of the built wheel and refuses to
-   publish a mismatch. Publishing
-   <code>v0.7.1</code> from a tree that still says <code>0.7.0</code> would produce a release
-   nobody can install under the name they were given, and permanently
-   spend the version it did claim, since PyPI never allows reuse.</li>
-<li><strong>Publish a GitHub Release.</strong> This is the trigger; pushing a tag alone
-   does nothing. That is deliberate -- a release is a decision someone
-   makes, whereas a mistyped <code>git push --tags</code> should not be able to burn
-   a version number.</li>
-</ol>
-<p>The build job then runs two gates before anything is uploaded: the tag
-check above, and an installation of the built wheel into a clean
-environment <em>outside the source tree</em>, asserting it carries its own
-<code>resources/*.json</code>. That second gate exists because those resources once
-shipped in no distribution at all and nothing failed -- every loader
-guards on <code>os.path.exists</code> and degrades to a default, so a published
-release audited against an empty PHI policy and reported clean.</p>
-<p>Neither index allows re-uploading a version, so the step-5 rehearsal
-consumes that version number on TestPyPI. That is the whole cost, and it
-buys the only look at 3.13 and 3.14 that happens while the real version
-number can still be spent.</p>
-<p><strong>If <code>test-supported</code> is red, that is a decision, not a formality.</strong> Either
-fix it and re-tag, or delete that classifier from <code>setup.py</code> before
-releasing -- <code>setup.py</code> says outright that a classifier CI does not back is
-the same unbacked promise the old <code>python_requires="&gt;=3.9"</code> was. Note that
-a red job here is <em>more</em> likely to be a flake than a real break (v0.9.1's
-publish had 3.13 fail and pass on rerun), which is exactly what makes it
-dangerous: "just rerun it" is the reading that ships a real break. Rerun to
-learn whether it is deterministic, not to make it go away.</p>
+<p>Before anything is uploaded, the build job checks the run. The target must
+be exactly <code>pypi</code> or <code>testpypi</code>. The built wheel must match
+<code>isocenter/_version.py</code>, the one place the version is declared. A run to
+<code>pypi</code> must be dispatched from a <code>v*</code> tag that matches both; a TestPyPI
+rehearsal may run from the release branch, and a tag, if it runs from one,
+must match too. It then installs the
+built wheel into a clean environment <em>outside the source tree</em> and asserts
+it carries its own <code>resources/*.json</code>. That gate exists because those
+resources once shipped in no distribution at all and nothing failed --
+every loader guards on <code>os.path.exists</code> and degrades to a default, so a
+published release audited against an empty PHI policy and reported clean.</p>
+<p><strong>If <code>test-supported</code> (3.13, 3.14) is red, that is a decision, not a
+formality.</strong> It only reports; it cannot block the upload. Either fix it,
+or delete that classifier from <code>setup.py</code> before releasing -- <code>setup.py</code>
+says outright that a classifier CI does not back is the same unbacked
+promise the old <code>python_requires="&gt;=3.9"</code> was. A red job here is <em>more</em>
+likely to be a flake than a real break (v0.9.1's publish had 3.13 fail and
+pass on rerun), which is exactly what makes it dangerous: "just rerun it"
+is the reading that ships a real break. Rerun to learn whether it is
+deterministic, not to make it go away. That is why <code>RELEASING.md</code> rehearses
+on TestPyPI, from the release branch, before tagging.</p>
 <h3 id="archiving-and-dois">Archiving and DOIs</h3>
 <p>Once the Zenodo GitHub integration is enabled for this repository, each
 published GitHub Release is archived and issued a version DOI, under a
@@ -1411,10 +1392,9 @@ switched on; it does not backfill -- its own guide says "once connected,
 new releases from the repository will be automatically ingested and
 archived". So enabling it does nothing to the releases already published:
 the first deposit comes from the next release, or from deleting and
-re-creating an existing GitHub Release, which fires <code>release: published</code>
-again. Note that re-firing it also re-runs the PyPI publish, which will
-fail on a version the index already has; nothing is uploaded, but the run
-goes red.</p>
+re-creating an existing GitHub Release. Creating a GitHub Release uploads
+nothing: publishing is a separate manual run (<code>RELEASING.md</code>), so the
+Release can be made, or re-made for Zenodo, without touching PyPI.</p>
 <p>The integration is enabled and the first deposit exists, from v0.8.1.
 The <strong>concept</strong> DOI is <code>10.5281/zenodo.22104298</code> -- that is what
 <code>CITATION.cff</code> and the README badge carry, and it always resolves to the
