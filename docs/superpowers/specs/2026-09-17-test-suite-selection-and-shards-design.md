@@ -344,4 +344,14 @@ the hand-copied module table beneath it -- already documented as incomplete
 
 ## 10. Amendments
 
-*(empty)*
+Found while writing the implementation plan, 2026-09-17, before any code:
+
+1. **§6.5 names four worker functions; the source has five.**
+   `_discover_worker` (`session.py`) is dispatched the same way. The plan's
+   dispatch-finder test asserts all five.
+2. **§5's `python -m scripts.shard_timings` is not built.** Timings are
+   recorded by a conftest option, `--record-shard-timings=PATH`, from
+   pytest's own per-phase durations: parsing `--durations` text is fragile,
+   and the hook already has the numbers. Same file, one fewer script.
+3. **§6.1's `build` needs the SHA passed in** (`--sha`) when it runs in a
+   `git archive` copy, which is not a git repository.
