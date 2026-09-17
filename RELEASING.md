@@ -30,26 +30,68 @@ never collide, so `git checkout v0.9.8` always means the published commit.
 
 1. The architect writes the specification.
 2. The developer writes the tests first, then the code, on a work branch
-   off `main`. **Nothing is pushed until the full suite passes locally on
-   both gate interpreters**, 3.12 and 3.14t, at the commit being pushed.
-   Record the SHA in each run's log header. Run 3.14t in a `git archive`
-   copy of the same commit, so the two suites do not share repo-root
-   `*.db` and `*.lock` files.
-3. Open a pull request into `main`.
-4. An adversarial reviewer reviews the tests and the code. Changes go back
-   to the developer, who consults the architect where the design is in
-   question. The first review covers the whole PR. A re-review may cover
-   only the delta, or the whole PR if the delta touches what an earlier
-   pass relied on. **Every pass names the SHA it approved.**
-5. When the reviewer passes, merge into `main` pinned to that SHA
+   off `main`.
+3. Before pushing, the developer rebases onto the current tip of the branch
+   the PR targets (`main`; `release/X.Y` for a patch) and runs, on **both
+   3.12 and 3.14t** at the commit being pushed, the new tests and the tests
+   that cover what the change touched. Until `pytest --changed` exists
+   (#707), "the tests that cover what the change touched" is exactly this:
+   - a changed `isocenter/**/*.py`: that module's row in
+     `scripts/mutation_probe.py`'s `TARGETS`. A module with no row (it is in
+     `NOT_PROBED`) means the whole suite.
+   - a changed `tests/test_*.py`: that file.
+   - `tests/conftest.py`, anything under `tests/support/`, `setup.py`,
+     `pytest.ini`, `.coveragerc`, `pyproject.toml`, `MANIFEST.in`, or any
+     file under `isocenter/` that is not Python: the whole suite.
+   - any other path: the test files whose text names it --
+     `grep -l <basename> tests/test_*.py`, and for a `.py` file its name
+     without the suffix as well. If none does: nothing, for a path under
+     `docs/` or any `*.md` (prose no test reads cannot break one); the
+     whole suite for anything else (`scripts/`, `.github/`, root files).
+
+   Afterwards it is what `pytest --changed` selects, which applies the same
+   rules. Both interpreters must pass. Run them one after the other in the
+   checkout: they share repo-root `*.db` and `*.lock` files. Paste each
+   run's command, its SHA and its last line into the PR body, and keep the
+   body current: it describes the SHA to be merged, not the first one
+   pushed. A change that selects no tests at all is recorded the same way,
+   as "nothing selected", with the rule that produced it.
+
+   **The full suite is not a merge requirement.** It runs before a merge
+   only when the rules above select it.
+4. Open a pull request into the target branch.
+5. An adversarial reviewer reviews the tests and the code **as rebased on
+   the current tip of the target branch**. A conflict with work merged since the branch was cut,
+   textual or semantic, is part of this review: two changes that each pass
+   alone and break together are the reviewer's finding. Changes go back to
+   the developer, who consults the architect where the design is in
+   question. The reviewer checks that the PR body carries step 3's two runs
+   at the SHA under review. The first review covers the whole PR. A
+   re-review covers the delta, and the whole PR when the delta touches what
+   an earlier pass relied on. **Every pass names the SHA it approved.** If
+   the target branch moves before the merge, the developer rebases and
+   repeats step 3, and the reviewer re-reviews the delta.
+6. When the reviewer passes, merge into the target branch pinned to that SHA
    (`gh pr merge --match-head-commit <sha>`), and delete the work branch.
+
+**Code on `main` has been tested locally and reviewed. It has not been run
+against the full suite** (owner's ruling, 2026-09-17). The full suite is the
+integration test, and it runs when a release is about to happen: see
+"Cutting a release". A regression found there is fixed on `main` like any
+other change, and the release is cut again. Nothing between a merge and a
+release runs the full suite, and no step here depends on how work happens
+to be grouped into bunches or waves.
+
+Until 2026-09-17 step 3 required the full suite on both interpreters before
+every push. It cost about forty minutes a push and made the local tier and
+the release tier the same thing.
 
 `main` has no required status checks, and no CI runs on a push or a pull
 request, into `main` or into a release branch. `tests.yml` runs only when
 dispatched by hand (`gh workflow run tests.yml --ref <branch>`) or when
-`publish.yml` calls it at release. A dispatched run is information for the
-reviewer, not a gate. The gate is the local suite on both interpreters and
-the review.
+`publish.yml` calls it at release. A dispatched run is not part of this
+procedure and no step waits on one. The gate is the local tests on both
+interpreters and the review.
 
 ## Cutting a release
 
@@ -57,7 +99,10 @@ A release branch is a fully tested cut from `main`, then frozen: it takes
 fixes, never features.
 
 1. **Choose the commit** on `main`. Run the full suite on 3.12 and 3.14t at
-   that SHA.
+   that SHA. **This is the integration test**, and the first time this code
+   meets the whole suite. A failure is fixed on `main` by the procedure
+   above, and step 1 starts again at the new commit. (A patch release skips
+   this step; its integration test is step 3's run.)
 2. **Cut the branch:** `git switch -c release/X.Y <sha>`, then
    `git push -u origin release/X.Y`. For a patch to an existing line, see
    below instead.
@@ -73,6 +118,9 @@ fixes, never features.
 
    Run the full suite on both interpreters at this commit
    (`tests/test_version_contract.py` checks that the three files agree).
+   For a patch release this run is the integration test. A failure here is
+   fixed on `release/X.Y` by the patch procedure below -- and forward-ported
+   -- and the release commit is made again on top of the fix.
    Open it as a PR into `release/X.Y`, have it reviewed, and merge it the
    same way as any other PR.
 4. **Rehearse on TestPyPI**, from the branch, and **do not tag until the
@@ -125,7 +173,9 @@ a re-tag.
 1. Branch the fix from `release/X.Y`, not from `main`. Give it a work branch
    name as usual.
 2. Develop and review it exactly as a change to `main` is, with the PR
-   targeting `release/X.Y`. Keep the fix and its tests in their own commits,
+   targeting `release/X.Y`: step 3's rebase and its tests are against
+   `release/X.Y`, not `main` (`pytest --changed --changed-base release/X.Y`
+   once #707 lands). Keep the fix and its tests in their own commits,
    and put the changelog entry in a separate commit, under
    `## [Unreleased]` at the top of the branch's `CHANGELOG.md`. The first
    fix of a patch adds that heading back.
