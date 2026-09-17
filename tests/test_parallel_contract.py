@@ -184,8 +184,8 @@ def test_the_default_path_is_processes_under_a_gil_and_threads_without_one(
         monkeypatch):
     """What `_use_threads` answers when no lever is set, on both builds (#365).
 
-    The PR gate runs 3.14t precisely because `run_parallel()` takes the
-    threads path there, and nothing had ever said so in a test: the last
+    The gate -- local before a push, `test-floor` at release -- runs 3.14t
+    precisely because `run_parallel()` takes the threads path there, and nothing had ever said so in a test: the last
     line of `_use_threads` could drop its `not`, turn its `and` into
     `or`, or become `return None`, and the suite stayed green on
     whichever build happened to be running. Pinned by patching
@@ -1625,8 +1625,8 @@ def test_export_runs_in_processes_by_decision(monkeypatch, caplog):
     `tests/test_export_worker_graph_purity.py`,
     `tests/test_redaction_identity.py`,
     `tests/test_redaction_attestation.py`,
-    `tests/test_redaction_multizone.py` and this file. All eight run on
-    every push. (A ninth, `tests/profile_memory.py`, was listed here for
+    `tests/test_redaction_multizone.py` and this file. All eight are
+    collected by the full suite. (A ninth, `tests/profile_memory.py`, was listed here for
     its assumption rather than its protection until #347 deleted it: it
     was neither collected nor importable, and its own assertion had
     drifted to `10` against the shipped `25` with nothing noticing.)

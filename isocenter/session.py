@@ -6246,8 +6246,8 @@ class DicomSession:
         task where pixels are resident -- across a pipe. Reversing it
         means revisiting eight test files which assume this subprocess
         boundary; `test_export_runs_in_processes_by_decision` names them
-        and pins the `25` below, and every one of the eight runs on
-        every push. (An uncollected ninth, `tests/profile_memory.py`,
+        and pins the `25` below, and every one of the eight is collected
+        by the full suite. (An uncollected ninth, `tests/profile_memory.py`,
         was named here until #347 deleted it: it asserted `10` against
         this `25` and nothing ever ran it.)
 

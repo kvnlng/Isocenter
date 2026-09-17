@@ -25,7 +25,7 @@ There is no command-line tool. The Python API is the whole interface, because a 
 - **Modify a source file.** Ingest reads. Anonymize and redact change an in-memory graph. Nothing reaches disk until `export()` writes copies to a directory you name, so a crashed or abandoned run leaves the originals as they were.
 - **Grade a lossy export `PASS`.** Every step that can lose data writes an audit row, and the report reads those rows. A cohort that lost a file, a private tag, a waveform group, or a pixel frame grades `REVIEW_REQUIRED` and names the loss. An export that attempted instances and wrote none of them raises `ExportError` rather than returning quietly, in either format.
 - **Pass through pixels it could not decode.** A frame that cannot be decompressed fails its instance's export rather than being copied uninspected.
-- **Advertise a Python version it does not test.** The suite runs on Python 3.12 and on the free-threaded 3.14t build on every pull request, and on all four supported versions at release. The PyPI classifiers list only those.
+- **Advertise a Python version it does not test.** The suite runs on all four supported versions, including the free-threaded 3.14t build, at every release, and 3.12 and 3.14t must pass before anything is uploaded. The PyPI classifiers list only those.
 
 ## What it does
 

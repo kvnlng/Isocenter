@@ -2,7 +2,6 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22104298.svg)](https://doi.org/10.5281/zenodo.22104298)
 [![PyPI](https://img.shields.io/pypi/v/isocenter.svg)](https://pypi.org/project/isocenter/)
-[![Tests](https://github.com/kvnlng/Isocenter/actions/workflows/tests.yml/badge.svg)](https://github.com/kvnlng/Isocenter/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **De-identify a DICOM cohort without touching the source files, and hand compliance a report that names anything the run could not do.**
@@ -22,7 +21,7 @@ The behaviours that matter most are refusals, so they come first.
 - **Modify a source file.** Ingest reads; anonymize and redact change an in-memory graph; nothing reaches disk until `export()` writes copies to a directory you name. A crashed or abandoned run leaves the originals exactly as they were.
 - **Grade a lossy export `PASS`.** Every step that can lose data writes an audit row, and the compliance report reads those rows. A cohort that lost a file, a private tag, a waveform group, or a pixel frame grades `REVIEW_REQUIRED` and names the loss. An export that attempted instances and wrote none of them raises `ExportError` rather than returning quietly, in both the DICOM and WFDB formats; a partial export returns what it wrote, with an `ERROR` row for each failure ([#541](https://github.com/kvnlng/Isocenter/issues/541)).
 - **Pass through pixels it could not decode.** If a compressed frame cannot be decompressed, because of a missing codec or a stream the decoder rejects, the export fails on that instance rather than copying bytes it never inspected.
-- **Advertise a Python version it does not test.** The suite runs on Python 3.12 and on the free-threaded 3.14t build on every pull request, and on all four supported versions at release. The classifiers on PyPI list only those, and a test fails if the matrix is narrowed without removing the classifier.
+- **Advertise a Python version it does not test.** The suite runs on all four supported versions, including the free-threaded 3.14t build, at every release, and 3.12 and 3.14t must pass before anything is uploaded. The classifiers on PyPI list only those, and a test fails if the matrix is narrowed without removing the classifier.
 
 ## What it does
 

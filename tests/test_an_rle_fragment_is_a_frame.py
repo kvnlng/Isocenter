@@ -27,7 +27,8 @@ turns it into an `ERROR` row via pydicom's own segment-table refusal. That
 file is `test_an_rle_frame_split_across_fragments_is_read_as_one_frame`,
 and it is the only thing holding the pre-check.
 
-Every test here runs on the PR gate: pydicom decodes RLE with no plugin at
+No test here skips without an optional codec, so every one runs in the
+local gate and the release matrix: pydicom decodes RLE with no plugin at
 all, and `RLELosslessEncoder` builds every fixture.
 """
 import os

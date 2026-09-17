@@ -1105,49 +1105,66 @@ def test_the_build_backend_is_declared_exactly_once():
         "rewrite this module's parsers.")
 
 
-# --- Support claims must be backed by the gate that runs on every PR ---
+# --- Support claims must be backed by the release matrix ---------------
 #
 # The version classifiers above are checked against `python_requires`,
 # which catches advertising *below* the floor. Neither catches the other
-# direction: a claim nothing runs. The PR gate is deliberately narrow
-# (two versions, not four), so which two it runs is now load-bearing --
-# drop one and a promise silently stops being tested, which is the exact
-# defect `test_classifiers_do_not_advertise_unsupported_python_versions`
-# was written for, one level up.
+# direction: a claim nothing runs. Since #704 nothing runs the suite on a
+# push or a pull request. GitHub runs it only when `publish.yml` calls
+# `tests.yml` at release, with two explicit version lists: `test-floor`,
+# which blocks the upload, and `test-supported`, which only reports.
+# Those lists are what back a classifier, so they are what these tests
+# read -- parsed from the YAML, never copied. `tests.yml`'s own default
+# list is deliberately not read: it runs only on a hand dispatch, and
+# pinning it stayed green while the release matrix could be narrowed
+# without a test noticing (#705).
 
 GATE_WORKFLOW = REPO / ".github" / "workflows" / "tests.yml"
+# `PUBLISH_WORKFLOW`, which the helpers below read, is defined with the
+# publish.yml trigger tests further down; it resolves at call time.
 
 
-def _gate_versions():
-    """Python versions the PR gate runs by default.
+def _release_versions(job):
+    """The Python versions `publish.yml`'s `job` passes to tests.yml."""
+    import yaml
 
-    The matrix is `fromJSON(inputs.python-versions || '[...]')` -- a
-    template string, because publish.yml overrides it to run the wider
-    release matrix. The default inside that expression is what runs on a
-    pull request, so that is what these assertions are about.
-    """
-    text = GATE_WORKFLOW.read_text(encoding="utf-8")
-    match = re.search(r"inputs\.python-versions\s*\|\|\s*'(\[[^']*\])'", text)
-    assert match, (
-        f"no default version list found in {GATE_WORKFLOW.name}; if the "
-        "matrix was rewritten, this helper needs to be too -- it is the "
-        "only thing checking the gate still covers what setup.py claims")
-    return json.loads(match.group(1))
+    workflow = yaml.safe_load(PUBLISH_WORKFLOW.read_text(encoding="utf-8"))
+    called = workflow["jobs"][job]
+    assert called.get("uses") == "./.github/workflows/tests.yml", (
+        f"publish.yml's {job} calls {called.get('uses')!r}, not tests.yml; "
+        "the version list it passes is no longer the suite's matrix")
+    versions = json.loads(called["with"]["python-versions"])
+    assert versions, f"publish.yml's {job} passes an empty version list"
+    return versions
 
 
-def test_the_gate_runs_the_floor_python_requires_declares():
-    """A floor is the one claim a single-version gate can prove.
+def _blocking_release_versions():
+    """`test-floor`'s versions, after checking it still blocks the upload."""
+    import yaml
+
+    workflow = yaml.safe_load(PUBLISH_WORKFLOW.read_text(encoding="utf-8"))
+    assert "test-floor" in workflow["jobs"]["publish"]["needs"], (
+        "publish no longer needs test-floor, so the floor list runs "
+        "without blocking anything")
+    return _release_versions("test-floor")
+
+
+def test_the_release_floor_runs_the_floor_python_requires_declares():
+    """A floor is the one claim a single-version job can prove.
 
     `python_requires=">=3.12"` says a 3.12 user can install and run this.
     Only 3.12 can show that: 3.13 passing says nothing about syntax or a
-    stdlib API that does not exist a version earlier.
+    stdlib API that does not exist a version earlier. It must be in the
+    list that blocks the upload, not the one that only reports.
     """
     declared = _setup_keyword("python_requires") or ""
     floor = declared.replace(">=", "").strip()
 
-    assert floor in _gate_versions(), (
-        f"python_requires={declared!r} but the PR gate does not run "
-        f"{floor}; the floor is advertised and untested")
+    versions = _blocking_release_versions()
+    assert floor in versions, (
+        f"python_requires={declared!r} but publish.yml's test-floor runs "
+        f"{versions}; the floor is advertised and nothing that blocks a "
+        "release tests it")
 
 
 def test_a_free_threading_claim_is_backed_by_a_free_threaded_job():
@@ -1161,7 +1178,8 @@ def test_a_free_threading_claim_is_backed_by_a_free_threaded_job():
     processes when there is no GIL to escape (`isocenter/parallel.py`),
     and everything heavy funnels through it. A GIL-enabled interpreter
     never executes that path, so a matrix without a `t` build tests none
-    of what is being claimed.
+    of what is being claimed. The build must be in `test-floor`, the list
+    that blocks the upload.
     """
     classifiers = _setup_keyword("classifiers") or []
     claims_free_threading = any(
@@ -1171,11 +1189,43 @@ def test_a_free_threading_claim_is_backed_by_a_free_threaded_job():
     if not claims_free_threading:
         pytest.skip("no free-threading claim to back")
 
-    versions = _gate_versions()
+    versions = _blocking_release_versions()
     assert any(v.endswith("t") for v in versions), (
-        "setup.py advertises free-threading support but the PR gate runs "
-        f"{versions} -- no free-threaded build, so run_parallel()'s "
-        "no-GIL path is never executed")
+        "setup.py advertises free-threading support but publish.yml's "
+        f"test-floor runs {versions} -- no free-threaded build, so "
+        "run_parallel()'s no-GIL path is never executed before an upload")
+
+
+def test_every_version_classifier_is_run_by_the_release_matrix():
+    """Each `Programming Language :: Python :: 3.N` classifier has a job.
+
+    The union of `test-floor` and `test-supported` is every version a
+    release runs. A classifier outside it advertises a version nothing
+    tests -- README's "a test fails if the matrix is narrowed without
+    removing the classifier".
+
+    **A `t` build does not stand in for its GIL version.** 3.14t and 3.14
+    take different `run_parallel()` paths (threads without a GIL,
+    processes with one), so a 3.14t job never runs the path a 3.14 user
+    gets. Stripping the `t` here let `test-supported` drop 3.14 with the
+    classifier kept and nothing red (#705 review). The versions are
+    compared literally; the free-threading classifier is backed by the
+    test above.
+    """
+    prefix = "Programming Language :: Python :: "
+    advertised = sorted(
+        item[len(prefix):] for item in _setup_keyword("classifiers") or []
+        if item.startswith(prefix) and item[len(prefix):][:1].isdigit()
+        and "." in item[len(prefix):])
+    assert advertised, "no specific Python version classifiers declared"
+
+    run = {version
+           for job in ("test-floor", "test-supported")
+           for version in _release_versions(job)}
+    untested = [version for version in advertised if version not in run]
+    assert not untested, (
+        f"setup.py advertises Python {untested} but publish.yml's release "
+        f"matrix runs only {sorted(run)}; run it or remove the classifier")
 
 
 def test_the_gate_workflow_cannot_cancel_its_own_release_matrix():
