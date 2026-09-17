@@ -259,9 +259,9 @@ hook (§10 item 5), combines, and writes
 `.test-map.json` to the main checkout (gitignored):
 
 ```
-~~{"sha": "<commit>", "python": "3.14.7t",~~
- ~~"lines":   {"isocenter/session.py": {"1612": ["tests/test_compaction.py::…", …]}},~~
- ~~"workers": {"isocenter/io_handlers.py": [4023, 4024, …]}}~~
+{"sha": "<commit>", "python": "3.14.7t",
+ "lines":   {"isocenter/session.py": {"1612": ["tests/test_compaction.py::…", …]}},
+ "workers": {"isocenter/io_handlers.py": [4023, 4024, …]}}
 ```
 
 ~~`lines` holds lines with at least one named context. `workers` holds lines~~
@@ -270,7 +270,8 @@ hook (§10 item 5), combines, and writes
 ~~A fresh clone has no map. Selection then degrades to §6.3 rule 4 for~~
 ~~everything, and says so.~~
 
-**Superseded, §10 items 8 and 10.** The shape is
+**The block above and the two paragraphs under it are superseded, §10 items 8
+and 10** (a fenced block cannot be struck). The shape is
 `{"sha", "python", "functions": {path: {qualname: [nodeid]}}, "workers":
 {path: [qualname]}, "unmapped": [nodeid]}`; `workers` holds functions a
 spawned process ran, whether or not a test also ran them. With no usable map
@@ -327,9 +328,10 @@ no longer exclusive; rule 7 widens; and two additions follow rule 7.
    ~~`test_documented_env_vars.py` and a workflow reaches~~
    ~~`test_packaging_contract.py`.~~
 
-   **Superseded, §10 item 10:** as written, a path no test names selected
-   nothing. Now: test files naming the path's basename **or stem**; if none,
-   the full suite; any non-Python file under `isocenter/` (package data every
+   **Superseded, §10 items 10 and 13:** as written, a path no test names
+   selected nothing. Now: test files naming the path's basename (and, for a
+   `.py` file, its stem); if none, nothing for `docs/` and `*.md`, else the
+   full suite; any non-Python file under `isocenter/` (package data every
    session loads), `pyproject.toml` and `MANIFEST.in` -> the full suite.
 
 `TARGETS` stays the one maintained map. The coverage map only narrows inside
@@ -514,7 +516,8 @@ coverage run):
       the tests recorded against functions changed between the map's SHA and
       the merge-base. `select()` adds any of those that sit in a touched
       module's `TARGETS` row. An old map therefore selects **more**, toward
-      the row. A map whose SHA is not in the clone is treated as no map.
+      the row -- never less than the row; **still less than a fresh map** for a
+      call path added across modules (item 13). A map whose SHA is not in the clone is treated as no map.
     - *A test renamed or deleted since the build* left a nodeid that matched
       nothing, so everything was deselected: zero tests, no fallback.
       Selected nodeids are now checked against the collection; any that are
@@ -537,11 +540,11 @@ coverage run):
       everything outside a test is labelled `<startup>`, so the empty
       context means a spawned process and nothing else.
     - *Rule 7 selected nothing* for a path no test names. It now selects the
-      suite; so does package data under `isocenter/`.
+      suite; so does package data under `isocenter/`. (Narrowed by item 13.)
     - *git config could blind it*: a pure rename has no hunk, and
       `diff.noprefix`/`mnemonicprefix` defeat the header match (all
       measured). The diff runs with those pinned, `--no-renames`, and `-z`.
-    - Still accepted, and measured in the plan's last task rather than
+    - Still accepted, and measured in the plan's Task 14 Step 1b rather than
       assumed: a module- or session-scoped fixture is attributed to the
       first test that triggers it (11 fixtures, 4 files). If any package
       function is reachable only that way, those four files join
@@ -550,3 +553,40 @@ coverage run):
     against that branch, not `main`: `--changed-base` / `select --base`.
 12. **Git-dependent tests skip from their bodies in a non-git tree**, since a
     `git archive` copy has no diff to read.
+
+Second review pass of PR #719, at `461beeb6` (the reviewer re-ran the
+regenerated module: 30 passed, 31 with the live source, on 3.12.14 and
+3.14.7t; then new adversarial repositories):
+
+13. **Item 10's rule 7 over-corrected, and this PR was its first casualty.**
+    "If no test names it, the whole suite" selected the whole suite for the
+    two dated documents this PR changes -- on both interpreters, by the
+    plan's own `selection_for()` -- because no test names a dated spec. Every
+    spec, plan or new docs page would cost the suite twice, which is the
+    per-PR full run item 7's ruling ended. Now: documentation no test names
+    (`docs/`, any `*.md`) selects nothing; any other unnamed path still
+    selects the suite. The needle is the basename, plus the stem **for `.py`
+    only** (the stem of `docs/session.md` is a word half the suite contains;
+    measured, `CHANGELOG.md` matched 4 files by basename and 25 with its
+    stem), and `RELEASING.md` step 3 states the same needle, so the procedure
+    does not change meaning when #707 lands.
+    **The bound item 10 overstated, recorded:** what the map cannot speak
+    for is intersected with the touched modules' rows, so a call path added
+    *across modules* since the build is still missed (measured: `b.k()`
+    changed on `main` to call `a.g()`; the developer edits `g`; `test_k` is
+    dropped because only `a.py` is touched). That is rule 3's own bound -- a
+    row is the files that import or name the module, not a closure over
+    callers -- and the release integration run is what finds it. The sound
+    alternative, unintersected, grows toward the whole suite with map age;
+    it was not taken. Second residual: a test that ran in the 3.14t build
+    but reaches a function only on 3.12's process path.
+    **Also from this pass:** rule 2 falls to the row when *any* dispatcher
+    lacks a record, not only when none has one (an export-worker edit was
+    selecting ingest and audit tests and no export test); a module that does
+    not parse falls to its row instead of raising; `---`/`+++` are read as
+    headers only between `diff --git` and the first hunk (a deleted line
+    reading `-- a/x` switched files, measured); the context labelling is
+    gated on `TEST_MAP_CONTEXTS=1`, which only `build()` sets, so the
+    documented coverage command writes the data file it always wrote; a
+    one-line `def` cannot tell its signature from its body and is counted,
+    which over-selects (none exist in `isocenter/`). 36 tests.

@@ -36,28 +36,32 @@ never collide, so `git checkout v0.9.8` always means the published commit.
    3.12 and 3.14t** at the commit being pushed, the new tests and the tests
    that cover what the change touched. Until `pytest --changed` exists
    (#707), "the tests that cover what the change touched" is exactly this:
-   - a changed `isocenter/*.py`: that module's row in
+   - a changed `isocenter/**/*.py`: that module's row in
      `scripts/mutation_probe.py`'s `TARGETS`. A module with no row (it is in
      `NOT_PROBED`) means the whole suite.
    - a changed `tests/test_*.py`: that file.
    - `tests/conftest.py`, anything under `tests/support/`, `setup.py`,
      `pytest.ini`, `.coveragerc`, `pyproject.toml`, `MANIFEST.in`, or any
      file under `isocenter/` that is not Python: the whole suite.
-   - any other path: the test files whose text names it
-     (`grep -l <basename> tests/test_*.py`); if none does, the whole suite.
+   - any other path: the test files whose text names it --
+     `grep -l <basename> tests/test_*.py`, and for a `.py` file its name
+     without the suffix as well. If none does: nothing, for a path under
+     `docs/` or any `*.md` (prose no test reads cannot break one); the
+     whole suite for anything else (`scripts/`, `.github/`, root files).
 
    Afterwards it is what `pytest --changed` selects, which applies the same
    rules. Both interpreters must pass. Run them one after the other in the
    checkout: they share repo-root `*.db` and `*.lock` files. Paste each
-   run's command, its SHA and its last line into the PR body. A selection of
-   no tests at all (pytest exits 5) is recorded the same way, as "nothing
-   selected", with the rule that produced it.
+   run's command, its SHA and its last line into the PR body, and keep the
+   body current: it describes the SHA to be merged, not the first one
+   pushed. A change that selects no tests at all is recorded the same way,
+   as "nothing selected", with the rule that produced it.
 
    **The full suite is not a merge requirement.** It runs before a merge
    only when the rules above select it.
-4. Open a pull request into `main`.
+4. Open a pull request into the target branch.
 5. An adversarial reviewer reviews the tests and the code **as rebased on
-   current `main`**. A conflict with work merged since the branch was cut,
+   the current tip of the target branch**. A conflict with work merged since the branch was cut,
    textual or semantic, is part of this review: two changes that each pass
    alone and break together are the reviewer's finding. Changes go back to
    the developer, who consults the architect where the design is in
@@ -67,7 +71,7 @@ never collide, so `git checkout v0.9.8` always means the published commit.
    an earlier pass relied on. **Every pass names the SHA it approved.** If
    the target branch moves before the merge, the developer rebases and
    repeats step 3, and the reviewer re-reviews the delta.
-6. When the reviewer passes, merge into `main` pinned to that SHA
+6. When the reviewer passes, merge into the target branch pinned to that SHA
    (`gh pr merge --match-head-commit <sha>`), and delete the work branch.
 
 **Code on `main` has been tested locally and reviewed. It has not been run
