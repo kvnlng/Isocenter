@@ -104,12 +104,14 @@ size**: 6 tests, against the 207 files `session.py`'s `TARGETS` row selects.
   measured after a cleanup glob had deleted the scratch tree's
   `.coveragerc`, so it ran with no multiprocessing measurement at all.
   Re-measured with the file intact: 68.3 s plain, 70.9 s with contexts. It
-  was not measured over the whole suite. The likely cause (a process that
+  was not measured over the whole suite. ~~The likely cause (a process that
   never enters a test context re-evaluates the context question on every new
-  frame) was **not verified**.
+  frame) was **not verified**.~~ It was not the cause.
 
-Consequence: **the map is generated on 3.14t**, where contexts cost ~1.45x
-on the pair measured, and the design must handle `''` structurally (§6.2).
+Consequence: **the map is generated on 3.14t**, ~~where contexts cost ~1.45x
+on the pair measured~~ where coverage over workers costs ~1.4x against
+~11.5x on 3.12 (§10 item 4), and the design must handle `''` structurally
+(§6.2).
 
 ## 4. PR 1 -- isolation: every test runs in its own directory
 
