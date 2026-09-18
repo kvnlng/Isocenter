@@ -1,27 +1,23 @@
 # API stability
 
-What the 1.0 tag promises, in three tiers. Decided for #379 against the
-owner's ruling on #26 — *the facade is what gets frozen, and the internal
-seams behind it are not* — and pinned by `tests/test_frozen_surface.py`:
-the set of public `Session` methods equals the frozen list in both
-directions, every parameter name matches, the frozen shapes' fields
-match, and `api/session.md` renders every frozen method. The design
-record is `docs/superpowers/specs/2026-09-08-frozen-surface-and-strategy-bunch-3.md` §5.
+What the 1.0 tag promises, in three tiers. The facade is what gets
+frozen; the internal seams behind it are not.
 
-**Frozen (tier 1)** names keep their spelling, their parameter names,
-their return shapes and their documented behaviour for every 1.x
-release; a change is a 2.0. **Documented but internal (tier 2)** names
-are rendered on this site and safe to call, and may change in a 1.x
-release with a CHANGELOG entry that names the old spelling and the new
-one; they exist so a reader can see the seams, not so a program can
-lean on them. **Private (tier 3)** names — everything with a leading
-underscore, and every module not listed below — may change without
-notice. Optional extras (`ocr`, `nlp`) degrade to the documented
-fallback; the fallback is frozen, the extra's internals are not. For
-`ocr`, the fallback of `scan_pixel_content()` and
-`discover_redaction_zones()` is a `RuntimeError` (see Exceptions), and
-a scan that ran reports the instances it could not read in
-`PhiReport.failures`.
+- **Frozen (tier 1)** names keep their spelling, their parameter names,
+  their return shapes and their documented behaviour for every 1.x
+  release; a change is a 2.0.
+- **Documented but internal (tier 2)** names are rendered on this site
+  and safe to call, and may change in a 1.x release with a CHANGELOG
+  entry that names the old spelling and the new one. They exist so a
+  reader can see the seams, not so a program can lean on them.
+- **Private (tier 3)** names — everything with a leading underscore, and
+  every module not listed below — may change without notice.
+
+Optional extras (`ocr`, `nlp`) degrade to the documented fallback; the
+fallback is frozen, the extra's internals are not. How each method
+behaves is on its own page — start at [Session](session.md) — and how a
+behaviour came to be is in the
+[changelog](https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md).
 
 ## Frozen at 1.0
 
@@ -37,10 +33,8 @@ accepted. `with Session(...) as s:` (`__enter__` returns the session,
 and both threads.
 
 **`Session` methods — all 28 public names, with their parameters.**
-These are the literal pins in `tests/test_frozen_surface.py`, row
-for row (the test parses this table): `self` omitted, `*` marks the
-keyword-only boundary, and a parameter moved across it is a different
-call.
+`self` is omitted, `*` marks the keyword-only boundary, and a parameter
+moved across it is a different call.
 
 | Method | Parameters |
 | --- | --- |
@@ -73,58 +67,32 @@ call.
 | `compact` | — |
 | `release_memory` | — |
 
-`export(format=)` accepts `'dicom'` and `'wfdb'`. The `dicom` options
-are `use_compression=True, check_burned_in=False,
+`export(format=)` accepts `'dicom'` and `'wfdb'`, and the option names
+are frozen with the method. The `dicom` options are
+`use_compression=True, check_burned_in=False,
 check_reversibility=True, patient_ids=None, show_progress=True,
 subset=None, verify_readback=False`; the `wfdb` options are
-`patient_ids` and `include_annotation_text`. Those option names are
-frozen with the method: `tests/test_frozen_surface.py` pins the `dicom`
-options through `_export_dicom`'s signature, and
-`tests/test_wfdb_privacy.py` pins the two `wfdb` options -- both that
-they are the only two the exporter reads, and that `patient_ids`
-actually limits what is written.
+`patient_ids` and `include_annotation_text`. An option name the format
+does not recognise raises `TypeError`, and nothing is written. The two
+formats do not accept the same options, so a caller forwarding one
+options dict to both must split it per format.
 
-**`patient_ids` means the same thing on both formats, and only `None`
-means every patient.** An empty list, tuple or set is a filter that
-selected nobody, so nothing is written; a bare `str` names exactly one
-id and logs a warning rather than matching ids that merely contain it;
-a bytes-like value raises `TypeError`, because no `PatientID` in the
-graph could match it; and an iterator is read once, so a generator is
-not consumed by the first patient the export walks. Until 0.9.8 the
-`wfdb` path read an empty container as "no filter" and exported the
-whole cohort (#678). Both formats normalise the option through one
-helper, and `tests/test_api_coherence.py` pins that they agree.
+`patient_ids` means the same thing on both formats, and only `None`
+means every patient. An empty list, tuple or set selects nobody, so
+nothing is written; a bare `str` names exactly one id and logs a
+warning; a bytes-like value raises `TypeError`; an iterator is read
+once.
 
-**An option name neither format recognises raises `TypeError`, and
-nothing is written.** The `dicom` path has always done this, because
-`_export_dicom` has a real signature; the `wfdb` path did not until
-0.9.5, and a mistyped `patient_ids` therefore exported every patient in
-silence (#410). Because the two formats do not accept the same options,
-a caller forwarding one options dict to both must split it per format.
-`tests/test_wfdb_option_strictness.py` pins the refusal, the acceptance
-of the two frozen names, that both formats refuse the same typo, and the
-allow-list constant itself -- the last separately, because the AST pin in
-`tests/test_wfdb_privacy.py` collects the keys the body *reads* and is
-blind to a name admitted and never used.
-
-`generate_report(format=)` accepts `'markdown'` only and raises
-`ValueError` otherwise.
-
-`lock_identities` took `_patient_obj=None, **kwargs` until 0.9.4; both
-were stripped before the tag rather than frozen, and `verbose` and
-`tags_to_lock` are keyword-only so a caller still filling the old third
-positional slot gets a `TypeError` rather than a `Patient` read as a
-flag (#379, Q7). `persist` and `verbose` reach every patient on the
-batch path -- `lock_identities(report, persist=True)` writes the rows,
-which until 0.9.4 it silently did not -- and are the batch method's own
-keyword-only parameters with the same defaults (#379, Q10).
+`generate_report(format=)` accepts `'markdown'` only. On
+`lock_identities` and `lock_identities_batch`, `persist` and `verbose`
+reach every patient.
 
 **`Session` attributes.** `store` (a `DicomStore` whose `.patients` is
 the `List[Patient]` the quickstart indexes), `configuration` (an
 `IsocenterConfiguration`), `persistence_file`. `audit()`, `anonymize()`
 and `recover_patient_identity()` merge two patients that end up with the
 same Patient ID into the one that was in the session first, removing the
-other from `store.patients` (#548, #563); `audit()` runs inside
+other from `store.patients`; `audit()` runs inside
 `export(check_burned_in=True)`, so that merges too.
 
 **Shapes the frozen methods return** (attribute names).
@@ -141,42 +109,30 @@ entity_path)`; `DiscoveryResult.filter(...)`, `.to_zones()`,
 
 `PhiFinding.entity`, on the findings `audit()` and
 `scan_pixel_content()` return, is the live object in `session.store`
-that the finding names -- the same object whether the pass ran in
-threads or in processes -- or `None` when that object cannot be found
-in the graph; it is never a worker's copy (#412). The object is found
-by its UID. `ingest()` does not admit a second instance with an SOP
-Instance UID the graph already holds (#431), so only a graph built or
-edited by hand can carry one UID on more than one instance, and findings
-on such a UID all resolve to a single one of those instances.
-`anonymize(findings)` never writes to an object outside
-`session.store` (#644). A finding whose `entity` is itself in the graph
-is acted on as it is, whatever its address says -- except a
-`REMOVE_TAG`, whose "already gone" is read on the object this session
-holds at the finding's address rather than on the entity as handed in:
-on an `Instance` since #626, and on a `Patient` or `Study` since #661.
-The object at an address is the finding's own entity where the address
-names it, the single object where the address names exactly one, and
-none where it names none, or two of which neither is the entity. So a
-removal whose entity reads gone where the object at its address still
-holds the value declines, and so does one whose address names nothing
-at all; where the entity is itself among the objects the address names,
-the entity is read, and a removal that reads gone there is satisfied
-with no row. Any other
-finding is resolved against the live graph at its `entity_uid` and `entity_path`
-(an instance's UID from before `redact()`, and a patient's original
-Patient ID after its pseudonym, included) and acts on the object found
-there, or declines when the address names no single object. A Patient
-ID is written, and a date shifted, only with a value that belongs to the
-live patient holding it; otherwise the finding declines. The findings
-passed are not modified.
+that the finding names — the same object whether the pass ran in
+threads or in processes — or `None` when that object cannot be found;
+it is never a worker's copy. The object is found by its UID.
+`ingest()` does not admit a second instance with an SOP Instance UID the
+graph already holds, so only a graph built or edited by hand can carry
+one UID on more than one instance, and findings on such a UID all
+resolve to a single one of those instances.
+
+`anonymize(findings)` never writes to an object outside `session.store`
+and does not modify the findings passed. A finding whose `entity` is
+itself in the graph is acted on as it is; any other is resolved against
+the live graph at its `entity_uid` and `entity_path` and acts on the
+object found there, or declines when the address names no single
+object. A removal of a value already gone from the object at the
+finding's address is satisfied. A Patient ID is written, and a date
+shifted, only with a value that belongs to the live patient holding it.
 
 `PhiReport.failures` is a list of `(entity_uid, reason)`, one per
 instance `scan_pixel_content()` could not read in full, and is always a
 list; `audit()`'s is always empty, because a failure in its workers
-raises (#423). Each instance `scan_pixel_content()` or
-`discover_redaction_zones()` could not read also writes one `WARNING`
-audit row naming it and the reason, before any raise, so a run with a
-scan failure grades `REVIEW_REQUIRED` (#479).
+raises. Each instance `scan_pixel_content()` or
+`discover_redaction_zones()` could not read also writes one audit
+warning naming it and the reason, before any raise, so a run with a
+scan failure does not grade as passing.
 
 **Entities, as reached from `session.store`.** The graph is `Patient`
 → `Study` → `Series` → `Instance`. Fields, in dataclass order (which is
@@ -188,20 +144,21 @@ instances`. `Instance`: `attributes, sequences, attribute_vrs` (inherited
 from `DicomItem`, `init=False`), then `sop_instance_uid, sop_class_uid,
 instance_number, file_path, source_path` (`pixel_array` and
 `waveform_array` follow and are tier 2). `Instance` carried a
-`date_shifted` field until 0.9.6; it is gone (#510) — reading it raises
-`AttributeError`. `Study.date_shifted` is unchanged.
-`Equipment`: `manufacturer, model_name, device_serial_number`.
-`attributes` is keyed by lowercase `"gggg,eeee"` strings; on `Instance`: `get_pixel_data()`,
-`set_pixel_data()`, `unload_pixel_data()`, `discard_pixel_data()`,
-`get_waveform_data()`, and the two-names-two-behaviours rule between
-`unload` and `discard` (`unload` refuses an unsaved replacement;
-`discard` throws it away, with the descriptors `set_pixel_data()`
-wrote for it -- and a `set_attr()` edit to any of those descriptors
-made since the set, which described the replacement (#434)). On
-`DicomItem`: `set_attr()`. On `Instance` it also keeps resident pixels
-reading as a pixel-descriptor edit declares, and raises `ValueError`
-for an edit that pixels set through `set_pixel_data()` and not yet
-saved cannot be read under (#531).
+`date_shifted` field until 0.9.6; it is gone, and reading it raises
+`AttributeError`. `Equipment`: `manufacturer, model_name,
+device_serial_number`.
+
+`attributes` is keyed by lowercase `"gggg,eeee"` strings. On `Instance`:
+`get_pixel_data()`, `set_pixel_data()`, `unload_pixel_data()`,
+`discard_pixel_data()`, `get_waveform_data()`, and the
+two-names-two-behaviours rule between `unload` and `discard` (`unload`
+refuses an unsaved replacement; `discard` throws it away, with the
+descriptors `set_pixel_data()` wrote for it — and a `set_attr()` edit
+to any of those descriptors made since the set). On `DicomItem`:
+`set_attr()`. On `Instance` it also keeps resident pixels reading as a
+pixel-descriptor edit declares, and raises `ValueError` for an edit that
+pixels set through `set_pixel_data()` and not yet saved cannot be read
+under.
 
 **`Builder`.** The name, `Builder.start_patient()`, and `Equipment`'s
 three fields. The rest of the fluent chain is tier 2.
@@ -213,78 +170,66 @@ three fields. The rest of the fluent chain is tier 2.
 no configuration, `phi_tags` is a copy of the floor policy,
 `profiles.FLOOR_POLICY`, and `audit()`/`anonymize()` apply it; a config
 with no `privacy_profile` line extends it, and one with
-`privacy_profile: none` opts out of it (#495). `set_phi_tag()`
-stores lowercase keys, as every other key in the policy is, stores
-`replacement` as the rule's `value` (#538), and raises `ValueError`,
-leaving the policy and its file unchanged, for an unknown action or a
-rule `load_config` would refuse (below). What the
-floor and `privacy_profile: basic` contain is **not** frozen: the basic
-profile is PS3.15 Annex E Table E.1-1 of a named edition (2026c since
-0.9.8, #547), its membership follows that edition, and a change to it
-can arrive in a minor release, listed under Breaking in the changelog.
+`privacy_profile: none` opts out of it. `set_phi_tag()` stores lowercase
+keys, stores `replacement` as the rule's `value`, and raises
+`ValueError`, leaving the policy and its file unchanged, for an unknown
+action or a rule `load_config` would refuse. What the floor and
+`privacy_profile: basic` contain is **not** frozen: the basic profile is
+PS3.15 Annex E Table E.1-1 of a named edition, its membership follows
+that edition, and a change to it can arrive in a minor release, listed
+under Breaking in the changelog.
 
-**Exceptions.** `RedactionError(failures, attempted)`, a `RuntimeError`,
-with `.failures` (a list of `(entity_uid, details)`) and `.attempted`,
-raised after the whole pass; `ExportError(failures, attempted,
-folder=None)`, a `RuntimeError`, raised last and only when zero of N
-reached disk, by both the `dicom` and (since #541) the `wfdb` format. `compact()` raises `RuntimeError` while a pass is open
-(below); `redact()` raises `RuntimeError` on a `:memory:` store when
-the environment asks for worker recycling, after the persistence
-drain and before any work is done (#400). `audit()`, `anonymize()` and
-`export(check_burned_in=True)` (which runs `audit()` first) raise
-`RuntimeError`, before any work, on a store holding dates shifted under
-a project secret it no longer has; on a store with no secret yet, each
-of the three generates one and commits it to the store (0.9.7). `scan_pixel_content()` and
-`discover_redaction_zones()` raise `RuntimeError` when the `ocr` extra
-or the `tesseract` binary is unavailable to the calling process, before
-any worker is dispatched and before either method reads the graph
-(#422). A worker process runs the `tesseract_cmd` the caller set, so it
-uses the binary that check probed (#458). The check still covers only
-the calling process's view of OCR: both methods also
-raise `RuntimeError` after the pass when at least one instance failed
-and none could be read (#423); a scan that read some instances returns
-its report with the others in `failures`, and discovery counts only the
-instances it read in `n_sources`. `ValueError` from
-`generate_report` on an unknown format. `load_config(config_file)` and
-`audit(config_path=)` raise `ValueError` when the file fails validation
-(not `.yaml`/`.yml`, YAML syntax, a root that is not a mapping, an
-unknown `privacy_profile`, an unknown `action`, a `phi_tags`,
-`date_jitter` or `machines` of the wrong shape, a rule
-`_validate_rule` rejects, or a `phi_tags` rule Isocenter cannot honour:
-a Patient ID rule other than `KEEP` or `REPLACE` with no value, a
-`value:` under an action other than `REPLACE` or of a non-string type,
-a `replacement:` key, `SHIFT`/`JITTER` on a standard tag that is not DA
-or DT, `REPLACE` on a standard tag whose VR cannot hold the value it
-would write, a `value:` holding a range in a DA, TM or DT, or a count of
-`\`-separated values its tag's multiplicity does not allow -- #537, #538,
-#559, #560) and `FileNotFoundError` when it does not exist; after either, the configuration is exactly what it was
-before the call (#456). `audit()` without `config_path` raises the
-same `ValueError` for such a rule in `session.configuration.phi_tags`,
-before it creates a project secret. `audit()` (and so
-`export(check_burned_in=True)`), `anonymize()` and
-`recover_patient_identity(restore=True)` raise `RuntimeError` when
-patients sharing a Patient ID were de-identified under different
-date-offset schemes (#548); `audit()` raises it after the policy is
-validated and before a project secret is created (#563).
-`recover_patient_identity()` raises `FileNotFoundError` when no key file
-exists at the path `enable_reversible_anonymization()` was given, before
-it looks the patient up and without creating one; `ValueError` when no
-patient holds the ID; and `RuntimeError` when the patient has no
-instances or no identity token, the key does not decrypt it (#539), or
-the key opens it but it holds no identity record this library writes (#617).
-It prints nothing, and no message names a Patient ID (#550).
-`enable_reversible_anonymization()` raises `ValueError` for a malformed
-key file and creates none; the first `lock_identities()` creates the key,
-exclusively and with mode 0600, unless the session holds an identity token
-this library wrote that no key here opens, in which case it raises
-`RuntimeError` and creates none (#617). `lock_identities()` refusals name no
-patient: a batch refusal numbers each refused patient by its place among
-the patients found, in Patient ID order. A lock of a patient any of whose
-instances holds no value in any tag `tags_to_lock` names is such a refusal
-(#638, per instance since #583).
-`lock_identities(persist=True)` and `lock_identities_batch()` raise the
-`sqlite3.Error` of a store write that fails, after one `ERROR` audit row;
-writes before it are not rolled back (#599).
+**Exceptions.** Each is raised before any work is done unless it says
+otherwise.
+
+- `RedactionError(failures, attempted)`, a `RuntimeError` with
+  `.failures` (a list of `(entity_uid, details)`) and `.attempted`,
+  raised after the whole pass.
+- `ExportError(failures, attempted, folder=None)`, a `RuntimeError`,
+  raised last and only when zero of N reached disk, by both formats.
+- `compact()`: `RuntimeError` while a pass is open (below).
+- `redact()`: `RuntimeError` on a `:memory:` store when the environment
+  asks for worker recycling.
+- `audit()`, `anonymize()` and `export(check_burned_in=True)`:
+  `RuntimeError` on a store holding dates shifted under a project secret
+  it no longer has (on a store with no secret yet, each generates one
+  and commits it); and, with `recover_patient_identity(restore=True)`,
+  `RuntimeError` when patients sharing a Patient ID were de-identified
+  under different date-offset schemes, which `audit()` raises before it
+  creates a project secret.
+- `scan_pixel_content()` and `discover_redaction_zones()`:
+  `RuntimeError` when the `ocr` extra or the `tesseract` binary is
+  unavailable to the calling process; and `RuntimeError` after the pass
+  when at least one instance failed and none could be read. A scan that
+  read some instances returns its report with the others in `failures`.
+- `generate_report()`: `ValueError` on an unknown format.
+- `load_config(config_file)` and `audit(config_path=)`: `ValueError`
+  when the file fails validation — its extension, YAML syntax or shape,
+  an unknown `privacy_profile` or `action`, or a rule Isocenter cannot
+  honour ([Configuration](../configuration.md) lists them) — and
+  `FileNotFoundError` when it does not exist; after either, the
+  configuration is exactly what it was. `audit()` without `config_path`
+  raises the same `ValueError` for such a rule in
+  `session.configuration.phi_tags`. Both are raised before a project
+  secret is created.
+- `recover_patient_identity()`: `FileNotFoundError` when no key file
+  exists at the path `enable_reversible_anonymization()` was given,
+  without creating one; `ValueError` when no patient holds the ID;
+  `RuntimeError` when the patient has no instances or no identity token,
+  the key does not decrypt it, or it holds no identity record this
+  library writes. It prints nothing, and no message names a Patient ID.
+- `enable_reversible_anonymization()`: `ValueError` for a malformed key
+  file, creating none. The first `lock_identities()` creates the key,
+  exclusively and with mode 0600, unless the session holds an identity
+  token this library wrote that no key here opens, in which case it
+  raises `RuntimeError` and creates none.
+- `lock_identities()` refusals name no patient: a batch refusal numbers
+  each refused patient by its place among the patients found, in Patient
+  ID order. A patient any of whose instances holds no value in any tag
+  `tags_to_lock` names is refused.
+- `lock_identities(persist=True)` and `lock_identities_batch()` raise
+  the `sqlite3.Error` of a store write that fails, after one audit error
+  row; writes before it are not rolled back.
 
 **Environment.** Every `ISOCENTER_*` name in
 [Environment Variables](../environment.md), its default and its
@@ -293,39 +238,34 @@ threads-or-processes levers resolve in, which paths each reaches, and
 that a value below a variable's floor is reported and replaced by the
 default.
 
-**Data promises.** A store written by 1.0 opens under every 1.x (the
-`user_version` migration chain); the sidecar and schema *layout* are
-not frozen, their forward compatibility is. A DICOM file exported with
-reversible anonymization by 1.0 is recoverable by every 1.x with its
-key: the tags `(0400,0500)`, `(0400,0510)`, `(0400,0520)` and the key
-file's format (raw Fernet key bytes). An identity token this library
-writes holds exactly the locked values captured from each instance that
-carries it: a lock writes one token per distinct set of values, never
-one instance's values onto another (#583), and a restore gives each
-instance the values of the token it carries. The exception: a token
-without this store's stamp that is shared across studies and holds a
-non-blank value outside group 0010 is read as an earlier release's shared token,
-and is restored in full only on the first study carrying it, and as its
-group 0010 on the others. A file carries no stamp, so this applies to
-an exported file ingested elsewhere whose studies' locked values were
-equal (#583; a marker that could tell them apart is #652). Date jitter stays
-deterministic per patient within a project: the same keyed patient under the same
-project secret and the same `date_jitter` range gets the same offset
-in every store holding that secret. A patient a store classed as
-de-identified before 0.9.7 keeps that store's unkeyed offset, which
-another store holding the same secret would not give it; and raw data
-for such a patient arriving in the same store is a keyed subject with
-a different offset. The offset is not derivable from the exported
-pseudonym, or from any other value its derivation uses, without the
-secret; that is not a promise that no exported date is recoverable
-(a date tag no rule names is exported as ingested, and UIDs can
-embed dates, #544). The project secret's file format (`write_project_secret`) is
-not a data promise.
+**Data promises.**
 
-**Output vocabularies.** These are five separate vocabularies, not one
-list. The page conflated them until 0.9.5, and the category it gave was
-wrong for four of the thirteen words: it sent a reader looking in the
-audit table for strings that are never written there (#396).
+- A store written by 1.0 opens under every 1.x. The sidecar and schema
+  *layout* are not frozen; their forward compatibility is.
+- A DICOM file exported with reversible anonymization by 1.0 is
+  recoverable by every 1.x with its key: the tags `(0400,0500)`,
+  `(0400,0510)`, `(0400,0520)` and the key file's format (raw Fernet key
+  bytes).
+- An identity token holds exactly the locked values captured from each
+  instance that carries it: a lock writes one token per distinct set of
+  values, and a restore gives each instance the values of the token it
+  carries. The exception is a token without this store's stamp that is
+  shared across studies and holds a non-blank value outside group 0010:
+  it is restored in full only on the first study carrying it, and as its
+  group 0010 on the others. A file carries no stamp, so this applies to
+  an exported file ingested elsewhere whose studies' locked values were
+  equal.
+- Date jitter stays deterministic per patient within a project: the same
+  patient under the same project secret and the same `date_jitter` range
+  gets the same offset in every store holding that secret. A patient a
+  store classed as de-identified before 0.9.7 keeps that store's offset.
+- The offset is not derivable from the exported pseudonym, or from any
+  other value its derivation uses, without the secret. That is not a
+  promise that no exported date is recoverable: a date tag no rule names
+  is exported as ingested, and UIDs can embed dates.
+- The project secret's file format is not a data promise.
+
+**Output vocabularies.** Five separate vocabularies, not one list.
 
 - The **grade**: `PASS`, `REVIEW_REQUIRED`. There is no `FAIL`.
 - The **audit `action_type` strings**, written to the audit table and
@@ -334,36 +274,24 @@ audit table for strings that are never written there (#396).
   `RISK`, `SCAN_GAP`, `WARNING`; and the four a remediation writes,
   `REMEDIATION_REPLACE`, `REMEDIATION_SHIFT_DATE` and
   `REMEDIATION_REMOVE` when it acts on a proposal and
-  `REMEDIATION_DECLINED` when it declines to, or fails to, leaving the
-  value it targeted in the graph or partly written (a remediation that
-  raises writes one since #553).
+  `REMEDIATION_DECLINED` when it declines to, or fails to.
 - The **remediation-proposal `action_type` strings**, carried on
   `PhiFinding.remediation_proposal`: `REMOVE_TAG`, `REPLACE_TAG`,
   `SHIFT_DATE`. These say what a proposal *will* do and are never an
-  audit row; acting on one writes one of the `REMEDIATION_*` words
-  above instead.
+  audit row.
 - The **report exception categories** `COMPLIANCE_CHECK` and
   `AUDIT_DROP`, synthesised into the report's `exceptions` list at
   report time and never written to the audit table. The second says
-  audit rows failed to write and were dropped, so the report
-  under-counts what was done; either one costs the run its PASS.
-- The **`loss_scope` strings**: `STANDARD`, `PRIVATE`, `SIGNAL`.
-  The third is acquired content that was in the source and is not in the
-  export: a discarded waveform multiplex group (#150), or an icon dropped
-  because pixel data is redacted (#542).
+  audit rows failed to write and were dropped; either one costs the run
+  its passing grade.
+- The **`loss_scope` strings**: `STANDARD`, `PRIVATE`, `SIGNAL`. The
+  third is acquired content that was in the source and is not in the
+  export.
 
 An existing string is never renamed or removed in 1.x; new strings may
 be added with a CHANGELOG entry. The *method* that returns the rows
 (`store_backend.get_audit_losses()`) is tier 2: the words are frozen,
 the access path is not.
-
-`tests/test_frozen_surface.py` is what makes each of the five checkable:
-it collects the words from the write sites themselves, by AST --
-resolving a word passed through a variable or a module constant, as
-remediation passes its four -- and compares each vocabulary for set
-equality. Until 0.9.5 it grepped the
-package for the word as a quoted literal, which a docstring or a SQL
-string satisfied.
 
 **Behaviours.** The call order the README documents and its
 consequences (a report generated before any export carries a boundary
@@ -371,27 +299,18 @@ note; export-time `DATA_LOSS` rows are in a report generated after it);
 `audit()` and `redact()` drain the persistence manager on entry;
 nothing reaches disk before `export()`; source files are never
 modified; `redact()` on a `:memory:` store runs in threads on every
-interpreter, and refuses when worker recycling is asked for (#381,
-#400); and the two behaviours below.
-
-### Compaction and passes (#368)
+interpreter; and the two below.
 
 1. **`compact()` raises `RuntimeError` while a `redact()` or `ingest()`
    pass is open on the same store, from any thread of this session, and
-   has done nothing when it does** — no save, no rewrite, every blob row
-   and the sidecar's inode as they were. Frozen: the class, the timing
+   has done nothing when it does.** Frozen: the class, the timing
    (before its leading save), and "has done nothing". Not frozen: the
    message text and the lock file's name.
 2. **`redact()` and `ingest()` block while a `compact()` is saving or
    rewriting, bounded, and then proceed.** Frozen: that they wait and
    then proceed, and that the wait is bounded and its expiry is a
    `RuntimeError` raised before any worker is dispatched or UID
-   regenerated. Not frozen: the bound itself (180 s today), which sits
-   inside the timeout inequality #280 records and may move with it.
-
-Both are pinned by `tests/test_compact_refuses_during_a_pass.py` on
-both gate interpreters, and stated in the `compact()`, `redact()` and
-`ingest()` docstrings.
+   regenerated. Not frozen: the bound itself.
 
 ## Documented but internal
 
@@ -399,37 +318,24 @@ Rendered by this site or named by a guide, safe to call, and changeable
 in a 1.x release with a CHANGELOG entry naming both spellings:
 
 - **`DicomSession`**, the class's own name. `isocenter.Session` is the
-  frozen spelling; the class stays importable and unrenamed for 1.x by
-  courtesy, but the freeze is on `Session`.
+  frozen spelling.
 - **`session.store_backend` and `SqliteStore`** — everything
-  [Persistence](persistence.md) renders: `__init__(db_path)`,
-  `__getstate__`, `__setstate__`, and the public methods including
-  `get_flattened_instances(patient_ids, instance_uids, page_size)` (the
-  0.9.1 migration path from `export_to_parquet`; #142's "the surface
-  #26 will freeze" is reversed here), `get_audit_losses()` and the other
+  [Persistence](persistence.md) renders, including
+  `get_flattened_instances()`, `get_audit_losses()` and the other
   `get_audit_*`, `persist_pixel_data`, `save_all`, `compact_sidecar`,
-  `stop`. The store's *forward compatibility* is frozen; its API is not.
-  That includes the project-secret carry (0.9.7):
-  `write_project_secret(path)` (`FileExistsError` rather than overwrite;
-  mode `0600`) and `load_project_secret(path)` (`RuntimeError` on a store
-  that already holds a secret, `ValueError` for a malformed file or a
-  secret that minted none of the store's pseudonyms,
-  `FileNotFoundError`; a store with shifted dates and no keyed pseudonym
-  to verify against accepts the secret as unverified and writes a
-  `WARNING` row at the load and at every later `audit()`, and a store
-  that has ever done so loads every later secret as unverified; nothing
-  clears it, so such a store's reports grade `REVIEW_REQUIRED` for
-  good, by design); see the
-  [Migration Guide](../migration.md#carrying-a-project-secret-between-stores).
+  `stop`, and the project-secret carry `write_project_secret(path)` and
+  `load_project_secret(path)` (see the
+  [Migration Guide](../migration.md#carrying-a-project-secret-between-stores)).
+  The store's *forward compatibility* is frozen; its API is not.
 - **`session.key_manager`, `session.persistence_manager`,
   `session.reversibility_service`** — attributes that expose services.
 - **`TrackedEntity` bookkeeping**: `has_unsaved_changes`, `phi_status`,
   `mark_modified()`, `mark_persisted()`, `mark_subtree_persisted()`,
   `record_phi_status()`; `PhiStatus`; `DicomItem.add_sequence()` and
-  `add_sequence_item()`,
-  `record_attr_vr()`; `DicomSequence`; `Instance.regenerate_uid()`,
-  `get_waveform_bytes()`, `unload_waveform_data()`, `pixel_array`,
-  `waveform_array`; `Equipment.from_parts()`.
+  `add_sequence_item()`, `record_attr_vr()`; `DicomSequence`;
+  `Instance.regenerate_uid()`, `get_waveform_bytes()`,
+  `unload_waveform_data()`, `pixel_array`, `waveform_array`;
+  `Equipment.from_parts()`.
 - **`entities` helpers** `clone_sequences`, `iter_item_tree`,
   `normalize_study_date`, `resolve_item_path`.
 - **The [Intelligent OCR](ocr.md) page**: `ZoneDiscoverer.group_boxes`,
@@ -438,34 +344,20 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   `pixel_analysis.analyze_pixels`, `pixel_analysis.detect_text_regions`,
   `pixel_analysis.HAS_OCR`, `pixel_analysis.OcrUnavailableError`,
   `pixel_analysis.PixelScanError`;
-  `DiscoveryResult.get_density_matrix`,
-  `visualize_heatmap`, `analyze_temporal_stability`, `inspect_clusters`.
-- **`DicomExporter.write_tree()`** (the serializer alone, used by the
-  fixture generators) and the exporter registry `Exporter`,
-  `register()`, `get_exporter()`, `available_formats()`.
+  `DiscoveryResult.get_density_matrix`, `visualize_heatmap`,
+  `analyze_temporal_stability`, `inspect_clusters`.
+- **`DicomExporter.write_tree()`** (the serializer alone) and the
+  exporter registry `Exporter`, `register()`, `get_exporter()`,
+  `available_formats()`.
 - **`RedactionService.apply_redaction_to_array`** (static).
 - **`Builder`'s fluent chain beyond `start_patient()`.**
 - **`ComplianceReport`'s fields** and the report's section layout and
   wording; log messages and `print` lines; the manifest's HTML.
 - **The JSON manifest's item keys** (`generate_manifest(format="json")`).
-  Each item's `anonymized` is `true` when the last tag-policy PHI scan
+  An item's `anonymized` is `true` when the last tag-policy PHI scan
   left no identifier unremediated on that instance's patient, study or
-  instance, and none of the three has been edited since: each carries
-  `REMEDIATED` or `CLEARED` at its current revision (#486). Two things
-  it is not. It is not "`anonymize()` ran": an input the scan found clean
-  reads `true` after `audit()` alone. And it says nothing about burned-in
-  pixel text, which the tag scan does not read. A remediation inside a
-  sequence counts as one on its instance: the instance reads
-  `REMEDIATED` after `anonymize()`, or `IDENTIFIED` if anything on it or
-  inside it declined (#494). `false` means the status does not establish
-  it: a session that never scanned, an entity edited since its scan, an
-  entity whose last pass declined a remediation on it or inside it (a
-  remediation that raised included), or one a pass left with a
-  remediation the session's last `audit()` raised against it still
-  unhandled -- a partial `anonymize(findings=...)` (#553). It can also
-  read `false` over an entity with nothing left on it, when the report a
-  pass was handed came from an earlier `audit()` than the last, until
-  the next `audit()` (#582).
+  instance and none of the three has been edited since. It is not
+  "`anonymize()` ran", and it says nothing about burned-in pixel text.
 - **The `.pass.lock` / `.lock` file names**, the sidecar's `_pixels.bin`
   suffix, the audit table's columns, the schema's table names.
 

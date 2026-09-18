@@ -2,7 +2,7 @@
 
 `session.export(folder)` compresses by **default** --
 `_export_dicom(..., use_compression=True)`, an option frozen at
-`docs/api/stability.md:73` -- and the JPEG 2000 encoder it used, Pillow's,
+`docs/api/stability.md` -- and the JPEG 2000 encoder it used, Pillow's,
 accepted exactly two dtypes. Measured, one array per dtype:
 
 | dtype | Pillow J2K |
