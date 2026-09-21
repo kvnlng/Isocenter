@@ -248,7 +248,7 @@ def merge_base(repo, upstream=None):
         except subprocess.CalledProcessError:
             continue
     raise SystemExit("--changed needs the branch this work will merge into; "
-                     "pass --changed-base for a release branch")
+                     "pass --changed-base=release/X.Y for a patch")
 
 
 @dataclass
@@ -419,3 +419,141 @@ def unmatched(sel, collected):
     """Selected tests that no longer exist: renamed or deleted since the build."""
     known = {context_to_nodeid(n) for n in collected}
     return {n for n in sel.nodeids if n not in known}
+
+
+def load(repo):
+    path = Path(repo) / MAP_FILE
+    if not path.exists():
+        return None
+    mapping = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        # A map built at a commit this clone does not have cannot be
+        # aged: `cannot_speak_for` needs the diff from it.
+        _git(repo, "cat-file", "-e", mapping["sha"] + "^{commit}")
+    except subprocess.CalledProcessError:
+        return None
+    return mapping
+
+
+def selection_for(repo, upstream=None):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "mutation_probe", Path(__file__).resolve().parent / "mutation_probe.py")
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    mapping = load(repo)
+    base = merge_base(repo, upstream)
+    changes, other = changed(repo, base)
+    unspoken = cannot_speak_for(mapping, repo, base) if mapping else set()
+    # TARGETS rides along: the conftest hook needs it for
+    # `fall_back_for_missing`, and loading the probe twice is waste.
+    return (select(mapping, changes, other, probe.TARGETS, repo,
+                   unspoken=unspoken), mapping, probe.TARGETS)
+
+
+def fall_back_for_missing(sel, missing, targets):
+    """Selected tests that are gone: their modules fall to their rows."""
+    if not missing:
+        return
+    sel.nodeids -= missing
+    for path in sorted(sel.touched):
+        if path in targets:
+            sel.files.update(targets[path][0])
+        else:
+            sel.full = True
+    sel.reasons.append(
+        f"{len(missing)} selected tests no longer exist (renamed or deleted "
+        "since the map was built) -> the touched modules' TARGETS rows")
+
+
+def describe(sel, mapping, repo):
+    if mapping:
+        behind = _git(repo, "rev-list", "--count",
+                      f"{mapping['sha']}..HEAD").strip()
+        out = [f"map: built at {mapping['sha'][:9]} on {mapping['python']}, "
+               f"{behind} commits behind HEAD"]
+    else:
+        out = ["map: none usable"]
+    out += [f"  {reason}" for reason in sel.reasons] or ["  nothing changed"]
+    out.append("selected: the full suite" if sel.full else
+               f"selected: {len(sel.nodeids)} tests + {len(sel.files)} files")
+    out.append(PURPOSE)
+    return "\n".join(out)
+
+
+def build(repo, out_dir, sha=None):
+    """Run the suite under per-test contexts and write the map to out_dir."""
+    import sys
+    import tempfile
+    repo = Path(repo).resolve()
+    if sha is None:
+        # Untracked files do not move a tracked function; modified ones do.
+        if _git(repo, "status", "--porcelain", "--untracked-files=no").strip():
+            raise SystemExit("build wants a clean tree, so the map describes "
+                             "a commit and not an edit in progress")
+        sha = _git(repo, "rev-parse", "HEAD").strip()
+    with tempfile.TemporaryDirectory() as scratch:
+        # `.coveragerc` plus `thread`: its `concurrency = multiprocessing`
+        # replaces coverage's default, so worker threads -- what
+        # run_parallel() uses on 3.14t -- go untraced. Measured with both:
+        # scan_worker's body lands under its test's nodeid. A scratch copy,
+        # because .coveragerc's SIGTERM comment was measured as it stands.
+        rc = Path(scratch) / "coveragerc"
+        text = (repo / ".coveragerc").read_text(encoding="utf-8")
+        if text.count("\nconcurrency = multiprocessing\n") != 1:
+            raise SystemExit(".coveragerc no longer has the one `concurrency = "
+                             "multiprocessing` line build() rewrites")
+        rc.write_text(text.replace(
+            "\nconcurrency = multiprocessing\n",
+            "\nconcurrency = multiprocessing,thread\n"), encoding="utf-8")
+        env = dict(os.environ, COVERAGE_FILE=str(Path(scratch) / ".coverage"),
+                   PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=str(repo),
+                   TEST_MAP_CONTEXTS="1")  # turns conftest's labelling on
+        listing = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+            cwd=repo, env=env, capture_output=True, text=True, check=True)
+        collected = [line for line in listing.stdout.splitlines() if "::" in line]
+        subprocess.run([sys.executable, "-m", "coverage", "run",
+                        f"--rcfile={rc}", "-m", "pytest", "-q"],
+                       cwd=repo, env=env, check=False)
+        subprocess.run([sys.executable, "-m", "coverage", "combine",
+                        f"--rcfile={rc}"], cwd=repo, env=env, check=True)
+        gil = getattr(sys, "_is_gil_enabled", lambda: True)()
+        mapping = from_coverage(Path(scratch) / ".coverage", repo, sha,
+                                sys.version.split()[0] + ("" if gil else "t"),
+                                collected)
+    target = Path(out_dir) / MAP_FILE
+    target.write_text(json.dumps(mapping), encoding="utf-8")
+    print(f"wrote {target}: {len(mapping['functions'])} files with tested "
+          f"functions, {len(mapping['workers'])} with functions a worker ran, "
+          f"{len(mapping['unmapped'])} tests it cannot speak for")
+
+
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(prog="python -m scripts.test_map")
+    sub = parser.add_subparsers(dest="command", required=True)
+    built = sub.add_parser("build")
+    built.add_argument("--out", default=".",
+                       help="directory to write .test-map.json into; when "
+                            "building in a `git archive` copy, the main checkout")
+    built.add_argument("--sha", default=None,
+                       help="the commit this tree is, for a `git archive` "
+                            "copy, which is not a git repository")
+    chosen = sub.add_parser("select")
+    chosen.add_argument("--base", default=None,
+                        help="the branch this work merges into, when it is "
+                             "not main (a patch onto release/X.Y)")
+    args = parser.parse_args(argv)
+    repo = Path(__file__).resolve().parent.parent
+    if args.command == "build":
+        build(repo, args.out, args.sha)
+    else:
+        sel, mapping, _targets = selection_for(repo, args.base)
+        print(describe(sel, mapping, repo))
+        for name in sorted(sel.nodeids | sel.files):
+            print(name)
+
+
+if __name__ == "__main__":
+    main()

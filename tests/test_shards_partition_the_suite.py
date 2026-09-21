@@ -3,6 +3,10 @@
 The failure this file exists to catch is green: a matrix that lists
 three of four shards, or an assignment that drops a file, runs fewer
 tests and reports success.
+
+It reads tests/shard_timings.json, and says so by name, so that
+`pytest --changed` selects this file (rule 7: the files that name a
+changed path) when the timings are regenerated, instead of the suite.
 """
 import json
 import os

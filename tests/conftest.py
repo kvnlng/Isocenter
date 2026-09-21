@@ -267,10 +267,59 @@ def pytest_addoption(parser):
     group.addoption(
         "--record-shard-timings", default=None, metavar="PATH",
         help="write per-file wall time to PATH, for tests/shard_timings.json")
+    group.addoption(
+        "--changed", action="store_true",
+        help="run the tests that exercise what this branch changed since it "
+             "left the branch it merges into (#707); the pre-merge check in "
+             "RELEASING.md step 3")
+    group.addoption(
+        "--changed-base", default=None, metavar="BRANCH",
+        help="the branch this work merges into, when it is not main "
+             "(--changed-base=release/X.Y for a patch)")
+
+
+def _select_changed(config, items):
+    """Keep only what `--changed` selects (#707). See scripts/test_map.py."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "test_map", config.rootpath / "scripts" / "test_map.py")
+    test_map = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(test_map)
+    sel, mapping, targets = test_map.selection_for(
+        config.rootpath, config.getoption("--changed-base"))
+    # Only against a whole collection: under `pytest --changed
+    # tests/test_x.py` every selected test elsewhere would read as gone.
+    # Asked of pytest, not of argv: sniffing argv for a word without a
+    # leading `-` read `--changed-base main` and `-p no:cacheprovider` as
+    # paths and skipped the check (#719 review).
+    if config.args_source is not pytest.Config.ArgsSource.ARGS:
+        test_map.fall_back_for_missing(
+            sel, test_map.unmatched(sel, [item.nodeid for item in items]),
+            targets)
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(test_map.describe(sel, mapping, config.rootpath))
+    if sel.full:
+        return
+    keep, drop = [], []
+    for item in items:
+        name = item.path.relative_to(config.rootpath).as_posix()
+        node = item.nodeid.split("[", 1)[0]
+        (keep if name in sel.files or node in sel.nodeids else drop).append(item)
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
 
 
 def pytest_collection_modifyitems(config, items):
-    """Keep only this shard's files, under `--shard=I/N` (#707)."""
+    """`--changed`, then `--shard=I/N` (#707): select, then split.
+
+    An empty selection is a result, not an error: a change to
+    documentation no test names selects nothing (rule 7), and pytest
+    exits 5. RELEASING.md step 3 says how that is recorded.
+    """
+    if config.getoption("--changed"):
+        _select_changed(config, items)
     spec = config.getoption("--shard")
     if not spec:
         return

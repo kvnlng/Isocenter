@@ -11,6 +11,7 @@ pytest-testmon was tried first and rejected: it traces the pytest
 process only, so an edit to `ingest_worker` selected no tests at all.
 The last three tests in this file are that experiment, kept.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -311,3 +312,91 @@ def test_the_dispatch_finder_sees_every_worker_in_the_live_source():
         "a worker is handed to a pool at module scope; rule 2 cannot "
         "reach its tests and widens to the row instead -- decide whether "
         "that is wanted before accepting it")
+
+
+def _git_tree(path):
+    return subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
+                          cwd=path, capture_output=True).returncode == 0
+
+
+def test_select_prints_its_reasons_and_what_it_is_for():
+    if not _git_tree(REPO):
+        pytest.skip("not a git work tree: a `git archive` copy has no diff")
+    out = subprocess.run(
+        [sys.executable, "-m", "scripts.test_map", "select"],
+        cwd=REPO, capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    assert "the pre-merge check (RELEASING.md step 3)" in out.stdout
+    assert "the full suite runs when a release is cut" in out.stdout
+
+
+def test_a_selected_test_that_is_gone_sends_its_modules_to_their_rows():
+    sel = _select([C("isocenter/session.py", "DicomSession.compact")])
+    test_map.fall_back_for_missing(sel, set(sel.nodeids), TARGETS)
+    assert {"tests/test_session.py", "tests/test_new.py"} <= sel.files
+    assert any("no longer exist" in reason for reason in sel.reasons)
+
+
+def test_a_map_whose_commit_is_not_here_is_no_map(tmp_path):
+    (tmp_path / test_map.MAP_FILE).write_text(
+        '{"sha": "0000000000000000000000000000000000000000", "python": "x", '
+        '"functions": {}, "workers": {}, "unmapped": []}')
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    assert test_map.load(tmp_path) is None
+
+
+@pytest.mark.parametrize("base_args", [
+    ["--changed-base=main"], ["--changed-base", "main"]])
+def test_a_vanished_test_widens_whichever_way_the_base_is_spelled(
+        tmp_path, base_args):
+    """`pytest --changed` end to end, in a scratch repository (#707).
+
+    The map names a test that no longer exists. Against a whole
+    collection, that sends the touched module to its TARGETS row. The
+    check used to be skipped whenever an argument did not start with
+    `-`, so `--changed-base main` -- the spelling RELEASING.md used --
+    or `-p no:cacheprovider` read as a path, and the run selected
+    nothing and exited 5 (#719 review, carried into #707's PR 3).
+    """
+    import json
+    import shutil
+    if not _git_tree(REPO):
+        pytest.skip("not a git work tree: a `git archive` copy has no diff")
+    proj = tmp_path / "proj"
+    for sub in ("tests", "scripts", "isocenter"):
+        (proj / sub).mkdir(parents=True)
+    shutil.copy(REPO / "pytest.ini", proj / "pytest.ini")
+    shutil.copy(REPO / "tests" / "conftest.py", proj / "tests")
+    shutil.copytree(REPO / "tests" / "support", proj / "tests" / "support")
+    shutil.copy(REPO / "scripts" / "test_map.py", proj / "scripts")
+    (proj / "scripts" / "__init__.py").write_text("")
+    (proj / "scripts" / "mutation_probe.py").write_text(
+        'TARGETS = {"isocenter/extra.py": (["tests/test_one.py"], 1)}\n')
+    # No __init__.py: a namespace portion, so `import isocenter` in the
+    # copied conftest still finds the real package on PYTHONPATH.
+    (proj / "isocenter" / "extra.py").write_text("def f():\n    return 1\n")
+    (proj / "tests" / "test_one.py").write_text("def test_a():\n    pass\n")
+    (proj / ".gitignore").write_text(".test-map.json\n.coverage*\n")
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=proj, check=True,
+                              capture_output=True, text=True).stdout.strip()
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    (proj / test_map.MAP_FILE).write_text(json.dumps({
+        "sha": git("rev-parse", "HEAD"), "python": "x",
+        "functions": {"isocenter/extra.py": {"f": ["tests/test_gone.py::test_x"]}},
+        "workers": {}, "unmapped": []}))
+    (proj / "isocenter" / "extra.py").write_text("def f():\n    return 2\n")
+
+    env = dict(os.environ, PYTHONPATH=str(REPO), PYTHONDONTWRITEBYTECODE="1")
+    out = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q",
+         "-p", "no:cacheprovider", "--changed", *base_args],
+        cwd=proj, env=env, capture_output=True, text=True, timeout=300)
+    assert "no longer exist" in out.stdout, out.stdout + out.stderr
+    assert "tests/test_one.py::test_a" in out.stdout, out.stdout
+    assert out.returncode == 0, out.stdout + out.stderr
