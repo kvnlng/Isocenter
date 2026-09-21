@@ -37,9 +37,8 @@ concurrency:
   # dispatch, where `inputs` does not exist, so a dispatched run keeps its
   # own single group.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.python-versions || 'gate' }}
-  # Superseding a stale dispatch on the same ref is worth cancelling
-  # for. A release's
-  # matrix is not: publish.yml sets cancel-in-progress: false so an
+  # Superseding a stale dispatch on the same ref is worth cancelling for.
+  # A release's matrix is not: publish.yml sets cancel-in-progress: false so an
   # upload cannot be interrupted, and a called workflow that cancels
   # anyway would defeat that from one level down.
   cancel-in-progress: ${{ !inputs.python-versions }}
@@ -95,8 +94,9 @@ jobs:
     # failing step in the log. That was #243: this cap sat at 15 while the
     # Run Tests step said 20, so #102's headroom was inert from the day it
     # landed and #250's three hangs each produced a log naming nothing.
-    # test_packaging_contract.py pins the inequality.
-    timeout-minutes: 95
+    # test_packaging_contract.py pins the inequality. 45 since the suite
+    # became four shards (#707): step sum 38, plus the old 7-minute margin.
+    timeout-minutes: 45
 
     steps:
     - uses: actions/checkout@v7
@@ -182,7 +182,17 @@ jobs:
       # cap. 75 puts that peak near 60%. The job cap above rises to 95,
       # over the step sum of 3+3+3+3+75+1 = 88, and faulthandler_timeout
       # (300 s) stays under half of this.
-      timeout-minutes: 75
+      #
+      # Lowered to 25 when the suite became four shards per version
+      # (#707, 2026-09-21): each step runs a quarter of it. Dispatched run
+      # 35636320365 at 83009f1e took 435-751 s on 3.12 and 483-715 s on
+      # 3.14t across the shards, peak 751 s, which 25 puts at 50%. The
+      # step sum is 3+3+3+3+25+1 = 38 and the job cap drops to 45, the
+      # same 7-minute margin as before; faulthandler_timeout (300 s)
+      # stays under half of this. The shards are uneven on a runner
+      # (shard 1 lightest) because the timings were recorded locally; that
+      # costs wall time, not coverage.
+      timeout-minutes: 25
       run: |
         pytest -v --shard=${{ matrix.shard }}/4
       env:
