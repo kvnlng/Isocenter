@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Isocenter uses a **Unified YAML Configuration** (v2.0) to control all aspects of de-identification, including PHI tag rules, date shifting, and pixel redaction.
+Isocenter uses a **Unified YAML Configuration** (schema version 2) to control all aspects of de-identification, including PHI tag rules, date shifting, and pixel redaction.
 
 This file allows you to define a reproducible privacy policy that can be shared across your team or version controlled.
 
@@ -8,6 +8,7 @@ This file allows you to define a reproducible privacy policy that can be shared 
 
 | Section | Description |
 | :--- | :--- |
+| **[version](#schema-version-2)** | The schema version, `"2.0"`. Optional; a file without it is version 2.0. |
 | **[privacy_profile](#privacy-profile)** | Base set of rules: "basic", "none", or a path to a YAML profile. |
 | **[date_jitter](#date-jitter)** | Randomly shifts dates to preserve intervals while hiding exact dates. |
 | **[remove_private_tags](#private-tags)** | Removes vendor-specific private tags (odd groups). |
@@ -21,6 +22,9 @@ This file allows you to define a reproducible privacy policy that can be shared 
 Save this as `isocenter_config.yaml`:
 
 ```yaml
+# 0. Schema version (optional; quoted)
+version: "2.0"
+
 # 1. Privacy Profile (Base Rules)
 # Options: "basic", "none", or path to external YAML
 privacy_profile: "basic"
@@ -62,6 +66,58 @@ machines:
 
 ---
 
+## Schema (version 2)
+
+A configuration is read as exactly what it says. Every key and every value
+type is listed below; **an unknown key, a value of the wrong type, or a
+`version` this library does not read makes `load_config()` and
+`audit(config_path=...)` raise `ValueError`**, naming the key, before
+anything is assigned
+([#711](https://github.com/kvnlng/Isocenter/issues/711),
+[#712](https://github.com/kvnlng/Isocenter/issues/712),
+[#713](https://github.com/kvnlng/Isocenter/issues/713)). Until 1.0 an
+unknown key was ignored, so a misspelling loaded and meant something the
+file did not say.
+
+| Level | Key | Type |
+| :--- | :--- | :--- |
+| top level | `version` | a quoted `"MAJOR.MINOR"` string: `"2.0"` |
+| top level | `privacy_profile` | `"basic"`, `"none"`, or a path to a profile file |
+| top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag to rule |
+| top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` |
+| top level | `remove_private_tags` | `true` or `false` (unquoted) |
+| top level | `machines` | a list of machine rules |
+| machine rule | `serial_number` | a non-empty string, **quoted** if it is all digits (required) |
+| machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them) |
+| machine rule | `redaction_zones` | a list of zones |
+| zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string |
+| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the actions below; `name`, `value`: strings |
+
+Three of these are traps YAML sets, and are refused rather than read:
+
+* **An unquoted serial number is a number.** `serial_number: 12345` is the
+  integer 12345, and `serial_number: 0123` is the octal integer 83; neither
+  ever equals a Device Serial Number, so the rule matched nothing. Quote it:
+  `serial_number: "0123"`.
+* **A quoted boolean is a string.** `remove_private_tags: "false"` is a
+  non-empty string, which read as true. A bare `remove_private_tags:` is
+  null, which read as false. Write `true` or `false` unquoted
+  (`yes`/`no` also work).
+* **An unquoted version is a number.** `version: 2.10` is the number 2.1.
+  Quote it.
+
+**`version`.** A file with no `version` line is version 2.0, and always
+will be. A present `version` must be a quoted string whose major is `2`;
+any `2.x` loads. A 1.x release that adds a key or a value does so under a
+new `2.x` minor, and never changes what an existing key means, so a file
+written for a newer minor either means the same thing here or is refused
+by the key or value this release does not have -- and then the refusal says
+the file's version is newer than this isocenter's. `"1.0"` is refused: it
+labelled the machines-only rules file before version 2 (December 2025),
+and such a file loads unchanged as `"2.0"`.
+
+---
+
 ## Detailed Options
 
 ### Privacy Profile
@@ -80,7 +136,7 @@ privacy_profile: "basic"
 
     The table removes or empties attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them `action: "KEEP"` to retain it. Membership follows the named edition and can change in a minor release; such a change is listed under **Breaking** in the changelog. A store anonymized under 0.9.7's 35-rule profile still reads as anonymized: run `audit()` and then `anonymize()` on it before exporting again ([#555](https://github.com/kvnlng/Isocenter/issues/555)). That removes what 0.9.8 removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source restores them.
 * **`none`**: No base. The file's `phi_tags` are the whole policy.
-* **External File**: You can provide a path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) to inherit its rules. That file must carry them under a `phi_tags:` mapping — a config-shaped file works, a bare tag map at its root raises `ValueError`, because the root used to be read as the tags and a profile written like a config then loaded `privacy_profile` itself as a "tag".
+* **External File**: You can provide a path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) to inherit its rules. That file carries its rules under a `phi_tags:` mapping and nothing else, beside an optional `version`; any other key raises `ValueError` naming it ([#712](https://github.com/kvnlng/Isocenter/issues/712)). A profile file contributes only its `phi_tags`, so a `privacy_profile: basic` or `remove_private_tags:` line inside it would be ignored, and is refused instead: a configuration is not a profile. A bare tag map at its root raises `ValueError` too, because the root used to be read as the tags and a profile written like a config then loaded `privacy_profile` itself as a "tag".
 
 Any other value is refused: `load_config()` raises `ValueError` naming it. (These docs once offered a `comprehensive` profile, which never existed; loading it warned and applied no base.)
 
@@ -115,6 +171,8 @@ Sets the range of the per-patient date shift. It is applied to every tag whose r
       min_days: -10
       max_days: 10
     ```
+
+    For a fixed shift, give both bounds the same value (`{min_days: -5, max_days: -5}`). A bare integer (`date_jitter: -5`) is refused, and so is `min_days` greater than `max_days`, which has at least one bound wrong ([#713](https://github.com/kvnlng/Isocenter/issues/713)).
 
 ### Private Tags
 
@@ -245,7 +303,7 @@ Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex stri
 | **`JITTER`** | Same as `SHIFT`. The generated scaffold and the floor policy use it for Study Date. | `action: "JITTER"` |
 | **`KEEP`** | Explicitly retains the original value (Exception to profile). | `action: "KEEP"` |
 
-Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
+A rule mapping's keys are `action`, `name` and `value`; any other key raises `ValueError` naming it (a misspelt `actoin: KEEP` used to leave the action at `REPLACE`). Any other action makes `load_config()` raise `ValueError` naming the tag. So does a rule Isocenter cannot honour, checked on the policy the file resolves to (profile and file merged), and again by `set_phi_tag()` and by `audit()` for a `phi_tags` assigned in code:
 
 * a `value:` under any action but `REPLACE`, a `value:` that is not a string, or a `replacement:` key (the name `set_phi_tag` saved in 0.9.7; rename it `value:`);
 * a Patient ID `(0010,0020)` rule other than `KEEP` or `REPLACE` with no value;
@@ -348,6 +406,8 @@ session.configuration.delete_rule("US-5555")
 `update_rule(serial_number, updates)`
 
 Update a rule by serial number.
+
+`add_rule()` and `update_rule()` refuse, with `ValueError`, a rule `load_config()` would refuse -- an unknown key such as `redaction_zone`, a serial that is not a string, a malformed zone -- and leave the rules and the file unchanged, so the file they write back always loads again ([#712](https://github.com/kvnlng/Isocenter/issues/712)).
 
 #### set_phi_tag()
 
