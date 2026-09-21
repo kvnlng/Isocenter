@@ -63,6 +63,7 @@ def test_two_takes_of_a_small_cohort_are_identical(two_takes, mini_cohort, tmp_p
     # that minted its own secret would still be self-consistent within a
     # run, so only the second run can tell the fixed secret was loaded.
     assert first["members"] == second["members"]
+    assert first["measure"] == second["measure"] == fp.measure()
     assert fp.compare(first, second).exit_code == 0
 
     other = tmp_path / "other.json"
