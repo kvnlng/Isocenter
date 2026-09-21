@@ -280,11 +280,20 @@ def _worker_calls(repo):
 
 
 def dispatchers(repo):
-    return {(rel, name) for rel, name, _worker in _worker_calls(repo)}
+    """{worker name: {(path, the function that hands it to a pool)}}.
+
+    Per worker, so rule 2 can ask only the dispatchers of the worker that
+    was edited (spec §10 item 17). `None` for the function is a hand-off
+    at module scope.
+    """
+    out = {}
+    for rel, name, worker in _worker_calls(repo):
+        out.setdefault(worker, set()).add((rel, name))
+    return out
 
 
 def dispatched_workers(repo):
-    return {worker for _rel, _name, worker in _worker_calls(repo)}
+    return set(dispatchers(repo))
 
 
 def _tests_naming(repo, path):
@@ -333,18 +342,27 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
         if in_worker:
             # Not `elif`: a helper one unit test calls directly and forty
             # pool tests reach inside a worker is both.
+            # A worker function itself is reached only through the calls
+            # that hand *it* to a pool. Anything else a spawned process
+            # ran -- a helper -- may sit under any worker, so it asks
+            # every dispatcher. Asking every dispatcher for a worker too
+            # left rule 2 dead for all five whenever one dispatcher had no
+            # record (spec §10 item 17).
+            own = dispatching.get(change.qualname)
+            asked = own if own else set().union(*dispatching.values())
             via, blind = set(), []
-            for path, name in sorted(dispatching, key=str):
+            for path, name in sorted(asked, key=str):
                 recorded = functions.get(path, {}).get(name, ()) if name else ()
                 via.update(recorded)
                 if not recorded:
                     blind.append(f"{path}::{name or '<module scope>'}")
             if blind:
                 # One dispatcher with a record is not enough: if export's
-                # has none, an export-worker edit would select the ingest
-                # and audit tests and not one export test.
+                # has none, a helper edit would select the ingest and
+                # audit tests and not one export test.
                 row(change.path, f"{change.qualname} runs in workers and "
-                                 f"{len(blind)} dispatcher(s) have no record "
+                                 f"{len(blind)} of its {len(asked)} "
+                                 f"dispatcher(s) have no record "
                                  f"({blind[0]})")
             tests |= via
         if tests:

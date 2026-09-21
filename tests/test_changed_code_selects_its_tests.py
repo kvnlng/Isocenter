@@ -188,12 +188,15 @@ MAP = {"sha": "abc", "python": "3.14.7t",
            "DicomSession.compact": ["tests/test_compaction.py::TestCompaction::test_a"],
            "DicomSession.ingest": ["tests/test_multiprocessing.py::test_parallel"],
            "helper": ["tests/test_unit.py::test_helper"]}},
-       "workers": {"isocenter/io_handlers.py": ["ingest_worker"],
+       "workers": {"isocenter/io_handlers.py": ["_export_instance_worker",
+                                                "ingest_worker"],
                    "isocenter/session.py": ["helper"]},
        "unmapped": []}
 TARGETS = {"isocenter/session.py": (["tests/test_session.py", "tests/test_new.py"], 80),
            "isocenter/io_handlers.py": (["tests/test_io.py"], 80)}
-DISPATCHING = {("isocenter/session.py", "DicomSession.ingest")}
+#: {worker: {(path, the function that hands it to a pool)}}.
+DISPATCHING = {"ingest_worker": {("isocenter/session.py", "DicomSession.ingest")}}
+EXPORT_BATCH = ("isocenter/io_handlers.py", "DicomExporter.export_batch")
 C = test_map.Change
 
 def _select(changes=(), other=(), mapping=MAP, **kw):
@@ -215,17 +218,42 @@ def test_a_function_tests_and_workers_both_ran_selects_both():
 
 def test_a_dispatch_at_module_scope_widens_to_the_row():
     sel = _select([C("isocenter/io_handlers.py", "ingest_worker")],
-                  dispatching=DISPATCHING | {("isocenter/x.py", None)})
+                  dispatching={"ingest_worker": DISPATCHING["ingest_worker"]
+                               | {("isocenter/x.py", None)}})
     assert "tests/test_io.py" in sel.files
 
 
-def test_one_dispatcher_without_a_record_widens_even_when_another_has_one():
-    # The reviewer's case: export's dispatcher renamed since the build,
-    # audit's still recorded. `via` is non-empty and used to be trusted.
+def test_a_workers_own_dispatcher_without_a_record_widens_to_the_row():
+    # The #719 reviewer's case: export's dispatcher renamed since the
+    # build, ingest's still recorded. An export-worker edit used to
+    # select the ingest tests and not one export test.
+    sel = _select([C("isocenter/io_handlers.py", "_export_instance_worker")],
+                  dispatching=dict(DISPATCHING,
+                                   _export_instance_worker={EXPORT_BATCH}))
+    assert "tests/test_io.py" in sel.files
+    assert "tests/test_multiprocessing.py::test_parallel" not in sel.nodeids
+
+
+def test_another_workers_blind_dispatcher_does_not_widen_this_one():
+    # Rule 2 per worker (#707 PR 3): an ingest_worker edit reaches its
+    # tests through ingest's dispatcher alone. With the union of every
+    # dispatcher, a map that never recorded export's widened every
+    # worker edit to the row -- rule 2 dead for all five on a map with
+    # one blind spot, and the first real-map probe went to the suite.
     sel = _select([C("isocenter/io_handlers.py", "ingest_worker")],
-                  dispatching=DISPATCHING | {
-                      ("isocenter/io_handlers.py", "DicomExporter.export_batch")})
-    assert "tests/test_io.py" in sel.files
+                  dispatching=dict(DISPATCHING,
+                                   _export_instance_worker={EXPORT_BATCH}))
+    assert sel.nodeids == {"tests/test_multiprocessing.py::test_parallel"}
+    assert not sel.files and not sel.full
+
+
+def test_a_helper_only_workers_run_uses_every_dispatcher():
+    # Not itself a worker, so there is no one worker to key on: any
+    # pool might reach it, and one blind dispatcher widens.
+    sel = _select([C("isocenter/session.py", "helper")],
+                  dispatching=dict(DISPATCHING,
+                                   _export_instance_worker={EXPORT_BATCH}))
+    assert {"tests/test_session.py", "tests/test_new.py"} <= sel.files
     assert "tests/test_multiprocessing.py::test_parallel" in sel.nodeids
 
 def test_rule_3_no_record_falls_to_the_targets_row():
@@ -308,7 +336,8 @@ def test_the_dispatch_finder_sees_every_worker_in_the_live_source():
             "ingest_worker", "_export_instance_worker"} <= found, (
         "a worker function has no hand-off the finder recognises, so an "
         "edit to it would fall past rule 2")
-    assert all(name for _path, name in test_map.dispatchers(REPO)), (
+    assert all(name for handoffs in test_map.dispatchers(REPO).values()
+               for _path, name in handoffs), (
         "a worker is handed to a pool at module scope; rule 2 cannot "
         "reach its tests and widens to the row instead -- decide whether "
         "that is wanted before accepting it")
@@ -400,3 +429,62 @@ def test_a_vanished_test_widens_whichever_way_the_base_is_spelled(
     assert "no longer exist" in out.stdout, out.stdout + out.stderr
     assert "tests/test_one.py::test_a" in out.stdout, out.stdout
     assert out.returncode == 0, out.stdout + out.stderr
+
+
+PROBE_FILES = ["tests/test_multiprocessing.py", "tests/test_compaction.py",
+               "tests/test_crypto.py"]
+
+
+@pytest.fixture(scope="module")
+def small_real_map(tmp_path_factory):
+    """A map built from three real test files, in a scratch copy."""
+    import os
+    try:
+        import coverage  # noqa: F401
+    except ImportError:
+        pytest.skip("coverage is in the dev extra")
+    if not _git_tree(REPO):
+        pytest.skip("not a git work tree: nothing to `git archive`")
+    proj = tmp_path_factory.mktemp("maprepo")
+    subprocess.run(f"git archive HEAD | tar -x -C {proj}", shell=True,
+                   cwd=REPO, check=True)
+    rc = proj / "both.rc"
+    rc.write_text((proj / ".coveragerc").read_text().replace(
+        "\nconcurrency = multiprocessing\n",
+        "\nconcurrency = multiprocessing,thread\n"))
+    env = {k: v for k, v in os.environ.items() if not k.startswith("COVERAGE_")}
+    env.update(PYTHONPATH=str(proj), PYTHONDONTWRITEBYTECODE="1",
+               COVERAGE_FILE=str(proj / ".coverage"), TEST_MAP_CONTEXTS="1")
+    subprocess.run([sys.executable, "-m", "coverage", "run", f"--rcfile={rc}",
+                    "-m", "pytest", "-q", *PROBE_FILES],
+                   cwd=proj, env=env, check=True, timeout=1500)
+    subprocess.run([sys.executable, "-m", "coverage", "combine",
+                    f"--rcfile={rc}"], cwd=proj, env=env, check=True)
+    return proj, test_map.from_coverage(proj / ".coverage", proj, "HEAD", "probe")
+
+
+def _files(sel):
+    return {n.split("::")[0] for n in sel.nodeids} | sel.files
+
+
+def test_a_compact_edit_selects_the_compaction_tests_only(small_real_map):
+    proj, mapping = small_real_map
+    sel = test_map.select(
+        mapping, {C("isocenter/session.py", "DicomSession.compact")}, [],
+        {}, proj)
+    assert not sel.full, sel.reasons
+    assert _files(sel) == {"tests/test_compaction.py"}
+
+
+@pytest.mark.parametrize("path, qualname", [
+    ("isocenter/session.py", "scan_worker"),
+    ("isocenter/io_handlers.py", "ingest_worker"),
+])
+def test_a_worker_edit_selects_the_test_that_runs_it_in_a_pool(
+        small_real_map, path, qualname):
+    # pytest-testmon selected 0 of 28 for the ingest_worker edit.
+    proj, mapping = small_real_map
+    sel = test_map.select(mapping, {C(path, qualname)}, [], {}, proj)
+    assert not sel.full, sel.reasons
+    assert "tests/test_multiprocessing.py" in _files(sel)
+    assert "tests/test_crypto.py" not in _files(sel)
