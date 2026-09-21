@@ -393,3 +393,39 @@ def test_audit_config_path_refuses_an_unshipped_edition_before_a_secret(tmp_path
             session.audit(config_path=path)
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM project_secret").fetchone()[0] == 0
+
+
+def test_the_policy_base_names_what_the_policy_was_built_on(tmp_path, capsys):
+    """`_policy_base` is the one-string identifier `load_config` prints and
+    #555's policy record is to carry. Kills each of its three returns
+    replaced (the probe's survivors at introduction)."""
+    external = tmp_path / "site_profile.yaml"
+    external.write_text("phi_tags:\n  '0018,1030': {action: KEEP, name: Protocol}\n",
+                        encoding="utf-8")
+    cases = [
+        (None, "floor over basic@2026c"),
+        ("privacy_profile: none\n", "none"),
+        ("remove_private_tags: true\n", "floor over basic@2026c"),
+        ("privacy_profile: basic\n", "basic@2026c"),
+        (f"privacy_profile: {external}\n", str(external)),
+    ]
+    for i, (text, expected) in enumerate(cases):
+        with Session(str(tmp_path / f"{i}.db")) as session:
+            if text is not None:
+                session.load_config(_config(tmp_path, text, f"{i}.yaml"))
+                assert f" - Privacy Profile: {expected}\n" in capsys.readouterr().out
+            assert session.configuration._policy_base == expected, (text, expected)
+
+
+def test_the_floor_flag_is_private_state_not_part_of_the_frozen_shape():
+    """`_floor` is not a constructor parameter, not in the repr, and not
+    in equality, so the frozen field list and what two configurations
+    compare equal on are unchanged. Kills `init=`, `repr=` or `compare=`
+    flipped on it."""
+    from isocenter.configuration import IsocenterConfiguration
+    with pytest.raises(TypeError):
+        IsocenterConfiguration(_floor=False)  # pylint: disable=unexpected-keyword-arg
+    first, second = IsocenterConfiguration(), IsocenterConfiguration()
+    second._floor = False
+    assert first == second
+    assert "_floor" not in repr(first)
