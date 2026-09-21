@@ -34,8 +34,8 @@ concurrency:
   # having run half the matrix behind a green check.
   #
   # The version list discriminates the two calls. It is empty on a hand
-  # dispatch, where `inputs` does not exist, so a dispatched run keeps its
-  # own single group.
+  # dispatch, where no `python-versions` input is declared, so a
+  # dispatched run keeps its own single group.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.python-versions || 'gate' }}
   # Superseding a stale dispatch on the same ref is worth cancelling for.
   # A release's matrix is not: publish.yml sets cancel-in-progress: false so an

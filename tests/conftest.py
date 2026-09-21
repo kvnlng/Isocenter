@@ -263,9 +263,9 @@ def pytest_collection_modifyitems(config, items):
     # every one of the N jobs would deselect it and pass. Refused, named.
     if orphans:
         raise pytest.UsageError(
-            "--shard: collected files that no shard owns (the partition is "
-            "tests/test_*.py, tests/support/shards.py): "
-            + ", ".join(sorted(orphans)))
+            f"--shard: collected files that no shard owns, relative to "
+            f"rootdir {repo} (the partition is tests/test_*.py there, "
+            "tests/support/shards.py): " + ", ".join(sorted(orphans)))
     if drop:
         config.hook.pytest_deselected(items=drop)
         items[:] = keep
@@ -290,7 +290,15 @@ def pytest_configure(config):
     global _stderr_fd, _stderr_file, _timing_recorder
     if _stderr_fd is not None:  # pragma: no cover - one configure per run
         return
-    if config.getoption("--record-shard-timings"):
+    target = config.getoption("--record-shard-timings")
+    if target:
+        # Refused, not resolved (#727 review): a relative path written at
+        # session finish landed in the root when pytest started there,
+        # and the root guard then blamed a test for the recorder's file.
+        if not os.path.isabs(target):
+            raise pytest.UsageError(
+                f"--record-shard-timings wants an absolute path; got "
+                f"{target!r} (e.g. $PWD/tests/shard_timings.json)")
         _timing_recorder = shards.TimingRecorder()
     _stderr_fd = os.dup(2)
     # `closefd=False` so the fd survives if this wrapper is ever replaced;

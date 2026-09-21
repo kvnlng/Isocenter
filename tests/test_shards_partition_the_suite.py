@@ -28,8 +28,7 @@ def test_parse_refuses_a_shard_that_cannot_exist(bad):
         shards.parse(bad)
 
 
-@pytest.mark.parametrize("n", [2, 4, 7])
-def test_the_shards_partition_the_real_suite(n):
+def _assert_the_shards_partition_the_real_suite(n):
     files = shards.suite_files(REPO)
     assigned = shards.assign(files, shards.load_timings(REPO), n)
     assert len(assigned) == n
@@ -83,21 +82,25 @@ def test_the_recorder_sums_every_phase_per_file(tmp_path):
         "tests/test_a.py": 4.0, "tests/test_b.py": 4.0}
 
 
-def test_a_shard_run_collects_only_its_own_files():
-    seen = []
+def test_a_shard_run_collects_what_the_full_assignment_gives_it():
+    """`--shard=I/N` on a few paths runs what shard I of the whole suite
+    holds among them -- so a red CI shard reproduces locally by its
+    number (#727 review). Disjoint-and-covering was not enough: assigning
+    over the collected items, or running shard I+1's files, passed it.
+    With today's timings shard 1/2 of this pair may be empty and exit 5;
+    the comparison makes that the expected result, not an accident."""
+    given = ["tests/test_crypto.py", "tests/test_shards_partition_the_suite.py"]
+    expected = shards.assign(shards.suite_files(REPO),
+                             shards.load_timings(REPO), 2)
     for index in (1, 2):
         out = subprocess.run(
             [sys.executable, "-m", "pytest", "--collect-only", "-q",
-             "-p", "no:cacheprovider", f"--shard={index}/2",
-             "tests/test_crypto.py",
-             "tests/test_shards_partition_the_suite.py"],
+             "-p", "no:cacheprovider", f"--shard={index}/2", *given],
             cwd=REPO, capture_output=True, text=True, timeout=300)
         assert out.returncode in (0, 5), out.stdout + out.stderr
-        seen.append({line.split("::")[0] for line in out.stdout.splitlines()
-                     if "::" in line})
-    assert not (seen[0] & seen[1]), "a file was collected by both shards"
-    assert seen[0] | seen[1] == {
-        "tests/test_crypto.py", "tests/test_shards_partition_the_suite.py"}
+        got = {line.split("::")[0] for line in out.stdout.splitlines()
+               if "::" in line}
+        assert got == set(given) & set(expected[index - 1]), (index, got)
 
 
 def test_a_collected_file_outside_the_partition_is_refused(tmp_path):
@@ -125,19 +128,55 @@ def test_a_collected_file_outside_the_partition_is_refused(tmp_path):
         cwd=proj, env=env, capture_output=True, text=True, timeout=300)
     assert out.returncode == 4, out.stdout + out.stderr
     assert "extra/test_outside.py" in out.stdout + out.stderr
+    # Named with the rootdir it was measured against, so a `-c` or
+    # `--rootdir` that moved it reads as that, not as a mystery.
+    assert f"relative to rootdir {proj}" in out.stdout + out.stderr
 
 
-def test_the_gate_workflow_runs_every_shard_it_divides_into():
+def test_a_relative_timings_path_is_refused(tmp_path):
+    """Relative, the recorder wrote into the repository root, and the root
+    guard then blamed a test for it (#727 review). Refused rather than
+    resolved: the documented form is absolute, and a resolved one would
+    still land in the root whenever pytest was started there."""
+    out = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q",
+         "-p", "no:cacheprovider", "--record-shard-timings=rt.json",
+         "tests/test_crypto.py"],
+        cwd=REPO, capture_output=True, text=True, timeout=300)
+    assert out.returncode == 4, out.stdout + out.stderr
+    assert "absolute" in out.stdout + out.stderr
+    assert not (REPO / "rt.json").exists()
+
+
+def _gate_workflow():
     import re
     import yaml
     workflow = yaml.safe_load(
         (REPO / ".github" / "workflows" / "tests.yml").read_text("utf-8"))
     job = workflow["jobs"]["test"]
-    listed = job["strategy"]["matrix"]["shard"]
     run = next(s for s in job["steps"] if s.get("id") == "suite")["run"]
     match = re.search(r"--shard=\$\{\{ matrix\.shard \}\}/(\d+)", run)
     assert match, f"the Run Tests step does not pass --shard: {run!r}"
-    count = int(match.group(1))
+    return job, int(match.group(1))
+
+
+@pytest.mark.parametrize("extra", [0, 1, 3])
+def test_the_shards_partition_the_real_suite(extra):
+    """Spec §5: the N `tests.yml` divides by, and two others. Read from
+    the workflow, so moving it to 6 moves this too (#727 review)."""
+    _job, count = _gate_workflow()
+    _assert_the_shards_partition_the_real_suite(count + extra)
+
+
+def test_the_gate_workflow_runs_every_shard_it_divides_into():
+    job, count = _gate_workflow()
+    matrix = job["strategy"]["matrix"]
+    listed = matrix["shard"]
+    # An `exclude:` of {python-version: 3.14t, shard: 4} drops a quarter
+    # of one version behind a list that still reads 1..N (#727 review).
+    assert not {"include", "exclude"} & set(matrix), (
+        "tests.yml's matrix has include/exclude: a combination it removes "
+        "or adds is a shard this pin cannot see")
     assert listed == list(range(1, count + 1)), (
         f"tests.yml divides the suite into {count} shards and runs "
         f"{listed}: every shard not listed is a part of the suite "
