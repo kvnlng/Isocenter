@@ -23,7 +23,7 @@ build point and line keys, §6.2's diff, §6.4's advisory line and §8's "local
 gate" are struck in place, as are the clauses of §4, §5, §6.3, §6.5, §7 and §9 that the
 same ruling or the review of PR #719 falsified; §10 items 7-12 say what
 replaces them.
-**Amended at implementation of PR 1 (2026-09-21), §10 item 14:** §4's
+**Amended at implementation of PR 1 (2026-09-21), §10 items 14-15:** §4's
 opt-out has no users yet, its "0 files open a repo path relatively" was
 one short, and work done between tests is a class it did not name.
 
@@ -625,3 +625,8 @@ implementation** list is the full record; what it changes here:
     reason for running the two interpreters one after the other is
     narrowed, not removed: runs that both include the packaging test
     still share its build directories.
+15. **§4's guard, after the review of #720.**
+    - It names a pre-existing root *file* that was rewritten as well as a new entry, because in a pre-#707 checkout the stale `isocenter.log` and `test_*.db` names are where a relative write would go.
+    - It repeats its line from `pytest_unconfigure` so the line is the run's last. `RELEASING.md` step 3 records each run's exit status as well.
+    - It still watches only the root's top level (plan deviation 12).
+    - `conftest.py` also puts the tree under test first on `PYTHONPATH`, for child interpreters started from a `tmp_path`.
