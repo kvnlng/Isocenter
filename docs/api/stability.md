@@ -98,11 +98,18 @@ other from `store.patients`; `audit()` runs inside
 **Shapes the frozen methods return** (attribute names).
 `IngestSummary(ingested, failures, declined, skipped)` plus `failed`;
 `ExportSummary(written_uids, failures)` plus `written`, `failed`;
+`written_uids` holds the SOP Instance UID of each written instance and
+nothing else: an instance with no UID is not written and is in
+`failures`;
 `PhiReport(findings, failures)` with `__len__`, `__iter__`, `__getitem__`,
 `to_dataframe()`; `PhiFinding(entity_uid, entity_type, field_name,
 value, reason, tag, patient_id, entity, remediation_proposal, metadata,
 entity_path)`; `DiscoveryResult.filter(...)`, `.to_zones()`,
 `.to_dataframe()`; `LockingResult` (a `list` of `Instance`);
+`recover_patient_identity()` → `Dict[str, Dict[str, Any]]`, mapping the
+SOP Instance UID of each instance that carries an identity token of ours
+to a copy of the values that token holds, in graph order, from both
+`restore=False` and `restore=True`;
 `get_cohort_report()` → `pandas.DataFrame`; `phi_status_summary()` →
 `Dict[str, Counter]`; `redact()`, `reconcile_private_tags()`,
 `auto_remediate_config()` → `int`.
@@ -222,6 +229,7 @@ otherwise.
   `RuntimeError` when the patient has no instances or no identity token,
   the key does not decrypt it, or it holds no identity record this
   library writes. It prints nothing, and no message names a Patient ID.
+  It returns the identity rather than printing it.
 - `enable_reversible_anonymization()`: `ValueError` for a malformed key
   file, creating none. The first `lock_identities()` creates the key,
   exclusively and with mode 0600, unless the session holds an identity
@@ -232,8 +240,12 @@ otherwise.
   ID order. A patient any of whose instances holds no value in any tag
   `tags_to_lock` names is refused.
 - `lock_identities(persist=True)` and `lock_identities_batch()` raise
-  the `sqlite3.Error` of a store write that fails, after one audit error
-  row; writes before it are not rolled back.
+  the `sqlite3.Error` of a store write that fails, and `RuntimeError`
+  for a write that finds no store row for one of its instances. Both are
+  raised **after the tokens are embedded in memory** (marked modified,
+  so a later `save()` stores them), and after one audit error row.
+  Neither stores any of that write's instances. Writes before it are not
+  rolled back.
 
 **Environment.** Every `ISOCENTER_*` name in
 [Environment Variables](../environment.md), its default and its
