@@ -192,6 +192,23 @@ def _install_fork_override():
               "context for every pool in this run (#250)\n").encode())
 
 
+# Spawned workers inherit the environment but resolve a relative coverage
+# data file against *their* cwd, and since #707 that is a tmp_path pytest
+# deletes. An absolute COVERAGE_FILE set before the first spawn is what
+# every worker then writes beside. Set whether or not coverage is
+# running: it is inert without it, and keying it on another variable is
+# one more name to be wrong about. Anchored on this file, not on the cwd,
+# so a scratch copy of the tree writes into the copy. Respects a
+# COVERAGE_FILE the caller set. Every subprocess a test launches inherits
+# it too, so a test that runs coverage in a scratch project must strip
+# `COVERAGE_*` from the child's environment
+# (`tests/test_coverage_keeps_worker_data_under_chdir.py` does).
+if not os.environ.get("COVERAGE_FILE"):
+    os.environ["COVERAGE_FILE"] = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        ".coverage")
+
+
 def pytest_configure(config):
     """Take the fd, start the watchdog, and arm the probe's two hooks.
 

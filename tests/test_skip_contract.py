@@ -17,10 +17,11 @@ module, that means the module has to sit in exactly the optional extras:
 - in no declared extra at all -> it can never be installed, so the skip
   can never be false. This is the `faker` case exactly.
 
-What is left -- `ocr`, `nlp`, `docs` -- is the set a user may
-legitimately not have, and `ocr` additionally needs a `tesseract` binary
-pip cannot supply. No hand-maintained allowlist: the rule reads the
-extras, so adding one is enough.
+What is left -- `ocr`, `nlp`, `docs`, and the contributor extra `dev` --
+is the set a documented environment may legitimately not have, and `ocr`
+additionally needs a `tesseract` binary pip cannot supply. No
+hand-maintained allowlist: the rule reads the extras, so adding one is
+enough.
 
 ## What this deliberately cannot see
 
@@ -43,7 +44,13 @@ TESTS = ROOT / "tests"
 # Extras a documented environment may legitimately lack. Everything else
 # declared -- `install_requires`, `tests` -- is present wherever the
 # suite can run, so a skip gated on it masks a broken environment.
-OPTIONAL_EXTRAS = {"ocr", "nlp", "docs"}
+#
+# `dev` (pylint, coverage) joined in #707: `tests.yml` installs
+# `.[tests,ocr]`, so the release matrix is a documented environment
+# without it, and a contributor's `.[dev]` is one with it --
+# `tests/test_coverage_keeps_worker_data_under_chdir.py` runs in the
+# second and skips in the first.
+OPTIONAL_EXTRAS = {"ocr", "nlp", "docs", "dev"}
 
 # Import name != distribution name for a handful of packages. Only the
 # ones that could plausibly gate a skip need listing; an unknown name
