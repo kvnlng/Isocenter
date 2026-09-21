@@ -168,12 +168,44 @@ def _skip_sites():
     return found
 
 
-def test_every_module_gated_skip_names_an_optional_extra():
-    """The #107 rule, in both directions."""
-    required, extras = _declared_modules()
+def _optional_and_non_optional(required, extras):
+    """(modules a skip may gate on, modules it may not).
+
+    A skip may gate only on a module that is optional **only**. The check
+    below reads `optional` first, so a module an optional extra repeats
+    from a required group would otherwise be admitted. Today the one such
+    module is the package itself: `dev` lists `isocenter[tests]`, which
+    reads as `isocenter` (the `tests` modules are not expanded into it).
+    The subtraction is for the next one -- an optional extra that also
+    names `pytest` or `numpy` must not make a skip on it legitimate (#720
+    review).
+    """
     optional = set().union(*(extras[e] for e in OPTIONAL_EXTRAS if e in extras))
     non_optional = required | set().union(
         *(v for k, v in extras.items() if k not in OPTIONAL_EXTRAS))
+    optional -= non_optional
+    optional.discard("isocenter")  # the package's own `isocenter[tests]`
+    return optional, non_optional
+
+
+def test_the_declared_extras_admit_coverage_and_not_the_package():
+    optional, non_optional = _optional_and_non_optional(*_declared_modules())
+    assert "coverage" in optional
+    assert "isocenter" not in optional
+    assert not optional & non_optional
+
+
+def test_an_optional_extra_repeating_a_required_module_does_not_admit_it():
+    optional, _ = _optional_and_non_optional(
+        {"numpy"},
+        {"dev": {"isocenter", "coverage", "pytest", "numpy"},
+         "tests": {"pytest"}})
+    assert optional == {"coverage"}
+
+
+def test_every_module_gated_skip_names_an_optional_extra():
+    """The #107 rule, in both directions."""
+    optional, non_optional = _optional_and_non_optional(*_declared_modules())
 
     offenders = []
     for path, lineno, module in _skip_sites():

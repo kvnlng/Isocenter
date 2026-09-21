@@ -203,10 +203,21 @@ def _install_fork_override():
 # it too, so a test that runs coverage in a scratch project must strip
 # `COVERAGE_*` from the child's environment
 # (`tests/test_coverage_keeps_worker_data_under_chdir.py` does).
+_TREE_UNDER_TEST = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if not os.environ.get("COVERAGE_FILE"):
-    os.environ["COVERAGE_FILE"] = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        ".coverage")
+    os.environ["COVERAGE_FILE"] = os.path.join(_TREE_UNDER_TEST, ".coverage")
+
+# A `python -c`/`-m` child a test starts without `cwd=` used to find this
+# tree through `''` on its `sys.path`, because the cwd was the root. Since
+# #707 the cwd is a tmp_path, and the child falls through to whatever
+# `isocenter` is installed -- the main checkout's editable install, so in
+# a worktree without PYTHONPATH the child tests `main` while this process
+# tests the worktree (#720 review). First on PYTHONPATH, anchored like
+# COVERAGE_FILE above; anything the caller put there stays after it.
+_pythonpath = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
+if _pythonpath[:1] != [_TREE_UNDER_TEST]:
+    os.environ["PYTHONPATH"] = os.pathsep.join([_TREE_UNDER_TEST] + _pythonpath)
+del _pythonpath
 
 
 def pytest_configure(config):
@@ -255,6 +266,8 @@ def pytest_runtest_logstart(nodeid, location):
 
 #: The repository root's listing when this run started (#707).
 _root_before = None
+#: What `pytest_sessionfinish` found, for `pytest_unconfigure` to repeat.
+_root_report = None
 
 
 def pytest_sessionstart(session):
@@ -266,24 +279,23 @@ def pytest_sessionstart(session):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Fail the run if it left a new entry in the repository root (#707).
+    """Fail the run if it wrote into the repository root (#707).
 
-    Every test runs in its own `tmp_path`, so a new root entry is a
-    write that escaped it -- an absolute path built on `__file__`, or a
-    `repo_root` test. Named rather than cleaned up: cleanup would hide
-    the next test that writes into the tree.
+    Every test runs in its own `tmp_path`, so a new or rewritten root
+    entry is a write that escaped it -- an absolute path built on
+    `__file__`, a wide-scoped fixture's relative write, or a `repo_root`
+    test. Named rather than cleaned up: cleanup would hide the next test
+    that writes into the tree.
     """
+    global _root_report
     _mark("sessionfinish")
     if _root_before is None:
         return
-    strays = root_guard.new_entries(session.config.rootpath, _root_before)
-    if strays:
+    _root_report = root_guard.report(session.config.rootpath, _root_before)
+    if _root_report is not None:
         reporter = session.config.pluginmanager.get_plugin("terminalreporter")
         if reporter is not None:
-            reporter.write_line(
-                "this run left new entries in the repository root: "
-                + ", ".join(strays)
-                + " -- a test wrote outside its tmp_path (#707)", red=True)
+            reporter.write_line(_root_report, red=True)
         # Only a clean run is turned red: an interrupt's 2 or a usage
         # error's 4 says more than this does, and a failed run is red
         # already.
@@ -293,6 +305,14 @@ def pytest_sessionfinish(session, exitstatus):
 
 def pytest_unconfigure(config):
     _mark("unconfigure / atexit")
+    # Again, last: pytest prints its warnings, short summary and stats
+    # line after `pytest_sessionfinish`, so the line above sits over a
+    # green `N passed`, and `RELEASING.md` step 3 records a run by its
+    # last line (#720 review). This hook runs after the stats line.
+    if _root_report is not None:
+        reporter = config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_line(_root_report, red=True)
 
 
 @pytest.fixture(scope="session", autouse=True)

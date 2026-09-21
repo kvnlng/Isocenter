@@ -1,4 +1,4 @@
-"""A run that leaves a new file in the repository root fails (#707).
+"""A run that writes into the repository root fails (#707).
 
 The chdir fixture moved the stray writes; this is what stops the next
 one. It fails the *run*, naming the entry, because by session finish
@@ -45,11 +45,50 @@ def test_the_packaging_builds_directories_are_allowed_by_exact_name(tmp_path):
         "build.db", "isocenter.egg-info.bak"]
 
 
-def test_a_file_that_was_already_there_is_not_reported(tmp_path):
+def test_a_rewritten_file_that_was_already_there_is_named_as_modified(tmp_path):
+    """A stray write into a name already in the root (#720 review).
+
+    A checkout that predates #707 holds `isocenter.log` and a dozen
+    `test_*.db`/`*_pixels.bin`/`*.lock` names in its root -- exactly where a
+    relative write would go. Comparing names alone passed such a write.
+    """
     (tmp_path / "old.db").write_bytes(b"")
     before = root_guard.snapshot(tmp_path)
     (tmp_path / "old.db").write_bytes(b"changed")
     assert root_guard.new_entries(tmp_path, before) == []
+    assert root_guard.modified_entries(tmp_path, before) == ["old.db"]
+
+
+def test_a_directory_whose_contents_change_is_not_modified(tmp_path):
+    """Only files: a directory's mtime moves whenever anything inside it
+    is created -- `tests/__pycache__`, `.git/index.lock` -- which is not a
+    write into the root."""
+    (tmp_path / "tests").mkdir()
+    before = root_guard.snapshot(tmp_path)
+    (tmp_path / "tests" / "__pycache__").mkdir()
+    assert root_guard.modified_entries(tmp_path, before) == []
+
+
+def test_allowed_files_are_not_reported_as_modified(tmp_path):
+    (tmp_path / ".coverage").write_bytes(b"")
+    before = root_guard.snapshot(tmp_path)
+    (tmp_path / ".coverage").write_bytes(b"combined data")
+    assert root_guard.modified_entries(tmp_path, before) == []
+
+
+def test_a_clean_root_has_no_report_line(tmp_path):
+    before = root_guard.snapshot(tmp_path)
+    assert root_guard.report(tmp_path, before) is None
+
+
+def test_the_report_line_names_new_and_modified_entries(tmp_path):
+    (tmp_path / "old.log").write_bytes(b"")
+    before = root_guard.snapshot(tmp_path)
+    (tmp_path / "old.log").write_bytes(b"more")
+    (tmp_path / "stray.db").write_bytes(b"")
+    assert root_guard.report(tmp_path, before) == (
+        "this run wrote into the repository root: stray.db (new), "
+        "old.log (modified) -- a test wrote outside its tmp_path (#707)")
 
 
 def test_a_run_that_writes_into_its_root_fails_naming_the_entry(pytester):
@@ -57,17 +96,31 @@ def test_a_run_that_writes_into_its_root_fails_naming_the_entry(pytester):
 
     The unit tests above would stay green if `pytest_sessionfinish` stopped
     calling them. This runs this very `conftest.py` in a scratch rootdir,
-    with a `repo_root` test that writes into that root, in a subprocess so
+    with `repo_root` tests that write into that root, in a subprocess so
     the inner run's hooks are its own.
+
+    The guard's line must be the run's **last** line: `RELEASING.md` step 3
+    records a run by its last line, and pytest's summary prints after
+    `pytest_sessionfinish`, so a line written only there sat above a green
+    `N passed` (#720 review). `pytest_unconfigure` repeats it.
     """
     import shutil
+    import textwrap
     from pathlib import Path
 
+    # A project below pytester's directory, which holds the subprocess's
+    # own `stdout`/`stderr` capture files -- growing, and not the guard's
+    # business.
     tests_dir = Path(__file__).resolve().parent
-    pytester.makeconftest((tests_dir / "conftest.py").read_text(encoding="utf-8"))
-    shutil.copytree(tests_dir / "support", pytester.path / "support")
-    pytester.makeini("[pytest]\nmarkers =\n    repo_root: opt out\n")
-    pytester.makepyfile(test_writes_root="""
+    proj = pytester.mkdir("proj")
+    (proj / "conftest.py").write_text(
+        (tests_dir / "conftest.py").read_text(encoding="utf-8"),
+        encoding="utf-8")
+    shutil.copytree(tests_dir / "support", proj / "support")
+    (proj / "pytest.ini").write_text(
+        "[pytest]\nmarkers =\n    repo_root: opt out\n", encoding="utf-8")
+    (proj / "zz_old.log").write_bytes(b"")
+    (proj / "test_writes_root.py").write_text(textwrap.dedent("""
         import pytest
 
 
@@ -76,14 +129,24 @@ def test_a_run_that_writes_into_its_root_fails_naming_the_entry(pytester):
             (request.config.rootpath / "zz_stray.db").write_bytes(b"")
 
 
+        @pytest.mark.repo_root
+        def test_rewrites(request):
+            (request.config.rootpath / "zz_old.log").write_bytes(b"again")
+
+
         def test_writes_relatively():
             open("zz_contained.db", "wb").close()
-    """)
+    """), encoding="utf-8")
 
-    result = pytester.runpytest_subprocess("-p", "no:cacheprovider")
+    result = pytester.runpytest_subprocess(
+        "-p", "no:cacheprovider", "--rootdir", str(proj),
+        "-c", str(proj / "pytest.ini"), str(proj))
 
-    result.assert_outcomes(passed=2)
+    result.assert_outcomes(passed=3)
     assert result.ret == 1, result.stdout.str()
-    result.stdout.fnmatch_lines(
-        ["*left new entries in the repository root: zz_stray.db -- *"])
-    assert not (pytester.path / "zz_contained.db").exists()
+    guard_line = ("this run wrote into the repository root: zz_stray.db "
+                  "(new), zz_old.log (modified) -- a test wrote outside its "
+                  "tmp_path (#707)")
+    printed = [line for line in result.stdout.lines if line.strip()]
+    assert printed[-1] == guard_line, result.stdout.str()
+    assert not (proj / "zz_contained.db").exists()
