@@ -20,6 +20,7 @@ import json
 from datetime import date
 from isocenter.entities import Patient, Study, Series, Instance, Equipment
 from isocenter.builders import DicomBuilder
+from support import root_guard
 
 # ---------------------------------------------------------------------
 # Stall watchdog (#250) -- instrumentation, not a fix
@@ -191,6 +192,34 @@ def _install_fork_override():
               "context for every pool in this run (#250)\n").encode())
 
 
+# Spawned workers inherit the environment but resolve a relative coverage
+# data file against *their* cwd, and since #707 that is a tmp_path pytest
+# deletes. An absolute COVERAGE_FILE set before the first spawn is what
+# every worker then writes beside. Set whether or not coverage is
+# running: it is inert without it, and keying it on another variable is
+# one more name to be wrong about. Anchored on this file, not on the cwd,
+# so a scratch copy of the tree writes into the copy. Respects a
+# COVERAGE_FILE the caller set. Every subprocess a test launches inherits
+# it too, so a test that runs coverage in a scratch project must strip
+# `COVERAGE_*` from the child's environment
+# (`tests/test_coverage_keeps_worker_data_under_chdir.py` does).
+_TREE_UNDER_TEST = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if not os.environ.get("COVERAGE_FILE"):
+    os.environ["COVERAGE_FILE"] = os.path.join(_TREE_UNDER_TEST, ".coverage")
+
+# A `python -c`/`-m` child a test starts without `cwd=` used to find this
+# tree through `''` on its `sys.path`, because the cwd was the root. Since
+# #707 the cwd is a tmp_path, and the child falls through to whatever
+# `isocenter` is installed -- the main checkout's editable install, so in
+# a worktree without PYTHONPATH the child tests `main` while this process
+# tests the worktree (#720 review). First on PYTHONPATH, anchored like
+# COVERAGE_FILE above; anything the caller put there stays after it.
+_pythonpath = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
+if _pythonpath[:1] != [_TREE_UNDER_TEST]:
+    os.environ["PYTHONPATH"] = os.pathsep.join([_TREE_UNDER_TEST] + _pythonpath)
+del _pythonpath
+
+
 def pytest_configure(config):
     """Take the fd, start the watchdog, and arm the probe's two hooks.
 
@@ -235,22 +264,120 @@ def pytest_runtest_logstart(nodeid, location):
     _mark("running test item", nodeid)
 
 
+#: The repository root's listing when this run started (#707).
+_root_before = None
+#: What `pytest_sessionfinish` found, for `pytest_unconfigure` to repeat.
+_root_report = None
+
+
+def pytest_sessionstart(session):
+    # One snapshot per run: a nested in-process pytest calls this again,
+    # and the inner run's start is not the outer run's baseline.
+    global _root_before
+    if _root_before is None:
+        _root_before = root_guard.snapshot(session.config.rootpath)
+
+
 def pytest_sessionfinish(session, exitstatus):
+    """Fail the run if it wrote into the repository root (#707).
+
+    Every test runs in its own `tmp_path`, so a new or rewritten root
+    entry is a write that escaped it -- an absolute path built on
+    `__file__`, a wide-scoped fixture's relative write, or a `repo_root`
+    test. Named rather than cleaned up: cleanup would hide the next test
+    that writes into the tree.
+    """
+    global _root_report
     _mark("sessionfinish")
+    if _root_before is None:
+        return
+    _root_report = root_guard.report(session.config.rootpath, _root_before)
+    if _root_report is not None:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_line(_root_report, red=True)
+        # Only a clean run is turned red: an interrupt's 2 or a usage
+        # error's 4 says more than this does, and a failed run is red
+        # already.
+        if session.exitstatus == 0:
+            session.exitstatus = 1
 
 
 def pytest_unconfigure(config):
     _mark("unconfigure / atexit")
+    # Again, last: pytest prints its warnings, short summary and stats
+    # line after `pytest_sessionfinish`, so the line above sits over a
+    # green `N passed`, and `RELEASING.md` step 3 records a run by its
+    # last line (#720 review). This hook runs after the stats line.
+    if _root_report is not None:
+        reporter = config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_line(_root_report, red=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _log_outside_a_test_to_scratch(tmp_path_factory):
+    """Where `isocenter.log` goes when no test is running (#707).
+
+    A module- or session-scoped fixture is set up between tests, outside
+    any test's `tmp_path` and `redirect_logging`. With no
+    `ISOCENTER_LOG_FILE` there, a `Session` it opened logged to
+    `./isocenter.log` -- the repository root, which the root guard now
+    refuses. `redirect_logging` restores this value rather than deleting
+    the variable, so every gap between tests sees it.
+    """
+    previous = os.environ.get("ISOCENTER_LOG_FILE")
+    os.environ["ISOCENTER_LOG_FILE"] = str(
+        tmp_path_factory.mktemp("outside-a-test") / "isocenter.log")
+    yield
+    if previous is None:
+        os.environ.pop("ISOCENTER_LOG_FILE", None)
+    else:
+        os.environ["ISOCENTER_LOG_FILE"] = previous
 
 
 @pytest.fixture(autouse=True)
 def redirect_logging(tmp_path):
     """Redirects isocenter.log to a temp file for all tests."""
+    previous = os.environ.get("ISOCENTER_LOG_FILE")
     log_file = tmp_path / "isocenter.log"
     os.environ["ISOCENTER_LOG_FILE"] = str(log_file)
     yield
-    if "ISOCENTER_LOG_FILE" in os.environ:
-        del os.environ["ISOCENTER_LOG_FILE"]
+    if previous is None:
+        os.environ.pop("ISOCENTER_LOG_FILE", None)
+    else:
+        os.environ["ISOCENTER_LOG_FILE"] = previous
+
+
+@pytest.fixture(autouse=True)
+def _own_working_directory(request, tmp_path):
+    """Run every test in its own `tmp_path` (#707).
+
+    A relative `Session("foo.db")` used to land in the repository root,
+    so two runs in one tree shared `foo.db`, its sidecar and both lock
+    files. Spawned workers inherit the cwd, so the pools follow.
+
+    `repo_root` opts out, for a test that builds or launches from the
+    root. Do not widen the opt-out to silence a failure: a test that
+    breaks here was reading a file an earlier test happened to leave
+    behind, and that is the defect.
+
+    `os.chdir` by hand, not `monkeypatch.chdir`: an autouse fixture that
+    requests `monkeypatch` instantiates it ahead of every autouse fixture
+    defined below this one, so its undo would run *after* their
+    teardown. `_pixel_analysis_ocr_is_not_left_replaced` then saw a
+    test's own `monkeypatch.setattr` still in place and failed it
+    (measured, `test_scan_reports_what_it_could_not_read.py`).
+    """
+    if request.node.get_closest_marker("repo_root") is not None:
+        yield
+        return
+    started = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        yield
+    finally:
+        os.chdir(started)
 
 
 @pytest.fixture(autouse=True)

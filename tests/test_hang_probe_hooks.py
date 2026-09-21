@@ -19,6 +19,7 @@ these rather than a probe run hours later.
 import multiprocessing
 import os
 import pathlib
+import shutil
 import sys
 
 import pytest
@@ -32,6 +33,16 @@ CONFTEST = REPO / "tests" / "conftest.py"
 #: package, which is why `docs/environment.md` has no row for it; see the
 #: conftest comment for the argument.
 PROBE_VARIABLE = "ISOCENTER_HANG_PROBE_START_METHOD"
+
+
+def _copy_conftest(pytester):
+    """This repository's conftest, and the `support` package it imports.
+
+    `conftest.py` imports `support.root_guard` (#707); the package sits
+    beside it on `sys.path` in the real tree and must in the copy too.
+    """
+    pytester.makeconftest(CONFTEST.read_text(encoding="utf-8"))
+    shutil.copytree(CONFTEST.parent / "support", pytester.path / "support")
 
 
 def _require_posix():
@@ -86,7 +97,7 @@ def test_the_fork_override_reaches_every_pool_pin(pytester, monkeypatch):
     measure the same thing from opposite sides.
     """
     _require_posix()
-    pytester.makeconftest(CONFTEST.read_text(encoding="utf-8"))
+    _copy_conftest(pytester)
     pytester.makepyfile(test_probe_fork="""
         import concurrent.futures
         import multiprocessing
@@ -142,7 +153,7 @@ def test_sigusr1_dumps_the_parents_threads(pytester, monkeypatch):
     carry faulthandler's `Current thread` header.
     """
     _require_posix()
-    pytester.makeconftest(CONFTEST.read_text(encoding="utf-8"))
+    _copy_conftest(pytester)
     pytester.makepyfile(test_probe_usr1="""
         import os
         import signal

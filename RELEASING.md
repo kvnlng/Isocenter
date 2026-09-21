@@ -50,11 +50,18 @@ never collide, so `git checkout v0.9.8` always means the published commit.
      whole suite for anything else (`scripts/`, `.github/`, root files).
 
    Afterwards it is what `pytest --changed` selects, which applies the same
-   rules. Both interpreters must pass. Run them one after the other in the
-   checkout: they share repo-root `*.db` and `*.lock` files. Paste each
-   run's command, its SHA and its last line into the PR body, and keep the
-   body current: it describes the SHA to be merged, not the first one
-   pushed. A change that selects no tests at all is recorded the same way,
+   rules. Both interpreters must pass. Each test runs in its own
+   directory (#707), so the two runs may overlap in one checkout -- unless
+   both include `tests/test_packaging_contract.py`, which builds the
+   distributions in the repository root (setuptools' `build/` and
+   `isocenter.egg-info/`); run those one after the other. Paste each
+   run's command, its SHA, its last line and its exit status
+   (`…; echo "exit=$?"`) into the PR body, and keep the body current: it
+   describes the SHA to be merged, not the first one pushed. A run that
+   wrote into the repository root exits 1 and ends with the guard's line
+   naming what it wrote. The guard sees new entries and rewritten files at
+   the root's top level only: not a write below it (into `tests/`, say),
+   and not a deletion. A change that selects no tests at all is recorded the same way,
    as "nothing selected", with the rule that produced it.
 
    **The full suite is not a merge requirement.** It runs before a merge

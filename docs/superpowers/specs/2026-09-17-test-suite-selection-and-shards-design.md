@@ -23,6 +23,9 @@ build point and line keys, §6.2's diff, §6.4's advisory line and §8's "local
 gate" are struck in place, as are the clauses of §4, §5, §6.3, §6.5, §7 and §9 that the
 same ruling or the review of PR #719 falsified; §10 items 7-12 say what
 replaces them.
+**Amended at implementation of PR 1 (2026-09-21), §10 items 14-15:** §4's
+opt-out has no users yet, its "0 files open a repo path relatively" was
+one short, and work done between tests is a class it did not name.
 
 ## 1. The problem, and why it is scheduled ahead of 1.0
 
@@ -127,19 +130,21 @@ on the pair measured~~ where coverage over workers costs ~1.4x against
 ## 4. PR 1 -- isolation: every test runs in its own directory
 
 **What.** One autouse fixture in `tests/conftest.py`, beside
-`redirect_logging`, doing `monkeypatch.chdir(tmp_path)`. Spawned workers
+`redirect_logging`, doing ~~`monkeypatch.chdir(tmp_path)`~~ `os.chdir(tmp_path)`
+and restoring it (§10 item 14). Spawned workers
 inherit the cwd, so `run_parallel()` pools follow.
 
-**Why it is low-risk (measured over `tests/test_*.py`).** 0 files open a repo
-path relatively, 31 anchor on `__file__`, 1 reads the cwd, 58 never touch
+**Why it is low-risk (measured over `tests/test_*.py`).** ~~0 files open a repo
+path relatively~~ 1 file did (§10 item 14), 31 anchor on `__file__`, 1 reads the cwd, 58 never touch
 `tmp_path`/`tempfile`. Almost nothing depends on *being* in the root; tests
 only happen to write there.
 
 **Opt-out.** A registered marker, `@pytest.mark.repo_root`, skips the chdir.
 Candidates are found by running the suite once under the fixture, not by
-guessing. The first is known: `test_packaging_contract.py`'s sdist staging,
+guessing. ~~The first is known: `test_packaging_contract.py`'s sdist staging,
 which builds `isocenter-<version>/` in the root and spawns build
-subprocesses; anything that launches `python -m scripts.…` or `python -m
+subprocesses;~~ (**§10 item 14:** it passes `cwd=REPO` and needs no mark; its
+build directories are allowed by name.) Anything that launches `python -m scripts.…` or `python -m
 tests.…` with a relative module path is the second class.
 
 **The guard.** A session-scoped check in `conftest.py`: snapshot the repo
@@ -590,3 +595,38 @@ regenerated module: 30 passed, 31 with the live source, on 3.12.14 and
     documented coverage command writes the data file it always wrote; a
     one-line `def` cannot tell its signature from its body and is counted,
     which over-selects (none exist in `isocenter/`). 36 tests.
+
+Implementing PR 1 (isolation), 2026-09-21. The plan's **Deviations at
+implementation** list is the full record; what it changes here:
+
+14. **§4 as built.** (a) No test needed `repo_root`:
+    `tests/test_packaging_contract.py` already gives every subprocess
+    `cwd=REPO`. It still builds in the root, so the guard allows
+    setuptools' `build/` and `isocenter.egg-info/` by exact name
+    (`root_guard.ALLOWED_NAMES`); moving `egg_info` to scratch was
+    measured and refused, as it drops `isocenter.egg-info/` from the
+    sdist. (b) §4's "0 files open a repo path relatively" was one short:
+    `tests/test_ctp_integration.py`. (c) A class §4 did not name: work
+    done **between** tests. A `setup_module` (`tests/test_naming_structure.py`)
+    and a module-scoped fixture (`tests/test_private_tag_vr_roundtrip.py`,
+    which logged to `./isocenter.log` once `redirect_logging` had deleted
+    `ISOCENTER_LOG_FILE`) run in the root, not in a `tmp_path`. The first is
+    fixed at the test; the second for every wide-scoped fixture, by a
+    session default for `ISOCENTER_LOG_FILE` that `redirect_logging` now
+    restores. The cwd itself is not moved between tests, so a wide-scoped
+    fixture that writes a relative path still lands in the root, and the
+    guard is what names it. (d) The chdir fixture calls `os.chdir`, not
+    `monkeypatch.chdir`: an autouse `monkeypatch` reorders teardown ahead of
+    `_pixel_analysis_ocr_is_not_left_replaced` (measured). (e) §4's
+    coverage trap was real: under the chdir and without the fix, 1 data
+    file and no `ingest_worker` line; with an absolute `COVERAGE_FILE` set
+    at `conftest.py` import, 49 files and 38 lines. The spawned child, not
+    the parent, resolves the relative path. (f) `RELEASING.md` step 3's
+    reason for running the two interpreters one after the other is
+    narrowed, not removed: runs that both include the packaging test
+    still share its build directories.
+15. **§4's guard, after the review of #720.**
+    - It names a pre-existing root *file* that was rewritten as well as a new entry, because in a pre-#707 checkout the stale `isocenter.log` and `test_*.db` names are where a relative write would go.
+    - It repeats its line from `pytest_unconfigure` so the line is the run's last. `RELEASING.md` step 3 records each run's exit status as well.
+    - It still watches only the root's top level (plan deviation 12).
+    - `conftest.py` also puts the tree under test first on `PYTHONPATH`, for child interpreters started from a `tmp_path`.
