@@ -1,0 +1,29 @@
+version: '2.0'
+privacy_profile: none
+phi_tags:
+  0010,0010:
+    name: Patient's Name
+    action: REPLACE
+  0008,0080:
+    name: Institution Name
+    action: REPLACE
+    value: SITE-A
+  0010,0040:
+    name: Patient's Sex
+    action: KEEP
+  0008,1030:
+    name: Custom Tag
+    action: REMOVE
+date_jitter:
+  min_days: -30
+  max_days: -10
+remove_private_tags: false
+machines:
+- serial_number: SN-KB-1
+  model_name: LOGIQ E9
+  comment: Header band across the top
+  redaction_zones: [{roi: [0, 60, 0, 1024], note: patient banner}, [900, 960, 0, 300]]
+- serial_number: SN-ADDED-2
+  manufacturer: ACME
+  model_name: Scanner 9
+  redaction_zones: [[10, 50, 20, 80]]

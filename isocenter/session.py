@@ -23,6 +23,7 @@ from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
                        carry_phi_status_across_redaction,
                        _report_redaction_failures, rules_matching, zone_rois)
+from . import config_manager
 from .config_manager import (ConfigLoader, _is_tag_key,
                              require_package_resource, validate_phi_policy)
 from .privacy import (PhiInspector, PhiFinding, PhiReport,
@@ -2231,11 +2232,14 @@ class DicomSession:
         Raises:
             FileNotFoundError: If `config_file` does not exist.
             ValueError: If the file fails validation -- not `.yaml`/`.yml`,
-                YAML syntax, a root that is not a mapping, an unknown
-                `privacy_profile`, an unknown `action`, a `phi_tags`,
-                `date_jitter` or `machines` of the wrong shape, a rule
-                `_validate_rule` rejects, or a `phi_tags` rule the
-                pipeline cannot honour (`config_manager.validate_phi_policy`,
+                YAML syntax, a root that is not a mapping, a `version`
+                this library does not read (#711), a key the schema does
+                not have at any level (#712), a value of the wrong type
+                (#713), an unknown `privacy_profile`, an unknown `action`,
+                a `phi_tags`, `date_jitter` or `machines` of the wrong
+                shape, a rule `_validate_rule` rejects, or a `phi_tags`
+                rule the pipeline cannot honour
+                (`config_manager.validate_phi_policy`,
                 #537/#538/#559/#560). Either way the configuration is
                 exactly what it was before the call.
         """
@@ -2332,7 +2336,9 @@ class DicomSession:
         machine_rules = self._scaffold_machine_rules()
 
         data = {
-            "version": "2.0",
+            # The module attribute, read now: one home for the number both
+            # writers stamp (#711).
+            "version": config_manager.CONFIG_VERSION,
             "privacy_profile": "basic",
             "phi_tags": self._scaffold_phi_tags(),
             "date_jitter": self.configuration.date_jitter,
@@ -2475,10 +2481,13 @@ class DicomSession:
             PhiReport: An object containing valid PHI findings, iterable and exportable.
 
         Raises:
-            ValueError: When the policy -- the file at `config_path`, or
-                `configuration.phi_tags` -- holds a rule the pipeline cannot
-                honour (`config_manager.validate_phi_policy`), before a
-                project secret is created (#537, #560).
+            ValueError: When the file at `config_path` fails any check
+                `load_config` makes (a `version` this library does not
+                read, a key the schema does not have, a value of the wrong
+                type, #711-#713, and the rest), or the policy -- that
+                file's, or `configuration.phi_tags` -- holds a rule the
+                pipeline cannot honour (`config_manager.validate_phi_policy`),
+                before a project secret is created (#537, #560).
             RuntimeError: When patients sharing a Patient ID were
                 de-identified under different date-offset schemes, so they
                 cannot be merged (#548, #563); raised after the policy is

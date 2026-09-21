@@ -552,7 +552,7 @@ def dummy_patient(dummy_pixel_array_2d):
 def config_file(tmp_path):
     """Creates a temporary YAML config file."""
     data = {
-        "version": "1.0",
+        "version": "2.0",
         "machines": [
             {
                 "serial_number": "SN-999",

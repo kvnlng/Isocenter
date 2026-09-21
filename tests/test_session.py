@@ -34,7 +34,7 @@ def test_load_empty_config(tmp_path):
         empty_conf = tmp_path / "empty_rules.yaml"
         import yaml
         with open(empty_conf, "w") as f:
-            yaml.dump({"version": "1.0", "machines": []}, f)
+            yaml.dump({"version": "2.0", "machines": []}, f)
 
         session.load_config(str(empty_conf))
         assert len(session.configuration.rules) == 0

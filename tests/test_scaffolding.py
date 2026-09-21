@@ -31,7 +31,7 @@ def test_scaffold_config_creates_new_entries(tmp_path):
         # 2. Load partial config
         # Only "SN-OLD" is known
         config_data = {
-            "version": "1.0",
+            "version": "2.0",
             "machines": [{"serial_number": "SN-OLD", "redaction_zones": []}]
         }
         config_file = tmp_path / "existing.yaml"

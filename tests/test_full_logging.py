@@ -38,7 +38,7 @@ def test_full_logging_coverage(tmp_path):
         # Config Loading
         config_path = tmp_path / "logging_config.yaml"
         with open(config_path, "w") as f:
-            f.write('version: "1.0"\nmachines: []\n')
+            f.write('version: "2.0"\nmachines: []\n')
 
         session.load_config(str(config_path))
 

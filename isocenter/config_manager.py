@@ -2,20 +2,197 @@
 Configuration manager for handling Isocenter system settings.
 
 This module provides functionality to load, validate, and manage configuration
-files for the Isocenter application. It supports unified YAML configurations,
-legacy formats, and privacy profile management.
+files for the Isocenter application: the unified YAML configuration
+(schema version 2, checked key by key and type by type since #711-#713),
+external privacy profile files, and the built-in profiles.
 """
 
 import os
 import logging
 import copy
+import contextlib
+import difflib
 from typing import Dict, Any, List, Optional
 import re
 import yaml
 
 from .profiles import FLOOR_POLICY, PRIVACY_PROFILES
 
+#: The schema version both writers stamp (`IsocenterConfiguration.save()`
+#: and `Session.create_config()`, which read it at call time rather than
+#: carrying their own literal). It is the schema's number, not the
+#: package's, and has been "2.0" since December 2025 (#711). A 1.x that
+#: adds a key or a value bumps the minor here and adds a row to
+#: `tests/test_config_schema_version.py::SCHEMA_BY_VERSION`; it never
+#: changes what an existing key means, and never bumps the major.
 CONFIG_VERSION = "2.0"
+
+#: The one major this library reads. A string, compared as a string, so
+#: `"02.0"` is not quietly read as 2.
+_READABLE_MAJOR = "2"
+
+#: What a file with no `version` line means: 2.0, permanently. Every
+#: configuration in the documentation omits the line, so refusing an
+#: absent version would refuse every file copied from it. Pinned rather
+#: than "whatever this library reads", so a library that ever reads a
+#: major 3 still reads an unversioned file as 2.
+_UNVERSIONED_MEANS = "2.0"
+
+# The schema (#712). Every key a configuration may carry, by level; a key
+# outside these is refused by name rather than ignored. Before #712 the
+# loader read these and silently ignored every other key, so a misspelt
+# `remove_private_tag: false` loaded and the private tags the file asked
+# to keep were removed. Extending the schema is one edit here, plus the
+# minor bump `CONFIG_VERSION`'s comment describes.
+_TOP_LEVEL_KEYS = frozenset({"version", "privacy_profile", "phi_tags",
+                             "date_jitter", "remove_private_tags", "machines"})
+#: `comment` is the shipped knowledge bases' own field
+#: (`resources/redaction_rules.json`, `ctp_rules.json`) and what
+#: `create_config` and auto-save write; `manufacturer` is what `add_rule`
+#: writes. Both are metadata and nothing reads them, but refusing either
+#: would refuse the library's own output.
+_RULE_KEYS = frozenset({"serial_number", "manufacturer", "model_name",
+                        "redaction_zones", "comment"})
+#: `note` is written as data by `create_config` for every machine the
+#: knowledge base matches by serial, so it is a zone key.
+_ZONE_KEYS = frozenset({"roi", "note"})
+#: `replacement` is deliberately absent and deliberately not reported as
+#: unknown: it is the one known-refused key, and `_refused_phi_rule`
+#: refuses it with its rename advice (#538).
+_PHI_RULE_KEYS = frozenset({"name", "action", "value"})
+#: An external profile file contributes its `phi_tags` and nothing else
+#: (#712, owner ruling Q1): a profile carrying `privacy_profile: basic`
+#: beside one rule loaded as that one rule.
+_PROFILE_FILE_KEYS = frozenset({"version", "phi_tags"})
+
+_VERSION_SHAPE = re.compile(r"[0-9]+\.[0-9]+")
+
+
+def _declared_version(data: Dict[Any, Any], source: str) -> str:
+    """The schema version `data` declares, or a `ValueError` (#711).
+
+    Absent means `_UNVERSIONED_MEANS`. Present, it must be a `str` of the
+    form `MAJOR.MINOR` whose major is `_READABLE_MAJOR`. An unquoted
+    number is refused rather than coerced -- YAML reads `version: 2.10`
+    as the float 2.1, the octal-serial trap again -- and so is `null`:
+    only an absent line means "unversioned", and a bare `version:` is a
+    typo, not a choice. `"1.0"` is refused too: it is the label the
+    machines-only rules file carried before 2.0 (December 2025), its
+    content loads as 2.0, and one schema has one spelling.
+    """
+    if "version" not in data:
+        return _UNVERSIONED_MEANS
+    version = data["version"]
+    if not isinstance(version, str):
+        raise ValueError(
+            f"{source}: version must be a quoted string such as '2.0', got "
+            f"{version!r} ({type(version).__name__}); unquoted, YAML reads "
+            f"a version as a number, and 2.10 as the number 2.1 (#711)")
+    if not _VERSION_SHAPE.fullmatch(version):
+        raise ValueError(
+            f"{source}: version {version!r} is not a 'MAJOR.MINOR' string "
+            f"such as '2.0' (#711)")
+    if version.split(".")[0] != _READABLE_MAJOR:
+        raise ValueError(
+            f"{source}: version {version!r} is a configuration schema this "
+            f"isocenter does not read; it reads version {_READABLE_MAJOR} "
+            f"({_READABLE_MAJOR}.0 through any {_READABLE_MAJOR}.x) (#711)")
+    return version
+
+
+def _newer_minor_note(declared: str) -> str:
+    """The sentence a refusal gains when the file declares a minor newer
+    than `CONFIG_VERSION`, else "" (#711).
+
+    Any minor of the readable major loads, which is sound only because a
+    minor adds keys and values and every key and value this library lacks
+    is refused. So a newer-minor file is either one that means the same
+    here, or one refused by what it uses -- and then this says why. Minors
+    compare as integers: "2.10" is newer than "2.9". Read at call time,
+    not import time, so the constant has one home.
+    """
+    ours = CONFIG_VERSION
+    if int(declared.split(".")[1]) <= int(ours.split(".")[1]):
+        return ""
+    return (f"; this file declares version {declared}; this isocenter reads "
+            f"{ours}, so a key or value added after {ours} needs a newer "
+            f"isocenter")
+
+
+@contextlib.contextmanager
+def _noting_a_newer_minor(declared: str):
+    """Re-raise any `ValueError` inside with `_newer_minor_note` appended.
+
+    On every refusal, not only an unknown key: a newer minor may add a
+    value to an existing key (a new action, a new profile name) or a key
+    inside a rule, and each of those reaches this library as a different
+    refusal. With no note to add, the original exception propagates
+    untouched."""
+    try:
+        yield
+    except ValueError as exc:
+        note = _newer_minor_note(declared)
+        if not note:
+            raise
+        raise ValueError(f"{exc}{note}") from exc
+
+
+def _unknown_keys(keys, known, where: str, whose: str,
+                  refused_elsewhere=frozenset()) -> Optional[str]:
+    """The refusal for `keys` outside `known`, or None (#712).
+
+    Names **every** unknown key (sorted by `str`, since YAML allows
+    `2:` and `yes:` as keys), offers `difflib`'s closest known key where
+    it has one, and always lists the known keys. `where` follows the key
+    list ("at the top level", or ""); `whose` names the level's keys ("A
+    machine rule's"). `refused_elsewhere` is keys a later check refuses
+    with better words -- only `replacement` in a phi rule (#538) -- and is
+    passed by that one caller alone, so no other level exempts it.
+    """
+    unknown = sorted((k for k in keys if k not in known and k not in refused_elsewhere),
+                     key=str)
+    if not unknown:
+        return None
+    noun = "key" if len(unknown) == 1 else "keys"
+    message = f"unknown {noun} {', '.join(repr(k) for k in unknown)}{where}"
+    guesses = []
+    for key in unknown:
+        if isinstance(key, str):
+            match = difflib.get_close_matches(key, sorted(known), n=1)
+            if match:
+                guesses.append((key, match[0]))
+    listed = f"{whose} keys are {', '.join(sorted(known))} (#712)"
+    if len(unknown) == 1 and guesses:
+        return f"{message}; did you mean {guesses[0][1]!r}? {listed}"
+    if guesses:
+        meant = ", ".join(f"{guess!r} for {key!r}" for key, guess in guesses)
+        return f"{message}; did you mean {meant}? {listed}"
+    return f"{message}; {listed}"
+
+
+def _checked_top_level(data: Dict[Any, Any], source: str) -> str:
+    """Check a configuration's version, then its top-level keys; return
+    the declared version (#711, #712).
+
+    The version first: a file written for another major may carry keys
+    this library has never heard of, and the version is the true reason
+    to refuse it. `machine_rules` gets its own message: it was an alias
+    `load_config` read as `machines` (and silently dropped when both were
+    present), never documented, and a deleted spelling is named rather
+    than reported as a typo -- the `replacement` -> `value` precedent
+    (#538).
+    """
+    declared = _declared_version(data, source)
+    with _noting_a_newer_minor(declared):
+        if "machine_rules" in data:
+            raise ValueError(
+                f"{source}: 'machine_rules' is an old spelling of 'machines'; "
+                f"rename it (#712)")
+        reason = _unknown_keys(data, _TOP_LEVEL_KEYS, " at the top level",
+                               "A version 2 configuration's")
+        if reason is not None:
+            raise ValueError(f"{source}: {reason}")
+    return declared
 
 #: Where this package's own shipped resources live.
 #:
@@ -147,21 +324,62 @@ def _is_tag_key(key: str) -> bool:
             and all(ch in _HEX_DIGITS for ch in key[:4] + key[5:]))
 
 
-def _external_profile_tags(path: str) -> Any:
-    """The `phi_tags:` mapping of an external profile file.
+def _external_profile_tags(path: str) -> Dict[str, Any]:
+    """The validated `phi_tags:` mapping of an external profile file.
 
     A file with no `phi_tags` key had its root mapping used as the tags
     (`load_phi_config`'s legacy fallback), so a profile written as a
     config -- `privacy_profile: basic` and its rules at the top level --
     loaded `privacy_profile` itself as a "tag" (review of #509). Refused,
-    naming the file; the value is validated by the caller.
+    naming the file.
+
+    The file's own `version` is checked as a configuration's is (#711),
+    and any key but `phi_tags` and `version` is refused (#712, owner
+    ruling Q1): a profile carrying `privacy_profile: basic` beside one
+    rule loaded as that one rule, where its author plainly meant 621. The
+    version first, as in a configuration; the no-`phi_tags` refusal
+    before the key check, so a root mapping of tags keeps its own
+    message rather than being told every tag is an unknown key.
     """
     data = ConfigLoader._load_yaml(path)
-    if not isinstance(data, dict) or "phi_tags" not in data:
+    if not isinstance(data, dict):
         raise ValueError(
             f"{path}: an external privacy profile must carry its rules under "
             f"a 'phi_tags:' mapping; this file has no phi_tags key")
-    return data["phi_tags"]
+    declared = _declared_version(data, path)
+    with _noting_a_newer_minor(declared):
+        if "phi_tags" not in data:
+            raise ValueError(
+                f"{path}: an external privacy profile must carry its rules "
+                f"under a 'phi_tags:' mapping; this file has no phi_tags key")
+        unknown = sorted((k for k in data if k not in _PROFILE_FILE_KEYS), key=str)
+        if unknown:
+            raise ValueError(
+                f"{path}: an external privacy profile contributes only its "
+                f"phi_tags; unknown key(s) {', '.join(repr(k) for k in unknown)} "
+                f"would be ignored (#712)")
+        return _validated_phi_tags(data["phi_tags"], path)
+
+
+def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
+    """Why a rule mapping's keys or `name` are not the schema's, or None.
+
+    First on every door, ahead of the action and VR checks (#712): a key
+    outside `name`, `action` and `value` was ignored, so `{actoin: KEEP}`
+    left the action at REPLACE and the value the file asked to keep was
+    replaced -- and on a DA tag `{actoin: JITTER}` defaulted to REPLACE
+    and was refused by #560 for a value it never asked to write. `name`
+    must be a string when present (#713). `replacement` is exempt here
+    and refused by `_refused_phi_rule` with its #538 rename advice.
+    """
+    reason = _unknown_keys(rule, _PHI_RULE_KEYS, "", "A rule's",
+                           refused_elsewhere=frozenset({"replacement"}))
+    if reason is not None:
+        return f"phi_tags[{tag!r}] has {reason}"
+    if "name" in rule and not isinstance(rule["name"], str):
+        return (f"phi_tags[{tag!r}] name must be a string, got "
+                f"{type(rule['name']).__name__} (#713)")
+    return None
 
 
 def _validated_phi_tags(tags: Any, source: str) -> Dict[str, Any]:
@@ -193,6 +411,13 @@ def _validated_phi_tags(tags: Any, source: str) -> Dict[str, Any]:
                 f"'0010,0010'); the scan reads no tag by that key, so the "
                 f"rule would never run")
         if isinstance(rule, dict):
+            # Here as well as in `_refused_phi_rule`: that one judges the
+            # merged policy, where a configuration's rule for a tag
+            # replaces an external profile's, so a typo in the profile's
+            # rule would never be seen.
+            reason = _phi_rule_shape_refused(tag, rule)
+            if reason is not None:
+                raise ValueError(f"{source}: {reason}")
             action = rule.get("action", "REPLACE")
             if not isinstance(action, str) or action.upper() not in _PHI_ACTIONS:
                 raise ValueError(
@@ -361,6 +586,10 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
 
     The checks, in the order their messages are tested:
 
+    0. A key outside `name`, `action` and `value`, and a `name` that is
+       not a string (`_phi_rule_shape_refused`, #712/#713) -- first, so a
+       misspelt `actoin:` is named rather than judged as the REPLACE it
+       silently became.
     1. `replacement:` is 0.9.7's `set_phi_tag` spelling of `value:`,
        which nothing read (#538). One spelling, so it is refused by name.
     2. A `value:` under anything but REPLACE writes nothing.
@@ -392,6 +621,9 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                 f"digits, a comma, four hex digits, such as '0010,0010'); the "
                 f"scan reads no tag by that key, so the rule would never run")
     if isinstance(rule, dict):
+        shape = _phi_rule_shape_refused(tag, rule)
+        if shape is not None:
+            return shape
         action = rule.get("action", "REPLACE")
         if not isinstance(action, str) or action.upper() not in _PHI_ACTIONS:
             return (f"phi_tags[{tag!r}] has action {action!r}; the actions "
@@ -494,8 +726,10 @@ def load_unified_config(path: str) -> Dict[str, Any]:
     """
     Loads the unified configuration file (YAML).
 
-    Supports legacy list-based config (machine rules only) and new dict-based config.
-    Merges 'privacy_profile' if specified (Built-in or External).
+    The root must be a mapping (a root-level list, the pre-0.5.2 format,
+    is refused), its `version` one this library reads (#711) and its
+    top-level keys the schema's (#712). Merges 'privacy_profile' if
+    specified (built-in or external).
 
     Args:
         path (str): Path to the YAML configuration file.
@@ -504,7 +738,8 @@ def load_unified_config(path: str) -> Dict[str, Any]:
         Dict[str, Any]: The loaded configuration dictionary.
 
     Raises:
-        ValueError: If file is not YAML.
+        ValueError: If the file is not YAML, or fails any check above or
+            in the `phi_tags` and profile validation below.
     """
     if not (path.endswith('.yaml') or path.endswith('.yml')):
         raise ValueError("Configuration file must be a YAML file (.yaml or .yml)")
@@ -524,6 +759,18 @@ def load_unified_config(path: str) -> Dict[str, Any]:
             f"(privacy_profile, phi_tags, machines, ...), got "
             f"{type(config).__name__}")
 
+    # First after the root is known to be a mapping (#711): before the
+    # keys, and before a profile file is opened, so a file this library
+    # does not read is refused for that and nothing else.
+    declared = _checked_top_level(config, path)
+    with _noting_a_newer_minor(declared):
+        return _resolved_policy(config, path)
+
+
+def _resolved_policy(config: Dict[str, Any], path: str) -> Dict[str, Any]:
+    """`config` with `phi_tags` validated and merged over its profile (or
+    the floor); the body of `load_unified_config` after the top-level
+    checks."""
     # Validated, and lowercased, before anything is merged. The profiles'
     # keys are lowercase (profiles.py's header comment), so a user's
     # `0008,103E` merged as spelled sat beside the profile's `0008,103e`
@@ -572,8 +819,7 @@ def load_unified_config(path: str) -> Dict[str, Any]:
         # this logged "Failed to load custom profile" and carried on with
         # no profile, which is #456's silence one file further out.
         elif isinstance(profile_name, str) and os.path.isfile(profile_name):
-            profile_rules = _validated_phi_tags(
-                _external_profile_tags(profile_name), profile_name)
+            profile_rules = _external_profile_tags(profile_name)
             get_logger().info("Loaded custom privacy profile from '%s' with %d rules.", profile_name, len(profile_rules))
 
         else:
@@ -605,13 +851,13 @@ class ConfigLoader:
     """
     Loads and validates configuration files for the Isocenter system.
 
-    This class provides static methods to parse unified YAML configuration files (v2.0),
-    legacy configuration formats, and PHI tag definitions. It handles configuration
-    validation, normalization, and file I/O operations.
+    This class provides static methods to parse unified YAML configuration
+    files (schema version 2) and PHI tag definitions. It handles
+    configuration validation, normalization, and file I/O operations.
 
-    Supports multiple configuration formats:
-    - Unified v2.0 YAML configs with PHI tags, machine rules, and date jitter settings
-    - Legacy machine rule configurations
+    Supports:
+    - Unified version 2 YAML configs with PHI tags, machine rules, and date
+      jitter settings; any key or type outside the schema is refused
     - PHI tag definitions (from files or internal defaults)
 
     The class also provides utility methods for filename sanitization and YAML parsing.
@@ -637,9 +883,20 @@ class ConfigLoader:
             unknown reference resolves to None rather than to its own name,
             because it contributed nothing.
         """
-        # Call the top-level loader which handles YAML, Legacy List, and Privacy Profiles
+        # The version, the top-level keys, the phi_tags and the profile.
         data = load_unified_config(filepath)
+        # Already checked; read again only for the newer-minor note on the
+        # refusals below, which a newer minor can reach too (a key inside
+        # a rule, a new value).
+        with _noting_a_newer_minor(_declared_version(data, filepath)):
+            return ConfigLoader._checked_parts(data, filepath)
 
+    @staticmethod
+    def _checked_parts(
+            data: Dict[str, Any], filepath: str) -> tuple[Dict[str, Any], List[Dict[str, Any]],
+                                                          Dict[str, Any], bool, Optional[str]]:
+        """The rest of `load_unified_config`: the merged policy judged, the
+        machines, `date_jitter` and `remove_private_tags` checked."""
         # Everything below validates before it returns, and `load_config`
         # assigns only what this returns: a file that fails any check
         # leaves the session's configuration exactly as it was (#456).
@@ -649,8 +906,9 @@ class ConfigLoader:
         # profile row the file did not override is judged and a file's
         # KEEP over a profile's refused row is not (#537, #560).
         validate_phi_policy(phi_tags, filepath)
-        # Support 'machines' (v2) or 'machine_rules' (legacy internal)
-        machine_rules = data.get("machines", data.get("machine_rules", []))
+        # `machines` only: the `machine_rules` alias read here until #712
+        # is refused by name at the top level (`_checked_top_level`).
+        machine_rules = data.get("machines", [])
         if machine_rules is None:
             machine_rules = []
         if not isinstance(machine_rules, list) or not all(
@@ -659,15 +917,24 @@ class ConfigLoader:
                 f"{filepath}: 'machines' must be a list of rule mappings "
                 f"(serial_number, redaction_zones, ...), got {machine_rules!r}")
 
-        # Date Jitter Normalization. Two shapes are read: an int, a fixed
-        # shift (legacy), and {min_days: int, max_days: int}. Anything else
-        # loaded until #456 and then failed in `load_config`'s own print,
-        # after the assignments, leaving `date_jitter: soon` in the session.
+        # Date Jitter. One shape is read, {min_days: int, max_days: int}.
+        # Anything else loaded until #456 and then failed in `load_config`'s
+        # own print, after the assignments, leaving `date_jitter: soon` in
+        # the session. A bare int was a second spelling of equal bounds,
+        # undocumented and never written by the library, and was deleted
+        # before the 1.0 freeze (owner ruling Q2, #713). A null
+        # `date_jitter:` is the default, unlike a null
+        # `remove_private_tags:` below: an absent range has one obvious
+        # meaning here, and the default is what it gets.
         dj = data.get("date_jitter")
         if dj is None:
             date_jitter_config = {"min_days": -365, "max_days": -1}
         elif isinstance(dj, int) and not isinstance(dj, bool):
-            date_jitter_config = {"min_days": dj, "max_days": dj}
+            raise ValueError(
+                f"{filepath}: 'date_jitter' must be {{min_days: int, "
+                f"max_days: int}}; the single-int form was removed in 1.0 -- "
+                f"write {{min_days: {dj}, max_days: {dj}}} for the same fixed "
+                f"shift (#713)")
         elif (isinstance(dj, dict) and set(dj) == {"min_days", "max_days"}
               and all(isinstance(v, int) and not isinstance(v, bool)
                       for v in dj.values())):
@@ -675,9 +942,41 @@ class ConfigLoader:
         else:
             raise ValueError(
                 f"{filepath}: 'date_jitter' must be {{min_days: int, "
-                f"max_days: int}} or a single int, got {dj!r}")
+                f"max_days: int}}, got {dj!r}")
+        # Bounds the wrong way round have at least one of them wrong, and
+        # the loader cannot know which (owner ruling Q3, #713). They loaded
+        # until 1.0 and `RemediationService` swapped them silently; that
+        # swap stays, for a range assigned in code, which no loader sees.
+        if date_jitter_config["min_days"] > date_jitter_config["max_days"]:
+            raise ValueError(
+                f"{filepath}: 'date_jitter' min_days "
+                f"{date_jitter_config['min_days']} is greater than max_days "
+                f"{date_jitter_config['max_days']}; one of them is wrong, and "
+                f"which cannot be told from the file (#713)")
 
+        # A bool, and only a bool (#713). Absent is True, as ever. Present
+        # and anything else is refused rather than read for truth:
+        # `"false"` is a non-empty string, which read as true and removed
+        # the private tags the file asked to keep; `0`/`1` are refused by
+        # `isinstance(..., bool)`, not `int`. A bare `remove_private_tags:`
+        # (null) is refused too, although `phi_tags:` and `machines:` read
+        # null as empty: a bool has no empty, and null read as falsy --
+        # keeping the private tags, the opposite of the default. Do not
+        # "make the nulls consistent" with `date_jitter:` above.
         remove_private_tags = data.get("remove_private_tags", True)
+        if not isinstance(remove_private_tags, bool):
+            why = {
+                str: (f"a quoted {remove_private_tags!r} is a non-empty "
+                      f"string, which reads as true"),
+                type(None): ("a bare 'remove_private_tags:' is null, which "
+                             "reads as false and keeps the private tags, the "
+                             "opposite of the default"),
+            }.get(type(remove_private_tags),
+                  "write true or false, unquoted")
+            raise ValueError(
+                f"{filepath}: 'remove_private_tags' must be true or false, got "
+                f"{remove_private_tags!r} ({type(remove_private_tags).__name__}); "
+                f"{why} (#713)")
 
         # Validate machines
         for i, rule in enumerate(machine_rules):
@@ -689,10 +988,12 @@ class ConfigLoader:
     @staticmethod
     def load_redaction_rules(filepath: str) -> List[Dict[str, Any]]:
         """
-        Legacy/Convenience support for loading only Machine Rules.
+        Convenience support for loading only Machine Rules.
 
-        Use this if you only need the 'machines' list from a unified config,
-        or an old-style legacy config file.
+        Use this if you only need the 'machines' list from a unified config.
+        Each rule gets `_validate_rule`'s checks (keys and types included,
+        #712/#713); the file's top level is not checked, and nothing in
+        the package calls this.
 
         Args:
             filepath (str): Path to the config file.
@@ -743,7 +1044,15 @@ class ConfigLoader:
             # because the message speaks of a `phi_tags` key the file
             # does not have.
             if "phi_tags" in data:
-                return _validated_phi_tags(data["phi_tags"], filepath)
+                # A configuration read here is read as strictly as
+                # `load_config` reads its top level (#711, #712). That is
+                # all this arm shares with it: it returns the file's own
+                # `phi_tags`, with no profile merged and no
+                # `validate_phi_policy`, a divergence older than the
+                # schema check and reached by no `Session` path.
+                declared = _checked_top_level(data, filepath)
+                with _noting_a_newer_minor(declared):
+                    return _validated_phi_tags(data["phi_tags"], filepath)
             return _validated_phi_tags(data, f"{filepath} (root mapping)")
         # The default policy is the floor a bare session applies (#495).
         # It was `resources/phi_tags.json` -- six name-only tags, every
@@ -781,9 +1090,53 @@ class ConfigLoader:
 
     @staticmethod
     def _validate_rule(rule: Dict[str, Any], index: int):
+        """Raise `ValueError` for a machine rule the redaction cannot read
+        as written; return otherwise.
+
+        The one function every rule door calls: the loader,
+        `load_redaction_rules`, and `add_rule`/`update_rule` before they
+        store and auto-save (#712). The order is load-bearing, and each
+        step is pinned by a test:
+
+        1. Unknown keys (#712), before the serial, so a misspelt
+           `serial_numbr:` is named rather than reported as a missing
+           serial.
+        2. `serial_number`: present and non-empty, then a `str` (#713).
+           An unquoted serial is a YAML number -- `0123` loads as the
+           octal 83 -- and never equals a Device Serial Number, so the
+           rule matched nothing and the machine was not redacted.
+        3. `manufacturer`, `model_name` and `comment` are strings when
+           present (#713). Nothing reads them; they are checked so no key
+           the loader accepts carries an unchecked type.
+        4. `redaction_zones` is a list, and only then are its zones
+           walked: walked first, `redaction_zones: 5` escaped as a
+           `TypeError`.
+        5. Per zone mapping: unknown keys and `note`'s type, then the ROI
+           checks, so a misspelt `rio:` is named rather than reported as
+           a bad ROI.
+        """
         sn = rule.get("serial_number")
-        if not sn:
+        label = f"Rule #{index} ({sn})" if isinstance(sn, str) and sn else f"Rule #{index}"
+
+        reason = _unknown_keys(rule, _RULE_KEYS, "", "A machine rule's")
+        if reason is not None:
+            raise ValueError(f"{label}: {reason}")
+
+        if sn is None or sn == "":
             raise ValueError(f"Rule #{index}: Missing 'serial_number'.")
+        if not isinstance(sn, str):
+            raise ValueError(
+                f"Rule #{index}: 'serial_number' must be a string, got {sn!r} "
+                f"({type(sn).__name__}); quote it as it is written on the "
+                f"machine (serial_number: \"0123\", not serial_number: 0123), "
+                f"because YAML reads unquoted digits as a number, and a "
+                f"leading 0 as octal: 0123 loads as 83 (#713)")
+
+        for key in ("manufacturer", "model_name", "comment"):
+            if key in rule and not isinstance(rule[key], str):
+                raise ValueError(
+                    f"{label}: '{key}' must be a string, got {rule[key]!r} "
+                    f"({type(rule[key]).__name__}) (#713)")
 
         zones = rule.get("redaction_zones", [])
         if not isinstance(zones, list):
@@ -793,6 +1146,13 @@ class ConfigLoader:
             if isinstance(zone, list):
                 roi = zone
             elif isinstance(zone, dict):
+                reason = _unknown_keys(zone, _ZONE_KEYS, "", "A zone's")
+                if reason is not None:
+                    raise ValueError(f"{label}, Zone #{z_idx}: {reason}")
+                if "note" in zone and not isinstance(zone["note"], str):
+                    raise ValueError(
+                        f"{label}, Zone #{z_idx}: 'note' must be a string, got "
+                        f"{zone['note']!r} ({type(zone['note']).__name__}) (#713)")
                 roi = zone.get("roi")
             else:
                 raise ValueError(
