@@ -21,11 +21,14 @@ in place.
 integration test at release, not a merge gate. §1's tier paragraph, §6.1's
 build point and line keys, §6.2's diff, §6.4's advisory line and §8's "local
 gate" are struck in place, as are the clauses of §4, §5, §6.3, §6.5, §7 and §9 that the
-same ruling or the review of PR #719 falsified; §10 items 7-12 say what
+same ruling or the review of PR #719 falsified; §10 items ~~7-12~~ 7-13 say what
 replaces them.
 **Amended at implementation of PR 1 (2026-09-21), §10 items 14-15:** §4's
 opt-out has no users yet, its "0 files open a repo path relatively" was
 one short, and work done between tests is a class it did not name.
+**Amended at implementation of PR 2 (2026-09-21), §10 item 16:** §5's
+shards refuse a collected file the partition does not list. The timings
+came from five chunks, not one run. The caps are 25 and 45.
 
 ## 1. The problem, and why it is scheduled ahead of 1.0
 
@@ -630,3 +633,8 @@ implementation** list is the full record; what it changes here:
     - It repeats its line from `pytest_unconfigure` so the line is the run's last. `RELEASING.md` step 3 records each run's exit status as well.
     - It still watches only the root's top level (plan deviation 12).
     - `conftest.py` also puts the tree under test first on `PYTHONPATH`, for child interpreters started from a `tmp_path`.
+16. **§5 as built** (plan deviations 14-21 are the full record).
+    - `--shard` refuses a collected file that `tests/support/shards.py` does not list. Without that, every one of the N shards would deselect it and none would run it. A malformed `--shard` value is a usage error as well.
+    - `tests/shard_timings.json` was summed from five 3.12 chunk runs, not one full run, because one tool call is capped at ten minutes. Locally the four loads are 304 s each. On a runner they are 435-751 s (3.12) and 483-715 s (3.14t), from dispatched run 35636320365. The heaviest local file skips on CI, because `coverage` is not installed there.
+    - The caps §5 left to measurement: the Run Tests step is 25 minutes (peak 751 s at 50%), and the job is 45. §5's "near 12-15 minutes plus ~5 of setup" held: the peak job took 798 s.
+    - Three of the plan's assignment fixtures passed with their rule removed, and were refixtured. The one surviving mutant is equivalent (the name tie-break, with the input sorted first).
