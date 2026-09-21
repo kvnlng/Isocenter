@@ -27,6 +27,7 @@ half and is unchanged: that error still leaves as itself.
 rows are charged.
 """
 import sqlite3
+import time
 from datetime import date
 
 import pytest
@@ -286,3 +287,52 @@ def test_update_attributes_counts_rows_written_not_rows_that_exist(tmp_path):
             after = dict(conn.execute(
                 "SELECT sop_instance_uid, attributes_json FROM instances"))
         assert after == before
+
+
+FORMS = {
+    # how the lock is asked to persist
+    "single": lambda s, pid: s.lock_identities(pid, tags_to_lock=TAGS, persist=True),
+    "list": lambda s, pid: s.lock_identities([pid], tags_to_lock=TAGS, persist=True),
+    "chunked": lambda s, pid: s.lock_identities_batch(
+        [pid], auto_persist_chunk_size=10, tags_to_lock=TAGS),
+}
+
+
+@pytest.mark.parametrize("form", FORMS)
+def test_a_lock_after_a_queued_save_waits_for_it(tmp_path, monkeypatch, form):
+    """`save()` returns with its write still queued on the persistence
+    manager's thread. A persisted lock straight after it found no rows for
+    the instances that save was about to write, raised, and recorded an
+    ERROR row saying they had none -- a durable, false row (review of #732,
+    finding 2: 5 raises in 5 on 20d8e562). The lock now drains a queued
+    save before it embeds anything, as `audit()` and `redact()` do (#297),
+    so the rows are there: no raise, no ERROR row, and every token in the
+    store. The queued save is held for half a second before it writes, so
+    the window is not left to scheduling: without the drain the lock
+    writes inside it every time. Kills M641-9 (no drain) in each form: one
+    patient, the list form (the batch with `persist=True`) and the chunk
+    flushes."""
+    db = str(tmp_path / "s.db")
+    with DicomSession(db) as session:
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        patient = Patient("PAT-641", "Test^PAT-641")
+        study = Study("ST_641", date(2023, 1, 1))
+        series = Series("SE_641", "CT", 1)
+        for n in range(20):
+            series.instances.append(_hand_built_instance(f"SOP_641_{n}", "PAT-641"))
+        study.series.append(series)
+        patient.studies.append(study)
+        session.store.patients.append(patient)
+
+        save_all = session.store_backend.save_all
+
+        def held(*args, **kwargs):
+            time.sleep(0.5)
+            return save_all(*args, **kwargs)
+
+        monkeypatch.setattr(session.store_backend, "save_all", held)
+        session.save()
+        FORMS[form](session, "PAT-641")
+        assert _errors(session) == []
+        monkeypatch.undo()
+    assert _stored_tokens(db) == {f"SOP_641_{n}": True for n in range(20)}

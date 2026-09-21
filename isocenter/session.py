@@ -3595,7 +3595,9 @@ class DicomSession:
                 included; one `ERROR` audit row gives the counts. Through
                 0.9.8 the lock returned as if the tokens had been stored.
                 `ingest()` writes the rows itself, so ingest-then-lock never
-                raises this.
+                raises this; and the lock drains a save queued by `save()`
+                before it embeds anything, as `audit()` does, so
+                `save()`-then-lock finds the rows that save writes.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3615,6 +3617,15 @@ class DicomSession:
             return LockingResult([])
 
         self._key_for_locking()
+        # Drained before anything is embedded, as `audit()` and `redact()`
+        # drain on entry (#297): a queued `save()` may be capturing these
+        # instances, and with `persist=True` the write below updates rows
+        # that save has not committed yet -- it found none, raised, and
+        # left an ERROR row saying the store held no row for instances
+        # whose save the caller had already asked for (review of #732,
+        # finding 2). The batch form drains in `lock_identities_batch`.
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
 
     def _key_for_locking(self) -> None:
@@ -4331,6 +4342,15 @@ class DicomSession:
                 "Each is numbered by its place among the patients found, in "
                 "Patient ID order. Lock the others without these, and each of "
                 "these as its message says:\n" + "\n".join(refusals))
+
+        # Drained after every plan and before the first token is embedded,
+        # for the reason `lock_identities` gives (#297; review of #732,
+        # finding 2). Once, here: nothing below enqueues a save, so the
+        # per-patient writes (`persist=True`) and the chunk flushes
+        # (`auto_persist_chunk_size`) all find the rows a queued save was
+        # about to write.
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
 
         with progress_bar(plans, desc="Locking Identities",
                           unit="patient") as pbar:
