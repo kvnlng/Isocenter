@@ -171,6 +171,8 @@ def test_the_committed_cohort_uses_no_random_uids():
 def test_the_tracked_fingerprint_covers_the_committed_cohort():
     tracked = json.loads((ROOT / "fingerprint" / "output.json").read_text(encoding="utf-8"))
     assert tracked["schema"] == fp.SCHEMA
+    # Taken with these configurations and this recorder.
+    assert tracked["measure"] == fp.measure()
     # A whole-cohort take, not a narrowed one.
     assert "members" not in tracked["provenance"]
     keys = set(tracked["members"])
@@ -185,6 +187,32 @@ def test_the_tracked_fingerprint_covers_the_committed_cohort():
     committed = {m.key for m in fp.synthetic_members(COHORT)}
     recorded = {k for k in keys if k.startswith("synthetic:")}
     assert recorded == committed
+
+
+def test_an_l10_shaped_move_of_the_tracked_longitudinal_member_invents_nothing():
+    """Every UID re-derived, nothing else touched: only UIDs and paths differ.
+
+    The six `longitudinal` files are named by their SOP UIDs, and the new
+    names sort in another order; paired by sorted path, instance 1 met
+    instance 3 and the report listed pixel and position changes in 20
+    files that never happened (#717 review, finding 1).
+    """
+    import hashlib
+    tracked = json.loads((ROOT / "fingerprint" / "output.json").read_text(encoding="utf-8"))
+    member = tracked["members"]["synthetic:longitudinal"]
+
+    def remap(match):
+        return "2.25." + str(int(hashlib.sha256(match.group(0).encode()).hexdigest()[:30], 16))
+
+    moved = json.loads(re.sub(r"2\.25\.\d+", remap, json.dumps(member)))
+    old = {"schema": fp.SCHEMA, "provenance": {}, "toolchain": {},
+           "members": {"synthetic:longitudinal": member}}
+    new = dict(old, members={"synthetic:longitudinal": moved})
+    report = fp.compare(old, new)
+    assert {g.kind for g in report.groups if g.section == "Paths"} == {"moved"}
+    invented = [f"{g.key} {g.vr} {g.kind} x{g.count}" for g in report.groups
+                if g.section in ("Elements", "Outcomes") and g.vr != "UI"]
+    assert not invented, report.text()
 
 
 def _section(text, heading):
@@ -202,6 +230,8 @@ def test_the_release_procedure_runs_the_fingerprint_check():
     assert "3.12 and 3.14t" in step1
     assert "compare --base" in step1
     assert "previous-tag" in step1
+    assert "git fetch --tags origin" in step1
+    assert "does not apply only when vP.Q.R is below `v1.0.0rc1`" in step1
     assert "pre-release" in step1
     assert "fetch_data_files" in step1
     step3 = cutting[cutting.index("3. **Make the release commit"):cutting.index("4. **Rehearse")]
@@ -242,3 +272,29 @@ def test_the_previous_release_is_found_by_version_not_reachability(tmp_path):
     assert fp.newest_release_tag(repo, line="0.9") == "v0.9.10"
     assert fp.newest_release_tag(repo, line="1.0") == "v1.0.0"
     assert fp.newest_release_tag(repo, line="2.0") is None
+
+
+def test_a_missing_base_is_never_a_comparison_that_does_not_apply(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(repo, "tag", "v0.9.8")
+    _git(repo, "tag", "v1.0.0")  # a fingerprinted-era tag without the file
+    with pytest.raises(fp.ToolError, match="does not apply"):
+        fp.fingerprint_at("v0.9.8", repo)
+    with pytest.raises(fp.ToolError, match="release record is broken"):
+        fp.fingerprint_at("v1.0.0", repo)
+    with pytest.raises(fp.ToolError, match="no tag v9.9.9 in this clone"):
+        fp.fingerprint_at("v9.9.9", repo)
+
+    # A clone that has not fetched origin's newest tag is refused, not
+    # answered with an older one.
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", "-q", str(repo), str(clone))
+    _git(repo, "tag", "v1.0.1")
+    assert fp.newest_release_tag(clone) == "v1.0.0"
+    with pytest.raises(fp.ToolError, match="origin has v1.0.1"):
+        fp.remote_tag_check("v1.0.0", clone)
+    _git(clone, "fetch", "-q", "--tags", "origin")
+    fp.remote_tag_check(fp.newest_release_tag(clone), clone)

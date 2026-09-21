@@ -186,9 +186,11 @@ def test_a_16_bit_rgb_j2k_file_is_compared_by_its_samples(tmp_path):
     ds["PixelData"].VR = "OB"
     rec = _record(tmp_path, ds, "rgb16.dcm")
     expected = fp._h(np.ascontiguousarray(arr).tobytes())  # pylint: disable=protected-access
-    assert rec["pixels"] in (f"<u2 [4, 4, 3] {expected}",
-                             f"<u2 [4, 4, 3] {expected} (imagecodecs)")
-    assert not rec["pixels"].startswith("undecodable")
+    assert rec["pixels"].startswith(f"<u2 [4, 4, 3] {expected}"), rec["pixels"]
+    if rec["pixels"] != f"<u2 [4, 4, 3] {expected}":
+        # pydicom refused; why it refused stays in the recording.
+        assert rec["pixels"].startswith(f"<u2 [4, 4, 3] {expected} (imagecodecs; pydicom: ")
+        assert "Pillow" in rec["pixels"], rec["pixels"]
 
 
 def test_waveform_samples_are_compared(tmp_path):
@@ -398,6 +400,20 @@ def test_parts_merge_into_the_whole_and_only_the_whole(tmp_path):
                  cohort_root=cohort, pydicom_sets=False)
 
 
+def test_only_a_uid_or_a_path_may_vary(tmp_path):
+    names = iter(["PN 'A'", "PN 'B'"])
+
+    def run(member, work, secret):
+        record = _runner(iter(["2.25.7", "2.25.8"]))(member, work, secret)
+        (rec,) = record["configs"]["A"]["arms"]["A.dicom"]["files"].values()
+        rec["elements"]["0010,0010"] = next(names)
+        return record
+
+    with pytest.raises(fp.ToolError, match="only a UI value or a file path may"):
+        fp.take(tmp_path / "out.json", cohort_root=_cohort(tmp_path), pydicom_sets=False,
+                runner=run)
+
+
 # -- the comparer ----------------------------------------------------------
 
 def test_a_changed_input_is_cohort_drift_not_an_output_change():
@@ -423,16 +439,39 @@ def test_differences_are_grouped_by_element_across_files():
     assert "3 files" in report.text()
 
 
+def _instances(uid_of, changed=None):
+    """Three distinct instances, each named by its SOP UID as exports are."""
+    files = {}
+    for n in (1, 2, 3):
+        uid = uid_of(n)
+        files[f"S/{uid}.dcm"] = {
+            "meta": {"0002,0003": f"UI '{uid}'"},
+            "elements": {"0008,0018": f"UI '{uid}'", "0020,0013": f"IS '{n}'",
+                         "0010,0010": "PN 'Y'" if n == changed else "PN 'X'"},
+            "pixels": f"<u2 [2, 2] sha256:{n:016d}"}
+    return files
+
+
 def test_paths_that_all_move_are_still_compared_element_by_element():
-    old = _member({f"old/{n}.dcm": _file(**{"0010_0010": "PN 'X'",
-                                            "0008_0018": f"UI '1.{n}'"})
-                   for n in range(3)})
-    new = _member({f"new/{n}.dcm": _file(**{"0010_0010": "PN 'X'" if n else "PN 'Y'",
-                                            "0008_0018": f"UI '1.{n}'"})
-                   for n in range(3)})
+    # The new UIDs sort in the reverse order of the old ones, as L10's
+    # re-derived UIDs will: pairing by sorted path would compare instance
+    # 1 with instance 3 and invent differences in both.
+    old = _member(_instances(lambda n: f"1.{n}"))
+    new = _member(_instances(lambda n: f"2.{4 - n}"))
     report = fp.compare(_fingerprint({"m": old}), _fingerprint({"m": new}))
-    assert sorted((g.section, g.kind) for g in report.groups) == [
-        ("Elements", "changed"), ("Paths", "moved")], report.text()
+    moved = [g for g in report.groups if g.section == "Paths"]
+    assert [(g.kind, g.count) for g in moved] == [("moved", 3)], report.text()
+    others = [(g.key, g.kind) for g in report.groups if g.section == "Elements"]
+    assert sorted(others) == [("0002,0003", "changed"), ("0008,0018", "changed")]
+    assert not [g for g in report.groups
+                if g.section == "Elements" and g.vr != "UI"], report.text()
+
+    # One real change in one moved file is one group, counted once.
+    new = _member(_instances(lambda n: f"2.{4 - n}", changed=2))
+    report = fp.compare(_fingerprint({"m": old}), _fingerprint({"m": new}))
+    real = [g for g in report.groups if g.section == "Elements" and g.vr != "UI"]
+    assert [(g.key, g.kind, g.count) for g in real] == [("0010,0010", "changed", 1)]
+    assert "S/2.2.dcm" in real[0].examples[0], real[0].examples
 
 
 def test_any_difference_exits_one_and_none_exits_zero():
@@ -445,6 +484,50 @@ def test_any_difference_exits_one_and_none_exits_zero():
     moved = fp.compare(one, other)
     assert moved.exit_code == 1
     assert moved.text().rstrip().splitlines()[-1].startswith("1 difference")
+
+    # A narrowed comparison says so on the line a run is recorded by.
+    narrowed = fp.compare(one, json.loads(json.dumps(one)), members="m*")
+    assert narrowed.text().rstrip().splitlines()[-1] == (
+        "No difference in the 1 members matching 'm*' (not the whole cohort).")
+    assert "(not the whole cohort)" in fp.compare(one, other, members="m*").text()
+
+
+def test_a_crash_measured_nothing_and_exits_two(tmp_path):
+    part = tmp_path / "part.json"
+    part.write_text(json.dumps({"schema": fp.SCHEMA, "members": {}}))
+    assert fp.main(["merge", "--out", str(tmp_path / "m.json"), str(part)]) == 2
+
+
+def test_a_changed_measuring_stick_is_cohort_drift_and_output_is_still_compared():
+    member = {"m": _member({"f.dcm": _file(**{"0010_0010": "PN 'X'"})})}
+    changed = {"m": _member({"f.dcm": _file(**{"0010_0010": "PN 'Y'"})})}
+    old = dict(_fingerprint(member), measure={"recorder": 1, "configs": {"A": "sha256:1"}})
+    new = dict(_fingerprint(changed), measure={"recorder": 1, "configs": {"A": "sha256:2"}})
+    report = fp.compare(old, new)
+    assert sorted((g.section, g.key) for g in report.groups) == [
+        ("Cohort", "measuring stick"), ("Elements", "0010,0010")], report.text()
+    assert "NOTE: the configurations or the recorder differ" in report.text()
+    assert fp.measure()["recorder"] == fp.RECORDER
+    assert set(fp.measure()["configs"]) == {"A", "B"}
+
+
+def test_one_change_in_explicit_and_implicit_arms_is_one_group():
+    old = _member({"f.dcm": _file()}, arm="B.dicom")
+    old["configs"]["A"]["arms"]["B.dicom-j2k"] = {"result": {}, "files": {"f.dcm": _file()}}
+    new = _member({"f.dcm": _file(**{"6000_3000": "OW/implicit sha256:1 len=2"})},
+                  arm="B.dicom")
+    new["configs"]["A"]["arms"]["B.dicom-j2k"] = {
+        "result": {}, "files": {"f.dcm": _file(**{"6000_3000": "OW sha256:1 len=2"})}}
+    report = fp.compare(_fingerprint({"m": old}), _fingerprint({"m": new}))
+    (group,) = report.groups
+    assert (group.key, group.vr, group.kind, group.count) == ("6000,3000", "OW", "added", 2)
+    assert group.arms == {"B.dicom", "B.dicom-j2k"}
+
+    # A relabel between the two spellings is still its own kind.
+    x = _fingerprint({"m": _member({"f.dcm": _file(**{"6000_3000": "OW sha256:1 len=2"})})})
+    y = _fingerprint({"m": _member({"f.dcm": _file(
+        **{"6000_3000": "OW/implicit sha256:1 len=2"})})})
+    assert [g.kind for g in fp.compare(x, y).groups] == ["VR changed"]
 
 
 def test_a_toolchain_change_alone_is_not_a_difference():

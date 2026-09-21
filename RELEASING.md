@@ -165,23 +165,28 @@ fixes, never features.
    `python -c "import pydicom.data; pydicom.data.fetch_data_files()"`
    once per machine.
 
-   Then compare the tracked fingerprint with the previous release's:
-   `python -m scripts.output_fingerprint compare --base vP.Q.R --report
-   fp-since-vP.Q.R.txt`, where vP.Q.R is what
-   `python -m scripts.output_fingerprint previous-tag` prints: the highest
-   `v*` tag in the repository by version order, **a pre-release tag
-   included** (`v1.0.0` compares with `v1.0.0rc1`, so an output fix made
-   after the candidate is named). By version order, not by what the
-   commit reaches: release tags sit on `release/X.Y`, and `main` reaches
-   none of them. **Every group it reports must be named by an
-   `**Output:**` line under `[Unreleased]`.** A group no line names
+   Then compare the tracked fingerprint with the previous release's.
+   First `git fetch --tags origin`: `previous-tag` refuses when origin has
+   a newer `v*` tag than the clone. Then
+   `python -m scripts.output_fingerprint compare --base vP.Q.R --report fp-since-vP.Q.R.txt`,
+   where vP.Q.R is what `python -m scripts.output_fingerprint previous-tag`
+   prints: the highest `v*` tag in the repository by version order, **a
+   pre-release tag included** (`v1.0.0` compares with `v1.0.0rc1`, so an
+   output fix made after the candidate is named). By version order, not
+   by what the commit reaches: release tags sit on `release/X.Y`, and
+   `main` reaches none of them. **Every group it reports must be named by
+   an `**Output:**` line under `[Unreleased]`.** A group no line names
    stops the release until one does (a `CHANGELOG.md` PR into `main`;
-   step 1 starts again). The Toolchain section needs no entry; the
-   Cohort section needs none either (a changed input is a changed
-   measuring stick, not changed output). If that tag carries no
-   `fingerprint/output.json` (the first candidate, `v1.0.0rc1`),
-   `compare --base` exits 2 saying so, and this comparison does not
-   apply.
+   step 1 starts again). The Toolchain section needs no entry, and
+   neither does the Cohort section: a changed input, configuration or
+   recorder is a changed measuring stick, not changed output. Output
+   groups that coincide with a changed measuring stick (the report's
+   header says so) still need a line, which may say they are the
+   stick's. This comparison does not apply only when vP.Q.R is below
+   `v1.0.0rc1`, the first release to carry `fingerprint/output.json`
+   (`compare --base` exits 2 saying "does not apply"). Any other exit 2
+   -- a tag this clone does not have, or a release from `v1.0.0rc1` on
+   without the file -- stops the release until it is resolved.
 2. **Cut the branch:** `git switch -c release/X.Y <sha>`, then
    `git push -u origin release/X.Y`. For a patch to an existing line, see
    below instead.

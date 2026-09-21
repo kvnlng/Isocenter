@@ -77,6 +77,19 @@ produces, so a change in where or whether the value appears still shows:
 
 Adding to this list is a reviewed change to the tool, with a test.
 
+**The measuring stick** -- each input's sha256, both configurations'
+sha256 and the `RECORDER` version -- is recorded and compared under
+Cohort: a changed stick is not changed output. Bump `RECORDER` in any
+change to what this tool records for the same output.
+
+**Comparing.** Files at the same path are compared with each other. Files
+whose paths moved (a UID or a date in the path changed) are paired by
+content -- fewest differing entries, UI values not counted -- never by
+sorted path, since UID-named files re-sort when their UIDs change.
+Differences are grouped by element, VR (without `/implicit`) and kind
+across the cohort; a relabel is its own kind. The last line names the
+glob when `--members` narrowed the comparison.
+
 Why this lives in `scripts/` and `fingerprint/`: it is release tooling,
 not API, and must not ship in the wheel; `MANIFEST.in` grafts `tests/`
 into the sdist, which is why the recording and the cohort bytes are not
@@ -120,6 +133,12 @@ CONFIGS = {"A": FINGERPRINT_DIR / "config-a.yaml",
            "B": FINGERPRINT_DIR / "config-b.yaml"}
 
 SCHEMA = 1
+
+#: The recorder's version. Bump it in any change to what this tool
+#: records for the same output (a new field, a new rendering, a new
+#: normalization): `compare` reports a changed recorder under Cohort, so
+#: the differences it causes read as a changed measuring stick.
+RECORDER = 1
 
 #: A public test secret, not a secret: `bytes(range(32))`. The suite's
 #: `tests/support/project_secret.py` FIXED_A is the same constant, and a
@@ -326,18 +345,22 @@ def _j2k_by_imagecodecs(ds) -> Optional[str]:
         arr = np.ascontiguousarray(decoded[0] if len(decoded) == 1 else np.stack(decoded))
     except Exception:  # pylint: disable=broad-except
         return None
-    return f"{arr.dtype.str} {list(arr.shape)} {_h(arr.tobytes())} (imagecodecs)"
+    return f"{arr.dtype.str} {list(arr.shape)} {_h(arr.tobytes())}"
 
 
 def record_dicom(path) -> dict:
     """One DICOM file: meta, elements, decoded pixels and waveforms.
 
-    Decoding a compressed arm's pixels relies on the package's codec
-    registration, which `import isocenter` performs; `take` checks the
-    JPEG 2000 decoder is present before it runs, so a lost registration
-    refuses the run instead of turning every compressed file undecodable.
+    Pixels are decoded by pydicom's own plugins (Pillow here), never by
+    `isocenter.imagecodecs_handler`: the product registers no decoder with
+    pydicom, and that is the property to keep. A fingerprint that decoded
+    the product's output with the product's own decoder could have an
+    encoder bug and a matching decoder bug cancel out. The one fallback,
+    `_j2k_by_imagecodecs`, calls imagecodecs directly and records that it
+    did and why pydicom refused. `take` checks a JPEG 2000 decoder is
+    present before it runs, so a missing one refuses the run instead of
+    turning every compressed file undecodable.
     """
-    import isocenter  # noqa: F401,PLC0415 -- registers the decoders
     ds = pydicom.dcmread(str(path), force=True)
     implicit = bool(ds.original_encoding[0])
     rec = {"meta": {}, "elements": {}}
@@ -349,8 +372,13 @@ def record_dicom(path) -> dict:
             arr = np.ascontiguousarray(ds.pixel_array)
             rec["pixels"] = f"{arr.dtype.str} {list(arr.shape)} {_h(arr.tobytes())}"
         except Exception as exc:  # pylint: disable=broad-except
-            rec["pixels"] = _j2k_by_imagecodecs(ds) or \
-                f"undecodable: {type(exc).__name__}: {exc}"
+            refusal = f"{type(exc).__name__}: {exc}"
+            by_imagecodecs = _j2k_by_imagecodecs(ds)
+            # pydicom's reason stays in the recording: imagecodecs reads
+            # the codestream without the header, so a new header refusal
+            # would otherwise record as the same samples.
+            rec["pixels"] = (f"{by_imagecodecs} (imagecodecs; pydicom: {refusal})"
+                             if by_imagecodecs else f"undecodable: {refusal}")
     if "WaveformSequence" in ds:
         waves = []
         for index in range(len(ds.WaveformSequence)):
@@ -657,9 +685,15 @@ class _Varies:
             self.tokens[(a, b)] = f"<varies:{len(self.tokens) + 1}>"
         return self.tokens[(a, b)]
 
-    def strings(self, a: str, b: str, where: str) -> Tuple[str, str]:
+    def strings(self, a: str, b: str, where: str, allowed: bool) -> Tuple[str, str]:
         if a == b:
             return a, b
+        if not allowed:
+            # Only a UID is expected to vary (#544). Anything else that
+            # varies is a new nondeterminism, and folding it would hide it
+            # in every later recording.
+            raise ToolError(f"varying member: {where} varies, and only a UI value or "
+                            f"a file path may: {_short(a)} / {_short(b)}")
         # A value differing inside a longer string (a UID in a path) is
         # replaced where it differs, so its other occurrences share one N.
         pa, pb = _NUMBER_RUN.split(a), _NUMBER_RUN.split(b)
@@ -674,9 +708,10 @@ class _Varies:
         joined = "".join(out)
         return joined, joined
 
-    def walk(self, a, b, where: str):
+    def walk(self, a, b, where: str, path_key: bool = False):
         if isinstance(a, str) and isinstance(b, str):
-            return self.strings(a, b, where)
+            uid = all(s.startswith(("UI ", "UI/implicit ")) for s in (a, b))
+            return self.strings(a, b, where, path_key or uid)
         if isinstance(a, dict) and isinstance(b, dict):
             ka, kb = sorted(a), sorted(b)
             if len(ka) != len(kb):
@@ -685,7 +720,7 @@ class _Varies:
             # Positional pairing: keys in sorted order. Safe only because a
             # varying member holds one instance per arm (checked above).
             for x, y in zip(ka, kb):
-                nx, ny = self.walk(x, y, f"{where}/{x}")
+                nx, ny = self.walk(x, y, f"{where}/{x}", where.endswith("/files"))
                 vx, vy = self.walk(a[x], b[y], f"{where}/{x}")
                 oa[nx], ob[ny] = vx, vy
             return oa, ob
@@ -737,6 +772,18 @@ def _git(*args) -> Optional[str]:
                               text=True, check=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def measure() -> dict:
+    """The measuring stick: what a recording depends on besides the code.
+
+    Compared under Cohort, like an input's sha: a changed configuration or
+    recorder is a changed stick, not changed output. Bump RECORDER in the
+    change that alters what a file or a row records.
+    """
+    return {"recorder": RECORDER,
+            "configs": {name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+                        for name, path in sorted(CONFIGS.items())}}
 
 
 def provenance(jobs: int) -> dict:
@@ -843,7 +890,7 @@ def take(out, *, members: Optional[str] = None, jobs: int = 1,
             os.environ["ISOCENTER_SHOW_PROGRESS"] = previous_progress
         shutil.rmtree(root, ignore_errors=True)
     fingerprint = {"schema": SCHEMA, "provenance": provenance(jobs),
-                   "toolchain": toolchain(),
+                   "toolchain": toolchain(), "measure": measure(),
                    "members": dict(sorted(records.items()))}
     fingerprint["provenance"]["seconds"] = round(time.time() - started)
     if members:
@@ -879,6 +926,8 @@ def merge(out, parts: List, *, cohort_root=COHORT, pydicom_sets: bool = True) ->
                                 "comes from one commit and one interpreter")
         if part["toolchain"] != first["toolchain"]:
             raise ToolError(f"{path}: its toolchain differs from {parts[0]}'s")
+        if part.get("measure") != first.get("measure"):
+            raise ToolError(f"{path}: its configurations or recorder differ from {parts[0]}'s")
         overlap = set(members) & set(part["members"])
         if overlap:
             raise ToolError(f"{path}: members already in an earlier part: "
@@ -896,7 +945,7 @@ def merge(out, parts: List, *, cohort_root=COHORT, pydicom_sets: bool = True) ->
     provenance_["seconds"] = sum(p["provenance"].get("seconds", 0) for p in loaded)
     provenance_["parts"] = [p["provenance"].get("members") or "*" for p in loaded]
     fingerprint = {"schema": SCHEMA, "provenance": provenance_,
-                   "toolchain": first["toolchain"],
+                   "toolchain": first["toolchain"], "measure": first.get("measure"),
                    "members": dict(sorted(members.items()))}
     write_fingerprint(out, fingerprint)
     return fingerprint
@@ -954,6 +1003,9 @@ class Report:
         self._groups: Dict[tuple, Group] = {}
         self.toolchain: List[str] = []
         self.scope = ""
+        self.members: Optional[str] = None
+        self.compared = 0
+        self.stick_changed = False
 
     def group(self, section, key, kind, vr="") -> Group:
         ident = (section, key, kind, vr)
@@ -984,6 +1036,10 @@ class Report:
                          f"gil={p.get('gil')} members={len(fp.get('members', {}))}")
         if self.scope:
             lines.append(self.scope)
+        if self.stick_changed:
+            lines.append("NOTE: the configurations or the recorder differ (section 2); "
+                         "output differences below may be theirs, and an **Output:** "
+                         "line may say so.")
         if self.toolchain and self._groups:
             lines.append("NOTE: the toolchain differs too (section 1); some "
                          "differences below may be the toolchain's.")
@@ -1009,14 +1065,18 @@ class Report:
                 if len(g.examples) > len(shown):
                     lines.append(f"     ... {len(g.examples) - len(shown)} more (--full)")
         lines.append("")
+        # The last line is what a run is recorded by, so a narrowed
+        # comparison says so there, not only in the header.
+        narrowed = (f" in the {self.compared} members matching {self.members!r} "
+                    "(not the whole cohort)") if self.members else ""
         if not self._groups:
-            lines.append("No difference.")
+            lines.append(f"No difference{narrowed}.")
         else:
             n, k = self.differences, len(self._groups)
             lines.append(f"{n} difference{'s' if n != 1 else ''} in {k} "
-                         f"group{'s' if k != 1 else ''} -- each is a defect or is named "
-                         "by an **Output:** changelog line; at release an unnamed "
-                         "one stops the release (RELEASING.md)")
+                         f"group{'s' if k != 1 else ''}{narrowed} -- each is a defect or "
+                         "is named by an **Output:** changelog line; at release an "
+                         "unnamed one stops the release (RELEASING.md)")
         return "\n".join(lines) + "\n"
 
 
@@ -1028,6 +1088,18 @@ def _short(value, limit=160) -> str:
 
 def _vr(entry) -> str:
     return entry.split(" ", 1)[0] if isinstance(entry, str) else ""
+
+
+def _group_vr(entry) -> str:
+    """The VR a group is keyed on: without `/implicit`.
+
+    One change reaches the explicit arms and the implicit ones alike (an
+    element added by one rule shows as `OW` in B.dicom-j2k and `OW/implicit`
+    in B.dicom); keyed on the full label it would be two groups, and two
+    `**Output:**` lines, for one decision. The arms list still says which
+    arms it reached. A VR relabel is still compared on the full label.
+    """
+    return _vr(entry).split("/", 1)[0]
 
 
 def _compare_file(report, where, arm, old: dict, new: dict) -> None:
@@ -1042,14 +1114,14 @@ def _compare_file(report, where, arm, old: dict, new: dict) -> None:
                 if x == y:
                     continue
                 if x is None:
-                    g = report.group("Elements", key, "added", _vr(y))
+                    g = report.group("Elements", key, "added", _group_vr(y))
                 elif y is None:
-                    g = report.group("Elements", key, "removed", _vr(x))
+                    g = report.group("Elements", key, "removed", _group_vr(x))
                 elif _vr(x) != _vr(y):
                     g = report.group("Elements", key, "VR changed",
                                      f"{_vr(x)}->{_vr(y)}")
                 else:
-                    g = report.group("Elements", key, "changed", _vr(x))
+                    g = report.group("Elements", key, "changed", _group_vr(x))
                 g.add(arm, f"{where}: {_short(x)} -> {_short(y)}")
         elif field in ("pixels", "waveforms"):
             now_bad = isinstance(b, str) and b.startswith("undecodable") and not (
@@ -1062,6 +1134,64 @@ def _compare_file(report, where, arm, old: dict, new: dict) -> None:
                 arm, f"{where}: {_short(a)} -> {_short(b)}")
 
 
+def _entries(record: dict) -> Dict[str, object]:
+    """A file record flattened to comparable entries, for pairing only."""
+    flat = {}
+    for field, value in record.items():
+        if isinstance(value, dict) and field in ("meta", "elements"):
+            for key, entry in value.items():
+                flat[f"{field}:{key}"] = entry
+        else:
+            flat[field] = json.dumps(value, sort_keys=True)
+    return flat
+
+
+def _distance(old: dict, new: dict) -> int:
+    """How many entries differ, not counting a change of UI value.
+
+    UIDs are what moves a file (its name is its SOP Instance UID), so they
+    say nothing about which old file a new one is; everything else does.
+    """
+    a, b = _entries(old), _entries(new)
+    count = 0
+    for key in set(a) | set(b):
+        x, y = a.get(key), b.get(key)
+        if x == y:
+            continue
+        if isinstance(x, str) and isinstance(y, str) and _group_vr(x) == _group_vr(y) == "UI":
+            continue
+        count += 1
+    return count
+
+
+def pair_moved(only_a: List[str], only_b: List[str], fa: dict, fb: dict) -> List[Tuple[str, str]]:
+    """Pair the files only in OLD with the files only in NEW, by content.
+
+    A move re-sorts: L10 re-derives every UID, the file name is the SOP
+    Instance UID, and the new names sort in an order unrelated to the old
+    ones. Pairing by sorted path then compares instance 1 with instance 3
+    and invents differences in both (#717 review). So: the pair with the
+    fewest differing entries (UI values not counted) first, each file used
+    once, ties by sorted position; and never across file types. Files left
+    over are reported as only in OLD / only in NEW.
+    """
+    candidates = []
+    for i, x in enumerate(only_a):
+        for j, y in enumerate(only_b):
+            if Path(x).suffix != Path(y).suffix:
+                continue
+            candidates.append((_distance(fa[x], fb[y]), i, j))
+    candidates.sort()
+    used_a, used_b, pairs = set(), set(), []
+    for _cost, i, j in candidates:
+        if i in used_a or j in used_b:
+            continue
+        used_a.add(i)
+        used_b.add(j)
+        pairs.append((only_a[i], only_b[j]))
+    return sorted(pairs)
+
+
 def _compare_arm(report, mkey, arm, old: dict, new: dict) -> None:
     if old.get("result") != new.get("result"):
         report.group("Outcomes", f"{arm} result", "changed").add(
@@ -1071,17 +1201,14 @@ def _compare_arm(report, mkey, arm, old: dict, new: dict) -> None:
     pairs = [(p, p) for p in same]
     only_a = sorted(set(fa) - set(fb))
     only_b = sorted(set(fb) - set(fa))
-    if only_a and len(only_a) == len(only_b):
-        # Every path moved (a UID or date in the folder name changed):
-        # pair in sorted order and still compare element by element.
-        for x, y in zip(only_a, only_b):
-            report.group("Paths", arm, "moved").add(arm, f"{mkey}: {x} -> {y}")
-            pairs.append((x, y))
-    else:
-        for x in only_a:
-            report.group("Paths", arm, "only in OLD").add(arm, f"{mkey}: {x}")
-        for y in only_b:
-            report.group("Paths", arm, "only in NEW").add(arm, f"{mkey}: {y}")
+    moved = pair_moved(only_a, only_b, fa, fb)
+    for x, y in moved:
+        report.group("Paths", arm, "moved").add(arm, f"{mkey}: {x} -> {y}")
+        pairs.append((x, y))
+    for x in sorted(set(only_a) - {x for x, _ in moved}):
+        report.group("Paths", arm, "only in OLD").add(arm, f"{mkey}: {x}")
+    for y in sorted(set(only_b) - {y for _, y in moved}):
+        report.group("Paths", arm, "only in NEW").add(arm, f"{mkey}: {y}")
     for x, y in pairs:
         _compare_file(report, f"{mkey} {arm} {y}", arm, fa[x], fb[y])
 
@@ -1125,12 +1252,20 @@ def compare(old: dict, new: dict, members: Optional[str] = None) -> Report:
     ta, tb = old.get("toolchain", {}), new.get("toolchain", {})
     report.toolchain = [f"{k}: {ta.get(k)} -> {tb.get(k)}"
                         for k in sorted(set(ta) | set(tb)) if ta.get(k) != tb.get(k)]
+    sa, sb = old.get("measure"), new.get("measure")
+    if sa != sb:
+        # Output is still compared: hiding it would hide a real change
+        # that landed alongside. The header says the two coincide.
+        report.group("Cohort", "measuring stick", "changed").add(
+            "", f"{_short(sa, 400)} -> {_short(sb, 400)}")
+        report.stick_changed = True
     ma, mb = old.get("members", {}), new.get("members", {})
     if members:
         ma = {k: v for k, v in ma.items() if fnmatch.fnmatchcase(k, members)}
         mb = {k: v for k, v in mb.items() if fnmatch.fnmatchcase(k, members)}
         report.scope = (f"compared only members matching {members!r}: "
                         f"{len(ma)} in OLD, {len(mb)} in NEW")
+        report.members, report.compared = members, len(set(ma) | set(mb))
     for key in sorted(set(ma) - set(mb)):
         report.group("Cohort", "member", "only in OLD").add("", key)
     for key in sorted(set(mb) - set(ma)):
@@ -1176,15 +1311,52 @@ def newest_release_tag(repo=REPO, line: Optional[str] = None) -> Optional[str]:
     return max(tags, key=_tag_order) if tags else None
 
 
+#: The first tag that carries the fingerprint. Only a base below it may
+#: lack the file; from it on, a missing file is a broken release record.
+FIRST_FINGERPRINTED = "v1.0.0rc1"
+
+
 def fingerprint_at(tag: str, repo=REPO) -> dict:
     rel = GOLDEN.relative_to(REPO).as_posix()
+    known = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}"],
+                           cwd=str(repo), capture_output=True, text=True)
+    if known.returncode != 0:
+        raise ToolError(f"no tag {tag} in this clone; run `git fetch --tags origin` "
+                        "(a missing tag is not a comparison that does not apply)")
     try:
         text = subprocess.run(["git", "show", f"{tag}:{rel}"], cwd=str(repo),
                               capture_output=True, text=True, check=True).stdout
     except subprocess.CalledProcessError as exc:
-        raise ToolError(f"{tag} carries no {rel}: the comparison with it does not "
-                        f"apply ({exc.stderr.strip()})") from exc
+        order = _tag_order(tag)
+        if order is not None and order < _tag_order(FIRST_FINGERPRINTED):
+            raise ToolError(f"{tag} predates the fingerprint (first carried by "
+                            f"{FIRST_FINGERPRINTED}): the comparison with it does not "
+                            "apply") from exc
+        raise ToolError(f"{tag} carries no {rel}, and every release from "
+                        f"{FIRST_FINGERPRINTED} on must: the release record is broken "
+                        f"({exc.stderr.strip()})") from exc
     return load_fingerprint(text, f"{tag}:{rel}")
+
+
+def remote_tag_check(local: Optional[str], repo=REPO, line: Optional[str] = None) -> None:
+    """Refuse when origin has a higher `v*` tag than this clone has fetched."""
+    remotes = subprocess.run(["git", "remote"], cwd=str(repo), capture_output=True,
+                             text=True).stdout.split()
+    if "origin" not in remotes:
+        return
+    listed = subprocess.run(["git", "ls-remote", "--tags", "origin", "v*"], cwd=str(repo),
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        raise ToolError("cannot list origin's tags to confirm this clone has the newest; "
+                        "run `git fetch --tags origin` and pass --offline")
+    tags = {ref.rsplit("/", 1)[-1].removesuffix("^{}") for ref in listed.stdout.split()
+            if ref.startswith("refs/tags/")}
+    tags = [t for t in tags if _tag_order(t)
+            and (not line or ".".join(t[1:].split(".")[:2]) == line)]
+    newest = max(tags, key=_tag_order) if tags else None
+    if newest and (local is None or _tag_order(newest) > _tag_order(local)):
+        raise ToolError(f"origin has {newest}, this clone's newest is {local}: "
+                        "run `git fetch --tags origin`")
 
 
 # -- CLI -------------------------------------------------------------------
@@ -1232,6 +1404,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     p_merge.add_argument("parts", nargs="+")
     p_prev = sub.add_parser("previous-tag", help="newest v* tag by version order")
     p_prev.add_argument("--line", help="restrict to one release line, e.g. 1.0")
+    p_prev.add_argument("--offline", action="store_true",
+                        help="skip asking origin for a newer tag (after a fetch)")
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
         if args.command == "take":
@@ -1256,12 +1430,22 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return EXIT_SAME
         if args.command == "previous-tag":
             tag = newest_release_tag(line=args.line)
+            if not args.offline:
+                remote_tag_check(tag, line=args.line)
             if tag is None:
                 raise ToolError("no v* tag" + (f" on line {args.line}" if args.line else ""))
             print(tag)
             return EXIT_SAME
     except ToolError as exc:
         print(f"output_fingerprint: {exc}", file=sys.stderr)
+        return EXIT_TOOL
+    except Exception as exc:  # pylint: disable=broad-except
+        # Exit 1 means "the output changed". A crash (a malformed part, a
+        # worker killed mid-run) measured nothing, so it is 2, never 1.
+        import traceback  # noqa: PLC0415
+        traceback.print_exc()
+        print(f"output_fingerprint: failed, nothing measured: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_TOOL
     return EXIT_TOOL
 
