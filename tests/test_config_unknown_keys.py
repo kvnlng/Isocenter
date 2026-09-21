@@ -264,6 +264,18 @@ def test_an_external_profile_carries_only_phi_tags(tmp_path):
     assert "'privacy_profile', 'remove_private_tags'" in message, message
 
 
+def test_a_versioned_external_profile_still_carries_only_phi_tags(tmp_path):
+    """A `version` line does not open the profile to other keys (review of
+    #728, R8). Kills the key check skipped when the profile declares a
+    version."""
+    profile = tmp_path / "profile.yaml"
+    profile.write_text('version: "2.0"\nprivacy_profile: basic\n'
+                       "phi_tags:\n  '0010,0010': {action: REMOVE}\n", encoding="utf-8")
+    message = _refused(tmp_path, f"privacy_profile: {profile}\n")
+    assert "contributes only its phi_tags" in message, message
+    assert "'privacy_profile'" in message, message
+
+
 def test_an_external_profile_with_a_version_loads(tmp_path):
     """The positive control for the profile door."""
     profile = tmp_path / "profile.yaml"
@@ -315,6 +327,26 @@ def test_what_0_9_8_wrote_still_loads():
     assert jitter == {"min_days": -30, "max_days": -10}
     assert remove_private is False
     assert profile is None
+
+
+def test_a_0_9_8_autosave_with_null_metadata_still_loads():
+    """Review of #728, finding 1. 0.9.8's auto-save wrote `null` for a
+    rule's `manufacturer` and `model_name` after `add_rule(serial,
+    eq.manufacturer, eq.model_name, zones)` on equipment without those tags,
+    and for `comment` after `update_rule(serial, {"comment": None})`.
+    `autosaved_config_0_9_8_null_metadata.yaml` is exactly that file,
+    captured at 63a64158 (the package extracted from that commit first on
+    `PYTHONPATH`, `isocenter.__file__` read back) by
+    `IsocenterConfiguration(config_path=...)`, `add_rule("SN-1",
+    manufacturer=None, model=None, zones=[[0, 4, 0, 4]])` and
+    `update_rule("SN-1", {"comment": None})`, and committed verbatim. It
+    loads, and the nulls load as the nulls it was saved from. Kills a null
+    refused in any of the three rule fields."""
+    _, rules, _, _, _ = ConfigLoader.load_unified_config(
+        os.path.join(FIXTURES, "autosaved_config_0_9_8_null_metadata.yaml"))
+    assert rules == [{"serial_number": "SN-1", "manufacturer": None,
+                      "model_name": None, "redaction_zones": [[0, 4, 0, 4]],
+                      "comment": None}]
 
 
 # --- The in-code doors that write the file --------------------------------
@@ -393,6 +425,36 @@ def test_update_rule_still_refuses_a_serial_change(tmp_path):
         configuration.update_rule("SN1", {"serial_number": "SN2"})
     configuration.update_rule("SN1", {"serial_number": "SN1", "model_name": "M"})
     assert configuration.get_rule("SN1")["model_name"] == "M"
+
+
+def test_add_rule_with_null_metadata_writes_a_file_that_loads(tmp_path):
+    """`add_rule(serial, None, None)` -- an `Equipment` with no
+    Manufacturer or model -- is accepted, and the file it auto-saves loads
+    (review of #728, finding 1)."""
+    path = tmp_path / "project.yaml"
+    configuration = IsocenterConfiguration(config_path=str(path))
+    configuration.add_rule("SN-1", manufacturer=None, model=None, zones=[[0, 4, 0, 4]])
+    configuration.update_rule("SN-1", {"comment": None})
+    _, rules, _, _, _ = ConfigLoader.load_unified_config(str(path))
+    assert rules[0]["manufacturer"] is None and rules[0]["comment"] is None
+
+
+@pytest.mark.parametrize("updates, fragment", [
+    ({"model_name": 5}, "'model_name' must be a string"),
+    ({"redaction_zones": [[5, 1, 0, 1]]}, "Start > End"),
+])
+def test_update_rule_refuses_a_value_the_loader_would_refuse(tmp_path, updates, fragment):
+    """The update's own values are what is judged, not the old rule's
+    (review of #728, R3): the round trip spec §3.6 closes covers a wrong
+    value as well as an unknown key. Kills `{**updates, **rule}`, under
+    which the old values win and the check passes."""
+    configuration, path = _configuration_with_a_rule(tmp_path)
+    rules_before = yaml.safe_load(yaml.safe_dump(configuration.rules))
+    bytes_before = path.read_bytes()
+    with pytest.raises(ValueError, match=fragment):
+        configuration.update_rule("SN1", updates)
+    assert configuration.rules == rules_before
+    assert path.read_bytes() == bytes_before
 
 
 # --- The convenience loader -----------------------------------------------

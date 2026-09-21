@@ -231,9 +231,6 @@ class IsocenterConfiguration:
                 REPLACE on a standard tag whose VR cannot hold the value).
                 Raised before the policy or its file is changed.
         """
-        # Local: config_manager imports profiles, as this module does, and
-        # is the one home of the refusal text.
-        from .config_manager import validate_phi_policy  # pylint: disable=import-outside-toplevel
         # Lowercase, as every other key in the policy is (profiles.py's
         # header comment gives the reason). This was `tag.upper()`, so
         # `set_phi_tag("0008,103e", ...)` stored `0008,103E` beside the
@@ -263,7 +260,7 @@ class IsocenterConfiguration:
         # the policy and its file as they were. This refuses an unknown
         # action too, with the loader's words; until 0.9.8 `OBLITERATE`
         # was stored and scanned as REPLACE.
-        validate_phi_policy({tag: val}, "set_phi_tag")
+        config_manager.validate_phi_policy({tag: val}, "set_phi_tag")
 
         self.phi_tags[tag] = val
         self.save()

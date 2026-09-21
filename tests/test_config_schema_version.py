@@ -101,7 +101,9 @@ def test_a_file_with_no_version_loads_as_version_2(tmp_path):
 @pytest.mark.parametrize("line", [
     "version: 2.0", "version: 2", "version: true", "version:",
     'version: "2"', 'version: "two"', 'version: " 2.0"', 'version: "2.0.1"',
-    'version: "2.0\\n"', 'version: "02.0"'])
+    'version: "2.0\\n"', 'version: "02.0"',
+    # Falsy but present: refused, not read as absent (review of #728, R6).
+    'version: ""', "version: 0", "version: false"])
 def test_a_version_that_is_not_a_quoted_string_is_refused(tmp_path, line):
     """Kills: a `str(version)` coercion (2.0 -> "2.0" would load); an
     unanchored pattern (`" 2.0"`, `"2.0.1"`, `"2.0\\n"`); a null treated
@@ -132,7 +134,8 @@ def test_a_newer_minor_names_itself_when_it_brings_an_unknown_key(tmp_path):
     message stays short)."""
     newer = _refused(tmp_path, 'version: "2.3"\na_new_key: 1\n')
     assert "a_new_key" in newer, newer
-    assert "2.3" in newer and "newer isocenter" in newer, newer
+    assert f"{tmp_path / 'cfg.yaml'} declares version 2.3" in newer, newer
+    assert "newer isocenter" in newer, newer
     current = _refused(tmp_path, 'version: "2.0"\na_new_key: 1\n')
     assert "a_new_key" in current, current
     assert "newer isocenter" not in current, current
@@ -211,6 +214,54 @@ def test_an_external_profile_declaring_another_version_is_refused(tmp_path):
     message = _refused(tmp_path, f"privacy_profile: {profile}\n")
     assert str(profile) in message, message
     assert "version '9.9'" in message, message
+
+
+def _with_profile(tmp_path, main_version, profile_version, profile_rule):
+    """A configuration naming an external profile; each file's `version`
+    line only when its argument is not None."""
+    profile = tmp_path / "profile.yaml"
+    head = f'version: "{profile_version}"\n' if profile_version else ""
+    profile.write_text(f"{head}phi_tags:\n  '0008,0080': {profile_rule}\n",
+                       encoding="utf-8")
+    head = f'version: "{main_version}"\n' if main_version else ""
+    return profile, _refused(tmp_path, f"{head}privacy_profile: {profile}\n")
+
+
+def test_a_newer_minor_profile_names_itself_inside_an_unversioned_config(tmp_path):
+    """The profile door carries its own note (spec §11.3, review of #728,
+    R1): a `2.7` profile refused for a rule key says the profile declares
+    2.7. Kills the note's wrap removed from `_external_profile_tags`."""
+    profile, message = _with_profile(tmp_path, None, "2.7", "{actoin: KEEP}")
+    assert f"{profile} declares version 2.7" in message, message
+
+
+def test_a_configurations_version_is_not_blamed_on_its_profile(tmp_path):
+    """Review of #728, finding 2: a `2.5` configuration whose unversioned
+    profile holds a typo said "this file declares version 2.5" about the
+    profile, which declares nothing. Kills the outer wrap noting a refusal
+    the profile's own wrap already judged."""
+    _, message = _with_profile(tmp_path, "2.5", None, "{actoin: KEEP}")
+    assert "unknown key 'actoin'" in message, message
+    assert "declares version" not in message, message
+
+
+def test_a_newer_profile_in_a_newer_configuration_is_noted_once(tmp_path):
+    """Both files newer: one note, naming the profile, whose refusal it
+    is. Kills a note per wrap."""
+    profile, message = _with_profile(tmp_path, "2.5", "2.7", "{actoin: KEEP}")
+    assert message.count("declares version") == 1, message
+    assert f"{profile} declares version 2.7" in message, message
+
+
+def test_load_phi_config_notes_a_newer_minor(tmp_path):
+    """The `load_phi_config` door carries the note too (review of #728,
+    R9). Kills its wrap removed."""
+    path = tmp_path / "cfg.yaml"
+    path.write_text('version: "2.7"\nphi_tags:\n  \'0010,0010\': {actoin: KEEP}\n',
+                    encoding="utf-8")
+    with pytest.raises(ValueError) as caught:
+        ConfigLoader.load_phi_config(str(path))
+    assert f"{path} declares version 2.7" in str(caught.value), str(caught.value)
 
 
 #: The schema, by version. A 1.x that adds a key bumps `CONFIG_VERSION` to

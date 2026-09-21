@@ -165,7 +165,7 @@ before the call.
 
 ## Clinical Trial Processor (CTP)
 
-Isocenter includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into Isocenter's YAML configuration format.
+Isocenter includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into the CTP rule-list format (YAML), the format of the knowledge base `create_config()` matches machines against.
 
 ```bash
 # Convert CTP script to Isocenter YAML

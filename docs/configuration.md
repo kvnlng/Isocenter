@@ -88,10 +88,10 @@ file did not say.
 | top level | `remove_private_tags` | `true` or `false` (unquoted) |
 | top level | `machines` | a list of machine rules |
 | machine rule | `serial_number` | a non-empty string, **quoted** if it is all digits (required) |
-| machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them) |
+| machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) |
 | machine rule | `redaction_zones` | a list of zones |
-| zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string |
-| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the actions below; `name`, `value`: strings |
+| zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) |
+| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the actions below; `name`: a string, or `null` (absent); `value`: a string |
 
 Three of these are traps YAML sets, and are refused rather than read:
 

@@ -65,6 +65,19 @@ _PHI_RULE_KEYS = frozenset({"name", "action", "value"})
 #: beside one rule loaded as that one rule.
 _PROFILE_FILE_KEYS = frozenset({"version", "phi_tags"})
 
+# Null is read as absent for the five optional metadata strings -- a rule's
+# `manufacturer`, `model_name` and `comment`, a zone's `note`, a phi rule's
+# `name` -- and only for them (review of #728, finding 1). 0.9.x auto-save
+# wrote `manufacturer: null` and `model_name: null` for
+# `add_rule(serial, eq.manufacturer, eq.model_name)` on equipment without
+# those tags (both are None then), and `comment: null` after
+# `update_rule(serial, {"comment": None})`; refusing null would refuse a file
+# the library itself wrote. Nothing reads any of the five, so an absent value
+# and a null one mean the same thing. This is not the rule for
+# `remove_private_tags`, whose null is refused because it read as the
+# opposite of the default, nor for `serial_number`, whose null is missing.
+# The three checks that apply it say "null is absent" and point here.
+
 _VERSION_SHAPE = re.compile(r"[0-9]+\.[0-9]+")
 
 
@@ -100,9 +113,9 @@ def _declared_version(data: Dict[Any, Any], source: str) -> str:
     return version
 
 
-def _newer_minor_note(declared: str) -> str:
-    """The sentence a refusal gains when the file declares a minor newer
-    than `CONFIG_VERSION`, else "" (#711).
+def _newer_minor_note(declared: str, source: str) -> str:
+    """The sentence a refusal gains when the file at `source` declares a
+    minor newer than `CONFIG_VERSION`, else "" (#711).
 
     Any minor of the readable major loads, which is sound only because a
     minor adds keys and values and every key and value this library lacks
@@ -114,27 +127,47 @@ def _newer_minor_note(declared: str) -> str:
     ours = CONFIG_VERSION
     if int(declared.split(".")[1]) <= int(ours.split(".")[1]):
         return ""
-    return (f"; this file declares version {declared}; this isocenter reads "
+    return (f"; {source} declares version {declared}; this isocenter reads "
             f"{ours}, so a key or value added after {ours} needs a newer "
             f"isocenter")
 
 
+#: The attribute a `ValueError` carries once the innermost file's
+#: `_noting_a_newer_minor` has judged it: the path of that file.
+_JUDGED_BY = "_isocenter_version_judged_by"
+
+
 @contextlib.contextmanager
-def _noting_a_newer_minor(declared: str):
+def _noting_a_newer_minor(declared: str, source: str):
     """Re-raise any `ValueError` inside with `_newer_minor_note` appended.
 
     On every refusal, not only an unknown key: a newer minor may add a
     value to an existing key (a new action, a new profile name) or a key
     inside a rule, and each of those reaches this library as a different
     refusal. With no note to add, the original exception propagates
-    untouched."""
+    untouched.
+
+    Only the innermost file judges a refusal (review of #728). An
+    external profile's refusal passes through the configuration's own
+    wrap on its way out, and the configuration's version says nothing
+    about the profile file: with no path in the note the configuration's
+    `2.5` was blamed on a profile that declared nothing, and a `2.7`
+    profile inside a `2.5` configuration got both notes. So the note
+    names its file, and an exception an inner wrap has judged -- noted
+    or not -- is marked and passed through unchanged by every outer one.
+    """
     try:
         yield
     except ValueError as exc:
-        note = _newer_minor_note(declared)
-        if not note:
+        if getattr(exc, _JUDGED_BY, None) is not None:
             raise
-        raise ValueError(f"{exc}{note}") from exc
+        note = _newer_minor_note(declared, source)
+        if not note:
+            setattr(exc, _JUDGED_BY, source)
+            raise
+        noted = ValueError(f"{exc}{note}")
+        setattr(noted, _JUDGED_BY, source)
+        raise noted from exc
 
 
 def _unknown_keys(keys, known, where: str, whose: str,
@@ -183,7 +216,7 @@ def _checked_top_level(data: Dict[Any, Any], source: str) -> str:
     (#538).
     """
     declared = _declared_version(data, source)
-    with _noting_a_newer_minor(declared):
+    with _noting_a_newer_minor(declared, source):
         if "machine_rules" in data:
             raise ValueError(
                 f"{source}: 'machine_rules' is an old spelling of 'machines'; "
@@ -347,7 +380,7 @@ def _external_profile_tags(path: str) -> Dict[str, Any]:
             f"{path}: an external privacy profile must carry its rules under "
             f"a 'phi_tags:' mapping; this file has no phi_tags key")
     declared = _declared_version(data, path)
-    with _noting_a_newer_minor(declared):
+    with _noting_a_newer_minor(declared, path):
         if "phi_tags" not in data:
             raise ValueError(
                 f"{path}: an external privacy profile must carry its rules "
@@ -369,14 +402,16 @@ def _phi_rule_shape_refused(tag: Any, rule: Dict[Any, Any]) -> Optional[str]:
     left the action at REPLACE and the value the file asked to keep was
     replaced -- and on a DA tag `{actoin: JITTER}` defaulted to REPLACE
     and was refused by #560 for a value it never asked to write. `name`
-    must be a string when present (#713). `replacement` is exempt here
+    must be a string when present (#713); null is absent, as for the
+    other optional metadata strings (see the comment above
+    `_VERSION_SHAPE`). `replacement` is exempt here
     and refused by `_refused_phi_rule` with its #538 rename advice.
     """
     reason = _unknown_keys(rule, _PHI_RULE_KEYS, "", "A rule's",
                            refused_elsewhere=frozenset({"replacement"}))
     if reason is not None:
         return f"phi_tags[{tag!r}] has {reason}"
-    if "name" in rule and not isinstance(rule["name"], str):
+    if rule.get("name") is not None and not isinstance(rule["name"], str):
         return (f"phi_tags[{tag!r}] name must be a string, got "
                 f"{type(rule['name']).__name__} (#713)")
     return None
@@ -763,7 +798,7 @@ def load_unified_config(path: str) -> Dict[str, Any]:
     # keys, and before a profile file is opened, so a file this library
     # does not read is refused for that and nothing else.
     declared = _checked_top_level(config, path)
-    with _noting_a_newer_minor(declared):
+    with _noting_a_newer_minor(declared, path):
         return _resolved_policy(config, path)
 
 
@@ -888,7 +923,7 @@ class ConfigLoader:
         # Already checked; read again only for the newer-minor note on the
         # refusals below, which a newer minor can reach too (a key inside
         # a rule, a new value).
-        with _noting_a_newer_minor(_declared_version(data, filepath)):
+        with _noting_a_newer_minor(_declared_version(data, filepath), filepath):
             return ConfigLoader._checked_parts(data, filepath)
 
     @staticmethod
@@ -1051,7 +1086,7 @@ class ConfigLoader:
                 # `validate_phi_policy`, a divergence older than the
                 # schema check and reached by no `Session` path.
                 declared = _checked_top_level(data, filepath)
-                with _noting_a_newer_minor(declared):
+                with _noting_a_newer_minor(declared, filepath):
                     return _validated_phi_tags(data["phi_tags"], filepath)
             return _validated_phi_tags(data, f"{filepath} (root mapping)")
         # The default policy is the floor a bare session applies (#495).
@@ -1106,7 +1141,8 @@ class ConfigLoader:
            octal 83 -- and never equals a Device Serial Number, so the
            rule matched nothing and the machine was not redacted.
         3. `manufacturer`, `model_name` and `comment` are strings when
-           present (#713). Nothing reads them; they are checked so no key
+           present and not null (#713; a null is absent -- 0.9.x
+           auto-save wrote one, review of #728). Nothing reads them; they are checked so no key
            the loader accepts carries an unchecked type.
         4. `redaction_zones` is a list, and only then are its zones
            walked: walked first, `redaction_zones: 5` escaped as a
@@ -1133,7 +1169,8 @@ class ConfigLoader:
                 f"leading 0 as octal: 0123 loads as 83 (#713)")
 
         for key in ("manufacturer", "model_name", "comment"):
-            if key in rule and not isinstance(rule[key], str):
+            # Null is absent (the comment above `_VERSION_SHAPE`).
+            if rule.get(key) is not None and not isinstance(rule[key], str):
                 raise ValueError(
                     f"{label}: '{key}' must be a string, got {rule[key]!r} "
                     f"({type(rule[key]).__name__}) (#713)")
@@ -1149,7 +1186,8 @@ class ConfigLoader:
                 reason = _unknown_keys(zone, _ZONE_KEYS, "", "A zone's")
                 if reason is not None:
                     raise ValueError(f"{label}, Zone #{z_idx}: {reason}")
-                if "note" in zone and not isinstance(zone["note"], str):
+                # Null is absent (the comment above `_VERSION_SHAPE`).
+                if zone.get("note") is not None and not isinstance(zone["note"], str):
                     raise ValueError(
                         f"{label}, Zone #{z_idx}: 'note' must be a string, got "
                         f"{zone['note']!r} ({type(zone['note']).__name__}) (#713)")

@@ -151,6 +151,42 @@ def test_a_phi_rule_name_assigned_in_code_is_type_checked():
                             "session.configuration.phi_tags")
 
 
+#: Each optional metadata string set to null. 0.9.x auto-save wrote null
+#: in the rule fields (review of #728, finding 1); nothing reads any of
+#: the five, so null is read as absent in all of them.
+NULL_STRINGS = {
+    "manufacturer": "machines:\n  - serial_number: SN1\n    manufacturer:\n",
+    "model_name": "machines:\n  - serial_number: SN1\n    model_name:\n",
+    "comment": "machines:\n  - serial_number: SN1\n    comment:\n",
+    "note": ("machines:\n  - serial_number: SN1\n"
+             "    redaction_zones: [{roi: [0, 4, 0, 4], note: null}]\n"),
+    "name": "phi_tags:\n  '0008,0080': {action: REMOVE, name: null}\n",
+}
+
+
+@pytest.mark.parametrize("key", sorted(NULL_STRINGS))
+def test_a_null_optional_string_loads_as_absent(tmp_path, key):
+    """One row per field, so a null refused in any one is its own red row.
+    (Paired with `test_every_schema_string_is_type_checked`, which keeps a
+    non-null non-string refused: the exemption is null's alone.)"""
+    _loaded(tmp_path, NULL_STRINGS[key])
+
+
+@pytest.mark.parametrize("line", ["manufacturer: 0", "model_name: false", "comment: []"])
+def test_a_falsy_non_string_is_still_refused(tmp_path, line):
+    """The exemption is null's, not every falsy value's. Kills
+    `rule.get(key) and ...` in place of `is not None`."""
+    message = _refused(tmp_path, f"machines:\n  - serial_number: SN1\n    {line}\n")
+    assert "must be a string" in message, message
+
+
+def test_a_null_phi_rule_name_is_absent_on_every_door():
+    """`validate_phi_policy` -- `set_phi_tag`, `audit()`, `PhiInspector` --
+    reads a null `name` as the loader does."""
+    validate_phi_policy({"0008,0080": {"action": "REMOVE", "name": None}},
+                        "session.configuration.phi_tags")
+
+
 # --- date_jitter ----------------------------------------------------------
 
 
