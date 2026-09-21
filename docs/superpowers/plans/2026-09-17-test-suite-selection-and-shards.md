@@ -48,6 +48,7 @@ Part 2, PR 2, 2026-09-21 (spec §10 item 16 carries the same list):
     - The partition test reads N from `tests.yml` and adds two others (N+1, N+3), as spec §5 says, where the plan hardcoded 2, 4 and 7.
     - One `tests.yml` comment corrected. On a dispatch the `inputs` context exists; it declares no `python-versions`.
     - **Recorded, not changed:** the caps' largest figure in this PR is local, not the runner's. 3.14t shard 4/4 took 893.79 s locally, 59.6% of 25 minutes, against the 751 s runner peak the floor's comment cites. The reviewer puts within-configuration variance at about 1.25x (the 2026-09-14 runs), which takes the runner peak to about 63%. Timings recorded on a runner would bring the peak toward the mean, about 655 s. That is a follow-up if the peak grows.
+    - **Rebased onto `2b2c70d0`** (#726, the output fingerprint), which added `tests/test_output_fingerprint.py` and `tests/test_output_fingerprint_release_step.py`. Their times were measured on 3.12 (0.35 s and 26.1 s) and added to `tests/shard_timings.json`, not left at the median. The median is 0.9 s, and the release-step file weighs 29 times that.
 
 **Goal:** give a developer `pytest --changed` -- the tests that exercise the code they touched -- and run the suite on GitHub as four duration-balanced shards per Python version, with every test isolated in its own working directory.
 

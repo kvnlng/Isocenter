@@ -188,6 +188,8 @@
  "tests/test_one_token_per_value_set.py": 3.97,
  "tests/test_one_value_per_owned_tag.py": 0.87,
  "tests/test_optimization.py": 0.05,
+ "tests/test_output_fingerprint.py": 0.35,
+ "tests/test_output_fingerprint_release_step.py": 26.1,
  "tests/test_packaging_contract.py": 5.94,
  "tests/test_parallel_config.py": 0.01,
  "tests/test_parallel_contract.py": 13.65,
