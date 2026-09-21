@@ -1,4 +1,11 @@
 {
+ "measure": {
+  "configs": {
+   "A": "sha256:8a1fd5e843950909cd83009743d4764c32fd37a63c1242777a761d520cf4c545",
+   "B": "sha256:61af4342699942ded6c134fbb1f1dd4770033eb2d2747d90e7b20cad662c635a"
+  },
+  "recorder": 1
+ },
  "members": {
   "pydicom-data:693_J2KR.dcm": {
    "configs": {
@@ -18809,7 +18816,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs)"
+         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -19039,7 +19046,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs)"
+         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -19224,7 +19231,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs)"
+         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -19457,7 +19464,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs)"
+         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -23926,7 +23933,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs)"
+         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -24156,7 +24163,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs)"
+         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -24341,7 +24348,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs)"
+         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -24574,7 +24581,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs)"
+         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -60781,7 +60788,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs)"
+         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -61011,7 +61018,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs)"
+         "pixels": "<u2 [100, 100, 3] sha256:36de0258708d3af7 (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -61196,7 +61203,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs)"
+         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -61429,7 +61436,7 @@
           "0002,0012": "UI <pydicom-implementation-uid>",
           "0002,0013": "SH <pydicom-implementation-version>"
          },
-         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs)"
+         "pixels": "<u2 [2, 100, 100, 3] sha256:d7e2338dd240b58c (imagecodecs; pydicom: RuntimeError: Unable to decode as exceptions were raised by all available plugins:\n  pillow: Pillow cannot decode 16-bit multi-sample data correctly)"
         }
        },
        "result": {
@@ -119348,7 +119355,7 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "ae414746dabd2d6edd734f31e1ac92a33369b113",
+  "git_sha": "ab973f4486123aa23b7a86c58d62ead5b0865f78",
   "isocenter_version": "0.9.8",
   "jobs": 4,
   "parts": [
@@ -119358,7 +119365,7 @@
   ],
   "platform": "macOS-27.0-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 658
+  "seconds": 631
  },
  "schema": 1,
  "toolchain": {
