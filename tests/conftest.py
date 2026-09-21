@@ -20,6 +20,7 @@ import json
 from datetime import date
 from isocenter.entities import Patient, Study, Series, Instance, Equipment
 from isocenter.builders import DicomBuilder
+from support import root_guard
 
 # ---------------------------------------------------------------------
 # Stall watchdog (#250) -- instrumentation, not a fix
@@ -235,8 +236,38 @@ def pytest_runtest_logstart(nodeid, location):
     _mark("running test item", nodeid)
 
 
+#: The repository root's listing when this run started (#707).
+_root_before = None
+
+
+def pytest_sessionstart(session):
+    # One snapshot per run: a nested in-process pytest calls this again,
+    # and the inner run's start is not the outer run's baseline.
+    global _root_before
+    if _root_before is None:
+        _root_before = root_guard.snapshot(session.config.rootpath)
+
+
 def pytest_sessionfinish(session, exitstatus):
+    """Fail the run if it left a new entry in the repository root (#707).
+
+    Every test runs in its own `tmp_path`, so a new root entry is a
+    write that escaped it -- an absolute path built on `__file__`, or a
+    `repo_root` test. Named rather than cleaned up: cleanup would hide
+    the next test that writes into the tree.
+    """
     _mark("sessionfinish")
+    if _root_before is None:
+        return
+    strays = root_guard.new_entries(session.config.rootpath, _root_before)
+    if strays:
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_line(
+                "this run left new entries in the repository root: "
+                + ", ".join(strays)
+                + " -- a test wrote outside its tmp_path (#707)", red=True)
+        session.exitstatus = 1
 
 
 def pytest_unconfigure(config):
