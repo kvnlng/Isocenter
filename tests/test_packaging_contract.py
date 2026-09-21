@@ -1360,7 +1360,16 @@ def test_a_hang_dumps_tracebacks_before_any_timeout_kills_it():
 #: 30d9e6b, run 35127628235, the 3.12 Run Tests step was killed at the
 #: 45-minute cap with 98% of the suite run and every listed test passing,
 #: and 3.14t finished at 44m37s wall. 75 minutes puts that peak near 60%.
-_RUN_TESTS_STEP_MINUTES_FLOOR = 75
+#:
+#: Lowered to 25 when the suite became four shards per version (#707,
+#: 2026-09-21). A step now runs a quarter of the suite. Dispatched run
+#: 35636320365 at 83009f1e: 435-751 s on 3.12 and 483-715 s on 3.14t
+#: across the four shards, peak 751 s. The rule was the measured peak at
+#: no more than 60% of the cap, rounded up to 5 minutes, and never under
+#: 20 (faulthandler_timeout = 300 s must sit well inside half of it).
+#: That gives 25, which puts the peak at 50%. A floor still: the job cap
+#: and faulthandler tests below move with it.
+_RUN_TESTS_STEP_MINUTES_FLOOR = 25
 
 
 def test_the_run_tests_step_keeps_the_headroom_the_suite_needs():
@@ -1377,8 +1386,8 @@ def test_the_run_tests_step_keeps_the_headroom_the_suite_needs():
         _faulthandler_threshold_and_step_seconds())
     assert run_tests["timeout-minutes"] >= _RUN_TESTS_STEP_MINUTES_FLOOR, (
         f"the Run Tests step allows {run_tests['timeout-minutes']} minutes "
-        f"({step_seconds}s); the suite's measured peak of 1643s needs at "
-        f"least {_RUN_TESTS_STEP_MINUTES_FLOOR} (#475), or a healthy but "
+        f"({step_seconds}s); the measured peak shard of 751s needs at "
+        f"least {_RUN_TESTS_STEP_MINUTES_FLOOR} (#475, #707), or a healthy but "
         "slow run is killed with no failing test in the log (#243)")
 
 

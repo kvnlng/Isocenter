@@ -76,6 +76,25 @@ def test_allowed_files_are_not_reported_as_modified(tmp_path):
     assert root_guard.modified_entries(tmp_path, before) == []
 
 
+def test_finders_ds_store_is_not_a_stray(tmp_path):
+    """macOS's Finder writes `.DS_Store` into a folder a window has shown,
+    whenever it likes (#720 review). Mid-run, in a main checkout someone
+    has open in Finder, that turned a clean run red. Exact name: a test's
+    own `.DS_Store.db` is still a stray."""
+    (tmp_path / ".DS_Store").write_bytes(b"")
+    before = root_guard.snapshot(tmp_path)
+    (tmp_path / ".DS_Store").write_bytes(b"view settings")
+    (tmp_path / ".DS_Store.db").write_bytes(b"")
+    assert root_guard.report(tmp_path, before) == (
+        "this run wrote into the repository root: .DS_Store.db (new)"
+        " -- a test wrote outside its tmp_path (#707)")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    before = root_guard.snapshot(empty)
+    (empty / ".DS_Store").write_bytes(b"")
+    assert root_guard.new_entries(empty, before) == []
+
+
 def test_a_clean_root_has_no_report_line(tmp_path):
     before = root_guard.snapshot(tmp_path)
     assert root_guard.report(tmp_path, before) is None

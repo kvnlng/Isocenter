@@ -21,6 +21,7 @@ from datetime import date
 from isocenter.entities import Patient, Study, Series, Instance, Equipment
 from isocenter.builders import DicomBuilder
 from support import root_guard
+from support import shards
 
 # ---------------------------------------------------------------------
 # Stall watchdog (#250) -- instrumentation, not a fix
@@ -220,6 +221,61 @@ if _pythonpath[:1] != [_TREE_UNDER_TEST]:
 del _pythonpath
 
 
+#: Set in `pytest_configure` when `--record-shard-timings` is given (#707).
+_timing_recorder = None
+
+
+def pytest_addoption(parser):
+    group = parser.getgroup("isocenter")
+    group.addoption(
+        "--shard", default=None, metavar="I/N",
+        help="run only the test files assigned to shard I of N (#707)")
+    group.addoption(
+        "--record-shard-timings", default=None, metavar="PATH",
+        help="write per-file wall time to PATH, for tests/shard_timings.json")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Keep only this shard's files, under `--shard=I/N` (#707)."""
+    spec = config.getoption("--shard")
+    if not spec:
+        return
+    try:
+        index, count = shards.parse(spec)
+    except ValueError as exc:
+        raise pytest.UsageError(str(exc)) from None
+    repo = config.rootpath
+    suite = shards.suite_files(repo)
+    # Assigned over the whole suite, never over `items`: a run restricted
+    # to two paths must put each file in the shard the full run would.
+    mine = set(shards.assign(suite, shards.load_timings(repo), count)[index - 1])
+    known = set(suite)
+    keep, drop, orphans = [], [], set()
+    for item in items:
+        try:
+            name = item.path.relative_to(repo).as_posix()
+        except ValueError:
+            name = str(item.path)
+        if name not in known:
+            orphans.add(name)
+        (keep if name in mine else drop).append(item)
+    # A collected file the partition does not list is in no shard, so
+    # every one of the N jobs would deselect it and pass. Refused, named.
+    if orphans:
+        raise pytest.UsageError(
+            f"--shard: collected files that no shard owns, relative to "
+            f"rootdir {repo} (the partition is tests/test_*.py there, "
+            "tests/support/shards.py): " + ", ".join(sorted(orphans)))
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
+
+
+def pytest_runtest_logreport(report):
+    if _timing_recorder is not None:
+        _timing_recorder.add(report.nodeid, report.duration)
+
+
 def pytest_configure(config):
     """Take the fd, start the watchdog, and arm the probe's two hooks.
 
@@ -231,9 +287,19 @@ def pytest_configure(config):
     this hook again, and a second wrapper over the first would still
     answer correctly but would be a stack nobody meant to build.
     """
-    global _stderr_fd, _stderr_file
+    global _stderr_fd, _stderr_file, _timing_recorder
     if _stderr_fd is not None:  # pragma: no cover - one configure per run
         return
+    target = config.getoption("--record-shard-timings")
+    if target:
+        # Refused, not resolved (#727 review): a relative path written at
+        # session finish landed in the root when pytest started there,
+        # and the root guard then blamed a test for the recorder's file.
+        if not os.path.isabs(target):
+            raise pytest.UsageError(
+                f"--record-shard-timings wants an absolute path; got "
+                f"{target!r} (e.g. $PWD/tests/shard_timings.json)")
+        _timing_recorder = shards.TimingRecorder()
     _stderr_fd = os.dup(2)
     # `closefd=False` so the fd survives if this wrapper is ever replaced;
     # the module-level reference is what actually keeps it open.
@@ -289,6 +355,9 @@ def pytest_sessionfinish(session, exitstatus):
     """
     global _root_report
     _mark("sessionfinish")
+    target = session.config.getoption("--record-shard-timings")
+    if _timing_recorder is not None and target:
+        _timing_recorder.write(target)
     if _root_before is None:
         return
     _root_report = root_guard.report(session.config.rootpath, _root_before)
