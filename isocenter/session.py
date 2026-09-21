@@ -4351,7 +4351,8 @@ class DicomSession:
                 len(modified_instances)} instances).")
         return LockingResult(modified_instances)
 
-    def recover_patient_identity(self, patient_id: str, restore: bool = True):
+    def recover_patient_identity(self, patient_id: str,
+                                 restore: bool = True) -> Dict[str, Dict[str, Any]]:
         """
         Attempts to recover original identity from the encrypted private token.
 
@@ -4407,10 +4408,32 @@ class DicomSession:
         cannot open, or that holds no record, raises and writes nothing.
 
         Every failure raises and nothing is printed (#539, #550). So
-        `restore=False` checks that the patient is recoverable under this
-        key, and writes nothing. No message names a Patient ID: until
-        0.9.8 an unknown ID was echoed to the console, and the ID given is
-        normally a pseudonym.
+        `restore=False` reads the identity, and so checks that the patient
+        is recoverable under this key, and writes nothing. No message
+        names a Patient ID: until 0.9.8 an unknown ID was echoed to the
+        console, and the ID given is normally a pseudonym.
+
+        Returns:
+            Dict[str, Dict[str, Any]]: The identity recovered (#586). Each
+            key is the SOP Instance UID of an instance carrying an identity
+            token of ours, as it was when the call began; each value is a
+            copy of the values that instance's token holds, keyed
+            `"gggg,eeee"`. Study, series and instance order. An instance
+            carrying no token is absent, and the dict is never empty (a
+            patient with no token raises). Both modes return the same
+            mapping, taken before `restore=True` writes anything, and it is
+            **what the tokens hold, not what the restore wrote**: a
+            tokenless instance a restore gives group 0010 of the first
+            token is absent, and a pre-0.9.8 shared token is returned whole
+            on every holder though a restore writes only its group 0010
+            outside the first study. The patient-level answer -- the token
+            whose name and ID a restore stamps on the `Patient` -- is
+            `next(iter(result.values()))`. Two instances sharing one SOP
+            Instance UID, which only a hand-built graph can hold, share one
+            key, and the later one's token is the value. These are the
+            original identifiers, handed to the holder of the key; nothing
+            prints or logs them. Through 0.9.8 the call returned `None` in
+            both modes.
 
         Raises:
             FileNotFoundError: No key file at the path given to
@@ -4478,6 +4501,21 @@ class DicomSession:
         # key cannot open is still the one the message is about.
         opened = {content: rs.recover_or_raise(holders[0][1])
                   for content, holders in carrying.items()}
+        # **What the call returns (#586)**: each instance carrying a token
+        # of ours, by the SOP Instance UID it holds now, mapped to a copy
+        # of what its own token holds, in graph order. Taken here, before
+        # the restore writes anything, and from `opened`, not from the
+        # instances: it reports what the tokens hold, not what the
+        # restore below writes (group 0010 only, for a tokenless instance
+        # or a pre-0.9.8 shared token outside its first study). A copy per
+        # key, because instances sharing a token share one `opened` dict,
+        # and an edit to one entry must reach neither its sibling nor the
+        # next call. From `walk`, not `carrying`: `carrying` groups by
+        # token, and a token reappearing after another would put its
+        # later holder out of graph order.
+        recovered: Dict[str, Dict[str, Any]] = {
+            inst.sop_instance_uid: dict(opened[content])
+            for _, inst, content in walk if content is not None}
         # The first token found speaks for the patient -- its name and ID,
         # the #548 scheme check, and the instances carrying no token --
         # as it spoke for every instance before.
@@ -4685,6 +4723,8 @@ class DicomSession:
                     drain=self.persistence_manager.flush)
 
                 get_logger().info(f"Restored identity attributes to {count} instances.")
+
+        return recovered
 
     def enable_reversible_anonymization(self, key_path: str = "isocenter.key"):
         """

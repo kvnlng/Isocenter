@@ -137,7 +137,8 @@ def test_the_first_lock_creates_the_key_at_0600_and_it_recovers(tmp_path, capsys
         os.umask(previous)
     with Session(db) as session:
         session.enable_reversible_anonymization(key)
-        assert _recover(session, capsys, caplog, pseudonym, restore=True) is None
+        result = _recover(session, capsys, caplog, pseudonym, restore=True)
+        assert [values["0010,0020"] for values in result.values()] == [LOCKED]
         assert capsys.readouterr().out == ""
         assert session.store.patients[0].patient_id == LOCKED
 
@@ -262,12 +263,14 @@ def test_a_patient_with_no_instances_raises(tmp_path, capsys, caplog):
 
 
 def test_restore_false_checks_and_prints_nothing(store, capsys, caplog):
-    """The success path under the real key: no exception, no output, and the
-    graph untouched."""
+    """The success path under the real key: no exception, no output, the
+    graph untouched, and the identity returned rather than printed (#586;
+    it returned `None` before)."""
     db, key, locked, unlocked = store
     with Session(db) as session:
         session.enable_reversible_anonymization(key)
-        assert _recover(session, capsys, caplog, locked, restore=False) is None
+        result = _recover(session, capsys, caplog, locked, restore=False)
+        assert [values["0010,0020"] for values in result.values()] == [LOCKED]
         _assert_quiet(capsys, caplog, "", store)
         assert sorted(p.patient_id for p in session.store.patients) == sorted([locked, unlocked])
 

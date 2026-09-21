@@ -160,7 +160,8 @@ def test_a_patient_whose_token_is_not_on_the_last_study_still_recovers(
         _keep_tokens_only_on(instances, keep)
         _anonymize_by_hand(instances, patient)
 
-        assert session.recover_patient_identity("ANON_616", restore=False) is None
+        result = session.recover_patient_identity("ANON_616", restore=False)
+        assert [v["0010,0020"] for v in result.values()] == [PID] * len(keep)
         assert patient.patient_id == "ANON_616", "restore=False wrote something"
 
         session.recover_patient_identity("ANON_616", restore=True)
@@ -219,7 +220,8 @@ def test_a_pair_merged_by_audit_after_a_lock_recovers(tmp_path, caplog):
         passed = patient.studies[1].series[0].instances[0].attributes.get("0008,0050")
         assert passed != ACC_ONE
 
-        assert session.recover_patient_identity(pseudonym, restore=False) is None
+        result = session.recover_patient_identity(pseudonym, restore=False)
+        assert [v["0010,0020"] for v in result.values()] == ["PAT-A"]
         caplog.clear()
         with caplog.at_level(logging.WARNING, logger="isocenter"):
             session.recover_patient_identity(pseudonym, restore=True)
