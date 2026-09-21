@@ -284,7 +284,11 @@ def pytest_sessionfinish(session, exitstatus):
                 "this run left new entries in the repository root: "
                 + ", ".join(strays)
                 + " -- a test wrote outside its tmp_path (#707)", red=True)
-        session.exitstatus = 1
+        # Only a clean run is turned red: an interrupt's 2 or a usage
+        # error's 4 says more than this does, and a failed run is red
+        # already.
+        if session.exitstatus == 0:
+            session.exitstatus = 1
 
 
 def pytest_unconfigure(config):
