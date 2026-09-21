@@ -1,0 +1,24 @@
+# Configuration A of the output fingerprint (#717; scripts/output_fingerprint.py).
+# The scaffold's research defaults, plus one machine rule that matches only
+# the synthetic member `redacted` (serial GOLD-SN-REDACT), so the redaction
+# path is on the fingerprint. Editing this file changes what is measured:
+# retake fingerprint/output.json in the same change.
+version: '2.0'
+privacy_profile: basic
+phi_tags:
+  0008,0020:
+    action: JITTER
+    name: Study Date
+  0010,0040:
+    action: KEEP
+    name: Patient's Sex
+  0010,1010:
+    action: KEEP
+    name: Patient's Age
+date_jitter:
+  min_days: -365
+  max_days: -1
+remove_private_tags: true
+machines:
+- serial_number: GOLD-SN-REDACT
+  redaction_zones: [{roi: [0, 8, 0, 16]}]

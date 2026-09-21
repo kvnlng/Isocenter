@@ -1,0 +1,184 @@
+"""The output fingerprint's wiring: the run, the committed cohort, the release step (#717).
+
+The recorder and comparer are pinned in `test_output_fingerprint.py`.
+Here: that a real run is deterministic under the fixed secret (and would
+not be without it), that the tracked recording describes the committed
+cohort, and that RELEASING.md runs the check. Only the first two tests
+open sessions (a two-member cohort, a few seconds per take).
+
+As in the sibling file, no package module is named by its dotted name:
+the pipeline is reached through `scripts.output_fingerprint` alone, so
+the mutation probe's target scan does not pull these slow tests into a
+module's row.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pydicom
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts import output_fingerprint as fp  # noqa: E402
+
+COHORT = ROOT / "fingerprint" / "cohort"
+RELEASING = ROOT / "RELEASING.md"
+PYDICOM_GENERATED_ROOT = "1.2.826.0.1.3680043.8.498."
+
+
+@pytest.fixture(scope="module")
+def mini_cohort(tmp_path_factory):
+    """Two committed members: a CT carrying '1.000000' DS values, and the ECG."""
+    root = tmp_path_factory.mktemp("cohort")
+    for name in ("private_nested", "ecg"):
+        shutil.copytree(COHORT / name, root / name)
+    return root
+
+
+@pytest.fixture(scope="module")
+def two_takes(mini_cohort, tmp_path_factory):
+    for name in fp.REFUSED_ENV:
+        assert name not in os.environ, name
+    out = tmp_path_factory.mktemp("takes")
+    takes = {}
+    for label, jobs in (("first", 1), ("second", 4)):
+        path = out / f"{label}.json"
+        fp.take(path, cohort_root=mini_cohort, pydicom_sets=False, jobs=jobs,
+                log=lambda line: None)
+        takes[label] = json.loads(path.read_text(encoding="utf-8"))
+    return takes
+
+
+def test_two_takes_of_a_small_cohort_are_identical(two_takes, mini_cohort, tmp_path):
+    first, second = two_takes["first"], two_takes["second"]
+    assert sorted(first["members"]) == ["synthetic:ecg", "synthetic:private_nested"]
+    # Two runs, in one process and in four: the same recording. A store
+    # that minted its own secret would still be self-consistent within a
+    # run, so only the second run can tell the fixed secret was loaded.
+    assert first["members"] == second["members"]
+    assert fp.compare(first, second).exit_code == 0
+
+    other = tmp_path / "other.json"
+    fp.take(other, cohort_root=mini_cohort, pydicom_sets=False,
+            secret=bytes(range(1, 33)), log=lambda line: None)
+    moved = json.loads(other.read_text(encoding="utf-8"))
+    paths = lambda fpr: sorted(  # noqa: E731
+        p for m in fpr["members"].values() for c in m["configs"].values()
+        for a in c["arms"].values() for p in a["files"])
+    assert paths(first) and not set(paths(first)) & set(paths(moved))
+
+
+def test_the_reopened_arm_exports_from_a_reopened_store(two_takes):
+    """Pins a defect, #662: the reopened export re-spells DS values.
+
+    When L6 fixes #662 this test is inverted in the same change, and the
+    fingerprint's `A.reopened.dicom` arm shows the fix. Until then the
+    difference is what proves the arm really exports from a reopened
+    store rather than quietly re-using the live session.
+    """
+    arms = two_takes["first"]["members"]["synthetic:private_nested"]["configs"]["A"]["arms"]
+    (live,) = arms["A.dicom"]["files"].values()
+    (reopened,) = arms["A.reopened.dicom"]["files"].values()
+    assert live["elements"]["0018,0050"] == "DS/implicit '1.000000'"
+    assert reopened["elements"]["0018,0050"] == "DS/implicit '1.0'"
+
+
+def _uids(ds):
+    for elem in ds.iterall():
+        if elem.VR == "UI" and elem.value:
+            yield from (elem.value if isinstance(elem.value, list) else [elem.value])
+
+
+def test_the_committed_cohort_uses_no_random_uids():
+    files = sorted(p for p in COHORT.rglob("*.dcm"))
+    assert files
+    offenders = []
+    for path in files:
+        ds = pydicom.dcmread(str(path))
+        for uid in list(_uids(ds.file_meta)) + list(_uids(ds)):
+            if str(uid).startswith(PYDICOM_GENERATED_ROOT):
+                offenders.append(f"{path.relative_to(ROOT)}: {uid}")
+    assert not offenders, offenders
+
+
+def test_the_tracked_fingerprint_covers_the_committed_cohort():
+    tracked = json.loads((ROOT / "fingerprint" / "output.json").read_text(encoding="utf-8"))
+    assert tracked["schema"] == fp.SCHEMA
+    # A whole-cohort take, not a narrowed one.
+    assert "members" not in tracked["provenance"]
+    keys = set(tracked["members"])
+    assert any(k.startswith("pydicom:") for k in keys)
+    assert any(k.startswith("pydicom-data:") for k in keys)
+
+    for member in fp.synthetic_members(COHORT):
+        entry = tracked["members"].get(member.key)
+        assert entry is not None, f"{member.key} is committed but not in the fingerprint"
+        assert entry["inputs"] == member.inputs, f"{member.key}: inputs changed, retake"
+        assert bool(entry.get("varies")) == (member.varies is not None), member.key
+    committed = {m.key for m in fp.synthetic_members(COHORT)}
+    recorded = {k for k in keys if k.startswith("synthetic:")}
+    assert recorded == committed
+
+
+def _section(text, heading):
+    start = text.index(heading)
+    following = text.find(" ## ", start + len(heading))
+    return text[start:following if following != -1 else len(text)]
+
+
+def test_the_release_procedure_runs_the_fingerprint_check():
+    # Whitespace collapsed: a reflowed paragraph is the same procedure.
+    text = re.sub(r"[ \t]*\n[ \t]*", " ", RELEASING.read_text(encoding="utf-8"))
+    cutting = _section(text, "## Cutting a release")
+    step1 = cutting[cutting.index("1. **Choose the commit**"):cutting.index("2. **Cut the branch:**")]
+    assert "python -m scripts.output_fingerprint check" in step1
+    assert "3.12 and 3.14t" in step1
+    assert "compare --base" in step1
+    assert "previous-tag" in step1
+    assert "pre-release" in step1
+    assert "fetch_data_files" in step1
+    step3 = cutting[cutting.index("3. **Make the release commit"):cutting.index("4. **Rehearse")]
+    assert "output_fingerprint" in step3 and "--line" in step3
+
+    landing = _section(text, "## Changes land on `main`")
+    assert "take --out fingerprint/output.json" in landing
+    assert "**Output:**" in landing
+    assert "Never resolve a conflict in it by hand" in landing
+
+
+def _git(repo, *args):
+    subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True,
+                   env={"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                        "PATH": os.environ["PATH"],
+                        "HOME": str(repo)})
+
+
+def test_the_previous_release_is_found_by_version_not_reachability(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(repo, "tag", "v0.9.7")
+    # A release branch, as RELEASING.md cuts one: its tags are not
+    # reachable from main, and main's newest reachable tag is older.
+    _git(repo, "switch", "-q", "-c", "release/1.0")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "rc")
+    _git(repo, "tag", "v1.0.0rc1")
+    assert fp.newest_release_tag(repo) == "v1.0.0rc1"
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "final")
+    _git(repo, "tag", "v1.0.0")
+    _git(repo, "tag", "not-a-release")
+    _git(repo, "switch", "-q", "main")
+    assert fp.newest_release_tag(repo) == "v1.0.0"
+    _git(repo, "tag", "v0.9.10")
+    assert fp.newest_release_tag(repo, line="0.9") == "v0.9.10"
+    assert fp.newest_release_tag(repo, line="1.0") == "v1.0.0"
+    assert fp.newest_release_tag(repo, line="2.0") is None
