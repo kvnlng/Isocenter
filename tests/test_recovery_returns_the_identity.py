@@ -22,8 +22,9 @@ What each test pins:
   A, C, B; graph order is A, B, C. Adjacent sharers would give the same
   order both ways.
 - The two modes agree, and `restore=True` still restores.
-- The values are copies: A and C share one token, and one dict object
-  shared between them would carry an edit from one to the other.
+- The values are deep copies: A and C share one token, and a dict, or a
+  list inside one, shared between them or with the graph would carry an
+  edit from one to the other.
 - An instance carrying no token is absent.
 - A pre-0.9.8 shared token is returned whole on every holder, while the
   restore writes only its group 0010 outside the first study: the return
@@ -154,18 +155,40 @@ def test_restore_true_returns_the_same_mapping(tmp_path):
             "ACC-1", "ACC-X", "ACC-1", "ACC-2"]
 
 
-def test_the_result_is_a_copy(tmp_path):
-    """A and C carry one token. An edit to A's entry reaches neither C's
-    entry nor the next call. Kills M586-6 (the opened record returned
-    uncopied: one dict object behind A and C, and behind every later call
-    in this one)."""
+ALIASES = "0010,1001"
+
+
+def test_the_result_is_a_copy_all_the_way_down(tmp_path):
+    """A and C carry one token, which holds a multi-valued tag (Other
+    Patient Names, a list once the token is read). The result is taken
+    under `restore=True`, which writes the token's values onto the graph.
+    An in-place edit of the list under A's entry reaches neither C's entry,
+    nor the graph, nor the next call. A scalar edit cannot tell a shallow
+    copy from a deep one; a list can (review of #732, finding 1: the
+    shallow copy handed the caller the very list the restore wrote onto
+    A and C, and an edit to it reached the graph without moving any
+    revision). Kills M586-6 (the opened record returned uncopied) and
+    M586-6b (a shallow `dict(...)` copy)."""
     with _session(tmp_path) as session:
-        _locked(session)
-        result = session.recover_patient_identity(PSEUDONYM, restore=False)
-        result[A]["0010,0020"] = "X"
-        assert result[C]["0010,0020"] == PID
-        again = session.recover_patient_identity(PSEUDONYM, restore=False)
-        assert again[A]["0010,0020"] == PID
+        patient, instances = _patient(
+            session, [[(A, "ACC-1"), (B, "ACC-X"), (C, "ACC-1")], [(D, "ACC-2")]])
+        for inst in instances:
+            inst.set_attr(ALIASES, ["Alias^One", "Alias^Two"])
+        session.lock_identities(PID, tags_to_lock=TAGS + [ALIASES])
+        _anonymize_by_hand(patient, instances)
+        for inst in instances:
+            inst.set_attr(ALIASES, [])
+
+        result = session.recover_patient_identity(PSEUDONYM, restore=True)
+        assert result[A][ALIASES] == ["Alias^One", "Alias^Two"]
+        revisions = [inst._revision for inst in instances]
+        result[A][ALIASES].append("LEAK")
+        assert result[C][ALIASES] == ["Alias^One", "Alias^Two"]
+        assert [inst.attributes[ALIASES] for inst in instances] == [
+            ["Alias^One", "Alias^Two"]] * 4
+        assert [inst._revision for inst in instances] == revisions
+        again = session.recover_patient_identity(PID, restore=False)  # restored
+        assert again[A][ALIASES] == ["Alias^One", "Alias^Two"]
 
 
 def test_an_instance_without_a_token_is_absent(tmp_path):

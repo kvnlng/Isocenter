@@ -1,3 +1,4 @@
+import copy
 import gc
 import os
 import re
@@ -4437,7 +4438,7 @@ class DicomSession:
             Dict[str, Dict[str, Any]]: The identity recovered (#586). Each
                 key is the SOP Instance UID of an instance carrying an identity
                 token of ours, as it was when the call began; each value is a
-                copy of the values that instance's token holds, keyed
+                deep copy of the values that instance's token holds, keyed
                 `"gggg,eeee"`. Study, series and instance order. An instance
                 carrying no token is absent, and the dict is never empty (a
                 patient with no token raises). Both modes return the same
@@ -4527,14 +4528,18 @@ class DicomSession:
         # the restore writes anything, and from `opened`, not from the
         # instances: it reports what the tokens hold, not what the
         # restore below writes (group 0010 only, for a tokenless instance
-        # or a pre-0.9.8 shared token outside its first study). A copy per
-        # key, because instances sharing a token share one `opened` dict,
-        # and an edit to one entry must reach neither its sibling nor the
-        # next call. From `walk`, not `carrying`: `carrying` groups by
-        # token, and a token reappearing after another would put its
-        # later holder out of graph order.
+        # or a pre-0.9.8 shared token outside its first study). A **deep**
+        # copy per key: instances sharing a token share one `opened` dict,
+        # and the restore below writes that dict's very values onto them,
+        # so a multi-valued tag (a list once the token is read, e.g. Other
+        # Patient Names) copied shallowly was the list the graph holds --
+        # an in-place edit of the result reached the sibling's entry and
+        # the graph, and moved no revision (review of #732, finding 1).
+        # From `walk`, not `carrying`: `carrying` groups by token, and a
+        # token reappearing after another would put its later holder out
+        # of graph order.
         recovered: Dict[str, Dict[str, Any]] = {
-            inst.sop_instance_uid: dict(opened[content])
+            inst.sop_instance_uid: copy.deepcopy(opened[content])
             for _, inst, content in walk if content is not None}
         # The first token found speaks for the patient -- its name and ID,
         # the #548 scheme check, and the instances carrying no token --
