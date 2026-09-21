@@ -34,8 +34,8 @@ does not move `Instance.sop_instance_uid` (a dataclass field that only
 `regenerate_uid()` assigns), so a restore of a locked SOP Instance UID
 cannot change the keys whatever the order; no test is needed for it.
 
-**Why this file imports what it does.** `isocenter.session` is named, so
-its probe row is charged.
+**Why this file imports what it does.** `isocenter.session` and
+`isocenter.entities` are named, so their probe rows are charged.
 """
 from datetime import date
 

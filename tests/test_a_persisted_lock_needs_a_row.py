@@ -22,8 +22,9 @@ marked persisted (#398).
 `test_a_lock_whose_store_write_fails_raises.py` is the `sqlite3.Error`
 half and is unchanged: that error still leaves as itself.
 
-**Why this file imports what it does.** `isocenter.session` and
-`isocenter.persistence` are named, so their probe rows are charged.
+**Why this file imports what it does.** `isocenter.session`,
+`isocenter.persistence` and `isocenter.entities` are named, so their probe
+rows are charged.
 """
 import sqlite3
 from datetime import date

@@ -23,9 +23,10 @@ Patient ID and all, with the arm restored).
 `save(sync=True)`, with `sqlite3.IntegrityError` (#721), and never reaches
 the write door.
 
-**Why this file imports what it does.** `isocenter.session` is named, so
-its probe row is charged; the kill of the `io_handlers` mutant is measured
-and named on that module's row.
+**Why this file imports what it does.** `isocenter.session` and
+`isocenter.builders` are named, so their probe rows are charged. It does
+not name `isocenter.io_handlers`; it is on that row for its measured kill
+of M613-1, named in the row's comment (#441).
 """
 import datetime
 import os
