@@ -366,6 +366,31 @@ def test_a_selected_test_that_is_gone_sends_its_modules_to_their_rows():
     assert any("no longer exist" in reason for reason in sel.reasons)
 
 
+def test_a_build_whose_suite_failed_exits_with_the_suites_status(
+        tmp_path, monkeypatch):
+    """`build` is "Cutting a release" step 1's 3.14t integration run
+    (#707). It still writes the map when a test fails, but must exit with
+    pytest's status: a build that swallowed it would record a red
+    integration run as `exit=0`."""
+    class Done:
+        def __init__(self, returncode, stdout=""):
+            self.returncode, self.stdout = returncode, stdout
+
+    def run(cmd, **kwargs):
+        if "--collect-only" in cmd:
+            return Done(0, "tests/test_x.py::test_a\n")
+        return Done(1 if "run" in cmd else 0)
+
+    monkeypatch.setattr(test_map.subprocess, "run", run)
+    monkeypatch.setattr(test_map, "from_coverage",
+                        lambda *a, **k: {"functions": {}, "workers": {},
+                                         "unmapped": []})
+    with pytest.raises(SystemExit) as stopped:
+        test_map.main(["build", "--sha", "abc", "--out", str(tmp_path)])
+    assert stopped.value.code == 1
+    assert (tmp_path / test_map.MAP_FILE).exists()
+
+
 def test_a_map_whose_commit_is_not_here_is_no_map(tmp_path):
     (tmp_path / test_map.MAP_FILE).write_text(
         '{"sha": "0000000000000000000000000000000000000000", "python": "x", '

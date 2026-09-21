@@ -531,9 +531,12 @@ def build(repo, out_dir, sha=None):
             [sys.executable, "-m", "pytest", "--collect-only", "-q"],
             cwd=repo, env=env, capture_output=True, text=True, check=True)
         collected = [line for line in listing.stdout.splitlines() if "::" in line]
-        subprocess.run([sys.executable, "-m", "coverage", "run",
-                        f"--rcfile={rc}", "-m", "pytest", "-q"],
-                       cwd=repo, env=env, check=False)
+        # Not `check=True`: a red suite still leaves a usable map. Its
+        # status is what `build` exits with, because this run doubles as
+        # "Cutting a release" step 1's 3.14t integration run (#707).
+        suite = subprocess.run([sys.executable, "-m", "coverage", "run",
+                                f"--rcfile={rc}", "-m", "pytest", "-q"],
+                               cwd=repo, env=env, check=False)
         subprocess.run([sys.executable, "-m", "coverage", "combine",
                         f"--rcfile={rc}"], cwd=repo, env=env, check=True)
         gil = getattr(sys, "_is_gil_enabled", lambda: True)()
@@ -544,7 +547,9 @@ def build(repo, out_dir, sha=None):
     target.write_text(json.dumps(mapping), encoding="utf-8")
     print(f"wrote {target}: {len(mapping['functions'])} files with tested "
           f"functions, {len(mapping['workers'])} with functions a worker ran, "
-          f"{len(mapping['unmapped'])} tests it cannot speak for")
+          f"{len(mapping['unmapped'])} tests it cannot speak for; the suite "
+          f"exited {suite.returncode}")
+    return suite.returncode
 
 
 def main(argv=None):
@@ -565,7 +570,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     repo = Path(__file__).resolve().parent.parent
     if args.command == "build":
-        build(repo, args.out, args.sha)
+        raise SystemExit(build(repo, args.out, args.sha))
     else:
         sel, mapping, _targets = selection_for(repo, args.base)
         print(describe(sel, mapping, repo))

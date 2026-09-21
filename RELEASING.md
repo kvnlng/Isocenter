@@ -34,8 +34,15 @@ never collide, so `git checkout v0.9.8` always means the published commit.
 3. Before pushing, the developer rebases onto the current tip of the branch
    the PR targets (`main`; `release/X.Y` for a patch) and runs, on **both
    3.12 and 3.14t** at the commit being pushed, the new tests and the tests
-   that cover what the change touched. Until `pytest --changed` exists
-   (#707), "the tests that cover what the change touched" is exactly this:
+   that cover what the change touched: `pytest -v --changed` on each
+   interpreter (a patch: `--changed-base=release/X.Y`, with the `=`). It
+   prints the rule behind each part of its selection before it runs.
+   With a map (`.test-map.json`; "Cutting a release", step 1 builds one),
+   a changed function selects the tests that ran it, plus, for code a
+   spawned worker runs, the tests that hand that worker to its pool --
+   and whatever the map cannot speak for is added back from the module's
+   row. Without a map, and for everything a map does not cover, it
+   applies exactly these rules (#707):
    - a changed `isocenter/**/*.py`: that module's row in
      `scripts/mutation_probe.py`'s `TARGETS`. A module with no row (it is in
      `NOT_PROBED`) means the whole suite.
@@ -49,8 +56,9 @@ never collide, so `git checkout v0.9.8` always means the published commit.
      `docs/` or any `*.md` (prose no test reads cannot break one); the
      whole suite for anything else (`scripts/`, `.github/`, root files).
 
-   Afterwards it is what `pytest --changed` selects, which applies the same
-   rules. Both interpreters must pass. Each test runs in its own
+   Both interpreters must pass. A selection that is the whole suite may be
+   run as shards, `pytest -v --changed --shard=I/N` for I in 1..N, so each
+   run is short enough to watch; record every shard's line. Each test runs in its own
    directory (#707), so the two runs may overlap in one checkout -- unless
    both include `tests/test_packaging_contract.py`, which builds the
    distributions in the repository root (setuptools' `build/` and
@@ -62,7 +70,8 @@ never collide, so `git checkout v0.9.8` always means the published commit.
    naming what it wrote. The guard sees new entries and rewritten files at
    the root's top level only: not a write below it (into `tests/`, say),
    and not a deletion. A change that selects no tests at all is recorded the same way,
-   as "nothing selected", with the rule that produced it.
+   as "nothing selected", with the rule that produced it (`pytest
+   --changed` exits 5 then, which is that result and not a failure).
 
    **The full suite is not a merge requirement.** It runs before a merge
    only when the rules above select it.
@@ -153,6 +162,18 @@ fixes, never features.
    meets the whole suite. A failure is fixed on `main` by the procedure
    above, and step 1 starts again at the new commit. (A patch release skips
    this step; its integration test is step 3's run.)
+
+   **On 3.14t the full run is the map build** (#707):
+   `PYTHON_GIL=0 python -m scripts.test_map build; echo "exit=$?"` in a
+   clean checkout at that SHA (it needs the `dev` extra for `coverage`).
+   It runs the whole suite under per-test coverage and exits with the
+   suite's status. It also leaves `.test-map.json`, which every
+   `pytest --changed` after it reads. Measured on 2026-09-21: 1899 s,
+   against about 1450 s for the same suite without coverage, so 1.3x.
+   Record its last test line and `exit=` as you would a plain run. The map
+   is gitignored and never edited. Rebuild it on demand, by the same
+   command, when `--changed` keeps falling back to `TARGETS` rows; an old
+   map selects more, toward those rows, rather than less.
 
    Also run `python -m scripts.output_fingerprint check --jobs 4 --report
    fp-X.Y.Z-<interpreter>.txt; echo "exit=$?"` on **3.12 and 3.14t** at
@@ -264,8 +285,8 @@ a re-tag.
    name as usual.
 2. Develop and review it exactly as a change to `main` is, with the PR
    targeting `release/X.Y`: step 3's rebase and its tests are against
-   `release/X.Y`, not `main` (`pytest --changed --changed-base release/X.Y`
-   once #707 lands). Keep the fix and its tests in their own commits,
+   `release/X.Y`, not `main` (`pytest -v --changed
+   --changed-base=release/X.Y`). Keep the fix and its tests in their own commits,
    and put the changelog entry in a separate commit, under
    `## [Unreleased]` at the top of the branch's `CHANGELOG.md`. The first
    fix of a patch adds that heading back.

@@ -58,6 +58,7 @@
  "tests/test_blob_storage.py": 0.17,
  "tests/test_both_write_doors_stamp_one_answer.py": 8.69,
  "tests/test_bytes_persistence.py": 0.01,
+ "tests/test_changed_code_selects_its_tests.py": 105.47,
  "tests/test_check_reversibility.py": 3.78,
  "tests/test_close_does_not_drop_an_orphaned_save.py": 2.18,
  "tests/test_close_warns_about_unsaved_instances.py": 0.78,
