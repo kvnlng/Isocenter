@@ -4435,25 +4435,25 @@ class DicomSession:
 
         Returns:
             Dict[str, Dict[str, Any]]: The identity recovered (#586). Each
-            key is the SOP Instance UID of an instance carrying an identity
-            token of ours, as it was when the call began; each value is a
-            copy of the values that instance's token holds, keyed
-            `"gggg,eeee"`. Study, series and instance order. An instance
-            carrying no token is absent, and the dict is never empty (a
-            patient with no token raises). Both modes return the same
-            mapping, taken before `restore=True` writes anything, and it is
-            **what the tokens hold, not what the restore wrote**: a
-            tokenless instance a restore gives group 0010 of the first
-            token is absent, and a pre-0.9.8 shared token is returned whole
-            on every holder though a restore writes only its group 0010
-            outside the first study. The patient-level answer -- the token
-            whose name and ID a restore stamps on the `Patient` -- is
-            `next(iter(result.values()))`. Two instances sharing one SOP
-            Instance UID, which only a hand-built graph can hold, share one
-            key, and the later one's token is the value. These are the
-            original identifiers, handed to the holder of the key; nothing
-            prints or logs them. Through 0.9.8 the call returned `None` in
-            both modes.
+                key is the SOP Instance UID of an instance carrying an identity
+                token of ours, as it was when the call began; each value is a
+                copy of the values that instance's token holds, keyed
+                `"gggg,eeee"`. Study, series and instance order. An instance
+                carrying no token is absent, and the dict is never empty (a
+                patient with no token raises). Both modes return the same
+                mapping, taken before `restore=True` writes anything, and it is
+                **what the tokens hold, not what the restore wrote**: a
+                tokenless instance a restore gives group 0010 of the first
+                token is absent, and a pre-0.9.8 shared token is returned whole
+                on every holder though a restore writes only its group 0010
+                outside the first study. The patient-level answer -- the token
+                whose name and ID a restore stamps on the `Patient` -- is
+                `next(iter(result.values()))`. Two instances sharing one SOP
+                Instance UID, which only a hand-built graph can hold, share one
+                key, and the later one's token is the value. These are the
+                original identifiers, handed to the holder of the key; nothing
+                prints or logs them. Through 0.9.8 the call returned `None` in
+                both modes.
 
         Raises:
             FileNotFoundError: No key file at the path given to
