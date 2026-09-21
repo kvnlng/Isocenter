@@ -576,11 +576,18 @@ def _documented_variables():
 def test_a_parallelism_variable_refuses_the_run(tmp_path, monkeypatch):
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
 
+    started = []
+
     def ran(*args, **kwargs):
-        raise AssertionError("the run started despite the variable")
+        # Recorded, not raised: main() turns any exception into exit 2,
+        # which is the refusal's exit too. An empty cohort ends the run
+        # at once, with exit 0.
+        started.append(args)
+        return []
 
     monkeypatch.setattr(fp, "assemble_cohort", ran)
     assert fp.main(["take", "--out", str(tmp_path / "x.json")]) == 2
+    assert not started
     assert not (tmp_path / "x.json").exists()
 
     # Every documented variable is either refused or named as not
