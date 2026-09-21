@@ -84,7 +84,7 @@ change to what this tool records for the same output.
 
 **Comparing.** Files at the same path are compared with each other. Files
 whose paths moved (a UID or a date in the path changed) are paired by
-content -- fewest differing entries, UI values not counted -- never by
+content -- fewest differing entries -- never by
 sorted path, since UID-named files re-sort when their UIDs change.
 Differences are grouped by element, VR (without `/implicit`) and kind
 across the cohort; a relabel is its own kind. The last line names the
@@ -1147,21 +1147,18 @@ def _entries(record: dict) -> Dict[str, object]:
 
 
 def _distance(old: dict, new: dict) -> int:
-    """How many entries differ, not counting a change of UI value.
+    """How many entries differ, UI values included.
 
-    UIDs are what moves a file (its name is its SOP Instance UID), so they
-    say nothing about which old file a new one is; everything else does.
+    UI values are counted, deliberately. When every UID is re-derived
+    (L10), each old file differs from each new one in all its UIDs, so
+    they cost every candidate pair the same and the other entries decide.
+    When the UIDs are kept and the path moved for another reason (a date
+    in the folder), the UIDs are what says which old file a new one is:
+    ignoring them would pair a renumbered instance with the instance whose
+    number it took, and hide the renumbering.
     """
     a, b = _entries(old), _entries(new)
-    count = 0
-    for key in set(a) | set(b):
-        x, y = a.get(key), b.get(key)
-        if x == y:
-            continue
-        if isinstance(x, str) and isinstance(y, str) and _group_vr(x) == _group_vr(y) == "UI":
-            continue
-        count += 1
-    return count
+    return sum(1 for key in set(a) | set(b) if a.get(key) != b.get(key))
 
 
 def pair_moved(only_a: List[str], only_b: List[str], fa: dict, fb: dict) -> List[Tuple[str, str]]:
@@ -1171,7 +1168,7 @@ def pair_moved(only_a: List[str], only_b: List[str], fa: dict, fb: dict) -> List
     Instance UID, and the new names sort in an order unrelated to the old
     ones. Pairing by sorted path then compares instance 1 with instance 3
     and invents differences in both (#717 review). So: the pair with the
-    fewest differing entries (UI values not counted) first, each file used
+    fewest differing entries first, each file used
     once, ties by sorted position; and never across file types. Files left
     over are reported as only in OLD / only in NEW.
     """

@@ -474,6 +474,25 @@ def test_paths_that_all_move_are_still_compared_element_by_element():
     assert "S/2.2.dcm" in real[0].examples[0], real[0].examples
 
 
+def test_a_kept_uid_says_which_file_moved_where():
+    """The folder moved (a date in it), the UIDs did not, two instances swapped numbers.
+
+    Paired by everything but the UIDs, each renumbered instance would meet
+    the instance whose number it took and the renumbering would vanish;
+    the UIDs say which file is which.
+    """
+    def files(folder, numbers):
+        return {f"{folder}/{uid}.dcm": {
+            "meta": {"0002,0003": f"UI '{uid}'"},
+            "elements": {"0008,0018": f"UI '{uid}'", "0020,0013": f"IS '{n}'"}}
+            for uid, n in zip(("1.1", "1.2"), numbers)}
+
+    report = fp.compare(_fingerprint({"m": _member(files("D1", (1, 2)))}),
+                        _fingerprint({"m": _member(files("D2", (2, 1)))}))
+    elements = [(g.key, g.kind, g.count) for g in report.groups if g.section == "Elements"]
+    assert elements == [("0020,0013", "changed", 2)], report.text()
+
+
 def test_any_difference_exits_one_and_none_exits_zero():
     one = _fingerprint({"m": _member({"f.dcm": _file(**{"0010_0010": "PN 'X'"})})})
     same = fp.compare(one, json.loads(json.dumps(one)))
