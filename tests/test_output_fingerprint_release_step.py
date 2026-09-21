@@ -90,6 +90,66 @@ def test_the_reopened_arm_exports_from_a_reopened_store(two_takes):
     assert reopened["elements"]["0018,0050"] == "DS/implicit '1.0'"
 
 
+#: The committed cohort, file by file. A member is never removed and its
+#: bytes never rebuilt to make a difference go away; adding one updates
+#: this list, the cohort and the fingerprint in one change.
+COMMITTED = {
+    "big_endian_words": ["big_endian_words-1.dcm"],
+    "curve_overlay": ["curve_overlay-1.dcm"],
+    "ecg": ["ecg-1.dcm"],
+    "float_pixels": ["float_pixels-1.dcm"],
+    "implicit": ["implicit-1.dcm"],
+    "longitudinal": ["longitudinal-s1-1.dcm", "longitudinal-s1-2.dcm",
+                     "longitudinal-s1-3.dcm", "longitudinal-s2-1.dcm",
+                     "longitudinal-s2-2.dcm", "longitudinal-s2-3.dcm"],
+    "lut_ambiguous": ["lut_ambiguous-1.dcm"],
+    "no_study_date": ["no_study_date-1.dcm"],
+    "private_nested": ["private_nested-1.dcm"],
+    "redacted": ["redacted-1.dcm", "VARIES"],
+}
+
+
+def test_the_committed_cohort_is_the_listed_one():
+    found = {m.name: sorted(p.name for p in m.iterdir())
+             for m in COHORT.iterdir() if m.is_dir()}
+    assert found == {k: sorted(v) for k, v in COMMITTED.items()}
+
+
+def test_the_generator_builds_what_is_listed_and_never_overwrites_a_member(tmp_path):
+    from scripts import golden_cohort
+    assert sorted(golden_cohort.MEMBERS) == sorted(COMMITTED)
+    assert golden_cohort.uid("x", 1) == golden_cohort.uid("x", 1)
+    assert golden_cohort.uid("x", 1).startswith("2.25.")
+
+    written = golden_cohort.build(tmp_path, only={"implicit", "redacted"})
+    assert sorted(written) == ["implicit", "redacted"]
+    assert sorted(p.name for p in (tmp_path / "redacted").iterdir()) == \
+        sorted(COMMITTED["redacted"])
+    marker = tmp_path / "implicit" / "implicit-1.dcm"
+    marker.write_bytes(b"committed bytes are the authority")
+    assert golden_cohort.build(tmp_path, only={"implicit"}) == []
+    assert marker.read_bytes() == b"committed bytes are the authority"
+
+
+def test_configuration_a_redacts_only_the_redacted_member_and_b_keeps_private_tags():
+    import yaml
+    assert fp.CONFIGS == {"A": ROOT / "fingerprint" / "config-a.yaml",
+                          "B": ROOT / "fingerprint" / "config-b.yaml"}
+    a = yaml.safe_load(fp.CONFIGS["A"].read_text(encoding="utf-8"))
+    b = yaml.safe_load(fp.CONFIGS["B"].read_text(encoding="utf-8"))
+    serials = {str(pydicom.dcmread(str(p)).get("DeviceSerialNumber", ""))
+               for p in COHORT.rglob("*.dcm")}
+    ruled = {rule["serial_number"] for rule in a["machines"]}
+    assert ruled == {"GOLD-SN-REDACT"}
+    assert ruled & serials == ruled
+    assert str(pydicom.dcmread(str(COHORT / "redacted" / "redacted-1.dcm"))
+               .DeviceSerialNumber) == "GOLD-SN-REDACT"
+    assert a["remove_private_tags"] is True and b["remove_private_tags"] is False
+    assert "machines" not in b
+    assert {k: v for k, v in a.items() if k not in ("machines", "remove_private_tags")} \
+        == {k: v for k, v in b.items() if k != "remove_private_tags"}
+
+
 def _uids(ds):
     for elem in ds.iterall():
         if elem.VR == "UI" and elem.value:

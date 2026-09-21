@@ -953,6 +953,7 @@ class Report:
         self.old, self.new = old, new
         self._groups: Dict[tuple, Group] = {}
         self.toolchain: List[str] = []
+        self.scope = ""
 
     def group(self, section, key, kind, vr="") -> Group:
         ident = (section, key, kind, vr)
@@ -981,6 +982,8 @@ class Report:
             lines.append(f"{label}: git_sha={p.get('git_sha')} dirty={p.get('dirty')} "
                          f"isocenter={p.get('isocenter_version')} python={p.get('python')} "
                          f"gil={p.get('gil')} members={len(fp.get('members', {}))}")
+        if self.scope:
+            lines.append(self.scope)
         if self.toolchain and self._groups:
             lines.append("NOTE: the toolchain differs too (section 1); some "
                          "differences below may be the toolchain's.")
@@ -1019,6 +1022,7 @@ class Report:
 
 def _short(value, limit=160) -> str:
     text = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+    text = text.replace("\n", "\\n")  # one example, one report line
     return text if len(text) <= limit else text[:limit] + "..."
 
 
@@ -1125,6 +1129,8 @@ def compare(old: dict, new: dict, members: Optional[str] = None) -> Report:
     if members:
         ma = {k: v for k, v in ma.items() if fnmatch.fnmatchcase(k, members)}
         mb = {k: v for k, v in mb.items() if fnmatch.fnmatchcase(k, members)}
+        report.scope = (f"compared only members matching {members!r}: "
+                        f"{len(ma)} in OLD, {len(mb)} in NEW")
     for key in sorted(set(ma) - set(mb)):
         report.group("Cohort", "member", "only in OLD").add("", key)
     for key in sorted(set(mb) - set(ma)):
