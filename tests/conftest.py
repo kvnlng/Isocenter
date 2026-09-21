@@ -254,6 +254,24 @@ def redirect_logging(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _own_working_directory(request, tmp_path, monkeypatch):
+    """Run every test in its own `tmp_path` (#707).
+
+    A relative `Session("foo.db")` used to land in the repository root,
+    so two runs in one tree shared `foo.db`, its sidecar and both lock
+    files. Spawned workers inherit the cwd, so the pools follow.
+
+    `repo_root` opts out, for a test that builds or launches from the
+    root. Do not widen the opt-out to silence a failure: a test that
+    breaks here was reading a file an earlier test happened to leave
+    behind, and that is the defect.
+    """
+    if request.node.get_closest_marker("repo_root") is None:
+        monkeypatch.chdir(tmp_path)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _pixel_analysis_ocr_is_not_left_replaced():
     """Fail the test that leaves `pixel_analysis._ocr_instance` replaced.
 
