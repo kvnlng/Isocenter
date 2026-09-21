@@ -3515,8 +3515,10 @@ class DicomSession:
 
         Args:
             patient_id (str): The ID of the patient to preserve (or a list/report for batch processing).
-            persist (bool): If True, writes changes to the database immediately.
-                            If False, returns modified instances (useful for batch buffering).
+            persist (bool): If True, writes each instance's token into the
+                row the store holds for it, immediately; an instance the
+                store holds no row for raises (see `RuntimeError` below).
+                If False, returns modified instances (useful for batch buffering).
             verbose (bool): If True, logs debug information.
             tags_to_lock (List[str], optional): The tags whose original values
                 are embedded. When omitted: PatientName, PatientID,
@@ -3579,6 +3581,20 @@ class DicomSession:
                 a report, the batch form's `sqlite3.Error` applies. Until
                 0.9.8 this was logged and the lock returned as if the
                 tokens had been stored.
+
+                **Also `RuntimeError`, with the same timing**, when with
+                `persist=True` some instance's current SOP Instance UID has
+                no row in the store to write its token into (#641): a
+                patient built by hand and never saved, or a UID
+                `regenerate_uid()` moved (as `redact()` does) since the last
+                save. Unlike the refusals above, which write no token, this
+                one is raised **after** the tokens are embedded: they are in
+                memory, marked modified, so a later `save(sync=True)` stores
+                them; this write stored none of them, those with a row
+                included; one `ERROR` audit row gives the counts. Through
+                0.9.8 the lock returned as if the tokens had been stored.
+                `ingest()` writes the rows itself, so ingest-then-lock never
+                raises this.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -4227,7 +4243,11 @@ class DicomSession:
             sqlite3.Error: A store write failed while tokens were being
                 persisted (`persist=True` writes per patient,
                 `auto_persist_chunk_size` per chunk), after one `ERROR`
-                audit row (#599). **Nothing is rolled back across writes**:
+                audit row (#599); or, as `RuntimeError`, a store write
+                found no row for an instance (#641, see
+                `lock_identities()`), with the same shape and the same
+                timing: raised after the tokens are embedded, unlike the
+                refusals above. **Nothing is rolled back across writes**:
                 patients written before the failure stay locked in the
                 store, the failed write stored none of its instances (they
                 hold their new tokens in memory, marked modified, and a

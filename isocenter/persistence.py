@@ -304,6 +304,21 @@ class _SaveTally:
     pixel_bytes: int = 0
 
 
+class _NoRowFor(Exception):
+    """`update_attributes` matched fewer rows than it was given (#641).
+
+    Private, and never leaves `update_attributes`: raised inside the
+    connection's `with` so the write rolls back, and turned into the
+    `RuntimeError` callers see outside it. Not a `sqlite3.Error`, so the
+    #599 arm cannot catch it, and not a `RuntimeError`, so nothing between
+    the raise and its own `except` can mistake it for the public one."""
+
+    def __init__(self, shortfall: int, total: int):
+        super().__init__(shortfall, total)
+        self.shortfall = shortfall
+        self.total = total
+
+
 class _StoredFrame(NamedTuple):
     """Where an instance's pixels live in the sidecar, if anywhere.
 
@@ -4791,6 +4806,19 @@ class SqliteStore:
                 as sqlite raised it (#599). Until 0.9.8 it was logged and
                 swallowed, so `lock_identities(persist=True)` reported
                 instances secured whose tokens only memory held.
+            RuntimeError: The write matched fewer rows than `instances`
+                holds: some instance's current SOP Instance UID has no row
+                in the store (#641) -- a graph built by hand and never
+                saved, or a UID `regenerate_uid()` moved since the last
+                save. The write is rolled back, so it stores none of
+                `instances`, then logged and recorded as one `ERROR` row
+                (best-effort, as above), counts only. Through 0.9.8 such
+                an instance was skipped in silence. Two limits: two
+                instances sharing one SOP Instance UID, which only a
+                hand-built graph can hold, both match its one row, so no
+                shortfall is seen and the row holds whichever was written
+                last; and the check counts the rows the write matched, it
+                does not read them back.
         """
         if not instances:
             return
@@ -4814,8 +4842,51 @@ class SqliteStore:
                     WHERE sop_instance_uid = ?
                 """, data)
 
+                # **A write that lands on no row is a failure too (#641).**
+                # An instance whose current SOP Instance UID the store
+                # holds no row for -- a hand-built graph never saved, a UID
+                # `regenerate_uid()` moved and no save has written since --
+                # matches nothing, and sqlite raises nothing for that, so
+                # `lock_identities(persist=True)` reported the lock secured
+                # while the store held no token. `rowcount` after
+                # `executemany` is summed over the parameter sets and counts
+                # a matched row whether or not its value changed, and a row
+                # a `RAISE(IGNORE)` trigger skipped is not counted: measured
+                # identical on 3.12 and 3.14t. So it counts rows written,
+                # not rows that exist. Raised **here, inside the `with`,
+                # before `commit()`**, so `_get_connection` rolls the whole
+                # write back on either backend (`:memory:` commits on its
+                # one shared connection, and rolls it back the same way):
+                # the instances that did match are not stored alone, and
+                # the row below says "stored none of them" truthfully. The
+                # row is written outside the `with`: on `:memory:` the
+                # connection's lock is held inside it.
+                shortfall = len(data) - cur.rowcount
+                if shortfall:
+                    raise _NoRowFor(shortfall, len(data))
+
                 conn.commit()
                 self.logger.info("Update complete.")
+
+        except _NoRowFor as missing:
+            # Counts only, no UID and no patient (P6). `RuntimeError`, not
+            # an invented `sqlite3.Error`: sqlite raised nothing. The same
+            # post-embed timing as the arm below, which the callers'
+            # docstrings state (owner's ruling on #641, Q2').
+            message = (f"update_attributes: {missing.shortfall} of {missing.total} "
+                       "instance(s) have no row in the store under their SOP "
+                       "Instance UID, so this write stored none of them; "
+                       "save(sync=True) writes an instance the store does not "
+                       "hold yet")
+            self.logger.error(message)
+            try:
+                self.log_audit(action_type="ERROR", entity_uid="SESSION",
+                               details=message)
+            except Exception as row_error:  # pylint: disable=broad-except
+                self.logger.error(
+                    "update_attributes could not record its failure in the "
+                    f"audit log: {describe_exception(row_error)}")
+            raise RuntimeError(message) from None
 
         except sqlite3.Error as e:
             # Raised, not swallowed (#599). The caller is a lock that has
