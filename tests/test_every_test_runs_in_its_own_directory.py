@@ -37,3 +37,25 @@ def test_a_spawned_worker_inherits_the_tests_directory(tmp_path):
     with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
         child_cwd = pool.submit(os.getcwd).result(timeout=120)
     assert Path(child_cwd).resolve() == tmp_path.resolve()
+
+
+@pytest.fixture(scope="module")
+def _log_file_a_module_fixture_sees():
+    return os.environ.get("ISOCENTER_LOG_FILE")
+
+
+def test_a_module_scoped_fixture_logs_outside_the_root(
+        _log_file_a_module_fixture_sees, request):
+    """A fixture wider than a test runs outside its `tmp_path`.
+
+    It is set up between tests, where the cwd is the root and, before
+    #707, `ISOCENTER_LOG_FILE` had been deleted by the previous test's
+    `redirect_logging` -- so a module-scoped fixture that opened a
+    `Session` wrote `isocenter.log` into the repository root (measured:
+    `test_private_tag_vr_roundtrip.py`'s `reloaded` fixture). A session
+    default keeps that log in scratch too.
+    """
+    target = _log_file_a_module_fixture_sees
+    assert target, "no ISOCENTER_LOG_FILE outside a test: logs go to ./isocenter.log"
+    root = Path(request.config.rootpath).resolve()
+    assert root not in Path(target).resolve().parents

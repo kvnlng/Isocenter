@@ -39,7 +39,9 @@ class TestCTPParser:
 
     def test_ctp_rules_file_exists(self):
         # Verify that the resource generation worked
-        path = "isocenter/resources/ctp_rules.json"
+        # Anchored on this file: the test runs in its own tmp_path (#707).
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
+            __file__))), "isocenter", "resources", "ctp_rules.json")
         assert os.path.exists(path)
         with open(path, 'r') as f:
             import json

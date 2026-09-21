@@ -291,18 +291,42 @@ def pytest_unconfigure(config):
     _mark("unconfigure / atexit")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _log_outside_a_test_to_scratch(tmp_path_factory):
+    """Where `isocenter.log` goes when no test is running (#707).
+
+    A module- or session-scoped fixture is set up between tests, outside
+    any test's `tmp_path` and `redirect_logging`. With no
+    `ISOCENTER_LOG_FILE` there, a `Session` it opened logged to
+    `./isocenter.log` -- the repository root, which the root guard now
+    refuses. `redirect_logging` restores this value rather than deleting
+    the variable, so every gap between tests sees it.
+    """
+    previous = os.environ.get("ISOCENTER_LOG_FILE")
+    os.environ["ISOCENTER_LOG_FILE"] = str(
+        tmp_path_factory.mktemp("outside-a-test") / "isocenter.log")
+    yield
+    if previous is None:
+        os.environ.pop("ISOCENTER_LOG_FILE", None)
+    else:
+        os.environ["ISOCENTER_LOG_FILE"] = previous
+
+
 @pytest.fixture(autouse=True)
 def redirect_logging(tmp_path):
     """Redirects isocenter.log to a temp file for all tests."""
+    previous = os.environ.get("ISOCENTER_LOG_FILE")
     log_file = tmp_path / "isocenter.log"
     os.environ["ISOCENTER_LOG_FILE"] = str(log_file)
     yield
-    if "ISOCENTER_LOG_FILE" in os.environ:
-        del os.environ["ISOCENTER_LOG_FILE"]
+    if previous is None:
+        os.environ.pop("ISOCENTER_LOG_FILE", None)
+    else:
+        os.environ["ISOCENTER_LOG_FILE"] = previous
 
 
 @pytest.fixture(autouse=True)
-def _own_working_directory(request, tmp_path, monkeypatch):
+def _own_working_directory(request, tmp_path):
     """Run every test in its own `tmp_path` (#707).
 
     A relative `Session("foo.db")` used to land in the repository root,
@@ -313,10 +337,23 @@ def _own_working_directory(request, tmp_path, monkeypatch):
     root. Do not widen the opt-out to silence a failure: a test that
     breaks here was reading a file an earlier test happened to leave
     behind, and that is the defect.
+
+    `os.chdir` by hand, not `monkeypatch.chdir`: an autouse fixture that
+    requests `monkeypatch` instantiates it ahead of every autouse fixture
+    defined below this one, so its undo would run *after* their
+    teardown. `_pixel_analysis_ocr_is_not_left_replaced` then saw a
+    test's own `monkeypatch.setattr` still in place and failed it
+    (measured, `test_scan_reports_what_it_could_not_read.py`).
     """
-    if request.node.get_closest_marker("repo_root") is None:
-        monkeypatch.chdir(tmp_path)
-    yield
+    if request.node.get_closest_marker("repo_root") is not None:
+        yield
+        return
+    started = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        yield
+    finally:
+        os.chdir(started)
 
 
 @pytest.fixture(autouse=True)

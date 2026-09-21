@@ -1,6 +1,5 @@
 
 import os
-import shutil
 import pytest
 import pydicom
 from pydicom.dataset import FileDataset, FileMetaDataset
@@ -8,17 +7,11 @@ from pydicom.uid import generate_uid, ImplicitVRLittleEndian
 from isocenter.session import DicomSession
 from isocenter.io_handlers import DicomExporter
 
+# Relative to the test's own tmp_path, which is its cwd (#707). These were
+# made by a `setup_module` that ran in the repository root, outside any
+# test, while the test itself now runs elsewhere and could not find them.
 TEST_DIR = "tests_data_naming"
 EXPORT_DIR = "tests_export_naming"
-
-def setup_module():
-    if os.path.exists(TEST_DIR): shutil.rmtree(TEST_DIR)
-    if os.path.exists(EXPORT_DIR): shutil.rmtree(EXPORT_DIR)
-    os.makedirs(TEST_DIR)
-
-def teardown_module():
-    if os.path.exists(TEST_DIR): shutil.rmtree(TEST_DIR)
-    if os.path.exists(EXPORT_DIR): shutil.rmtree(EXPORT_DIR)
 
 def create_dicom(path, pid, study_desc, series_desc, modality):
     meta = FileMetaDataset()
@@ -51,6 +44,7 @@ def create_dicom(path, pid, study_desc, series_desc, modality):
 
 def test_folder_naming_structure():
     # Create a DICOM with specific descriptions
+    os.makedirs(TEST_DIR)
     dcm_path = os.path.join(TEST_DIR, "test.dcm")
     ds = create_dicom(dcm_path, "PAT001", "Brain_Scan", "Axial_T1", "MR")
 
