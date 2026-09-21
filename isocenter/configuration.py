@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import yaml
 
+from . import config_manager
 from .profiles import FLOOR_POLICY
 from .logger import describe_exception
 
@@ -96,7 +97,9 @@ class IsocenterConfiguration:
             machines_export.append(m_copy)
 
         data = {
-            "version": "2.0",
+            # The loader's constant, read at call time: one home for the
+            # number both writers stamp (#711).
+            "version": config_manager.CONFIG_VERSION,
             # The profile that actually produced these tags, so a round-trip
             # through save() does not relabel a 'basic' config. With no
             # named profile, `phi_tags` already holds the whole policy
@@ -132,16 +135,28 @@ class IsocenterConfiguration:
             manufacturer (str, optional): Metadata for reference.
             model (str, optional): Metadata for reference.
             zones (List[Any], optional): List of redaction zones (ROIs).
-        """
-        # Remove existing if any
-        self.delete_rule(serial_number)
 
+        Raises:
+            ValueError: For a rule `load_config` would refuse
+                (`ConfigLoader._validate_rule`: a serial that is not a
+                non-empty string, a metadata field that is not a string,
+                a malformed zone), before any rule or the file changes.
+        """
         new_rule = {
             "serial_number": serial_number,
             "manufacturer": manufacturer,
             "model_name": model,
             "redaction_zones": zones or []
         }
+        # Before the delete, not merely before the append: `delete_rule`
+        # auto-saves, so a refusal after it would have lost the serial's
+        # existing rule and rewritten the file (#712). The loader's own
+        # check, so this cannot store -- and auto-save -- a rule the
+        # session's next `load_config` of that file refuses.
+        config_manager.ConfigLoader._validate_rule(new_rule, len(self.rules))
+
+        # Remove existing if any
+        self.delete_rule(serial_number)
         self.rules.append(new_rule)
         self.save()
 
@@ -154,7 +169,11 @@ class IsocenterConfiguration:
             updates (Dict[str, Any]): Dictionary of fields to update.
 
         Raises:
-            ValueError: If rule is not found or if attempting to change the serial number.
+            ValueError: If rule is not found, if attempting to change the
+                serial number, or if the updated rule is one `load_config`
+                would refuse (`ConfigLoader._validate_rule`: an unknown key
+                such as `redaction_zone`, a value of the wrong type, a
+                malformed zone). Raised before the rule or the file changes.
         """
         rule = self.get_rule(serial_number)
         if not rule:
@@ -164,6 +183,13 @@ class IsocenterConfiguration:
         if "serial_number" in updates and updates["serial_number"] != serial_number:
             raise ValueError("Values for 'serial_number' cannot be changed via update_rule.")
 
+        # The rule as it would be, judged before the in-place update: the
+        # typo `{"redaction_zone": ...}` was stored and auto-saved, writing
+        # a file this session's own loader then refused (#712). Updated in
+        # place afterwards, not replaced, because `get_rule` hands out the
+        # dict itself.
+        config_manager.ConfigLoader._validate_rule(
+            {**rule, **updates}, self.rules.index(rule))
         rule.update(updates)
         self.save()
 
@@ -205,9 +231,6 @@ class IsocenterConfiguration:
                 REPLACE on a standard tag whose VR cannot hold the value).
                 Raised before the policy or its file is changed.
         """
-        # Local: config_manager imports profiles, as this module does, and
-        # is the one home of the refusal text.
-        from .config_manager import validate_phi_policy  # pylint: disable=import-outside-toplevel
         # Lowercase, as every other key in the policy is (profiles.py's
         # header comment gives the reason). This was `tag.upper()`, so
         # `set_phi_tag("0008,103e", ...)` stored `0008,103E` beside the
@@ -237,7 +260,7 @@ class IsocenterConfiguration:
         # the policy and its file as they were. This refuses an unknown
         # action too, with the loader's words; until 0.9.8 `OBLITERATE`
         # was stored and scanned as REPLACE.
-        validate_phi_policy({tag: val}, "set_phi_tag")
+        config_manager.validate_phi_policy({tag: val}, "set_phi_tag")
 
         self.phi_tags[tag] = val
         self.save()

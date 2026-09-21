@@ -5,7 +5,7 @@ from isocenter.config_manager import ConfigLoader
 
 def test_load_valid_config(tmp_path):
     data = {
-        "version": "1.0",
+        "version": "2.0",
         "machines": [{"serial_number": "SN1", "redaction_zones": []}]
     }
     p = tmp_path / "valid.yaml"

@@ -19,11 +19,14 @@ def test_zone_validation_flexible_format(tmp_path):
     # Should not crash
     ConfigLoader._validate_rule(list_zone_rule, 0)
 
-    # 2. Test Dict Format (Standard Isocenter)
+    # 2. Test Dict Format (Standard Isocenter). Its annotation key is
+    # `note`, the one the knowledge base and create_config write; this
+    # used `label`, which nothing writes or reads and the schema now
+    # refuses by name (#712).
     dict_zone_rule = {
         "serial_number": "TEST_DICT_ZONE",
         "redaction_zones": [
-            {"roi": [10, 60, 10, 60], "label": "Test Zone"}
+            {"roi": [10, 60, 10, 60], "note": "Test Zone"}
         ]
     }
     # Should not crash

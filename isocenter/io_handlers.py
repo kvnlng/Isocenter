@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1663 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1666 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1671 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1674 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why

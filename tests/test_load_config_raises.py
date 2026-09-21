@@ -22,7 +22,7 @@ import logging
 
 import pytest
 
-from isocenter.config_manager import ConfigLoader
+from isocenter.config_manager import ConfigLoader  # noqa: F401  (probe row)
 from isocenter.session import DicomSession
 
 
@@ -176,15 +176,10 @@ def test_a_valid_config_still_loads(tmp_path):
         assert c.config_path == str(config)
 
 
-def test_an_integer_date_jitter_is_still_a_fixed_shift(tmp_path):
-    """`date_jitter: 5` was accepted as a fixed shift before #456 and is
-    still: the validation rejects shapes nothing reads, not a shorthand
-    the loader already honoured. Kills an over-eager check that refuses
-    the int form."""
-    config = tmp_path / "int.yaml"
-    config.write_text("privacy_profile: basic\ndate_jitter: -5\n", encoding="utf-8")
-    tags, _, jitter, _, _ = ConfigLoader.load_unified_config(str(config))
-    assert jitter == {"min_days": -5, "max_days": -5}
+# `test_an_integer_date_jitter_is_still_a_fixed_shift` pinned `date_jitter: 5`
+# as a shorthand #456 deliberately kept. The owner deleted it before the 1.0
+# freeze (#713, ruling Q2: one spelling per behaviour), so the pin is
+# inverted in `test_config_scalar_types.py::test_an_integer_date_jitter_is_refused`.
 
 
 def test_audit_config_path_raises_the_same_way(tmp_path):

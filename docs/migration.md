@@ -130,14 +130,53 @@ The file recovers the dates of every store sharing it: keep it with the store, n
 
 **Starting a new project over another project's export.** A fresh store that ingests an export from another project, without that project's secret, generates its own secret and writes a `WARNING` row naming the pseudonyms it cannot verify: its offsets are its own, not the source project's, and intervals within each patient are kept. That is the one path for a new project. There is no override to adopt a secret into a store that has one, because that is the only guard against silently mixing two projects' offsets. If the data belongs to the existing project, load that project's secret into a fresh store before its first `audit()` and ingest the export there instead.
 
+## Configs from 0.9.x
+
+From 1.0 a configuration is read as exactly what it says: a key the schema
+does not have, a value of the wrong type, or a `version` this library does
+not read raises `ValueError` naming it, where 0.9.x loaded the file and
+ignored or misread the part it did not understand
+([#711](https://github.com/kvnlng/Isocenter/issues/711),
+[#712](https://github.com/kvnlng/Isocenter/issues/712),
+[#713](https://github.com/kvnlng/Isocenter/issues/713);
+[Configuration](configuration.md#schema-version-2) has the schema).
+
+**Files Isocenter wrote load unchanged.** Every file `create_config()` or
+an auto-save wrote in 0.9.x loads, and so does every configuration in this
+documentation. A file with no `version` line is version 2.0.
+
+**What is refused, and the fix.** Apart from the first two, each of these
+loaded in 0.9.x without meaning what it said:
+
+| 0.9.x file | Fix |
+| :--- | :--- |
+| `version: "1.0"` (the label before version 2) | write `version: "2.0"`; the content loads as before |
+| `version: 2.0` (unquoted: a YAML number) | quote it: `version: "2.0"` |
+| a misspelt key at any level (`remove_private_tag`, `redaction_zone`, `actoin`) | the refusal names it and, usually, the key you meant |
+| `machine_rules:` | rename it `machines:` |
+| an unquoted numeric serial, `serial_number: 0123` (loaded as 83) | quote it: `serial_number: "0123"` |
+| `remove_private_tags: "false"`, or a bare `remove_private_tags:` | write `true` or `false`, unquoted |
+| `date_jitter: -5` | write `date_jitter: {min_days: -5, max_days: -5}` |
+| `date_jitter` with `min_days` greater than `max_days` | put the bounds the right way round |
+| an external profile file carrying anything but `phi_tags` and `version` | move the other keys into the configuration that names the profile |
+
+A refusal changes nothing: the session's configuration is what it was
+before the call.
+
 ## Clinical Trial Processor (CTP)
 
-Isocenter includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into Isocenter's YAML configuration format.
+Isocenter includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into the CTP rule-list format (YAML), the format of the knowledge base `create_config()` matches machines against.
 
 ```bash
 # Convert CTP script to Isocenter YAML
 python -m isocenter.utils.ctp_parser /path/to/anonymizer.script output_rules.yaml
 ```
+
+Its output is the rule list the CTP knowledge base is read from (`rules:`,
+as in `isocenter/resources/ctp_rules.json`), not a configuration:
+`load_config()` refuses it, naming `rules` as an unknown key (0.9.x loaded it
+and applied none of its rules). Copy a rule you want into a configuration's
+`machines:` list, with the `serial_number` of the machine it is for.
 
 This parser extracts:
 

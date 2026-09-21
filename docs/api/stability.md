@@ -173,7 +173,9 @@ with no `privacy_profile` line extends it, and one with
 `privacy_profile: none` opts out of it. `set_phi_tag()` stores lowercase
 keys, stores `replacement` as the rule's `value`, and raises
 `ValueError`, leaving the policy and its file unchanged, for an unknown
-action or a rule `load_config` would refuse. What the floor and
+action or a rule `load_config` would refuse. `add_rule()` and
+`update_rule()` raise `ValueError`, leaving the rules and the file
+unchanged, for a machine rule `load_config` would refuse. What the floor and
 `privacy_profile: basic` contain is **not** frozen: the basic profile is
 PS3.15 Annex E Table E.1-1 of a named edition, its membership follows
 that edition, and a change to it can arrive in a minor release, listed
@@ -205,8 +207,10 @@ otherwise.
 - `generate_report()`: `ValueError` on an unknown format.
 - `load_config(config_file)` and `audit(config_path=)`: `ValueError`
   when the file fails validation — its extension, YAML syntax or shape,
-  an unknown `privacy_profile` or `action`, or a rule Isocenter cannot
-  honour ([Configuration](../configuration.md) lists them) — and
+  a `version` this library does not read, a key the schema does not
+  have, a value of the wrong type, an unknown `privacy_profile` or
+  `action`, or a rule Isocenter cannot honour
+  ([Configuration](../configuration.md) lists them) — and
   `FileNotFoundError` when it does not exist; after either, the
   configuration is exactly what it was. `audit()` without `config_path`
   raises the same `ValueError` for such a rule in
@@ -267,6 +271,9 @@ default.
   promise that no exported date is recoverable: a date tag no rule names
   is exported as ingested, and UIDs can embed dates.
 - The project secret's file format is not a data promise.
+- A configuration file that 1.0 loads, every 1.x loads and applies the
+  same way. Its schema is version 2. A 1.x adds keys and values only,
+  under a new 2.x minor, and never changes what an existing one means.
 
 **Output vocabularies.** Five separate vocabularies, not one list.
 

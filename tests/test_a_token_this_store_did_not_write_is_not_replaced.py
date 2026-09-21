@@ -615,18 +615,29 @@ def test_one_decrypt_per_distinct_token(tmp_path, monkeypatch):
 def test_redact_does_not_disturb_the_stamp(tmp_path):
     """`redact()` rewrites the instance's UID and pixels; the stamp is
     untouched, and a changed-value re-lock after it is still this
-    store's."""
-    with _session(tmp_path, KEEP_BOTH) as session:
+    store's.
+
+    Until #712 this wrote `{rules: [{name, match, zones}]}`, a schema no
+    version of the loader has had: `rules` was ignored, no rule loaded,
+    and `redact()` ran over nothing, so the stamp "survived" a redaction
+    that never happened. The rule is now a `machines:` rule on the
+    instance's own serial, with a zone that selects pixels (`[0, 4, 0, 4]`
+    is rows 0-4, columns 0-4; `[0, 0, 4, 4]` would select none), and the
+    test asserts the redaction ran before it asserts anything survived it.
+    """
+    with _session(tmp_path, KEEP_BOTH, DeviceSerialNumber="SN607") as session:
         instance = _instance(session)
         session.lock_identities(PID, tags_to_lock=TAGS)
         before = instance._locked_token
+        uid_before = instance.sop_instance_uid
         cfg = tmp_path / "redact.yaml"
-        cfg.write_text(yaml.safe_dump({"rules": [{"name": "r", "match": {"modality": "CT"},
-                                                  "zones": [[0, 0, 4, 4]]}]}),
-                       encoding="utf-8")
+        cfg.write_text(yaml.safe_dump({"machines": [
+            {"serial_number": "SN607", "redaction_zones": [[0, 4, 0, 4]]}]}),
+            encoding="utf-8")
         session.load_config(str(cfg))
-        session.redact()
+        assert session.redact() == 1
         instance = _instance(session)
+        assert instance.sop_instance_uid != uid_before
         assert instance._locked_token == before
         instance.set_attr("0010,0010", "CHANGED^Value")
         session.lock_identities(PID, tags_to_lock=TAGS)
