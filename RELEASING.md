@@ -66,6 +66,49 @@ never collide, so `git checkout v0.9.8` always means the published commit.
 
    **The full suite is not a merge requirement.** It runs before a merge
    only when the rules above select it.
+
+   **A change that alters exported output updates the output fingerprint
+   in the same PR.** `fingerprint/output.json` records what the golden
+   cohort exports (`scripts/output_fingerprint.py` says what it covers
+   and what it deliberately leaves out). If the change is meant to alter
+   what `export()` writes, or might, then after the tests above:
+   - **Check**, on 3.12:
+     `python -m scripts.output_fingerprint check --jobs 4 --report fp-3.12.txt; echo "exit=$?"`.
+     Exit 0 is no difference, 1 is a difference, 2 means nothing was
+     measured and is never a pass. Every difference it reports is either
+     a defect in the change, fixed before going on, or intended.
+   - **Retake**, for an intended difference, on 3.12:
+     `python -m scripts.output_fingerprint take --out fingerprint/output.json --jobs 4`.
+   - **Confirm** on 3.14t:
+     `python -m scripts.output_fingerprint check --jobs 4; echo "exit=$?"`
+     must report **no difference** (exit 0). The two interpreters are two
+     observations of one recording, never two recordings.
+   - **Name it.** Commit the file, and name every group the check's
+     report lists in the change's `CHANGELOG.md` entry, in a line
+     beginning `**Output:**` that says what changed and why. A difference
+     caused only by a dependency upgrade is named the same way, with the
+     dependency and its version.
+   - **Paste** the check's grouped sections, and both runs' command, SHA,
+     last line and exit status, into the PR body.
+
+   If the change affects output that no cohort member reaches, add a
+   member (`scripts/golden_cohort.py`) in the same PR, so the change is
+   visible from then on. A member is never removed, and its committed
+   bytes never rebuilt, to make a difference go away. `take` and `check`
+   need pydicom's external test data, fetched once per machine:
+   `python -c "import pydicom.data; pydicom.data.fetch_data_files()"`.
+   Each takes about ten minutes at `--jobs 4` on a 14-core machine. To
+   run one in parts, `--members 'pydicom:*'`, `--members 'pydicom-data:*'`
+   and `--members 'synthetic:*'` together cover every member: three
+   `check`s, or three `take`s joined by
+   `python -m scripts.output_fingerprint merge --out fingerprint/output.json PART...`,
+   which refuses parts that are not exactly the whole cohort.
+
+   `fingerprint/output.json` is generated. **Never resolve a conflict in
+   it by hand:** rebase, take it again, and check again. The reviewer
+   checks that the file at the SHA under review is what `take` produces
+   at that SHA, and that every group in the report is named by an
+   `**Output:**` line.
 4. Open a pull request into the target branch.
 5. An adversarial reviewer reviews the tests and the code **as rebased on
    the current tip of the target branch**. A conflict with work merged since the branch was cut,
@@ -110,6 +153,40 @@ fixes, never features.
    meets the whole suite. A failure is fixed on `main` by the procedure
    above, and step 1 starts again at the new commit. (A patch release skips
    this step; its integration test is step 3's run.)
+
+   Also run `python -m scripts.output_fingerprint check --jobs 4 --report
+   fp-X.Y.Z-<interpreter>.txt; echo "exit=$?"` on **3.12 and 3.14t** at
+   that SHA. Both must report **no difference**. A difference is a change
+   that reached `main` without updating the fingerprint: it is fixed on
+   `main` by the procedure above -- the output is put back, or the
+   fingerprint update and its `**Output:**` line are added in a PR -- and
+   step 1 starts again, in full, at the new commit. Exit 2 measured
+   nothing; it is not a pass. `check` needs pydicom's external test data:
+   `python -c "import pydicom.data; pydicom.data.fetch_data_files()"`
+   once per machine.
+
+   Then compare the tracked fingerprint with the previous release's.
+   First `git fetch --tags origin`: `previous-tag` refuses when origin has
+   a newer `v*` tag than the clone. Then
+   `python -m scripts.output_fingerprint compare --base vP.Q.R --report fp-since-vP.Q.R.txt`,
+   where vP.Q.R is what `python -m scripts.output_fingerprint previous-tag`
+   prints: the highest `v*` tag in the repository by version order, **a
+   pre-release tag included** (`v1.0.0` compares with `v1.0.0rc1`, so an
+   output fix made after the candidate is named). By version order, not
+   by what the commit reaches: release tags sit on `release/X.Y`, and
+   `main` reaches none of them. **Every group it reports must be named by
+   an `**Output:**` line under `[Unreleased]`.** A group no line names
+   stops the release until one does (a `CHANGELOG.md` PR into `main`;
+   step 1 starts again). The Toolchain section needs no entry, and
+   neither does the Cohort section: a changed input, configuration or
+   recorder is a changed measuring stick, not changed output. Output
+   groups that coincide with a changed measuring stick (the report's
+   header says so) still need a line, which may say they are the
+   stick's. This comparison does not apply only when vP.Q.R is below
+   `v1.0.0rc1`, the first release to carry `fingerprint/output.json`
+   (`compare --base` exits 2 saying "does not apply"). Any other exit 2
+   -- a tag this clone does not have, or a release from `v1.0.0rc1` on
+   without the file -- stops the release until it is resolved.
 2. **Cut the branch:** `git switch -c release/X.Y <sha>`, then
    `git push -u origin release/X.Y`. For a patch to an existing line, see
    below instead.
@@ -125,8 +202,14 @@ fixes, never features.
 
    Run the full suite on both interpreters at this commit
    (`tests/test_version_contract.py` checks that the three files agree).
-   For a patch release this run is the integration test. A failure here is
-   fixed on `release/X.Y` by the patch procedure below -- and forward-ported
+   For a patch release this run is the integration test, **and the two
+   fingerprint comparisons of step 1 are made at this commit**:
+   `python -m scripts.output_fingerprint check` on both interpreters, then
+   `compare --base` the line's previous tag, which
+   `python -m scripts.output_fingerprint previous-tag --line X.Y` prints.
+   The fingerprint is not rewritten at release:
+   `git show vX.Y.Z:fingerprint/output.json` is the release's fingerprint.
+   A failure here is fixed on `release/X.Y` by the patch procedure below -- and forward-ported
    -- and the release commit is made again on top of the fix.
    Open it as a PR into `release/X.Y`, have it reviewed, and merge it the
    same way as any other PR.

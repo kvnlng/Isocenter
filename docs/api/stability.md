@@ -240,6 +240,9 @@ default.
 
 **Data promises.**
 
+- For the same input, configuration and project secret, a 1.x release
+  exports what the previous release exported, or its changelog says
+  what changed.
 - A store written by 1.0 opens under every 1.x. The sidecar and schema
   *layout* are not frozen; their forward compatibility is.
 - A DICOM file exported with reversible anonymization by 1.0 is
