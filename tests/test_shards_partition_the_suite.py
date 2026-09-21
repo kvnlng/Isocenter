@@ -114,3 +114,26 @@ def test_a_collected_file_outside_the_partition_is_refused(tmp_path):
         cwd=proj, capture_output=True, text=True, timeout=300)
     assert out.returncode == 4, out.stdout + out.stderr
     assert "extra/test_outside.py" in out.stdout + out.stderr
+
+
+def test_the_gate_workflow_runs_every_shard_it_divides_into():
+    import re
+    import yaml
+    workflow = yaml.safe_load(
+        (REPO / ".github" / "workflows" / "tests.yml").read_text("utf-8"))
+    job = workflow["jobs"]["test"]
+    listed = job["strategy"]["matrix"]["shard"]
+    run = next(s for s in job["steps"] if s.get("id") == "suite")["run"]
+    match = re.search(r"--shard=\$\{\{ matrix\.shard \}\}/(\d+)", run)
+    assert match, f"the Run Tests step does not pass --shard: {run!r}"
+    count = int(match.group(1))
+    assert listed == list(range(1, count + 1)), (
+        f"tests.yml divides the suite into {count} shards and runs "
+        f"{listed}: every shard not listed is a part of the suite "
+        "that no job runs, behind a green check")
+    # The summary line is what names a red shard in the release matrix's
+    # table; one that omits the shard reports four lines per version
+    # nobody can tell apart.
+    summary = next(s for s in job["steps"]
+                   if "GITHUB_STEP_SUMMARY" in s.get("run", ""))["run"]
+    assert f"shard ${{{{ matrix.shard }}}}/{count}" in summary, summary

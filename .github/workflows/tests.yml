@@ -1,25 +1,15 @@
 name: Isocenter Tests
 
 on:
-  # Post-merge verification only. Without the branch filter this also fires
-  # on every push to a PR branch, producing a second, duplicate run whose
-  # check contexts share the names `main` requires -- ambiguous for branch
-  # protection and twice the CI cost.
-  #
-  # This is not redundant with the pull_request run even though `strict`
-  # branch protection means they test the same tree: `--admin` merges
-  # bypass `strict`, and then this is the only thing that tests what
-  # actually landed.
-  # push:
-  #  branches:
-  #    - main
-  # Deliberately NOT path-filtered. `main` requires these checks, and a
-  # required check that never runs leaves a PR blocked forever "waiting
-  # for status" rather than failing. Every PR into main runs the suite,
-  # whatever it touches.
-  # pull_request:
-  #  branches:
-  #    - main
+  # No push or pull_request trigger (#704; RELEASING.md, "Changes land on
+  # `main`"). `main` has no required status checks: a change merges on
+  # the local runs step 3 prescribes and an adversarial review, and the
+  # full suite is the integration test when a release is cut. This
+  # workflow runs on a hand dispatch, which is information and gates
+  # nothing, and when publish.yml calls it, where `test-floor` blocks the
+  # upload. The comments that stood here until #707 argued for a branch
+  # filter and against path-filtering a *required* check; both described
+  # a gate that no longer exists.
   workflow_dispatch:
   # Called by publish.yml, which runs the full version matrix at release
   # time. The gate below is deliberately narrow; the breadth lives there.
@@ -43,11 +33,12 @@ concurrency:
   # `test-supported` loses, `test-floor` passes, and a release goes out
   # having run half the matrix behind a green check.
   #
-  # The version list discriminates the two calls. It is empty on push and
-  # pull_request, where `inputs` does not exist, so the PR gate keeps its
+  # The version list discriminates the two calls. It is empty on a hand
+  # dispatch, where `inputs` does not exist, so a dispatched run keeps its
   # own single group.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.python-versions || 'gate' }}
-  # Superseding a stale PR push is worth cancelling for. A release's
+  # Superseding a stale dispatch on the same ref is worth cancelling
+  # for. A release's
   # matrix is not: publish.yml sets cancel-in-progress: false so an
   # upload cannot be interrupted, and a called workflow that cancels
   # anyway would defeat that from one level down.
@@ -82,6 +73,22 @@ jobs:
         # publish.yml after 30 runs of the four-way matrix produced zero
         # divergences that were not step timeouts.
         python-version: ${{ fromJSON(inputs.python-versions || '["3.12", "3.14t"]') }}
+        # Four duration-balanced shards per version (#707). Four because
+        # the release runs four versions: 16 jobs stays under the plan's
+        # 20-job concurrency limit. Membership is a pure function of
+        # tests/shard_timings.json (tests/support/shards.py), and
+        # tests/test_shards_partition_the_suite.py pins that this list is
+        # exactly 1..N for the N the run step divides by -- a shard left
+        # off this list is a quarter of the suite nobody runs, and green.
+        # A test file added after the timings were recorded weighs the
+        # median and still lands in exactly one shard. Regenerate the
+        # timings on 3.12 with `--record-shard-timings=<abs path>` when the
+        # balance drifts; drift costs wall time, never a test.
+        #
+        # The concurrency group above needs no shard in it: it is declared
+        # at workflow level, so it scopes the run, and matrix jobs inside
+        # one run do not compete for it.
+        shard: [1, 2, 3, 4]
     # Backstop only, against what no step timeout covers -- it must exceed
     # the SUM of the step allowances below, or some step's own timeout
     # becomes unreachable and a hang there dies as 'cancelled' with no
@@ -177,7 +184,7 @@ jobs:
       # (300 s) stays under half of this.
       timeout-minutes: 75
       run: |
-        pytest -v
+        pytest -v --shard=${{ matrix.shard }}/4
       env:
         # Derived from the version rather than carried in a parallel
         # `include:` block, so adding a version to the matrix cannot
@@ -203,6 +210,6 @@ jobs:
       run: |
         outcome="${{ steps.suite.outcome }}"
         [ "$outcome" = "success" ] && mark="pass" || mark="**$outcome**"
-        echo "- Python ${{ matrix.python-version }} (GIL=${{ endsWith(matrix.python-version, 't') && '0' || '1' }}): $mark" \
+        echo "- Python ${{ matrix.python-version }} (GIL=${{ endsWith(matrix.python-version, 't') && '0' || '1' }}) shard ${{ matrix.shard }}/4: $mark" \
           >> "$GITHUB_STEP_SUMMARY"
 
