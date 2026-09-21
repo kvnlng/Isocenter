@@ -375,6 +375,26 @@ def test_add_rule_refusing_a_replacement_keeps_the_rule_it_would_replace(tmp_pat
     assert path.read_bytes() == bytes_before
 
 
+def test_add_rule_that_passes_still_replaces_the_serials_rule(tmp_path):
+    """The delete moved below the validation still runs: a valid
+    `add_rule` for a serial that has a rule replaces it rather than adding
+    a second. Kills the moved `delete_rule` call deleted (a probe survivor
+    on this branch before this test)."""
+    configuration, _ = _configuration_with_a_rule(tmp_path)
+    configuration.add_rule("SN1", zones=[[0, 8, 0, 8]])
+    assert [r["redaction_zones"] for r in configuration.rules] == [[[0, 8, 0, 8]]]
+
+
+def test_update_rule_still_refuses_a_serial_change(tmp_path):
+    """The guard ahead of the new validation. Kills it inverted or
+    deleted (a probe survivor on this branch before this test)."""
+    configuration, _ = _configuration_with_a_rule(tmp_path)
+    with pytest.raises(ValueError, match="cannot be changed"):
+        configuration.update_rule("SN1", {"serial_number": "SN2"})
+    configuration.update_rule("SN1", {"serial_number": "SN1", "model_name": "M"})
+    assert configuration.get_rule("SN1")["model_name"] == "M"
+
+
 # --- The convenience loader -----------------------------------------------
 
 
