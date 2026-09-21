@@ -9,7 +9,7 @@ This file allows you to define a reproducible privacy policy that can be shared 
 | Section | Description |
 | :--- | :--- |
 | **[version](#schema-version-2)** | The schema version, `"2.0"`. Optional; a file without it is version 2.0. |
-| **[privacy_profile](#privacy-profile)** | Base set of rules: "basic", "none", or a path to a YAML profile. |
+| **[privacy_profile](#privacy-profile)** | Base set of rules: "basic@2026c" (or its short form "basic"), "none", or a path to a YAML profile. |
 | **[date_jitter](#date-jitter)** | Randomly shifts dates to preserve intervals while hiding exact dates. |
 | **[remove_private_tags](#private-tags)** | Removes vendor-specific private tags (odd groups). |
 | **[phi_tags](#phi-tags)** | Overrides or adds specific tag rules, keyed by quoted `"gggg,eeee"` hex (e.g., `"0010,0010"` for Patient's Name). |
@@ -26,8 +26,9 @@ Save this as `isocenter_config.yaml`:
 version: "2.0"
 
 # 1. Privacy Profile (Base Rules)
-# Options: "basic", "none", or path to external YAML
-privacy_profile: "basic"
+# Options: "basic@2026c" ("basic" is its short form), "none", or path to
+# external YAML
+privacy_profile: "basic@2026c"
 
 # 2. Date Jitter
 # Range for the per-patient date shift, applied to every tag whose rule
@@ -82,7 +83,7 @@ file did not say.
 | Level | Key | Type |
 | :--- | :--- | :--- |
 | top level | `version` | a quoted `"MAJOR.MINOR"` string: `"2.0"` |
-| top level | `privacy_profile` | `"basic"`, `"none"`, or a path to a profile file |
+| top level | `privacy_profile` | `"basic@2026c"` or `"basic"`, `"none"`, or a path to a profile file |
 | top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag to rule |
 | top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` |
 | top level | `remove_private_tags` | `true` or `false` (unquoted) |
@@ -125,22 +126,24 @@ and such a file loads unchanged as `"2.0"`.
 Sets the baseline rules that `phi_tags` then extends or overrides.
 
 ```yaml
-privacy_profile: "basic"
+privacy_profile: "basic@2026c"
 ```
 
-* **`basic`**: The Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c** (`BASIC_PROFILE` in `isocenter/profiles.py`, 620 tag rules). Each row maps to a rule: `X` removes the attribute; `Z`, and any code that allows zero length (`X/Z`, `Z/D`, `X/Z/D`), empties it, so a Type 2 attribute stays present; `D` empties it too. Isocenter has no dummy-value action yet ([#557](https://github.com/kvnlng/Isocenter/issues/557)), so an attribute that is Type 1 in its IOD (for example Verifying Observer Name in a Structured Report) is written zero-length, which makes that file non-conformant. A rule on a sequence removes the sequence, or empties it to zero items; identifiers nested inside any sequence are handled wherever they sit. It is **not** the whole of Annex E:
+**A built-in profile's name is pinned to the PS3.15 edition its table was taken from** ([#714](https://github.com/kvnlng/Isocenter/issues/714)). `basic@2026c` is the name, and a bare `basic` means `basic@2026c` in every 1.x: both load the same rules, and `session.configuration.privacy_profile` holds `"basic@2026c"` after either, so `save()` writes the pinned name back. `create_config()` writes it. A later PS3.15 edition arrives in a minor release as a new name, under a new configuration schema minor, never as a new meaning for this one. A name is looked up exactly (`Basic` and `basic@2026C` are refused), and a value containing `@` that this version does not ship raises `ValueError` saying which names it ships; such a value is never read as a file path.
+
+* **`basic@2026c`** (short form **`basic`**): The Basic Profile column of *DICOM PS3.15 Annex E, Table E.1-1*, **edition 2026c** (`BASIC_PROFILE` in `isocenter/profiles.py`, 620 tag rules). Each row maps to a rule: `X` removes the attribute; `Z`, and any code that allows zero length (`X/Z`, `Z/D`, `X/Z/D`), empties it, so a Type 2 attribute stays present; `D` empties it too. Isocenter has no dummy-value action yet ([#557](https://github.com/kvnlng/Isocenter/issues/557)), so an attribute that is Type 1 in its IOD (for example Verifying Observer Name in a Structured Report) is written zero-length, which makes that file non-conformant. A rule on a sequence removes the sequence, or empties it to zero items; identifiers nested inside any sequence are handled wherever they sit. It is **not** the whole of Annex E:
     * **UIDs are not replaced** ([#544](https://github.com/kvnlng/Isocenter/issues/544)). Study, Series and SOP Instance UIDs are exported as they were ingested (a redacted instance gets a new SOP Instance UID, and references to it are not updated), so an export can be linked back to its source by anyone who can see the source UIDs. The table's `U` rows have no rule.
     * Patient Identity Removed `(0012,0062)`, De-identification Method `(0012,0063)` and Longitudinal Temporal Information Modified `(0028,0303)` are not written ([#554](https://github.com/kvnlng/Isocenter/issues/554)).
     * Patient's Name and Patient ID are `REPLACE` rather than the table's `Z`: the name becomes `ANONYMIZED`, a dummy `Z` permits, and the ID becomes the keyed `ANON_` pseudonym, because a Patient ID rule may not empty or remove it ([#537](https://github.com/kvnlng/Isocenter/issues/537)). Study Date follows the table and is exported zero-length; the floor shifts it instead.
     * Deliberate departures from the table: Study and Series Description are emptied rather than removed, because the export directory names read them. Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned, and an icon is dropped when its pixels may show what redaction removed, in two tiers ([#542](https://github.com/kvnlng/Isocenter/issues/542)): an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a *different* instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export. The retired Curve groups `(50xx)` are not removed, and removing Overlay Data `(60xx,3000)` leaves the rest of its Overlay Plane module ([#556](https://github.com/kvnlng/Isocenter/issues/556)). Isocenter's own redaction note in Derivation Description `(0008,2111)` is kept; any other Derivation Description is removed. Private attributes are the `remove_private_tags` sweep, not a rule.
 
-    The table removes or empties attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them `action: "KEEP"` to retain it. Membership follows the named edition and can change in a minor release; such a change is listed under **Breaking** in the changelog. A store anonymized under 0.9.7's 35-rule profile still reads as anonymized: run `audit()` and then `anonymize()` on it before exporting again ([#555](https://github.com/kvnlng/Isocenter/issues/555)). That removes what 0.9.8 removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source restores them.
+    The table removes or empties attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them `action: "KEEP"` to retain it. What `basic@2026c` contains is frozen for every 1.x: the rules 1.0 ships under it, which are the table, this mapping and these departures. The one exception is a row the published 2026c standard shows was transcribed wrongly, which a 1.x may correct as a **Breaking** changelog entry quoting the standard's row; anything else is a new name. A store anonymized under 0.9.7's 35-rule profile still reads as anonymized: run `audit()` and then `anonymize()` on it before exporting again ([#555](https://github.com/kvnlng/Isocenter/issues/555)). That removes what 0.9.8 removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source restores them.
 * **`none`**: No base. The file's `phi_tags` are the whole policy.
 * **External File**: You can provide a path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) to inherit its rules. That file carries its rules under a `phi_tags:` mapping and nothing else, beside an optional `version`; any other key raises `ValueError` naming it ([#712](https://github.com/kvnlng/Isocenter/issues/712)). A profile file contributes only its `phi_tags`, so a `privacy_profile: basic` or `remove_private_tags:` line inside it would be ignored, and is refused instead: a configuration is not a profile. A bare tag map at its root raises `ValueError` too, because the root used to be read as the tags and a profile written like a config then loaded `privacy_profile` itself as a "tag".
 
 Any other value is refused: `load_config()` raises `ValueError` naming it. (These docs once offered a `comprehensive` profile, which never existed; loading it warned and applied no base.)
 
-A session that has loaded no configuration applies the **floor policy**, `FLOOR_POLICY` in `isocenter/profiles.py`: the basic profile with three of its rules changed by the research defaults `create_config()` writes (Study Date jittered, Patient's Sex and Age kept): 620 rules.
+A session that has loaded no configuration applies the **floor policy**, `FLOOR_POLICY` in `isocenter/profiles.py`: `basic@2026c` with three of its rules changed by the research defaults `create_config()` writes (Study Date jittered, Patient's Sex and Age kept): 620 rules. The floor is built on `basic@2026c` in every 1.x. The compliance report says so (`None (session defaults: the floor policy over basic@2026c)`), and says `None (privacy_profile: none)` for a session that opted out.
 
 **Omitting `privacy_profile` means the floor beneath your `phi_tags`.** A file with a few tags and no profile line extends the floor rather than replacing it, so a one-tag config cannot switch the floor off by accident. To opt a single tag out, give it `action: "KEEP"`; to opt out of the floor entirely, write `privacy_profile: "none"`.
 

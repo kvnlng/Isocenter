@@ -2,8 +2,10 @@
 # ==========================================
 #
 #
-# privacy_profile: "basic"
-#   - Standard profile handling common PHI (Name, ID, etc).
+# privacy_profile: "basic@2026c"
+#   - The DICOM PS3.15 Annex E Basic Profile, Table E.1-1 of edition 2026c.
+#   - The name is pinned to its edition: "basic" means "basic@2026c" in
+#     every 1.x, and a later edition arrives as a new name.
 #   - Omit the line to apply the floor policy beneath your phi_tags.
 #   - Set to "none" for manual control: phi_tags is the whole policy.
 #
@@ -20,7 +22,7 @@
 #
 
 version: '2.0'
-privacy_profile: basic
+privacy_profile: basic@2026c
 phi_tags:
   0008,0020:
     action: JITTER

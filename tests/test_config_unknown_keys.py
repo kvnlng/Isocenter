@@ -104,7 +104,7 @@ def test_a_file_carrying_every_top_level_key_loads(tmp_path):
         "date_jitter: {min_days: -30, max_days: -10}\n"
         "remove_private_tags: false\n"
         "machines:\n  - serial_number: SN-1\n    redaction_zones: [[0, 10, 0, 20]]\n")
-    assert profile == "basic"
+    assert profile == "basic@2026c"
     assert tags["0018,1030"] == {"action": "REMOVE", "name": "Protocol"}
     assert rules[0]["serial_number"] == "SN-1"
     assert jitter == {"min_days": -30, "max_days": -10}

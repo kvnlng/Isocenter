@@ -16,7 +16,7 @@ from typing import Dict, Any, List, Optional
 import re
 import yaml
 
-from .profiles import FLOOR_POLICY, PRIVACY_PROFILES
+from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 
 #: The schema version both writers stamp (`IsocenterConfiguration.save()`
 #: and `Session.create_config()`, which read it at call time rather than
@@ -776,6 +776,19 @@ def load_unified_config(path: str) -> Dict[str, Any]:
         ValueError: If the file is not YAML, or fails any check above or
             in the `phi_tags` and profile validation below.
     """
+    return _loaded_unified_config(path)[0]
+
+
+def _loaded_unified_config(path: str):
+    """`load_unified_config`'s body: the configuration and its policy base.
+
+    The base is what the policy was built on -- a built-in profile's pinned
+    name, an external profile's path, `profiles.FLOOR` for a file with no
+    `privacy_profile` line, or None for `privacy_profile: none` (and for an
+    external profile that contributed no rules). Returned beside the dict
+    rather than stored in it, so the floor's sentinel never becomes a
+    value of a configuration mapping (#714).
+    """
     if not (path.endswith('.yaml') or path.endswith('.yml')):
         raise ValueError("Configuration file must be a YAML file (.yaml or .yml)")
 
@@ -802,10 +815,22 @@ def load_unified_config(path: str) -> Dict[str, Any]:
         return _resolved_policy(config, path)
 
 
-def _resolved_policy(config: Dict[str, Any], path: str) -> Dict[str, Any]:
+def _unshipped_profile_refusal(profile_name: str, path: str) -> ValueError:
+    """The refusal for a `privacy_profile` holding `@` that names no
+    profile this version ships (#714)."""
+    aliases = ", ".join(f"{alias!r} means {pinned}"
+                        for alias, pinned in sorted(PROFILE_ALIASES.items()))
+    return ValueError(
+        f"{path}: privacy_profile {profile_name!r} is not a profile this "
+        f"isocenter ships; it ships {', '.join(sorted(PRIVACY_PROFILES))} "
+        f"({aliases}). A later PS3.15 edition arrives as a new name in a "
+        f"newer isocenter (#714)")
+
+
+def _resolved_policy(config: Dict[str, Any], path: str):
     """`config` with `phi_tags` validated and merged over its profile (or
-    the floor); the body of `load_unified_config` after the top-level
-    checks."""
+    the floor), and the policy base (`_loaded_unified_config`); the body of
+    `load_unified_config` after the top-level checks."""
     # Validated, and lowercased, before anything is merged. The profiles'
     # keys are lowercase (profiles.py's header comment), so a user's
     # `0008,103E` merged as spelled sat beside the profile's `0008,103e`
@@ -820,7 +845,7 @@ def _resolved_policy(config: Dict[str, Any], path: str) -> Dict[str, Any]:
     # warned "Unknown privacy profile" and loaded nothing until #495.
     if "privacy_profile" in config and _names_no_profile(config["privacy_profile"]):
         config.pop("privacy_profile")
-        return config
+        return config, None
 
     # No `privacy_profile` line: the floor policy beneath the file's tags
     # (#495). A loaded config extends or overrides
@@ -837,49 +862,68 @@ def _resolved_policy(config: Dict[str, Any], path: str) -> Dict[str, Any]:
             "only the file's own tags.", path, len(floor), len(config["phi_tags"]))
         floor.update(config["phi_tags"])
         config["phi_tags"] = floor
-        return config
+        return config, FLOOR
 
     # Merge Privacy Profile
-    if "privacy_profile" in config:
-        profile_name = config["privacy_profile"]
+    profile_name = config["privacy_profile"]
+    # Exactly as spelled: no case-folding and no stripping, so `Basic` and
+    # `basic@2026c ` are refused rather than read as a name they resemble.
+    pinned = (PROFILE_ALIASES.get(profile_name, profile_name)
+              if isinstance(profile_name, str) else None)
 
-        profile_rules = {}
+    # 1. Built-in profiles, by pinned name or by a bare alias (#714). The
+    # configuration records the pinned name, not the spelling: it is the
+    # table that ran, and `save()` writes it back.
+    if pinned in PRIVACY_PROFILES:
+        profile_rules = copy.deepcopy(PRIVACY_PROFILES[pinned])
+        config["privacy_profile"] = pinned
+        edition = pinned.partition("@")[2]
+        meaning = (f"; {profile_name!r} means {pinned} in every 1.x"
+                   if profile_name != pinned else "")
+        get_logger().info(
+            "Loaded built-in privacy profile '%s' (PS3.15 edition %s) with "
+            "%d rules%s.", pinned, edition, len(profile_rules), meaning)
 
-        # 1. Check Built-in Profiles
-        if isinstance(profile_name, str) and profile_name in PRIVACY_PROFILES:
-            profile_rules = copy.deepcopy(PRIVACY_PROFILES[profile_name])
-            get_logger().info("Loaded built-in privacy profile '%s' with %d rules.", profile_name, len(profile_rules))
+    # 2. Any other value holding `@` is a profile name this version does
+    # not ship, and is never tried as a path. Checked before `isfile`, and
+    # on `@` alone rather than a grammar: otherwise a file named
+    # `basic@2027a` in the working directory turns a refused edition into
+    # a silently loaded external profile, and a grammar narrower than `@`
+    # reopens that for the next name it does not match (#714).
+    elif isinstance(profile_name, str) and "@" in profile_name:
+        raise _unshipped_profile_refusal(profile_name, path)
 
-        # 2. Check External File (Custom Profile). Its failures propagate:
-        # this logged "Failed to load custom profile" and carried on with
-        # no profile, which is #456's silence one file further out.
-        elif isinstance(profile_name, str) and os.path.isfile(profile_name):
-            profile_rules = _external_profile_tags(profile_name)
-            get_logger().info("Loaded custom privacy profile from '%s' with %d rules.", profile_name, len(profile_rules))
+    # 3. External File (Custom Profile). Its failures propagate: this
+    # logged "Failed to load custom profile" and carried on with no
+    # profile, which is #456's silence one file further out.
+    elif isinstance(profile_name, str) and os.path.isfile(profile_name):
+        profile_rules = _external_profile_tags(profile_name)
+        get_logger().info("Loaded custom privacy profile from '%s' with %d rules.", profile_name, len(profile_rules))
 
-        else:
-            # A misspelt profile is refused, not warned about and dropped
-            # (#456): the drop loaded the file's own tags with no base
-            # beneath them, a policy nobody wrote, behind a warning in
-            # front of a run that then succeeded. `comprehensive`, which
-            # README and docs/configuration.md offered, never existed and
-            # took this path.
-            raise ValueError(
-                f"{path}: privacy_profile {profile_name!r} is neither a "
-                f"built-in profile ({', '.join(sorted(PRIVACY_PROFILES))}), "
-                f"'none', nor an existing file")
+    else:
+        # A misspelt profile is refused, not warned about and dropped
+        # (#456): the drop loaded the file's own tags with no base
+        # beneath them, a policy nobody wrote, behind a warning in
+        # front of a run that then succeeded. `comprehensive`, which
+        # README and docs/configuration.md offered, never existed and
+        # took this path.
+        known = sorted(set(PRIVACY_PROFILES) | set(PROFILE_ALIASES))
+        raise ValueError(
+            f"{path}: privacy_profile {profile_name!r} is neither a "
+            f"built-in profile ({', '.join(known)}), "
+            f"'none', nor an existing file")
 
-        if not profile_rules:
-            # An external profile with no tags contributed nothing; naming
-            # it would let the compliance report describe protection that
-            # never ran.
-            config.pop("privacy_profile", None)
+    if not profile_rules:
+        # An external profile with no tags contributed nothing; naming
+        # it would let the compliance report describe protection that
+        # never ran.
+        config.pop("privacy_profile", None)
 
-        # User rules override profile rules
-        profile_rules.update(config["phi_tags"])
-        config["phi_tags"] = profile_rules
+    # User rules override profile rules
+    profile_rules.update(config["phi_tags"])
+    config["phi_tags"] = profile_rules
 
-    return config
+    return config, config.get("privacy_profile")
 
 
 class ConfigLoader:
@@ -913,23 +957,27 @@ class ConfigLoader:
 
         Returns:
             tuple: (phi_tags, machine_rules, date_jitter_config,
-            remove_private_tags, privacy_profile). The last element is the
-            name of the profile whose rules were merged, or None -- an
-            unknown reference resolves to None rather than to its own name,
-            because it contributed nothing.
+            remove_private_tags, policy_base). The last element is what
+            the policy was built on (#714): a built-in profile's pinned
+            name (`basic@2026c`, also when the file said `basic`), an
+            external profile's path, `profiles.FLOOR` -- an object,
+            compared with `is` -- for a file with no `privacy_profile`
+            line, or None for `privacy_profile: none` and for an external
+            profile that contributed no rules.
         """
         # The version, the top-level keys, the phi_tags and the profile.
-        data = load_unified_config(filepath)
+        data, base = _loaded_unified_config(filepath)
         # Already checked; read again only for the newer-minor note on the
         # refusals below, which a newer minor can reach too (a key inside
         # a rule, a new value).
         with _noting_a_newer_minor(_declared_version(data, filepath), filepath):
-            return ConfigLoader._checked_parts(data, filepath)
+            return ConfigLoader._checked_parts(data, filepath, base)
 
     @staticmethod
     def _checked_parts(
-            data: Dict[str, Any], filepath: str) -> tuple[Dict[str, Any], List[Dict[str, Any]],
-                                                          Dict[str, Any], bool, Optional[str]]:
+            data: Dict[str, Any], filepath: str,
+            base: Any) -> tuple[Dict[str, Any], List[Dict[str, Any]],
+                                Dict[str, Any], bool, Any]:
         """The rest of `load_unified_config`: the merged policy judged, the
         machines, `date_jitter` and `remove_private_tags` checked."""
         # Everything below validates before it returns, and `load_config`
@@ -1018,7 +1066,7 @@ class ConfigLoader:
             ConfigLoader._validate_rule(rule, i)
 
         return (phi_tags, machine_rules, date_jitter_config,
-                remove_private_tags, data.get("privacy_profile"))
+                remove_private_tags, base)
 
     @staticmethod
     def load_redaction_rules(filepath: str) -> List[Dict[str, Any]]:

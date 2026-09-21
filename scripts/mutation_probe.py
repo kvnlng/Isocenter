@@ -266,6 +266,7 @@ TARGETS = {
                                      "tests/test_documented_zones_are_zone_space.py",
                                      "tests/test_floor_policy.py",
                                      "tests/test_load_config_raises.py",
+                                     "tests/test_profile_editions.py",
                                      "tests/test_profiles.py",
                                      "tests/test_scaffold_features.py",
                                      "tests/test_shipped_resource_is_required.py",
@@ -281,6 +282,11 @@ TARGETS = {
                                     "tests/test_configuration_persistence.py",
                                     "tests/test_documented_zones_are_zone_space.py",
                                     "tests/test_floor_policy.py",
+                                    # A hand extra (#714): it reaches the
+                                    # module through `Session`, which the
+                                    # scan cannot see, and is what holds
+                                    # `_floor` and `_policy_base`.
+                                    "tests/test_profile_editions.py",
                                     "tests/test_redaction_export.py"], 30),
     # 45 sites, exhaustive: 45 killed. Six files, 18s per pass (3.12.14).
     #
@@ -848,6 +854,7 @@ TARGETS = {
                               "tests/test_private_tag_export.py",
                               "tests/test_private_tag_reload.py",
                               "tests/test_private_tag_vr_roundtrip.py",
+                              "tests/test_profile_editions.py",
                               "tests/test_profile_end_to_end.py",
                               "tests/test_query_export.py",
                               "tests/test_readback_label_admissibility.py",

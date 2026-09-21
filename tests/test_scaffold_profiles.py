@@ -22,7 +22,7 @@ def test_scaffold_generates_basic_profile(tmp_path):
             data = yaml.safe_load(f)
 
         # Check Profile
-        assert data.get("privacy_profile") == "basic"
+        assert data.get("privacy_profile") == "basic@2026c"
 
         # Check PHI Tags (Should ONLY be overrides, not the full list)
         tags = data.get("phi_tags", {})

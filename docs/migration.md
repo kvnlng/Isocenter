@@ -143,7 +143,11 @@ ignored or misread the part it did not understand
 
 **Files Isocenter wrote load unchanged.** Every file `create_config()` or
 an auto-save wrote in 0.9.x loads, and so does every configuration in this
-documentation. A file with no `version` line is version 2.0.
+documentation. A file with no `version` line is version 2.0. A file saying
+`privacy_profile: basic` means `basic@2026c`, the profile name pinned to
+its PS3.15 edition, and loads the same rules; `configuration.privacy_profile`
+then reads `"basic@2026c"`, and `save()` and `create_config()` write that
+([#714](https://github.com/kvnlng/Isocenter/issues/714)).
 
 **What is refused, and the fix.** Apart from the first two, each of these
 loaded in 0.9.x without meaning what it said:

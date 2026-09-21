@@ -44,7 +44,10 @@ from .parallel import (run_parallel, _env_int, _resolve_strategy,
 from .configuration import IsocenterConfiguration, FlowList
 from .entities import (Patient, PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree)
-from .profiles import BASIC_PROFILE, FLOOR_POLICY, PRIVACY_PROFILES
+from .profiles import FLOOR_POLICY
+# The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
+# and diffs against its table, and the two must be one read (#714).
+from . import profiles
 from . import entities
 from . import pixel_analysis
 from .automation import ConfigAutomator
@@ -338,8 +341,10 @@ _CONFIG_HEADER = """# Isocenter Privacy Configuration (v2.0)
 # ==========================================
 #
 #
-# privacy_profile: "basic"
-#   - Standard profile handling common PHI (Name, ID, etc).
+# privacy_profile: "basic@2026c"
+#   - The DICOM PS3.15 Annex E Basic Profile, Table E.1-1 of edition 2026c.
+#   - The name is pinned to its edition: "basic" means "basic@2026c" in
+#     every 1.x, and a later edition arrives as a new name.
 #   - Omit the line to apply the floor policy beneath your phi_tags.
 #   - Set to "none" for manual control: phi_tags is the whole policy.
 #
@@ -355,6 +360,13 @@ _CONFIG_HEADER = """# Isocenter Privacy Configuration (v2.0)
 #
 #
 """
+
+
+def _profile_source(pinned: str) -> str:
+    """Where a built-in profile's rules come from, for the report (#714):
+    the table and the edition, which is the part of the pinned name after
+    `@`."""
+    return f"(PS3.15 Annex E Table E.1-1, edition {pinned.partition('@')[2]})"
 
 
 def _load_redaction_knowledge_base() -> List[Dict[str, Any]]:
@@ -2236,7 +2248,9 @@ class DicomSession:
                 YAML syntax, a root that is not a mapping, a `version`
                 this library does not read (#711), a key the schema does
                 not have at any level (#712), a value of the wrong type
-                (#713), an unknown `privacy_profile`, an unknown `action`,
+                (#713), an unknown `privacy_profile` -- including a
+                `<profile>@<edition>` this version does not ship (#714) --
+                an unknown `action`,
                 a `phi_tags`, `date_jitter` or `machines` of the wrong
                 shape, a rule `_validate_rule` rejects, or a `phi_tags`
                 rule the pipeline cannot honour
@@ -2257,19 +2271,24 @@ class DicomSession:
         # assignments either (`date_jitter: soon` used to, leaving half
         # of a failed file in the session).
         (tags, rules, jitter, remove_private,
-         profile) = ConfigLoader.load_unified_config(config_file)
+         base) = ConfigLoader.load_unified_config(config_file)
 
         self.configuration.phi_tags = tags
         self.configuration.rules = rules
         self.configuration.date_jitter = jitter
         self.configuration.remove_private_tags = remove_private
         self.configuration.config_path = config_file
-        self.configuration.privacy_profile = profile
+        # Both, on every load (#714): the floor and `none` both leave
+        # `privacy_profile` at None, and a flag set only when true would
+        # still call a later `none` load the floor.
+        floor = base is profiles.FLOOR
+        self.configuration.privacy_profile = None if floor else base
+        self.configuration._floor = floor
 
         get_logger().info(
             f"Loaded {len(self.configuration.rules)} machine rules and {len(self.configuration.phi_tags)} PHI tags.")
         print(
-            f"Configuration Loaded:\n - {len(self.configuration.rules)} Machine Redaction Rules\n - {len(self.configuration.phi_tags)} PHI Tags")
+            f"Configuration Loaded:\n - Privacy Profile: {self.configuration._policy_base}\n - {len(self.configuration.rules)} Machine Redaction Rules\n - {len(self.configuration.phi_tags)} PHI Tags")
         print(
             f" - Date Jitter: {
                 self.configuration.date_jitter['min_days']} to {
@@ -2335,13 +2354,17 @@ class DicomSession:
             print(f"Note: Appending .yaml extension -> {output_path}")
 
         machine_rules = self._scaffold_machine_rules()
+        base = profiles.FLOOR_BASE
 
         data = {
             # The module attribute, read now: one home for the number both
             # writers stamp (#711).
             "version": config_manager.CONFIG_VERSION,
-            "privacy_profile": "basic",
-            "phi_tags": self._scaffold_phi_tags(),
+            # The floor's base, which `_scaffold_phi_tags` diffs against:
+            # one constant, read once, so the file cannot name one table
+            # and carry the overrides of another (#714).
+            "privacy_profile": base,
+            "phi_tags": self._scaffold_phi_tags(base),
             "date_jitter": self.configuration.date_jitter,
             "remove_private_tags": self.configuration.remove_private_tags,
             "machines": machine_rules + self.configuration.rules
@@ -2427,12 +2450,14 @@ class DicomSession:
         return (f"WARNING: {flagged} images have 'Burned In Annotation' "
                 f"flag. Verify pixel redaction.")
 
-    def _scaffold_phi_tags(self) -> Dict[str, Any]:
+    def _scaffold_phi_tags(self, base: str) -> Dict[str, Any]:
         """The PHI tag section of a scaffolded config.
 
         Every entry of the session's policy whose action differs from the
-        basic profile's -- the scaffold sets `privacy_profile: basic`, so
-        a line repeating the profile would change nothing. On a bare
+        built-in profile `base`'s -- the scaffold names `base` as its
+        `privacy_profile`, so a line repeating the profile would change
+        nothing. `create_config` passes the one value it also writes as
+        the name, `profiles.FLOOR_BASE` (#714). On a bare
         session the policy is the floor, and the difference is exactly
         `profiles.RESEARCH_DEFAULTS`: a jittered study date, and sex and
         age kept.
@@ -2446,19 +2471,20 @@ class DicomSession:
         floor. It is exact only because the policy it diffs is a superset
         of the basic profile: a session under `privacy_profile: none`
         (or one whose basic tags were deleted) is still scaffolded under
-        `basic`, and its file reloads with the basic profile beneath its
+        `basic@2026c`, and its file reloads with that profile beneath its
         own tags -- more protection than the session had, never less.
 
         A plain-string value is a tag's display name and leaves the
         inspector's action at REPLACE (`PhiInspector.__init__`), so it is
         written structured, as the REPLACE it is.
         """
+        table = profiles.PRIVACY_PROFILES[base]
         structured = {}
         for tag, val in self.configuration.phi_tags.items():
             rule = dict(val) if isinstance(val, dict) else {
                 "name": str(val), "action": "REPLACE"}
-            base = BASIC_PROFILE.get(tag, {}).get("action")
-            if str(rule.get("action", "REPLACE")).upper() != base:
+            action = table.get(tag, {}).get("action")
+            if str(rule.get("action", "REPLACE")).upper() != action:
                 structured[tag] = rule
         return structured
 
@@ -3250,13 +3276,25 @@ class DicomSession:
         # none` with no tags, and "0 tag rules" is then the truth.
         effective_tags = self.configuration.phi_tags
 
+        # Which table the rules were built from, never a claim that the
+        # output conforms to it (#714). The floor and `privacy_profile:
+        # none` both leave `privacy_profile` at None, and were both
+        # "session defaults" until #714; `_floor` is what tells them
+        # apart. The edition is read from the pinned name, not from a
+        # second table that could disagree with it.
         profile_name = self.configuration.privacy_profile
-        if not profile_name:
-            privacy_profile = "None (session defaults)"
-            method = "Session defaults"
-        elif profile_name in PRIVACY_PROFILES:
+        if not profile_name and self.configuration._floor:
+            floor_base = profiles.FLOOR_BASE
+            source = _profile_source(floor_base)
+            privacy_profile = (
+                f"None (session defaults: the floor policy over {floor_base})")
+            method = f"Session defaults, the floor policy over '{floor_base}' {source}"
+        elif not profile_name:
+            privacy_profile = "None (privacy_profile: none)"
+            method = "No profile"
+        elif profile_name in profiles.PRIVACY_PROFILES:
             privacy_profile = profile_name
-            method = f"DICOM PS3.15 '{profile_name}' profile"
+            method = f"Profile '{profile_name}' {_profile_source(profile_name)}"
         else:
             # Resolved, but from a file rather than a built-in name.
             privacy_profile = profile_name

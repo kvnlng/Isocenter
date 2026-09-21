@@ -8,11 +8,34 @@ red. The derivation lives here instead, and
 the literal cannot drift from the table, and every place the profile
 departs from the table is written below, once, with its reason.
 
-To refresh the table: replace the fixture with the new edition's rows
-(the fixture's header says what each field is), rename the file and
-`EDITION`, update the edition named in `docs/configuration.md`, and
-regenerate the literal by pasting `render_literal(load_table())` over
-it. A test fails at each step that is skipped.
+A profile name is pinned to its edition (#714): `basic@2026c` is the rule
+table the v1.0.0 tag ships under that name -- this fixture, the mapping
+below and the named departures -- and from that tag it never changes
+(`tests/test_profile_editions.py` holds its digest). Replacing the
+fixture with a later edition's, which is how this file used to say the
+table was refreshed, would rewrite what `basic@2026c` means, and is
+forbidden. A later edition is added beside it:
+
+1. Vendor `tests/fixtures/ps3.15-<edition>-table-e1-1.json` beside the
+   2026c one. Never replace or edit the 2026c file.
+2. Give the new edition its own derivation. The 2026c mapping, departures
+   and literal comments are frozen with the name, so a rule change for
+   the new edition must not reach 2026c: at the first new edition, split
+   this module's constants per edition. (Not before: there is one.)
+3. Add a second literal (`BASIC_2027A`) to `isocenter/profiles.py` and
+   `PRIVACY_PROFILES["basic@2027a"]`. `PROFILE_ALIASES` and `FLOOR_BASE`
+   do not move in 1.x.
+4. A new name is a new configuration value, so bump
+   `config_manager.CONFIG_VERSION` to the next minor, add its row (with
+   the new name) to `SCHEMA_BY_VERSION` in
+   `tests/test_config_schema_version.py`, and pin the new name's digest.
+5. `test_the_configuration_page_names_the_fixture_edition` becomes "the
+   page names every shipped edition".
+
+Before the v1.0.0 tag the 2026c table may still change (#544, #557): edit
+the mapping or a departure here, regenerate the literal by pasting
+`render_literal(load_table())` over it, and update the pinned digests in
+`tests/test_profile_editions.py` with a CHANGELOG entry.
 
 The literal's explanatory comments live in `LITERAL_COMMENTS` below and
 are emitted by `render_literal`, and the literal is held equal to that
