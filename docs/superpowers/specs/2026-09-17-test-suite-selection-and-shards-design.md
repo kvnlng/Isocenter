@@ -29,6 +29,9 @@ one short, and work done between tests is a class it did not name.
 **Amended at implementation of PR 2 (2026-09-21), §10 item 16:** §5's
 shards refuse a collected file the partition does not list. The timings
 came from five chunks, not one run. The caps are 25 and 45.
+**Amended at implementation of PR 3 (2026-09-21), §10 item 17:** §6.3
+rule 2 asks only the edited worker's dispatchers. §9's four open points
+are measured, and the release's 3.14t run is the map build.
 
 ## 1. The problem, and why it is scheduled ahead of 1.0
 
@@ -320,8 +323,9 @@ no longer exclusive; rule 7 widens; and two additions follow rule 7.
    a pool, for an `ingest_worker` edit -- and correct, and still far under a
    126-file row. A finer worker->dispatch-site pairing (an `ingest_worker`
    region selects only tests covering the *ingest* dispatch) is the obvious
-   refinement; it is in scope only if the coarse set proves too large in
-   use.
+   refinement; ~~it is in scope only if the coarse set proves too large in
+   use.~~ **Taken, §10 item 17:** an edit to a worker function asks only
+   its own dispatchers; a helper only workers run asks all of them.
 3. **Region has no record at all** (new code, module-scope lines, a path
    only the process branch executes and so absent from a 3.14t map) -> the
    module's `TARGETS` row.
@@ -639,3 +643,10 @@ implementation** list is the full record; what it changes here:
     - The caps §5 left to measurement: the Run Tests step is 25 minutes (peak 751 s at 50%), and the job is 45. §5's "near 12-15 minutes plus ~5 of setup" held: the peak job took 798 s.
     - Three of the plan's assignment fixtures passed with their rule removed, and were refixtured. The one surviving mutant is equivalent (the name tie-break, with the input sorted first).
     - After the review of #727: a shard run on a few paths is pinned to collect exactly what shard I of the *whole* suite holds among them, so a red CI shard reproduces locally by its number. §5's partition contract reads N from `tests.yml` as written. The matrix may not carry `include`/`exclude`. A relative `--record-shard-timings` path is refused. Plan deviation 22.
+17. **§6 as built** (plan deviations 23-30 are the full record).
+    - **§6.3 rule 2 is per worker.** An edit to a worker function asks only the functions that hand *that* worker to a pool. A helper that only workers run still asks every dispatcher. Task 13's `ingest_worker` probe forced this: with every dispatcher asked, a map in which any one dispatcher had no record widened every worker edit to its row, and on the probe's three-file map to the full suite. §6.3's "in scope only if the coarse set proves too large in use" was overtaken by the coarse set being *wrong* on any partial map.
+    - **§9, point 2 (build cost):** 1899 s against about 1450 s unsharded without coverage on 3.14t, which is 1.3x. The release's 3.14t integration run is `python -m scripts.test_map build`, and `build` exits with the suite's status (`RELEASING.md`, "Cutting a release", step 1).
+    - **§9, point 3 (rule 2's breadth):** an `ingest_worker` edit selects 138 of 330 files, more than a third and more than `io_handlers.py`'s 126-file row, even after the per-worker refinement. Its one dispatcher, `_ingest_results`, carries every ingest in the suite. That is recorded, not narrowed: only a call-site trace could narrow it. The other workers select 126, 93, 8 and 7 files. A `compact()` edit selects 22 tests in 7 files against a 207-file row. With every dispatcher recorded, rule 2's row fallback fired 0 times on this map.
+    - **§9, point 4 (export's pool):** processes on every interpreter. `export()` passes `maxtasksperchild=25`, and `parallel.py` then always chooses `multiprocessing.Pool`. Its lines land under the empty context, which is rule 2's case.
+    - **The wide-scoped-fixture limit (item 10):** 0 package functions are recorded only from the 7 files with module- or session-scoped fixtures, so `cannot_speak_for` does not add them.
+    - **Item 10's whole-collection check** sniffed argv and read `--changed-base main` and `-p no:cacheprovider` as paths. It asks `config.args_source` instead.

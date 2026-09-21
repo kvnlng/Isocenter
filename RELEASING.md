@@ -172,8 +172,10 @@ fixes, never features.
    against about 1450 s for the same suite without coverage, so 1.3x.
    Record its last test line and `exit=` as you would a plain run. The map
    is gitignored and never edited. Rebuild it on demand, by the same
-   command, when `--changed` keeps falling back to `TARGETS` rows; an old
-   map selects more, toward those rows, rather than less.
+   command, when `--changed` keeps falling back to `TARGETS` rows. An old
+   map selects more, toward those rows. What it misses is a call path
+   added *across* modules since the build, which is the rows' own bound
+   and this step's to find.
 
    Also run `python -m scripts.output_fingerprint check --jobs 4 --report
    fp-X.Y.Z-<interpreter>.txt; echo "exit=$?"` on **3.12 and 3.14t** at
