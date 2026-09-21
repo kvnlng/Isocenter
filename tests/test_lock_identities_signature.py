@@ -65,9 +65,9 @@ def session(tmp_path):
             patient.studies.append(study)
             s.store.patients.append(patient)
         # Rows first: `persist=True` writes through `update_attributes`,
-        # which has nothing to update for an instance the store has never
-        # seen -- an unsaved fixture would make the persist test below
-        # red and green look the same.
+        # which raises for an instance the store has never seen (#641; it
+        # updated nothing in silence before, which made the persist test
+        # below red and green look the same), so the fixture is saved.
         s.save(sync=True)
         yield s
 
