@@ -59,3 +59,20 @@ def assign(files, timings, n):
         result[lightest].append(name)
         loads[lightest] += weight[name]
     return [sorted(shard) for shard in result]
+
+
+class TimingRecorder:
+    """Per-file wall time, every phase summed (setup + call + teardown)."""
+
+    def __init__(self):
+        self._seconds = {}
+
+    def add(self, nodeid, seconds):
+        name = nodeid.split("::", 1)[0]
+        self._seconds[name] = self._seconds.get(name, 0.0) + seconds
+
+    def write(self, path):
+        rounded = {name: round(total, 2)
+                   for name, total in sorted(self._seconds.items())}
+        Path(path).write_text(json.dumps(rounded, indent=1) + "\n",
+                              encoding="utf-8")
