@@ -40,28 +40,35 @@ def test_the_shards_partition_the_real_suite(n):
 
 
 def test_assignment_is_deterministic():
+    # Equal weights, so every placement is a tie and only the tie-break
+    # decides: with distinct weights the input order never mattered and
+    # this passed without one (#707, mutant at implementation).
     files = [f"tests/test_{c}.py" for c in "abcdefgh"]
-    timings = {f: float(i) for i, f in enumerate(files)}
+    timings = {f: 1.0 for f in files}
     assert shards.assign(files, timings, 3) == shards.assign(
         list(reversed(files)), dict(reversed(list(timings.items()))), 3)
 
 
 def test_the_longest_files_are_spread_not_stacked():
-    timings = {"tests/test_a.py": 100.0, "tests/test_b.py": 100.0,
-               "tests/test_c.py": 1.0, "tests/test_d.py": 1.0}
+    # Name order puts the long file last, where greedy-by-name would lay
+    # it on a shard already holding one: 3 and 1. Longest first: 2 and 2.
+    timings = {"tests/test_a.py": 1.0, "tests/test_b.py": 1.0,
+               "tests/test_c.py": 2.0}
     assigned = shards.assign(timings, timings, 2)
     loads = sorted(sum(timings[f] for f in shard) for shard in assigned)
-    assert loads == [101.0, 101.0]
+    assert loads == [2.0, 2.0]
 
 
 def test_a_file_with_no_timing_gets_the_median_not_zero():
-    timings = {"tests/test_a.py": 10.0, "tests/test_b.py": 10.0,
-               "tests/test_c.py": 10.0}
-    files = list(timings) + ["tests/test_new.py"]
-    assigned = shards.assign(files, timings, 2)
-    # 4 files of equal weight over 2 shards: 2 and 2. With a zero
-    # default the new file would ride along with two others: 3 and 1.
-    assert sorted(len(s) for s in assigned) == [2, 2]
+    timings = {"tests/test_a.py": 40.0, "tests/test_b.py": 10.0,
+               "tests/test_c.py": 20.0}
+    files = list(timings) + ["tests/test_x.py"]
+    # Weighed at the median, 20: a | c, then x joins c (20 < 40) and b
+    # joins a (40 = 40, lower index). Weighed at 0 or any small constant,
+    # x goes last and lands with a instead.
+    assert shards.assign(files, timings, 2) == [
+        ["tests/test_a.py", "tests/test_b.py"],
+        ["tests/test_c.py", "tests/test_x.py"]]
 
 
 def test_the_recorder_sums_every_phase_per_file(tmp_path):
