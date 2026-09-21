@@ -18,6 +18,40 @@ warnings.filterwarnings("ignore", module="pydicom.*")
 import os
 import json
 from datetime import date
+
+#: Set by `scripts/test_map.py build` and by nothing else. Without it the
+#: hooks below do nothing, so the documented `coverage run -m pytest`
+#: keeps writing the data file it always wrote -- per-test contexts for
+#: ~4,800 tests were only ever costed on five. Not an ISOCENTER_ name:
+#: those are the library's and tests/test_documented_env_vars.py wants a
+#: docs/environment.md row for each.
+_MAP_CONTEXTS_VAR = "TEST_MAP_CONTEXTS"
+_coverage_label = ""
+
+
+def _label_coverage(label):
+    """Switch coverage's context; return the label that was in force."""
+    global _coverage_label
+    previous = _coverage_label
+    if os.environ.get(_MAP_CONTEXTS_VAR) != "1":
+        return previous
+    try:
+        import coverage
+    except ImportError:
+        return previous
+    cov = coverage.Coverage.current()
+    if cov is not None:
+        cov.switch_context(label)
+        _coverage_label = label
+    return previous
+
+
+# Everything outside a test -- imports, collection, session fixtures'
+# teardown -- is "<startup>", so the empty context is left meaning one
+# thing: a spawned process, where no hook reaches (#707). Above the
+# `isocenter` imports so the package's own import is labelled too.
+_label_coverage("<startup>")
+
 from isocenter.entities import Patient, Study, Series, Instance, Equipment
 from isocenter.builders import DicomBuilder
 from support import root_guard
@@ -269,6 +303,22 @@ def pytest_collection_modifyitems(config, items):
     if drop:
         config.hook.pytest_deselected(items=drop)
         items[:] = keep
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    """Label coverage with the running test, fixtures included (#707).
+
+    `dynamic_context = test_function` stops at the test function's own
+    frame, so what a fixture executes is recorded under no test at all.
+    Restores the label it found rather than assuming "<startup>", so an
+    in-process nested run does not relabel the rest of its outer test.
+    """
+    previous = _label_coverage(item.nodeid)
+    try:
+        return (yield)
+    finally:
+        _label_coverage(previous)
 
 
 def pytest_runtest_logreport(report):
