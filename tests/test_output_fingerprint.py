@@ -101,6 +101,19 @@ def test_an_element_records_its_vr_and_its_encoded_value(tmp_path):
     assert ob != ow
     assert ob.startswith("OB ") and ow.startswith("OW ")
 
+    # A known tag written as UN: pydicom's reader hands back the
+    # dictionary VR, so only the VR as written shows the relabel (#676).
+    # pydicom's writer relabels UN on a known tag, so the UN is spliced in.
+    as_lo = _dataset()
+    as_lo.StudyDescription = "CHEST"
+    path = _write(as_lo, tmp_path / "un.dcm")
+    lo = b"\x08\x00\x30\x10LO\x06\x00CHEST "
+    data = path.read_bytes()
+    assert data.count(lo) == 1
+    path.write_bytes(data.replace(lo, b"\x08\x00\x30\x10UN\x00\x00\x06\x00\x00\x00CHEST "))
+    un = fp.record_dicom(path)["elements"]["0008,1030"]
+    assert un.startswith("UN sha256:"), un
+
     report = fp.compare(_fingerprint({"m": _member({"f.dcm": _file(**{"0009_1010": ob})})}),
                         _fingerprint({"m": _member({"f.dcm": _file(**{"0009_1010": ow})})}))
     kinds = [g.kind for g in report.groups]
@@ -460,6 +473,11 @@ def _documented_variables():
 
 def test_a_parallelism_variable_refuses_the_run(tmp_path, monkeypatch):
     monkeypatch.setenv("ISOCENTER_FORCE_THREADS", "1")
+
+    def ran(*args, **kwargs):
+        raise AssertionError("the run started despite the variable")
+
+    monkeypatch.setattr(fp, "assemble_cohort", ran)
     assert fp.main(["take", "--out", str(tmp_path / "x.json")]) == 2
     assert not (tmp_path / "x.json").exists()
 
@@ -478,6 +496,9 @@ def test_missing_pydicom_data_refuses_rather_than_skips(tmp_path, monkeypatch):
         raise RuntimeError("An error occurred downloading the following files: x")
 
     monkeypatch.setattr(pydicom.data, "fetch_data_files", offline)
+    # Nothing else to run, so a skip would finish at once with exit 0.
+    monkeypatch.setattr(fp, "_bundled_members", lambda: [])
+    monkeypatch.setattr(fp, "synthetic_members", lambda root: [])
     assert fp.main(["take", "--out", str(tmp_path / "x.json")]) == 2
     assert not (tmp_path / "x.json").exists()
 
