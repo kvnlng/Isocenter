@@ -26,9 +26,13 @@ ALLOWED_PREFIXES = (
 #: sdist (397 entries, not 403), so the build stays in the root and the
 #: directories are named here instead. Exact, not prefix: a test's own
 #: `build.db` is still a stray.
+#: Plus one that no test writes: macOS's Finder rewrites `.DS_Store` in
+#: any folder a window has shown, at times of its own choosing, so a run
+#: in a main checkout open in Finder went red for nothing (#720 review).
 ALLOWED_NAMES = frozenset({
     "build",               # test_packaging_contract.py::built (bdist)
     "isocenter.egg-info",  # test_packaging_contract.py::built (egg_info)
+    ".DS_Store",           # Finder, not a test (#707)
 })
 
 

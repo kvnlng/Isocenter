@@ -5,6 +5,7 @@ three of four shards, or an assignment that drops a file, runs fewer
 tests and reports success.
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -108,10 +109,13 @@ def test_a_collected_file_outside_the_partition_is_refused(tmp_path):
     (proj / "tests" / "test_inside.py").write_text("def test_a():\n    pass\n")
     (proj / "extra" / "test_outside.py").write_text(
         "def test_b():\n    pass\n")
+    # The copied conftest imports `isocenter`; name the tree under test
+    # rather than relying on what this process inherited.
+    env = dict(os.environ, PYTHONPATH=str(REPO), PYTHONDONTWRITEBYTECODE="1")
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q",
          "-p", "no:cacheprovider", "--shard=1/1", "tests", "extra"],
-        cwd=proj, capture_output=True, text=True, timeout=300)
+        cwd=proj, env=env, capture_output=True, text=True, timeout=300)
     assert out.returncode == 4, out.stdout + out.stderr
     assert "extra/test_outside.py" in out.stdout + out.stderr
 
