@@ -641,6 +641,85 @@ def test_a_kept_report_with_a_finding_added_still_brings_its_policy(tmp_path):
         assert inst.phi_status_policy == policy
 
 
+def test_a_kept_report_whose_nested_item_is_gone_brings_no_policy(tmp_path):
+    """The report still holds every finding, but one no longer resolves to
+    a live target: its sequence item was removed before `anonymize()`. The
+    pass settles the rest and records REMEDIATED; the report does not speak
+    for an entity it could not reach, so nothing is adopted and the export
+    says so (coordinator's ruling on #750). Kills: the resolution half of
+    the check skipped."""
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    item = Dataset()
+    item.ScheduledProcedureStepDescription = "Nested^PHI"
+    ds.RequestAttributesSequence = Sequence([item])
+    folder = tmp_path / "in"
+    folder.mkdir()
+    ds.save_as(str(folder / "a.dcm"))
+    config = _write_config(
+        tmp_path, "nested.yaml", privacy_profile="none",
+        phi_tags={INSTITUTION: {"action": "REPLACE"},
+                  "0040,0007": {"action": "REPLACE"}})
+    db = str(tmp_path / "s.db")
+    with DicomSession(db) as session:
+        session.ingest(str(folder))
+        session.save(sync=True)
+        session.load_config(config)
+        report = session.audit()
+    assert {f.tag for f in report.findings} >= {INSTITUTION, "0040,0007"}
+    with DicomSession(db) as session:
+        session.load_config(config)
+        [inst] = _instances(session)
+        inst.sequences["0040,0275"].items.clear()
+        session.anonymize(report)
+        assert inst.attributes[INSTITUTION] != "JFK IMAGING CENTER"
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        assert inst.phi_status_policy is None
+        session.export(str(tmp_path / "out"))
+        [notice] = _notices(session)
+        assert "1 with no recorded policy" in notice
+
+
+def test_a_kept_report_with_a_finding_rehydration_lost_brings_no_policy(
+        tmp_path):
+    """A finding whose rehydration found nothing (`_live_target` -> None,
+    so it carries a proposal and no entity) reached no live target. The
+    report holds it, and does not speak for the pass. Kills: a
+    proposal-bearing finding with no entity counted as resolved."""
+    db = str(tmp_path / "s.db")
+    report, _ = _audited_and_closed(tmp_path, db)
+    [lost] = [f for f in report.findings if f.tag == INSTITUTION]
+    lost.entity = None
+    with DicomSession(db) as session:
+        [inst] = _instances(session)
+        session.anonymize(report)
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        assert inst.phi_status_policy is None
+
+
+def test_a_report_applied_to_another_store_brings_no_policy(tmp_path):
+    """A whole report from store A applied to store B, which holds the same
+    patient and study but not A's instance: the patient and study findings
+    resolve and are remediated, the instance findings resolve to nothing.
+    The report was not raised on this graph, and nothing is adopted."""
+    report, _ = _audited_and_closed(tmp_path, str(tmp_path / "a.db"))
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ds.SOPInstanceUID = ds.SOPInstanceUID + ".9"
+    ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+    folder = tmp_path / "other"
+    folder.mkdir()
+    ds.save_as(str(folder / "b.dcm"))
+    with DicomSession(str(tmp_path / "b.db")) as session:
+        session.ingest(str(folder))
+        session.anonymize(report)
+        remediated = [e for _, e in _entities(session)
+                      if e.phi_status is PhiStatus.REMEDIATED]
+        assert remediated   # the pass reached the patient or the study
+        for entity in remediated:
+            assert entity.phi_status_policy is None, entity
+
+
 def test_only_a_status_the_pass_recorded_adopts_the_reports_policy(tmp_path):
     """Kills: the adoption relabelling a policy-less status the pass did not
     record -- a store's pre-1.0 REMEDIATED beside the one the report

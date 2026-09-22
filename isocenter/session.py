@@ -5736,7 +5736,16 @@ class DicomSession:
             # thing to the resolver and another to the owners or the
             # removal targets.
             by_uid = self._instances_by_uid()
-            findings, gone = self._live_findings(list(findings), project_secret, by_uid)
+            report = findings
+            findings, gone, unresolved = self._live_findings(
+                list(findings), project_secret, by_uid)
+            if report_policy is not None and any(
+                    id(finding) in unresolved
+                    for finding in report._scan_findings):
+                # A finding the scan raised reached nothing live: the pass
+                # cannot have settled it, so the report does not speak for
+                # this pass (coordinator's ruling on #750).
+                report_policy = None
             owners = self._nested_finding_owners(findings, by_uid)
             remediator._use_gone_keys(gone)
             remediator._use_instance_owners(owners)
@@ -6831,8 +6840,9 @@ class DicomSession:
         return holders
 
     def _live_findings(self, findings, secret, by_uid) -> tuple:
-        """`(findings, gone)`: each finding resolved against the live graph,
-        and the keys of those a pass already settled (#644).
+        """`(findings, gone, unresolved)`: each finding resolved against the
+        live graph, the keys of those a pass already settled (#644), and
+        the `id`s of the findings passed in that reached no live target.
 
         `anonymize(findings)` does not rehydrate `finding.entity`, and every
         remediation arm writes to that object. Until this, a report kept
@@ -6879,6 +6889,14 @@ class DicomSession:
         since #661, so an owner's address cannot mean one thing to the
         resolver and another to the removal it resolves.
 
+        **Unresolved** (#555, the ruling on #750): a finding with a
+        proposal whose entity is None (rehydration found nothing), bound to
+        a copy with no entity, bound to the empty item `_removal_address`
+        answers for a walk that broke, or put in `gone`. Each settles, or
+        declines, without a live object to act on, so a report holding one
+        does not speak for the pass (`anonymize()` adopts nothing from it).
+        Keyed by the `id` of the finding passed in, which the caller holds.
+
         **Copies, never in place.** The caller's findings keep the entity
         they had: a finding bound to None in place would stay unresolvable
         in a later session that could resolve it, and a report passed
@@ -6903,10 +6921,12 @@ class DicomSession:
                         top.add(id(inst))
                         instances.append(inst)
         items = None
-        resolved, gone = [], set()
+        resolved, gone, unresolved = [], set(), set()
         for finding in findings:
             proposal, entity = finding.remediation_proposal, finding.entity
             if proposal is None or entity is None:
+                if proposal is not None:
+                    unresolved.add(id(finding))
                 resolved.append(finding)
                 continue
             uid = finding.entity_uid
@@ -6931,19 +6951,23 @@ class DicomSession:
                 resolved.append(finding)
                 continue
             if len(unique) != 1:
+                unresolved.add(id(finding))
                 resolved.append(dataclasses.replace(finding, entity=None))
                 continue
             (target,) = unique.values()
             if finding.entity_type == "Instance":
                 item = self._removal_address(target, finding.entity_path,
                                              proposal.target_attr)
+                live = resolve_item_path(target, finding.entity_path)
+                if item is None or live is not item:
+                    unresolved.add(id(finding))
                 if (item is not None and proposal.action_type != "REMOVE_TAG"
-                        and resolve_item_path(target, finding.entity_path) is not item):
+                        and live is not item):
                     gone.add(_remediation_key(finding))
                     continue
                 target = item
             resolved.append(dataclasses.replace(finding, entity=target))
-        return resolved, frozenset(gone)
+        return resolved, frozenset(gone), frozenset(unresolved)
 
     @staticmethod
     def _owner_candidates(finding, by_pid, by_study, secret) -> list:
@@ -7013,6 +7037,11 @@ class DicomSession:
         equality. Compared by identity: the report holds its findings by
         reference (`_scan_findings`), so an `id` cannot be reused while
         this runs.
+
+        This is half the check. The other half is in `anonymize()`, once
+        the findings are resolved: if any of the scan's findings reached no
+        live target (`_live_findings`' third value), the policy is dropped.
+        That covers a report applied to a graph it was not raised on.
         """
         policy = getattr(findings, "_scan_policy", None)
         raised = getattr(findings, "_scan_findings", None)
