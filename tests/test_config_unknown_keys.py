@@ -181,9 +181,11 @@ def test_a_misspelt_zone_roi_is_named_not_blamed_on_the_roi(tmp_path):
 
 @pytest.mark.parametrize("tag, rule", [
     ("0008,0080", "{actoin: KEEP}"),
-    # A DA tag: a check after the VR checks would default the action to
-    # REPLACE and refuse with #560's "cannot hold it" instead.
-    ("0008,0012", "{actoin: JITTER}"),
+    # A US tag: a check after the VR checks would default the action to
+    # REPLACE and refuse with #560's "cannot hold it" instead. It was a DA
+    # tag until #557 gave a value-less REPLACE on a DA its dummy, which
+    # loads, and the order mutant then survived.
+    ("0028,0010", "{actoin: JITTER}"),
 ])
 def test_a_misspelt_phi_rule_key_is_refused(tmp_path, tag, rule):
     """Kills the phi rule check deleted, and placed after the VR checks."""

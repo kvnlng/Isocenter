@@ -489,7 +489,11 @@ def test_acquisition_and_procedure_step_timing_is_remediated_end_to_end(tmp_path
                     for instance in series.instances:
                         for tag, raw in raw_values.items():
                             value = instance.attributes.get(tag)
-                            if value:
+                            # Acquisition DateTime is X/Z/D: its DT dummy
+                            # since #557, which carries nothing of the
+                            # source value.
+                            if value and not (tag == "0008,002a"
+                                              and value == "19000101"):
                                 remaining.setdefault(tag, []).append(str(value))
     finally:
         session.close()

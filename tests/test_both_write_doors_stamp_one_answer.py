@@ -226,7 +226,8 @@ def test_a_series_with_no_number_writes_an_empty_series_number(tmp_path):
 
 def test_write_tree_after_anonymize_writes_no_series_serial(tmp_path):
     """The PHI half. After `anonymize()` the instance's serial is empty
-    and `Series.equipment` still holds `SN-570` (redaction matches on it).
+    and `Series.equipment` still holds `SN-570` (redaction matches on it);
+    since #557 "empty" is the X/Z/D dummy, `ANONYMIZED`.
     `write_tree` writes the instance's value, and the serial appears
     nowhere in the file's bytes. Killing mutation: the equipment block
     restored in `_generate_export_contexts`."""
@@ -243,7 +244,7 @@ def test_write_tree_after_anonymize_writes_no_series_serial(tmp_path):
     assert len(names) == 1, names
     raw = (out / names[0]).read_bytes()
     assert b"SN-570" not in raw
-    assert _read_one(out).get("DeviceSerialNumber", "") == ""
+    assert _read_one(out).get("DeviceSerialNumber", "") == "ANONYMIZED"
 
 
 def test_the_builder_puts_equipment_on_its_instances(tmp_path):

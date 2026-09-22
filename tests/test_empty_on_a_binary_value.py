@@ -180,7 +180,11 @@ def test_the_floor_converges_on_its_own_export(tmp_path):
 
     Kills: either half reverted -- the scan half by the re-audit, the
     write half by the graph's value before export. Not by the file: a
-    zero-length element reads back empty whichever type was written."""
+    zero-length element reads back empty whichever type was written.
+
+    Both tags are D, so since #557 the floor writes the OB dummy, two zero
+    bytes, rather than zero length; the property is the same, and the
+    re-audit must read the dummy it wrote back from the file as done."""
     source = tmp_path / "in"
     source.mkdir()
     ds = pydicom.dcmread(pydicom.data.get_testdata_file("CT_small.dcm"))
@@ -193,14 +197,14 @@ def test_the_floor_converges_on_its_own_export(tmp_path):
         session.anonymize(session.audit())
         instance = session.store.patients[0].studies[0].series[0].instances[0]
         for tag in (ENCAPSULATED_DOCUMENT, CERTIFICATE_OF_SIGNER):
-            assert instance.attributes[tag] == b"", instance.attributes[tag]
+            assert instance.attributes[tag] == b"\x00\x00", instance.attributes[tag]
         summary = session.export(str(tmp_path / "out"), use_compression=False)
     assert summary.written == 1, summary.failures
 
     written = pydicom.dcmread(_written(str(tmp_path / "out")))
     for tag in (0x00420011, 0x04000115):
         assert written[tag].VR == "OB"
-        assert not written[tag].value, written[tag].value
+        assert written[tag].value == b"\x00\x00", written[tag].value
 
     with Session(str(tmp_path / "second.db")) as session:
         session.ingest(str(tmp_path / "out"))

@@ -13,6 +13,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
+from .config_manager import _vr_dummy
 from .exporters.wfdb import _sanitize_description
 # The (0040,A0B0) reading -- list coercion, 1-based ordinal, pair
 # iteration -- lives in waveform.py since #177, because the graph-side
@@ -199,6 +200,23 @@ def _concept(item, include_text: bool = False):
     return category, (meaning or None)
 
 
+def _real_note(item) -> str:
+    """`item`'s Unformatted Text Value as a note, or `""` when it is the
+    dummy a value-less REPLACE writes there (#557).
+
+    The tag is D in PS3.15 Table E.1-1, so `basic` and the floor write
+    the text dummy `ANONYMIZED` over the annotation's text; read as a
+    note, every finding would carry that placeholder where 0.9.8, which
+    emptied the tag, wrote none (owner's ruling, 2026-09-22). The same
+    reading as `exporters.wfdb._real_timing` gives the DT dummy, and
+    compared with `config_manager._vr_dummy`, the one table, never a
+    literal of its own. Text that really is `ANONYMIZED` is no note
+    either: omitted, not invented.
+    """
+    value = str(item.attributes.get(TAG_UNFORMATTED_TEXT, "") or "")
+    return "" if value == _vr_dummy(TAG_UNFORMATTED_TEXT) else value
+
+
 def build_annotations(instance, waveform, source: str, include_text: bool = False,
                       dropped_groups: Optional[List[int]] = None) -> Dict[str, Any]:
     """Build a Murmur annotations document from an instance's annotations.
@@ -298,9 +316,9 @@ def build_annotations(instance, waveform, source: str, include_text: bool = Fals
             finding["lead"] = lead
 
         if include_text:
-            note = item.attributes.get(TAG_UNFORMATTED_TEXT)
+            note = _real_note(item)
             if note:
-                finding["note"] = str(note)
+                finding["note"] = note
 
         findings.append(finding)
 

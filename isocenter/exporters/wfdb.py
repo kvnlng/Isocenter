@@ -11,6 +11,7 @@ from typing import List, Optional
 import numpy as np
 
 from . import Exporter, register
+from ..config_manager import _vr_dummy
 from ..io_handlers import (ExportError, export_folder_names,
                            format_study_date, LOSS_SCOPE_STANDARD,
                            normalize_patient_id_subset)
@@ -312,6 +313,23 @@ def _parse_dicom_dt(value: str):
         return datetime.strptime(stamp, fmt)
     except ValueError:
         return None
+
+
+def _real_timing(instance, tag: str) -> str:
+    """`tag`'s value on `instance` as timing, or `""` when it is the dummy
+    a value-less REPLACE writes on that tag (#557).
+
+    Acquisition DateTime is X/Z/D in PS3.15 Table E.1-1, so `basic`
+    writes the DT dummy `19000101` there, which `_parse_dicom_dt` reads as
+    1900-01-01 00:00: the record line would then carry an invented
+    `00:00:00`, beside the study's shifted date under the floor, and #59
+    would be back. Compared with `config_manager._vr_dummy`, the one
+    table, rather than relying on a dummy the parser happens to reject,
+    which the next reader of `_parse_dicom_dt` would "fix". A source that
+    really holds `19000101` reads as no timing: omitted, not invented.
+    """
+    value = str(instance.attributes.get(tag, "") or "")
+    return "" if value == _vr_dummy(tag) else value
 
 
 class WfdbExporter(Exporter):
@@ -778,7 +796,7 @@ class WfdbExporter(Exporter):
         Returns a `datetime.time`, or None if no usable value exists.
         """
         acquired = _parse_dicom_dt(
-            str(instance.attributes.get("0008,002a", "") or ""))
+            _real_timing(instance, "0008,002a"))
         if acquired is not None:
             return acquired.time()
 
@@ -804,7 +822,7 @@ class WfdbExporter(Exporter):
         from datetime import datetime
 
         acquired = _parse_dicom_dt(
-            str(instance.attributes.get("0008,002a", "") or ""))
+            _real_timing(instance, "0008,002a"))
         if acquired is not None:
             return acquired, None
 

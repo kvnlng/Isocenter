@@ -373,6 +373,27 @@ def _is_tag_key(key: str) -> bool:
             and all(ch in _HEX_DIGITS for ch in key[:4] + key[5:]))
 
 
+#: PS3.15 Table E.1-1's own spellings of a repeating group (#556):
+#: `50xx,xxxx` / `60xx,xxxx` for a whole group, `50xx,eeee` / `60xx,eeee`
+#: for one element in every group. Matched on the lowercased key, so
+#: either case of `x` is read.
+_GROUP_MASK_KEY = re.compile(r"(50|60)xx,(xxxx|[0-9a-f]{4})")
+
+
+def _is_group_mask_key(key: str) -> bool:
+    """True for a repeating-group key (#556).
+
+    Such a key names the **even** groups 5000-501E (retired Curve) or
+    6000-601E (Overlay) and nothing else (PS3.5 7.6); the odd groups
+    between them are private and belong to the `remove_private_tags`
+    sweep. `privacy._rule_for` resolves a mask to the concrete tags it
+    covers, the most specific key first. Until #556 no key could spell
+    Table E.1-1's `Curve Data (50xx,xxxx)` row, so every curve element
+    survived every profile.
+    """
+    return isinstance(key, str) and _GROUP_MASK_KEY.fullmatch(key.lower()) is not None
+
+
 def _external_profile_tags(path: str) -> Dict[str, Any]:
     """The validated `phi_tags:` mapping of an external profile file.
 
@@ -455,11 +476,12 @@ def _validated_phi_tags(tags: Any, source: str) -> Dict[str, Any]:
             raise ValueError(
                 f"{source}: phi_tags key {tag!r} must be a quoted "
                 f"'gggg,eeee' string, got {type(tag).__name__}")
-        if not _is_tag_key(tag):
+        if not (_is_tag_key(tag) or _is_group_mask_key(tag)):
             raise ValueError(
                 f"{source}: phi_tags key {tag!r} is not a 'gggg,eeee' tag "
                 f"(four hex digits, a comma, four hex digits, such as "
-                f"'0010,0010'); the scan reads no tag by that key, so the "
+                f"'0010,0010'), or a repeating-group key such as "
+                f"'60xx,xxxx'; the scan reads no tag by that key, so the "
                 f"rule would never run")
         if isinstance(rule, dict):
             # Here as well as in `_refused_phi_rule`: that one judges the
@@ -487,6 +509,57 @@ def _validated_phi_tags(tags: Any, source: str) -> Dict[str, Any]:
 _NON_STRING_VRS = frozenset({"OB", "OD", "OF", "OL", "OV", "OW", "UN",
                              "US", "SS", "UL", "SL", "UV", "SV", "FL", "FD",
                              "AT"})
+
+#: What a `REPLACE` with no `value:` writes on a standard tag, by the
+#: tag's dictionary VR (#557). PS3.15 Table E.1-1a's D is "replace with a
+#: non-zero length value that may be a dummy value and consistent with the
+#: VR"; `basic@2026c` maps D and every code with a D arm to that REPLACE.
+#:
+#: - Text: `ANONYMIZED`, the constant REPLACE always wrote, so no text
+#:   export changes. Ten characters, under every limit (16 for AE, CS,
+#:   SH), and valid in each of these VRs (a relative reference for UR).
+#: - DA and DT `19000101` (a DT may stop at the date: no time of day is
+#:   invented, see `exporters/wfdb.py::_real_timing`), TM `000000`, AS
+#:   `000D`: visibly placeholder values, not plausible real ones.
+#: - Binary: zero bytes, one word of the VR's width, so the value field is
+#:   even (PS3.5 7.1.1).
+#:
+#: A VR not here has no dummy (`_vr_dummy` is None), and a value-less
+#: REPLACE on it is refused: numeric VRs and AT (no Table E.1-1 D row is
+#: either, and a zero reads as a plausible value), UI (a dummy UID is UID
+#: replacement, #544), SQ (no dummy item is valid independent of the IOD;
+#: the scan warns and applies nothing), and a compound dictionary VR.
+#: Changing a value here changes `basic@2026c`'s output, which is frozen
+#: from the v1.0.0 tag (#714).
+VR_DUMMY = {
+    **{vr: "ANONYMIZED" for vr in ("AE", "CS", "LO", "LT", "PN", "SH", "ST",
+                                   "UC", "UT", "UR")},
+    "DA": "19000101",
+    "DT": "19000101",
+    "TM": "000000",
+    "AS": "000D",
+    "OB": b"\x00\x00",
+    "UN": b"\x00\x00",
+    "OW": b"\x00\x00",
+    "OF": b"\x00" * 4,
+    "OL": b"\x00" * 4,
+    "OD": b"\x00" * 8,
+    "OV": b"\x00" * 8,
+}
+
+
+def _vr_dummy(tag: str) -> Any:
+    """The dummy a value-less REPLACE writes on `tag` (`VR_DUMMY`), or None
+    when its dictionary VR has none, and for a private, unknown or
+    malformed tag (#557).
+
+    The dictionary VR and never the recorded one, so the value a rule
+    writes does not depend on the file it meets; a private or unknown tag
+    keeps `ANONYMIZED` and the exporter's LO fallback (#571). One value,
+    whatever the tag's multiplicity: every D-arm row of Table E.1-1 is VM
+    1 or 1-n."""
+    return VR_DUMMY.get(_standard_dictionary_vr(tag))
+
 
 #: The three tags the Patient and the Study own (#537). Their rules are
 #: read by `privacy._owned_rule`; the validator knows two things about
@@ -645,6 +718,10 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
        which nothing read (#538). One spelling, so it is refused by name.
     2. A `value:` under anything but REPLACE writes nothing.
     3. A `value:` that is not a string cannot be written as one.
+    3a. A repeating-group key (`60xx,xxxx`, #556) takes REMOVE or KEEP:
+       it names elements of many VRs, so an action whose effect depends
+       on the VR could not say what it writes. Nothing after this reads a
+       mask, which names no dictionary tag.
     4. Patient ID can only be kept or pseudonymised: the ID is what keeps
        two patients apart, and `anonymize()` merges patients that share
        one (#548), so an emptied or literal ID would merge every patient.
@@ -652,7 +729,11 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
        every pass (#559).
     6. REPLACE on a standard tag whose VR cannot hold what it writes
        (#560). Study Date's REPLACE with no value is the shift (#537, Q3)
-       and is not judged as a literal.
+       and is not judged as a literal. With no `value:` it writes the
+       VR's dummy (`VR_DUMMY`, #557), so it is refused only on a VR with
+       none: numeric VRs, AT, a compound VR, and UI, whose message names
+       UID replacement (#544). Until #557 DA, DT, TM, AS and the binary
+       VRs were refused here too, for the `ANONYMIZED` they could not hold.
     7. A REPLACE `value:` pydicom's `validate_value` passes and the tag
        still cannot hold (review of #574): a `-` in a DA or TM, which is
        a range, and a `\\` on a tag of multiplicity 1, which is a second
@@ -660,8 +741,9 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
        at the end (`_dt_is_a_range`), and on any other tag the count of
        `\\`-separated values must meet the dictionary VM (`_vm_allows`;
        review of #574 round 2, P-3 and P-4). Only a `value:` is counted:
-       REPLACE with no value writes one `ANONYMIZED` wherever it did
-       in 0.9.7, and no rule of that shape is refused by its count.
+       REPLACE with no value writes one value (`ANONYMIZED` on text, as in
+       0.9.7, or the VR's dummy), and no rule of that shape is refused by
+       its count.
 
     Before all of them, a key naming no 32-bit tag is refused as the
     loader refuses a key that is not `gggg,eeee`; on the in-code doors it
@@ -697,6 +779,17 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
 
     if not isinstance(tag, str):
         return None
+    if _is_group_mask_key(tag):
+        # Here, not only in `_validated_phi_tags`: `set_phi_tag`,
+        # `configuration.phi_tags` and `PhiInspector(config_tags=)` never
+        # reach that one (L1 condition (a)). After the shape checks and
+        # before anything reads the dictionary, which has no entry for a
+        # mask (condition (c)).
+        if action in ("REMOVE", "KEEP"):
+            return None
+        return (f"phi_tags[{tag!r}] is {action}; a repeating-group key (50xx "
+                f"or 60xx) takes REMOVE or KEEP, because it names elements "
+                f"of many VRs (#556)")
     if tag == _PATIENT_ID and (action in ("REMOVE", "EMPTY", "SHIFT", "JITTER")
                                or value):
         said = f" with value {value!r}" if value else ""
@@ -714,18 +807,25 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                     f"and apply only to DA and DT (#559)")
         return None
     if action == "REPLACE" and not (tag == _STUDY_DATE and not value):
-        written = value or "ANONYMIZED"
+        # With no `value:`, the VR's dummy (#557): the same spelling as the
+        # scan's, so the loader judges exactly what the scan will write.
+        # Until #557 this was `value or "ANONYMIZED"`, and a value-less
+        # REPLACE on a DA, TM, DT, AS or binary tag was refused here.
+        written = value or _vr_dummy(tag) or "ANONYMIZED"
         vr = _dictionary_vr_refuses(tag, written)
         if vr is not None:
             advice = "EMPTY or REMOVE"
+            # Only for a `value:`: a value-less REPLACE on a DA or DT
+            # writes its dummy and is never refused here.
             if vr in ("DA", "DT"):
                 advice += ", or JITTER to shift it"
             # By arm: `US or SS` is as numeric as `US` (review of #574).
             if not set(vr.split(" or ")) <= _NON_STRING_VRS:
                 advice += f", or give a value: that is a valid {vr}"
+            uid = "; a UID is replaced by UID replacement (#544)" if vr == "UI" else ""
             return (f"phi_tags['{tag}'] is REPLACE, which writes {written!r}, "
                     f"and {tag} is {vr}, which cannot hold it; use {advice} "
-                    f"(#560)")
+                    f"(#560){uid}")
         if value:
             vr = _standard_dictionary_vr(tag)
             if vr in ("DA", "TM") and "-" in value:

@@ -166,7 +166,7 @@ TARGETS = {
     # 17 sites, exhaustive: all 17 killed. One file, 1.4s per pass.
     "isocenter/automation.py": (["tests/test_automation.py"], 30),
     # 5 sites, exhaustive: all 5 killed. Seven files, 20.3s per pass.
-    "isocenter/exporters/__init__.py": (["tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py",
+    "isocenter/exporters/__init__.py": (["tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py",
                                          "tests/test_murmur_annotations.py",
                                          "tests/test_study_date_roundtrip.py",
                                          "tests/test_wfdb_option_strictness.py",
@@ -256,7 +256,7 @@ TARGETS = {
     # Their NOT_PROBED notes (config_manager 29/40 killed, configuration
     # 21/31) were measured before either bunch and are not carried over:
     # the first default run is the new measurement.
-    "isocenter/config_manager.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_api_coherence.py",
+    "isocenter/config_manager.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_api_coherence.py", "tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py",  # hand extras (#556, #557): the mask arm and `_vr_dummy`, reached through Session and PhiInspector
                                      "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                      "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
                                      "tests/test_config.py",
@@ -348,7 +348,7 @@ TARGETS = {
                                 "tests/test_reporting.py",
                                 "tests/test_report_export_boundary.py",
                                 "tests/test_export_delivery_counters.py", "tests/test_the_grade_counts_findings_not_acted_on.py"], 30),
-    "isocenter/privacy.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_token_this_store_did_not_write_is_not_replaced.py", "tests/test_the_grade_counts_findings_not_acted_on.py",
+    "isocenter/privacy.py": (["tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_token_this_store_did_not_write_is_not_replaced.py", "tests/test_the_grade_counts_findings_not_acted_on.py",
                               "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                               "tests/test_suggested_config.py", "tests/test_analysis.py", "tests/test_analysis_persistence.py",
                               "tests/test_anonymize_records_what_it_left.py",
@@ -729,7 +729,7 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+    "isocenter/session.py": (["tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                               "tests/test_a_nested_item_status_survives_a_reopen.py",
                               "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
@@ -1009,7 +1009,7 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+    "isocenter/entities.py": (["tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                                "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                "tests/test_a_nested_item_status_survives_a_reopen.py",
                                "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",

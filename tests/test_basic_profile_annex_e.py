@@ -19,8 +19,10 @@ import re
 
 from isocenter.profiles import BASIC_PROFILE, FLOOR_POLICY, RESEARCH_DEFAULTS
 
-from support.annex_e import (ACTION_FOR_CODE, DEVIATIONS, EDITION, NO_ENTRY,
-                             NO_ENTRY_CODES, derive, load_table,
+from pydicom.datadict import dictionary_VM, dictionary_VR
+
+from support.annex_e import (ACTION_FOR_CODE, DEVIATIONS, EDITION, GROUP_RULES,
+                             NO_ENTRY, NO_ENTRY_CODES, derive, load_table,
                              render_literal)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -60,9 +62,13 @@ def test_basic_profile_is_derived_from_annex_e():
         "not edit one entry.")
     assert BASIC_PROFILE == derived
 
-    assert len(BASIC_PROFILE) == 620
+    # 590 since #556/#557: the 32 concrete `60xx` keys became the two
+    # group rules, and 119 D-arm rules moved from EMPTY or REMOVE to
+    # REPLACE, which writes the VR's dummy. Literal numbers, checked
+    # against the arithmetic by hand, never computed.
+    assert len(BASIC_PROFILE) == 590
     assert collections.Counter(rule["action"] for rule in BASIC_PROFILE.values()) == {
-        "REMOVE": 463, "EMPTY": 155, "REPLACE": 2}
+        "REMOVE": 412, "EMPTY": 57, "REPLACE": 121}
 
 
 #: Rows read off PS3.15 2026c Table E.1-1 itself, not off the fixture: one
@@ -75,13 +81,18 @@ def test_basic_profile_is_derived_from_annex_e():
 FROM_THE_STANDARD = {
     # key: (name, Basic Prof. code, rule action or None)
     "0010,1000": ("Other Patient IDs", "X", "REMOVE"),
-    "0008,0021": ("Series Date", "X/D", "REMOVE"),
-    "0018,1030": ("Protocol Name", "X/D", "REMOVE"),
+    "0008,0021": ("Series Date", "X/D", "REPLACE"),
+    "0018,1030": ("Protocol Name", "X/D", "REPLACE"),
     "0008,0050": ("Accession Number", "Z", "EMPTY"),
     "0010,0030": ("Patient's Birth Date", "Z", "EMPTY"),
-    "0008,0023": ("Content Date", "Z/D", "EMPTY"),
-    "0008,1010": ("Station Name", "X/Z/D", "EMPTY"),
-    "0040,a075": ("Verifying Observer Name", "D", "EMPTY"),
+    "0008,0023": ("Content Date", "Z/D", "REPLACE"),
+    "0008,1010": ("Station Name", "X/Z/D", "REPLACE"),
+    "0040,a075": ("Verifying Observer Name", "D", "REPLACE"),
+    # A D-arm sequence keeps its action, a named departure (#557): no
+    # dummy item is valid independent of the IOD.
+    "0008,0082": ("Institution Code Sequence", "X/Z/D", "EMPTY"),
+    # The table's own repeating-group spelling is the rule key (#556).
+    "50xx,xxxx": ("Curve Data", "X", "REMOVE"),
     "0040,0275": ("Request Attributes Sequence", "X", "REMOVE"),
     "0008,1110": ("Referenced Study Sequence", "X/Z", "EMPTY"),
     "0020,000d": ("Study Instance UID", "U", None),
@@ -125,7 +136,7 @@ def test_the_floor_overrides_three_basic_rules_and_adds_none():
     """Patient's Age is a basic rule since 0.9.8, so all three research
     defaults override one and the floor is the profile's size."""
     assert set(RESEARCH_DEFAULTS) <= set(BASIC_PROFILE)
-    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 620
+    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 590
 
 
 def test_every_departure_is_a_row_and_is_a_departure():
@@ -152,6 +163,17 @@ def test_every_departure_is_a_row_and_is_a_departure():
         assert deviation["action"] != ACTION_FOR_CODE[rows[key]["basic"]], (
             f"{key}: the deviation gives what the table's code gives")
 
+    # A group rule is the other way round: a key the table does not have
+    # (#556), so it is added, not departed to, and owns an issue its
+    # reason repeats.
+    assert GROUP_RULES, "the overlay group rule is gone"
+    for key, rule in GROUP_RULES.items():
+        assert key not in rows, f"GROUP_RULES names {key}, which is a table row"
+        assert rule["action"] in ("REMOVE", "KEEP"), key
+        assert rule["name"].strip() and rule["reason"].strip(), key
+        assert re.fullmatch(r"#\d+", rule["authority"]), key
+        assert rule["authority"] in rule["reason"], key
+
 
 def test_every_deviation_names_its_reason_and_issue():
     """Each departure is owned: an issue number that its reason repeats, or
@@ -170,15 +192,62 @@ def test_every_deviation_names_its_reason_and_issue():
             f"{key}'s deviation rests on {symbol} in {path}, which is gone")
 
 
-def test_537s_two_deviations_are_the_patients_name_and_id():
+def test_537s_deviation_is_the_patients_name():
     """#537 decided the three owned rules: Study Date follows the table
-    (Z, so EMPTY), and Patient's Name and Patient ID depart from it to
-    REPLACE -- a dummy Z permits, and the keyed pseudonym, the only
-    replacement a Patient ID rule may ask for. Kills a third departure
-    kept on Study Date, and either of the two dropped."""
+    (Z, so EMPTY), and Patient's Name departs from it to REPLACE, a dummy
+    Z permits. Patient ID (Z/D) was the second departure until #557; its
+    code now maps to REPLACE, and REPLACE with no value on Patient ID is
+    the keyed pseudonym, which is its D arm. Kills a departure kept on
+    Study Date, the name's dropped, and the Patient ID row silently
+    becoming something else."""
     assert {key: d["action"] for key, d in DEVIATIONS.items()
-            if d["authority"] == "#537"} == {"0010,0010": "REPLACE",
-                                             "0010,0020": "REPLACE"}
+            if d["authority"] == "#537"} == {"0010,0010": "REPLACE"}
+    assert BASIC_PROFILE["0010,0020"] == {"action": "REPLACE", "name": "Patient ID"}
+
+
+#: The VRs a value-less REPLACE writes a dummy for (#557). Literal, not
+#: read from `config_manager.VR_DUMMY`: the test would otherwise pass any
+#: change to the table it is guarding.
+DUMMY_VRS = {"AE", "CS", "LO", "LT", "PN", "SH", "ST", "UC", "UT", "UR",
+             "DA", "DT", "TM", "AS", "OB", "OW", "OF", "OL", "OD", "OV", "UN"}
+
+
+def _dictionary(key):
+    number = int(key.replace(",", ""), 16)
+    return str(dictionary_VR(number)), str(dictionary_VM(number))
+
+
+def test_no_dummy_lands_on_a_sequence_or_a_uid():
+    """Every value-less REPLACE in the literal is on a VR that has a dummy
+    (#557). The mapping sends every D arm to REPLACE, so a later table
+    giving D to a sequence or a UID row would become a REPLACE the scan
+    ignores (SQ) or the loader refuses (UI); this says why, where the
+    derivation test would only say the literal differs.
+
+    Kills: a D-arm sequence departure deleted from `DEVIATIONS` (its row
+    derives to REPLACE on an SQ)."""
+    for key, rule in BASIC_PROFILE.items():
+        if rule["action"] != "REPLACE" or "value" in rule:
+            continue
+        vr, _vm = _dictionary(key)
+        assert vr in DUMMY_VRS, (
+            f"{key} ({rule['name']}) is a value-less REPLACE on {vr}, which "
+            f"has no dummy; give the row a departure or a dummy")
+
+
+def test_every_d_arm_row_is_single_valued_and_not_numeric():
+    """The dummy is one value of a string or binary VR. That is right
+    because every row whose code has a D arm is VM 1 or 1-n, and none is
+    numeric, AT or a compound VR (measured on the 2026c table). Kills a
+    table refresh that breaks either premise without anyone noticing."""
+    numeric = {"US", "SS", "UL", "SL", "UV", "SV", "FL", "FD", "DS", "IS", "AT"}
+    rows = [row for row in load_table()["rows"]
+            if "D" in row["basic"].split("/")]
+    assert len(rows) == 130
+    for row in rows:
+        vr, vm = _dictionary(row["key"])
+        assert vm in ("1", "1-n"), (row["key"], vm)
+        assert vr not in numeric and " or " not in vr, (row["key"], vr)
 
 
 def test_the_configuration_page_names_the_fixture_edition():

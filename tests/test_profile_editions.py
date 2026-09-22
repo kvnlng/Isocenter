@@ -44,8 +44,8 @@ PINNED_FLOOR_BASE = "basic@2026c"
 #: CHANGELOG entry saying what the table gained or lost (L10 #544 and L11
 #: #557 will). After 1.0 it is a new name, never a new digest.
 PINNED_DIGESTS = {
-    "basic@2026c": "ec15e4d411a80368df92d0431ce053938b6e58d4f0cc92e8e1ae77e5679f2133",
-    "floor": "674175c1e723af2e94ba29905344ee2fe4ba23ab78e5b8dc2d104732b1334b76",
+    "basic@2026c": "6c9726ddf0029806ad94995db5d8ae31ea8c58be1fb27b475742598ef42dccf2",
+    "floor": "234216eca845fc8c4cba0a181c566c5058c39c656279828ca6aaee6c5b53697f",
 }
 #: Filled at the v1.0.0 cut by L14 (#26): a copy of `PINNED_DIGESTS`.
 FROZEN_AT_1_0 = {}
@@ -101,7 +101,7 @@ def test_the_pinned_name_loads_the_2026c_table(tmp_path):
     with Session(str(tmp_path / "s.db")) as session:
         session.load_config(path)
         assert session.configuration.phi_tags == BASIC_PROFILE
-        assert len(session.configuration.phi_tags) == 620
+        assert len(session.configuration.phi_tags) == 590
         assert session.configuration.privacy_profile == "basic@2026c"
 
 
@@ -329,7 +329,7 @@ def test_the_report_names_the_edition_and_tells_floor_from_none(tmp_path):
         basic = _report_rows(session, tmp_path, "basic.md")
     assert basic["Privacy Profile"] == "| Privacy Profile | basic@2026c |", basic
     assert "edition 2026c" in basic["De-ID Method"], basic
-    assert "620 tag rules" in basic["De-ID Method"], basic
+    assert "590 tag rules" in basic["De-ID Method"], basic
 
     with Session(str(tmp_path / "none.db")) as session:
         session.load_config(_config(tmp_path, "privacy_profile: none\n", "n.yaml"))

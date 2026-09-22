@@ -48,6 +48,12 @@ from isocenter.session import DicomSession
 NOTICE = "recorded under a policy other than the one in force"
 FLOOR = "floor over basic@2026c"
 INSTITUTION = "0008,0080"
+#: Study ID is `Z` in PS3.15 Table E.1-1, so the floor and `basic` both
+#: empty it. The two split-report tests below assert the value the
+#: remediated tag holds; Institution Name is `X/Z/D`, whose value moved
+#: from empty to the dummy in #557, which is not what they pin (L11's
+#: rebase onto #750).
+STUDY_ID = "0020,0010"
 
 
 @pytest.fixture(autouse=True)
@@ -911,8 +917,8 @@ def test_a_tally_keeps_its_audit_through_copy_pickle_and_deepcopy():
 
 def test_two_audits_split_across_a_reopen_fail_closed(tmp_path):
     """The one known difference from the scanning session (fourth review of
-    #750): two audits, the first's report narrowed to all but Institution
-    Name, the second's to Institution Name alone. In the scanning session
+    #750): two audits, the first's report narrowed to all but Study ID,
+    the second's to Study ID alone. In the scanning session
     both passes settle against the *latest* audit's tally, which the second
     completes: REMEDIATED, PASS. After a reopen each report brings its own
     audit's tally, and neither is told which came last, so neither
@@ -928,13 +934,13 @@ def test_two_audits_split_across_a_reopen_fail_closed(tmp_path):
         r1 = session.audit()
         r2 = session.audit()
         policy = session.configuration._scan_policy()
-    r1.findings[:] = [f for f in r1.findings if f.tag != INSTITUTION]
-    r2.findings[:] = [f for f in r2.findings if f.tag == INSTITUTION]
+    r1.findings[:] = [f for f in r1.findings if f.tag != STUDY_ID]
+    r2.findings[:] = [f for f in r2.findings if f.tag == STUDY_ID]
     with DicomSession(db) as session:
         session.anonymize(r1)
         session.anonymize(r2)
         [inst] = _instances(session)
-        assert inst.attributes.get(INSTITUTION) == ""
+        assert inst.attributes.get(STUDY_ID) == ""
         assert inst.phi_status is PhiStatus.IDENTIFIED
         assert inst.phi_status_policy == policy
         session.export(str(tmp_path / "out"))
@@ -944,14 +950,14 @@ def test_two_audits_split_across_a_reopen_fail_closed(tmp_path):
 def test_one_entitys_findings_split_across_two_sessions_fail_closed(tmp_path):
     """The second known difference from the scanning session (sixth review
     of #750): one report's findings for one instance split in two -- all but
-    Institution Name, then Institution Name alone. In the scanning session
+    Study ID, then Study ID alone. In the scanning session
     the second pass completes the first (#553's `_partial`): REMEDIATED,
     PASS. Here the first half is applied in one reopened session, which
     saves, and the second in another: that session's working copy starts
     from the audit, the first session's partial progress on the instance
     died with it, and the second pass handles one of its keys, so the
-    instance stays IDENTIFIED and the grade is REVIEW_REQUIRED. Institution
-    Name is still emptied. Closing it would need the working tally stored,
+    instance stays IDENTIFIED and the grade is REVIEW_REQUIRED. Study ID
+    is still emptied. Closing it would need the working tally stored,
     which the design excludes. Pinned so a later change cannot quietly turn
     it into a PASS that no tally supports."""
     db = str(tmp_path / "s.db")
@@ -963,14 +969,14 @@ def test_one_entitys_findings_split_across_two_sessions_fail_closed(tmp_path):
         policy = session.configuration._scan_policy()
     every = list(report.findings)
     with DicomSession(db) as session:
-        report.findings[:] = [f for f in every if f.tag != INSTITUTION]
+        report.findings[:] = [f for f in every if f.tag != STUDY_ID]
         session.anonymize(report)
         session.save(sync=True)
     with DicomSession(db) as session:
-        report.findings[:] = [f for f in every if f.tag == INSTITUTION]
+        report.findings[:] = [f for f in every if f.tag == STUDY_ID]
         session.anonymize(report)
         [inst] = _instances(session)
-        assert inst.attributes.get(INSTITUTION) == ""
+        assert inst.attributes.get(STUDY_ID) == ""
         assert inst.phi_status is PhiStatus.IDENTIFIED
         assert inst.phi_status_policy == policy
         session.export(str(tmp_path / "out"))

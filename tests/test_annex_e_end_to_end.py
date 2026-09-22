@@ -7,13 +7,15 @@ walked element by element. On 0.9.7, 25 of the 26 probes reached the
 file.
 
 The walk is the assertion, not the probe list. Every element in the
-written file whose tag the table has (a `60xx` overlay element through
-its row) must be absent, zero-length, or a zero-item sequence, unless
-the table gives it no rule or a named departure says why not. The probe
-list only makes sure each kind of identifier is in the input, so an edit
-to the fixture cannot quietly stop testing one.
+written file whose tag the table has must be absent, zero-length, or a
+zero-item sequence -- or, where the row's code has a D arm, hold its
+VR's dummy (#557) -- unless the table gives it no rule or a named
+departure says why not. Every even-group 50xx and 60xx element must be
+absent outright, whatever its row (#556). The probe list only makes sure
+each kind of identifier is in the input, so an edit to the fixture
+cannot quietly stop testing one.
 
-Both worker paths, because the process path pickles the 620-rule policy
+Both worker paths, because the process path pickles the 590-rule policy
 into every scan task and the thread path does not.
 """
 import os
@@ -28,7 +30,15 @@ from pydicom.sequence import Sequence
 from isocenter import Session
 from isocenter import parallel
 
-from support.annex_e import DEVIATIONS, NO_ENTRY, NO_ENTRY_CODES, load_table
+from support.annex_e import (DEVIATIONS, GROUP_RULES, NO_ENTRY, NO_ENTRY_CODES,
+                             load_table)
+
+#: What a value-less REPLACE writes, by VR (#557). Literal, never read
+#: from `config_manager.VR_DUMMY`.
+DUMMY = {"DA": "19000101", "DT": "19000101", "TM": "000000", "AS": "000D",
+         **{vr: "ANONYMIZED" for vr in ("AE", "CS", "LO", "LT", "PN", "SH",
+                                        "ST", "UC", "UR", "UT")},
+         "OB": b"\x00\x00", "UN": b"\x00\x00"}
 
 #: tag -> (kind of identifier, value written into the source).
 PROBES = {
@@ -75,9 +85,13 @@ SEQUENCE_PROBES = {
 KINDS = {"date", "patient", "personnel", "device", "free text", "repeating group",
          "sequence", "nested in a sequence"}
 
-#: Retired Curve Data (50xx) has no rule until the repeating-group sweep
-#: (#556). Asserted to SURVIVE, so the sweep flips this on purpose.
+#: Retired Curve Data (50xx): removed by the `50xx,xxxx` rule since #556.
+#: It survived every profile until then, and this test said so.
 CURVE_ELEMENT = 0x50000005
+
+#: Overlay Description in group 6002: free text Table E.1-1 does not list,
+#: removed with its group by the `60xx,xxxx` rule (#556).
+OVERLAY_DESCRIPTION = 0x60020022
 
 
 def _build(path):
@@ -118,6 +132,7 @@ def _build(path):
     ds.add_new(0x0040A073, "SQ", Sequence([observer]))
 
     ds.add_new(CURVE_ELEMENT, "US", 1)                          # Curve Dimensions
+    ds.add_new(OVERLAY_DESCRIPTION, "LO", "Overlay by Jane Doe")
     ds.save_as(path)
     return ds
 
@@ -126,12 +141,23 @@ def _key(tag):
     return f"{tag.group:04x},{tag.element:04x}"
 
 
+def _is_repeating(tag):
+    """An even group of the retired Curve or the Overlay range (PS3.5 7.6)."""
+    return ((0x5000 <= tag.group <= 0x501E or 0x6000 <= tag.group <= 0x601E)
+            and tag.group % 2 == 0)
+
+
 def _row_for(rows, tag):
+    """The element's row, most specific first: the concrete key, then the
+    table's element mask, then its group mask. Written here, not imported
+    from `privacy._rule_for`, so a change there cannot move this."""
     key = _key(tag)
     if key in rows:
         return rows[key]
-    if 0x6000 <= tag.group <= 0x601E and tag.group % 2 == 0:
-        return rows.get(f"60xx,{tag.element:04x}")
+    if _is_repeating(tag):
+        prefix = f"{tag.group:04x}"[:2]
+        return (rows.get(f"{prefix}xx,{tag.element:04x}")
+                or rows.get(f"{prefix}xx,xxxx"))
     return None
 
 
@@ -165,6 +191,12 @@ def test_the_probes_cover_every_kind_of_identifier():
         row = _row_for(rows, pydicom.tag.Tag(tag))
         assert row is not None, f"{tag:08x} is not a Table E.1-1 row"
         assert row["basic"] not in NO_ENTRY_CODES and row["key"] not in NO_ENTRY
+        # A row folded into a group rule has no rule of its own; a probe
+        # on it tests something only while a group rule covers it (#556).
+        if DEVIATIONS.get(row["key"], {"action": ""})["action"] is None:
+            group = row["key"][:2] + "xx,xxxx"
+            assert group in GROUP_RULES or group in rows, (
+                f"{tag:08x}: its row has no rule and no group rule covers it")
 
 
 @pytest.mark.parametrize("strategy", ["threads", "processes"], indirect=True)
@@ -201,7 +233,9 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
 
     rows = {row["key"]: row for row in load_table()["rows"]}
     no_rule = set(NO_ENTRY) | {key for key, d in DEVIATIONS.items() if d["action"] is None}
-    entity_owned = {key for key, d in DEVIATIONS.items() if d["authority"] == "#537"}
+    # Owned by the Patient and the Study (#537): the name's and the ID's
+    # REPLACE write `ANONYMIZED` and the keyed pseudonym, asserted below.
+    entity_owned = {"0010,0010", "0010,0020"}
     # The floor's research defaults: Patient's Sex and Age kept, Study
     # Date jittered rather than the table's Z (the basic profile empties
     # it since #537).
@@ -209,14 +243,25 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
 
     survivors = []
     for element in out.iterall():
+        # Every curve and overlay element goes, whatever its row: the
+        # group rules cover the rows folded into them (#556).
+        if _is_repeating(element.tag):
+            survivors.append((_key(element.tag), "repeating group", element.value))
+            continue
         row = _row_for(rows, element.tag)
         if row is None or row["basic"] in NO_ENTRY_CODES:
             continue
         key = row["key"]
         if key in no_rule or key in entity_owned or key in floor_keeps:
             continue
-        if not _is_empty(element):
-            survivors.append((_key(element.tag), row["name"], element.value))
+        if _is_empty(element):
+            continue
+        # A D arm is replaced, not emptied: the element holds its VR's
+        # dummy and nothing of the original (#557).
+        if ("D" in row["basic"].split("/") and element.VR != "SQ"
+                and element.value == DUMMY.get(element.VR)):
+            continue
+        survivors.append((_key(element.tag), row["name"], element.value))
     assert survivors == [], survivors
 
     # The owned three hold the floor's replacements: its REPLACE rows on
@@ -233,9 +278,14 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
     # and what is inside them is empty.
     assert len(out[0x0040, 0xA730].value) == 1
     observer = out[0x0040, 0xA073].value[0]
-    assert observer[0x0040, 0xA075].value in ("", None)
+    # D: Verifying Observer Name is Type 1 in an SR, so it is replaced by
+    # a dummy rather than emptied (#557).
+    assert observer[0x0040, 0xA075].value == "ANONYMIZED"
     assert len(observer[0x0040, 0xA088].value) == 0
+    # X/D: removed until #557, now holding the DA dummy.
+    assert out[0x0008, 0x0012].value == "19000101"
 
-    # The known gap, asserted so that closing it is a visible change: the
-    # retired Curve group has no rule until the repeating-group sweep (#556).
-    assert CURVE_ELEMENT in out and out[CURVE_ELEMENT].value == 1
+    # The gap this test used to assert, closed: the retired Curve group
+    # and the whole overlay group are removed (#556).
+    assert CURVE_ELEMENT not in out
+    assert OVERLAY_DESCRIPTION not in out

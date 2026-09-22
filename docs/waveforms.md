@@ -92,14 +92,14 @@ There are three configurations a reader of this guide can be in:
 - **A bare `Session()`, never `load_config()`-ed.** `phi_tags` is the
   floor policy, `FLOOR_POLICY` (`isocenter/profiles.py`): the basic
   profile below plus the three research defaults `create_config()`
-  writes (Study Date jittered, Patient's Sex and Age kept) -- 620 rules.
+  writes (Study Date jittered, Patient's Sex and Age kept) -- 590 rules.
   Until #495 this configuration applied no tag policy at all, and Study
   ID, Institution Name, Station Name and the series/acquisition/content
   dates reached the export.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic@2026c` (the pinned name; `basic` is its short
   form, #714); `load_config()` expands that into
-  `PRIVACY_PROFILES["basic@2026c"]` (`isocenter/profiles.py`) -- **620 tags, 620
+  `PRIVACY_PROFILES["basic@2026c"]` (`isocenter/profiles.py`) -- **590 tags, 590
   effective** -- the Basic Profile column of DICOM PS3.15 Annex E Table
   E.1-1 (2026c), with its departures named in
   [Configuration](configuration.md#privacy-profile). This is what
@@ -109,7 +109,7 @@ There are three configurations a reader of this guide can be in:
   sat in the profile doing nothing. It fires now.
   The scaffold lists only the three research defaults beneath
   `privacy_profile: basic@2026c` -- the entries of the floor whose action
-  differs from the profile's -- so the loaded policy is the same 620
+  differs from the profile's -- so the loaded policy is the same 590
   rules a bare session applies.
 - **Your own `phi_tags` configuration.** With no `privacy_profile`
   line it is layered on the floor policy; with `privacy_profile: basic`
@@ -155,10 +155,12 @@ configurations above you're in:
   to restore it. That default-off behaviour is what actually protects
   this field today. `(0070,0006)` is also in the Basic profile, and
   since 0.8.0 that entry works: a configured session that passes
-  `include_annotation_text=True` gets the profile's remediated (emptied)
-  value.
+  `include_annotation_text=True` gets the profile's remediated value.
+  Since #557 that is the text dummy `ANONYMIZED` in the exported DICOM,
+  as Table E.1-1's `D` asks, and the bridge reads the dummy as no text:
+  the finding carries no `note`, exactly as when the value was emptied.
 
-  Before 0.8.0 it did not. The tag lives inside each Waveform Annotation
+  Before 0.8.0 the entry did not work. The tag lives inside each Waveform Annotation
   Sequence item rather than at the top level, and the scan only reached
   nested content through the instance's `text_index` -- which the worker
   clones `session.audit()` scans were not given. So the profile entry sat
