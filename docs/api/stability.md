@@ -388,8 +388,10 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
 - **`session.key_manager`, `session.persistence_manager`,
   `session.reversibility_service`** — attributes that expose services.
 - **`TrackedEntity` bookkeeping**: `has_unsaved_changes`, `phi_status`,
-  `mark_modified()`, `mark_persisted()`, `mark_subtree_persisted()`,
-  `record_phi_status()`; `PhiStatus`; `DicomItem.add_sequence()` and
+  `phi_status_policy`, `mark_modified()`, `mark_persisted()`,
+  `mark_subtree_persisted()`, `record_phi_status()`; `PhiStatus`;
+  `ScanPolicy`, the policy a status was recorded under, which the store
+  keeps beside it (#555); `DicomItem.add_sequence()` and
   `add_sequence_item()`, `record_attr_vr()`; `DicomSequence`;
   `Instance.regenerate_uid()`, `get_waveform_bytes()`,
   `unload_waveform_data()`, `pixel_array`, `waveform_array`;

@@ -402,6 +402,27 @@ class WfdbExporter(Exporter):
         # This is the auditor's override, not a debug switch -- it says the
         # protocol permits releasing that text.
         include_annotation_text = bool(options.get("include_annotation_text", False))
+
+        # The #555 notice, over the instances this export will attempt: the
+        # ones in the selected patients that hold a waveform. A CT slice
+        # sharing a series with an ECG is written nowhere, so its status is
+        # not this export's to report (`_write_instance`'s first arm).
+        # After the option checks above, so a refused call says nothing;
+        # through `getattr` because a caller may hand in a session-like
+        # object that is not a `Session`.
+        report_policies = getattr(
+            session, "_report_statuses_under_another_policy", None)
+        if report_policies is not None:
+            report_policies(
+                [(patient, study, instance)
+                 for patient in session.store.patients
+                 if patient_ids is None or patient.patient_id in patient_ids
+                 for study in patient.studies
+                 for series in study.series
+                 for instance in series.instances
+                 if getattr(instance.sequences.get(WAVEFORM_SEQUENCE_TAG),
+                            "items", None)],
+                folder, "WFDB")
         # Passed down explicitly rather than read off `session` inside
         # `_write_instance`, so the one place that writes an audit entry
         # names its dependency instead of reaching back through the

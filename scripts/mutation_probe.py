@@ -257,6 +257,7 @@ TARGETS = {
     # 21/31) were measured before either bunch and are not carried over:
     # the first default run is the new measurement.
     "isocenter/config_manager.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_api_coherence.py",
+                                     "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                      "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
                                      "tests/test_config.py",
                                      "tests/test_config_scalar_types.py",
@@ -274,6 +275,7 @@ TARGETS = {
                                      "tests/test_suggested_config.py",
                                      "tests/test_zone_validation.py"], 30),
     "isocenter/configuration.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_automation.py",
+                                    "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                     "tests/test_a_replace_rule_writes_its_value.py",
                                     "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
                                     "tests/test_config_schema_version.py",
@@ -287,7 +289,8 @@ TARGETS = {
                                     # scan cannot see, and is what holds
                                     # `_floor` and `_policy_base`.
                                     "tests/test_profile_editions.py",
-                                    "tests/test_redaction_export.py"], 30),
+                                    "tests/test_redaction_export.py",
+                                    "tests/test_the_policy_fingerprint.py"], 30),
     # 45 sites, exhaustive: 45 killed. Six files, 18s per pass (3.12.14).
     #
     # tests/test_relock_identity_token.py is a hand extra (#441): it reaches
@@ -346,6 +349,7 @@ TARGETS = {
                                 "tests/test_report_export_boundary.py",
                                 "tests/test_export_delivery_counters.py", "tests/test_the_grade_counts_findings_not_acted_on.py"], 30),
     "isocenter/privacy.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_token_this_store_did_not_write_is_not_replaced.py", "tests/test_the_grade_counts_findings_not_acted_on.py",
+                              "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                               "tests/test_suggested_config.py", "tests/test_analysis.py", "tests/test_analysis_persistence.py",
                               "tests/test_anonymize_records_what_it_left.py",
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
@@ -391,6 +395,7 @@ TARGETS = {
                               "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                               "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/remediation.py": (["tests/test_audit_suppression.py",
+                                  "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_partial_findings_list_is_not_remediated.py",
                                   "tests/test_a_replace_rule_writes_its_value.py",
@@ -598,7 +603,10 @@ TARGETS = {
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
     "isocenter/persistence.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+                                  "tests/test_a_nested_item_status_survives_a_reopen.py",
+                                  "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
                                   "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
+                                  "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                   "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                   "tests/test_a_lock_whose_store_write_fails_raises.py",
                                   "tests/test_a_persisted_lock_needs_a_row.py",
@@ -723,8 +731,11 @@ TARGETS = {
     # budget.
     "isocenter/session.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+                              "tests/test_a_nested_item_status_survives_a_reopen.py",
+                              "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
                               "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
                               "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                              "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                               "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                               "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
                               "tests/test_a_plugin_value_error_reaches_the_fallback.py",
@@ -1000,6 +1011,9 @@ TARGETS = {
     # Cost: ~1.8 h of a default run as an upper bound.
     "isocenter/entities.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                                "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+                               "tests/test_a_nested_item_status_survives_a_reopen.py",
+                               "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
+                               "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
                                "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                                "tests/test_an_rle_fragment_is_a_frame.py",

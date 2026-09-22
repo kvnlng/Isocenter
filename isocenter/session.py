@@ -41,7 +41,8 @@ from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
                        resolve_max_workers, resolve_worker_initializer,
                        progress_bar)
-from .configuration import IsocenterConfiguration, FlowList
+from .configuration import (IsocenterConfiguration, FlowList, _policy_base_label,
+                            _scan_policy_for)
 from .entities import (Patient, PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree)
 from .profiles import FLOOR_POLICY
@@ -952,6 +953,26 @@ class DicomSession:
         # identifiers it was not handed (#553). None until an audit runs,
         # and not persisted: a reopened session keeps pass accounting.
         self._scan_tally = None
+        # This session's working copy of each kept report's scan tally
+        # (#555, third to fifth reviews of #750): one per *audit*, keyed by
+        # the audit token its tally carries (`_ScanTally._audit`), so
+        # partial passes over one audit's reports -- copied, deep-copied,
+        # pickled or loaded again -- complete one another as they would in
+        # the session that scanned it (a patient-level pass now, the
+        # instances later), while another session starts from its own
+        # copy. A plain dict: nothing else holds a working copy, so a weak
+        # mapping would drop it between passes. It keeps one entry per
+        # audit handed to this session, two ints per uid it has not
+        # completed plus the handled keys of any uid a pass left partial,
+        # for the life of the session.
+        self._report_tallies = {}
+        # Every policy an `audit()` in this session scanned under,
+        # fingerprint -> base (#555). A status recorded under one of these
+        # raises no export notice (owner's ruling Q2): the user chose it in
+        # this session, by `audit(config_path=)` or by the configuration
+        # then in force. Not persisted, deliberately: #555's harm crosses
+        # sessions, and a fresh session has scanned nothing.
+        self._scanned_policies = {}
 
         # The verbs this session actually performed ("REDACTION",
         # "ANONYMIZE"), so `generate_report` can demand action-specific
@@ -2529,6 +2550,12 @@ class DicomSession:
         Two `Patient` objects holding one Patient ID are merged into the
         one that was in the session first before the scan (#563), so
         `store.patients` can get shorter, as after `anonymize()`.
+
+        Every status the scan records is recorded under the policy it ran
+        with (#555): the configuration's, or with `config_path` that
+        file's rules under this session's `remove_private_tags` (the flag
+        the scan uses). An entity whose status is unchanged but whose
+        policy differs is re-recorded, so the next `save()` writes it.
         """
 
         # A scan ENDS by advancing `_revision` on every entity it
@@ -2559,8 +2586,16 @@ class DicomSession:
             # against happily, a `.json` file `load_config` refuses was
             # accepted, and a root-level tag file loaded tags the scan
             # then never matched.
-            tags_to_use, _, _, _, _ = ConfigLoader.load_unified_config(config_path)
+            tags_to_use, _, _, _, base = ConfigLoader.load_unified_config(config_path)
+            # The policy this scan runs with (#555): the file's rules, and
+            # the session's `remove_private_tags` -- the flag the inspector
+            # below is given, not the file's -- under the file's base,
+            # spelled by the helper the configuration spells its own with.
+            policy = _scan_policy_for(tags_to_use,
+                                      self.configuration.remove_private_tags,
+                                      _policy_base_label(base))
         else:
+            policy = self.configuration._scan_policy()
             # `configuration.phi_tags` can be assigned directly, which no
             # loader sees. The same refusal the loader raises (#537, #560),
             # and before the project secret below, for #456's reason.
@@ -2629,11 +2664,29 @@ class DicomSession:
 
         # Rehydrate Entities!
         self._rehydrate_findings(all_findings)
-        self._record_scan_results(all_findings)
+        self._record_scan_results(all_findings, policy)
+        self._scanned_policies[policy.fingerprint] = policy.base
 
         get_logger().info(f"PHI Scan Complete. Found {len(all_findings)} issues.")
 
-        return PhiReport(all_findings)
+        report = PhiReport(all_findings)
+        # The policy the report's findings were raised under (#555), for
+        # `anonymize()` handed this report after a reopen, when the
+        # entities it remediates carry no policy of their own. Private and
+        # set here rather than a constructor argument, so `PhiReport`'s
+        # shape is unchanged; a report rebuilt from its findings has none.
+        report._scan_policy = policy
+        # And the scan's tally (#553), as the audit left it: a pass over
+        # this report in a session that has no audit of its own -- the
+        # report kept across `close()`, pickled or not -- settles against
+        # a copy of it, demoting what it leaves unsettled as the same pass
+        # would in this session, and gives the policy only to the entities
+        # this scan raised under (ruling on #750, which replaced a
+        # completeness check and a resolution check that each missed a way
+        # to hand over a partial pass). A copy, not the session's object,
+        # which this session's own passes drain.
+        report._scan_tally = self._scan_tally.copy()
+        return report
 
     def phi_status_summary(self) -> Dict[str, Counter]:
         """What the session currently knows about the PHI in each entity.
@@ -2653,6 +2706,11 @@ class DicomSession:
         after it, provided nothing but redaction's own writes changed
         (#486; confirmed by the owner on 2026-09-11). See `PhiStatus`.
 
+        The counts are of statuses as recorded, whatever policy each was
+        recorded under: `phi_status_policy` names it, and an `export()`
+        of statuses recorded under a policy other than the one in force
+        says so (#555).
+
         Returns:
             Dict[str, Counter]: Keyed "patients", "studies", "instances";
                 each a Counter of PhiStatus to how many carry it.
@@ -2670,8 +2728,9 @@ class DicomSession:
 
         return summary
 
-    def _record_scan_results(self, findings):
-        """Writes what the scan concluded onto the entities it scanned.
+    def _record_scan_results(self, findings, policy):
+        """Writes what the scan concluded onto the entities it scanned,
+        under the `ScanPolicy` the scan ran with (#555).
 
         Every entity the inspector reports on gets a status: IDENTIFIED
         where a finding names it, CLEARED where the scan looked and found
@@ -2698,7 +2757,7 @@ class DicomSession:
         def record(entity, uid):
             entity.record_phi_status(
                 PhiStatus.IDENTIFIED if uid in identified
-                else PhiStatus.CLEARED)
+                else PhiStatus.CLEARED, policy=policy)
 
         for patient in self.store.patients:
             record(patient, patient.patient_id)
@@ -3336,6 +3395,22 @@ class DicomSession:
         deid_method = (
             f"{method}: {len(effective_tags)} tag rules, "
             f"{len(self.configuration.rules)} pixel redaction rules")
+        # The rows above describe the configuration in force, and an
+        # `audit(config_path=)` scans under another policy without
+        # changing it, so a status this session recorded can name a
+        # policy these rows do not (review of #738, N5). Said here, not
+        # counted: statuses by recorded policy are a report row of their
+        # own (#724). Fingerprints, not bases, decide "another".
+        in_force = self.configuration._scan_policy().fingerprint
+        also = [f"{base} ({fingerprint[:15]})"
+                for fingerprint, base in sorted(self._scanned_policies.items())
+                if fingerprint != in_force]
+        if also:
+            deid_method += (
+                "; this session also scanned under " + "; ".join(also)
+                + ", and a status recorded by that scan names it "
+                "(`phi_status_policy`), not the configuration above")
+            deid_method = deid_method.replace("|", "\\|")
 
         try:
             from importlib.metadata import version, PackageNotFoundError
@@ -5654,8 +5729,32 @@ class DicomSession:
             project_secret=project_secret,
         )
 
+        # What `audit()` put on this report (#555): the policy it scanned
+        # under and its tally. Read before `findings` is rebound below.
+        report_policy = getattr(findings, "_scan_policy", None)
+        report_tally = getattr(findings, "_scan_tally", None)
+        # The session's own tally when it has one, as before (#553);
+        # otherwise this session's working copy of the report's, so a pass
+        # over a kept report records what the same pass would have in the
+        # session that scanned it, and the report stays as its audit left
+        # it.
+        from_report = self._scan_tally is None and report_tally is not None
+        tally = (self._working_tally(report_tally) if from_report
+                 else self._scan_tally)
+
         count = 0
         if findings:
+            # Which revision each status was recorded at before the pass,
+            # so the statuses the pass records can be told from the rest.
+            recorded_at = {id(entity): entity._phi_status_revision
+                           for entity in self._status_bearers()}
+            # The entities the report's scan raised under, read before the
+            # pass can replace a patient's ID. Only when the tally settling
+            # this pass is the report's own: under another audit's tally,
+            # the report's policy is not the scan being settled against.
+            named = (self._named_by(tally)
+                     if from_report and report_policy is not None
+                     else frozenset())
             # Resolved against the live graph before the service sees them
             # (#644), and only here, after the blind-execution check above:
             # a report every finding of which a pass already settled
@@ -5676,8 +5775,10 @@ class DicomSession:
             remediator._use_holders(self._finding_holders(findings, owners))
             remediator._use_removal_targets(
                 self._removal_targets(findings, by_uid, project_secret))
-            remediator._use_scan_tally(self._scan_tally, findings)
+            remediator._use_scan_tally(tally, findings)
             count = remediator.apply_remediation(findings)
+            if named:
+                self._adopt_the_reports_policy(report_policy, recorded_at, named)
 
         # A patient ingested under its original ID after that patient was
         # anonymized has just been given the pseudonym the stored patient
@@ -5755,6 +5856,13 @@ class DicomSession:
                 a DICOM export whose every instance the pre-export scan
                 withheld (#536): nothing was attempted, and its `WARNING`
                 rows grade the run.
+
+        Either format writes one `WARNING` audit row, and changes nothing
+        it writes, when the instances it writes carry PHI statuses
+        recorded under a policy that is neither the one in force nor one
+        this session scanned under, or with no recorded policy (a store
+        written before 1.0): the report then grades `REVIEW_REQUIRED`
+        (#555). `check_burned_in=True` re-audits first, so it never does.
         """
         # Cleared first, before the exporter is even resolved. These are
         # session-scoped, and assigning them only on success let an
@@ -5954,6 +6062,22 @@ class DicomSession:
         # (#536). Until then the filter logged a line and nothing else,
         # and a cohort withheld whole read as an empty plan under PASS.
         _audit_withheld_instances(self.store_backend, folder, withheld)
+
+        # Over the instances this export will write, after the pre-export
+        # scan -- which re-records every status under the policy in force,
+        # so `check_burned_in=True` never draws it -- and only when there
+        # are some (#555). The plan holds instances; the notice reads
+        # their patient and study too.
+        if tasks:
+            planned = {id(task.instance) for task in tasks}
+            self._report_statuses_under_another_policy(
+                [(patient, study, instance)
+                 for patient in self.store.patients
+                 for study in patient.studies
+                 for series in study.series
+                 for instance in series.instances
+                 if id(instance) in planned],
+                folder, "DICOM")
 
         if not tasks and withheld:
             get_logger().warning(
@@ -6295,6 +6419,92 @@ class DicomSession:
                 f"UIDs; got {type(subset).__name__}")
 
         return _uids_from_frame(frame)
+
+    #: The substring the export notice is pinned by (#555).
+    _OTHER_POLICY_NOTICE = ("recorded under a policy other than the one "
+                            "in force")
+
+    def _report_statuses_under_another_policy(self, triples, folder, fmt):
+        """One `WARNING` row when an export writes statuses recorded under
+        a policy other than the one in force (#555, owner's ruling Q1).
+
+        Measured on 63a64158: `CT_small` remediated under a one-rule
+        policy, reopened bare under the floor, read REMEDIATED, and a
+        plain `export()` wrote Institution Name -- which the floor empties
+        -- under a PASS. Nothing is reinterpreted, here or at load: a
+        status says what the scan it came from concluded, and `export()`
+        writes the graph as it holds it. This says, where the harm happens,
+        that the two policies differ, and the row grades the report
+        `REVIEW_REQUIRED` -- a word `get_audit_errors()` already selects,
+        as #536's withheld rows do.
+
+        An entity **disagrees** when its status is not UNSCANNED and its
+        policy is None (written before 1.0, or remediated from findings
+        that are not a whole `audit()` report) or
+        has a fingerprint that is neither the policy in force nor one this
+        session scanned under (Q2). Fingerprints, never bases: a scaffold
+        and the bare floor are one policy under two labels. An instance
+        counts once when any of its patient, study and itself disagrees;
+        nested items are not read, since #561 the instance carries their
+        outcome. One row and one log line per call, never per instance
+        (#536's shape, `entity_uid` the folder).
+
+        Args:
+            triples: `(patient, study, instance)` for every instance the
+                export will attempt. Empty says nothing.
+            folder: The export's folder, as the other export rows name it.
+            fmt: `"DICOM"` or `"WFDB"`, the lead word of the row.
+        """
+        in_force = self.configuration._scan_policy()
+        accepted = set(self._scanned_policies) | {in_force.fingerprint}
+        others = {}
+        legacy = written = 0
+        for triple in triples:
+            policies = set()
+            for entity in triple:
+                # A stand-in built in user code (a mock graph) records no
+                # status, so it has none to disagree with.
+                if not isinstance(entity, entities.TrackedEntity):
+                    continue
+                # One read of the pair, as the save thread reads it.
+                status, policy = entity._phi_status_record()
+                if status is PhiStatus.UNSCANNED:
+                    continue
+                if policy is None or policy.fingerprint not in accepted:
+                    policies.add(policy)
+            if not policies:
+                continue
+            written += 1
+            if None in policies:
+                legacy += 1
+            for policy in policies - {None}:
+                others.setdefault(policy.fingerprint, set()).add(policy.base)
+        if not written:
+            return
+        named = [f"{' or '.join(sorted(bases))} ({fingerprint[:15]})"
+                 for fingerprint, bases in sorted(others.items())]
+        if legacy:
+            # True of all three routes to None (review of #750, finding
+            # 2): a store from 0.9.x, a findings list with no scan behind
+            # it, and a report that scan did run for but that was rebuilt
+            # or narrowed, so no longer speaks for it.
+            named.append(f"{legacy} with no recorded policy (written "
+                         f"before 1.0, or remediated from findings that are "
+                         f"not a whole audit() report)")
+        detail = (f"{fmt} export to {folder} writes {written} instance(s) "
+                  f"whose PHI status was {self._OTHER_POLICY_NOTICE} "
+                  f"({in_force.base}, {in_force.fingerprint[:15]}): "
+                  f"{'; '.join(named)}. A status says what the scan it came "
+                  f"from concluded; export() writes the graph as it holds "
+                  f"it. To apply the policy in force, run audit() and then "
+                  f"anonymize() (#555).")
+        detail = " ".join(detail.split()).replace("|", "\\|")
+        get_logger().warning(detail)
+        if self.store_backend is not None:
+            # `log_audit`, one call, and the action word spelled at the
+            # call: the frozen-vocabulary pin reads the keyword at the site.
+            self.store_backend.log_audit(action_type="WARNING",
+                                         entity_uid=folder, details=detail)
 
     def _build_export_plan(self, options: '_ExportOptions', target_ids):
         """Walks the store and builds one ExportContext per instance to write.
@@ -6809,6 +7019,97 @@ class DicomSession:
         if finding.entity_type == "Study":
             return list(by_study.get(uid, ()))
         return []
+
+    def _status_bearers(self):
+        """Every patient, study and instance: what a status column holds."""
+        for patient in self.store.patients:
+            yield patient
+            for study in patient.studies:
+                yield study
+                for series in study.series:
+                    yield from series.instances
+
+    def _working_tally(self, report_tally):
+        """This session's working copy of a kept report's tally, made on
+        first use.
+
+        One per audit per session, keyed by the audit token the tally
+        carries (`_ScanTally._audit`): a fresh copy per call lost the first
+        pass's progress (`_partial`), so a report narrowed to everything
+        but one tag and then to that tag read IDENTIFIED after a reopen and
+        REMEDIATED in the scanning session (third review of #750); a copy
+        per *report* did the same to the two halves of a `copy.copy` split
+        (fourth review); and a copy per tally *object* did it to halves
+        that carry equal tallies -- deep-copied, pickled, or loaded from
+        one pickle per step (fifth review). Two audits carry two tokens,
+        and their reports never complete one another here.
+
+        Not guarded for two threads calling `anonymize()` on one session at
+        once: that is not supported (nothing locks the graph either), and
+        the worst case here is two copies, each demoting what the other
+        settled.
+        """
+        tally = self._report_tallies.get(report_tally._audit)
+        if tally is None:
+            tally = self._report_tallies[report_tally._audit] = report_tally.copy()
+        return tally
+
+    def _named_by(self, tally) -> frozenset:
+        """`id`s of the patients, studies and instances `tally` raised under.
+
+        Read before a pass: an instance by its SOP Instance UID, a study by
+        its Study Instance UID, a patient by the `patient_id` it holds now,
+        which the pass may replace -- the uids the scan files findings
+        under. An entity the scan never saw (an instance ingested since,
+        reached by a patient-level carry) is not named, and is given no
+        policy (review of #750 at 17f002c1, (b)).
+        """
+        named = set()
+        for patient in self.store.patients:
+            if tally.raised_under(patient.patient_id):
+                named.add(id(patient))
+            for study in patient.studies:
+                if tally.raised_under(study.study_instance_uid):
+                    named.add(id(study))
+                for series in study.series:
+                    for inst in series.instances:
+                        if tally.raised_under(inst.sop_instance_uid):
+                            named.add(id(inst))
+        return frozenset(named)
+
+    def _adopt_the_reports_policy(self, policy, recorded_at, named):
+        """Give the report's policy to a status this pass recorded with none,
+        on an entity the report's scan raised under.
+
+        Remediation records a status under the policy the entity was last
+        scanned under (`record_phi_status`'s default). An entity reopened
+        from the store with no scan behind it -- its audit was never saved,
+        and the report was kept across `close()` (#644) -- has none, so its
+        status carried no policy and the export said so, over a graph
+        byte-identical to a fresh pass's. In the session that scanned it,
+        the same status would carry the scan's policy.
+
+        The pass settled against the report's tally, so what it recorded
+        is what the scanning session's pass would have: REMEDIATED where
+        the pass settled everything the scan raised under the entity,
+        IDENTIFIED where it did not (#553). This gives either the policy
+        that session's statuses would carry, and nothing else:
+
+        - only an entity in `named` (`_named_by`): one the pass reached
+          that the scan never saw -- an instance ingested since, reached by
+          a patient-level carry -- keeps no policy (review of #750 at
+          17f002c1, (b));
+        - only a status this pass recorded (its `_phi_status_revision`
+          moved): a status recorded before the pass is not this pass's.
+        """
+        for entity in self._status_bearers():
+            if id(entity) not in named:
+                continue
+            if recorded_at.get(id(entity)) == entity._phi_status_revision:
+                continue
+            status, recorded = entity._phi_status_record()
+            if status is not PhiStatus.UNSCANNED and recorded is None:
+                entity.record_phi_status(status, policy=policy)
 
     def _nested_finding_owners(self, findings, by_uid) -> dict:
         """`id(item) -> Instance` for each finding raised inside a sequence.

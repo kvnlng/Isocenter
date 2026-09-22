@@ -31,7 +31,8 @@ from pydicom.multival import MultiValue
 from pydicom.valuerep import DSdecimal, DSfloat, IS, ISfloat
 
 from .entities import (Patient, Study, Series, Instance, Equipment,
-                       PhiStatus, normalize_study_date, resolve_item_path)
+                       PhiStatus, ScanPolicy, normalize_study_date,
+                       resolve_item_path)
 from . import entities
 from .blob_kind import parse_blob_kind, serialize_blob_kind
 from .sidecar import SidecarManager
@@ -59,8 +60,8 @@ _UPSERT_INSTANCE_SQL = """
     INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
                            source_path,
                            pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json,
-                           phi_status, shift_provenance)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           phi_status, shift_provenance, phi_policy, phi_policy_base)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(sop_instance_uid) DO UPDATE SET
         series_id_fk=excluded.series_id_fk,
         sop_class_uid=excluded.sop_class_uid,
@@ -76,6 +77,11 @@ _UPSERT_INSTANCE_SQL = """
         -- protection its unrecorded dates depend on -- one re-save and
         -- every one of them gets shifted a second time.
         shift_provenance=excluded.shift_provenance,
+        -- The policy the status was recorded under (#555), plainly for
+        -- the same reason: a status that went UNSCANNED writes NULL here,
+        -- and a guard would keep the old policy beside it.
+        phi_policy=excluded.phi_policy,
+        phi_policy_base=excluded.phi_policy_base,
         pixel_offset=COALESCE(excluded.pixel_offset, instances.pixel_offset),
         pixel_length=COALESCE(excluded.pixel_length, instances.pixel_length),
         pixel_hash=COALESCE(excluded.pixel_hash, instances.pixel_hash),
@@ -94,6 +100,21 @@ def _phi_status_from_stored(value) -> PhiStatus:
         return PhiStatus(value)
     except ValueError:
         return PhiStatus.UNSCANNED
+
+
+def _status_columns(entity):
+    """`(phi_status, phi_policy, phi_policy_base)` for an entity's row.
+
+    From one read of the pair (`TrackedEntity._phi_status_record`), so a
+    save racing an audit writes a status with its own policy or neither
+    changed, never one status beside another's policy (#555). An
+    UNSCANNED status, and a status recorded before policies were, write
+    NULL for both policy columns.
+    """
+    status, policy = entity._phi_status_record()
+    if policy is None:
+        return status.value, None, None
+    return status.value, policy.fingerprint, policy.base
 
 
 def _in_clause(values):
@@ -644,6 +665,8 @@ class SqliteStore:
         patient_id TEXT NOT NULL,
         patient_name TEXT,
         phi_status TEXT,
+        phi_policy TEXT,      -- #555: 'v1:' + sha256 hex; NULL = none known
+        phi_policy_base TEXT, -- #555: the policy's readable base
         -- 'keyed-hmac-v1' or 'unkeyed-sha256'; fixed once per patient,
         -- NULL only in a row a release before 0.9.7 wrote
         jitter_scheme TEXT,
@@ -667,6 +690,8 @@ class SqliteStore:
         date_shifted INTEGER,
         shifted_study_date TEXT, -- what a shift produced; NULL pre-0.9.6
         phi_status TEXT,
+        phi_policy TEXT,      -- #555: 'v1:' + sha256 hex; NULL = none known
+        phi_policy_base TEXT, -- #555: the policy's readable base
         FOREIGN KEY(patient_id_fk) REFERENCES patients(id),
         UNIQUE(study_instance_uid)
     );
@@ -700,6 +725,12 @@ class SqliteStore:
         attributes_json TEXT, -- Core attributes (Horizontal)
         phi_status TEXT,      -- What the last scan concluded, if still valid
         shift_provenance TEXT, -- 'recorded' since 0.9.6; NULL means pre-0.9.6
+        -- The policy `phi_status` was recorded under (#555): 'v1:' plus
+        -- the sha256 of `configuration._canonical_policy_v1`, and its
+        -- readable base. NULL: an unscanned status, or a row written
+        -- before 1.0, whose policy nothing recorded.
+        phi_policy TEXT,
+        phi_policy_base TEXT,
         FOREIGN KEY(series_id_fk) REFERENCES series(id),
         UNIQUE(sop_instance_uid)
     );
@@ -1133,6 +1164,18 @@ class SqliteStore:
             if "phi_status" not in columns:
                 conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN phi_status TEXT")
+            # The policy each status was recorded under (#555). **No
+            # back-fill**, for `value_count`'s and `shift_provenance`'s
+            # reason: a row written before 1.0 cannot know which
+            # configuration its scan ran under, and an `UPDATE ... SET
+            # phi_policy = <the policy in force>` would fabricate exactly
+            # the fact #555 is about. NULL beside a status reads "recorded
+            # before this store recorded policies": the status is restored
+            # as recorded, and an export of it says so.
+            for column in ("phi_policy", "phi_policy_base"):
+                if column not in columns:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
 
         # `loss_scope` on audit_log (#146). A DATA_LOSS row written
         # before this column existed reads NULL, and NULL is ungraded:
@@ -2003,7 +2046,7 @@ class SqliteStore:
                                         or entities.JITTER_SCHEME_KEYED)
                     p_map[r['id']] = p
                     patients.append(p)
-                    stored_statuses.append((p, r['phi_status']))
+                    stored_statuses.append((p, r))
 
                 st_map = {}
                 legacy_studies = 0
@@ -2024,7 +2067,7 @@ class SqliteStore:
                     if st.date_shifted and st._shifted_study_date is None:
                         legacy_studies += 1
                     st_map[r['id']] = st
-                    stored_statuses.append((st, r['phi_status']))
+                    stored_statuses.append((st, r))
                     if r['patient_id_fk'] in p_map:
                         p_map[r['patient_id_fk']].studies.append(st)
 
@@ -2170,7 +2213,7 @@ class SqliteStore:
                     if r['series_id_fk'] in se_map:
                         se_map[r['series_id_fk']].instances.append(inst)
 
-                    stored_statuses.append((inst, r['phi_status']))
+                    stored_statuses.append((inst, r))
 
             self.logger.info(f"Loaded {len(patients)} patients from {self.db_path}")
             self._report_legacy_shift_provenance(legacy_instances, legacy_studies)
@@ -2180,8 +2223,8 @@ class SqliteStore:
             # so the stored conclusion applies to this revision. Recorded
             # before marking persisted, because recording advances the
             # revision.
-            for entity, stored in stored_statuses:
-                entity.record_phi_status(_phi_status_from_stored(stored))
+            self._report_statuses_without_a_policy(
+                self._restore_statuses(stored_statuses))
 
             # Mark all loaded data as clean so we don't save it back immediately
             for p in patients:
@@ -2223,7 +2266,7 @@ class SqliteStore:
                 p._jitter_scheme = (p_row['jitter_scheme']
                                     or entities.JITTER_SCHEME_KEYED)
                 p_pk = p_row['id']
-                stored_statuses = [(p, p_row['phi_status'])]
+                stored_statuses = [(p, p_row)]
                 # Collected during the walk and hydrated from the vertical
                 # table in one pass afterwards. Unlike `load_all` this
                 # filters by UID -- one patient's instances, not the whole
@@ -2273,7 +2316,7 @@ class SqliteStore:
                     if st.date_shifted and st._shifted_study_date is None:
                         legacy_studies += 1
                     st_pk = st_r['id']
-                    stored_statuses.append((st, st_r['phi_status']))
+                    stored_statuses.append((st, st_r))
 
                     # Fetch Series
                     se_rows = cur.execute(
@@ -2348,7 +2391,7 @@ class SqliteStore:
 
                             se.instances.append(inst)
                             hydrated_instances.append(inst)
-                            stored_statuses.append((inst, r['phi_status']))
+                            stored_statuses.append((inst, r))
 
                         st.series.append(se)
                     p.studies.append(st)
@@ -2369,8 +2412,10 @@ class SqliteStore:
                         inst, vertical.get(inst.sop_instance_uid, {}),
                         vertical_vrs.get(inst.sop_instance_uid, {}))
 
-                for entity, stored in stored_statuses:
-                    entity.record_phi_status(_phi_status_from_stored(stored))
+                # Same as load_all's, and the same "per load" call-site
+                # caveat as `_report_legacy_shift_provenance`.
+                self._report_statuses_without_a_policy(
+                    self._restore_statuses(stored_statuses))
 
                 self._report_legacy_shift_provenance(legacy_instances,
                                                      legacy_studies)
@@ -2410,6 +2455,71 @@ class SqliteStore:
         "Re-ingesting those files from source gives them the full "
         "guarantee."
     )
+
+    @staticmethod
+    def _restore_statuses(stored_statuses) -> int:
+        """Restore each hydrated entity's status under its stored policy.
+
+        `stored_statuses` pairs each patient, study and instance with the
+        row it was built from. The status is restored as recorded, and so
+        is the policy (#555): nothing is reinterpreted against the policy
+        in force, which a load cannot know -- `Session(db)` hydrates
+        before any `load_config`. A status whose row has no policy keeps
+        None -- written before 1.0, which recorded none, or remediated
+        from findings that are not a whole `audit()` report -- and a
+        policy made up here would be the back-fill `_add_missing_columns`
+        refuses. Policies are interned per load, so ten thousand instances
+        scanned under one policy share one object.
+
+        Returns:
+            int: How many statuses carry no policy (UNSCANNED aside).
+        """
+        interned = {}
+        legacy = 0
+        for entity, row in stored_statuses:
+            status = _phi_status_from_stored(row['phi_status'])
+            fingerprint = row['phi_policy']
+            policy = None
+            if status is PhiStatus.UNSCANNED:
+                pass
+            elif isinstance(fingerprint, str) and fingerprint:
+                base = row['phi_policy_base']
+                key = (fingerprint, base)
+                policy = interned.get(key)
+                if policy is None:
+                    policy = interned[key] = ScanPolicy(
+                        fingerprint, base if isinstance(base, str) else "")
+            else:
+                legacy += 1
+            entity.record_phi_status(status, policy=policy)
+        return legacy
+
+    #: What a load says once when statuses in the store carry no policy
+    #: (#555). A log line and no audit row (owner's ruling Q3): a row per
+    #: load would grade every report over the store REVIEW_REQUIRED with no
+    #: export, and the export that writes such instances already writes
+    #: its own row.
+    _STATUSES_WITHOUT_A_POLICY_NOTICE = (
+        "{count} in this store {carry} no recorded policy: written before "
+        "1.0, which recorded none, or remediated from findings that are "
+        "not a whole audit() report. Which configuration the scan ran "
+        "under is not known. They are restored as recorded, and an export that writes "
+        "them says so. To record a policy, run audit() under the "
+        "configuration you mean, then save() (#555).")
+
+    def _report_statuses_without_a_policy(self, count: int):
+        """Say once per load how many statuses carry no policy (#555).
+
+        The same "per load" call-site caveat as
+        `_report_legacy_shift_provenance`: `load_patient` calls this too,
+        and the facade loads through `load_all` once.
+        """
+        if not count:
+            return
+        self.logger.warning(self._STATUSES_WITHOUT_A_POLICY_NOTICE.format(
+            count=(f"{count} PHI status" if count == 1
+                   else f"{count} PHI statuses"),
+            carry="carries" if count == 1 else "carry"))
 
     def _report_legacy_shift_provenance(self, instances: int, studies: int = 0):
         """Say once that part of this graph keeps the pre-0.9.6 rule.
@@ -2801,6 +2911,17 @@ class SqliteStore:
         # the next pass shifts it again.
         if getattr(item, "_shifted_dates", None):
             data['__shifted__'] = dict(item._shifted_dates)
+        # The item's PHI status (#564), items only: a patient, study or
+        # instance has its status column, and a second home here would be
+        # a second answer after a partial write -- `__vrs__`'s asymmetry,
+        # for `__vrs__`'s reason. The revision-checked property, never the
+        # raw slot, so an item edited since its remediation stores none.
+        # No policy key: an item is never scanned, so its status has none
+        # (#555). A mapping, so a later 1.x can add a key inside it; every
+        # 1.x pops it at every depth and reads an absent key as today.
+        status = item.phi_status
+        if status is not PhiStatus.UNSCANNED:
+            data['__phi__'] = {"status": status.value}
         if item.sequences:
             seq_data = {}
             for tag, seq in item.sequences.items():
@@ -2827,6 +2948,10 @@ class SqliteStore:
         # And the lock's stamp (#607), popped at every depth for the
         # same reason and assigned only where there is a slot for it.
         locked_data = data.pop('__locked__', None)
+        # And a nested item's PHI status (#564), at every depth: only an
+        # item writes it, but a hand-edited root key must not become a
+        # tag either, nor a status (see the restore at the end).
+        phi_data = data.pop('__phi__', None)
 
         # 1. Attributes
         target_item.attributes.update(data)
@@ -2864,6 +2989,25 @@ class SqliteStore:
                     new_item = DicomItem()
                     self._deserialize_into(new_item, item_data)
                     target_item.add_sequence_item(tag, new_item)
+
+        # 3. A nested item's status (#564), as this item's **last** step:
+        # its own sub-sequences are built above, and each
+        # `add_sequence_item` advances this item's revision, so a status
+        # recorded earlier would already read stale. The parent's
+        # `add_sequence_item` that follows advances only the parent, and
+        # the load's `mark_subtree_persisted()` clears the change this
+        # records. Never on an `Instance`: the root's status comes from its
+        # column, and a hand-edited root key must not land a status there
+        # even for the moment before the column's overwrites it. Only a
+        # well-formed `{"status": <str>}`; anything else reads UNSCANNED
+        # through `_phi_status_from_stored`, and nothing here raises. No
+        # policy: an item's status never has one (#555).
+        if (not isinstance(target_item, Instance)
+                and isinstance(phi_data, dict)
+                and isinstance(phi_data.get('status'), str)):
+            status = _phi_status_from_stored(phi_data['status'])
+            if status is not PhiStatus.UNSCANNED:
+                target_item.record_phi_status(status, policy=None)
 
     def save_vertical_attributes(
             self, instance_uid: str, attributes: Dict[Tuple[str, str], Any],
@@ -3791,15 +3935,18 @@ class SqliteStore:
             # and a save must not reclassify it.
             cur.execute("""
                 INSERT INTO patients (patient_id, patient_name, phi_status,
+                                      phi_policy, phi_policy_base,
                                       jitter_scheme)
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(patient_id) DO UPDATE SET
                     patient_name=excluded.patient_name,
                     phi_status=excluded.phi_status,
+                    phi_policy=excluded.phi_policy,
+                    phi_policy_base=excluded.phi_policy_base,
                     jitter_scheme=COALESCE(patients.jitter_scheme,
                                            excluded.jitter_scheme)
             """, (patient.patient_id, patient.patient_name,
-                  patient.phi_status.value, patient._jitter_scheme))
+                  *_status_columns(patient), patient._jitter_scheme))
             tally.patients += 1
         else:
             return existing[0]
@@ -3817,14 +3964,17 @@ class SqliteStore:
         if study.has_unsaved_changes:
             cur.execute("""
                 INSERT INTO studies (patient_id_fk, study_instance_uid, study_date, date_shifted,
-                                     shifted_study_date, phi_status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                                     shifted_study_date, phi_status,
+                                     phi_policy, phi_policy_base)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(study_instance_uid) DO UPDATE SET
                     study_date=excluded.study_date,
                     date_shifted=excluded.date_shifted,
                     shifted_study_date=excluded.shifted_study_date,
                     patient_id_fk=excluded.patient_id_fk,
-                    phi_status=excluded.phi_status
+                    phi_status=excluded.phi_status,
+                    phi_policy=excluded.phi_policy,
+                    phi_policy_base=excluded.phi_policy_base
             """, (patient_pk, study.study_instance_uid,
                   _as_stored_date(study.study_date),
                   1 if study.date_shifted else 0,
@@ -3835,7 +3985,7 @@ class SqliteStore:
                   # would go on vouching for a value the graph no longer
                   # holds.
                   study._shifted_study_date,
-                  study.phi_status.value))
+                  *_status_columns(study)))
             tally.studies += 1
 
         row = cur.execute(
@@ -4099,6 +4249,7 @@ class SqliteStore:
             frame = prepared[inst][1]
             if inst._revision != revision:
                 frame = _StoredFrame(None, None, None, None)
+            status_columns = _status_columns(inst)
             rows.append((
                 series_pk, inst.sop_instance_uid, inst.sop_class_uid,
                 # Positional, and nothing checks this tuple against
@@ -4111,12 +4262,15 @@ class SqliteStore:
                 json.dumps(core, cls=IsocenterJSONEncoder),
                 # The property, not the stored field: an entity edited since
                 # the scan reports UNSCANNED, and that is what belongs in the
-                # row, whose attributes are the edited ones.
-                inst.phi_status.value,
+                # row, whose attributes are the edited ones. Its policy
+                # comes from the same read (#555), after `shift_provenance`
+                # as the columns are.
+                status_columns[0],
                 # NULL keeps a legacy instance legacy for its life in the
                 # store; anything this version created or ingested says
                 # so (#510).
-                None if inst._legacy_shift_provenance else 'recorded'))
+                None if inst._legacy_shift_provenance else 'recorded',
+                *status_columns[1:]))
 
             # instance_blobs is what compaction reads, so it must never lag
             # behind `instances`. If it did, compaction would copy the STALE

@@ -125,6 +125,38 @@ class PhiStatus(Enum):
     CLEARED = "cleared"
 
 
+@dataclass(frozen=True, slots=True)
+class ScanPolicy:
+    """The policy a PHI status was recorded under (#555).
+
+    A status says what a scan concluded, and a scan concludes under the
+    rules it ran with. Before 1.0 nothing recorded which, so a store
+    remediated under one configuration and reopened under another still
+    read REMEDIATED, and its export wrote what the policy in force
+    removes under a PASS.
+
+    `fingerprint` decides whether two policies are the same: `"v1:"` and
+    the sha256 of the canonical form (`configuration._canonical_policy_v1`),
+    which covers what a scan reads -- every rule key but `name`, and
+    `remove_private_tags`. `base` is what a person reads: `basic@2026c`,
+    `floor over basic@2026c`, `none`, or an external profile's path (the
+    configuration's `_policy_base`). Two policies with one fingerprint and
+    different bases scan identically -- a `create_config()` scaffold and
+    the bare floor, for instance -- so compare fingerprints, never bases.
+
+    Frozen, so the slot holding one is replaced whole and never torn, and
+    compared by value, so each audit's fresh object equals the last one's.
+    """
+    fingerprint: str
+    base: str
+
+
+#: `record_phi_status()`'s default: keep the policy the entity's status
+#: was last recorded under. A sentinel rather than None, because None is
+#: a policy a caller can mean ("no policy is known").
+_KEEP = object()
+
+
 # `eq=False` on this base and on every graph entity below it is
 # load-bearing (#299). The trap is that `eq=True` is the dataclass
 # DEFAULT, so "a dataclass that defines no `__eq__`" is not what it
@@ -181,6 +213,11 @@ class TrackedEntity:
     # reports UNSCANNED without needing a separate "was it scanned" flag.
     _phi_status: 'PhiStatus' = field(init=False, default=None)
     _phi_status_revision: int = field(init=False, default=-1)
+    # The policy `_phi_status` was recorded under (#555), valid exactly
+    # when the status is: read through `phi_status_policy`, which applies
+    # the same revision check. None is "no policy known": never scanned,
+    # a nested item (never scanned either), or a row written before 1.0.
+    _phi_status_policy: Optional['ScanPolicy'] = field(init=False, default=None)
 
     @property
     def has_unsaved_changes(self) -> bool:
@@ -213,14 +250,45 @@ class TrackedEntity:
 
         UNSCANNED once the entity has changed since the scan ran -- structural,
         not a convention: no status can describe content the entity no longer
-        holds. Session-scoped for a nested `DicomItem`: a reopened store hydrates
-        items UNSCANNED; the owning instance's status and owner survive (#564).
+        holds. A status is recorded under a policy, which `phi_status_policy`
+        names; this reads the status as recorded and never consults the
+        policy in force (#555). A nested `DicomItem` takes a status from
+        remediation only -- `audit()` records none on it -- and the store
+        keeps it across a reopen (#564).
         """
-        if self._phi_status is None or self._phi_status_revision != self._revision:
-            return PhiStatus.UNSCANNED
-        return self._phi_status
+        return self._phi_status_record()[0]
 
-    def record_phi_status(self, status: 'PhiStatus'):
+    @property
+    def phi_status_policy(self) -> Optional['ScanPolicy']:
+        """The `ScanPolicy` the current `phi_status` was recorded under.
+
+        None when the status is UNSCANNED, when it was recorded before
+        policies were (a store written before 1.0), and on a nested item,
+        which is never scanned. Stale exactly when the status is, by the
+        same revision check: one structural rule, not two (#555).
+        """
+        return self._phi_status_record()[1]
+
+    def _phi_status_record(self):
+        """`(phi_status, phi_status_policy)`, read as one pair.
+
+        The save thread reads both halves for one row, and must never pair
+        a status with another status's policy. `record_phi_status` writes
+        the revision first and `_phi_status_revision` last; this reads
+        `_phi_status_revision` first and `_revision` last, so a read that
+        overlaps a write sees the revisions disagree and reports
+        `(UNSCANNED, None)` rather than a torn pair.
+        """
+        recorded_at = self._phi_status_revision
+        status = self._phi_status
+        policy = self._phi_status_policy
+        if status is None or recorded_at != self._revision:
+            return PhiStatus.UNSCANNED, None
+        if status is PhiStatus.UNSCANNED:
+            return status, None
+        return status, policy
+
+    def record_phi_status(self, status: 'PhiStatus', policy=_KEEP):
         """Records what a scan concluded about this entity's current state.
 
         Call this *after* any change the status describes -- remediation
@@ -246,11 +314,29 @@ class TrackedEntity:
         saveable -- they look redundant because on a first remediation
         this method's bump would have covered them, and after a reload
         they are the only bump there is (#173).
+
+        **The policy (#555).** `policy` is the `ScanPolicy` the status is
+        recorded under. Only a scan passes one (`Session._record_scan_results`),
+        and hydration and the patient merge restore one. Every other
+        transition -- remediation's REMEDIATED, the pass-end demotion,
+        redaction's carry -- omits it and keeps the policy the entity was
+        last recorded under, read from the record even when the status
+        itself has gone stale: remediation writes the entity first and
+        stamps it afterwards, so at the stamp the status reads UNSCANNED
+        and the scan's policy is still the right one. Recording the same
+        status under a *different* policy is a change: it advances the
+        revision, so the store learns the new policy. Policies compare by
+        value, so an identical second audit still changes nothing.
         """
-        if self.phi_status is status:
+        if policy is _KEEP:
+            policy = self._phi_status_policy
+        if self.phi_status is status and self._phi_status_policy == policy:
             return
+        # Written in this order for `_phi_status_record`: the revision
+        # first, the status and policy, then the revision they belong to.
         self._revision += 1
         self._phi_status = status
+        self._phi_status_policy = policy
         self._phi_status_revision = self._revision
 
     def mark_subtree_persisted(self):
