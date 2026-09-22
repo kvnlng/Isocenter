@@ -438,7 +438,8 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+    "isocenter/io_handlers.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+                                  "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
                                   # `Session.export()` without naming it), and listed for a
@@ -720,7 +721,8 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+    "isocenter/session.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+                              "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                               "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
                               "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                               "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
@@ -996,7 +998,8 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+    "isocenter/entities.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
                                "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                                "tests/test_an_rle_fragment_is_a_frame.py",
