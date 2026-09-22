@@ -4635,7 +4635,12 @@ class DicomSession:
                             include Patient's Age, Size and Weight, and so
                             may be another study's -- and keeps its other
                             locked identifiers as the pass left them; one
-                            WARNING gives the count. A token a release before
+                            WARNING gives the count. Of a patient with no
+                            Patient ID (#584), such an instance keeps a
+                            non-blank Patient ID of its own rather than
+                            take the token's blank one, and a second
+                            WARNING counts those; the kept ID is the one
+                            identifier excluded. A token a release before
                             0.9.8 shared across studies, holding a non-blank
                             value outside group 0010 and not stamped by this
                             store, is restored in full on the first study
@@ -4855,7 +4860,7 @@ class DicomSession:
                                         for _, inst in holders)):
                         partial[content] = holders[0][0]
 
-                tokenless = elsewhere = count = 0
+                tokenless = elsewhere = count = kept_ids = 0
                 study_dates: Dict[int, Tuple["Study", Any]] = {}
                 fallback = patient_level(original_attrs)
                 for st, inst, content in walk:
@@ -4875,6 +4880,21 @@ class DicomSession:
                         # Weight, which can differ by study; disclosed.
                         values = fallback
                         tokenless += 1
+                        # **Not a blank token ID over a real one (#584).**
+                        # An ID-less patient's token holds the ID the
+                        # export writes, `''`. A file carrying a Patient ID
+                        # that linked under it after the lock (the WARNING
+                        # case) holds its own; writing `''` over that would
+                        # lose it, not restore it. The instance mirror of
+                        # the `restored_id` guard; only this tag, only a
+                        # blank token value, only a non-blank copy.
+                        if (is_synthetic_patient_id(p.patient_id)
+                                and "0010,0020" in values
+                                and not str(values["0010,0020"] or "").strip()
+                                and str(inst.attributes.get("0010,0020") or "").strip()):
+                            values = {tag: val for tag, val in values.items()
+                                      if tag != "0010,0020"}
+                            kept_ids += 1
                     elif content in partial and st is not partial[content]:
                         values = patient_level(opened[content])
                         elsewhere += 1
@@ -4894,6 +4914,12 @@ class DicomSession:
                         "(group 0010) of the first token found, and their other "
                         "locked identifiers keep what anonymize() left (#583).",
                         tokenless, count)
+                if kept_ids:
+                    get_logger().warning(
+                        "%d of them kept their own Patient ID: the token holds "
+                        "the blank one a subject with no Patient ID exports, "
+                        "and a restore does not write it over a real one (#584).",
+                        kept_ids)
                 if elsewhere:
                     get_logger().warning(
                         "%d of %d instances of this patient carry an identity "

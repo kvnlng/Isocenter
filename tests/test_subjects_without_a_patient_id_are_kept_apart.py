@@ -393,10 +393,23 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
     the subtree is evidence the gate honours, as a shift is (coordinator
     ruling): the file links under the ID-less patient with its WARNING row,
     and the restore keeps the key. Red at ae5212ff in both modes (the pass handed only the patient's
-    findings shifts nothing). Kills MT1 (the token not read)."""
+    findings shifts nothing). Kills MT1 (the token not read).
+
+    The restore then gives each file back what it held (coordinator ruling,
+    review round 2): b, ingested after the lock and carrying no token,
+    keeps its own `PA` rather than the token's blank ID (MR2: the guard
+    dropped). c, also token-less, whose copy is absent, still takes the
+    token's group 0010 as before: its name, and an empty ID (MR3: the
+    guard applied whatever the copy holds)."""
     _id_less(tmp_path / "in1" / "a.dcm", "5895", "Alpha^One", "absent")
     _with_id(tmp_path / "in2" / "b.dcm", "PA", "5895", ".1.2", "Alpha^One")
+    c = tmp_path / "in2" / "c.dcm"
+    _id_less(c, "5895", "Other^Name", "absent")
+    ds = pydicom.dcmread(str(c))
+    ds.SOPInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID = study_uid("5895") + ".1.3"
+    ds.save_as(str(c))
     sop_b = study_uid("5895") + ".1.2"
+    sop_c = study_uid("5895") + ".1.3"
     with Session(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in1"))
         session.enable_reversible_anonymization(str(tmp_path / "k.key"))
@@ -415,7 +428,16 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
         session.recover_patient_identity(patient.patient_id, restore=True)
         [patient] = session.store.patients
         assert is_synthetic_patient_id(patient.patient_id)
+        held = {i.sop_instance_uid: i for st in patient.studies
+                for se in st.series for i in se.instances}
+        assert held[sop_b].attributes.get("0010,0020") == "PA"
+        assert "0010,0020" in held[sop_c].attributes
+        assert held[sop_c].attributes["0010,0020"] == ""
+        assert held[sop_c].attributes.get("0010,0010") == "Alpha^One"
         session.anonymize(session.audit())
+        # Kept through the next pass: the §3.4 arm leaves a synthetic
+        # patient's copy alone, and the export writes it empty.
+        assert held[sop_b].attributes.get("0010,0020") == "PA"
         declined = [d for _uid, d in _audit_rows(session, "REMEDIATION_DECLINED")
                     if "PatientID" in d]
         assert declined == [], declined
