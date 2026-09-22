@@ -3,6 +3,10 @@
 The failure this file exists to catch is green: a matrix that lists
 three of four shards, or an assignment that drops a file, runs fewer
 tests and reports success.
+
+It reads tests/shard_timings.json, and says so by name, so that
+`pytest --changed` selects this file (rule 7: the files that name a
+changed path) when the timings are regenerated, instead of the suite.
 """
 import json
 import os
@@ -138,13 +142,16 @@ def test_a_relative_timings_path_is_refused(tmp_path):
     guard then blamed a test for it (#727 review). Refused rather than
     resolved: the documented form is absolute, and a resolved one would
     still land in the root whenever pytest was started there."""
+    # Started from tmp_path, so a regression writes rt.json there and
+    # not into the repository root (#727 review).
     out = subprocess.run(
         [sys.executable, "-m", "pytest", "--collect-only", "-q",
          "-p", "no:cacheprovider", "--record-shard-timings=rt.json",
-         "tests/test_crypto.py"],
-        cwd=REPO, capture_output=True, text=True, timeout=300)
+         str(REPO / "tests" / "test_crypto.py")],
+        cwd=tmp_path, capture_output=True, text=True, timeout=300)
     assert out.returncode == 4, out.stdout + out.stderr
     assert "absolute" in out.stdout + out.stderr
+    assert not (tmp_path / "rt.json").exists()
     assert not (REPO / "rt.json").exists()
 
 

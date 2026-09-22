@@ -66,6 +66,8 @@ htmlcov/
 .nox/
 .coverage
 .coverage.*
+# scripts/test_map.py's generated map: never edited, never committed (#707)
+.test-map.json
 .cache
 nosetests.xml
 coverage.xml
