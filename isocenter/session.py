@@ -953,6 +953,16 @@ class DicomSession:
         # identifiers it was not handed (#553). None until an audit runs,
         # and not persisted: a reopened session keeps pass accounting.
         self._scan_tally = None
+        # This session's working copy of each kept report's tally (#555,
+        # third review of #750): one per report, so two partial passes over
+        # the same report in this session complete one another as they
+        # would in the session that scanned it -- a patient-level pass now,
+        # the instances later -- while another session starts from its own
+        # copy. Weak keys, so an entry dies with its report; `PhiReport`
+        # hashes by identity. Imported here so no module-level line moves
+        # (`tests/test_packaging_contract.py` cites one by number).
+        from weakref import WeakKeyDictionary  # pylint: disable=import-outside-toplevel
+        self._report_tallies = WeakKeyDictionary()
         # Every policy an `audit()` in this session scanned under,
         # fingerprint -> base (#555). A status recorded under one of these
         # raises no export notice (owner's ruling Q2): the user chose it in
@@ -5721,11 +5731,13 @@ class DicomSession:
         report_policy = getattr(findings, "_scan_policy", None)
         report_tally = getattr(findings, "_scan_tally", None)
         # The session's own tally when it has one, as before (#553);
-        # otherwise a fresh copy of the report's, so a pass over a kept
-        # report records what the same pass would have in the session that
-        # scanned it, and the report stays as its audit left it.
+        # otherwise this session's working copy of the report's, so a pass
+        # over a kept report records what the same pass would have in the
+        # session that scanned it, and the report stays as its audit left
+        # it.
         from_report = self._scan_tally is None and report_tally is not None
-        tally = report_tally.copy() if from_report else self._scan_tally
+        tally = (self._working_tally(findings, report_tally) if from_report
+                 else self._scan_tally)
 
         count = 0
         if findings:
@@ -7013,6 +7025,24 @@ class DicomSession:
                 yield study
                 for series in study.series:
                     yield from series.instances
+
+    def _working_tally(self, report, report_tally):
+        """This session's copy of `report`'s tally, made on first use.
+
+        One per report per session: a fresh copy per call lost the first
+        pass's progress (`_partial`), so a report narrowed to everything
+        but one tag and then to that tag read IDENTIFIED after a reopen and
+        REMEDIATED in the scanning session (third review of #750). A report
+        that cannot be weakly referenced gets a fresh copy each call, which
+        fails safe: a partial pass is demoted, never completed.
+        """
+        try:
+            tally = self._report_tallies.get(report)
+        except TypeError:
+            return report_tally.copy()
+        if tally is None:
+            tally = self._report_tallies[report] = report_tally.copy()
+        return tally
 
     def _named_by(self, tally) -> frozenset:
         """`id`s of the patients, studies and instances `tally` raised under.

@@ -660,15 +660,17 @@ def _outcome(session, root):
 
 
 def _both_ways(tmp_path, *, nested=False, config=None, mutate=None,
-               before=None):
+               before=None, passes=None):
     """`(in_session, reopened)` outcomes of one flow.
 
     In session: ingest, save, `audit()`, then `before(session, root)` and
     `mutate(report)`, then `anonymize(report)`. Reopened: the same, but the
     session closes after `audit()` without saving it, and a new session
     over the same store runs `before`, `mutate` and `anonymize` (#644's
-    flow). `mutate` may return a replacement report.
+    flow). `mutate` may return a replacement report. `passes`, in place of
+    `mutate`, is one mutation per `anonymize(report)` call, in order.
     """
+    steps = passes or [mutate]
     results = []
     for mode in ("in_session", "reopened"):
         root = tmp_path / mode
@@ -683,8 +685,9 @@ def _both_ways(tmp_path, *, nested=False, config=None, mutate=None,
             if mode == "in_session":
                 if before:
                     before(session, root)
-                report = (mutate(report) if mutate else None) or report
-                session.anonymize(report)
+                for step in steps:
+                    report = (step(report) if step else None) or report
+                    session.anonymize(report)
                 results.append(_outcome(session, root))
                 continue
         with DicomSession(db) as session:
@@ -692,8 +695,9 @@ def _both_ways(tmp_path, *, nested=False, config=None, mutate=None,
                 session.load_config(config(tmp_path))
             if before:
                 before(session, root)
-            report = (mutate(report) if mutate else None) or report
-            session.anonymize(report)
+            for step in steps:
+                report = (step(report) if step else None) or report
+                session.anonymize(report)
             results.append(_outcome(session, root))
     return results
 
@@ -779,6 +783,34 @@ def test_the_reviewers_carry_sequence_gives_the_unseen_instance_no_policy(
         session.export(str(tmp_path / "out"))
         assert _notices(session)
         assert "REVIEW_REQUIRED" in _grade(session, tmp_path)
+
+
+def test_two_complementary_passes_complete_as_in_the_scanning_session(
+        tmp_path):
+    """Third review of #750, at 934b794a: the report narrowed in place to
+    everything but Institution Name, anonymized, then narrowed to Institution
+    Name alone and anonymized again -- the documented partial workflow. In
+    the scanning session the second pass completes the first (#553's
+    `_partial`): REMEDIATED, PASS. Across a reopen each call took a fresh
+    copy of the report's tally, the second pass had lost the first's
+    progress, and the instance read IDENTIFIED, REVIEW_REQUIRED. Kills: a
+    fresh copy of the tally per call."""
+    kept = {}
+
+    def all_but_institution(report):
+        kept.setdefault(id(report), list(report.findings))
+        report.findings[:] = [f for f in kept[id(report)]
+                              if f.tag != INSTITUTION]
+
+    def institution_only(report):
+        report.findings[:] = [f for f in kept[id(report)]
+                              if f.tag == INSTITUTION]
+
+    in_session, reopened = _both_ways(
+        tmp_path, passes=[all_but_institution, institution_only])
+    assert {s[1] for s in in_session["statuses"]} == {"remediated"}
+    assert "PASS" in in_session["grade"]
+    assert reopened == in_session
 
 
 def test_a_narrowed_report_is_settled_as_in_the_scanning_session(tmp_path):
