@@ -101,6 +101,7 @@ Part 3, PR 3, 2026-09-21 (spec §10 item 17 carries the same list):
     - **(6)** `has_wide_fixture()`: a file with a `scope=` of module, class, package or session is taken whole when any of its tests is selected.
     - **`RELEASING.md` step 3** states the new rules in the same words. The owner's approved text changes in meaning for docs; the coordinator is telling the owner.
     - **Rebased once more, onto `abdbe479` (#738).** It adds `tests/test_profile_editions.py`, timed on 3.12 at 0.44 s and added to the timings. It adds no pool call to `isocenter/` and no glob to the tests.
+    - **And onto `d093f6a3` (#739).** It adds three test files, timed on 3.12 and added to the timings: `test_a_file_backed_instance_reads_as_its_descriptors_declare.py` at 3.51 s, `test_a_kept_private_binary_value_keeps_its_vr.py` at 12.83 s and `test_a_reopened_store_keeps_the_text_of_ds_and_is.py` at 5.31 s. It adds no pool call to `isocenter/`.
 
 **Goal:** give a developer `pytest --changed` -- the tests that exercise the code they touched -- and run the suite on GitHub as four duration-balanced shards per Python version, with every test isolated in its own working directory.
 
