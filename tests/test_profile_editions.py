@@ -144,10 +144,14 @@ def test_a_pinned_name_has_the_rules_it_was_pinned_with():
 
 
 def test_a_1x_release_carries_the_rules_1_0_froze():
-    """Below 1.0 this skips. From the release cut's version bump
-    (`1.0.0rc1`) it runs, so L14 (#26) forgetting to copy `PINNED_DIGESTS`
-    into `FROZEN_AT_1_0` is red at the cut's full suite, and so is any
-    later change to a pinned name's rules."""
+    """Below 1.0 this skips, so it skips on `main` and at RELEASING.md's
+    "Cutting a release" step 1, where the version still reads 0.9.x. It
+    first runs at step 3's release commit, which bumps the version to
+    `1.0.0rc1`: L14 (#26) forgetting to copy `PINNED_DIGESTS` into
+    `FROZEN_AT_1_0` is red there, and so is any later change to a pinned
+    name's rules. L14 fills it on `main` before step 1, so step 3 is not
+    where it is found; a change between `1.0.0rc1` and the v1.0.0 tag, when
+    the pin freezes, updates both tables."""
     major = int(isocenter.__version__.split(".")[0])
     if major < 1:
         pytest.skip(f"isocenter {isocenter.__version__} is before 1.0; "
@@ -334,7 +338,8 @@ def test_the_report_names_the_edition_and_tells_floor_from_none(tmp_path):
         assert "session defaults" not in row.lower(), none
         assert "floor" not in row, none
         assert "2026c" not in row, none
-    assert "none" in none["Privacy Profile"], none
+    assert none["Privacy Profile"] == "| Privacy Profile | None (no base profile) |", none
+    assert none["De-ID Method"].startswith("| De-ID Method | No profile: "), none
 
     # The edition is read from the name: a registered name with another
     # edition is reported with that edition.
@@ -357,7 +362,7 @@ def test_each_load_resets_what_the_report_calls_the_floor(tmp_path):
 
         session.load_config(_config(tmp_path, "privacy_profile: none\n", "none.yaml"))
         row = _report_rows(session, tmp_path, "1.md")["Privacy Profile"]
-        assert "none" in row and "floor" not in row, row
+        assert row == "| Privacy Profile | None (no base profile) |", row
 
         session.load_config(_config(tmp_path, "remove_private_tags: true\n", "floor.yaml"))
         row = _report_rows(session, tmp_path, "2.md")["Privacy Profile"]
@@ -429,3 +434,55 @@ def test_the_floor_flag_is_private_state_not_part_of_the_frozen_shape():
     second._floor = False
     assert first == second
     assert "_floor" not in repr(first)
+
+
+def test_an_external_profile_with_no_rules_is_reported_as_no_base(tmp_path):
+    """An external profile that contributes no rules names no base: the
+    loader drops its path, and the report says `None (no base profile)`,
+    which is true of it and of `privacy_profile: none` alike -- not
+    `privacy_profile: none`, a line that file never had (review of #738,
+    B1). Kills the loader keeping the empty profile's path."""
+    empty = tmp_path / "empty_profile.yaml"
+    empty.write_text("phi_tags: {}\n", encoding="utf-8")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.load_config(_config(tmp_path, f"privacy_profile: {empty}\n"))
+        assert session.configuration.privacy_profile is None
+        assert session.configuration.phi_tags == {}
+        rows = _report_rows(session, tmp_path)
+    assert rows["Privacy Profile"] == "| Privacy Profile | None (no base profile) |", rows
+    assert rows["De-ID Method"] == (
+        "| De-ID Method | No profile: 0 tag rules, 0 pixel redaction rules |"), rows
+
+
+def test_a_bare_name_assigned_in_code_is_reported_as_the_built_in(tmp_path):
+    """`configuration.privacy_profile` is a public field; `"basic"` assigned
+    into it in code is the built-in, reported under its pinned name, not a
+    custom profile named `basic` (review of #738, N2). Kills the report
+    looking the field up without the aliases."""
+    with Session(str(tmp_path / "s.db")) as session:
+        session.configuration.privacy_profile = "basic"
+        rows = _report_rows(session, tmp_path)
+    assert rows["Privacy Profile"] == "| Privacy Profile | basic@2026c |", rows
+    assert "Profile 'basic@2026c' (PS3.15 Annex E Table E.1-1, edition 2026c)" in rows["De-ID Method"], rows
+    assert "Custom profile" not in rows["De-ID Method"], rows
+
+
+def test_the_two_refusals_say_what_the_changelog_quotes(tmp_path):
+    """Both refusals, whole: the file's path first, the value, the names
+    this version ships, and what `basic` means (review of #738, N3). Kills
+    the path prefix dropped, the alias clause dropped, and the unknown-name
+    list narrowed to the pinned names."""
+    unshipped = _config(tmp_path, "privacy_profile: basic@2027a\n", "u.yaml")
+    with pytest.raises(ValueError) as caught:
+        ConfigLoader.load_unified_config(unshipped)
+    assert str(caught.value) == (
+        f"{unshipped}: privacy_profile 'basic@2027a' is not a profile this "
+        "isocenter ships; it ships basic@2026c ('basic' means basic@2026c). "
+        "A later PS3.15 edition arrives as a new name in a newer isocenter (#714)")
+
+    unknown = _config(tmp_path, "privacy_profile: Basic\n", "k.yaml")
+    with pytest.raises(ValueError) as caught:
+        ConfigLoader.load_unified_config(unknown)
+    assert str(caught.value) == (
+        f"{unknown}: privacy_profile 'Basic' is neither a built-in profile "
+        "(basic, basic@2026c), 'none', nor an existing file")

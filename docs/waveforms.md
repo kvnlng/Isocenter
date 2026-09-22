@@ -97,8 +97,9 @@ There are three configurations a reader of this guide can be in:
   ID, Institution Name, Station Name and the series/acquisition/content
   dates reached the export.
 - **The Quick Start above.** `create_config()` scaffolds a config with
-  `privacy_profile: basic`; `load_config()` expands that into
-  `PRIVACY_PROFILES["basic"]` (`isocenter/profiles.py`) -- **620 tags, 620
+  `privacy_profile: basic@2026c` (the pinned name; `basic` is its short
+  form, #714); `load_config()` expands that into
+  `PRIVACY_PROFILES["basic@2026c"]` (`isocenter/profiles.py`) -- **620 tags, 620
   effective** -- the Basic Profile column of DICOM PS3.15 Annex E Table
   E.1-1 (2026c), with its departures named in
   [Configuration](configuration.md#privacy-profile). This is what
@@ -107,12 +108,12 @@ There are three configurations a reader of this guide can be in:
   Annotation Sequence, and the scan never opened sequences (#57), so it
   sat in the profile doing nothing. It fires now.
   The scaffold lists only the three research defaults beneath
-  `privacy_profile: basic` -- the entries of the floor whose action
+  `privacy_profile: basic@2026c` -- the entries of the floor whose action
   differs from the profile's -- so the loaded policy is the same 620
   rules a bare session applies.
 - **Your own `phi_tags` configuration.** With no `privacy_profile`
   line it is layered on the floor policy; with `privacy_profile: basic`
-  on the basic profile; with `privacy_profile: none` it is the whole
+  (or `basic@2026c`) on the basic profile; with `privacy_profile: none` it is the whole
   policy. Your explicit tags win over the base either way, and
   `action: KEEP` opts a tag out.
 

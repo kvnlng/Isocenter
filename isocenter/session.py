@@ -3282,7 +3282,13 @@ class DicomSession:
         # "session defaults" until #714; `_floor` is what tells them
         # apart. The edition is read from the pinned name, not from a
         # second table that could disagree with it.
+        #
+        # A name assigned into the public field in code (`"basic"`) goes
+        # through the aliases as a file would; it is a built-in, not a
+        # custom profile (review of #738).
         profile_name = self.configuration.privacy_profile
+        if isinstance(profile_name, str):
+            profile_name = profiles.PROFILE_ALIASES.get(profile_name, profile_name)
         if not profile_name and self.configuration._floor:
             floor_base = profiles.FLOOR_BASE
             source = _profile_source(floor_base)
@@ -3290,7 +3296,11 @@ class DicomSession:
                 f"None (session defaults: the floor policy over {floor_base})")
             method = f"Session defaults, the floor policy over '{floor_base}' {source}"
         elif not profile_name:
-            privacy_profile = "None (privacy_profile: none)"
+            # `privacy_profile: none`, or an external profile that
+            # contributed no rules (the loader drops its path). Worded to be
+            # true of both: this row does not quote a line the file may not
+            # have (review of #738).
+            privacy_profile = "None (no base profile)"
             method = "No profile"
         elif profile_name in profiles.PRIVACY_PROFILES:
             privacy_profile = profile_name
