@@ -145,6 +145,12 @@ def test_the_uid_carries_version_8_and_the_rfc_variant():
     assert (value >> 62) & 0x3 == 0b10
     top = uid_from_bytes16(b"\xff" * 16)
     assert len(top) == 44 and (int(top[5:]) >> 76) & 0xF == 8
+    # All ones: the variant's low bit must be cleared, not only its high
+    # bit set (a zero input cannot tell those apart).
+    assert (int(top[5:]) >> 62) & 0x3 == 0b10
+    # Asymmetric input pins the byte order: big-endian, as RFC 9562 reads
+    # a UUID.
+    assert uid_from_bytes16(bytes(range(16))) == "2.25.5233100606847278184134747173490191"
     assert generated_uid("study", "1.2.3") == generated_uid("study", "1.2.3")
     with pytest.raises(ValueError):
         uid_from_bytes16(bytes(15))

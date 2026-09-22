@@ -1163,10 +1163,15 @@ class PhiInspector:
             return (value == patient.patient_name
                     and _holds_owned_replacement(self.phi_tags, tag, value))
         if tag == "0010,0020":
-            # No arm for a subject with no Patient ID (#584). Its top-level
-            # copy is absent or empty, and the scan raises neither, so an
-            # arm skipping it was measured dead (mutant M-B13 in the #584
-            # PR) and is not written, as #496's N4 was not.
+            # A subject with no Patient ID (#584): the export stamps its
+            # ID empty whatever the copy holds, and its key is never
+            # replaced, so a finding here could only write a pseudonym
+            # onto a copy no file carries. Not dead: the copy is usually
+            # absent or `''`, which raise nothing, but pydicom keeps a
+            # blank ID's leading whitespace (" \t " reads " \t"), which
+            # ingest counts as no ID and the scan would raise.
+            if is_synthetic_patient_id(patient.patient_id):
+                return True
             return (value == patient.patient_id
                     and _holds_owned_replacement(self.phi_tags, tag, value))
         # No StudyTime (0008,0030) arm, though `ENTITY_FIELD_TAGS` carries

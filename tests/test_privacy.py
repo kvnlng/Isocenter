@@ -44,3 +44,12 @@ def test_no_phi():
     findings = inspector.scan_patient(pat)
 
     assert len(findings) == 0
+
+
+def test_a_patient_id_reading_unknown_is_pseudonymized():
+    """The scan's exemption of the literal `UNKNOWN` is gone (#584): no
+    ingest path produced it, a file can carry it, and it is an ID like
+    any other. Kills MP1 (the exemption restored)."""
+    findings = PhiInspector(project_secret=FIXED_A).scan_patient(
+        Patient("UNKNOWN", "Unknown"))
+    assert [f.tag for f in findings if f.field_name == "patient_id"] == ["0010,0020"]

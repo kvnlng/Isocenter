@@ -59,7 +59,10 @@ def _id_less(path, suffix, name, how):
     if how == "absent":
         del ds.PatientID
     else:
-        ds.PatientID = "   " if how == "blank" else ""
+        # Blank with a tab: pydicom strips trailing spaces on read, so
+        # "   " arrives as "" and would test the empty case twice; " \t "
+        # arrives as " \t", which only the `.strip()` makes unusable.
+        ds.PatientID = " \t " if how == "blank" else ""
     ds.save_as(str(path))
     return str(path)
 
@@ -74,8 +77,10 @@ def _exported(out):
 def test_two_id_less_subjects_stay_two_patients(tmp_path, mode, how):
     """T-B1. Kills M-B1 (the absent spelling `UnknownPatient` restored),
     M-B2 (the key drops the study UID), M-B3 (the stamp reads
-    `patient.patient_id`) and M-B12 (the patient-level synthetic check
-    dropped: the key is pseudonymized and exported)."""
+    `patient.patient_id`), M-B12 (the patient-level synthetic check
+    dropped: the key is pseudonymized and exported), and, through the
+    blank case, MI3 (the `.strip()` dropped) and M-B13 (the instance-level
+    synthetic arm dropped: the `" \\t"` copy is raised and pseudonymized)."""
     _id_less(tmp_path / "in" / "a.dcm", "5841", "Alpha^One", how)
     _id_less(tmp_path / "in" / "b.dcm", "5842", "Beta^Two", how)
     source_date = str(pydicom.dcmread(str(tmp_path / "in" / "a.dcm")).StudyDate)
@@ -139,14 +144,20 @@ def test_a_later_file_of_the_same_study_joins_its_patient(tmp_path):
         assert sum(len(se.instances) for se in study.series) == 2
 
 
-def test_a_real_id_that_reads_unknownpatient_is_not_an_id_less_file(tmp_path):
-    """T-B3. Kills M-B6 (an absent ID normalized to the literal)."""
+def test_a_real_id_that_reads_unknownpatient_is_not_an_id_less_file(tmp_path, caplog):
+    """T-B3. Kills M-B6 (an absent ID normalized to the literal), and MI17
+    (the INFO count of ID-less files dropped: one file here, not two)."""
     write_ct(tmp_path / "in" / "real.dcm", "UnknownPatient", "5844", name="Real^Person")
     _id_less(tmp_path / "in" / "none.dcm", "5845", "Other^Person", "absent")
-    with Session(str(tmp_path / "s.db")) as session:
-        session.ingest(str(tmp_path / "in"))
-        ids = sorted(p.patient_id for p in session.store.patients)
+    with caplog.at_level("INFO", logger="isocenter"):
+        with Session(str(tmp_path / "s.db")) as session:
+            session.ingest(str(tmp_path / "in"))
+            ids = sorted(p.patient_id for p in session.store.patients)
     assert ids == ["UnknownPatient", NO_PATIENT_ID_PREFIX + study_uid("5845")]
+    counts = [r.getMessage() for r in caplog.records
+              if "carried no Patient ID" in r.getMessage()]
+    assert counts == ["1 file(s) carried no Patient ID; each of their "
+                      "studies was made its own patient."], counts
 
 
 def test_keep_exports_an_empty_id_and_no_key_reaches_a_name(tmp_path):
@@ -201,20 +212,78 @@ def test_a_real_id_arriving_later_rekeys_the_id_less_patient(tmp_path):
         assert [p.patient_id for p in reopened.store.patients] == ["PA"]
 
 
-def test_an_id_less_file_joins_the_patient_holding_its_study(tmp_path):
+def test_a_third_file_after_a_merge_in_one_ingest_links_under_the_survivor(tmp_path):
+    """One ingest, in file order: an ID-less file of S, then two `PA` files
+    of S, with `PA` already holding another study. The second file merges
+    the ID-less patient's study onto `PA`; the third must find S held by
+    `PA`, not by the patient the merge removed. Kills MI13 (the owner map
+    left pointing at the removed patient: the third file fails linkage)."""
+    _with_id(tmp_path / "in0" / "p.dcm", "PA", "5855", ".1.1", "Alpha^One")
+    _id_less(tmp_path / "in1" / "a.dcm", "5856", "Alpha^One", "absent")
+    _with_id(tmp_path / "in1" / "b.dcm", "PA", "5856", ".1.2", "Alpha^One")
+    _with_id(tmp_path / "in1" / "c.dcm", "PA", "5856", ".1.3", "Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in0"))
+        session.ingest(str(tmp_path / "in1"))
+        shape = {p.patient_id: sorted(sum(len(se.instances) for se in st.series)
+                                      for st in p.studies)
+                 for p in session.store.patients}
+        errors = _audit_rows(session, "ERROR")
+    assert shape == {"PA": [1, 3]}, shape
+    assert errors == [], errors
+
+
+@pytest.mark.parametrize("existing", [False, True], ids=["rekey", "merge"])
+def test_a_re_key_of_a_stored_id_less_patient_reaches_the_store(tmp_path, existing):
+    """T-B9 across a reopen: the ID-less patient's row was already written
+    under its key when the real-ID file arrives in a later session. The
+    store ends holding `PA` alone -- no row left under the key, none
+    empty. The re-key's `mark_modified()` is not what this pins: the save
+    writes a patient with no row under its ID whatever its revision says
+    (#552), which a re-keyed patient always is, so dropping the call
+    survives (MI10, equivalent)."""
+    if existing:
+        _with_id(tmp_path / "in0" / "p.dcm", "PA", "5853", ".1.1", "Alpha^One")
+    _id_less(tmp_path / "in1" / "a.dcm", "5854", "Alpha^One", "absent")
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", "5854", ".1.2", "Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        if existing:
+            session.ingest(str(tmp_path / "in0"))
+        session.ingest(str(tmp_path / "in1"))
+        session.save(sync=True)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in2"))
+        session.save(sync=True)
+    import sqlite3
+    with sqlite3.connect(str(tmp_path / "s.db")) as conn:
+        rows = [r[0] for r in conn.execute("SELECT patient_id FROM patients")]
+    assert rows == ["PA"], rows
+    with Session(str(tmp_path / "s.db")) as reopened:
+        [patient] = reopened.store.patients
+        assert patient.patient_id == "PA"
+        assert sorted(sum(len(se.instances) for se in st.series)
+                      for st in patient.studies) == ([1, 2] if existing else [2])
+
+
+@pytest.mark.parametrize("batches", [2, 1], ids=["two-ingests", "one-ingest"])
+def test_an_id_less_file_joins_the_patient_holding_its_study(tmp_path, batches):
     """The forward order: `PA`'s file of study S first, then a file of S
     with its Patient ID stripped. One patient `PA`, both instances, and no
     empty synthetic patient beside it. Kills M-B5 (the patient looked up by
-    key before the study, creating an empty one)."""
+    key before the study, creating an empty one). In one ingest, where the
+    owner map is not rebuilt from the graph between the two files, also
+    MI14 (a new study not recorded as its patient's), in either order."""
+    second = "in2" if batches == 2 else "in1"
     _with_id(tmp_path / "in1" / "a.dcm", "PA", "5851", ".1.1", "Alpha^One")
-    _id_less(tmp_path / "in2" / "b.dcm", "5851", "Alpha^One", "empty")
-    path = tmp_path / "in2" / "b.dcm"
+    _id_less(tmp_path / second / "b.dcm", "5851", "Alpha^One", "empty")
+    path = tmp_path / second / "b.dcm"
     ds = pydicom.dcmread(str(path))
     ds.SOPInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID = study_uid("5851") + ".1.2"
     ds.save_as(str(path))
     with Session(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in1"))
-        session.ingest(str(tmp_path / "in2"))
+        if batches == 2:
+            session.ingest(str(tmp_path / "in2"))
         shape = {p.patient_id: [sum(len(se.instances) for se in st.series)
                                 for st in p.studies]
                  for p in session.store.patients}
@@ -258,6 +327,40 @@ def test_after_a_shift_the_real_id_file_links_under_the_id_less_patient(tmp_path
     linked = [d for uid, d in warnings if uid == sop]
     assert len(linked) == 1, warnings
     assert "PA" not in linked[0] and "Alpha" not in linked[0], linked
+
+
+@pytest.mark.parametrize("level", ["Study", "Study-edited", "Instance"])
+def test_a_partial_pass_already_gave_the_id_less_patient_its_offset(tmp_path, level):
+    """The re-key refusal reads more than the patient's own status. A pass
+    handed only the Study's findings shifts the Study Date, and one handed
+    only the instance's shifts its Series, Acquisition and Content dates --
+    each by the ID-less patient's offset -- while the patient itself still
+    reads IDENTIFIED. Re-keying then would give those dates a second
+    offset. Kills MI7 (only the patient's status read); for the instance
+    pass, MI9 (the instance walk dropped); and for a study edited after
+    the pass, which reads UNSCANNED with its date still shifted, MI8
+    (`date_shifted` not read)."""
+    _id_less(tmp_path / "in1" / "a.dcm", "5852", "Alpha^One", "absent")
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", "5852", ".1.2", "Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
+        report = session.audit()
+        applied = session.anonymize(
+            [f for f in report.findings if f.entity_type == level.split("-")[0]])
+        [patient] = session.store.patients
+        assert applied and patient.phi_status.name == "IDENTIFIED"
+        if level == "Study-edited":
+            [study] = patient.studies
+            study.mark_modified()
+            assert study.date_shifted and study.phi_status.name == "UNSCANNED"
+        session.ingest(str(tmp_path / "in2"))
+        [patient] = session.store.patients
+        assert is_synthetic_patient_id(patient.patient_id)
+        [study] = patient.studies
+        assert sum(len(se.instances) for se in study.series) == 2
+        warnings = _audit_rows(session, "WARNING")
+    sop = study_uid("5852") + ".1.2"
+    assert len([d for uid, d in warnings if uid == sop]) == 1, warnings
 
 
 def _audit_rows(session, action_type):
