@@ -8911,7 +8911,8 @@ def _is_str(value):
 
 
 def normalize_id_filter(values, option, kind="Patient ID", *,
-                        allow_none=True, element=_is_str):
+                        allow_none=True, element=_is_str,
+                        element_is="a str"):
     """The shape of a selection of ids, read once, for every door that
     takes one (#696).
 
@@ -8972,6 +8973,8 @@ def normalize_id_filter(values, option, kind="Patient ID", *,
             lock, whose documented input is a list of findings, admits an
             object carrying `patient_id` as well; every other door takes
             the default, a `str`.
+        element_is (str): What `element` admits, for the refusal
+            ("a str or a finding" on the lock pair).
 
     Returns:
         Optional[tuple]: `None` for every one; otherwise the elements in
@@ -9018,9 +9021,9 @@ def normalize_id_filter(values, option, kind="Patient ID", *,
         if not element(value):
             raise TypeError(
                 f"{option} holds a {type(value).__name__} at position "
-                f"{position}; every {kind} is a str, so it could never "
-                f"match, and it would select nothing in silence. Pass str "
-                f"values only.")
+                f"{position}, which is not {element_is}: every {kind} is "
+                f"a str, so it could never match, and it would select "
+                f"nothing in silence.")
     return materialised
 
 

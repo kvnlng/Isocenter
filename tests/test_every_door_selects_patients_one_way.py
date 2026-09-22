@@ -163,6 +163,13 @@ def _assert_nothing_written(session, tmp_path):
         assert not tokens, f"a refused lock left tokens on {tokens}"
 
 
+def _names_the_option(door, message):
+    """A refusal opens with the argument as the call spelled it:
+    `lock_identities(patient_id)`, `patient_ids` everywhere else."""
+    option = "patient_id" if door == "lock" else "patient_ids"
+    return message.startswith(option + " ")
+
+
 def _refused(door, session, tmp_path, selection):
     with pytest.raises(TypeError) as caught:
         _DOORS[door](session, tmp_path, selection)
@@ -211,7 +218,7 @@ def test_a_bare_str_is_refused(tmp_path, door, value):
     (tmp_path / "s").mkdir()
     with _session(tmp_path, door) as session:
         message = _refused(door, session, tmp_path / "s", value)
-    assert "patient_ids" in message and "bare str" in message, message
+    assert _names_the_option(door, message) and "bare str" in message, message
     assert A not in message and B not in message, message
 
 
@@ -237,7 +244,7 @@ def test_a_bytes_like_selection_is_refused(tmp_path, door, value):
     (tmp_path / "s").mkdir()
     with _session(tmp_path, door) as session:
         message = _refused(door, session, tmp_path / "s", value)
-    assert "patient_ids" in message and label in message, message
+    assert _names_the_option(door, message) and label in message, message
 
 
 @pytest.mark.parametrize("element", [b"COH-A", 42, None, ("COH-A",)],
@@ -250,7 +257,10 @@ def test_a_non_str_element_is_refused(tmp_path, door, element):
     (tmp_path / "s").mkdir()
     with _session(tmp_path, door) as session:
         message = _refused(door, session, tmp_path / "s", [A, element])
-    assert "patient_ids" in message, message
+    assert _names_the_option(door, message), message
+    # The lock pair also takes findings, and its refusal says so.
+    admits = "a str or a finding" if door.startswith("lock") else "a str:"
+    assert f"which is not {admits}" in message, message
     assert "position 2" in message, message
     assert type(element).__name__ in message, message
     assert A not in message and "COH" not in message, message
@@ -264,7 +274,21 @@ def test_a_non_iterable_is_refused_in_our_words(tmp_path, door):
     (tmp_path / "s").mkdir()
     with _session(tmp_path, door) as session:
         message = _refused(door, session, tmp_path / "s", 42)
-    assert "patient_ids" in message and "int" in message, message
+    assert _names_the_option(door, message) and "int" in message, message
+
+
+def test_an_iterators_own_typeerror_is_not_reworded():
+    """`iter()` alone is inside the shape check's `try`: a `TypeError` the
+    caller's own iterator raises part-way surfaces as itself, not as a
+    refusal of the argument's shape that hides the caller's bug."""
+    from isocenter.io_handlers import normalize_id_filter  # pylint: disable=import-outside-toplevel
+
+    def ids():
+        yield A
+        raise TypeError("the iterator's own")
+
+    with pytest.raises(TypeError, match="the iterator's own"):
+        normalize_id_filter(ids(), "patient_ids")
 
 
 # --- S7: None and empty ----------------------------------------------------------
@@ -390,7 +414,7 @@ def test_none_locks_nobody(tmp_path, door):
     (tmp_path / "s").mkdir()
     with _session(tmp_path, door) as session:
         message = _refused(door, session, tmp_path / "s", None)
-    assert "patient_ids" in message and "None" in message, message
+    assert _names_the_option(door, message) and "None" in message, message
 
 
 def test_one_finding_is_not_a_patient_id(tmp_path):
@@ -404,7 +428,7 @@ def test_one_finding_is_not_a_patient_id(tmp_path):
         session.enable_reversible_anonymization(str(key))
         with pytest.raises(TypeError) as caught:
             session.lock_identities(finding)
-    assert "patient_ids" in str(caught.value), str(caught.value)
+    assert _names_the_option("lock", str(caught.value)), str(caught.value)
     assert "PhiFinding" in str(caught.value), str(caught.value)
     assert not key.exists()
 

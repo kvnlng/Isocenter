@@ -712,6 +712,17 @@ def _suggested_tag_name(tag: str) -> str:
     return tag
 
 
+def _lock_selection(value, option):
+    """The lock pair's reading of a selection (#696): the shape every door
+    reads, except that `None` is refused -- there is no "lock everyone"
+    spelling, and read as every patient it would lock the whole session --
+    and an item may be a finding, the batch's documented input."""
+    return normalize_id_filter(
+        value, option, allow_none=False,
+        element=lambda item: isinstance(item, str) or hasattr(item, 'patient_id'),
+        element_is="a str or a finding")
+
+
 class LockingResult(list):
     """
     A list subclass that suppresses verbose REPL output for large datasets.
@@ -3846,6 +3857,11 @@ class DicomSession:
         # each an ERROR line rather than a refusal -- and a patient left
         # unlocked loses its identity at `anonymize()`.
         if not isinstance(patient_id, str):
+            # Read here, under the name the caller used, so a refusal says
+            # `patient_id` (review of #696); the batch gets the tuple and
+            # reads it again, which a tuple survives.
+            if not hasattr(patient_id, 'findings'):
+                patient_id = _lock_selection(patient_id, "patient_id")
             return self.lock_identities_batch(
                 patient_id, persist=persist, verbose=verbose, tags_to_lock=tags_to_lock)
 
@@ -4545,10 +4561,7 @@ class DicomSession:
         if hasattr(patient_ids, 'findings'):  # PhiReport
             iterable_data = patient_ids.findings
         else:
-            iterable_data = normalize_id_filter(
-                patient_ids, "patient_ids", allow_none=False,
-                element=lambda item: (isinstance(item, str)
-                                      or hasattr(item, 'patient_id')))
+            iterable_data = _lock_selection(patient_ids, "patient_ids")
         self._key_for_locking()
 
         # Normalize input to a set of strings

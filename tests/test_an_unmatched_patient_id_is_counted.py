@@ -141,7 +141,8 @@ def test_a_full_export_still_grades_pass(tmp_path, fmt):
     """The control for the grade above: the same fixture, every id known."""
     with _session(tmp_path, fmt) as session:
         assert _export(session, tmp_path / "out", fmt, [A]) == {A}
-        assert _grade(session, tmp_path) != "REVIEW_REQUIRED"
+        grade = _grade(session, tmp_path)
+    assert "**PASS**" in grade, grade
 
 
 # --- U4: the worked example ---------------------------------------------------------
@@ -176,6 +177,36 @@ def test_no_row_when_every_id_matches_or_none_is_given(tmp_path, fmt, selection,
         added = _rows(session)[before:]
     assert _count_rows(added) == [], added
     assert _warnings(caplog) == [], caplog.messages
+
+
+def test_all_withheld_export_with_an_unknown_id_still_writes_the_row(tmp_path):
+    """The row sits before *both* empty-plan branches. A CT never
+    anonymized, exported with `check_burned_in=True`, has its every
+    instance withheld, and that branch returns early: the unknown id must
+    still be counted there, not only on the empty-plan path (review of
+    #696, M6)."""
+    import pydicom  # pylint: disable=import-outside-toplevel
+    from pydicom.data import get_testdata_file  # pylint: disable=import-outside-toplevel
+
+    source = tmp_path / "in"
+    source.mkdir()
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    ds.PatientID = "CT-A"
+    ds.PatientName = "Doe^Jane"
+    ds.save_as(str(source / "a.dcm"))
+    with DicomSession(persistence_file=str(tmp_path / "ct.db")) as session:
+        session.ingest(str(source))
+        summary = session.export(str(tmp_path / "out"),
+                                 patient_ids=["CT-A", UNKNOWN_1],
+                                 check_burned_in=True, show_progress=False)
+        rows = _rows(session)
+    assert summary.written == 0
+    assert any(row[0] == "EXPORT" and "were withheld" in row[2] for row in rows), (
+        "the fixture did not take the all-withheld branch; the assertion "
+        f"below would not test it: {rows}")
+    counted = _count_rows(rows)
+    assert len(counted) == 1, rows
+    assert "1 of the 2 ids given (position 2," in counted[0][2], counted[0][2]
 
 
 def test_no_row_for_an_export_that_did_not_run(tmp_path):
