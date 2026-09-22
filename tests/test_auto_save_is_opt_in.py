@@ -319,3 +319,27 @@ def test_a_written_change_puts_the_file_back_in_step(tmp_path, capsys):
         capsys.readouterr()
         session.configuration.add_rule("SN4")
         assert _notices(capsys) == 1
+
+
+def test_deleting_an_absent_rule_changes_nothing(tmp_path, capsys):
+    """`delete_rule` writes `config_path` only when auto-save is on *and*
+    a rule was removed (spec §2.1.3). Under auto-save a no-op leaves a
+    hand-written file's bytes, comments included, as they were; with it
+    off, a no-op prints no notice and leaves the file counted as in step,
+    so the next real change is the one announced. Kills the early return
+    removed, which sent the no-op through `_apply` (review of #742,
+    finding 1)."""
+    path = _write(tmp_path)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.load_config(str(path))
+        session.configuration.auto_save = True
+        assert session.configuration.delete_rule("NOPE") is False
+        assert path.read_text(encoding="utf-8") == WITH_A_RULE
+
+        session.configuration.auto_save = False
+        capsys.readouterr()
+        assert session.configuration.delete_rule("NOPE") is False
+        assert _notices(capsys) == 0
+        assert session.configuration.delete_rule("SN1") is True
+        assert _notices(capsys) == 1
+    assert path.read_text(encoding="utf-8") == WITH_A_RULE

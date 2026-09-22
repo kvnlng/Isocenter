@@ -152,14 +152,19 @@ class IsocenterConfiguration:
         # The base lookup sits beside the loader's resolution, so the two
         # cannot resolve a name differently.
         base = config_manager._policy_base_rules(self.privacy_profile, self._floor)
+        # Keys as the loader reads them, lowercase: `phi_tags` assigned in
+        # code can hold `0008,103E`, which the base spells `0008,103e`.
+        # Compared raw, that rule read as missing and the save refused a
+        # policy that has it (review of #742, finding 5).
+        tags = config_manager._lowercase_tag_keys(self.phi_tags)
 
-        missing = [tag for tag in base if tag not in self.phi_tags]
+        missing = [tag for tag in base if tag not in tags]
         if missing:
             raise ValueError(self._missing_base_rules_refusal(missing))
 
         # Whole rules, not actions: an action-only diff (the scaffold's)
         # drops a rule that keeps the base's action and adds a `value`.
-        overrides = {tag: rule for tag, rule in self.phi_tags.items()
+        overrides = {tag: rule for tag, rule in tags.items()
                      if base.get(tag) != rule}
 
         machines = []

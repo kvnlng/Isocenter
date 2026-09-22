@@ -340,3 +340,95 @@ def test_the_file_reads_top_down_in_the_schema_order(tmp_path):
     assert list(yaml.safe_load(text)) == ["version", "privacy_profile", "phi_tags",
                                           "date_jitter", "remove_private_tags", "machines"]
     assert "\nmachines:\n- serial_number: SN1\n" in text, text
+
+
+def test_a_hand_assigned_none_saves_with_no_base(tmp_path):
+    """`privacy_profile = "none"` assigned in code (the loader leaves None
+    for a file's `none`) is a base of no rules: every rule in memory is
+    written, and the file reloads to the same rules. Kills the `none` arm
+    of `_policy_base_rules` removed, which refuses the name as neither a
+    profile nor a file (review of #742, R2)."""
+    path = tmp_path / "c.yaml"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.configuration.config_path = str(path)
+        session.configuration.privacy_profile = "none"
+        session.configuration.set_phi_tag("0008,1030", "REMOVE")
+        session.configuration.save()
+        expected = session.configuration.phi_tags
+    saved = _parsed(path)
+    assert saved["privacy_profile"] == "none"
+    assert saved["phi_tags"] == expected
+    assert _reloaded(tmp_path, path)["phi_tags"] == expected
+
+
+@pytest.mark.parametrize("profile, match", [
+    (7, "must be a profile name or a path, got int"),
+    ("basic@2027a", "'basic@2027a' is not a profile this isocenter ships"),
+], ids=["not a string", "an unshipped edition"])
+def test_a_profile_no_file_could_name_is_refused(tmp_path, profile, match):
+    """A `privacy_profile` assigned in code that no file could name is a
+    `ValueError` with its own reason, and nothing is written. Kills the
+    type check removed (a `TypeError` from `"@" in 7`) and the `@` arm
+    removed (the generic neither-profile-nor-file wording), R3 and R4 in
+    the review of #742."""
+    path = _write(tmp_path, SEVEN_LINE_CONFIG)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.load_config(str(path))
+        session.configuration.privacy_profile = profile
+        with pytest.raises(ValueError, match=match):
+            session.configuration.save()
+    assert path.read_text(encoding="utf-8") == SEVEN_LINE_CONFIG
+
+
+def test_the_missing_rules_refusal_counts_what_it_does_not_show(tmp_path):
+    """The refusal names three missing tags and counts the rest. Kills the
+    count off by the three shown (review of #742, R1)."""
+    path = _write(tmp_path, "privacy_profile: basic\n")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.load_config(str(path))
+        for tag in list(session.configuration.phi_tags)[:5]:
+            del session.configuration.phi_tags[tag]
+        with pytest.raises(ValueError) as refused:
+            session.configuration.save()
+    assert "(and 2 more)" in str(refused.value), str(refused.value)
+
+
+def test_a_tag_key_in_uppercase_is_the_base_s_tag(tmp_path):
+    """`phi_tags` keys are compared and written as the loader reads them,
+    lowercase. A base rule re-keyed in uppercase is still that rule, not a
+    missing one, and an override keyed in uppercase is written lowercase.
+    Kills the diff taken over raw keys (review of #742, finding 5)."""
+    path = _write(tmp_path, "privacy_profile: basic\n")
+    tag = next(t for t in BASIC_PROFILE if t != t.upper())
+    changed = {**BASIC_PROFILE[tag], "action": "KEEP"}
+    with Session(str(tmp_path / "s.db")) as session:
+        session.load_config(str(path))
+        del session.configuration.phi_tags[tag]
+        session.configuration.phi_tags[tag.upper()] = dict(changed)
+        session.configuration.save()
+    assert _parsed(path)["phi_tags"] == {tag: changed}
+    assert _reloaded(tmp_path, path)["phi_tags"][tag] == changed
+
+
+def test_a_relative_profile_lost_to_a_chdir_says_where_it_looked(tmp_path, monkeypatch):
+    """An external profile named by a relative path is looked for in the
+    working directory at save time, as at load time. After a `chdir` the
+    save is refused, and under auto-save so is every change method; the
+    refusal names the directory it looked in, and nothing changes. Kills
+    the directory left out of the message (review of #742, finding 3)."""
+    _external_profile(tmp_path, {"0010,0010": {"action": "REMOVE"}}, "rel.yaml")
+    path = _write(tmp_path, "privacy_profile: rel.yaml\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(tmp_path)
+    with Session(str(tmp_path / "s.db")) as session:
+        session.load_config(str(path))
+        session.configuration.auto_save = True
+        monkeypatch.chdir(elsewhere)
+        with pytest.raises(ValueError) as refused:
+            session.configuration.set_phi_tag("0008,1030", "REMOVE")
+        assert "0008,1030" not in session.configuration.phi_tags
+    message = str(refused.value)
+    assert "'rel.yaml'" in message and str(elsewhere) in message, message
+    assert "set privacy_profile to its path" in message, message
+    assert path.read_text(encoding="utf-8") == "privacy_profile: rel.yaml\n"

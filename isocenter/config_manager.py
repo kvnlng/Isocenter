@@ -961,8 +961,11 @@ def _policy_base_rules(privacy_profile: Optional[str], floor: bool) -> Dict[str,
     An external profile is **re-read now**, not snapshotted at load: the
     next load reads the file as it is on disk, so a diff against the file
     as it is now is the one that reloads to memory when the profile has
-    changed or dropped a rule since. A profile that has gone raises the
-    loader's own error, which a snapshot would only defer to the next load.
+    changed or dropped a rule since. A profile that has gone gets the
+    refusal the loader gives a missing profile, which a snapshot would only
+    defer to the next load; this one adds where a relative path was looked
+    for, because under `auto_save` every change method raises it, and the
+    usual cause is a `chdir` since the load (review of #742).
 
     The returned mapping is the module's own table for a built-in; callers
     read it and never write it.
@@ -984,10 +987,14 @@ def _policy_base_rules(privacy_profile: Optional[str], floor: bool) -> Dict[str,
     if os.path.isfile(privacy_profile):
         return _external_profile_tags(privacy_profile)
     known = ", ".join(sorted(set(PRIVACY_PROFILES) | set(PROFILE_ALIASES)))
+    where = ("" if os.path.isabs(privacy_profile) else
+             f"; a relative path is looked for in the working directory, "
+             f"now {os.getcwd()}")
     raise ValueError(
         f"configuration.save(): privacy_profile {privacy_profile!r} is neither "
         f"a built-in profile ({known}), 'none', nor an existing file, so a "
-        f"file naming it would not load")
+        f"file naming it would not load{where}. If the profile file has "
+        f"moved, set privacy_profile to its path (#715)")
 
 
 class ConfigLoader:
