@@ -36,15 +36,44 @@ The report includes:
    session `REVIEW_REQUIRED` on the same argument 3.2 makes. Unlike 3.1
    and 3.2, 3.3 is omitted entirely from a run that declined nothing.
 4. **Exceptions & Errors**: every `ERROR` and `WARNING` audit row, plus report-time checks (`COMPLIANCE_CHECK`, `AUDIT_DROP`). Any row here grades the run `REVIEW_REQUIRED`. An `ERROR` means something requested failed -- a file refused at ingest, an instance that failed to write. A `WARNING` means the run did what it should but something about the *source data* could not be honoured or read, or was deliberately held back: a file declined because its SOP Instance UID is already held, an instance `export(check_burned_in=True)` withheld because it still carries an identifier (not written, and nothing failed -- the pipeline declined it; [#536](https://github.com/kvnlng/Isocenter/issues/536)), an instance OCR could not read, a store de-identified before 0.9.6 (see [Migration Tools](migration.md)), a Photometric Interpretation the written transfer syntax does not admit, written as declared because correcting it would invent a claim, or an ambiguous value representation whose decider the source omits or contradicts -- no Waveform Bits Allocated above a waveform element, no LUT Descriptor in a LUT, a value the arm Pixel Representation names cannot hold, or a value the unsigned default cannot hold where no Pixel Representation is declared at all ([#674](https://github.com/kvnlng/Isocenter/issues/674), [#681](https://github.com/kvnlng/Isocenter/issues/681)).
-5. **Validation & Verification**: the **Grade Basis** -- every reason this run is not `PASS`, one line each, or a statement that nothing costs it its `PASS` -- then how many `REMEDIATION_*` rows the audit trail holds, what each `scan_pixel_content()` call in this session read and could not read, and the configured method. When the grade surprises you, read the Grade Basis first: it names the section that holds the row.
+5. **Validation & Verification**: the **Grade Basis** -- every reason this run is not `PASS`, one line each, or a statement that nothing costs it its `PASS` -- then how many `REMEDIATION_*` rows the audit trail holds, what each `scan_pixel_content()` call in this session read and could not read, and the configured method. When the grade surprises you, read the Grade Basis first: it names the section that holds the row. Every condition behind it is listed under [How the grade is decided](#how-the-grade-is-decided).
 
 A per-instance manifest is not part of the report; it is a separate document written by `generate_manifest()`.
+
+### How the grade is decided
+
+The report grades a run `PASS` or `REVIEW_REQUIRED`. There is no `FAIL`: a failure the run records costs it its `PASS` (condition 2); one it cannot record raises.
+
+**The grade is `PASS` exactly when none of the conditions below holds.** Section 5's *Grade Basis* lists each one that does, one line per condition, naming the section that holds the evidence. The grade and that list are computed from one list, so they cannot disagree.
+
+The conditions are read from the store's audit log and from the store itself. The audit log holds everything any session ever recorded in this store, not only the session generating the report. A row written once stays; only a new store starts clean.
+
+1. **Nothing is attested.** The audit log holds no rows at all. A clean ingest followed by `audit()` alone writes none, for example.
+2. **Something failed, or the source could not be honoured.** Any `ERROR` or `WARNING` row, or a report-time check (section 4):
+    - `COMPLIANCE_CHECK`: an instance stored with Burned In Annotation `YES`, or stored pixel descriptors that cannot describe its frame.
+    - `AUDIT_DROP`: audit rows that failed to write.
+3. **Graded data was lost.** A `DATA_LOSS` row scoped `PRIVATE` or `SIGNAL` (section 3.1). A `STANDARD` loss is listed but does not grade.
+4. **The PHI scan could not read something the export still carries.** A `SCAN_GAP` row whose element is retained for export, or whose disposition cannot be resolved (section 3.2).
+5. **A remediation was proposed and did not run.** A `REMEDIATION_DECLINED` row, including a proposal that raised (section 3.3).
+6. **A verb left no evidence.** `anonymize()` or `redact()` ran in the session generating the report, and none of the rows it writes is in the audit log.
+7. **A finding raised under your policy was not acted on.** A patient, study or instance whose last PHI scan (`audit()`, or the scan `export(check_burned_in=True)` runs) found a value that a rule of the policy that scan ran with acts on, and which no `anonymize()` pass since has acted on. "Acted on" means the value was replaced, shifted or removed, or was already what the rule asks. A remediation that declined did not act, so its entity reads `IDENTIFIED` after the pass and counts here as well as under condition 5, unless it was edited after its scan and the pass changed nothing else on it, which leaves it `UNSCANNED`. This is the entity reading `IDENTIFIED` in `session.phi_status_summary()`, counted over the whole store; section 5's line gives the count per level. Series are never scanned and never counted. An entity edited after its scan reads `UNSCANNED`, and does not grade under this condition.
+
+**What `PASS` does not mean.** The grade is about what the run recorded doing, and what its own scan found and its own passes left. It does not say the exported data holds no identifiers:
+
+- **Data never scanned does not grade.** An export without `audit()` grades `PASS` if nothing else is recorded: an unscanned instance is the absence of a measurement, not a finding. Section 5 says how many instances have no PHI scan at their current revision, so a `PASS` over data no scan has read does not pass for a `PASS` over data a scan cleared. The per-entity answer is `session.phi_status_summary()` and the manifest's `anonymized`.
+- **The scan finds what your policy names, plus Patient's Name, Patient ID and Study Date, which it always checks, and, with `remove_private_tags` on, every private tag.** An identifier anywhere else is not a finding, and the grade does not see it.
+- **An edit made between `audit()` and `anonymize()`** can be stamped `REMEDIATED` by the pass without any scan having read it, and then does not grade ([#752](https://github.com/kvnlng/Isocenter/issues/752)).
+- **Burned-in pixel text is not graded.** Text `scan_pixel_content()` finds is counted in section 5 and costs no `PASS`; an instance it could not read does (condition 2), as does a stored Burned In Annotation `YES`.
+
+The grade describes a run. Whether the result meets a protocol or a regulation is the data steward's determination.
+
+The conditions are a 1.x promise: none is removed or narrowed in a 1.x release, and one may be added, with a CHANGELOG entry. The promise covers the conditions, not the direction a grade can move: a 1.x fix that stops writing a wrong row can move a run from `REVIEW_REQUIRED` to `PASS`, and the CHANGELOG entry for that fix says so. The wording of the report and of each Grade Basis line is not part of that promise ([API stability](api/stability.md)).
 
 !!! note "A `WARNING` row is about your data; a correction is not reported"
 
     What you will **not** find in section 4 is Isocenter correcting a descriptor of its own making -- PixelRepresentation or BitsStored rewritten to match the pixels actually written. Those corrections are exact, lose nothing, and say nothing about your data, so they are logged at `INFO` and are neither recorded in the audit log nor graded. The default console handler shows `WARNING` and above, so they do not appear on screen either. A `WARNING` row, by contrast, always says something about the source dataset and needs a person to read it.
 
-    Two grade reasons have no row anywhere else, so the Grade Basis is the only place they appear: **an empty audit trail** (a clean ingest followed by `audit()` alone writes no row, and grades `REVIEW_REQUIRED` because nothing the run did is attested), and **a verb with no evidence** (`anonymize()` or `redact()` did work and none of the rows it writes reached the audit log).
+    Three grade reasons have no row anywhere else, so the Grade Basis is the only place they appear: **an empty audit trail** (a clean ingest followed by `audit()` alone writes no row, and grades `REVIEW_REQUIRED` because nothing the run did is attested), **a verb with no evidence** (`anonymize()` or `redact()` did work and none of the rows it writes reached the audit log), and **findings nobody acted on** (entities the last PHI scan left `IDENTIFIED`; condition 7 under [How the grade is decided](#how-the-grade-is-decided)).
 
 !!! warning "Which losses move the Validation Status"
 
