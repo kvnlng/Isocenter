@@ -39,22 +39,34 @@ never collide, so `git checkout v0.9.8` always means the published commit.
    prints the rule behind each part of its selection before it runs.
    With a map (`.test-map.json`; "Cutting a release", step 1 builds one),
    a changed function selects the tests that ran it, plus, for code a
-   spawned worker runs, the tests that hand that worker to its pool --
+   spawned worker runs, the tests of the functions that hand that worker
+   to a pool (every `run_parallel(...)` and pool call in `isocenter/`),
+   and its module's row as well when no test ran it outside a worker --
    and whatever the map cannot speak for is added back from the module's
    row. Without a map, and for everything a map does not cover, it
    applies exactly these rules (#707):
    - a changed `isocenter/**/*.py`: that module's row in
      `scripts/mutation_probe.py`'s `TARGETS`. A module with no row (it is in
      `NOT_PROBED`) means the whole suite.
-   - a changed `tests/test_*.py`: that file.
+   - a changed `tests/test_*.py`: that file, and the test files whose text
+     names it (its name without `.py`: test files import from test files).
    - `tests/conftest.py`, anything under `tests/support/`, `setup.py`,
      `pytest.ini`, `.coveragerc`, `pyproject.toml`, `MANIFEST.in`, or any
      file under `isocenter/` that is not Python: the whole suite.
    - any other path: the test files whose text names it --
      `grep -l <basename> tests/test_*.py`, and for a `.py` file its name
-     without the suffix as well. If none does: nothing, for a path under
-     `docs/` or any `*.md` (prose no test reads cannot break one); the
+     without the suffix as well. If none does: for a path under `docs/` or
+     any `*.md`, only the tests that read it by glob (next rule); the
      whole suite for anything else (`scripts/`, `.github/`, root files).
+   - whatever else it selected, every changed path also selects the test
+     files that read every file of its kind by glob: a `tests/test_*.py`
+     that calls `glob`/`rglob` and holds a `*.ext` pattern matching the
+     path's name. That is how a page no test names reaches the tests that
+     walk `docs/**/*.md`, and a module reaches the ones that read
+     `isocenter/**/*.py` as text (`test_source_citations.py`,
+     `test_documented_env_vars.py`).
+   - a selected test in a file with a module-, class-, package- or
+     session-scoped fixture brings its whole file.
 
    Both interpreters must pass. A selection that is the whole suite may be
    run as shards, `pytest -v --changed --shard=I/N` for I in 1..N, so each

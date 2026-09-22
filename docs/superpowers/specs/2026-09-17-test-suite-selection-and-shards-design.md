@@ -32,6 +32,11 @@ came from five chunks, not one run. The caps are 25 and 45.
 **Amended at implementation of PR 3 (2026-09-21), §10 item 17:** §6.3
 rule 2 asks only the edited worker's dispatchers. §9's four open points
 are measured, and the release's 3.14t run is the map build.
+**Amended after the review of #734 (2026-09-21), §10 item 18:** §6.3's
+dispatchers are found by the pool call, not by a `*_worker` name; rule 7's
+"nothing" for unnamed docs rested on a false premise and is now the tests
+that read docs by glob; changed test files, wide-scoped fixtures, a corrupt
+map and the vanished-test check each widen.
 
 ## 1. The problem, and why it is scheduled ahead of 1.0
 
@@ -318,7 +323,10 @@ no longer exclusive; rule 7 widens; and two additions follow rule 7.
    ~~functions), not listed by hand.~~
    **Superseded, §10 item 10:** a function a spawned worker ran -> also every
    test recorded for a **dispatching function**: one containing a call that
-   hands a `*_worker` to a pool, found by AST. In addition to rule 1, not
+   ~~hands a `*_worker` to a pool, found by AST.~~ **Superseded, §10 item
+   18:** feeds or makes a pool (`run_parallel`, a pool method, a pool
+   maker), found by AST, matched on the last dotted part of each side; a
+   helper no test ran outside a worker also takes its row. In addition to rule 1, not
    instead of it. Coarse -- every test that ingests through
    a pool, for an `ingest_worker` edit -- and correct, and still far under a
    126-file row. A finer worker->dispatch-site pairing (an `ingest_worker`
@@ -331,7 +339,8 @@ no longer exclusive; rule 7 widens; and two additions follow rule 7.
    module's `TARGETS` row.
 4. **Module has no `TARGETS` row** -- the 15 `NOT_PROBED` modules -> the
    **full suite**. Fail-safe, and printed as the reason.
-5. **A changed `tests/test_*.py`** -> that file, whole.
+5. **A changed `tests/test_*.py`** -> that file, whole. **Amended, §10
+   item 18:** and the test files that name it.
 6. **`tests/conftest.py`, `tests/support/`, `setup.py`, `pytest.ini`,
    `.coveragerc`** -> the full suite.
 ~~7. **Any other changed path** (docs, workflows, `scripts/`, `CLAUDE.md` is~~
@@ -342,9 +351,14 @@ no longer exclusive; rule 7 widens; and two additions follow rule 7.
 
    **Superseded, §10 items 10 and 13:** as written, a path no test names
    selected nothing. Now: test files naming the path's basename (and, for a
-   `.py` file, its stem); if none, nothing for `docs/` and `*.md`, else the
+   `.py` file, its stem); if none, ~~nothing~~ **(superseded, §10 item 18:**
+   only the tests that read it by glob**)** for `docs/` and `*.md`, else the
    full suite; any non-Python file under `isocenter/` (package data every
    session loads), `pyproject.toml` and `MANIFEST.in` -> the full suite.
+   **Added, §10 item 18:** every changed path also selects the test files
+   that read every file of its kind by glob; a selected test in a file
+   with a module-, class-, package- or session-scoped fixture brings its
+   whole file.
 
 `TARGETS` stays the one maintained map. The coverage map only narrows inside
 it and is generated, never edited -- there is no second hand-kept list for
@@ -576,7 +590,8 @@ regenerated module: 30 passed, 31 with the live source, on 3.12.14 and
     plan's own `selection_for()` -- because no test names a dated spec. Every
     spec, plan or new docs page would cost the suite twice, which is the
     per-PR full run item 7's ruling ended. Now: documentation no test names
-    (`docs/`, any `*.md`) selects nothing; any other unnamed path still
+    (`docs/`, any `*.md`) selects ~~nothing~~ **(superseded, §10 item 18:
+    the tests that read it by glob; four read every page)**; any other unnamed path still
     selects the suite. The needle is the basename, plus the stem **for `.py`
     only** (the stem of `docs/session.md` is a word half the suite contains;
     measured, `CHANGELOG.md` matched 4 files by basename and 25 with its
@@ -648,5 +663,13 @@ implementation** list is the full record; what it changes here:
     - **§9, point 2 (build cost):** 1899 s against about 1450 s unsharded without coverage on 3.14t, which is 1.3x. The release's 3.14t integration run is `python -m scripts.test_map build`, and `build` exits with the suite's status (`RELEASING.md`, "Cutting a release", step 1).
     - **§9, point 3 (rule 2's breadth):** an `ingest_worker` edit selects 138 of 330 files, more than a third and more than `io_handlers.py`'s 126-file row, even after the per-worker refinement. Its one dispatcher, `_ingest_results`, carries every ingest in the suite. That is recorded, not narrowed: only a call-site trace could narrow it. The other workers select 126, 93, 8 and 7 files. A `compact()` edit selects 22 tests in 7 files against a 207-file row. With every dispatcher recorded, rule 2's row fallback fired 0 times on this map.
     - **§9, point 4 (export's pool):** processes on every interpreter. `export()` passes `maxtasksperchild=25`, and `parallel.py` then always chooses `multiprocessing.Pool`. Its lines land under the empty context, which is rule 2's case.
-    - **The wide-scoped-fixture limit (item 10):** 0 package functions are recorded only from the 7 files with module- or session-scoped fixtures, so `cannot_speak_for` does not add them.
-    - **Item 10's whole-collection check** sniffed argv and read `--changed-base main` and `-p no:cacheprovider` as paths. It asks `config.args_source` instead.
+    - **The wide-scoped-fixture limit (item 10):** 0 package functions are recorded only from the 7 files with module- or session-scoped fixtures, so `cannot_speak_for` does not add them. **Superseded, item 18:** that answered the wrong question.
+    - **Item 10's whole-collection check** sniffed argv and read `--changed-base main` and `-p no:cacheprovider` as paths. ~~It asks `config.args_source` instead.~~ **Superseded, item 18:** there is no whole-collection check.
+18. **After the review of #734** (plan deviation 32 is the full record).
+    - **Rule 2's dispatchers are found by the call.** The finder looked for a positional argument named `*_worker`. `redact()` hands `service.execute_redaction_task`, an attribute, so no function dispatched the redaction worker or the 15 other `services.py` functions it runs. An edit to one selected none of the tests that reach it through that pool; this was worse than no map, since `services.py` has no row and falls to the suite. A dispatcher is now any function in `isocenter/` that calls `run_parallel`, calls a pool method on an attribute, or makes a pool. The handed function is keyed on its last dotted part, and an edit's qualname is matched on its last part. A pool maker, or a hand-off of something unnamed, dispatches only helpers. A live test asserts that every such call in the package resolves to a dispatcher. Measured on the review's mutant, all 24 of its killers on 3.12 (among 113 redaction-related files) are selected.
+    - **A helper no test ran outside a worker takes its row as well.** The union of dispatchers says which pools run it, not which tests check it. `parallel._worker_init` dropped 3 of its row's 13 files, among them the ones that pin the initializer. That is rule 3's case, for the 5 such functions on the first map; a helper with records of its own keeps rule 1. The review's measurement stands: a blanket "helper -> row" would undo rule 1 for 470 functions.
+    - **Rule 7's docs clause rested on a false premise.** "Prose no test reads cannot break one" is false: four tests read every `docs/**/*.md` by glob. A broken anchor in `docs/performance.md` selected nothing and exited 5. Now every changed path also selects the test files that call a glob and hold a `*.ext` pattern matching its name. That covers the docs readers, and for a package edit the source-text tests (`test_source_citations.py`, `test_documented_env_vars.py`) that no row holds. Item 13's cost argument does not apply to this set: for a `*.md` it is 6 files, about 3 s by `tests/shard_timings.json` (the review measured the 4 it named at 25 tests in 11.5 s on 3.12); for a `*.py` it is 12 files, about 30 s.
+    - **A changed test file also selects the test files that name it**, because test files import helpers from test files.
+    - **A selected test from a file with a wide-scoped fixture brings the file.** Only a fixture's first consumer is recorded for what it ran.
+    - **The vanished-test check runs every time,** per file: a test is gone when its file is not on disk, or its file was collected and it was not. `args_source` skipped it for `pytest --changed tests`.
+    - **An unusable map is no map.** A map that does not parse, or lacks a map's keys, falls back to the rows with its reason. It used to fail the run with an INTERNALERROR.
