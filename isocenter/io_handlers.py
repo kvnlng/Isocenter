@@ -4079,35 +4079,41 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
             describe_exception(failure), len(pending), alone)
 
 
-def _may_carry_its_offset(patient) -> bool:
-    """Whether any date of `patient` may already carry its offset: whether
-    a `SHIFT_DATE` has written one anywhere in the subtree.
+def _its_key_is_in_use(patient) -> bool:
+    """Whether a value has been derived under an ID-less patient's key, so
+    re-keying it to a real Patient ID would contradict that value.
 
-    Read from the shift evidence, never from a status (review of #584,
-    finding 1). A pass handed only some of an instance's findings shifts
-    its dates and leaves it IDENTIFIED (#553); an edit after the pass
-    leaves it UNSCANNED; a reopen hydrates the record and nothing else.
-    So:
+    Two things derive from the key, and the gate reads the evidence each
+    leaves, never a status (review of #584, finding 1):
 
-    - a study: `date_shifted` (the arm sets it with the Study Date's shift
-      record, remediation.py, and both are stored; either would do);
-    - an instance, and every sequence item below it (#513): its per-value
-      shift record, `_shifted_dates`.
+    - **A date offset.** A study's `date_shifted` (the arm sets it with
+      the Study Date's shift record, remediation.py, and both are stored;
+      either would do), or a per-value shift record, `_shifted_dates`, on
+      an instance or any sequence item below it (#513). A status would
+      miss it: a pass handed part of an instance's findings leaves it
+      IDENTIFIED (#553), an edit leaves it UNSCANNED, and a reopen
+      hydrates the record and nothing else.
+    - **An identity token.** `lock_identities()` stashes the Patient ID
+      the export writes, `''`, so a restore after a re-key wrote `''` over
+      the real ID, and the patient read as a pre-1.0 `''` group (review
+      round 2, R2-1). The instance's `_locked_token` stamp is this store's
+      own embed (#607), stored and hydrated; a foreign Encrypted
+      Attributes Sequence from a source file is not a lock and is not read.
 
-    **No status is read, because none adds a case.** The offset is the
-    only value derived from an ID-less patient's key (the scan never
-    pseudonymizes the key, #584), so REMEDIATED with no shift record --
-    a name replaced, a tag removed -- gives a re-key nothing to
-    contradict, and refusing it would only lose the real ID. And an
-    ID-less patient exists only in a store written since this change,
-    where every shift is recorded; there is no older store whose shifts
-    only a status remembers.
+    **No status is read, because none adds a case.** Nothing else derives
+    from the key (the scan never pseudonymizes it, #584), so REMEDIATED
+    with neither -- a name replaced, a tag removed -- gives a re-key
+    nothing to contradict, and refusing it would only lose the real ID.
+    An ID-less patient exists only in a store written since this change,
+    where every shift and every lock is recorded.
     """
     for study in patient.studies:
         if study.date_shifted:
             return True
         for series in study.series:
             for instance in series.instances:
+                if instance._locked_token:
+                    return True
                 for item, _path in iter_item_tree(instance):
                     if item._shifted_dates:
                         return True
@@ -4125,10 +4131,10 @@ def _link_patient(store, patient_map, study_owner, meta, owner):
       study whose Patient ID was stripped from some of its files): that
       patient is **re-keyed** to the real ID -- or, when a patient with
       that ID exists, its studies move onto it, the move
-      `SqliteStore._reparent_studies` persists. Only while no date of the
-      ID-less patient may carry its offset (`_may_carry_its_offset`):
-      otherwise re-keying would give those dates a second offset, so the
-      file links under the ID-less patient and the caller writes a
+      `SqliteStore._reparent_studies` persists. Only while nothing has
+      been derived under the ID-less key, no offset and no identity token
+      (`_its_key_is_in_use`): otherwise re-keying would contradict it, so
+      the file links under the ID-less patient and the caller writes a
       `WARNING` row. **Neither branch creates an empty patient.** (Two
       patients sharing a real Study UID still can: #745, not this.)
     - **Otherwise**, as before: the patient with the file's ID.
@@ -4138,7 +4144,7 @@ def _link_patient(store, patient_map, study_owner, meta, owner):
         if owner is not None:
             return owner, False
     elif owner is not None and is_synthetic_patient_id(owner.patient_id):
-        if _may_carry_its_offset(owner):
+        if _its_key_is_in_use(owner):
             return owner, True
         old_key = owner.patient_id
         existing = patient_map.get(pid)
@@ -4184,11 +4190,11 @@ def _audit_linkage(store_backend, uid, meta, linked_under_id_less):
         store_backend.log_audit(
             action_type="WARNING", entity_uid=uid,
             details=(f"Instance {uid} carries a Patient ID, and its study "
-                     "belongs to a patient whose files carried none and whose "
-                     "dates may already be shifted; it was linked under that "
-                     "patient, which exports an empty Patient ID, because "
-                     "re-keying it would give those dates a second offset "
-                     "(#584)."))
+                     "belongs to a patient whose files carried none, under "
+                     "whose key a date was already shifted or an identity "
+                     "locked; it was linked under that patient, which exports "
+                     "an empty Patient ID, because re-keying would contradict "
+                     "them (#584)."))
 
 
 def _linkage_keys(ds) -> dict:

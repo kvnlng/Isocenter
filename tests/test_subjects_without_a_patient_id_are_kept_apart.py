@@ -382,6 +382,50 @@ def test_a_pass_that_shifted_nothing_still_lets_the_real_id_re_key(tmp_path):
     assert linked == [], linked
 
 
+@pytest.mark.parametrize("mode", ["lock-only", "lock-then-patient-pass"])
+def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
+    """Review round 2, R2-1. `lock_identities()` stashes an ID-less
+    patient's Patient ID as `''` (the ID the export writes). If a real-ID
+    file then re-keyed the patient to `PA`, a restore wrote the token's
+    `''` over `PA`, the patient read as a pre-1.0 `''` group, every later
+    date shift declined ("could not resolve a PatientID"), and the next
+    open wrote a false pre-1.0 WARNING. A token of this store anywhere in
+    the subtree is evidence the gate honours, as a shift is (coordinator
+    ruling): the file links under the ID-less patient with its WARNING row,
+    and the restore keeps the key. Red at ae5212ff in both modes (the pass handed only the patient's
+    findings shifts nothing). Kills MT1 (the token not read)."""
+    _id_less(tmp_path / "in1" / "a.dcm", "5895", "Alpha^One", "absent")
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", "5895", ".1.2", "Alpha^One")
+    sop_b = study_uid("5895") + ".1.2"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        report = session.audit()
+        session.lock_identities(report)
+        if mode == "lock-then-patient-pass":
+            session.anonymize([f for f in report.findings
+                               if f.entity_type == "Patient"])
+        [patient] = session.store.patients
+        assert not patient.studies[0].date_shifted
+        session.ingest(str(tmp_path / "in2"))
+        [patient] = session.store.patients
+        assert is_synthetic_patient_id(patient.patient_id)
+        linked = [d for uid, d in _audit_rows(session, "WARNING") if uid == sop_b]
+        assert len(linked) == 1, linked
+        session.recover_patient_identity(patient.patient_id, restore=True)
+        [patient] = session.store.patients
+        assert is_synthetic_patient_id(patient.patient_id)
+        session.anonymize(session.audit())
+        declined = [d for _uid, d in _audit_rows(session, "REMEDIATION_DECLINED")
+                    if "PatientID" in d]
+        assert declined == [], declined
+        session.save(sync=True)
+    with Session(str(tmp_path / "s.db")) as reopened:
+        pre_1_0 = [d for _uid, d in _audit_rows(reopened, "WARNING")
+                   if "before 1.0" in d]
+    assert pre_1_0 == [], pre_1_0
+
+
 #: The floor, plus SHIFT on Series, Acquisition and Content Date: dates an
 #: instance owns, so a pass can shift them while the instance's status says
 #: nothing about it (review of this PR, finding 1).
