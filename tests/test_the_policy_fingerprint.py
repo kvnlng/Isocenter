@@ -103,9 +103,22 @@ def test_a_value_json_cannot_hold_does_not_raise():
     }
     fingerprint = _fp(odd)
     assert fingerprint.startswith("v1:") and len(fingerprint) == 3 + 64
-    # And a date is not confused with its text.
+    # And a date is not confused with its text, nor with another date:
+    # what JSON cannot hold is hashed as what it was, not dropped.
     as_text = {NAME: {"action": "REPLACE", "value": "2020-01-02"}}
     assert _fp({NAME: odd[NAME]}) != _fp(as_text)
+    other_day = {NAME: {"action": "REPLACE", "value": datetime.date(2021, 3, 4)}}
+    assert _fp({NAME: odd[NAME]}) != _fp(other_day)
+
+
+def test_a_value_outside_ascii_is_escaped_not_refused():
+    """The canonical form is ASCII: a non-ASCII value is escaped, so it
+    hashes and never raises on the `.encode("ascii")`. Kills:
+    `ensure_ascii` turned off."""
+    tags = {NAME: {"action": "REPLACE", "value": "Müller"}}
+    assert _canonical_policy_v1(tags, True) == (
+        b'{"phi_tags":{"0010,0010":{"action":"REPLACE","value":"M\\u00fcller"}},'
+        b'"remove_private_tags":true}'), NEVER_CHANGE_V1
 
 
 #: Computed once from the implementation and pasted. The canonical bytes
