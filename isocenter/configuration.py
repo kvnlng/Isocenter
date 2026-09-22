@@ -8,11 +8,14 @@ settings in a backing YAML file, which it writes only when asked:
 `save()`, or every change once `auto_save` is on (#715).
 """
 import copy
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 import yaml
 
 from . import config_manager, profiles
+from .entities import ScanPolicy
 from .profiles import FLOOR_POLICY
 
 #: `save()` with nowhere to write, and any change under `auto_save` with
@@ -39,6 +42,92 @@ def _flow_list_representer(dumper, data):
 
 
 yaml.add_representer(FlowList, _flow_list_representer)
+
+
+# --- The policy a PHI status is recorded under (#555) ----------------------
+#
+# **A store format.** Every status a 1.x store holds carries a `"v1:"`
+# fingerprint made here, and a 1.0 store opens in every 1.x, so the v1
+# canonical form is never changed: a later 1.x adds `_canonical_policy_v2`
+# with a `"v2:"` prefix beside it, and compares a stored v1 record against
+# the in-force policy's *v1* fingerprint. A stored fingerprint is never
+# rewritten -- the input it hashed is gone, and deriving it again would be
+# the back-fill the migration refuses. `test_the_v1_fingerprint_is_pinned`
+# holds the bytes.
+#
+# **The rule it keeps: it may tell apart two policies that scan alike, and
+# must never equate two that scan differently.** Telling them apart costs a
+# re-audit; equating them is #555 again. So nothing is normalized. The
+# inspector does not read a rule one way: `_owned_rule` reads
+# `rule.get("action") or "REPLACE"` and the configured-tag scan
+# `rule.get("action", "REPLACE")`, so `action: ""` is two different things
+# at two sites and hashes as itself.
+#
+# In: every rule key except `name`, the rule's form, and
+# `remove_private_tags` (on CT_small the difference between 183 findings
+# and 4). Out: `name` and a bare-string rule's text, which only label a
+# finding; `date_jitter`, which moves a shift and not what is flagged; the
+# pixel rules; the project secret; the library version (owner's ruling
+# Q4: a 1.x that changes what an unchanged config detects says so under
+# Breaking); and the base, which is a label.
+
+
+def _tagged(value):
+    """A value JSON cannot hold, as text that says what it was.
+
+    `_scan_policy()` runs at export with no validator in front of it, over
+    a `phi_tags` code can assign, so the canonical form must never raise:
+    a rule value YAML read as a `date` hashes as that date, not as a
+    string that happens to spell it.
+    """
+    return {"__type__": type(value).__name__, "__str__": str(value)}
+
+
+def _key(key):
+    # `json.dumps(default=)` never reaches keys, and `sort_keys` raises on
+    # keys of mixed types, so a non-str key is replaced by its repr.
+    return key if isinstance(key, str) else repr(key)
+
+
+def _canonical_policy_v1(phi_tags, remove_private_tags) -> bytes:
+    """The v1 canonical form of a tag policy. Never change it (see above)."""
+    rules = {}
+    for tag, rule in (phi_tags or {}).items():
+        if isinstance(rule, dict):
+            rules[_key(tag)] = {_key(k): v for k, v in rule.items()
+                                if k != "name"}
+        elif isinstance(rule, str):
+            # A string rule is REPLACE labelled with the string, except
+            # that the configured-tag scan skips an empty one
+            # (`if not config_val: continue`) where `_owned_rule` does not:
+            # so its text is out, and whether it is empty is in.
+            rules[_key(tag)] = {"__form__": "string" if rule else "empty-string"}
+        else:
+            rules[_key(tag)] = {"__form__": _tagged(rule)}
+    doc = {"phi_tags": rules, "remove_private_tags": bool(remove_private_tags)}
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, default=_tagged).encode("ascii")
+
+
+def _scan_policy_for(phi_tags, remove_private_tags, base: str) -> ScanPolicy:
+    """The `ScanPolicy` a scan over `phi_tags` records, labelled `base`."""
+    return ScanPolicy("v1:" + hashlib.sha256(
+        _canonical_policy_v1(phi_tags, remove_private_tags)).hexdigest(), base)
+
+
+def _policy_base_label(base) -> str:
+    """The loader's fifth element as the label a person reads (#714, #555).
+
+    `profiles.FLOOR` is the floor, None is `privacy_profile: none`, and a
+    string is a pinned profile name or an external profile's path. The one
+    spelling of each, shared by `IsocenterConfiguration._policy_base` and
+    `Session.audit(config_path=)`, so one base cannot be written two ways.
+    """
+    if base is profiles.FLOOR:
+        return f"floor over {profiles.FLOOR_BASE}"
+    if base is None:
+        return "none"
+    return base
 
 
 @dataclass
@@ -103,9 +192,14 @@ class IsocenterConfiguration:
         store's policy record (#555) is to carry."""
         if self.privacy_profile:
             return self.privacy_profile
-        if self._floor:
-            return f"floor over {profiles.FLOOR_BASE}"
-        return "none"
+        return _policy_base_label(profiles.FLOOR if self._floor else None)
+
+    def _scan_policy(self) -> ScanPolicy:
+        """The policy in force: what `audit()` with no argument scans with
+        (#555). Computed on every call, never cached: `phi_tags` and
+        `remove_private_tags` can be assigned directly."""
+        return _scan_policy_for(self.phi_tags, self.remove_private_tags,
+                                self._policy_base)
 
     def save(self) -> None:
         """

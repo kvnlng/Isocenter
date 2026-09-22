@@ -99,8 +99,14 @@ class DicomStore:
         dropped = set()
         for members in groups.values():
             survivor, others = members[0], members[1:]
-            status = max((m.phi_status for m in members),
-                         key=_MERGE_STATUS_RANK.__getitem__)
+            # The member whose status is kept, not only the status: the
+            # status is recorded under that member's policy (#555), which
+            # the survivor's own would misstate. `max` returns the first
+            # of equals, so a tie on the worst status under two policies
+            # keeps the earliest member's, in `members` order.
+            kept = max(members,
+                       key=lambda m: _MERGE_STATUS_RANK[m.phi_status])
+            status, policy = kept.phi_status, kept.phi_status_policy
             for other in others:
                 if other.patient_name != survivor.patient_name:
                     renamed += 1
@@ -109,8 +115,9 @@ class DicomStore:
                 other.studies.clear()
                 dropped.add(id(other))
                 merged += 1
-            if survivor.phi_status is not status:
-                survivor.record_phi_status(status)
+            if (survivor.phi_status is not status
+                    or survivor.phi_status_policy != policy):
+                survivor.record_phi_status(status, policy=policy)
         self.patients[:] = [p for p in self.patients if id(p) not in dropped]
 
         logger = get_logger()

@@ -533,7 +533,7 @@ def _string_literals_in_package():
     `f"{RESOURCES_DIR}/redaction_rules.json"` that is
     `"/redaction_rules.json"`, which is not the basename the caller
     checks for. Measured by review of #391: that rewrite of the
-    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 381 turns
+    `RESOURCES_DIR, "redaction_rules.json",` at session.py line 382 turns
     `test_every_shipped_resource_is_named_by_the_package` red. That is
     the safe direction (a resource the walk cannot
     see reads as unnamed, never as named), and it is the same rule the

@@ -550,9 +550,9 @@ def test_audit_drains_a_running_save_before_it_records_what_it_found(
     observations = []
     real_record = TrackedEntity.record_phi_status
 
-    def watched_record(self, status):
+    def watched_record(self, status, **kwargs):
         observations.append(started.is_set() and not finished.is_set())
-        return real_record(self, status)
+        return real_record(self, status, **kwargs)
 
     monkeypatch.setattr(session.store_backend, "save_all", parked_save_all)
     monkeypatch.setattr(session.persistence_manager, "flush", releasing_flush)
