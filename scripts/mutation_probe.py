@@ -597,7 +597,7 @@ TARGETS = {
     # `isocenter\.persistence\b` (the `\b` correctly excludes
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
-    "isocenter/persistence.py": (["tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+    "isocenter/persistence.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                   "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
                                   "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                   "tests/test_a_lock_whose_store_write_fails_raises.py",
@@ -721,7 +721,7 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+    "isocenter/session.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                               "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
                               "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
@@ -998,7 +998,7 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+    "isocenter/entities.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                                "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
                                "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",

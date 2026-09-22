@@ -132,7 +132,8 @@ def test_an_empty_call_on_a_store_that_lost_its_secret_refuses(tmp_path):
             second.anonymize([])
 
     assert "no longer has" in str(raised.value)
-    assert "load_project_secret" in str(raised.value)
+    # The advice names no carry: there is none since #716.
+    assert "re-ingest" in str(raised.value)
 
 
 def test_a_report_taken_after_an_empty_call_attests_nothing(tmp_path):

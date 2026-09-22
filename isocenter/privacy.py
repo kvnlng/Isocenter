@@ -174,7 +174,7 @@ def _pseudonym_verifies(patient_id, secret) -> bool:
     """Whether `patient_id` is a keyed pseudonym minted under `secret`.
 
     Diagnostics only -- the refusals and warnings about a missing or
-    foreign secret, and `load_project_secret`'s check. Never used to
+    foreign secret. Never used to
     decide an offset: every `ANON_` id seeds from its own text, whether
     or not it verifies, so a verdict here cannot move a date.
     """

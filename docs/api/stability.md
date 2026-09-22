@@ -297,15 +297,22 @@ default.
   group 0010 on the others. A file carries no stamp, so this applies to
   an exported file ingested elsewhere whose studies' locked values were
   equal.
-- Date jitter stays deterministic per patient within a project: the same
-  patient under the same project secret and the same `date_jitter` range
-  gets the same offset in every store holding that secret. A patient a
-  store classed as de-identified before 0.9.7 keeps that store's offset.
+- Date jitter and the `ANON_` pseudonym are deterministic per patient
+  within a store: the same patient under the same `date_jitter` range
+  gets the same offset and pseudonym every time that store derives
+  them, and in every copy of its file. They are derived from the
+  store's project secret, which the store generates and never exports.
+  The same configuration over a different store gives different ones.
+  A patient a store classed as de-identified before 0.9.7 keeps that
+  store's offset.
+- A configuration file determines the policy, not the pseudonyms or
+  offsets. The three things a de-identification depends on, and what is
+  lost with each, are listed in
+  [What to keep](../configuration.md#what-to-keep).
 - The offset is not derivable from the exported pseudonym, or from any
   other value its derivation uses, without the secret. That is not a
   promise that no exported date is recoverable: a date tag no rule names
   is exported as ingested, and UIDs can embed dates.
-- The project secret's file format is not a data promise.
 - A configuration file that 1.0 loads, every 1.x loads and applies the
   same way. Its schema is version 2. A 1.x adds keys and values only,
   under a new 2.x minor, and never changes what an existing one means.
@@ -368,9 +375,7 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   [Persistence](persistence.md) renders, including
   `get_flattened_instances()`, `get_audit_losses()` and the other
   `get_audit_*`, `persist_pixel_data`, `save_all`, `compact_sidecar`,
-  `stop`, and the project-secret carry `write_project_secret(path)` and
-  `load_project_secret(path)` (see the
-  [Migration Guide](../migration.md#carrying-a-project-secret-between-stores)).
+  `stop`.
   The store's *forward compatibility* is frozen; its API is not.
 - **`session.key_manager`, `session.persistence_manager`,
   `session.reversibility_service`** — attributes that expose services.

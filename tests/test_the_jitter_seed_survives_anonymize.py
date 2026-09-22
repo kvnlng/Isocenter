@@ -153,7 +153,8 @@ def test_a_reingested_export_keeps_its_offset_with_the_projects_secret(tmp_path)
     time; that is pre-existing and not what this pins. What it pins is
     that the second shift is the patient's own offset.)
 
-    Red on: `load_project_secret` a no-op (store two generates its own).
+    Red on: the fixed secret not reaching the store (store two
+    generates its own).
     """
     out = _export_project_a(tmp_path)
     db = str(tmp_path / "two.db")
