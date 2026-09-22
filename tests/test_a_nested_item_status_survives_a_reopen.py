@@ -226,13 +226,18 @@ def test_the_root_status_lives_in_its_columns_only(tmp_path, config):
 
 
 def test_load_patient_restores_item_statuses(tmp_path, config):
-    """Kills: only `load_all` wired."""
-    db, _ = _remediated_store(tmp_path, config)
+    """The item, and beside it its instance's status and policy (#555), the
+    other half `load_patient` restores. Kills: only `load_all` wired."""
+    db, policy = _remediated_store(tmp_path, config)
     with DicomSession(db) as session:
         patient = session.store_backend.load_patient("ANON_probe")
-    item = patient.studies[0].series[0].instances[0].sequences[SEQ].items[0]
+    inst = patient.studies[0].series[0].instances[0]
+    item = inst.sequences[SEQ].items[0]
     assert item.phi_status is PhiStatus.REMEDIATED
     assert not item.has_unsaved_changes
+    assert inst.phi_status is PhiStatus.REMEDIATED
+    assert inst.phi_status_policy == policy
+    assert not inst.has_unsaved_changes
 
 
 def test_a_lock_keeps_the_item_status(tmp_path, config):
