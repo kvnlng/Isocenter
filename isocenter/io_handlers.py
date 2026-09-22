@@ -133,7 +133,7 @@ import numbers
 import struct
 from math import ceil
 from io import BytesIO
-from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping
+from typing import List, Dict, Any, Optional, Tuple, Iterable, Mapping, NamedTuple, FrozenSet
 from datetime import datetime, date
 from dataclasses import dataclass, field
 from concurrent.futures.process import BrokenProcessPool
@@ -8905,106 +8905,199 @@ def export_folder_names(patient, study, series):
     return subj_name, study_folder, series_folder
 
 
-def normalize_patient_id_subset(patient_ids, option="patient_ids"):
-    """The patient ids an export was asked for, or `None` for every patient.
+def _is_str(value):
+    """The element rule every id selection takes by default."""
+    return isinstance(value, str)
 
-    The third question both write doors have to answer the same way,
-    beside `export_folder_names` ("where does the export write") and
-    `export_stamp_attributes` ("what does it stamp"): **who** does it
-    write. `DicomSession._export_dicom` and
-    `exporters.wfdb.WfdbExporter.export` both call this, so the same
-    argument reads the same way whichever format the caller named. They
-    answered it separately until #678 and disagreed -- which is the
-    divergence #410 closed for option *names*, reappearing in their
-    values. Anything that changes here must change for both doors, and
-    calling this from only one of them is the defect, not a smaller fix.
 
-    Three readings, each measured on 0.9.8 before this existed:
+def normalize_id_filter(values, option, kind="Patient ID", *,
+                        allow_none=True, element=_is_str):
+    """The shape of a selection of ids, read once, for every door that
+    takes one (#696).
 
-    - **An empty container is a filter that selected nobody**, and
-      `None` is the only spelling of "every patient". `[]`, `()`,
-      `set()` and `frozenset()` are all falsy, and the wfdb door read
-      them as "no filter given" and wrote the whole cohort to a caller
-      who asked for none of it (#678). `SqliteStore.get_flattened_instances`
-      was the same defect, fixed as Breaking in #142. The empty
-      frozenset returned here is deliberately not `None`: "asked for
-      nobody" and "asked for everybody" must not collapse into one
-      value again.
-    - **An iterator is consumed by the first membership test.** A
-      generator passed straight through was exhausted on the first
-      patient the walk reached, so every later patient was compared
-      against nothing: a generator yielding the *second* patient in
-      store order exported nothing at all, on both doors. Materialising
-      once, here, is what lets both walks keep their plain `not in`
-      test.
-    - **A bare `str` substring-matches.** `"PAT-A" in "PAT-APAT-B"` is
-      True, so a caller who wrote a string where a list was meant got a
-      fuzzy match that looked like it worked -- a concatenation of two
-      ids selected both patients and a shared prefix selected none. A
-      string names exactly one id, which is the only honest reading of
-      it, and it is logged: the export writes the closest honest output
-      rather than refusing (the write path's tie-breaker), and the
-      warning is how a caller who passed the wrong type still hears
-      about it.
+    **A shape error is refused; an absent value is counted.** Everything
+    this function refuses is detectable from the argument alone, is always
+    the caller's mistake and has no honest reading, so it raises
+    `TypeError` before the door reads, flushes or writes anything. Whether
+    an id names anything *here* is a different question, which a
+    well-shaped id may legitimately answer "no" to (a cohort list built
+    across stores, a list of source IDs after `anonymize()`):
+    `select_patient_ids` counts those, and does not refuse them.
 
-    `bytes` is the one refusal, and the asymmetry with `str` is the
-    point. Every `PatientID` in the graph is a `str`, so wrapping
-    `b"PAT-A"` would select **no** patient and report a clean zero
-    export -- the silence #678 is about, arriving through the fix for
-    it. There is no encoding to decode it under either, so it raises,
-    before anything is written.
+    The readings, each measured before this existed (#678 on the export
+    doors, #696 on the others):
 
-    Neither the refusal nor the warning names the value. A Patient ID is
-    an identifier, and this text reaches a log file that outlives the
-    session; the caller supplied the value and does not need it read
-    back (#588 is the same reasoning for an audit row).
+    - **`None` is the only spelling of "every one"**, and an empty
+      iterable is a filter that selected nobody. `[]`, `()`, `set()` and
+      `frozenset()` are falsy, and a door that read them as "no filter"
+      wrote the whole cohort to a caller who asked for none of it (#678,
+      and #142 on `SqliteStore.get_flattened_instances`). The empty tuple
+      returned here is deliberately not `None`. `allow_none=False` is for
+      the lock pair, where there is no "lock everyone" spelling: `None`
+      read as every patient would lock the whole session.
+    - **An iterator is read once, here.** A generator handed to a walk is
+      exhausted by the first membership test, so a generator yielding the
+      *second* patient in store order selected nobody (the report door),
+      and one handed to `IN (?, ...)` placeholders was consumed building
+      them and raised `sqlite3.ProgrammingError` binding them (the store).
+    - **A bare `str` is refused.** It is itself an iterable of characters,
+      and the doors read it three ways: one id with a warning (the export
+      doors, #678), a substring match (`"PAT-APAT-B"` reported both
+      patients on the report doors), and characters (the store and the
+      batch lock). The owner ruled for one spelling (Q2 on #686): wrap one
+      id in a list. `lock_identities(patient_id)` is the single-id
+      spelling where one is meant, and it never reaches this.
+    - **Bytes-like values are refused**, and non-iterables: no id in the
+      graph is `bytes`, and a `memoryview` selected nobody in silence
+      because it has no `__contains__`. A non-iterable raised Python's own
+      `TypeError`, worded per interpreter and naming no option.
+    - **Every element is checked**, because `[b"PAT-A"]`, `[42]` and
+      `[None]` each selected nobody in silence on every door: the clean
+      zero #678 refused one level up. The refusal names the option, the
+      element's 1-based position and its type.
+
+    No message names a value. A Patient ID is an identifier and this text
+    reaches a log file that outlives the session; the caller holds the
+    value (#588 is the same reasoning for an audit row).
 
     Args:
-        patient_ids: `None` for every patient, a bare `str` naming one
-            patient id, or any iterable of ids -- list, tuple, set, or a
-            one-shot iterator.
-        option (str): How the caller spelled the option, used in the
-            refusal and the warning. A parameter rather than a literal
-            so the message names what the caller typed; both doors pass
-            the default.
+        values: `None`, or any iterable of ids -- list, tuple, set,
+            frozenset or a one-shot iterator.
+        option (str): The argument's name, for the refusal.
+        kind (str): What one id is, for the refusal: "Patient ID", or
+            "SOP Instance UID" for the store's `instance_uids`.
+        allow_none (bool): Whether `None` means every one (True), or is
+            refused (the lock pair).
+        element (callable): Whether one element is acceptable. The batch
+            lock, whose documented input is a list of findings, admits an
+            object carrying `patient_id` as well; every other door takes
+            the default, a `str`.
 
     Returns:
-        Optional[frozenset]: `None` when every patient is wanted;
-            otherwise exactly the ids to write, which may be empty.
+        Optional[tuple]: `None` for every one; otherwise the elements in
+            the order given (a `set`'s order is its iteration order),
+            possibly empty.
 
     Raises:
-        TypeError: If `patient_ids` is bytes-like, or is neither `None`
-            nor iterable. Raised before any file is written on either
-            door, and before `_export_dicom`'s flush.
+        TypeError: As above, before anything is read or written.
     """
-    if patient_ids is None:
-        return None
-    if isinstance(patient_ids, (bytes, bytearray, memoryview)):
+    # What the refusals say this option takes: `None` only where it is a
+    # reading, so the lock pair's refusals do not offer it.
+    takes = (f"None or an iterable of {kind}s" if allow_none
+             else f"an iterable of {kind}s")
+    if values is None:
+        if allow_none:
+            return None
+        raise TypeError(
+            f"{option} takes {takes}, not None: there is no "
+            f"spelling for every patient here. The report `audit()` "
+            f"returns selects every patient its scan found.")
+    if isinstance(values, str):
+        raise TypeError(
+            f"{option} takes {takes}, not a bare str: "
+            f"a str is itself an iterable of characters, so it has no one "
+            f"reading as a selection. Wrap one {kind} in a list: "
+            f"{option}=[...].")
+    if isinstance(values, (bytes, bytearray, memoryview)):
         raise TypeError(
             f"{option} was given a bytes-like value "
-            f"({type(patient_ids).__name__}); every PatientID in the "
-            f"graph is a str, so no patient could ever match it and the "
-            f"export would write nothing and call it a success. Pass a "
-            f"str naming one patient, or an iterable of str.")
-    if isinstance(patient_ids, str):
-        # Best-effort with a warning rather than a refusal, the way the
-        # write path treats everything it can read but not honour
-        # exactly: one id is the only reading of a bare string. The
-        # warning is not decoration -- until #678 the string was matched
-        # as a substring, so a caller who has been passing one and
-        # getting several back is owed the sentence that says so.
-        get_logger().warning(
-            "%s was a bare str, so it names exactly one patient id. "
-            "Until #678 it was matched as a substring, so any patient "
-            "whose id merely contained it was exported too. Pass a "
-            "list, tuple or set of ids to select more than one.", option)
-        return frozenset({patient_ids})
+            f"({type(values).__name__}); every {kind} in the graph is a "
+            f"str, so nothing could ever match it and the call would "
+            f"select nothing and call it a success. Pass an iterable of "
+            f"str.")
+    # `iter()` alone inside the `try`: a `TypeError` raised while an
+    # iterator runs is the iterator's own, not a shape we refuse.
     try:
-        return frozenset(patient_ids)
+        iterator = iter(values)
     except TypeError as exc:
         raise TypeError(
-            f"{option} must be None, a str naming one patient id, or an "
-            f"iterable of ids; got {type(patient_ids).__name__}.") from exc
+            f"{option} takes {takes}; got "
+            f"{type(values).__name__}.") from exc
+    materialised = tuple(iterator)
+    for position, value in enumerate(materialised, start=1):
+        if not element(value):
+            raise TypeError(
+                f"{option} holds a {type(value).__name__} at position "
+                f"{position}; every {kind} is a str, so it could never "
+                f"match, and it would select nothing in silence. Pass str "
+                f"values only.")
+    return materialised
+
+
+class PatientSelection(NamedTuple):
+    """What a `patient_ids` argument selected, from `select_patient_ids`."""
+
+    #: The Patient IDs to select, or `None` for every patient.
+    ids: Optional[FrozenSet[str]]
+    #: How many ids were given, counting each position.
+    given: int
+    #: The 1-based positions whose id no patient holds, in the order given.
+    unmatched: Tuple[int, ...]
+
+
+def select_patient_ids(patient_ids, patients, option="patient_ids"):
+    """The one reading of `patient_ids`, for every door that selects
+    patients (#678, #686, #696).
+
+    `DicomSession._export_dicom`, `exporters.wfdb.WfdbExporter.export` and
+    `DicomSession.get_cohort_report` (and `export_dataframe` through it)
+    call this, so one argument selects one cohort whichever door it goes
+    through. They each read it their own way until #696 and disagreed: a
+    cohort report and an export of "the same" `patient_ids` could name two
+    different sets of patients. `lock_identities_batch` and
+    `SqliteStore.get_flattened_instances` read the shape through
+    `normalize_id_filter` directly (the batch because its input may be
+    findings, the store because it has no graph to count against). Calling
+    this from only some doors is the defect, not a smaller fix.
+
+    First `normalize_id_filter` (which refuses a wrongly shaped argument),
+    then the positions whose id no patient in `patients` holds. Pure: it
+    logs nothing and writes nothing, so each door decides when a count is
+    owed -- `_export_dicom` reports it only once the export is certain to
+    run, and a refused export must not say it selected short.
+
+    Selection is by `Patient.patient_id`, exactly: after `anonymize()` a
+    patient is selected by its replacement ID, and a subject whose files
+    carried no Patient ID by the key the graph holds for it (the
+    `PatientID` column of `get_cohort_report`), not by `""` (#584).
+
+    Returns:
+        PatientSelection: `ids` is `None` for every patient, else a
+            frozenset; `unmatched` counts a duplicated unknown id at each
+            position it appears.
+    """
+    values = normalize_id_filter(patient_ids, option)
+    if values is None:
+        return PatientSelection(None, 0, ())
+    held = {patient.patient_id for patient in patients}
+    unmatched = tuple(position
+                      for position, value in enumerate(values, start=1)
+                      if value not in held)
+    return PatientSelection(frozenset(values), len(values), unmatched)
+
+
+#: How many unmatched positions the sentence lists before "and N more".
+_UNMATCHED_POSITIONS_LISTED = 10
+
+
+def unmatched_patient_ids_sentence(selection, option="patient_ids"):
+    """The one spelling of the unmatched-id count, for the log line and the
+    audit row (#686). Numbers and positions only, never an id.
+
+    Its pinned substring is "no patient in the session matches", chosen so
+    the singular and the plural read the same way.
+    """
+    count, given = len(selection.unmatched), selection.given
+    shown = selection.unmatched[:_UNMATCHED_POSITIONS_LISTED]
+    positions = ", ".join(str(position) for position in shown)
+    if count > len(shown):
+        positions += f", and {count - len(shown)} more"
+    return (f"{option}: no patient in the session matches {count} of the "
+            f"{given} id{'' if given == 1 else 's'} given "
+            f"(position{'' if count == 1 else 's'} {positions}, in the order "
+            f"given); {'it selects' if count == 1 else 'they select'} "
+            f"nothing. After anonymize(), a patient is selected by its "
+            f"replacement Patient ID.")
 
 
 def export_stamp_attributes(patient, study, series):

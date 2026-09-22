@@ -77,11 +77,22 @@ does not recognise raises `TypeError`, and nothing is written. The two
 formats do not accept the same options, so a caller forwarding one
 options dict to both must split it per format.
 
-`patient_ids` means the same thing on both formats, and only `None`
-means every patient. An empty list, tuple or set selects nobody, so
-nothing is written; a bare `str` names exactly one id and logs a
-warning; a bytes-like value raises `TypeError`; an iterator is read
-once.
+`patient_ids` means the same thing on every method that takes it:
+`export` (both formats), `get_cohort_report`, `export_dataframe` and
+`lock_identities_batch`. `lock_identities` sends any argument that is
+not a `str` to `lock_identities_batch`. Only `None` means every patient,
+and neither lock method accepts `None`. An empty iterable selects
+nobody, and an iterator is read once. A bare `str`, a bytes-like value,
+a non-iterable, or an element that is not a `str` raises `TypeError`
+before anything is written. A patient is selected by its `patient_id`
+exactly: after `anonymize()` that is its replacement Patient ID, and a
+subject whose files carried no Patient ID is selected by the key
+`get_cohort_report` shows in its `PatientID` column, not by `""`. An ID
+that no patient in the session holds selects nothing and is counted,
+never named. `export`, `get_cohort_report` and `export_dataframe` log
+one `WARNING` line for it. `export` also writes one `WARNING` audit row,
+which grades the report `REVIEW_REQUIRED`. The lock methods log the
+count as an error.
 
 `generate_report(format=)` accepts `'markdown'` only. On
 `lock_identities` and `lock_identities_batch`, `persist` and `verbose`

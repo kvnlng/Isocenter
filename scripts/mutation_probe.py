@@ -167,7 +167,7 @@ TARGETS = {
     "isocenter/automation.py": (["tests/test_automation.py"], 30),
     "isocenter/uids.py": (["tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py"], 30),
     # 5 sites, exhaustive: all 5 killed. Seven files, 20.3s per pass.
-    "isocenter/exporters/__init__.py": (["tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py",
+    "isocenter/exporters/__init__.py": (["tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py",
                                          "tests/test_murmur_annotations.py",
                                          "tests/test_study_date_roundtrip.py",
                                          "tests/test_wfdb_option_strictness.py",
@@ -444,7 +444,7 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/io_handlers.py": (["tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
@@ -603,7 +603,7 @@ TARGETS = {
     # `isocenter\.persistence\b` (the `\b` correctly excludes
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
-    "isocenter/persistence.py": (["tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_kept_private_binary_value_keeps_its_vr.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/persistence.py": (["tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_kept_private_binary_value_keeps_its_vr.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_nested_item_status_survives_a_reopen.py",
                                   "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
                                   "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
@@ -730,7 +730,7 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/session.py": (["tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                               "tests/test_a_nested_item_status_survives_a_reopen.py",
                               "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
