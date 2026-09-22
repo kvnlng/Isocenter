@@ -364,24 +364,29 @@ def test_a_recorded_vr_does_not_turn_a_bool_into_a_number():
     assert ds[0x00091006].value == 'True'
 
 
-def test_a_private_binary_value_is_still_written_as_UN():
-    """A guard on the fix, not evidence of the defect -- and not, as an
-    earlier version of this docstring said, green on both sides. It
-    passes `vrs=` to `_merge`, a parameter the unfixed code does not
-    accept, so on that side it is a `TypeError` about a signature. An
-    unexpected keyword is no more evidence of the defect than the
-    `ImportError` the two #183 tests take, and the two have to be
-    counted the same way.
+def test_a_private_binary_value_is_written_under_its_recorded_vr():
+    """A binary private value with a recorded VR is written under it, and
+    one with none is written `UN` (#676).
 
-    PS3.5 §6.2.2 makes `UN` the VR for an unknown raw-bytes value, and
-    `_split_core_and_private` keeps odd-group `bytes` in
-    `attributes_json` rather than the EAV table -- so there is no
-    `value_rep` home for a binary private tag's VR at all. Nothing is
-    recorded for them, deliberately.
+    This test said the opposite until #676, when it was
+    `test_a_private_binary_value_is_still_written_as_UN`: PS3.5 §6.2.2
+    makes `UN` the VR for an unknown raw-bytes value, and
+    `_split_core_and_private` keeps odd-group `bytes` in `attributes_json`
+    rather than the EAV table, so there was no `value_rep` home for a
+    binary private tag's VR and nothing was recorded. The owner's ruling on
+    #676 is that a kept private binary element is written faithfully: its
+    VR is now recorded at ingest and stored in the root `__vrs__`, and a
+    *known* VR is not unknown. The no-`vrs` half is what an Implicit VR
+    source produces, which records none.
     """
     ds = pydicom.Dataset()
     DicomExporter._merge(ds, {"0009,1003": b"\x01\x02\x03\x04"},
                          vrs={"0009,1003": "OB"})
+    assert ds[0x00091003].VR == 'OB'
+    assert ds[0x00091003].value == b"\x01\x02\x03\x04"
+
+    ds = pydicom.Dataset()
+    DicomExporter._merge(ds, {"0009,1003": b"\x01\x02\x03\x04"})
     assert ds[0x00091003].VR == 'UN'
     assert ds[0x00091003].value == b"\x01\x02\x03\x04"
 
