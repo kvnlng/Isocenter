@@ -278,7 +278,7 @@ def test_the_documented_quick_start_exports_ct_small(tmp_path):
         session.ingest(str(tmp_path / "in"))
         session.create_config(str(config))
         session.load_config(str(config))
-        assert session.configuration.privacy_profile == "basic"
+        assert session.configuration.privacy_profile == "basic@2026c"
         session.anonymize(session.audit())
         summary = session.export(str(tmp_path / "out"), use_compression=False)
 
@@ -446,11 +446,11 @@ def test_the_scaffold_is_generated_from_the_floor(tmp_path):
         session.create_config(str(config))
 
     data = yaml.safe_load(config.read_text(encoding="utf-8"))
-    assert data["privacy_profile"] == "basic"
+    assert data["privacy_profile"] == "basic@2026c"
     assert data["phi_tags"] == RESEARCH_DEFAULTS
 
     tags, _, _, _, profile = ConfigLoader.load_unified_config(str(config))
-    assert profile == "basic"
+    assert profile == "basic@2026c"
     assert tags == FLOOR_POLICY
 
 
@@ -595,7 +595,7 @@ def test_a_config_without_a_profile_line_extends_the_floor(tmp_path, caplog):
     brief's `MODE=onetag` measurement), and the floor applied without a
     word."""
     from isocenter.config_manager import ConfigLoader
-    from isocenter.profiles import FLOOR_POLICY
+    from isocenter.profiles import FLOOR, FLOOR_POLICY
 
     config = tmp_path / "onetag.yaml"
     config.write_text("phi_tags:\n  '0018,0015': {action: REMOVE, name: Body Part}\n",
@@ -611,7 +611,7 @@ def test_a_config_without_a_profile_line_extends_the_floor(tmp_path, caplog):
     assert tags == {**FLOOR_POLICY,
                     "0018,0015": {"action": "REMOVE", "name": "Body Part"}}
     assert tags["0020,0010"]["action"] == "EMPTY"       # Study ID
-    assert profile is None
+    assert profile is FLOOR
     assert "floor policy" in caplog.text
 
 

@@ -182,11 +182,17 @@ keys, stores `replacement` as the rule's `value`, and raises
 `ValueError`, leaving the policy and its file unchanged, for an unknown
 action or a rule `load_config` would refuse. `add_rule()` and
 `update_rule()` raise `ValueError`, leaving the rules and the file
-unchanged, for a machine rule `load_config` would refuse. What the floor and
-`privacy_profile: basic` contain is **not** frozen: the basic profile is
-PS3.15 Annex E Table E.1-1 of a named edition, its membership follows
-that edition, and a change to it can arrive in a minor release, listed
-under Breaking in the changelog.
+unchanged, for a machine rule `load_config` would refuse. A built-in
+profile's name is pinned to the PS3.15 edition its table was taken from,
+and what a pinned name contains is frozen: `basic@2026c` holds the rules
+1.0 shipped under it in every 1.x. A bare `basic` means `basic@2026c`,
+and the floor policy is `basic@2026c` with the three research defaults,
+in every 1.x. A later edition arrives in a minor release as a new name,
+never as a new meaning for an existing one. The one exception: a 1.x may
+correct a row of `basic@2026c` that the published 2026c standard shows
+was transcribed wrongly, as a Breaking changelog entry quoting the
+standard's row. `configuration.privacy_profile` holds the pinned name of
+the built-in profile that was loaded, even when the file said `basic`.
 
 **Exceptions.** Each is raised before any work is done unless it says
 otherwise.
@@ -215,8 +221,9 @@ otherwise.
 - `load_config(config_file)` and `audit(config_path=)`: `ValueError`
   when the file fails validation — its extension, YAML syntax or shape,
   a `version` this library does not read, a key the schema does not
-  have, a value of the wrong type, an unknown `privacy_profile` or
-  `action`, or a rule Isocenter cannot honour
+  have, a value of the wrong type, an unknown `privacy_profile`
+  (including an edition this version does not ship) or `action`, or a
+  rule Isocenter cannot honour
   ([Configuration](../configuration.md) lists them) — and
   `FileNotFoundError` when it does not exist; after either, the
   configuration is exactly what it was. `audit()` without `config_path`

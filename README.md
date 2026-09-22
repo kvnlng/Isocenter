@@ -325,7 +325,7 @@ One YAML file controls de-identification. See the **[Configuration Guide](https:
 
 ```yaml
 # 1. Privacy Profile (Optional)
-# Options: "basic", "none", or path to external YAML
+# Options: "basic@2026c" ("basic" is its short form), "none", or path to external YAML
 privacy_profile: "basic"
 
 # 2. Date Jitter

@@ -11,10 +11,21 @@ E.1-1, edition 2026c: one rule per row, apart from the departures
 `tests/support/annex_e.py` names with their reasons. It is not the whole
 of Annex E -- UIDs are not replaced (#544), and the attributes that record
 de-identification are not written (#554). See docs/configuration.md.
+
+A profile's name is pinned to the PS3.15 edition its table was taken from
+(#714): `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
+`basic` means `basic@2026c` in every 1.x (`PROFILE_ALIASES`). A later
+edition arrives as a second literal under a new name (`basic@2027a`),
+never as an edit to this one. How a name resolves is `config_manager`'s:
+this module is data, with zero mutation sites.
 """
 
 # DICOM PS3.15 2026c, Table E.1-1, Basic Prof. column (#547). Each entry's
-# trailing comment is the table's code for the row.
+# trailing comment is the table's code for the row. `PRIVACY_PROFILES`
+# names this table `basic@2026c`, and from the v1.0.0 tag what that name
+# holds is frozen (#714, tests/test_profile_editions.py): regenerating it
+# after 1.0 changes what an unchanged config removes. A later edition is a
+# new literal beside this one (`BASIC_2027A`), under a new name.
 #
 # DO NOT EDIT ENTRIES BY HAND. This is a pasted literal, not a loop over
 # the table, because the mutation probe registers this module as data
@@ -695,15 +706,45 @@ BASIC_PROFILE = {
 # The three entries where a research export deliberately departs from the
 # basic profile: the study date is jittered so intervals survive, and sex
 # and age are kept because analyses stratify on them. `create_config()`
-# writes exactly these beneath `privacy_profile: basic` -- it diffs the
-# floor against `BASIC_PROFILE`, so the scaffold cannot drift from this
-# table -- and they are half of what a bare session applies. Keys
-# lowercase, for the reason the header comment above gives.
+# writes exactly these beneath `privacy_profile: basic@2026c` -- it diffs
+# the floor against `PRIVACY_PROFILES[FLOOR_BASE]`, so the scaffold cannot
+# drift from this table -- and they are half of what a bare session
+# applies. Frozen with the floor at 1.0 (#714). Keys lowercase, for the
+# reason the header comment above gives.
 RESEARCH_DEFAULTS = {
     "0008,0020": {"action": "JITTER", "name": "Study Date"},
     "0010,0040": {"action": "KEEP", "name": "Patient's Sex"},
     "0010,1010": {"action": "KEEP", "name": "Patient's Age"},
 }
+
+#: Every built-in profile, by its pinned name. A name is
+#: `<profile>@<edition>`, the edition being the PS3.15 release its table was
+#: taken from, spelled as the standard spells it (`2026c`) and looked up
+#: exactly -- no case-folding, no stripping. A 1.x adds names; it never
+#: removes one or changes the rules of one (#714). Adding one also bumps
+#: the configuration schema's minor (`config_manager.CONFIG_VERSION`).
+PRIVACY_PROFILES = {
+    "basic@2026c": BASIC_PROFILE,
+}
+
+#: What a bare name means, for every 1.x. Frozen at 1.0: a later edition is
+#: a new pinned name, never a new target here. 2.0 may move it.
+PROFILE_ALIASES = {
+    "basic": "basic@2026c",
+}
+
+#: The profile the floor policy is built on, and the one `create_config()`
+#: names and diffs against. Frozen at 1.0, for the reason `PROFILE_ALIASES`
+#: is: a bare session's scaffold must reload to exactly the floor, which
+#: ties the scaffold to the floor's base, not to the newest edition.
+FLOOR_BASE = "basic@2026c"
+
+#: What `ConfigLoader.load_unified_config` returns as the policy base of a
+#: file with no `privacy_profile` line. An object, compared with `is`, not
+#: a string: the same tuple slot carries an external profile's path, and a
+#: profile file named `floor` must not read as the floor. Never a value a
+#: config can spell.
+FLOOR = object()
 
 # What a session applies when it has loaded no configuration, and what a
 # config file with no `privacy_profile` line extends (#495). Until then a
@@ -714,14 +755,12 @@ RESEARCH_DEFAULTS = {
 #
 # Not a named profile. `PRIVACY_PROFILES` is what a config can spell; the
 # floor is what spelling nothing means, so it has no name to collide with
-# a user's. Callers that hand it out copy it (`copy.deepcopy`) -- a
+# a user's. It is `FLOOR_BASE`'s table with the research defaults, in
+# every 1.x (#714). Callers that hand it out copy it (`copy.deepcopy`) -- a
 # session's `set_phi_tag` writes into its own `phi_tags`, and a shared
 # dict would carry that edit into every later session. The dict is built
 # from copies of each entry for the same reason: `BASIC_PROFILE` is what
-# `privacy_profile: basic` reads.
+# `privacy_profile: basic@2026c` reads.
 FLOOR_POLICY = {tag: dict(rule)
-                for tag, rule in {**BASIC_PROFILE, **RESEARCH_DEFAULTS}.items()}
-
-PRIVACY_PROFILES = {
-    "basic": BASIC_PROFILE
-}
+                for tag, rule in {**PRIVACY_PROFILES[FLOOR_BASE],
+                                  **RESEARCH_DEFAULTS}.items()}

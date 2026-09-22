@@ -104,7 +104,7 @@ def test_a_file_carrying_every_top_level_key_loads(tmp_path):
         "date_jitter: {min_days: -30, max_days: -10}\n"
         "remove_private_tags: false\n"
         "machines:\n  - serial_number: SN-1\n    redaction_zones: [[0, 10, 0, 20]]\n")
-    assert profile == "basic"
+    assert profile == "basic@2026c"
     assert tags["0018,1030"] == {"action": "REMOVE", "name": "Protocol"}
     assert rules[0]["serial_number"] == "SN-1"
     assert jitter == {"min_days": -30, "max_days": -10}
@@ -303,9 +303,15 @@ def test_what_0_9_8_wrote_still_loads():
     committed verbatim. The expected values below are that session's
     `rules`, `phi_tags`, `date_jitter` and `remove_private_tags` after
     the two calls, as printed at capture. Kills an allowlist that forgets
-    what the library writes (`note`, `manufacturer`, `comment`)."""
+    what the library writes (`note`, `manufacturer`, `comment`).
+
+    `scaffolded_config_0_9_8.yaml` is `scaffolded_config.golden.yaml` as
+    the v0.9.8 tag has it (blob ad2f3ae0, identical at 63a64158 and
+    d47f2b43), copied verbatim before #714 regenerated the golden: the
+    golden is what *this* version's `create_config()` writes, so loading
+    it here would prove only that 1.0 reads its own output."""
     ConfigLoader.load_unified_config(
-        os.path.join(FIXTURES, "scaffolded_config.golden.yaml"))
+        os.path.join(FIXTURES, "scaffolded_config_0_9_8.yaml"))
 
     tags, rules, jitter, remove_private, profile = ConfigLoader.load_unified_config(
         os.path.join(FIXTURES, "autosaved_config_0_9_8.yaml"))

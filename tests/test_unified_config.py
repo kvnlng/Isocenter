@@ -31,7 +31,7 @@ def test_unified_workflow(session_db, tmp_path, dummy_patient):
         assert "machines" in data
         # Check that scalar defaults are present (Tag IDs)
         # With basic profile, 0010,0010 is implied via profile, not explicit in phi_tags
-        assert data.get("privacy_profile") == "basic"
+        assert data.get("privacy_profile") == "basic@2026c"
         # assert "0010,0010" in data["phi_tags"]
 
         # 3. Edit Config (Simulated User Action)

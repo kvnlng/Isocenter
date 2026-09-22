@@ -190,7 +190,7 @@ def test_the_report_names_the_profile_that_was_actually_applied(tmp_path):
         session.load_config(str(config))
         content = _render_report(session, tmp_path)
 
-    assert "basic" in content
+    assert "| Privacy Profile | basic@2026c |" in content
     assert f"{len(BASIC_PROFILE)} tag rules" in content, (
         "the report does not state how many tag rules were in force")
 

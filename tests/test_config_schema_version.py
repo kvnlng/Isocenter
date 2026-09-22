@@ -19,7 +19,7 @@ import sqlite3
 import pytest
 import yaml
 
-from isocenter import config_manager
+from isocenter import config_manager, profiles
 from isocenter.config_manager import CONFIG_VERSION, ConfigLoader
 from isocenter.configuration import IsocenterConfiguration
 from isocenter.session import DicomSession
@@ -81,7 +81,7 @@ def test_any_minor_of_version_2_loads(tmp_path, version):
     """Kills `version == CONFIG_VERSION` in place of the major check."""
     tags, _, _, _, profile = _loaded(
         tmp_path, f'version: "{version}"\nprivacy_profile: basic\n')
-    assert profile == "basic"
+    assert profile == "basic@2026c"
     assert len(tags) > 0
 
 
@@ -276,6 +276,10 @@ SCHEMA_BY_VERSION = {
                  "redaction_zones", "comment"},
         "zone": {"roi", "note"},
         "phi_rule": {"action", "name", "value"},
+        # Every `privacy_profile` value a built-in resolves, pinned names
+        # and bare aliases alike (#714). A later PS3.15 edition is a new
+        # value, so it comes with a new minor like a new key does.
+        "profiles": {"basic", "basic@2026c"},
     },
 }
 
@@ -287,3 +291,16 @@ def test_a_key_added_to_the_schema_bumps_the_minor():
     assert set(config_manager._RULE_KEYS) == expected["rule"]
     assert set(config_manager._ZONE_KEYS) == expected["zone"]
     assert set(config_manager._PHI_RULE_KEYS) == expected["phi_rule"]
+
+
+def test_a_new_profile_name_comes_with_a_schema_minor():
+    """Kills an edition (`basic@2027a`) added under an unchanged
+    `CONFIG_VERSION` -- the accept-any-2.x rule is then unsound for values,
+    because a 2.0 file naming it reaches an older library with no
+    newer-minor hint -- and a name removed in a later minor (#714)."""
+    names = set(profiles.PRIVACY_PROFILES) | set(profiles.PROFILE_ALIASES)
+    assert names == SCHEMA_BY_VERSION[CONFIG_VERSION]["profiles"]
+    rows = sorted(SCHEMA_BY_VERSION, key=lambda v: int(v.split(".")[1]))
+    for older, newer in zip(rows, rows[1:]):
+        assert (SCHEMA_BY_VERSION[older]["profiles"]
+                <= SCHEMA_BY_VERSION[newer]["profiles"]), (older, newer)

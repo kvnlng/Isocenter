@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import yaml
 
-from . import config_manager
+from . import config_manager, profiles
 from .profiles import FLOOR_POLICY
 from .logger import describe_exception
 
@@ -50,11 +50,13 @@ class IsocenterConfiguration:
         date_jitter (Dict[str, int]): Date shifting parameters.
         remove_private_tags (bool): Global flag to strip private tags.
         config_path (Optional[str]): Path to the backing YAML file for auto-save.
-        privacy_profile (Optional[str]): Name of the profile whose rules were
-            merged into `phi_tags`, or None when no named profile was
-            applied (the floor, or `privacy_profile: none`). Only ever set
-            to a profile that actually resolved, so the compliance report
-            cannot name protection that never ran.
+        privacy_profile (Optional[str]): The pinned name of the built-in
+            profile whose rules were merged into `phi_tags` -- `basic@2026c`,
+            also when the file said `basic` (#714) -- or an external
+            profile's path, or None when no named profile was applied (the
+            floor, or `privacy_profile: none`). Only ever set to a profile
+            that actually resolved, so the compliance report cannot name
+            protection that never ran.
     """
     rules: List[Dict[str, Any]] = field(default_factory=list)
     phi_tags: Dict[str, Any] = field(
@@ -63,6 +65,26 @@ class IsocenterConfiguration:
     remove_private_tags: bool = True
     config_path: Optional[str] = None
     privacy_profile: Optional[str] = None
+    # Whether `phi_tags` came from the floor policy: a bare configuration,
+    # or a loaded file with no `privacy_profile` line. `Session.load_config`
+    # sets it on every load. The floor and `privacy_profile: none` both
+    # leave `privacy_profile` at None, and nothing else here tells them
+    # apart -- the report called both "session defaults" until #714.
+    # Private and not a constructor parameter, so the frozen field list is
+    # unchanged.
+    _floor: bool = field(default=True, init=False, repr=False, compare=False)
+
+    @property
+    def _policy_base(self) -> str:
+        """What the policy in force was built on, as one string (#714):
+        the pinned profile name or external path, `floor over
+        basic@2026c`, or `none`. The identifier the report prints and the
+        store's policy record (#555) is to carry."""
+        if self.privacy_profile:
+            return self.privacy_profile
+        if self._floor:
+            return f"floor over {profiles.FLOOR_BASE}"
+        return "none"
 
     def save(self) -> None:
         """

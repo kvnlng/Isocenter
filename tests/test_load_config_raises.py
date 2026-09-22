@@ -169,7 +169,7 @@ def test_a_valid_config_still_loads(tmp_path):
         assert session.load_config(str(config)) is None
         c = session.configuration
         assert c.phi_tags["0018,1030"] == {"action": "REMOVE", "name": "Protocol"}
-        assert c.privacy_profile == "basic"
+        assert c.privacy_profile == "basic@2026c"
         assert c.rules[0]["serial_number"] == "SN-1"
         assert c.date_jitter == {"min_days": -30, "max_days": -10}
         assert c.remove_private_tags is False
