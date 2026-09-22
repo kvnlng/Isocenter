@@ -181,6 +181,10 @@ def test_a_reingested_export_under_another_secret_is_warned(tmp_path):
     [notice] = _foreign_notices(db)
     assert notice.startswith("1 patient in this store carries an `ANON_` pseudonym")
     assert "a new one was generated" not in notice
+    # Its advice is the one a 1.x user can follow: the carry it named
+    # until #716 raises AttributeError now.
+    assert "ingest it into that project's store" in notice, notice
+    assert "load_project_secret" not in notice, notice
 
 
 def test_a_reingested_export_without_any_secret_generates_and_warns(tmp_path):

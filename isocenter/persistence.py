@@ -2695,18 +2695,18 @@ class SqliteStore:
     _ORIGIN_LOADED = "loaded"
     _ORIGIN_LOADED_UNVERIFIED = "loaded-unverified"
 
-    # The notice below carries the phrase 0.9.7 and 0.9.8 matched in the
-    # audit log ("project secret could not be verified when it was
-    # loaded") to tell a verified reload from a laundered one. Nothing
-    # reads it back since the load was deleted (#716); stores keep it in
-    # their WARNING rows, so it is kept word for word.
+    # Written at every audit, for good, by a store a 0.9.7 or 0.9.8 load
+    # left `loaded-unverified`. Its last sentence is the remedy a 1.x user
+    # has: until #716 it said to confirm the secret file, and there is no
+    # secret file any more. Rows already written keep their own text.
     _UNVERIFIED_SECRET_NOTICE = (
         "This store's project secret could not be verified when it was "
         "loaded. If it is not the secret this store's earlier dates were "
         "shifted under, every date shifted since the load carries a "
         "different offset from the dates of the same patients shifted "
-        "before it, and the store cannot tell which. Confirm the secret "
-        "file came from this store's own project.")
+        "before it, and the store cannot tell which. The secret cannot be "
+        "checked or replaced from outside the store: where those offsets "
+        "matter, re-ingest the source files into a new store (#716).")
 
     def _serialize_item(self, item: Instance) -> Dict[str, Any]:
         """

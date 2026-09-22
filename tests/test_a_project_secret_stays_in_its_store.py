@@ -124,6 +124,24 @@ def _warnings(db):
             "SELECT details FROM audit_log WHERE action_type = 'WARNING'")]
 
 
+UNVERIFIED = "could not be verified when it was loaded"
+
+
+def _unverified_store(tmp_path):
+    """A shifted store whose row says `loaded-unverified`, written by SQL
+    as a 0.9.7 or 0.9.8 load left it."""
+    db = str(tmp_path / "unverified.db")
+    _shifted_store(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE project_secret SET origin = 'loaded-unverified'")
+    return db
+
+
+def _grade(report):
+    return [line for line in report.read_text(encoding="utf-8").splitlines()
+            if line.startswith("| **Validation Status**")]
+
+
 def test_a_store_that_took_a_secret_unverified_still_says_so(tmp_path):
     """A 0.9.7 or 0.9.8 store whose row says `loaded-unverified` still
     writes the lasting WARNING at every audit, and grades
@@ -131,10 +149,7 @@ def test_a_store_that_took_a_secret_unverified_still_says_so(tmp_path):
     deleting the load does not remove it. The row is written by SQL, as
     that release's load left it. Kills the read side deleted along with
     the load."""
-    db = str(tmp_path / "unverified.db")
-    _shifted_store(db)
-    with sqlite3.connect(db) as conn:
-        conn.execute("UPDATE project_secret SET origin = 'loaded-unverified'")
+    db = _unverified_store(tmp_path)
     before = len(_warnings(db))
     with DicomSession(db) as session:
         session.audit()
@@ -142,8 +157,39 @@ def test_a_store_that_took_a_secret_unverified_still_says_so(tmp_path):
         report = tmp_path / "report.md"
         session.generate_report(str(report))
     new = _warnings(db)[before:]
-    assert any("could not be verified when it was loaded" in w for w in new), new
-    assert "REVIEW_REQUIRED" in report.read_text(encoding="utf-8")
+    assert any(UNVERIFIED in w for w in new), new
+    # The grade line, not the word anywhere: a report that names the
+    # grades in a legend would pass a substring check by accident.
+    assert _grade(report) == ["| **Validation Status** | **REVIEW_REQUIRED** |"]
+
+
+def test_the_unverified_notice_is_written_once_per_pass(tmp_path):
+    """One lasting WARNING per `anonymize(audit())`: the audit writes it,
+    and the anonymize that follows asks for the secret without diagnosing.
+    Kills `diagnose and` dropped from the unverified check, which writes it
+    twice per pass (review of #751, B3; the 0.9.8 count went with the
+    load's tests)."""
+    db = _unverified_store(tmp_path)
+    before = len(_warnings(db))
+    with DicomSession(db) as session:
+        session.anonymize(session.audit())
+        session.store_backend.flush_audit_queue()
+    new = [w for w in _warnings(db)[before:] if UNVERIFIED in w]
+    assert len(new) == 1, new
+
+
+def test_the_unverified_notice_names_a_remedy_a_1x_user_has(tmp_path):
+    """The notice is permanent for such a store, so its advice must be one
+    a 1.x user can follow: there is no secret file to confirm any more.
+    Kills the 0.9.x advice left in place (review of #751, N2)."""
+    db = _unverified_store(tmp_path)
+    before = len(_warnings(db))
+    with DicomSession(db) as session:
+        session.audit()
+        session.store_backend.flush_audit_queue()
+    [notice] = [w for w in _warnings(db)[before:] if UNVERIFIED in w]
+    assert "re-ingest the source files into a new store" in notice, notice
+    assert "secret file" not in notice, notice
 
 
 def test_the_store_class_offers_no_secret_file_format():

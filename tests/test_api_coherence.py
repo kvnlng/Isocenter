@@ -951,3 +951,14 @@ def test_a_project_secret_has_no_carry():
         assert not hasattr(SqliteStore, name), (
             f"`SqliteStore.{name}` is back; a project secret stays in its "
             f"store (#716)")
+    # Nor under another name, on any object a caller holds: no public
+    # attribute mentions a secret (review of #751, N1).
+    import isocenter  # pylint: disable=import-outside-toplevel
+    from isocenter.persistence_manager import PersistenceManager  # pylint: disable=import-outside-toplevel
+    from isocenter.session import DicomSession  # pylint: disable=import-outside-toplevel
+    for owner in (SqliteStore, PersistenceManager, DicomSession, isocenter):
+        public = [name for name in dir(owner)
+                  if "secret" in name.lower() and not name.startswith("_")]
+        assert public == [], (
+            f"{getattr(owner, '__name__', owner)} offers {public}; a project "
+            f"secret stays in its store (#716)")
