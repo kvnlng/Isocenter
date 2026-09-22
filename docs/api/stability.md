@@ -326,8 +326,8 @@ default.
   or narrowed in 1.x, and one may be added with a CHANGELOG entry. It
   is not a promise about which way a grade can move: a 1.x fix that
   stops writing a wrong row can move a run from REVIEW_REQUIRED to
-  PASS, and the CHANGELOG entry for that fix says so. The report's layout and the wording of each Grade Basis
-  line are tier 2.
+  PASS, and the CHANGELOG entry for that fix says so. The report's
+  layout and the wording of each Grade Basis line are tier 2.
 - The **audit `action_type` strings**, written to the audit table and
   counted by type in section 2 of the report: `DATA_LOSS`, `ERROR`,
   `EXPORT`, `RECONCILE_PRIVATE`, `REDACTION`, `REVERSIBLE_EXPORT`,

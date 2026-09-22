@@ -3156,7 +3156,7 @@ class DicomSession:
 
         The conditions are numbered in `docs/analytics.md`, "How the grade
         is decided", in the order they are appended here. They are a 1.x
-        promise in one direction (owner ruling Q1, 2026-09-21): none is
+        promise about the conditions (owner ruling Q1, 2026-09-21): none is
         removed or narrowed, and one may be added with a CHANGELOG entry.
         """
         review_reasons = []
