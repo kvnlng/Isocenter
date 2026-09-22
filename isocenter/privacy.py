@@ -5,7 +5,8 @@ import hashlib
 import hmac
 import re
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
-                       Patient, Study, iter_item_tree)
+                       Patient, Study, is_synthetic_patient_id,
+                       iter_item_tree)
 from .config_manager import _vr_dummy
 from .logger import get_logger
 from .profiles import FLOOR_POLICY
@@ -664,7 +665,12 @@ class PhiInspector:
         id_action, _ = _owned_rule(self.phi_tags, "0010,0020")
         assert id_action in ("KEEP", "REPLACE"), id_action
         if (id_action == "REPLACE" and patient.patient_id
-                and patient.patient_id != "UNKNOWN"
+                # A subject with no Patient ID has nothing to pseudonymize
+                # (#584): its key is never exported, and replacing it would
+                # move its date offset. This read `!= "UNKNOWN"`, which
+                # matched nothing once the placeholder became
+                # `UnknownPatient`.
+                and not is_synthetic_patient_id(patient.patient_id)
                 and not _is_replacement_id(patient.patient_id)):
             # Through the constructors, not spelled here: the date
             # jitter canonicalizes an original id to this value (#517),
@@ -1157,6 +1163,10 @@ class PhiInspector:
             return (value == patient.patient_name
                     and _holds_owned_replacement(self.phi_tags, tag, value))
         if tag == "0010,0020":
+            # No arm for a subject with no Patient ID (#584). Its top-level
+            # copy is absent or empty, and the scan raises neither, so an
+            # arm skipping it was measured dead (mutant M-B13 in the #584
+            # PR) and is not written, as #496's N4 was not.
             return (value == patient.patient_id
                     and _holds_owned_replacement(self.phi_tags, tag, value))
         # No StudyTime (0008,0030) arm, though `ENTITY_FIELD_TAGS` carries

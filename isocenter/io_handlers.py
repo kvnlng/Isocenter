@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1716 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1719 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1717 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1720 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -186,7 +186,10 @@ from pydicom.filewriter import (AMBIGUOUS_VR, write_sequence,
 from pydicom.values import convert_numbers
 
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
-                       resolve_item_path)
+                       resolve_item_path, NO_PATIENT_ID_PREFIX,
+                       is_synthetic_patient_id, exported_patient_id,
+                       PhiStatus)
+from .uids import generated_uid
 from .logger import (describe_exception, describe_exception_without_paths,
                      get_logger)
 from .pixel_geometry import (
@@ -4076,6 +4079,151 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
             describe_exception(failure), len(pending), alone)
 
 
+def _has_been_remediated(patient) -> bool:
+    """Whether any date of `patient` may already carry its offset.
+
+    A study's `date_shifted`, or any entity of the subtree REMEDIATED: an
+    instance-level date (Series, Acquisition, Content) is shifted by the
+    patient's offset in the same pass, and a study with no Study Date has
+    no flag to say so.
+    """
+    if patient.phi_status is PhiStatus.REMEDIATED:
+        return True
+    for study in patient.studies:
+        if study.date_shifted or study.phi_status is PhiStatus.REMEDIATED:
+            return True
+        for series in study.series:
+            for instance in series.instances:
+                if instance.phi_status is PhiStatus.REMEDIATED:
+                    return True
+    return False
+
+
+def _link_patient(store, patient_map, study_owner, meta, owner):
+    """The patient a file links under; and whether it was the WARNING case.
+
+    `owner` is the patient already holding the file's study, or None.
+
+    - **No Patient ID:** the owner, or the patient keyed on this study's
+      synthetic key, created if need be (#584).
+    - **A Patient ID, and the study is held by an ID-less patient** (a
+      study whose Patient ID was stripped from some of its files): that
+      patient is **re-keyed** to the real ID -- or, when a patient with
+      that ID exists, its studies move onto it, the move
+      `SqliteStore._reparent_studies` persists. Only while no date of the
+      ID-less patient may carry its offset (`_has_been_remediated`):
+      otherwise re-keying would give those dates a second offset, so the
+      file links under the ID-less patient and the caller writes a
+      `WARNING` row. **No branch creates an empty patient.**
+    - **Otherwise**, as before: the patient with the file's ID.
+    """
+    pid = meta['pid']
+    if meta['no_patient_id']:
+        if owner is not None:
+            return owner, False
+    elif owner is not None and is_synthetic_patient_id(owner.patient_id):
+        if _has_been_remediated(owner):
+            return owner, True
+        old_key = owner.patient_id
+        existing = patient_map.get(pid)
+        patient_map.pop(old_key, None)
+        if existing is None:
+            owner.patient_id = pid
+            owner.mark_modified()
+            patient_map[pid] = owner
+            return owner, False
+        moved = list(owner.studies)
+        existing.studies.extend(moved)
+        for moved_study in moved:
+            study_owner[moved_study.study_instance_uid] = existing
+        owner.studies.clear()
+        store.patients.remove(owner)
+        return existing, False
+    pat = patient_map.get(pid)
+    if pat is None:
+        pat = Patient(pid, meta['pname'])
+        store.patients.append(pat)
+        patient_map[pid] = pat
+    return pat, False
+
+
+def _audit_linkage(store_backend, uid, meta, linked_under_id_less):
+    """The `WARNING` rows a linkage writes, one per fact, naming the
+    instance and never a value (#584).
+
+    A generated Study or Series Instance UID grades the run: a Type 1
+    element the source lacked is written with a value it never held. An
+    absent or empty Patient ID writes no row: it is Type 2, and empty is
+    legal.
+    """
+    for key, element in (('generated_study', "Study Instance UID"),
+                         ('generated_series', "Series Instance UID")):
+        if meta.get(key):
+            store_backend.log_audit(
+                action_type="WARNING", entity_uid=uid,
+                details=(f"{element} absent from the source of instance "
+                         f"{uid}; the export writes a UID generated for it "
+                         "(#584)."))
+    if linked_under_id_less:
+        store_backend.log_audit(
+            action_type="WARNING", entity_uid=uid,
+            details=(f"Instance {uid} carries a Patient ID, and its study "
+                     "belongs to a patient whose files carried none and whose "
+                     "dates may already be shifted; it was linked under that "
+                     "patient, which exports an empty Patient ID, because "
+                     "re-keying it would give those dates a second offset "
+                     "(#584)."))
+
+
+def _linkage_keys(ds) -> dict:
+    """The keys ingest links a file by: its patient, study and series (#584).
+
+    Ingest's patient, study and series maps are global. Placeholders
+    (`UnknownPatient`, `''`, `UnknownStudy`, `UnknownSeries`) made every
+    file lacking the element share one key, so unrelated subjects became
+    one patient, and a second patient's UID-less file was linked under the
+    first patient's study. No placeholder is used any more:
+
+    - **study**: the Study Instance UID if non-blank; otherwise a UID
+      generated from the Series Instance UID, or the SOP Instance UID when
+      that is blank too -- one generated study per source series, or per
+      file. **Never from the Patient ID**: an unkeyed hash of an MRN
+      written into an exported UID lets anyone confirm a guessed MRN.
+    - **series**: the Series Instance UID if non-blank; otherwise a UID
+      generated from the study's, so never shared across studies.
+    - **pid**: the Patient ID if it holds anything but whitespace;
+      otherwise `NO_PATIENT_ID_PREFIX + study`. The file's own data says
+      nothing finer than "the patient of this study" (PatientName is
+      absent or empty in 22 of the 31 ID-less corpus files).
+
+    `generated_study` / `generated_series` say which UIDs the source did
+    not carry; the parent writes one `WARNING` row per generated UID.
+    """
+    def usable(keyword):
+        value = ds.get(keyword)
+        if value is None or not str(value).strip():
+            return None
+        return str(value).strip() if keyword != "PatientID" else value
+
+    sop = ds.get("SOPInstanceUID", None)
+    study = usable("StudyInstanceUID")
+    series_uid = usable("SeriesInstanceUID")
+    generated_study = study is None
+    if generated_study:
+        study = generated_uid("study", series_uid or str(sop))
+    generated_series = series_uid is None
+    if generated_series:
+        series_uid = generated_uid("series", study)
+    pid = usable("PatientID")
+    no_patient_id = pid is None
+    if no_patient_id:
+        pid = NO_PATIENT_ID_PREFIX + study
+    return {'pid': pid, 'sid': study, 'ser_id': series_uid,
+            'no_patient_id': no_patient_id,
+            'generated_study': generated_study,
+            'generated_series': generated_series}
+
+
 def ingest_worker(fp: str) -> Tuple:
     """
     Worker function to read DICOM and construct Instance object.
@@ -4102,16 +4250,13 @@ def ingest_worker(fp: str) -> Tuple:
 
         # Extract Linking Metadata
         meta = {
-            'pid': ds.get("PatientID", "UnknownPatient"),
             'pname': str(ds.get("PatientName", "Unknown")),
-            'sid': ds.get("StudyInstanceUID", "UnknownStudy"),
             # Absent stays absent. This used to default to "19000101",
             # and nothing downstream could tell that from a real date --
             # SHIFT_DATE jittered it and the result was exported as
             # genuine study timing, so a study that never had a date
             # acquired one near 1900 (#60).
             'sdate': str(ds.StudyDate) if "StudyDate" in ds else None,
-            'ser_id': ds.get("SeriesInstanceUID", "UnknownSeries"),
             'modality': ds.get("Modality", "OT"),
             'sop': ds.get("SOPInstanceUID", None),
             'sop_class': sop_class,
@@ -4123,6 +4268,8 @@ def ingest_worker(fp: str) -> Tuple:
 
         if not meta['sop']:
             raise ValueError("Missing SOPInstanceUID. Likely not a valid DICOM file.")
+        # After the SOP check: a generated study falls back to the SOP UID.
+        meta.update(_linkage_keys(ds))
 
         # Construct Instance (Metadata Only)
         inst = Instance(meta['sop'], meta['sop_class'], 0, file_path=fp)
@@ -4580,6 +4727,11 @@ class DicomImporter:
         patient_map = {p.patient_id: p for p in store.patients}
         study_map = {}  # Key: study_uid -> Study
         series_map = {}  # Key: series_uid -> Series
+        # Which patient holds each study (#584): a file with no Patient ID
+        # belongs to the patient of its study, so the study is looked up
+        # before any patient is created.
+        study_owner = {}  # Key: study_uid -> Patient
+        id_less_files = 0
 
         # Every SOP Instance UID the session already holds, and the
         # instance holding it (#431). Seeded from the graph, which equals
@@ -4592,6 +4744,7 @@ class DicomImporter:
         for p in store.patients:
             for st in p.studies:
                 study_map[st.study_instance_uid] = st
+                study_owner[st.study_instance_uid] = p
                 for se in st.series:
                     series_map[se.series_instance_uid] = se
                     for held_inst in se.instances:
@@ -5447,15 +5600,19 @@ class DicomImporter:
                     sid = meta['sid']
                     ser_id = meta['ser_id']
 
-                    # Patient
-                    pat = patient_map.get(pid)
-                    if not pat:
-                        pat = Patient(pid, meta['pname'])
-                        store.patients.append(pat)
-                        patient_map[pid] = pat
+                    # Patient, after the study is looked up (#584): a file
+                    # with no Patient ID joins the patient holding its
+                    # study, and a file with one never creates an empty
+                    # patient beside a study someone else already holds
+                    # for it. See `_link_patient`.
+                    study = study_map.get(sid)
+                    pat, linked_under_id_less = _link_patient(
+                        store, patient_map, study_owner, meta,
+                        study_owner.get(sid) if study else None)
+                    if meta['no_patient_id']:
+                        id_less_files += 1
 
                     # Study
-                    study = study_map.get(sid)
                     if not study:
                         # A date we cannot read is a date we do not have.
                         # Substituting one here is indistinguishable
@@ -5474,6 +5631,7 @@ class DicomImporter:
                         study = Study(sid, sdate)
                         pat.studies.append(study)
                         study_map[sid] = study
+                        study_owner[sid] = pat
 
                     # Series
                     series = series_map.get(ser_id)
@@ -5494,6 +5652,9 @@ class DicomImporter:
                     # against a later file that could have been kept.
                     held[inst.sop_instance_uid] = inst
                     count += 1
+                    if store_backend is not None:
+                        _audit_linkage(store_backend, inst.sop_instance_uid,
+                                       meta, linked_under_id_less)
                 except Exception as e:
                     # A parent-side failure is the same failure to the
                     # caller as a worker-side one: the file is not in the
@@ -5502,6 +5663,12 @@ class DicomImporter:
                                     f"Linkage Failed: {describe_exception(e)}")
 
         logger.info(f"Successfully ingested {count} instances.")
+        if id_less_files:
+            # A count, never an audit row: Patient ID is Type 2 and empty
+            # is legal, so an ID-less file is not a failure (#584).
+            logger.info(
+                f"{id_less_files} file(s) carried no Patient ID; each of "
+                "their studies was made its own patient.")
         if failures:
             logger.warning(
                 f"Rejected {len(failures)} file(s) at ingest; each has an "
@@ -8639,7 +8806,11 @@ def export_folder_names(patient, study, series):
     Returns:
         tuple[str, str, str]: (subject_folder, study_folder, series_folder)
     """
-    subj_name = "Subject_" + ConfigLoader.clean_filename(patient.patient_id or "UnknownPatient")
+    # `exported_patient_id`, never `patient_id`: a subject with no Patient
+    # ID is keyed on its source Study UID, which must not name a folder
+    # (#584). Its folder is `Subject_UnknownPatient`, as an empty ID's was.
+    subj_name = "Subject_" + ConfigLoader.clean_filename(
+        exported_patient_id(patient) or "UnknownPatient")
 
     # Study/Series descriptions are read from the FIRST series' FIRST
     # instance -- not from whichever instance a caller happens to be
@@ -8824,7 +8995,10 @@ def export_stamp_attributes(patient, study, series):
     """
     patient_attributes = {
         "0010,0010": patient.patient_name,
-        "0010,0020": patient.patient_id,
+        # Empty for a subject with no Patient ID, under KEEP and REPLACE
+        # alike (#584, owner ruling Q4): what its source had, and never
+        # the synthetic key or the placeholder `UnknownPatient`.
+        "0010,0020": exported_patient_id(patient),
     }
     if getattr(patient, 'birth_date', None):
         patient_attributes["0010,0030"] = patient.birth_date

@@ -44,7 +44,8 @@ from .parallel import (run_parallel, _env_int, _resolve_strategy,
 from .configuration import (IsocenterConfiguration, FlowList, _policy_base_label,
                             _scan_policy_for)
 from .entities import (Patient, PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
-                       resolve_item_path, iter_item_tree)
+                       resolve_item_path, iter_item_tree,
+                       exported_patient_id, is_synthetic_patient_id)
 from .profiles import FLOOR_POLICY
 # The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
 # and diffs against its table, and the two must be one read (#714).
@@ -928,6 +929,8 @@ class DicomSession:
         # run its PASS through the COMPLIANCE_CHECK channel.
         for uid, _path, details in self.store_backend.check_pixel_geometry():
             get_logger().warning(f"{uid}: {details}")
+
+        self._audit_pre_1_0_id_less_groups()
 
         # Initialize Configuration Object
         self.configuration = IsocenterConfiguration()
@@ -2688,6 +2691,36 @@ class DicomSession:
         report._scan_tally = self._scan_tally.copy()
         return report
 
+    def _audit_pre_1_0_id_less_groups(self):
+        """One count-only `WARNING` row at every open of a store holding a
+        pre-1.0 ID-less group (#584, owner ruling Q5).
+
+        Before 1.0 ingest grouped every file with an empty Patient ID under
+        `''`, and every file without one under `UnknownPatient`, so such a
+        patient may be several subjects. Nothing is split on open: that
+        would give already-shifted dates a second offset (docs/migration.md
+        says how to separate them). A `''` group is loud already -- its date
+        shift declines on every pass -- but an `UnknownPatient` group shares
+        one pseudonym and one offset and graded PASS, silently. A real
+        Patient ID `UnknownPatient` is counted too, which "may" covers.
+
+        Counts only, as the log since 0.9.7 names no Patient ID. Every open,
+        not once: the row is about the store's contents, and a report over
+        any later session of this store has to carry it.
+        """
+        count = sum(1 for p in self.store.patients
+                    if p.patient_id in ("", "UnknownPatient"))
+        if not count:
+            return
+        detail = (f"{count} patient{' was' if count == 1 else 's were'} "
+                  "grouped by a release before 1.0 from files with no Patient "
+                  "ID and may be more than one subject; re-ingest their source "
+                  "files into a new store to separate them (#584).")
+        get_logger().warning(detail)
+        self.store_backend.log_audit(action_type="WARNING",
+                                     entity_uid=self.persistence_file,
+                                     details=detail)
+
     def phi_status_summary(self) -> Dict[str, Counter]:
         """What the session currently knows about the PHI in each entity.
 
@@ -2744,8 +2777,9 @@ class DicomSession:
         """
         from .remediation import _ScanTally
 
-        # `is not None`, not truthiness: `''` is a Patient ID ingest keeps
-        # (an empty element; an absent one is `UnknownPatient`), and a
+        # `is not None`, not truthiness: `''` is a Patient ID a store
+        # written before 1.0 can hold, and a hand-built graph too (ingest
+        # keys an ID-less subject on its study since #584), and a
         # falsy filter stamped such a patient CLEARED with its name finding
         # outstanding and let its instances through the safe export
         # (#581). The same test in `_scan_before_export` and `_ScanTally`.
@@ -3917,7 +3951,9 @@ class DicomSession:
         # {'0010,0040': 'O'} over the good one (review of #509). Where the
         # patient is itself a replacement, the refusal below names it.
         entity_fallback = {"0010,0010": patient.patient_name,
-                           "0010,0020": patient.patient_id}
+                           # What the export writes: never the synthetic
+                           # key of a subject with no Patient ID (#584).
+                           "0010,0020": exported_patient_id(patient)}
 
         def captured(inst, tag):
             """The value the lock stashes for `tag` on `inst`, and whether
@@ -3954,7 +3990,7 @@ class DicomSession:
             if "0010,0010" in tags_to_lock:
                 record["0010,0010"] = patient.patient_name
             if "0010,0020" in tags_to_lock:
-                record["0010,0020"] = patient.patient_id
+                record["0010,0020"] = exported_patient_id(patient)
             groups.append((record, []))
 
         # A replacement is not an identity to keep. Since #492 the
@@ -4738,6 +4774,15 @@ class DicomSession:
         # the #548 scheme check, and the instances carrying no token --
         # as it spoke for every instance before.
         original_attrs = opened[next(iter(carrying))]
+        # The Patient ID a restore gives the patient. A subject with no
+        # Patient ID locked a blank one; writing that back would make every
+        # restored ID-less subject `''`, and `audit()`'s shared-ID merge
+        # (#563) would collapse them into one -- #584 again, by another
+        # door. So a blank token ID leaves the synthetic key in place.
+        restored_id = original_attrs.get("0010,0020", p.patient_id)
+        if (is_synthetic_patient_id(p.patient_id)
+                and not str(restored_id or "").strip()):
+            restored_id = p.patient_id
 
         if original_attrs:
             if restore:
@@ -4747,7 +4792,7 @@ class DicomSession:
                 # and a refusal there would leave two patients with one
                 # ID under two schemes in the graph (#548).
                 self.store._refuse_a_merge_across_schemes(
-                    renamed=(p, original_attrs.get("0010,0020", p.patient_id)))
+                    renamed=(p, restored_id))
                 # Drained before the first write, as `audit()` and
                 # `redact()` drain on entry: the loop below writes onto
                 # every instance and the patient, and a queued save could
@@ -4882,7 +4927,7 @@ class DicomSession:
                 if "0010,0010" in original_attrs:
                     p.patient_name = original_attrs["0010,0010"]
                 if "0010,0020" in original_attrs:
-                    p.patient_id = original_attrs["0010,0020"]
+                    p.patient_id = restored_id
                 # Recorded, because `Patient` tracks no assignment: a
                 # restore that marked nothing was skipped by the next save,
                 # which then deleted the pseudonym's row and every study

@@ -33,8 +33,11 @@ def test_phi_detection():
     assert date_finding.tag == "0008,0020"
 
 def test_no_phi():
-    # Setup a patient with no PHI (sanitized)
-    pat = Patient("UNKNOWN", "Unknown")
+    # Setup a patient with no PHI (sanitized): its ID is already a
+    # replacement. This used `"UNKNOWN"`, which the scan exempted by name
+    # until #584; that string is a Patient ID a file can carry, and is
+    # pseudonymized like any other now.
+    pat = Patient("ANON_0123456789abcdef01234567", "Unknown")
     # No studies
 
     inspector = PhiInspector(project_secret=FIXED_A)

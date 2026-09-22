@@ -120,6 +120,19 @@ A store records what the last scan concluded about each patient, study and insta
 
 A 1.0 store is not for 0.9.x: an older release reopening it reads a nested item's stored status as an attribute, and cannot export it (it reads the DS/IS values of #662 as dicts). **Never save into a 1.0 store from 0.9.x.** 0.9.x does not know the policy columns, so a status it records is left beside the policy of the last 1.0 scan -- a pairing no scan concluded, which the export cannot tell from a true one. If that has happened, run `audit()` under your configuration before trusting any status. Keep a copy of the 0.9.x store if you may need to go back, and go back to that copy, not into the 1.0 store.
 
+### Files with no Patient ID, grouped before 1.0 (#584)
+
+Before 1.0 ingest grouped every file whose Patient ID was **empty** under one patient `''`, and every file **without** one under one patient `UnknownPatient`, across the whole store, so either may hold several subjects. From 1.0 a file with no Patient ID belongs to the patient holding its study, or to a new patient of that study alone, and a subject with no Patient ID exports an empty one.
+
+Opening an older store splits nothing, because splitting would give dates already shifted under the group's offset a second one. So:
+
+- New ID-less files ingested into an old store get patients of their own; the old grouping stays as it was.
+- A `''` patient's date shift is still declined on every pass ("could not resolve a PatientID"), as before: loud and fail-closed.
+- An `UnknownPatient` patient keeps its one pseudonym and one offset for every subject in it.
+- Every open of a store holding either writes one `WARNING` audit row, counts only: "N patients were grouped by a release before 1.0 from files with no Patient ID and may be more than one subject". A real Patient ID `UnknownPatient` is counted too. Reports over the store grade `REVIEW_REQUIRED`.
+
+To separate the subjects, re-ingest their **source** files into a new store.
+
 ### A project secret stays in its store
 
 Until 1.0, `store_backend.write_project_secret(path)` and `load_project_secret(path)` copied a store's project secret into a fresh store. Both are gone and raise `AttributeError`: a secret belongs to the store it was generated in (see [What to keep](configuration.md#what-to-keep); [#716](https://github.com/kvnlng/Isocenter/issues/716)). A later batch for the same patients goes into the same store. Nothing reads a secret file written by 0.9.7 or 0.9.8 any more; delete it as you would a key.
