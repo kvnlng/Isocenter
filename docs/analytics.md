@@ -42,7 +42,7 @@ A per-instance manifest is not part of the report; it is a separate document wri
 
 ### How the grade is decided
 
-The report grades a run `PASS` or `REVIEW_REQUIRED`. There is no `FAIL`: a run that fails raises an exception rather than grading itself.
+The report grades a run `PASS` or `REVIEW_REQUIRED`. There is no `FAIL`: a failure the run records costs it its `PASS` (condition 2); one it cannot record raises.
 
 **The grade is `PASS` exactly when none of the conditions below holds.** Section 5's *Grade Basis* lists each one that does, one line per condition, naming the section that holds the evidence. The grade and that list are computed from one list, so they cannot disagree.
 
@@ -56,13 +56,14 @@ The conditions are read from the store's audit log and from the store itself. Th
 4. **The PHI scan could not read something the export still carries.** A `SCAN_GAP` row whose element is retained for export, or whose disposition cannot be resolved (section 3.2).
 5. **A remediation was proposed and did not run.** A `REMEDIATION_DECLINED` row, including a proposal that raised (section 3.3).
 6. **A verb left no evidence.** `anonymize()` or `redact()` ran in the session generating the report, and none of the rows it writes is in the audit log.
-7. **A finding raised under your policy was not acted on.** A patient, study or instance whose last PHI scan (`audit()`, or the scan `export(check_burned_in=True)` runs) found a value that a rule of the policy that scan ran with acts on, and which no `anonymize()` pass since has acted on. "Acted on" means the value was replaced, shifted or removed, or was already what the rule asks. A remediation that declined did not act, so its entity counts here as well as under condition 5. This is the entity reading `IDENTIFIED` in `session.phi_status_summary()`, counted over the whole store; section 5's line gives the count per level. Series are never scanned and never counted. An entity edited after its scan reads `UNSCANNED`, and does not grade under this condition.
+7. **A finding raised under your policy was not acted on.** A patient, study or instance whose last PHI scan (`audit()`, or the scan `export(check_burned_in=True)` runs) found a value that a rule of the policy that scan ran with acts on, and which no `anonymize()` pass since has acted on. "Acted on" means the value was replaced, shifted or removed, or was already what the rule asks. A remediation that declined did not act, so its entity keeps or returns to `IDENTIFIED` and counts here as well as under condition 5, unless it was edited after its scan. This is the entity reading `IDENTIFIED` in `session.phi_status_summary()`, counted over the whole store; section 5's line gives the count per level. Series are never scanned and never counted. An entity edited after its scan reads `UNSCANNED`, and does not grade under this condition.
 
 **What `PASS` does not mean.** The grade is about what the run recorded doing, and what its own scan found and its own passes left. It does not say the exported data holds no identifiers:
 
 - **Data never scanned does not grade.** An export without `audit()` grades `PASS` if nothing else is recorded: an unscanned instance is the absence of a measurement, not a finding. Section 5 says how many instances have no PHI scan at their current revision, so a `PASS` over data no scan has read does not pass for a `PASS` over data a scan cleared. The per-entity answer is `session.phi_status_summary()` and the manifest's `anonymized`.
-- **The scan finds what your policy names.** An identifier in a tag no rule names is not a finding, and the grade does not see it.
-- **Burned-in pixel text is not graded** unless `scan_pixel_content()` or a redaction recorded something. Section 5 says which scans ran.
+- **The scan finds what your policy names, plus Patient's Name, Patient ID and Study Date, which it always checks, and, with `remove_private_tags` on, every private tag.** An identifier anywhere else is not a finding, and the grade does not see it.
+- **An edit made between `audit()` and `anonymize()`** can be stamped `REMEDIATED` by the pass without any scan having read it, and then does not grade ([#752](https://github.com/kvnlng/Isocenter/issues/752)).
+- **Burned-in pixel text is not graded.** Text `scan_pixel_content()` finds is counted in section 5 and costs no `PASS`; an instance it could not read does (condition 2), as does a stored Burned In Annotation `YES`.
 
 The grade describes a run. Whether the result meets a protocol or a regulation is the data steward's determination.
 

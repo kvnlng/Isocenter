@@ -124,6 +124,40 @@ def test_a_partial_pass_grades_in_a_reopened_store(tmp_path, mode):
         "acted on it (patients 0, studies 1, instances 1)"], section_5
 
 
+def test_the_count_is_over_the_whole_store_not_the_export(tmp_path):
+    """Owner ruling Q2: counted store-wide, like every other condition, not
+    over the exported instances. `PA` is passed its patient findings only
+    and exported alone, leaving its study and instance; `PB`, two studies,
+    is scanned and never acted on, and still grades. Both patients hold
+    uncounted-if-skipped entities, so the result does not depend on which
+    one `store.patients` lists first. Kills M-A10 (the walk narrowed to
+    the first patient), M-A11 (to each patient's first study) and any
+    narrowing to what was exported."""
+    write_ct(tmp_path / "in" / "a.dcm", "PA", "5732", name="Alpha^One")
+    write_ct(tmp_path / "in" / "b1.dcm", "PB", "5733", name="Beta^Two")
+    write_ct(tmp_path / "in" / "b2.dcm", "PB", "5734", name="Beta^Two")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        session.anonymize(PhiReport([f for f in report.findings
+                                     if f.patient_id == "PA"
+                                     and f.entity_type == "Patient"]))
+        [pa_sop] = [i.sop_instance_uid for p in session.store.patients
+                    if p.patient_id != "PB" for st in p.studies
+                    for se in st.series for i in se.instances]
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       subset=[pa_sop])
+        section_5 = _section_5(session, tmp_path)
+
+    assert _unacted(_reasons(section_5)) == [
+        "7 entities read IDENTIFIED: the last PHI scan raised a finding "
+        "under the policy it ran with, and no `anonymize()` pass since "
+        "acted on it (patients 1, studies 3, instances 3)"], section_5
+    assert _unscanned_line(section_5) == (
+        "*   **PHI Scan (`audit()`):** 0 of 3 instance(s) have no PHI scan "
+        "at their current revision.")
+
+
 def test_an_instance_only_pass_grades(tmp_path):
     """Scenario (e): the file carries the original name, ID and date,
     because the export stamps them from the owners the pass never touched."""
@@ -148,6 +182,7 @@ def test_a_full_pass_grades_pass(tmp_path):
         section_5 = _section_5(session, tmp_path)
 
     assert _reasons(section_5) == [], section_5
+    assert "**Grade Basis:** PASS" in section_5, section_5
     assert _unscanned_line(section_5) == (
         "*   **PHI Scan (`audit()`):** 0 of 1 instance(s) have no PHI scan "
         "at their current revision.")
@@ -162,6 +197,7 @@ def test_an_export_nothing_scanned_grades_pass_and_says_so(tmp_path):
         section_5 = _section_5(session, tmp_path)
 
     assert _reasons(section_5) == [], section_5
+    assert "**Grade Basis:** PASS" in section_5, section_5
     assert _unscanned_line(section_5).startswith(
         "*   **PHI Scan (`audit()`):** 1 of 1 instance(s) have no PHI scan "
         "at their current revision."), section_5
