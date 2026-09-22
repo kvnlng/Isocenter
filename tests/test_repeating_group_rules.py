@@ -120,7 +120,7 @@ def test_a_private_group_beside_them_is_the_private_sweeps(tmp_path):
 def test_the_private_sweep_still_removes_them(tmp_path):
     """The other half: under `remove_private_tags: true` they go, by the
     sweep, which is the only thing that should touch an odd group."""
-    _, out, rows = _run(tmp_path, remove_private=True)
+    _, out, _ = _run(tmp_path, remove_private=True)
     assert 0x50010010 not in out and 0x60011000 not in out
 
 
@@ -293,6 +293,29 @@ def test_the_mask_spellings_that_are_refused(tmp_path, key):
     message = str(caught.value)
     assert f"phi_tags key {key!r} is not a 'gggg,eeee' tag" in message, message
     assert "or a repeating-group key such as '60xx,xxxx'" in message, message
+
+
+def test_a_mask_rule_survives_save_and_reload(tmp_path):
+    """`save()` writes only the rules that differ from the base (#715), by
+    key, so a mask key must be written, and reload, like a tag key: a KEEP
+    of the overlay group over `basic` is a difference; the profile's own
+    `50xx,xxxx` is not. Kills a writer or diff that drops or reshapes a
+    mask key."""
+    path = tmp_path / "cfg.yaml"
+    path.write_text(yaml.safe_dump({"privacy_profile": "basic", "phi_tags": {
+        "60XX,XXXX": {"action": "KEEP", "name": "Overlay"}}}), encoding="utf-8")
+    with DicomSession(str(tmp_path / "a.db")) as session:
+        session.load_config(str(path))
+        session.configuration.config_path = str(tmp_path / "saved.yaml")
+        session.configuration.save()
+        policy = dict(session.configuration.phi_tags)
+    saved = yaml.safe_load((tmp_path / "saved.yaml").read_text(encoding="utf-8"))
+    assert saved["phi_tags"] == {"60xx,xxxx": {"action": "KEEP", "name": "Overlay"}}
+    with DicomSession(str(tmp_path / "b.db")) as session:
+        session.load_config(str(tmp_path / "saved.yaml"))
+        assert session.configuration.phi_tags == policy
+        assert policy["60xx,xxxx"]["action"] == "KEEP"
+        assert policy["50xx,xxxx"]["action"] == "REMOVE"
 
 
 def test_a_mask_does_not_reach_a_group_outside_the_range():
