@@ -27,8 +27,8 @@ import pydicom
 import pytest
 
 from isocenter import Session
-from isocenter.entities import (NO_PATIENT_ID_PREFIX, exported_patient_id,
-                                is_synthetic_patient_id)
+from isocenter.entities import (NO_PATIENT_ID_PREFIX, PhiStatus,
+                                exported_patient_id, is_synthetic_patient_id)
 from isocenter.exporters.wfdb import record_name_for
 
 from support.ct_small_files import study_uid, write_ct
@@ -599,6 +599,70 @@ def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(
         assert patient.patient_id == key
         assert held[sop_b].attributes.get("0010,0020") == "PA"
         assert held[sop_c].attributes.get("0010,0020") == ""
+
+
+
+def _rekey_between_audit_and_pass(tmp_path, suffix):
+    """An ID-less file a, audited under the floor policy P; then a `PA`
+    file b of its study, which re-keys the patient to `PA` (nothing is
+    derived under the key yet); then `anonymize()` of that report. The
+    re-key is an edit between the scan and the pass: the patient's current
+    ID was never scanned under P. Returns the patient, its status after
+    the audit, the session and the study UID; the caller closes the
+    session."""
+    _id_less(tmp_path / "in1" / "a.dcm", suffix, "Alpha^One", "absent")
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", suffix, ".1.2", "Alpha^One")
+    session = Session(str(tmp_path / "s.db"))
+    session.ingest(str(tmp_path / "in1"))
+    report = session.audit()
+    [patient] = session.store.patients
+    audited = patient._phi_status_record()
+    session.ingest(str(tmp_path / "in2"))
+    [patient] = session.store.patients
+    assert patient.patient_id == "PA"
+    session.anonymize(report)
+    return patient, audited, session
+
+
+@pytest.mark.xfail(strict=True, reason="#752")
+def test_a_re_key_between_audit_and_pass_is_not_remediated_under_the_scans_policy(
+        tmp_path):
+    """The rebase check against #750 (L7): a status recorded under a policy
+    says the entity was scanned under it. The re-key gives the patient an
+    ID the scan never read, and the pass then records it REMEDIATED under
+    P -- measured on e75230a2 -- and the export writes `PA` in the clear,
+    so the status vouches for a value no scan saw. That is #752's class
+    (an edit between `audit()` and `anonymize()` stamped REMEDIATED), and
+    the re-key is a second door into it (coordinator ruling: xfail on
+    #752, not a fix here). The honest outcome, asserted: the patient is
+    not REMEDIATED under P."""
+    patient, audited, session = _rekey_between_audit_and_pass(tmp_path, "5902")
+    try:
+        status, policy = audited
+        assert status is PhiStatus.IDENTIFIED and policy is not None
+        assert patient._phi_status_record() != (PhiStatus.REMEDIATED, policy)
+    finally:
+        session.close()
+
+
+def test_a_re_key_between_audit_and_pass_does_not_grade_pass(tmp_path):
+    """The fail-closed half of the case above, which holds today and is
+    pinned apart from the xfail: the pass declines the dates, since the
+    offset's seed is no longer the patient's ID, writes a
+    REMEDIATION_DECLINED row for the study's and the instance's Study
+    Date, and the run grades REVIEW_REQUIRED, never PASS."""
+    patient, _audited, session = _rekey_between_audit_and_pass(tmp_path, "5903")
+    try:
+        declined = sorted(uid for uid, d in _audit_rows(session, "REMEDIATION_DECLINED")
+                          if "offset is seeded on" in d)
+        assert declined == sorted([study_uid("5903"), study_uid("5903") + ".1.1"]), declined
+        session.export(str(tmp_path / "out"), use_compression=False)
+        session.generate_report(str(tmp_path / "r.md"))
+        content = (tmp_path / "r.md").read_text(encoding="utf-8")
+    finally:
+        session.close()
+    assert "**REVIEW_REQUIRED**" in content
+    assert "**PASS**" not in content
 
 
 #: The floor, plus SHIFT on Series, Acquisition and Content Date: dates an
