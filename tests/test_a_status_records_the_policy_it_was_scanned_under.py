@@ -813,6 +813,66 @@ def test_two_complementary_passes_complete_as_in_the_scanning_session(
     assert reopened == in_session
 
 
+def test_a_copy_split_completes_as_in_the_scanning_session(tmp_path):
+    """Fourth review of #750, at 4f28e5c1: a report split with `copy.copy`
+    into complementary halves -- all but Institution Name, then Institution
+    Name alone -- each anonymized in turn. Both halves carry the audit's
+    tally; in the scanning session both settle against its one tally and
+    the instance ends REMEDIATED, PASS. Keyed per report, the reopened
+    session gave each half its own working copy and read IDENTIFIED,
+    REVIEW_REQUIRED. Kills: a working copy per call or per report."""
+    import copy
+    audit = {}   # the report each mode's audit returned; the first step sets it
+
+    def half(keep, first=False):
+        def step(report):
+            if first:
+                audit["report"] = report
+            part = copy.copy(audit["report"])
+            part.findings = [f for f in audit["report"].findings if keep(f)]
+            return part
+        return step
+
+    in_session, reopened = _both_ways(tmp_path, passes=[
+        half(lambda f: f.tag != INSTITUTION, first=True),
+        half(lambda f: f.tag == INSTITUTION)])
+    assert {s[1] for s in in_session["statuses"]} == {"remediated"}
+    assert "PASS" in in_session["grade"]
+    assert reopened == in_session
+
+
+def test_two_audits_split_across_a_reopen_fail_closed(tmp_path):
+    """The one known difference from the scanning session (fourth review of
+    #750): two audits, the first's report narrowed to all but Institution
+    Name, the second's to Institution Name alone. In the scanning session
+    both passes settle against the *latest* audit's tally, which the second
+    completes: REMEDIATED, PASS. After a reopen each report brings its own
+    audit's tally, and neither is told which came last, so neither
+    completes: the instance stays IDENTIFIED under the scan's policy and
+    the grade is REVIEW_REQUIRED. The output is the same. Pinned so a
+    later change cannot quietly turn it into a PASS that no single tally
+    supports."""
+    db = str(tmp_path / "s.db")
+    folder = _write_ct(tmp_path / "in")
+    with DicomSession(db) as session:
+        session.ingest(folder)
+        session.save(sync=True)
+        r1 = session.audit()
+        r2 = session.audit()
+        policy = session.configuration._scan_policy()
+    r1.findings[:] = [f for f in r1.findings if f.tag != INSTITUTION]
+    r2.findings[:] = [f for f in r2.findings if f.tag == INSTITUTION]
+    with DicomSession(db) as session:
+        session.anonymize(r1)
+        session.anonymize(r2)
+        [inst] = _instances(session)
+        assert inst.attributes.get(INSTITUTION) == ""
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        assert inst.phi_status_policy == policy
+        session.export(str(tmp_path / "out"))
+        assert "REVIEW_REQUIRED" in _grade(session, tmp_path)
+
+
 def test_a_narrowed_report_is_settled_as_in_the_scanning_session(tmp_path):
     """Review of #750, finding 1: `report.findings[:]` without Institution
     Name. The tally demotes the instance in both sessions."""
