@@ -941,6 +941,42 @@ def test_two_audits_split_across_a_reopen_fail_closed(tmp_path):
         assert "REVIEW_REQUIRED" in _grade(session, tmp_path)
 
 
+def test_one_entitys_findings_split_across_two_sessions_fail_closed(tmp_path):
+    """The second known difference from the scanning session (sixth review
+    of #750): one report's findings for one instance split in two -- all but
+    Institution Name, then Institution Name alone. In the scanning session
+    the second pass completes the first (#553's `_partial`): REMEDIATED,
+    PASS. Here the first half is applied in one reopened session, which
+    saves, and the second in another: that session's working copy starts
+    from the audit, the first session's partial progress on the instance
+    died with it, and the second pass handles one of its keys, so the
+    instance stays IDENTIFIED and the grade is REVIEW_REQUIRED. Institution
+    Name is still emptied. Closing it would need the working tally stored,
+    which the design excludes. Pinned so a later change cannot quietly turn
+    it into a PASS that no tally supports."""
+    db = str(tmp_path / "s.db")
+    folder = _write_ct(tmp_path / "in")
+    with DicomSession(db) as session:
+        session.ingest(folder)
+        session.save(sync=True)
+        report = session.audit()
+        policy = session.configuration._scan_policy()
+    every = list(report.findings)
+    with DicomSession(db) as session:
+        report.findings[:] = [f for f in every if f.tag != INSTITUTION]
+        session.anonymize(report)
+        session.save(sync=True)
+    with DicomSession(db) as session:
+        report.findings[:] = [f for f in every if f.tag == INSTITUTION]
+        session.anonymize(report)
+        [inst] = _instances(session)
+        assert inst.attributes.get(INSTITUTION) == ""
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        assert inst.phi_status_policy == policy
+        session.export(str(tmp_path / "out"))
+        assert "REVIEW_REQUIRED" in _grade(session, tmp_path)
+
+
 def test_a_narrowed_report_is_settled_as_in_the_scanning_session(tmp_path):
     """Review of #750, finding 1: `report.findings[:]` without Institution
     Name. The tally demotes the instance in both sessions."""

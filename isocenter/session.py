@@ -963,7 +963,8 @@ class DicomSession:
         # copy. A plain dict: nothing else holds a working copy, so a weak
         # mapping would drop it between passes. It keeps one entry per
         # audit handed to this session, two ints per uid it has not
-        # completed, for the life of the session.
+        # completed plus the handled keys of any uid a pass left partial,
+        # for the life of the session.
         self._report_tallies = {}
         # Every policy an `audit()` in this session scanned under,
         # fingerprint -> base (#555). A status recorded under one of these

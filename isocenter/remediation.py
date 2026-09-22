@@ -2189,9 +2189,13 @@ class _ScanTally:
         the audit's reports then drain. Never the session's own tally: it
         is drained as its passes complete uids, and a report sharing it
         named nothing after a reopen of a pass that was never saved
-        (#644's flow). A pass over a pristine copy still completes what an
-        earlier *saved* pass applied, whose end state the graph holds
-        (#567's satisfied keys).
+        (#644's flow). A pass handed the whole report over a pristine copy
+        still completes what an earlier *saved* pass applied, whose end
+        state the graph holds (#567's satisfied keys). A pass handed only
+        the rest of an entity's findings does not: the keys an earlier
+        session's pass handled are not in its list, and that session's
+        `_partial` died with it, so the entity stays IDENTIFIED (sixth
+        review of #750).
         """
         fresh = _ScanTally(())
         fresh._raised = dict(self._raised)
