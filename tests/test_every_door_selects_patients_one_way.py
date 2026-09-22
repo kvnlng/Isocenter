@@ -393,6 +393,22 @@ def test_none_locks_nobody(tmp_path, door):
     assert "patient_ids" in message and "None" in message, message
 
 
+def test_one_finding_is_not_a_patient_id(tmp_path):
+    """`lock_identities(<one PhiFinding>)` goes to the batch, which refuses
+    it by its type (a finding is not iterable), before any key exists.
+    Measured at 042aa01f: looked up as one Patient ID, an ERROR, nothing
+    locked -- and `anonymize()` then removed the identity."""
+    key = tmp_path / "k.key"
+    with _session(tmp_path, "finding") as session:
+        finding = session.audit().findings[0]
+        session.enable_reversible_anonymization(str(key))
+        with pytest.raises(TypeError) as caught:
+            session.lock_identities(finding)
+    assert "patient_ids" in str(caught.value), str(caught.value)
+    assert "PhiFinding" in str(caught.value), str(caught.value)
+    assert not key.exists()
+
+
 def test_the_lock_count_stays_over_distinct_ids(tmp_path, caplog):
     """The lock's unmatched count is over distinct ids, as its `[n of m]`
     numbering is over distinct patients; the export's count is positional.
