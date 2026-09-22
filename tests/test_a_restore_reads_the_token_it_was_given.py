@@ -247,8 +247,8 @@ def tokenless(count, total):
     which counted an instance carrying another token too."""
     return (f"{count} of {total} instances of this patient carry no identity "
             "token, so they took only the patient-level identifiers (group "
-            "0010) of the first token found, and their other locked identifiers "
-            "keep what anonymize() left (#583).")
+            "0010) of the token the patient's identity was restored from, and "
+            "their other locked identifiers keep what anonymize() left (#583).")
 
 
 def _tokenless_warnings(caplog):

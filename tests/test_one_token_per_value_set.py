@@ -63,8 +63,8 @@ def tokenless(count, total):
     """The WARNING a restore logs for instances carrying no token (Q-A)."""
     return (f"{count} of {total} instances of this patient carry no identity "
             "token, so they took only the patient-level identifiers (group "
-            "0010) of the first token found, and their other locked identifiers "
-            "keep what anonymize() left (#583).")
+            "0010) of the token the patient's identity was restored from, and "
+            "their other locked identifiers keep what anonymize() left (#583).")
 
 
 def old_shared(count, total):
@@ -83,9 +83,10 @@ def old_shared(count, total):
 def disagree(count, total):
     """The WARNING a restore logs when tokens disagree on name or ID (Q-F)."""
     return (f"{count} of {total} identity tokens of this patient hold a "
-            "Patient's Name or Patient ID different from the first token found; "
-            "the patient takes the first token's, which export() stamps on "
-            "every study (#583).")
+            "Patient's Name or Patient ID different from the token the "
+            "patient's identity was restored from (the first found, or the "
+            "first holding a Patient ID); the patient takes that token's, which "
+            "export() stamps on every study (#583).")
 
 
 def empty_records(count, total, tags):

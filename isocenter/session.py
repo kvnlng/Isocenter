@@ -4631,7 +4631,8 @@ class DicomSession:
                             it is, with one WARNING per such study that
                             carries no date (#619). An instance carrying no
                             token takes only the patient-level identifiers
-                            (group 0010) of the first token found -- which
+                            (group 0010) of the token that speaks for the
+                            patient (below) -- which
                             include Patient's Age, Size and Weight, and so
                             may be another study's -- and keeps its other
                             locked identifiers as the pass left them; one
@@ -4650,7 +4651,9 @@ class DicomSession:
                             restored in full everywhere. Where tokens
                             disagree on Patient's Name or Patient ID, each
                             instance keeps its own and the `Patient` takes
-                            the first token's, with a WARNING.
+                            the speaking token's, with a WARNING; a token
+                            whose Patient ID is blank does not disagree on
+                            it.
 
         The token that speaks for the patient is the first one **of ours**
         in study, series and instance order (#616): a study without a
@@ -4887,7 +4890,8 @@ class DicomSession:
                     if content is None:
                         # **An instance carrying no token takes the
                         # patient-level identifiers only (#583, Q-A)**:
-                        # group 0010, from the first token found. Until
+                        # group 0010, from the token that speaks for the
+                        # patient (`original_attrs`, above). Until
                         # 0.9.8 it took every value of that token, so a
                         # study ingested after the lock, or the unlocked
                         # half of a pair `audit()` merged, took another
@@ -4931,7 +4935,8 @@ class DicomSession:
                     get_logger().warning(
                         "%d of %d instances of this patient carry no identity "
                         "token, so they took only the patient-level identifiers "
-                        "(group 0010) of the first token found, and their other "
+                        "(group 0010) of the token the patient's identity was "
+                        "restored from, and their other "
                         "locked identifiers keep what anonymize() left (#583).",
                         tokenless, count)
                 if kept_ids:
@@ -4952,20 +4957,35 @@ class DicomSession:
                 # **Tokens that disagree on the name or ID (#583, Q-F).**
                 # Each instance keeps its own token's, so a re-lock after
                 # the restore stashes each again; the `Patient` has one
-                # name and one ID, and takes the first token's, which is
-                # what `export()` stamps on every study -- as the #548
-                # merge already stamps the surviving patient's.
+                # name and one ID, and takes the speaking token's
+                # (`original_attrs`), which is what `export()` stamps on
+                # every study -- as the #548 merge already stamps the
+                # surviving patient's. The speaker is not always the first
+                # token found (#584): the WARNING names it, and a token
+                # whose Patient ID is blank does not count as disagreeing
+                # on the ID -- for a patient with one, the speaker rule
+                # passed that token over on purpose, and its `''` is the
+                # file's own empty copy, not a rival ID (review round 4 of
+                # #584, R4-1). A later token holding `PA` under an ID-less
+                # patient still disagrees: the patient keeps its key.
+                def disagrees(values, tag):
+                    if tag not in values or tag not in original_attrs:
+                        return False
+                    if tag == "0010,0020" and not str(values[tag] or "").strip():
+                        return False
+                    return values[tag] != original_attrs[tag]
                 disagreeing = sum(
                     1 for values in opened.values()
-                    if any(tag in values and tag in original_attrs
-                           and values[tag] != original_attrs[tag]
+                    if any(disagrees(values, tag)
                            for tag in ("0010,0010", "0010,0020")))
                 if disagreeing:
                     get_logger().warning(
                         "%d of %d identity tokens of this patient hold a "
-                        "Patient's Name or Patient ID different from the first "
-                        "token found; the patient takes the first token's, which "
-                        "export() stamps on every study (#583).",
+                        "Patient's Name or Patient ID different from the token "
+                        "the patient's identity was restored from (the first "
+                        "found, or the first holding a Patient ID); the patient "
+                        "takes that token's, which export() stamps on every "
+                        "study (#583).",
                         disagreeing, len(opened))
 
                 # Update Patient Object top-level properties if Name/ID changed

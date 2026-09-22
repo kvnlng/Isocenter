@@ -21,6 +21,7 @@ the file's `0010,0020` is empty under `KEEP` and `REPLACE` alike (owner
 ruling Q4, 2026-09-21).
 """
 import datetime
+import logging
 
 import pydicom
 import pytest
@@ -34,6 +35,32 @@ from support.ct_small_files import study_uid, write_ct
 from support.project_secret import load_fixed_secret
 
 MODES = ["threads", "processes"]
+
+#: The token a restore takes the patient's identity from (#583, and review
+#: round 4 of #584): the first found, unless the patient has a Patient ID
+#: and that token's is blank, when it is the first holding one.
+SPEAKER = "the token the patient's identity was restored from"
+
+
+def _tokenless(count, total):
+    return (f"{count} of {total} instances of this patient carry no identity "
+            "token, so they took only the patient-level identifiers (group "
+            f"0010) of {SPEAKER}, and their other locked identifiers keep what "
+            "anonymize() left (#583).")
+
+
+def _disagree(count, total):
+    return (f"{count} of {total} identity tokens of this patient hold a "
+            f"Patient's Name or Patient ID different from {SPEAKER} (the first "
+            "found, or the first holding a Patient ID); the patient takes that "
+            "token's, which export() stamps on every study (#583).")
+
+
+def _restore_warnings(session, caplog, patient_id):
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="isocenter"):
+        session.recover_patient_identity(patient_id, restore=True)
+    return [r.getMessage() for r in caplog.records if "(#583)" in r.getMessage()]
 
 
 @pytest.fixture(autouse=True)
@@ -460,7 +487,7 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
 
 @pytest.mark.parametrize("order", ["rekey", "forward", "rekey-reopened"])
 @pytest.mark.parametrize("how", ["empty", "absent"])
-def test_a_restore_gives_a_joined_patient_its_real_id(tmp_path, order, how):
+def test_a_restore_gives_a_joined_patient_its_real_id(tmp_path, order, how, caplog):
     """Review round 3, R3-1. An ID-less file a and a `PA` file b of one
     study make patient `PA` (a re-key, or a forward join) before any lock.
     The lock stashes each instance's own copy, faithfully: a's is `''`
@@ -470,7 +497,15 @@ def test_a_restore_gives_a_joined_patient_its_real_id(tmp_path, order, how):
     pre-1.0 row. Now the patient, and a token-less instance, take the
     first token whose Patient ID is not blank (coordinator ruling): the
     patient and c get `PA`, a gets back its own. Red at 9b831175 for
-    `rekey-empty`. Kills MS2 (the first token speaks)."""
+    `rekey-empty`. Kills MS2 (the first token speaks).
+
+    Review round 4 (R4-1): the #583 WARNINGs named "the first token
+    found", which here is a's blank token, not the one the patient's
+    identity came from; and a's blank ID counted as a token disagreeing
+    on the Patient ID, though the speaker rule passed it over on purpose.
+    Now they name the speaking token, and a blank-ID token does not
+    disagree: only c's token-less line is logged. Red at bb00b8b1 for
+    `*-empty` (the disagreement line) and every case (the wording)."""
     first, second = ("in2", "in1") if order == "forward" else ("in1", "in2")
     _id_less(tmp_path / first / "a.dcm", "5897", "Alpha^One", how)
     _with_id(tmp_path / second / "b.dcm", "PA", "5897", ".1.2", "Alpha^One")
@@ -494,7 +529,8 @@ def test_a_restore_gives_a_joined_patient_its_real_id(tmp_path, order, how):
             session = Session(str(tmp_path / "s.db"))
             session.enable_reversible_anonymization(str(tmp_path / "k.key"))
         [patient] = session.store.patients
-        session.recover_patient_identity(patient.patient_id, restore=True)
+        warnings = _restore_warnings(session, caplog, patient.patient_id)
+        assert warnings == [_tokenless(1, 3)], warnings
         [patient] = session.store.patients
         assert patient.patient_id == "PA"
         held = {i.sop_instance_uid: i for st in patient.studies
@@ -519,7 +555,8 @@ def test_a_restore_gives_a_joined_patient_its_real_id(tmp_path, order, how):
     assert pre_1_0 == [], pre_1_0
 
 
-def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(tmp_path):
+def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(
+        tmp_path, caplog):
     """The other side of R3-1's rule. An ID-less patient locked, then a
     `PA` file of its study linked under it (the token refuses the re-key),
     then locked again: its tokens are a's `''` and b's `PA`. The patient
@@ -527,7 +564,13 @@ def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(tm
     the first non-blank one, which would rename it to `PA` after values
     were derived under the key (review round 2's rule) -- and a token-less
     ID-less file c still takes the blank ID. Kills MS3 (the non-blank
-    choice applied to an ID-less patient too)."""
+    choice applied to an ID-less patient too).
+
+    Review round 4 (R4-1): b's `PA` does disagree with the speaker's blank
+    -- the patient keeps its key and exports it empty -- so one token is
+    counted, in the wording that names the speaking token. c's copy was
+    absent at ingest, so its `''` after the restore is the token's, not
+    an untouched copy."""
     _id_less(tmp_path / "in1" / "a.dcm", "5898", "Alpha^One", "absent")
     _with_id(tmp_path / "in2" / "b.dcm", "PA", "5898", ".1.2", "Alpha^One")
     c = tmp_path / "in3" / "c.dcm"
@@ -547,13 +590,15 @@ def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(tm
         session.lock_identities(session.audit())
         session.ingest(str(tmp_path / "in3"))
         session.anonymize(session.audit())
-        session.recover_patient_identity(key, restore=True)
-        [patient] = session.store.patients
-        assert patient.patient_id == key
         held = {i.sop_instance_uid: i for st in patient.studies
                 for se in st.series for i in se.instances}
+        assert "0010,0020" not in held[sop_c].attributes
+        warnings = _restore_warnings(session, caplog, key)
+        assert warnings == [_tokenless(1, 3), _disagree(1, 2)], warnings
+        [patient] = session.store.patients
+        assert patient.patient_id == key
         assert held[sop_b].attributes.get("0010,0020") == "PA"
-        assert str(held[sop_c].attributes.get("0010,0020", "")).strip() == ""
+        assert held[sop_c].attributes.get("0010,0020") == ""
 
 
 #: The floor, plus SHIFT on Series, Acquisition and Content Date: dates an
