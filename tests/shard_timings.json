@@ -224,6 +224,7 @@
  "tests/test_private_tag_export.py": 11.89,
  "tests/test_private_tag_reload.py": 4.37,
  "tests/test_private_tag_vr_roundtrip.py": 2.03,
+ "tests/test_profile_editions.py": 0.44,
  "tests/test_profile_end_to_end.py": 3.6,
  "tests/test_profiles.py": 0.02,
  "tests/test_progress_bars_honour_the_environment.py": 4.97,

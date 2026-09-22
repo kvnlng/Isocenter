@@ -100,6 +100,7 @@ Part 3, PR 3, 2026-09-21 (spec §10 item 17 carries the same list):
     - **(5)** `vanished()` replaces `unmatched()` and the `args_source` guard. It asks per file, and runs on every `--changed` run.
     - **(6)** `has_wide_fixture()`: a file with a `scope=` of module, class, package or session is taken whole when any of its tests is selected.
     - **`RELEASING.md` step 3** states the new rules in the same words. The owner's approved text changes in meaning for docs; the coordinator is telling the owner.
+    - **Rebased once more, onto `abdbe479` (#738).** It adds `tests/test_profile_editions.py`, timed on 3.12 at 0.44 s and added to the timings. It adds no pool call to `isocenter/` and no glob to the tests.
 
 **Goal:** give a developer `pytest --changed` -- the tests that exercise the code they touched -- and run the suite on GitHub as four duration-balanced shards per Python version, with every test isolated in its own working directory.
 
