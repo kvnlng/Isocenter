@@ -6415,8 +6415,6 @@ class DicomSession:
             folder: The export's folder, as the other export rows name it.
             fmt: `"DICOM"` or `"WFDB"`, the lead word of the row.
         """
-        if not triples:
-            return
         in_force = self.configuration._scan_policy()
         accepted = set(self._scanned_policies) | {in_force.fingerprint}
         others = {}

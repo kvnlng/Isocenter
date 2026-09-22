@@ -225,6 +225,24 @@ def test_the_root_status_lives_in_its_columns_only(tmp_path, config):
         assert "__phi__" not in inst.attributes
 
 
+def test_a_root_key_never_lands_a_status_on_an_instance(tmp_path):
+    """The guard where it lives: hydration never records a status on an
+    `Instance` from `__phi__`, even for the moment before its column's
+    status overwrites it -- the root's status has one home. The reopen
+    above cannot see the guard, because the column always wins. Kills:
+    the restore running on an `Instance`."""
+    from isocenter.entities import Instance
+    from isocenter.persistence import SqliteStore
+    store = SqliteStore(str(tmp_path / "bare.db"))
+    try:
+        inst = Instance("1.2.3.4", "1.2.840.10008.5.1.4.1.1.7", 1)
+        store._deserialize_into(inst, {"__phi__": {"status": "cleared"}})
+    finally:
+        store.stop()
+    assert inst.phi_status is PhiStatus.UNSCANNED
+    assert "__phi__" not in inst.attributes
+
+
 def test_load_patient_restores_item_statuses(tmp_path, config):
     """The item, and beside it its instance's status and policy (#555), the
     other half `load_patient` restores. Kills: only `load_all` wired."""
