@@ -14,6 +14,7 @@ Now `D` and every code with a D arm map to REPLACE, and REPLACE with no
 below are literals, never read from `config_manager.VR_DUMMY`: an
 expectation derived from the module under test passes any change to it.
 """
+import json
 import pathlib
 import re
 import shutil
@@ -449,3 +450,53 @@ def test_the_instance_timing_readers_skip_a_dummy():
     instance.attributes["0008,002a"] = "20230417143005"
     assert WfdbExporter._instance_time_of_day(instance).hour == 14
     assert WfdbExporter._instance_only_datetime(instance)[0].year == 2023
+
+
+def _annotated_ecg(tmp_path, note):
+    from scripts.generate_waveform_test_data import (  # pylint: disable=import-outside-toplevel
+        add_annotation, build_ecg_dataset)
+
+    ds = build_ecg_dataset(num_samples=500, patient_id="NOTE557",
+                           patient_name="Waveform^Test")
+    add_annotation(ds, start_sample=101, text=note)
+    src = tmp_path / "in"
+    src.mkdir()
+    pydicom.dcmwrite(str(src / "wf.dcm"), ds, enforce_file_format=True)
+    return src
+
+
+@pytest.mark.parametrize("profile", ["basic", None], ids=["basic", "floor"])
+def test_a_dummy_annotation_text_is_not_written_as_a_note(tmp_path, profile):
+    """Unformatted Text Value (0070,0006) is D, so it now holds the text
+    dummy; opting in to annotation text must not turn that into a Murmur
+    `note` on every finding. 0.9.8 emptied it and wrote no note, and the
+    owner's ruling of 2026-09-22 keeps that output (review of #557)."""
+    src = _annotated_ecg(tmp_path, "Reviewed by Dr Jane Doe")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(str(src))
+        if profile is not None:
+            session.load_config(_config(tmp_path, privacy_profile=profile))
+        session.anonymize(session.audit())
+        (instance,) = session.store.patients[0].studies[0].series[0].instances
+        (item,) = instance.sequences["0040,b020"].items
+        assert item.attributes["0070,0006"] == DUMMY["UT"]
+        session.export(str(tmp_path / "out"), format="wfdb",
+                       include_annotation_text=True)
+    (path,) = (tmp_path / "out").rglob("*.annotations.json")
+    findings = json.loads(path.read_text(encoding="utf-8"))["findings"]
+    assert len(findings) == 1, findings
+    assert "note" not in findings[0], findings
+    assert "ANONYMIZED" not in path.read_text(encoding="utf-8")
+
+
+def test_the_note_reader_skips_only_the_dummy():
+    """Kills the guard removed, or compared with anything but the dummy."""
+    from isocenter.murmur import _real_note  # pylint: disable=import-outside-toplevel
+
+    item = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.9.1.1", 1)
+    item.attributes["0070,0006"] = "ANONYMIZED"
+    assert _real_note(item) == ""
+    item.attributes["0070,0006"] = "sinus rhythm"
+    assert _real_note(item) == "sinus rhythm"
+    del item.attributes["0070,0006"]
+    assert _real_note(item) == ""

@@ -155,10 +155,12 @@ configurations above you're in:
   to restore it. That default-off behaviour is what actually protects
   this field today. `(0070,0006)` is also in the Basic profile, and
   since 0.8.0 that entry works: a configured session that passes
-  `include_annotation_text=True` gets the profile's remediated (emptied)
-  value.
+  `include_annotation_text=True` gets the profile's remediated value.
+  Since #557 that is the text dummy `ANONYMIZED` in the exported DICOM,
+  as Table E.1-1's `D` asks, and the bridge reads the dummy as no text:
+  the finding carries no `note`, exactly as when the value was emptied.
 
-  Before 0.8.0 it did not. The tag lives inside each Waveform Annotation
+  Before 0.8.0 the entry did not work. The tag lives inside each Waveform Annotation
   Sequence item rather than at the top level, and the scan only reached
   nested content through the instance's `text_index` -- which the worker
   clones `session.audit()` scans were not given. So the profile entry sat
