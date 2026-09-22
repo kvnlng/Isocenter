@@ -17,8 +17,9 @@ that VR's words (PS3.5 6.2), and otherwise `UN`, named in the instance's
 one re-VR `WARNING` sentence (#571). pydicom writes a ragged `OL` or `OD`
 without a word, so the gate refuses those lengths itself.
 
-Only an explicit-VR source records a VR (Implicit VR carries none), and
-only an explicit-VR output shows one: here the JPEG 2000 arm of a
+Only an explicit-VR source records a binary VR (Implicit VR states none,
+whatever pydicom's private dictionary guesses), and only an explicit-VR
+output shows one: here the JPEG 2000 arm of a
 pixel-bearing instance.
 """
 import itertools
@@ -59,7 +60,7 @@ WIDTH = {"OB": 1, "OW": 2, "OL": 4, "OF": 4, "OD": 8, "OV": 8}
 
 
 def _source(folder: Path, syntax=ExplicitVRLittleEndian, root=ROOT,
-            extra=()) -> Path:
+            extra=(), nested_extra=()) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = SC
@@ -86,6 +87,8 @@ def _source(folder: Path, syntax=ExplicitVRLittleEndian, root=ROOT,
     std.ReferencedSOPInstanceUID = "1.2.826.0.1.676.9"
     std.add_new(0x00110010, "LO", "ACME")
     std.add_new(NESTED_STANDARD[0], NESTED_STANDARD[1], NESTED_STANDARD[2])
+    for tag, vr, value in nested_extra:
+        std.add_new(tag, vr, value)
     ds.ReferencedImageSequence = Sequence([std])
     ds.Rows = ds.Columns = 8
     ds.BitsAllocated = ds.BitsStored = 8
@@ -228,19 +231,51 @@ def test_a_ragged_source_value_draws_one_warning_row(tmp_path):
     assert "(0009,1002) recorded OL, written UN" in row
 
 
-def test_an_implicit_source_records_no_vr_and_writes_un(tmp_path):
-    """Implicit VR carries no VR, so nothing is recorded and every private
-    binary value is written `UN`, with no row. Killing mutations: recording
-    `UN`; guessing a VR from a length."""
-    out, db = _written(tmp_path, ImplicitVRLittleEndian)
+#: Private creators pydicom's private dictionary knows, so that under
+#: Implicit VR its default `replace_un_with_known_vr` hands back the
+#: dictionary's VR instead of `UN` -- `OB` for a Siemens CSA header, `OF`
+#: for this Toshiba element (six bytes: not whole `OF` words).
+KNOWN_CREATORS = [(0x00290010, "LO", "SIEMENS CSA HEADER"),
+                  (0x00291010, "OB", bytes(range(10))),
+                  (0x700D0010, "LO", "TOSHIBA_MEC_MR3"),
+                  (0x700D1090, "OB", bytes(range(6)))]
+
+
+def test_an_implicit_source_records_no_vr_and_writes_un(tmp_path, monkeypatch):
+    """Implicit VR carries no VR, so no binary VR is recorded and every
+    private binary value is written `UN`, with no row -- including for a
+    creator pydicom's private dictionary knows, whose element pydicom reads
+    back as the dictionary's `OB` or `OF` rather than `UN` (review of #739).
+    That is pydicom's guess, not the file's statement: recorded, the CSA
+    header was written `OB` and the six-byte Toshiba element drew a re-VR
+    `WARNING` ("recorded OF, written UN") over a VR the file never declared.
+    The output is read with the relabel off, or pydicom would guess again on
+    the way back in. Killing mutations: recording `UN`; guessing a VR from a
+    length; recording a binary VR from an Implicit VR dataset, at the root
+    or in a sequence item."""
+    out_dir = tmp_path / "out"
+    _source(tmp_path / "src", ImplicitVRLittleEndian, extra=KNOWN_CREATORS,
+            nested_extra=KNOWN_CREATORS[:2])
+    db = str(tmp_path / "s.db")
     with DicomSession(db) as session:
+        session.ingest(str(tmp_path / "src"))
         (patient,) = session.store.patients
         inst = patient.studies[0].series[0].instances[0]
         recorded = dict(inst.attribute_vrs)
-    for tag, _ in ROOT.values():
+        (std,) = inst.sequences["0008,1140"].items
+        nested = dict(std.attribute_vrs)
+        session.export(str(out_dir), use_compression=True)
+    monkeypatch.setattr(pydicom.config, "replace_un_with_known_vr", False)
+    out = pydicom.dcmread(str(_only(out_dir)))
+    assert out.file_meta.TransferSyntaxUID.is_implicit_VR is False
+    binary = [tag for tag, _ in ROOT.values()] + [0x00291010, 0x700D1090]
+    for tag in binary:
         key = f"{tag >> 16:04x},{tag & 0xFFFF:04x}"
-        assert key not in recorded
-        assert out[tag].VR == "UN"
+        assert key not in recorded, key
+        assert out[tag].VR == "UN", key
+    assert "0029,1010" not in nested
+    (item,) = out.ReferencedImageSequence
+    assert item[0x00291010].VR == "UN"
     assert _warnings(db) == []
 
 

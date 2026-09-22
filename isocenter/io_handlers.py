@@ -2045,6 +2045,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # and not `is not True`: the waveform and Murmur tests hand this a
     # hand-built item whose bytes are already little-endian.
     big_endian = getattr(ds, "original_encoding", (None, None))[1] is False
+    # And whether it was read under Implicit VR, where no element's VR was
+    # on the wire (#676, review of #739). pydicom's default
+    # `replace_un_with_known_vr` still hands back a dictionary VR for a
+    # private element whose creator it knows -- `SIEMENS CSA HEADER`
+    # (0029,xx10) reads `OB`, `TOSHIBA_MEC_MR3` (700D,xx90) `OF` -- which
+    # is pydicom's guess, not the file's statement, so a binary value's VR
+    # is not recorded from such a dataset. `is True`, for the reason the
+    # line above is `is False`: a bare `Dataset` says (None, None).
+    implicit = getattr(ds, "original_encoding", (None, None))[0] is True
 
     # A Waveform Sequence item is where the sample width lives; its
     # Channel Definition items, one level down, hold samples in that width
@@ -2131,7 +2140,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 # here, where the value is kept: a dropped one records
                 # nothing. `OV` is not in `BINARY_VRS` and records
                 # through the generic arm below.
-                _record_private_vr(item, b_tag, elem)
+                _record_private_vr(item, b_tag, elem, implicit)
                 continue
             if dropped is not None:
                 dropped.append(
@@ -2244,7 +2253,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 _process_safe(elem.value), elem.VR, tag, path, big_endian,
                 unconverted, waveform_bits,
                 _declared_width(ds, tag) if big_endian else None))
-            _record_private_vr(item, tag, elem)
+            _record_private_vr(item, tag, elem, implicit)
 
 
 def _read_element(ds, tag, little_endian=True):
@@ -2352,7 +2361,7 @@ def _process_safe(value):
     return value
 
 
-def _record_private_vr(item, tag: str, elem) -> None:
+def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
     """Keep the VR of a private element beside its value (#154).
 
     What is recorded, and why each rule is what keeps some other
@@ -2362,11 +2371,12 @@ def _record_private_vr(item, tag: str, elem) -> None:
       standard dictionary at export time, so recording one here would be
       a second answer that can drift from the dictionary's.
     * **Never `UN`.** `UN` is the absence of an answer, not an answer.
-      It is also what *every* private element resolves to under Implicit
-      VR Little Endian, so this condition is what makes an implicit-VR
-      ingest record nothing at all and keeps
+      It is also what a private element resolves to under Implicit VR
+      Little Endian when pydicom's private dictionary does not know its
+      creator, so this condition is what keeps
       `tests/test_private_sequence_implicit_vr.py` true by construction
-      rather than by luck.
+      rather than by luck. (For a creator the dictionary does know,
+      pydicom relabels the `UN`; see the Implicit VR rule below.)
     * **A bytes value included, since #676.** Until then a bytes value
       was refused here ("PS3.5 §6.2.2 makes `UN` the right VR for raw
       bytes"), because there was nowhere to keep its VR:
@@ -2382,6 +2392,18 @@ def _record_private_vr(item, tag: str, elem) -> None:
       (`_serialize_item`), in the item's own below it, as every nested
       private VR always has -- and `_value_fits_vr` writes it when the
       bytes are whole words of it.
+    * **But not from an Implicit VR dataset** (`implicit`, the caller's
+      reading of `original_encoding`). There the file stated no VR, and
+      what pydicom hands back for a private element whose creator is in
+      its private dictionary is that dictionary's guess, relabelled from
+      `UN` by `replace_un_with_known_vr`: `SIEMENS CSA HEADER` (0029,xx10)
+      reads `OB`, `TOSHIBA_MEC_MR3` (700D,xx90) `OF`. Recorded, the
+      guess was written as though the file had said it, and a six-byte
+      `OF` drew a re-VR `WARNING` over a VR the file never declared
+      (review of #739). So a binary-VR element from such a dataset
+      records nothing and is written `UN`, as before #676. A *text* value's
+      dictionary VR is still recorded from one -- that predates #676 and
+      is not this rule's to change.
     * **The private creator included.** (gggg,0010) is `LO`, which is
       what the fallback already guesses, so recording it changes
       nothing -- and leaving it out would make the one tag every private
@@ -2390,6 +2412,10 @@ def _record_private_vr(item, tag: str, elem) -> None:
     if elem.tag.group % 2 != 1:
         return
     if elem.VR == 'UN':
+        return
+    # By the VR, not the value's type: a zero-length element's value is
+    # None, and is retained as `b""` all the same.
+    if implicit and elem.VR in _BINARY_VR_WORD:
         return
     item.record_attr_vr(tag, str(elem.VR))
 

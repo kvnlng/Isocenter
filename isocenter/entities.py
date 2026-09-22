@@ -1880,6 +1880,12 @@ class Instance(DicomItem):
                         else:
                             if samples is None:
                                 native = np.ascontiguousarray(arr)
+                                # Defence, not a measured path:
+                                # `_decode_from_file` hands back native
+                                # order even for Explicit VR Big Endian
+                                # (measured, review of #739). A decoder
+                                # that did not would have its bytes read
+                                # swapped by `_frame_from_samples`.
                                 if native.dtype.byteorder not in ('=', '|'):
                                     native = native.astype(
                                         native.dtype.newbyteorder('='))

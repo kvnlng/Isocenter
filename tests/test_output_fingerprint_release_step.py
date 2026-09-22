@@ -103,21 +103,27 @@ def test_the_reopened_arm_runs_on_a_second_session_over_the_same_store(
     In-process (`jobs=1`), so the spy reaches `_run_config`, which imports
     `Session` from `isocenter` at call time.
     """
+    import itertools
+
     import isocenter
 
     events = []
+    # A counter, not `id(self)`: CPython can hand the reopened session the
+    # freed live session's id, and the two would read as one (review of #739).
+    serial = itertools.count(1)
 
     class Spy(isocenter.Session):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            events.append(("open", id(self), kwargs.get("persistence_file")))
+            self._spy_serial = next(serial)
+            events.append(("open", self._spy_serial, kwargs.get("persistence_file")))
 
         def __exit__(self, *exc):
-            events.append(("close", id(self), None))
+            events.append(("close", self._spy_serial, None))
             return super().__exit__(*exc)
 
         def export(self, folder, *args, **kwargs):
-            events.append(("export", id(self), Path(folder).name))
+            events.append(("export", self._spy_serial, Path(folder).name))
             return super().export(folder, *args, **kwargs)
 
     monkeypatch.setattr(isocenter, "Session", Spy)

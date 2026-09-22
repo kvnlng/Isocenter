@@ -126,6 +126,11 @@ EDITS = {
     "photometric": [("0028,0004", "MONOCHROME1")],
     "bits stored": [("0028,0101", 12)],
     "bits allocated": [(BITS, 8)],
+    # The two of the six nothing else here edits (review of #739): four
+    # 2x2 frames the 16 samples hold, and three samples per pixel they
+    # cannot (48 needed).
+    "number of frames": [(ROWS, 2), (COLS, 2), ("0028,0008", 4)],
+    "samples per pixel": [("0028,0002", 3)],
 }
 
 
