@@ -841,6 +841,74 @@ def test_a_copy_split_completes_as_in_the_scanning_session(tmp_path):
     assert reopened == in_session
 
 
+def _deepcopy_split(audit):
+    import copy
+    return copy.deepcopy(audit["report"])
+
+
+def _pickled_half(audit):
+    import copy
+    return _pickled(copy.copy(audit["report"]))
+
+
+def _loaded_from_disk(audit):
+    import pickle
+    audit.setdefault("blob", pickle.dumps(audit["report"]))
+    return pickle.loads(audit["blob"])
+
+
+@pytest.mark.parametrize("make_half", [
+    _deepcopy_split, _pickled_half, _loaded_from_disk],
+    ids=["deepcopy", "pickled_halves", "kept_on_disk_loaded_per_step"])
+def test_a_split_whose_halves_carry_equal_tallies_completes_as_in_the_scanning_session(
+        tmp_path, make_half):
+    """Fifth review of #750, at 6658dbc4: the halves of a split carry the
+    same audit's tally but not the same *object* -- `copy.deepcopy`, each
+    `copy.copy` half pickled, or the report pickled once after `audit()`
+    and loaded from those bytes for each step (a report kept on disk). In
+    the scanning session both halves settle against its one tally:
+    REMEDIATED, PASS. Keyed by tally identity, the reopened session gave
+    each half its own working copy and read IDENTIFIED, REVIEW_REQUIRED.
+    Kills: a working copy keyed by anything narrower than the audit, and
+    an audit token that `copy()`, pickle or deepcopy does not carry."""
+    audit = {}   # the report each mode's audit returned; the first step sets it
+
+    def half(keep, first=False):
+        def step(report):
+            if first:
+                audit.clear()
+                audit["report"] = report
+            part = make_half(audit)
+            part.findings = [f for f in part.findings if keep(f)]
+            return part
+        return step
+
+    in_session, reopened = _both_ways(tmp_path, passes=[
+        half(lambda f: f.tag != INSTITUTION, first=True),
+        half(lambda f: f.tag == INSTITUTION)])
+    assert {s[1] for s in in_session["statuses"]} == {"remediated"}
+    assert "PASS" in in_session["grade"]
+    assert reopened == in_session
+
+
+def test_a_tally_keeps_its_audit_through_copy_pickle_and_deepcopy():
+    """The contract `Session._working_tally` keys by (fifth review of
+    #750): a tally names its audit, and every way a report's tally is
+    reproduced keeps that name, while another audit's tally has its own.
+    `copy()`'s carry is not observable through a session today -- the
+    session keys by the report's tally, and `audit()` copies once -- so it
+    is pinned here, where a later caller of `copy()` would rely on it.
+    Kills: `copy()` not carrying the token, or minting a fresh one."""
+    import copy
+    import pickle
+    from isocenter.remediation import _ScanTally
+    tally = _ScanTally(())
+    for same in (tally.copy(), copy.deepcopy(tally),
+                 pickle.loads(pickle.dumps(tally))):
+        assert same._audit == tally._audit
+    assert _ScanTally(())._audit != tally._audit
+
+
 def test_two_audits_split_across_a_reopen_fail_closed(tmp_path):
     """The one known difference from the scanning session (fourth review of
     #750): two audits, the first's report narrowed to all but Institution

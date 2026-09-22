@@ -954,17 +954,17 @@ class DicomSession:
         # and not persisted: a reopened session keeps pass accounting.
         self._scan_tally = None
         # This session's working copy of each kept report's scan tally
-        # (#555, third and fourth reviews of #750): one per *audit*, keyed
-        # by the tally the report carries -- which `copy.copy` of a report
-        # shares -- so partial passes over one audit's report, or over
-        # copies of it, complete one another as they would in the session
-        # that scanned it (a patient-level pass now, the instances later),
-        # while another session starts from its own copy. Weak keys, so an
-        # entry dies with the tally, and so with the last report holding it.
-        # Imported here so no module-level line moves
-        # (`tests/test_packaging_contract.py` cites one by number).
-        from weakref import WeakKeyDictionary  # pylint: disable=import-outside-toplevel
-        self._report_tallies = WeakKeyDictionary()
+        # (#555, third to fifth reviews of #750): one per *audit*, keyed by
+        # the audit token its tally carries (`_ScanTally._audit`), so
+        # partial passes over one audit's reports -- copied, deep-copied,
+        # pickled or loaded again -- complete one another as they would in
+        # the session that scanned it (a patient-level pass now, the
+        # instances later), while another session starts from its own
+        # copy. A plain dict: nothing else holds a working copy, so a weak
+        # mapping would drop it between passes. It keeps one entry per
+        # audit handed to this session, two ints per uid it has not
+        # completed, for the life of the session.
+        self._report_tallies = {}
         # Every policy an `audit()` in this session scanned under,
         # fingerprint -> base (#555). A status recorded under one of these
         # raises no export notice (owner's ruling Q2): the user chose it in
@@ -7032,28 +7032,25 @@ class DicomSession:
         """This session's working copy of a kept report's tally, made on
         first use.
 
-        One per audit per session, keyed by the tally the report carries:
-        a fresh copy per call lost the first pass's progress (`_partial`),
-        so a report narrowed to everything but one tag and then to that tag
-        read IDENTIFIED after a reopen and REMEDIATED in the scanning
-        session (third review of #750); and a copy per *report* did the same
-        to the two halves of a `copy.copy` split, which share the audit's
-        tally as they share its progress in the scanning session (fourth
-        review). A tally that cannot be weakly referenced gets a fresh copy
-        each call, which fails safe: a partial pass is demoted, never
-        completed.
+        One per audit per session, keyed by the audit token the tally
+        carries (`_ScanTally._audit`): a fresh copy per call lost the first
+        pass's progress (`_partial`), so a report narrowed to everything
+        but one tag and then to that tag read IDENTIFIED after a reopen and
+        REMEDIATED in the scanning session (third review of #750); a copy
+        per *report* did the same to the two halves of a `copy.copy` split
+        (fourth review); and a copy per tally *object* did it to halves
+        that carry equal tallies -- deep-copied, pickled, or loaded from
+        one pickle per step (fifth review). Two audits carry two tokens,
+        and their reports never complete one another here.
 
         Not guarded for two threads calling `anonymize()` on one session at
         once: that is not supported (nothing locks the graph either), and
         the worst case here is two copies, each demoting what the other
         settled.
         """
-        try:
-            tally = self._report_tallies.get(report_tally)
-        except TypeError:
-            return report_tally.copy()
+        tally = self._report_tallies.get(report_tally._audit)
         if tally is None:
-            tally = self._report_tallies[report_tally] = report_tally.copy()
+            tally = self._report_tallies[report_tally._audit] = report_tally.copy()
         return tally
 
     def _named_by(self, tally) -> frozenset:

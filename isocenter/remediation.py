@@ -2027,6 +2027,7 @@ _TALLY_MASK = (1 << 64) - 1
 # holds each to its number (#310).
 import hashlib  # pylint: disable=wrong-import-position,wrong-import-order
 import json  # pylint: disable=wrong-import-position,wrong-import-order
+import uuid  # pylint: disable=wrong-import-position,wrong-import-order
 
 
 #: One encoder for every key: `json.dumps` with non-default arguments
@@ -2168,20 +2169,33 @@ class _ScanTally:
         self._raised = {uid: (len(keys), _key_digest(keys))
                         for uid, keys in raised.items()}
         self._partial = {}
+        # Which audit this is (#555, fifth review of #750): what a session
+        # keys its working copy of a kept report's tally by, so every
+        # report from one audit -- `copy.copy`, `copy.deepcopy`, pickled,
+        # or loaded from the same bytes once per step -- drains one copy,
+        # as its passes drain one tally in the session that scanned. An
+        # attribute, so pickle and deepcopy carry it; `copy()` carries it
+        # by hand. uuid4, not a counter: reports from two processes can
+        # reach a third, where two counters' tokens would collide.
+        self._audit = uuid.uuid4().hex
 
     def copy(self) -> "_ScanTally":
-        """This tally as the audit left it, with no pass's progress.
+        """This tally as the audit left it, with no pass's progress, and
+        the same audit token (`_audit`).
 
-        What a report carries (`report._scan_tally`) and what each pass
-        over a kept report settles against: the session's own tally is
-        drained as its passes complete uids, and a report sharing it named
-        nothing after a reopen of a pass that was never saved (#644's
-        flow). A pass over a pristine copy still completes what an
+        What `audit()` puts on its report (`report._scan_tally`), and how
+        a session makes its working copy of a kept report's tally on first
+        use (`Session._working_tally`), which that session's passes over
+        the audit's reports then drain. Never the session's own tally: it
+        is drained as its passes complete uids, and a report sharing it
+        named nothing after a reopen of a pass that was never saved
+        (#644's flow). A pass over a pristine copy still completes what an
         earlier *saved* pass applied, whose end state the graph holds
         (#567's satisfied keys).
         """
         fresh = _ScanTally(())
         fresh._raised = dict(self._raised)
+        fresh._audit = self._audit
         return fresh
 
     def raised_under(self, uid) -> bool:
