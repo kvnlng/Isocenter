@@ -118,7 +118,7 @@ Files already exported by an older release stay recoverable, and nothing Isocent
 
 A store records what the last scan concluded about each patient, study and instance (`phi_status`). From 1.0 it also records the policy that scan ran under (`phi_status_policy`: a fingerprint of the tag rules and `remove_private_tags`, and a readable base such as `basic@2026c`). A store written by 0.9.x never recorded which configuration ran, so opening one adds the two columns empty and fills nothing in: each status keeps its value (`REMEDIATED` stays `REMEDIATED`) with no policy, and each open logs one warning counting them. The first `export()` that writes such instances writes one `WARNING` audit row saying so, and its report grades `REVIEW_REQUIRED`. Run `audit()` (and `anonymize()`, if it finds anything) under the configuration you mean, then `save()`: the statuses then carry that policy and the row stops.
 
-A 1.0 store is not for 0.9.x: an older release reopening it reads a nested item's stored status as an attribute. Keep a copy of the 0.9.x store if you may need to go back.
+A 1.0 store is not for 0.9.x: an older release reopening it reads a nested item's stored status as an attribute, and cannot export it (it reads the DS/IS values of #662 as dicts). **Never save into a 1.0 store from 0.9.x.** 0.9.x does not know the policy columns, so a status it records is left beside the policy of the last 1.0 scan -- a pairing no scan concluded, which the export cannot tell from a true one. If that has happened, run `audit()` under your configuration before trusting any status. Keep a copy of the 0.9.x store if you may need to go back, and go back to that copy, not into the 1.0 store.
 
 ### A project secret stays in its store
 

@@ -2466,9 +2466,10 @@ class SqliteStore:
         in force, which a load cannot know -- `Session(db)` hydrates
         before any `load_config`. A status whose row has no policy keeps
         None -- written before 1.0, which recorded none, or remediated
-        from findings with no scan behind them -- and a policy made up
-        here would be the back-fill `_add_missing_columns` refuses. Policies are interned per load, so ten thousand
-        instances scanned under one policy share one object.
+        from findings that are not a whole `audit()` report -- and a
+        policy made up here would be the back-fill `_add_missing_columns`
+        refuses. Policies are interned per load, so ten thousand instances
+        scanned under one policy share one object.
 
         Returns:
             int: How many statuses carry no policy (UNSCANNED aside).
@@ -2500,9 +2501,9 @@ class SqliteStore:
     #: its own row.
     _STATUSES_WITHOUT_A_POLICY_NOTICE = (
         "{count} in this store {carry} no recorded policy: written before "
-        "1.0, which recorded none, or remediated from findings with no "
-        "scan behind them. Which configuration the scan ran under is not "
-        "known. They are restored as recorded, and an export that writes "
+        "1.0, which recorded none, or remediated from findings that are "
+        "not a whole audit() report. Which configuration the scan ran "
+        "under is not known. They are restored as recorded, and an export that writes "
         "them says so. To record a policy, run audit() under the "
         "configuration you mean, then save() (#555).")
 

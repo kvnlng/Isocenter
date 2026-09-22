@@ -2663,6 +2663,14 @@ class DicomSession:
         # set here rather than a constructor argument, so `PhiReport`'s
         # shape is unchanged; a report rebuilt from its findings has none.
         report._scan_policy = policy
+        # And the findings the scan raised, by reference, so `anonymize()`
+        # can tell the report it was handed still holds all of them. A
+        # report narrowed in place still carries the policy, and a pass
+        # over what is left settles less than the scan found: labelling
+        # that pass's REMEDIATED with the scan's policy wrote a conclusion
+        # no scan reached, and the export passed over the finding the
+        # narrowing dropped (review of #750, finding 1).
+        report._scan_findings = tuple(all_findings)
         return report
 
     def phi_status_summary(self) -> Dict[str, Counter]:
@@ -5707,7 +5715,7 @@ class DicomSession:
         )
 
         # Read before `findings` is rebound to the live list below (#555).
-        report_policy = getattr(findings, "_scan_policy", None)
+        report_policy = self._the_reports_policy(findings)
 
         count = 0
         if findings:
@@ -6400,7 +6408,7 @@ class DicomSession:
 
         An entity **disagrees** when its status is not UNSCANNED and its
         policy is None (written before 1.0, or remediated from findings
-        with no scan behind them) or
+        that are not a whole `audit()` report) or
         has a fingerprint that is neither the policy in force nor one this
         session scanned under (Q2). Fingerprints, never bases: a scaffold
         and the bare floor are one policy under two labels. An instance
@@ -6444,9 +6452,13 @@ class DicomSession:
         named = [f"{' or '.join(sorted(bases))} ({fingerprint[:15]})"
                  for fingerprint, bases in sorted(others.items())]
         if legacy:
+            # True of all three routes to None (review of #750, finding
+            # 2): a store from 0.9.x, a findings list with no scan behind
+            # it, and a report that scan did run for but that was rebuilt
+            # or narrowed, so no longer speaks for it.
             named.append(f"{legacy} with no recorded policy (written "
-                         f"before 1.0, or remediated from findings with no "
-                         f"scan behind them)")
+                         f"before 1.0, or remediated from findings that are "
+                         f"not a whole audit() report)")
         detail = (f"{fmt} export to {folder} writes {written} instance(s) "
                   f"whose PHI status was {self._OTHER_POLICY_NOTICE} "
                   f"({in_force.base}, {in_force.fingerprint[:15]}): "
@@ -6985,6 +6997,32 @@ class DicomSession:
                 for series in study.series:
                     yield from series.instances
 
+    @staticmethod
+    def _the_reports_policy(findings):
+        """The policy `audit()` put on this report, if it still speaks for
+        the pass; otherwise None.
+
+        It speaks for the pass only while the report holds every finding
+        its scan raised (review of #750, finding 1). A report narrowed in
+        place kept its `_scan_policy`, and at 1f857655 a pass over what was
+        left was labelled REMEDIATED under the floor over an instance still
+        holding the Institution Name the floor empties: the export passed,
+        and the saved row claimed a conclusion the scan under that policy
+        had not reached (it concluded IDENTIFIED). Findings added beside
+        the scan's do not withdraw it, so the test is containment, not
+        equality. Compared by identity: the report holds its findings by
+        reference (`_scan_findings`), so an `id` cannot be reused while
+        this runs.
+        """
+        policy = getattr(findings, "_scan_policy", None)
+        raised = getattr(findings, "_scan_findings", None)
+        if policy is None or raised is None:
+            return None
+        held = {id(finding) for finding in findings}
+        if all(id(finding) in held for finding in raised):
+            return policy
+        return None
+
     def _adopt_the_reports_policy(self, policy, recorded_at):
         """Give the report's policy to a status this pass recorded with none.
 
@@ -7002,7 +7040,8 @@ class DicomSession:
         own, a status recorded before the pass is not this pass's to
         relabel, and a nested item's never has one (it is never scanned).
         A findings list, or a report rebuilt from one, carries no policy,
-        and nothing is adopted.
+        and nothing is adopted; nor is anything from a report that no longer
+        holds every finding its scan raised (`_the_reports_policy`).
         """
         for entity in self._status_bearers():
             if recorded_at.get(id(entity)) == entity._phi_status_revision:

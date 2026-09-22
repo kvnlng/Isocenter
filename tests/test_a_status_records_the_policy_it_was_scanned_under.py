@@ -594,6 +594,53 @@ def test_a_bare_findings_list_brings_no_policy(tmp_path):
         assert "1 with no recorded policy" in notice
 
 
+def test_a_kept_report_narrowed_in_place_brings_no_policy(tmp_path):
+    """Review of #750, finding 1, measured at 1f857655: a kept report whose
+    findings list was narrowed in place still carried its scan's policy, so
+    a pass that left Institution Name in place was labelled REMEDIATED under
+    the floor, the export carried JFK IMAGING CENTER with no notice, the
+    grade read PASS, and the saved row claimed a conclusion no scan
+    reached (the scan under that policy concluded IDENTIFIED). The report
+    no longer holds every finding its scan raised, so it does not speak for
+    the pass: nothing is adopted, the status carries no policy, and the
+    export says so. Kills: the completeness check skipped."""
+    db = str(tmp_path / "s.db")
+    report, _ = _audited_and_closed(tmp_path, db)
+    assert any(f.tag == INSTITUTION for f in report.findings)
+    report.findings[:] = [f for f in report.findings if f.tag != INSTITUTION]
+    with DicomSession(db) as session:
+        [inst] = _instances(session)
+        session.anonymize(report)
+        assert inst.attributes.get(INSTITUTION)   # the pass left it
+        assert inst.phi_status_policy is None
+        session.export(str(tmp_path / "out"))
+        [notice] = _notices(session)
+        # Finding 2: true of a report a scan did run for.
+        assert ("1 with no recorded policy (written before 1.0, or "
+                "remediated from findings that are not a whole audit() "
+                "report)") in notice
+        assert "REVIEW_REQUIRED" in _grade(session, tmp_path)
+
+
+def test_a_kept_report_with_a_finding_added_still_brings_its_policy(tmp_path):
+    """The check is that the report still holds every finding its scan
+    raised, not that it holds nothing else: an appended finding does not
+    withdraw what the scan concluded. Kills: completeness read as
+    equality."""
+    from isocenter.privacy import PhiFinding
+    db = str(tmp_path / "s.db")
+    report, policy = _audited_and_closed(tmp_path, db)
+    [first] = report.findings[:1]
+    report.findings.append(PhiFinding(
+        entity_uid=first.entity_uid, entity_type=first.entity_type,
+        field_name="extra", value=None, reason="added by hand", tag=None))
+    with DicomSession(db) as session:
+        [inst] = _instances(session)
+        session.anonymize(report)
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        assert inst.phi_status_policy == policy
+
+
 def test_only_a_status_the_pass_recorded_adopts_the_reports_policy(tmp_path):
     """Kills: the adoption relabelling a policy-less status the pass did not
     record -- a store's pre-1.0 REMEDIATED beside the one the report
@@ -625,6 +672,7 @@ def test_only_a_status_the_pass_recorded_adopts_the_reports_policy(tmp_path):
                 action_type="REPLACE_TAG", target_attr="0008,0090",
                 new_value="ANON", original_value="Dr^Leak"))])
         report._scan_policy = policy
+        report._scan_findings = tuple(report.findings)
         assert session.anonymize(report) == 1
         assert touched.attributes["0008,0090"] == "ANON"
         assert touched.phi_status_policy == policy
