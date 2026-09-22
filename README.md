@@ -297,14 +297,18 @@ session.generate_report("compliance_report.md")
 
 ### 7. Recover Identity (Optional)
 
-If you have the key (`isocenter.key`) and need the original identity of an anonymized patient, load the session under the key the data was locked with. `enable_reversible_anonymization()` never creates a key; the first `lock_identities()` does, unless the session holds an identity token this library wrote that no key here opens, in which case the lock raises `RuntimeError` and creates none ([#617](https://github.com/kvnlng/Isocenter/issues/617)). The call prints nothing and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path (checked first, and no key is created), `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token, the key does not decrypt it, or the key opens it but it holds no identity record this library writes. No message names the Patient ID ([#539](https://github.com/kvnlng/Isocenter/issues/539), [#550](https://github.com/kvnlng/Isocenter/issues/550)). With `restore=False` it only checks that the patient is recoverable under the key:
+If you have the key (`isocenter.key`) and need the original identity of an anonymized patient, load the session under the key the data was locked with. `enable_reversible_anonymization()` never creates a key; the first `lock_identities()` does, unless the session holds an identity token this library wrote that no key here opens, in which case the lock raises `RuntimeError` and creates none ([#617](https://github.com/kvnlng/Isocenter/issues/617)). The call prints nothing and raises when it cannot recover: `FileNotFoundError` when no key file exists at that path (checked first, and no key is created), `ValueError` when no patient in the session holds the ID, and `RuntimeError` when the patient has no identity token, the key does not decrypt it, or the key opens it but it holds no identity record this library writes. No message names the Patient ID ([#539](https://github.com/kvnlng/Isocenter/issues/539), [#550](https://github.com/kvnlng/Isocenter/issues/550)). It returns the identity it recovered: a `dict` mapping the SOP Instance UID of each instance that carries an identity token to a copy of the values that token holds, in study, series and instance order; the first entry speaks for the patient ([#586](https://github.com/kvnlng/Isocenter/issues/586)). With `restore=False` it reads the identity and writes nothing, which also checks that the patient is recoverable under the key; `restore=True` returns the same mapping and writes it back:
 
 ```python
 # Load the session containing anonymized data
 session = Session("my_project.db")
 session.enable_reversible_anonymization("isocenter.key")
 
-# Recover the original PatientName and PatientID
+# Read the original identity without writing it back
+identity = session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=False)
+first = next(iter(identity.values()))  # the patient-level answer
+print(first["0010,0020"])  # the original Patient ID
+
 # Recover the original identity and restore attributes in-memory
 # restore=True (default) automatically updates the instance with original values
 session.recover_patient_identity("ANON_5b5ce7b47f254ef3a0d90c0f", restore=True)

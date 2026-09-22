@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1671 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1674 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1686 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1689 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -5606,9 +5606,9 @@ class ExportSummary:
     not: the disclosure has to say which files went out, not how many
     were meant to.
     """
-    #: SOP Instance UID per instance that reached disk, or its output path
-    #: when it carries no UID: ingest refuses such a file, but a hand-built
-    #: graph through `write_tree()` can carry one, written as `None.dcm` (#613).
+    #: SOP Instance UID of each instance that reached disk, and nothing else: a write
+    #: needs the UID for its file meta, so one without it fails and is in `failures`,
+    #: keyed UNKNOWN (#613). Never an output path, which names the Patient ID (D10).
     written_uids: List[str] = field(default_factory=list)
     #: `(entity_uid, details)` per instance that did not reach disk,
     #: already audited by `_report_export_failures`.
@@ -9797,14 +9797,19 @@ class DicomExporter:
         # caller say how many of the requested instances exist (#181).
         failures = DicomExporter._report_export_failures(results, store_backend)
         summary = ExportSummary(
-            # The path fallback stays here, unlike the report helpers
-            # above (D10): `written_uids` is a frozen public field that is
-            # counted (`written` de-duplicates it) and matched against the
-            # plan's UIDs, and no line or row is built from it. A shared
-            # placeholder would count every UID-less instance as one file
-            # -- reachable through `write_tree()` on a hand-built graph,
-            # since ingest refuses a file with no SOP Instance UID (#613).
-            written_uids=[r.sop_instance_uid or r.output_path
+            # An `ok` outcome always carries its UID (#613): the write puts
+            # it into Media Storage SOP Instance UID, and `save_as(...,
+            # enforce_file_format=True)` refuses an empty one, so a UID-less
+            # instance fails and is in `failures`, keyed UNKNOWN like its
+            # ERROR row. This was `sop_instance_uid or output_path`, with a
+            # comment saying `write_tree()` wrote such an instance as
+            # `None.dcm`; `write_tree()` builds no summary and writes no such
+            # file, and the arm could never run. Had it run, it would have
+            # put `Subject_<Patient ID>/...` into a repr that is printed and
+            # logged (D10). **The trap:** turning `enforce_file_format` off
+            # lets a UID-less instance be written (as the dotfile `.dcm`),
+            # and this field would then hold `""`.
+            written_uids=[r.sop_instance_uid
                           for r in results
                           if isinstance(r, ExportOutcome) and r.ok],
             failures=failures)

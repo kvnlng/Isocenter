@@ -1,3 +1,4 @@
+import copy
 import gc
 import os
 import re
@@ -3515,8 +3516,10 @@ class DicomSession:
 
         Args:
             patient_id (str): The ID of the patient to preserve (or a list/report for batch processing).
-            persist (bool): If True, writes changes to the database immediately.
-                            If False, returns modified instances (useful for batch buffering).
+            persist (bool): If True, writes each instance's token into the
+                row the store holds for it, immediately; an instance the
+                store holds no row for raises (see `RuntimeError` below).
+                If False, returns modified instances (useful for batch buffering).
             verbose (bool): If True, logs debug information.
             tags_to_lock (List[str], optional): The tags whose original values
                 are embedded. When omitted: PatientName, PatientID,
@@ -3579,6 +3582,22 @@ class DicomSession:
                 a report, the batch form's `sqlite3.Error` applies. Until
                 0.9.8 this was logged and the lock returned as if the
                 tokens had been stored.
+
+                **Also `RuntimeError`, with the same timing**, when with
+                `persist=True` some instance's current SOP Instance UID has
+                no row in the store to write its token into (#641): a
+                patient built by hand and never saved, or a UID
+                `regenerate_uid()` moved (as `redact()` does) since the last
+                save. Unlike the refusals above, which write no token, this
+                one is raised **after** the tokens are embedded: they are in
+                memory, marked modified, so a later `save(sync=True)` stores
+                them; this write stored none of them, those with a row
+                included; one `ERROR` audit row gives the counts. Through
+                0.9.8 the lock returned as if the tokens had been stored.
+                `ingest()` writes the rows itself, so ingest-then-lock never
+                raises this; and the lock drains a save queued by `save()`
+                before it embeds anything, as `audit()` does, so
+                `save()`-then-lock finds the rows that save writes.
         """
         if not self.reversibility_service:
             raise RuntimeError(
@@ -3598,6 +3617,15 @@ class DicomSession:
             return LockingResult([])
 
         self._key_for_locking()
+        # Drained before anything is embedded, as `audit()` and `redact()`
+        # drain on entry (#297): a queued `save()` may be capturing these
+        # instances, and with `persist=True` the write below updates rows
+        # that save has not committed yet -- it found none, raised, and
+        # left an ERROR row saying the store held no row for instances
+        # whose save the caller had already asked for (review of #732,
+        # finding 2). The batch form drains in `lock_identities_batch`.
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
         return self._lock_patient_identity(patient, persist, verbose, tags_to_lock)
 
     def _key_for_locking(self) -> None:
@@ -4227,7 +4255,11 @@ class DicomSession:
             sqlite3.Error: A store write failed while tokens were being
                 persisted (`persist=True` writes per patient,
                 `auto_persist_chunk_size` per chunk), after one `ERROR`
-                audit row (#599). **Nothing is rolled back across writes**:
+                audit row (#599); or, as `RuntimeError`, a store write
+                found no row for an instance (#641, see
+                `lock_identities()`), with the same shape and the same
+                timing: raised after the tokens are embedded, unlike the
+                refusals above. **Nothing is rolled back across writes**:
                 patients written before the failure stay locked in the
                 store, the failed write stored none of its instances (they
                 hold their new tokens in memory, marked modified, and a
@@ -4311,6 +4343,15 @@ class DicomSession:
                 "Patient ID order. Lock the others without these, and each of "
                 "these as its message says:\n" + "\n".join(refusals))
 
+        # Drained after every plan and before the first token is embedded,
+        # for the reason `lock_identities` gives (#297; review of #732,
+        # finding 2). Once, here: nothing below enqueues a save, so the
+        # per-patient writes (`persist=True`) and the chunk flushes
+        # (`auto_persist_chunk_size`) all find the rows a queued save was
+        # about to write.
+        if hasattr(self, 'persistence_manager'):
+            self.persistence_manager.flush()
+
         with progress_bar(plans, desc="Locking Identities",
                           unit="patient") as pbar:
             for pid in pbar:
@@ -4351,7 +4392,8 @@ class DicomSession:
                 len(modified_instances)} instances).")
         return LockingResult(modified_instances)
 
-    def recover_patient_identity(self, patient_id: str, restore: bool = True):
+    def recover_patient_identity(self, patient_id: str,
+                                 restore: bool = True) -> Dict[str, Dict[str, Any]]:
         """
         Attempts to recover original identity from the encrypted private token.
 
@@ -4407,10 +4449,32 @@ class DicomSession:
         cannot open, or that holds no record, raises and writes nothing.
 
         Every failure raises and nothing is printed (#539, #550). So
-        `restore=False` checks that the patient is recoverable under this
-        key, and writes nothing. No message names a Patient ID: until
-        0.9.8 an unknown ID was echoed to the console, and the ID given is
-        normally a pseudonym.
+        `restore=False` reads the identity, and so checks that the patient
+        is recoverable under this key, and writes nothing. No message
+        names a Patient ID: until 0.9.8 an unknown ID was echoed to the
+        console, and the ID given is normally a pseudonym.
+
+        Returns:
+            Dict[str, Dict[str, Any]]: The identity recovered (#586). Each
+                key is the SOP Instance UID of an instance carrying an identity
+                token of ours, as it was when the call began; each value is a
+                deep copy of the values that instance's token holds, keyed
+                `"gggg,eeee"`. Study, series and instance order. An instance
+                carrying no token is absent, and the dict is never empty (a
+                patient with no token raises). Both modes return the same
+                mapping, taken before `restore=True` writes anything, and it is
+                **what the tokens hold, not what the restore wrote**: a
+                tokenless instance a restore gives group 0010 of the first
+                token is absent, and a pre-0.9.8 shared token is returned whole
+                on every holder though a restore writes only its group 0010
+                outside the first study. The patient-level answer -- the token
+                whose name and ID a restore stamps on the `Patient` -- is
+                `next(iter(result.values()))`. Two instances sharing one SOP
+                Instance UID, which only a hand-built graph can hold, share one
+                key, and the later one's token is the value. These are the
+                original identifiers, handed to the holder of the key; nothing
+                prints or logs them. Through 0.9.8 the call returned `None` in
+                both modes.
 
         Raises:
             FileNotFoundError: No key file at the path given to
@@ -4478,6 +4542,25 @@ class DicomSession:
         # key cannot open is still the one the message is about.
         opened = {content: rs.recover_or_raise(holders[0][1])
                   for content, holders in carrying.items()}
+        # **What the call returns (#586)**: each instance carrying a token
+        # of ours, by the SOP Instance UID it holds now, mapped to a copy
+        # of what its own token holds, in graph order. Taken here, before
+        # the restore writes anything, and from `opened`, not from the
+        # instances: it reports what the tokens hold, not what the
+        # restore below writes (group 0010 only, for a tokenless instance
+        # or a pre-0.9.8 shared token outside its first study). A **deep**
+        # copy per key: instances sharing a token share one `opened` dict,
+        # and the restore below writes that dict's very values onto them,
+        # so a multi-valued tag (a list once the token is read, e.g. Other
+        # Patient Names) copied shallowly was the list the graph holds --
+        # an in-place edit of the result reached the sibling's entry and
+        # the graph, and moved no revision (review of #732, finding 1).
+        # From `walk`, not `carrying`: `carrying` groups by token, and a
+        # token reappearing after another would put its later holder out
+        # of graph order.
+        recovered: Dict[str, Dict[str, Any]] = {
+            inst.sop_instance_uid: copy.deepcopy(opened[content])
+            for _, inst, content in walk if content is not None}
         # The first token found speaks for the patient -- its name and ID,
         # the #548 scheme check, and the instances carrying no token --
         # as it spoke for every instance before.
@@ -4685,6 +4768,8 @@ class DicomSession:
                     drain=self.persistence_manager.flush)
 
                 get_logger().info(f"Restored identity attributes to {count} instances.")
+
+        return recovered
 
     def enable_reversible_anonymization(self, key_path: str = "isocenter.key"):
         """

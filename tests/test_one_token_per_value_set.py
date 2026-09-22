@@ -298,6 +298,9 @@ def test_the_lock_log_names_every_tag_any_value_set_holds(tmp_path, caplog):
     with _session(tmp_path) as session:
         _patient(session, [[{"0008_0050": ACC_ONE}],
                            [{"0010_1000": "OTHER-2", "0008_0050": ACC_TWO}]])
+        # Rows first: `persist=True` raises for an instance the store holds
+        # no row for (#641), and the line is logged after the write.
+        session.save(sync=True)
         caplog.clear()
         with caplog.at_level(logging.INFO, logger="isocenter"):
             session.lock_identities(PID, persist=True,

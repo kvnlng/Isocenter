@@ -185,6 +185,7 @@ TARGETS = {
                                "tests/test_report_action_evidence.py",
                                "tests/test_safe_export_feedback.py",
                                "tests/test_save_all_contract.py",
+                               "tests/test_written_uids_names_only_uids.py",
                                "tests/test_scaffolding.py",
                                "tests/test_tag_key_normalisation.py"], 30),
     # 99 sites; budget 30 is a stride of 3, 33 mutants: all 33
@@ -432,6 +433,14 @@ TARGETS = {
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+                                  # Not demanded by the scan (it reaches this module through
+                                  # `Session.export()` without naming it), and listed for a
+                                  # measured kill (#441): `enforce_file_format=True` turned
+                                  # off at the one DICOM write (#613, M613-1). The UID-less
+                                  # instance is then written as `.dcm` and reported, and
+                                  # `written_uids` gains `""`. Measured by a source edit on the
+                                  # branch of #613.
+                                  "tests/test_written_uids_names_only_uids.py",
                                   "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                                   "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
                                   "tests/test_a_stream_wider_than_bits_stored_is_read_and_said.py",
@@ -582,6 +591,7 @@ TARGETS = {
     # are 34 others, each of which the guard demands.
     "isocenter/persistence.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                   "tests/test_a_lock_whose_store_write_fails_raises.py",
+                                  "tests/test_a_persisted_lock_needs_a_row.py",
                                   "tests/test_api_coherence.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_pre_096_store_is_not_reshifted.py",
@@ -721,6 +731,9 @@ TARGETS = {
                               "tests/test_one_token_per_value_set.py",
                               "tests/test_a_lock_that_stashes_nothing_is_refused.py",
                               "tests/test_a_lock_whose_store_write_fails_raises.py",
+                              "tests/test_a_persisted_lock_needs_a_row.py",
+                              "tests/test_recovery_returns_the_identity.py",
+                              "tests/test_written_uids_names_only_uids.py",
                               "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                               "tests/test_a_private_re_vr_is_recorded.py",
                               "tests/test_both_write_doors_stamp_one_answer.py",
@@ -981,6 +994,8 @@ TARGETS = {
                                "tests/test_a_lock_under_the_wrong_key_refuses.py",
                                "tests/test_a_restore_reads_the_token_it_was_given.py",
                                "tests/test_one_token_per_value_set.py",
+                               "tests/test_a_persisted_lock_needs_a_row.py",
+                               "tests/test_recovery_returns_the_identity.py",
                                "tests/test_a_lock_that_stashes_nothing_is_refused.py",
                                "tests/test_an_empty_patient_id_is_still_a_patient.py",
                                "tests/test_a_private_re_vr_is_recorded.py",
