@@ -188,7 +188,7 @@ from pydicom.values import convert_numbers
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path, NO_PATIENT_ID_PREFIX,
                        is_synthetic_patient_id, exported_patient_id,
-                       PhiStatus)
+                       iter_item_tree)
 from .uids import generated_uid
 from .logger import (describe_exception, describe_exception_without_paths,
                      get_logger)
@@ -4079,23 +4079,38 @@ def _ingest_results(files, executor, strategy, on_executor_broken=None):
             describe_exception(failure), len(pending), alone)
 
 
-def _has_been_remediated(patient) -> bool:
-    """Whether any date of `patient` may already carry its offset.
+def _may_carry_its_offset(patient) -> bool:
+    """Whether any date of `patient` may already carry its offset: whether
+    a `SHIFT_DATE` has written one anywhere in the subtree.
 
-    A study's `date_shifted`, or any entity of the subtree REMEDIATED: an
-    instance-level date (Series, Acquisition, Content) is shifted by the
-    patient's offset in the same pass, and a study with no Study Date has
-    no flag to say so.
+    Read from the shift evidence, never from a status (review of #584,
+    finding 1). A pass handed only some of an instance's findings shifts
+    its dates and leaves it IDENTIFIED (#553); an edit after the pass
+    leaves it UNSCANNED; a reopen hydrates the record and nothing else.
+    So:
+
+    - a study: `date_shifted` (the arm sets it with the Study Date's shift
+      record, remediation.py, and both are stored; either would do);
+    - an instance, and every sequence item below it (#513): its per-value
+      shift record, `_shifted_dates`.
+
+    **No status is read, because none adds a case.** The offset is the
+    only value derived from an ID-less patient's key (the scan never
+    pseudonymizes the key, #584), so REMEDIATED with no shift record --
+    a name replaced, a tag removed -- gives a re-key nothing to
+    contradict, and refusing it would only lose the real ID. And an
+    ID-less patient exists only in a store written since this change,
+    where every shift is recorded; there is no older store whose shifts
+    only a status remembers.
     """
-    if patient.phi_status is PhiStatus.REMEDIATED:
-        return True
     for study in patient.studies:
-        if study.date_shifted or study.phi_status is PhiStatus.REMEDIATED:
+        if study.date_shifted:
             return True
         for series in study.series:
             for instance in series.instances:
-                if instance.phi_status is PhiStatus.REMEDIATED:
-                    return True
+                for item, _path in iter_item_tree(instance):
+                    if item._shifted_dates:
+                        return True
     return False
 
 
@@ -4111,10 +4126,11 @@ def _link_patient(store, patient_map, study_owner, meta, owner):
       patient is **re-keyed** to the real ID -- or, when a patient with
       that ID exists, its studies move onto it, the move
       `SqliteStore._reparent_studies` persists. Only while no date of the
-      ID-less patient may carry its offset (`_has_been_remediated`):
+      ID-less patient may carry its offset (`_may_carry_its_offset`):
       otherwise re-keying would give those dates a second offset, so the
       file links under the ID-less patient and the caller writes a
-      `WARNING` row. **No branch creates an empty patient.**
+      `WARNING` row. **Neither branch creates an empty patient.** (Two
+      patients sharing a real Study UID still can: #745, not this.)
     - **Otherwise**, as before: the patient with the file's ID.
     """
     pid = meta['pid']
@@ -4122,7 +4138,7 @@ def _link_patient(store, patient_map, study_owner, meta, owner):
         if owner is not None:
             return owner, False
     elif owner is not None and is_synthetic_patient_id(owner.patient_id):
-        if _has_been_remediated(owner):
+        if _may_carry_its_offset(owner):
             return owner, True
         old_key = owner.patient_id
         existing = patient_map.get(pid)

@@ -329,24 +329,21 @@ def test_after_a_shift_the_real_id_file_links_under_the_id_less_patient(tmp_path
     assert "PA" not in linked[0] and "Alpha" not in linked[0], linked
 
 
-@pytest.mark.parametrize("level", ["Study", "Study-edited", "Instance"])
+@pytest.mark.parametrize("level", ["Study", "Study-edited"])
 def test_a_partial_pass_already_gave_the_id_less_patient_its_offset(tmp_path, level):
-    """The re-key refusal reads more than the patient's own status. A pass
-    handed only the Study's findings shifts the Study Date, and one handed
-    only the instance's shifts its Series, Acquisition and Content dates --
-    each by the ID-less patient's offset -- while the patient itself still
-    reads IDENTIFIED. Re-keying then would give those dates a second
-    offset. Kills MI7 (only the patient's status read); for the instance
-    pass, MI9 (the instance walk dropped); and for a study edited after
-    the pass, which reads UNSCANNED with its date still shifted, MI8
-    (`date_shifted` not read)."""
+    """A pass handed only the Study's findings shifts the Study Date by the
+    ID-less patient's offset while the patient still reads IDENTIFIED; a
+    study edited after it reads UNSCANNED with its date still shifted.
+    Re-keying then would give that date a second offset. Kills MI7 and MI8
+    (`date_shifted` not read). The instance-level shapes are
+    `test_a_shift_the_status_does_not_show_refuses_the_re_key`."""
     _id_less(tmp_path / "in1" / "a.dcm", "5852", "Alpha^One", "absent")
     _with_id(tmp_path / "in2" / "b.dcm", "PA", "5852", ".1.2", "Alpha^One")
     with Session(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in1"))
         report = session.audit()
         applied = session.anonymize(
-            [f for f in report.findings if f.entity_type == level.split("-")[0]])
+            [f for f in report.findings if f.entity_type == "Study"])
         [patient] = session.store.patients
         assert applied and patient.phi_status.name == "IDENTIFIED"
         if level == "Study-edited":
@@ -361,6 +358,124 @@ def test_a_partial_pass_already_gave_the_id_less_patient_its_offset(tmp_path, le
         warnings = _audit_rows(session, "WARNING")
     sop = study_uid("5852") + ".1.2"
     assert len([d for uid, d in warnings if uid == sop]) == 1, warnings
+
+
+def test_a_pass_that_shifted_nothing_still_lets_the_real_id_re_key(tmp_path):
+    """The gate reads shift evidence, not status (review finding 1). A pass
+    handed only the patient's name finding leaves the patient REMEDIATED
+    and no date shifted; nothing derived from the ID-less key is in the
+    graph, so the real ID re-keys it and no WARNING row is written. Kills
+    MG5 (a patient status read back into the gate)."""
+    _id_less(tmp_path / "in1" / "a.dcm", "5871", "Alpha^One", "absent")
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", "5871", ".1.2", "Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
+        report = session.audit()
+        session.anonymize([f for f in report.findings
+                           if f.entity_type == "Patient" and f.tag == "0010,0010"])
+        [patient] = session.store.patients
+        assert patient.phi_status.name == "REMEDIATED"
+        session.ingest(str(tmp_path / "in2"))
+        assert [p.patient_id for p in session.store.patients] == ["PA"]
+        linked = [d for uid, d in _audit_rows(session, "WARNING")
+                  if uid == study_uid("5871") + ".1.2"]
+    assert linked == [], linked
+
+
+#: The floor, plus SHIFT on Series, Acquisition and Content Date: dates an
+#: instance owns, so a pass can shift them while the instance's status says
+#: nothing about it (review of this PR, finding 1).
+_INSTANCE_DATES = ("0008,0021", "0008,0022", "0008,0023")
+_SHIFT_INSTANCE_DATES = "phi_tags:\n" + "".join(
+    f"  '{tag}': {{action: SHIFT}}\n" for tag in _INSTANCE_DATES)
+_DATES = ("StudyDate", "SeriesDate", "AcquisitionDate", "ContentDate")
+
+
+def _nest_the_content_date(path):
+    """File a with its one instance-owned date moved into a sequence item:
+    `0008,1140[0] > 0008,0023`, the top-level three removed."""
+    ds = pydicom.dcmread(str(path))
+    item = pydicom.Dataset()
+    item.ReferencedSOPClassUID = ds.SOPClassUID
+    item.ReferencedSOPInstanceUID = ds.SOPInstanceUID + ".9"
+    item.ContentDate = ds.ContentDate
+    for keyword in ("SeriesDate", "AcquisitionDate", "ContentDate"):
+        if keyword in ds:
+            delattr(ds, keyword)
+    ds.ReferencedImageSequence = pydicom.Sequence([item])
+    ds.save_as(str(path))
+
+
+@pytest.mark.parametrize("shape", ["dates-only", "edited", "reopened", "nested"])
+def test_a_shift_the_status_does_not_show_refuses_the_re_key(tmp_path, shape):
+    """Review finding 1. A pass handed only some of an instance's findings
+    shifts its dates and leaves it IDENTIFIED (#553); an edit after the
+    pass leaves it UNSCANNED; a reopen hydrates the shift record and no
+    status says more. The evidence is the shift record, at the root or in
+    a sequence item (#513). A real-ID file of the study then links under
+    the ID-less patient with its WARNING row, and after a full pass the
+    subject's files export one offset per date, never two. At 3fc566e1
+    every shape re-keyed silently and split the subject (-18 / -275
+    days). Kills MG1 (the record not read) and, nested, MG2 (the nested
+    items not walked)."""
+    a = tmp_path / "in1" / "a.dcm"
+    _id_less(a, "5870", "Alpha^One", "absent")
+    if shape == "nested":
+        _nest_the_content_date(a)
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", "5870", ".1.2", "Alpha^One")
+    source = {k: str(pydicom.dcmread(str(tmp_path / "in2" / "b.dcm")).get(k))
+              for k in _DATES}
+    config = tmp_path / "c.yaml"
+    config.write_text(_SHIFT_INSTANCE_DATES, encoding="utf-8")
+    sop_b = study_uid("5870") + ".1.2"
+    session = Session(str(tmp_path / "s.db"))
+    try:
+        load_fixed_secret(session, tmp_path)
+        session.load_config(str(config))
+        session.ingest(str(tmp_path / "in1"))
+        report = session.audit()
+        handed = [f for f in report.findings if f.entity_type == "Instance"
+                  and f.tag in _INSTANCE_DATES
+                  and bool(f.entity_path) == (shape == "nested")]
+        assert handed and len(handed) < len(
+            [f for f in report.findings if f.entity_type == "Instance"])
+        session.anonymize(handed)
+        [patient] = session.store.patients
+        [inst] = [i for st in patient.studies for se in st.series
+                  for i in se.instances]
+        assert not patient.studies[0].date_shifted
+        if shape == "edited":
+            inst.set_attr("0008,103e", "edited after the pass")
+            assert inst.phi_status.name == "UNSCANNED"
+        else:
+            assert inst.phi_status.name == "IDENTIFIED"
+        if shape == "reopened":
+            session.save(sync=True)
+            session.close()
+            session = Session(str(tmp_path / "s.db"))
+            session.load_config(str(config))
+        session.ingest(str(tmp_path / "in2"))
+        [patient] = session.store.patients
+        assert is_synthetic_patient_id(patient.patient_id)
+        linked = [d for uid, d in _audit_rows(session, "WARNING") if uid == sop_b]
+        assert len(linked) == 1, linked
+        session.anonymize(session.audit())
+        session.export(str(tmp_path / "out"), use_compression=False)
+    finally:
+        session.close()
+
+    def day(value):
+        return datetime.datetime.strptime(str(value), "%Y%m%d")
+
+    offsets = set()
+    for path in (tmp_path / "out").rglob("*.dcm"):
+        ds = pydicom.dcmread(str(path))
+        dated = [(k, ds.get(k)) for k in _DATES if ds.get(k)]
+        dated += [("ContentDate", item.ContentDate)
+                  for item in ds.get("ReferencedImageSequence", [])
+                  if item.get("ContentDate")]
+        offsets |= {(day(v) - day(source[k])).days for k, v in dated}
+    assert len(offsets) == 1 and 0 not in offsets, offsets
 
 
 def _audit_rows(session, action_type):

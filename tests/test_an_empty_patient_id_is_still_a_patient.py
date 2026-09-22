@@ -176,14 +176,22 @@ def test_a_report_lock_numbers_an_empty_id_patient_among_those_found(tmp_path):
         assert _locked(session) == []
 
 
-def test_two_restored_id_less_subjects_are_not_merged(tmp_path):
+@pytest.mark.parametrize("how", ["absent", "empty", "blank"])
+def test_two_restored_id_less_subjects_are_not_merged(tmp_path, how):
     """T-B6's addition. A restore that wrote the token's blank Patient ID
     back would make both subjects `''`, and the next `audit()`'s shared-ID
-    merge (#563) would collapse them into one patient. Kills M-B11."""
+    merge (#563) would collapse them into one patient. Kills M-B11. The
+    blank case (`" \t "`, which pydicom reads back as `" \t"`: the lock
+    stashes that copy) kills MR1, the guard's `.strip()` read as
+    `restored_id == ""`: the second restore wrote `" \t"` over both keys
+    and made one patient (review of this PR, finding 2)."""
     for suffix, name in (("5831", "Secret^One"), ("5832", "Secret^Two")):
         path = write_ct(tmp_path / "in" / f"{suffix}.dcm", "TMP", suffix, name=name)
         ds = pydicom.dcmread(path)
-        del ds.PatientID
+        if how == "absent":
+            del ds.PatientID
+        else:
+            ds.PatientID = " \t " if how == "blank" else ""
         ds.save_as(path)
     with Session(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in"))
