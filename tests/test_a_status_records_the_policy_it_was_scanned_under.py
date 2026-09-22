@@ -227,15 +227,17 @@ def test_remediation_keeps_its_scans_policy(tmp_path):
     """Remediation stamps REMEDIATED after its own writes, when the status
     already reads UNSCANNED: the policy comes from the entity's record,
     not from the stale reading. A nested item is never scanned, so its
-    REMEDIATED carries no policy. Kills: the default recording `None`;
-    an item given a policy no scan recorded."""
+    REMEDIATED carries no policy. Handed the findings as a list, not the
+    report, so the report's own policy (`anonymize(report)` after a
+    reopen) cannot stand in for the entity's. Kills: the default recording
+    `None`; an item given a policy no scan recorded."""
     _write_nested_only_ct(tmp_path / "in" / "a.dcm")
     config = _write_config(tmp_path, "tags.yaml", privacy_profile="none",
                            phi_tags={STEP: {"action": "REPLACE"}})
     with DicomSession(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in"))
         session.load_config(config)
-        session.anonymize(session.audit())
+        session.anonymize(list(session.audit().findings))
         expected = session.configuration._scan_policy()
         [inst] = _instances(session)
         item = inst.sequences[REQUEST_SEQ].items[0]
