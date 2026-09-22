@@ -395,6 +395,7 @@ TARGETS = {
                               "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                               "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
     "isocenter/remediation.py": (["tests/test_audit_suppression.py",
+                                  "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_partial_findings_list_is_not_remediated.py",
                                   "tests/test_a_replace_rule_writes_its_value.py",

@@ -24,7 +24,8 @@ the one literal.
 
 **Why this file imports what it does.** The recording is in
 `isocenter.session` and `isocenter.entities`, the fingerprint in
-`isocenter.configuration`, the store in `isocenter.persistence`; see
+`isocenter.configuration`, the store in `isocenter.persistence`, and
+the scan tally a kept report carries in `isocenter.remediation`; see
 `test_mutation_probe_targets.py`.
 """
 import json
@@ -591,140 +592,319 @@ def test_a_bare_findings_list_brings_no_policy(tmp_path):
         assert inst.phi_status_policy is None
         session.export(str(tmp_path / "out"))
         [notice] = _notices(session)
-        assert "1 with no recorded policy" in notice
-
-
-def test_a_kept_report_narrowed_in_place_brings_no_policy(tmp_path):
-    """Review of #750, finding 1, measured at 1f857655: a kept report whose
-    findings list was narrowed in place still carried its scan's policy, so
-    a pass that left Institution Name in place was labelled REMEDIATED under
-    the floor, the export carried JFK IMAGING CENTER with no notice, the
-    grade read PASS, and the saved row claimed a conclusion no scan
-    reached (the scan under that policy concluded IDENTIFIED). The report
-    no longer holds every finding its scan raised, so it does not speak for
-    the pass: nothing is adopted, the status carries no policy, and the
-    export says so. Kills: the completeness check skipped."""
-    db = str(tmp_path / "s.db")
-    report, _ = _audited_and_closed(tmp_path, db)
-    assert any(f.tag == INSTITUTION for f in report.findings)
-    report.findings[:] = [f for f in report.findings if f.tag != INSTITUTION]
-    with DicomSession(db) as session:
-        [inst] = _instances(session)
-        session.anonymize(report)
-        assert inst.attributes.get(INSTITUTION)   # the pass left it
-        assert inst.phi_status_policy is None
-        session.export(str(tmp_path / "out"))
-        [notice] = _notices(session)
-        # Finding 2: true of a report a scan did run for.
+        # Review of #750, finding 2: true of a bare list, and of a report
+        # whose scan did run but that no longer carries it.
         assert ("1 with no recorded policy (written before 1.0, or "
                 "remediated from findings that are not a whole audit() "
                 "report)") in notice
+
+
+def test_a_kept_report_speaks_for_every_session_it_is_handed_to(tmp_path):
+    """One kept report, handed to two reopened sessions in turn, neither of
+    which saves: each pass settles against the report's tally as its audit
+    left it. Kills: a reopened pass settling the report's own tally in
+    place, which drained it, so the second session adopted nothing."""
+    db = str(tmp_path / "s.db")
+    report, policy = _audited_and_closed(tmp_path, db)
+    for _ in range(2):
+        with DicomSession(db) as session:
+            [inst] = _instances(session)
+            session.anonymize(report)
+            assert inst.phi_status is PhiStatus.REMEDIATED
+            assert inst.phi_status_policy == policy
+
+
+# --- the same pass in the scanning session and across a reopen --------------
+#
+# The ruling on #750 (re-review at 17f002c1): a pass over a kept report
+# records exactly what the same pass would have recorded in the session
+# that scanned it. `audit()` puts its scan tally on the report; a reopened
+# pass settles against it, demoting what it leaves unsettled, and the
+# report's policy goes only to entities the scan raised under. Each case
+# runs twice -- in the scanning session, and across a reopen -- and the
+# statuses, policies, notices and grade must be identical.
+
+NESTED_SEQ = "0040,0275"      # Request Attributes Sequence
+NESTED_STEP = "0040,0007"     # Scheduled Procedure Step Description
+
+
+def _write_ct(folder, name="a.dcm", nested=False, sop_suffix=""):
+    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    if nested:
+        from pydicom.dataset import Dataset
+        from pydicom.sequence import Sequence
+        item = Dataset()
+        item.ScheduledProcedureStepDescription = "Nested^PHI"
+        ds.RequestAttributesSequence = Sequence([item])
+    if sop_suffix:
+        ds.SOPInstanceUID = ds.SOPInstanceUID + sop_suffix
+        ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+    folder.mkdir(parents=True, exist_ok=True)
+    ds.save_as(str(folder / name))
+    return str(folder)
+
+
+def _snapshot(session):
+    return [(level, entity.phi_status.value,
+             entity.phi_status_policy and entity.phi_status_policy.fingerprint)
+            for level, entity in _entities(session)]
+
+
+def _outcome(session, root):
+    snapshot = _snapshot(session)
+    out = root / "out"
+    session.export(str(out))
+    notices = [n.replace(str(out), "<out>") for n in _notices(session)]
+    return {"statuses": snapshot, "notices": notices,
+            "grade": _grade(session, root)}
+
+
+def _both_ways(tmp_path, *, nested=False, config=None, mutate=None,
+               before=None):
+    """`(in_session, reopened)` outcomes of one flow.
+
+    In session: ingest, save, `audit()`, then `before(session, root)` and
+    `mutate(report)`, then `anonymize(report)`. Reopened: the same, but the
+    session closes after `audit()` without saving it, and a new session
+    over the same store runs `before`, `mutate` and `anonymize` (#644's
+    flow). `mutate` may return a replacement report.
+    """
+    results = []
+    for mode in ("in_session", "reopened"):
+        root = tmp_path / mode
+        db = str(root / "s.db")
+        folder = _write_ct(root / "in", nested=nested)
+        with DicomSession(db) as session:
+            session.ingest(folder)
+            session.save(sync=True)
+            if config:
+                session.load_config(config(tmp_path))
+            report = session.audit()
+            if mode == "in_session":
+                if before:
+                    before(session, root)
+                report = (mutate(report) if mutate else None) or report
+                session.anonymize(report)
+                results.append(_outcome(session, root))
+                continue
+        with DicomSession(db) as session:
+            if config:
+                session.load_config(config(tmp_path))
+            if before:
+                before(session, root)
+            report = (mutate(report) if mutate else None) or report
+            session.anonymize(report)
+            results.append(_outcome(session, root))
+    return results
+
+
+def _withdraw_institution(report):
+    [finding] = [f for f in report.findings if f.tag == INSTITUTION]
+    finding.remediation_proposal = None
+
+
+def _narrow_institution(report):
+    report.findings[:] = [f for f in report.findings if f.tag != INSTITUTION]
+
+
+def _nested_config(tmp_path):
+    return _write_config(
+        tmp_path, "nested.yaml", privacy_profile="none",
+        phi_tags={INSTITUTION: {"action": "REPLACE"},
+                  NESTED_STEP: {"action": "REPLACE"}})
+
+
+def _remove_the_nested_item(session, root):
+    [inst] = _instances(session)
+    inst.sequences[NESTED_SEQ].items.clear()
+
+
+def _ingest_a_second_instance(session, root):
+    session.ingest(_write_ct(root / "later", sop_suffix=".9"))
+
+
+def _pickled(report):
+    import pickle
+    return pickle.loads(pickle.dumps(report))
+
+
+def test_a_withdrawn_proposal_is_settled_as_in_the_scanning_session(tmp_path):
+    """Re-review (a): a finding kept in the report with its proposal set to
+    None. At 17f002c1 the reopened pass read REMEDIATED under the floor
+    over JFK IMAGING CENTER, no notice, PASS; in the scanning session the
+    tally demotes the instance to IDENTIFIED. Kills: the carried tally
+    ignored."""
+    in_session, reopened = _both_ways(tmp_path, mutate=_withdraw_institution)
+    assert ("instance", "identified") in {s[:2] for s in in_session["statuses"]}
+    assert reopened == in_session
+
+
+def test_a_carry_to_an_instance_the_scan_never_saw_adopts_nothing(tmp_path):
+    """Re-review (b), as a flow: a second instance of the same patient,
+    ingested after the audit, is reached by the patient-level carry. The
+    scan never saw it: in the scanning session its status carries no
+    policy, and across a reopen it must not adopt the report's."""
+    in_session, reopened = _both_ways(tmp_path, before=_ingest_a_second_instance)
+    instances = [s for s in in_session["statuses"] if s[0] == "instance"]
+    assert len(instances) == 2 and None in {s[2] for s in instances}
+    assert reopened == in_session
+
+
+def test_the_reviewers_carry_sequence_gives_the_unseen_instance_no_policy(
+        tmp_path):
+    """Re-review (b), S1-S4 as written: I2 remediated from a bare list
+    (REMEDIATED, no policy) and saved; then `anonymize(r1)` from a session
+    whose audit never saw I2. At 17f002c1 I2 adopted r1's policy while it
+    still held JFK IMAGING CENTER, and the export graded PASS."""
+    db = str(tmp_path / "s.db")
+    with DicomSession(db) as session:                                # S1
+        session.ingest(_write_ct(tmp_path / "i1"))
+        session.save(sync=True)
+        r1 = session.audit()
+    with DicomSession(db) as session:                                # S2
+        session.ingest(_write_ct(tmp_path / "i2", sop_suffix=".9"))
+        session.save(sync=True)
+        r2 = session.audit()
+        i2_uid = [i for i in _instances(session)
+                  if i.sop_instance_uid.endswith(".9")][0].sop_instance_uid
+    with DicomSession(db) as session:                                # S3
+        session.anonymize([f for f in r2.findings
+                           if f.entity_uid == i2_uid and f.tag != INSTITUTION])
+        session.save(sync=True)
+    with DicomSession(db) as session:                                # S4
+        session.anonymize(r1)
+        [i2] = [i for i in _instances(session) if i.sop_instance_uid == i2_uid]
+        assert i2.attributes.get(INSTITUTION) == "JFK IMAGING CENTER"
+        assert i2.phi_status_policy is None
+        session.export(str(tmp_path / "out"))
+        assert _notices(session)
         assert "REVIEW_REQUIRED" in _grade(session, tmp_path)
 
 
-def test_a_kept_report_with_a_finding_added_still_brings_its_policy(tmp_path):
-    """The check is that the report still holds every finding its scan
-    raised, not that it holds nothing else: an appended finding does not
-    withdraw what the scan concluded. Kills: completeness read as
-    equality."""
-    from isocenter.privacy import PhiFinding
-    db = str(tmp_path / "s.db")
-    report, policy = _audited_and_closed(tmp_path, db)
-    [first] = report.findings[:1]
-    report.findings.append(PhiFinding(
-        entity_uid=first.entity_uid, entity_type=first.entity_type,
-        field_name="extra", value=None, reason="added by hand", tag=None))
-    with DicomSession(db) as session:
-        [inst] = _instances(session)
-        session.anonymize(report)
-        assert inst.phi_status is PhiStatus.REMEDIATED
-        assert inst.phi_status_policy == policy
+def test_a_narrowed_report_is_settled_as_in_the_scanning_session(tmp_path):
+    """Review of #750, finding 1: `report.findings[:]` without Institution
+    Name. The tally demotes the instance in both sessions."""
+    in_session, reopened = _both_ways(tmp_path, mutate=_narrow_institution)
+    assert ("instance", "identified") in {s[:2] for s in in_session["statuses"]}
+    assert reopened == in_session
 
 
-def test_a_kept_report_whose_nested_item_is_gone_brings_no_policy(tmp_path):
-    """The report still holds every finding, but one no longer resolves to
-    a live target: its sequence item was removed before `anonymize()`. The
-    pass settles the rest and records REMEDIATED; the report does not speak
-    for an entity it could not reach, so nothing is adopted and the export
-    says so (coordinator's ruling on #750). Kills: the resolution half of
-    the check skipped."""
-    from pydicom.dataset import Dataset
-    from pydicom.sequence import Sequence
-    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
-    item = Dataset()
-    item.ScheduledProcedureStepDescription = "Nested^PHI"
-    ds.RequestAttributesSequence = Sequence([item])
-    folder = tmp_path / "in"
-    folder.mkdir()
-    ds.save_as(str(folder / "a.dcm"))
-    config = _write_config(
-        tmp_path, "nested.yaml", privacy_profile="none",
-        phi_tags={INSTITUTION: {"action": "REPLACE"},
-                  "0040,0007": {"action": "REPLACE"}})
-    db = str(tmp_path / "s.db")
-    with DicomSession(db) as session:
-        session.ingest(str(folder))
-        session.save(sync=True)
-        session.load_config(config)
-        report = session.audit()
-    assert {f.tag for f in report.findings} >= {INSTITUTION, "0040,0007"}
-    with DicomSession(db) as session:
-        session.load_config(config)
-        [inst] = _instances(session)
-        inst.sequences["0040,0275"].items.clear()
-        session.anonymize(report)
-        assert inst.attributes[INSTITUTION] != "JFK IMAGING CENTER"
-        assert inst.phi_status is PhiStatus.REMEDIATED
-        assert inst.phi_status_policy is None
-        session.export(str(tmp_path / "out"))
-        [notice] = _notices(session)
-        assert "1 with no recorded policy" in notice
+def test_a_removed_nested_item_is_settled_as_in_the_scanning_session(tmp_path):
+    """The nested finding's item is removed before `anonymize()`: its key
+    is settled as gone (#644) in both sessions, and the outcomes match."""
+    in_session, reopened = _both_ways(
+        tmp_path, nested=True, config=_nested_config,
+        before=_remove_the_nested_item)
+    assert reopened == in_session
 
 
-def test_a_kept_report_with_a_finding_rehydration_lost_brings_no_policy(
+def test_a_pickled_report_is_settled_as_in_the_scanning_session(tmp_path):
+    """A whole report through a pickle round trip: its tally and policy
+    travel with it, and the reopened pass matches the scanning session's --
+    REMEDIATED under the scan's policy, no notice."""
+    in_session, reopened = _both_ways(tmp_path, mutate=_pickled)
+    assert {s[1] for s in in_session["statuses"]} == {"remediated"}
+    assert in_session["notices"] == []
+    assert reopened == in_session
+
+
+def test_a_report_applied_to_another_store_gives_its_instance_no_policy(
         tmp_path):
-    """A finding whose rehydration found nothing (`_live_target` -> None,
-    so it carries a proposal and no entity) reached no live target. The
-    report holds it, and does not speak for the pass. Kills: a
-    proposal-bearing finding with no entity counted as resolved."""
-    db = str(tmp_path / "s.db")
-    report, _ = _audited_and_closed(tmp_path, db)
-    [lost] = [f for f in report.findings if f.tag == INSTITUTION]
-    lost.entity = None
-    with DicomSession(db) as session:
-        [inst] = _instances(session)
-        session.anonymize(report)
-        assert inst.phi_status is PhiStatus.REMEDIATED
-        assert inst.phi_status_policy is None
+    """A report from store A applied to store B, which holds A's patient
+    and study but another instance. The scan never saw B's instance: it
+    is given no policy, and the report grades REVIEW_REQUIRED, whether A's
+    session is still open or closed (the report's tally is the same object
+    either way). Measured: B's instance is not reached and stays
+    UNSCANNED; A's patient-level keys do not settle on B's patient, which
+    is demoted to IDENTIFIED under the scan's policy."""
+    outcomes = []
+    for mode in ("a_open", "a_closed"):
+        root = tmp_path / mode
+        root.mkdir()
+        a = DicomSession(str(root / "a.db"))
+        try:
+            a.ingest(_write_ct(root / "a"))
+            a.save(sync=True)
+            report = a.audit()
+            if mode == "a_closed":
+                a.close()
+            with DicomSession(str(root / "b.db")) as b:
+                b.ingest(_write_ct(root / "b", sop_suffix=".9"))
+                b.anonymize(report)
+                [inst] = _instances(b)
+                assert inst.phi_status_policy is None
+                outcomes.append(_outcome(b, root))
+        finally:
+            if mode == "a_open":
+                a.close()
+    assert "REVIEW_REQUIRED" in outcomes[0]["grade"]
+    assert outcomes[0] == outcomes[1]
 
 
-def test_a_report_applied_to_another_store_brings_no_policy(tmp_path):
-    """A whole report from store A applied to store B, which holds the same
-    patient and study but not A's instance: the patient and study findings
-    resolve and are remediated, the instance findings resolve to nothing.
-    The report was not raised on this graph, and nothing is adopted."""
-    report, _ = _audited_and_closed(tmp_path, str(tmp_path / "a.db"))
-    ds = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
-    ds.SOPInstanceUID = ds.SOPInstanceUID + ".9"
-    ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
-    folder = tmp_path / "other"
-    folder.mkdir()
-    ds.save_as(str(folder / "b.dcm"))
-    with DicomSession(str(tmp_path / "b.db")) as session:
-        session.ingest(str(folder))
-        session.anonymize(report)
-        remediated = [e for _, e in _entities(session)
-                      if e.phi_status is PhiStatus.REMEDIATED]
-        assert remediated   # the pass reached the patient or the study
-        for entity in remediated:
-            assert entity.phi_status_policy is None, entity
+# --- the tally travels between processes -----------------------------------
+
+def test_the_key_hash_is_pinned_and_types_stay_apart():
+    """The tally's digest is the same in every process and interpreter:
+    blake2b over a canonical, type-tagged spelling. Pinned by value, so
+    `hash()` (salted per process) cannot come back unnoticed. Kills: the
+    digest restored to `hash(key)`."""
+    from isocenter.remediation import _canonical_key, _key_hash
+    key = ("1.2.3", (("0040,0275", 0),), "0040,0007")
+    assert _canonical_key(key) == '["1.2.3",[["0040,0275",0]],"0040,0007"]'
+    assert _key_hash(key) == KEY_HASH
+    assert len({_canonical_key(v) for v in (1, True, "1", None)}) == 4
+    # A key JSON cannot spell (only a hand-built finding's) still gets one
+    # spelling per value, apart from every JSON spelling.
+    assert _canonical_key(("1.2.3", 1.5j)) == '~t(s"1.2.3",ocomplex:1.5j)'
+
+
+#: blake2b(digest_size=8) of the key above's canonical spelling, as a
+#: little-endian int. Computed once and pasted: it must never change.
+KEY_HASH = 16290191241151387406
+
+
+def test_a_pickled_tally_settles_alike_in_a_child_process(tmp_path):
+    """A real tally, pickled into a spawned child under another
+    `PYTHONHASHSEED`, settles each uid as it does in the parent. Measured
+    before the digest was stable: every uid settled False in the child
+    (ruling on #750, condition 2)."""
+    import os
+    import pickle
+    import subprocess
+    import sys
+    from isocenter.remediation import _remediation_key
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(_input(tmp_path, "CT_small.dcm"))
+        report = session.audit()
+        tally = report._scan_tally
+        keys = {}
+        for finding in report.findings:
+            if finding.remediation_proposal is not None:
+                keys.setdefault(finding.entity_uid, set()).add(
+                    _remediation_key(finding))
+    path = tmp_path / "tally.pkl"
+    path.write_bytes(pickle.dumps((tally, keys)))
+    parent = {uid: pickle.loads(path.read_bytes())[0].settle(uid, k)
+              for uid, k in keys.items()}
+    assert parent and set(parent.values()) == {True}
+    child_code = (
+        "import json, pickle, sys\n"
+        "tally, keys = pickle.load(open(sys.argv[1], 'rb'))\n"
+        "print(json.dumps({u: tally.settle(u, k) for u, k in keys.items()}))\n")
+    for seed in ("0", "1"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        run = subprocess.run([sys.executable, "-c", child_code, str(path)],
+                             env=env, capture_output=True, text=True,
+                             check=True)
+        assert json.loads(run.stdout) == parent, seed
 
 
 def test_only_a_status_the_pass_recorded_adopts_the_reports_policy(tmp_path):
     """Kills: the adoption relabelling a policy-less status the pass did not
     record -- a store's pre-1.0 REMEDIATED beside the one the report
-    touched."""
+    touched, both named by the report's tally."""
     from isocenter.privacy import PhiFinding, PhiRemediation, PhiReport
+    from isocenter.remediation import _ScanTally
     policy = ScanPolicy("v1:" + "c" * 64, "kept")
     with DicomSession(str(tmp_path / "s.db")) as session:
         patient = Patient("P555", "Original^Name")
@@ -743,15 +923,17 @@ def test_only_a_status_the_pass_recorded_adopts_the_reports_policy(tmp_path):
         patient.studies.append(study)
         session.store.patients.append(patient)
 
-        report = PhiReport([PhiFinding(
-            entity_uid=touched.sop_instance_uid, entity_type="Instance",
-            field_name="0008,0090", value="Dr^Leak", reason="test",
-            tag="0008,0090", entity=touched,
-            remediation_proposal=PhiRemediation(
-                action_type="REPLACE_TAG", target_attr="0008,0090",
-                new_value="ANON", original_value="Dr^Leak"))])
+        def finding(inst):
+            return PhiFinding(
+                entity_uid=inst.sop_instance_uid, entity_type="Instance",
+                field_name="0008,0090", value="Dr^Leak", reason="test",
+                tag="0008,0090", entity=inst,
+                remediation_proposal=PhiRemediation(
+                    action_type="REPLACE_TAG", target_attr="0008,0090",
+                    new_value="ANON", original_value="Dr^Leak"))
+        report = PhiReport([finding(touched)])
         report._scan_policy = policy
-        report._scan_findings = tuple(report.findings)
+        report._scan_tally = _ScanTally([finding(touched), finding(untouched)])
         assert session.anonymize(report) == 1
         assert touched.attributes["0008,0090"] == "ANON"
         assert touched.phi_status_policy == policy

@@ -2022,9 +2022,71 @@ def _remediation_key(finding: PhiFinding) -> tuple:
 _TALLY_MASK = (1 << 64) - 1
 
 
+# Imported here, not at the top: a line added above remediation.py's five
+# pinned `mark_modified()` calls moves them, and `test_source_citations.py`
+# holds each to its number (#310).
+import hashlib  # pylint: disable=wrong-import-position,wrong-import-order
+import json  # pylint: disable=wrong-import-position,wrong-import-order
+
+
+#: One encoder for every key: `json.dumps` with non-default arguments
+#: builds a new one per call, which measured 1.3 us a key against 0.8.
+_KEY_ENCODER = json.JSONEncoder(ensure_ascii=True, separators=(",", ":"))
+
+
+def _canonical_key(value) -> str:
+    """A remediation key as text that is the same in every process.
+
+    A scan's key is `(str, tuple of (str, int) pairs, str)`: JSON spells
+    each of those one way, in C (the pure-Python spelling below cost about
+    4 us a key), and keeps `1`, `True`, `"1"` and `None` four keys. A key
+    JSON refuses can only come from a hand-built finding, and gets
+    `_typed_key`'s spelling, behind a `~` no JSON text begins with.
+    """
+    try:
+        return _KEY_ENCODER.encode(value)
+    except (TypeError, ValueError):
+        return "~" + _typed_key(value)
+
+
+def _typed_key(value) -> str:
+    """The fallback spelling: tagged by type, `repr` for anything else.
+
+    `repr` is stable for the builtins a key can hold (a float's shortest
+    `repr` has been fixed since 3.1). For an object with a default `repr`
+    it differs between processes, and such a key then fails to match,
+    which the tally reads as incomplete (fail-closed), never as complete.
+    """
+    if value is None:
+        return "n"
+    if isinstance(value, bool):
+        return "b1" if value else "b0"
+    if isinstance(value, int):
+        return f"i{value}"
+    if isinstance(value, str):
+        return "s" + json.dumps(value, ensure_ascii=True)
+    if isinstance(value, tuple):
+        return "t(" + ",".join(_typed_key(v) for v in value) + ")"
+    return f"o{type(value).__qualname__}:{value!r}"
+
+
+def _key_hash(key) -> int:
+    """64 bits of blake2b over `_canonical_key(key)`."""
+    return int.from_bytes(hashlib.blake2b(
+        _canonical_key(key).encode("utf-8"), digest_size=8).digest(), "little")
+
+
 def _key_digest(keys) -> int:
-    """The 64-bit sum of `hash(key)` over a set of remediation keys."""
-    return sum(hash(key) & _TALLY_MASK for key in keys) & _TALLY_MASK
+    """The 64-bit sum of `_key_hash(key)` over a set of remediation keys.
+
+    Not `hash(key)`: that is salted per process, and a report carries its
+    scan's tally into whatever process reopens the store (#555, the ruling
+    on #750). Measured: a tally pickled into a child under another
+    `PYTHONHASHSEED` settled every uid False. Costs about 1.2 us a key
+    (the encoding 0.8, blake2b 0.3) against `hash()`'s 0.04, about 0.25 ms
+    for a 200-key instance.
+    """
+    return sum(_key_hash(key) for key in keys) & _TALLY_MASK
 
 
 class _ScanTally:
@@ -2078,11 +2140,14 @@ class _ScanTally:
     today's answer. The hash-sum only stops such a key
     from making up the count in place of a raised key that was not
     handled; two distinct sets of equal size colliding is about 2^-64.
-    It is not a secret and not an integrity check. `hash()` of a str is
-    salted per process, which is safe here because the tally is built
-    and settled in the parent process of one session and never crosses a
-    boundary; it is not persisted, so a reopened session has no tally and
-    keeps pass accounting.
+    It is not a secret and not an integrity check. The hash is blake2b
+    over a canonical spelling of the key (`_key_hash`), not `hash()`,
+    because the tally crosses processes: `audit()` puts it on its report
+    (`report._scan_tally`), and a report kept across `close()` -- pickled,
+    even -- settles in whatever session is handed it as it would have in
+    the session that scanned (#555, the ruling on #750). It is still not
+    persisted with the store: a reopened session without the report has no
+    tally and keeps pass accounting.
 
     **`_partial`'s cost.** Nothing on a full pass. A deliberately partial
     workflow -- a patient-level pass now, the instances later -- keeps
@@ -2103,6 +2168,27 @@ class _ScanTally:
         self._raised = {uid: (len(keys), _key_digest(keys))
                         for uid, keys in raised.items()}
         self._partial = {}
+
+    def copy(self) -> "_ScanTally":
+        """This tally as the audit left it, with no pass's progress.
+
+        What a report carries (`report._scan_tally`) and what each pass
+        over a kept report settles against: the session's own tally is
+        drained as its passes complete uids, and a report sharing it named
+        nothing after a reopen of a pass that was never saved (#644's
+        flow). A pass over a pristine copy still completes what an
+        earlier *saved* pass applied, whose end state the graph holds
+        (#567's satisfied keys).
+        """
+        fresh = _ScanTally(())
+        fresh._raised = dict(self._raised)
+        return fresh
+
+    def raised_under(self, uid) -> bool:
+        """Whether the audit raised anything under `uid` that no pass has
+        yet completed. Read by `Session.anonymize` before a pass, to know
+        which entities a kept report's scan speaks for (#555)."""
+        return uid in self._raised
 
     def settle(self, uid, handled) -> Optional[bool]:
         """Whether the keys handled under `uid` complete what was raised."""

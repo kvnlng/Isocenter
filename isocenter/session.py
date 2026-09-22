@@ -2663,14 +2663,16 @@ class DicomSession:
         # set here rather than a constructor argument, so `PhiReport`'s
         # shape is unchanged; a report rebuilt from its findings has none.
         report._scan_policy = policy
-        # And the findings the scan raised, by reference, so `anonymize()`
-        # can tell the report it was handed still holds all of them. A
-        # report narrowed in place still carries the policy, and a pass
-        # over what is left settles less than the scan found: labelling
-        # that pass's REMEDIATED with the scan's policy wrote a conclusion
-        # no scan reached, and the export passed over the finding the
-        # narrowing dropped (review of #750, finding 1).
-        report._scan_findings = tuple(all_findings)
+        # And the scan's tally (#553), as the audit left it: a pass over
+        # this report in a session that has no audit of its own -- the
+        # report kept across `close()`, pickled or not -- settles against
+        # a copy of it, demoting what it leaves unsettled as the same pass
+        # would in this session, and gives the policy only to the entities
+        # this scan raised under (ruling on #750, which replaced a
+        # completeness check and a resolution check that each missed a way
+        # to hand over a partial pass). A copy, not the session's object,
+        # which this session's own passes drain.
+        report._scan_tally = self._scan_tally.copy()
         return report
 
     def phi_status_summary(self) -> Dict[str, Counter]:
@@ -5714,8 +5716,16 @@ class DicomSession:
             project_secret=project_secret,
         )
 
-        # Read before `findings` is rebound to the live list below (#555).
-        report_policy = self._the_reports_policy(findings)
+        # What `audit()` put on this report (#555): the policy it scanned
+        # under and its tally. Read before `findings` is rebound below.
+        report_policy = getattr(findings, "_scan_policy", None)
+        report_tally = getattr(findings, "_scan_tally", None)
+        # The session's own tally when it has one, as before (#553);
+        # otherwise a fresh copy of the report's, so a pass over a kept
+        # report records what the same pass would have in the session that
+        # scanned it, and the report stays as its audit left it.
+        from_report = self._scan_tally is None and report_tally is not None
+        tally = report_tally.copy() if from_report else self._scan_tally
 
         count = 0
         if findings:
@@ -5723,6 +5733,13 @@ class DicomSession:
             # so the statuses the pass records can be told from the rest.
             recorded_at = {id(entity): entity._phi_status_revision
                            for entity in self._status_bearers()}
+            # The entities the report's scan raised under, read before the
+            # pass can replace a patient's ID. Only when the tally settling
+            # this pass is the report's own: under another audit's tally,
+            # the report's policy is not the scan being settled against.
+            named = (self._named_by(tally)
+                     if from_report and report_policy is not None
+                     else frozenset())
             # Resolved against the live graph before the service sees them
             # (#644), and only here, after the blind-execution check above:
             # a report every finding of which a pass already settled
@@ -5736,26 +5753,17 @@ class DicomSession:
             # thing to the resolver and another to the owners or the
             # removal targets.
             by_uid = self._instances_by_uid()
-            report = findings
-            findings, gone, unresolved = self._live_findings(
-                list(findings), project_secret, by_uid)
-            if report_policy is not None and any(
-                    id(finding) in unresolved
-                    for finding in report._scan_findings):
-                # A finding the scan raised reached nothing live: the pass
-                # cannot have settled it, so the report does not speak for
-                # this pass (coordinator's ruling on #750).
-                report_policy = None
+            findings, gone = self._live_findings(list(findings), project_secret, by_uid)
             owners = self._nested_finding_owners(findings, by_uid)
             remediator._use_gone_keys(gone)
             remediator._use_instance_owners(owners)
             remediator._use_holders(self._finding_holders(findings, owners))
             remediator._use_removal_targets(
                 self._removal_targets(findings, by_uid, project_secret))
-            remediator._use_scan_tally(self._scan_tally, findings)
+            remediator._use_scan_tally(tally, findings)
             count = remediator.apply_remediation(findings)
-            if report_policy is not None:
-                self._adopt_the_reports_policy(report_policy, recorded_at)
+            if named:
+                self._adopt_the_reports_policy(report_policy, recorded_at, named)
 
         # A patient ingested under its original ID after that patient was
         # anonymized has just been given the pseudonym the stored patient
@@ -6840,9 +6848,8 @@ class DicomSession:
         return holders
 
     def _live_findings(self, findings, secret, by_uid) -> tuple:
-        """`(findings, gone, unresolved)`: each finding resolved against the
-        live graph, the keys of those a pass already settled (#644), and
-        the `id`s of the findings passed in that reached no live target.
+        """`(findings, gone)`: each finding resolved against the live graph,
+        and the keys of those a pass already settled (#644).
 
         `anonymize(findings)` does not rehydrate `finding.entity`, and every
         remediation arm writes to that object. Until this, a report kept
@@ -6889,14 +6896,6 @@ class DicomSession:
         since #661, so an owner's address cannot mean one thing to the
         resolver and another to the removal it resolves.
 
-        **Unresolved** (#555, the ruling on #750): a finding with a
-        proposal whose entity is None (rehydration found nothing), bound to
-        a copy with no entity, bound to the empty item `_removal_address`
-        answers for a walk that broke, or put in `gone`. Each settles, or
-        declines, without a live object to act on, so a report holding one
-        does not speak for the pass (`anonymize()` adopts nothing from it).
-        Keyed by the `id` of the finding passed in, which the caller holds.
-
         **Copies, never in place.** The caller's findings keep the entity
         they had: a finding bound to None in place would stay unresolvable
         in a later session that could resolve it, and a report passed
@@ -6921,12 +6920,10 @@ class DicomSession:
                         top.add(id(inst))
                         instances.append(inst)
         items = None
-        resolved, gone, unresolved = [], set(), set()
+        resolved, gone = [], set()
         for finding in findings:
             proposal, entity = finding.remediation_proposal, finding.entity
             if proposal is None or entity is None:
-                if proposal is not None:
-                    unresolved.add(id(finding))
                 resolved.append(finding)
                 continue
             uid = finding.entity_uid
@@ -6951,23 +6948,19 @@ class DicomSession:
                 resolved.append(finding)
                 continue
             if len(unique) != 1:
-                unresolved.add(id(finding))
                 resolved.append(dataclasses.replace(finding, entity=None))
                 continue
             (target,) = unique.values()
             if finding.entity_type == "Instance":
                 item = self._removal_address(target, finding.entity_path,
                                              proposal.target_attr)
-                live = resolve_item_path(target, finding.entity_path)
-                if item is None or live is not item:
-                    unresolved.add(id(finding))
                 if (item is not None and proposal.action_type != "REMOVE_TAG"
-                        and live is not item):
+                        and resolve_item_path(target, finding.entity_path) is not item):
                     gone.add(_remediation_key(finding))
                     continue
                 target = item
             resolved.append(dataclasses.replace(finding, entity=target))
-        return resolved, frozenset(gone), frozenset(unresolved)
+        return resolved, frozenset(gone)
 
     @staticmethod
     def _owner_candidates(finding, by_pid, by_study, secret) -> list:
@@ -7021,62 +7014,61 @@ class DicomSession:
                 for series in study.series:
                     yield from series.instances
 
-    @staticmethod
-    def _the_reports_policy(findings):
-        """The policy `audit()` put on this report, if it still speaks for
-        the pass; otherwise None.
+    def _named_by(self, tally) -> frozenset:
+        """`id`s of the patients, studies and instances `tally` raised under.
 
-        It speaks for the pass only while the report holds every finding
-        its scan raised (review of #750, finding 1). A report narrowed in
-        place kept its `_scan_policy`, and at 1f857655 a pass over what was
-        left was labelled REMEDIATED under the floor over an instance still
-        holding the Institution Name the floor empties: the export passed,
-        and the saved row claimed a conclusion the scan under that policy
-        had not reached (it concluded IDENTIFIED). Findings added beside
-        the scan's do not withdraw it, so the test is containment, not
-        equality. Compared by identity: the report holds its findings by
-        reference (`_scan_findings`), so an `id` cannot be reused while
-        this runs.
-
-        This is half the check. The other half is in `anonymize()`, once
-        the findings are resolved: if any of the scan's findings reached no
-        live target (`_live_findings`' third value), the policy is dropped.
-        That covers a report applied to a graph it was not raised on.
+        Read before a pass: an instance by its SOP Instance UID, a study by
+        its Study Instance UID, a patient by the `patient_id` it holds now,
+        which the pass may replace -- the uids the scan files findings
+        under. An entity the scan never saw (an instance ingested since,
+        reached by a patient-level carry) is not named, and is given no
+        policy (review of #750 at 17f002c1, (b)).
         """
-        policy = getattr(findings, "_scan_policy", None)
-        raised = getattr(findings, "_scan_findings", None)
-        if policy is None or raised is None:
-            return None
-        held = {id(finding) for finding in findings}
-        if all(id(finding) in held for finding in raised):
-            return policy
-        return None
+        named = set()
+        for patient in self.store.patients:
+            if tally.raised_under(patient.patient_id):
+                named.add(id(patient))
+            for study in patient.studies:
+                if tally.raised_under(study.study_instance_uid):
+                    named.add(id(study))
+                for series in study.series:
+                    for inst in series.instances:
+                        if tally.raised_under(inst.sop_instance_uid):
+                            named.add(id(inst))
+        return frozenset(named)
 
-    def _adopt_the_reports_policy(self, policy, recorded_at):
-        """Give the report's policy to a status this pass recorded with none.
+    def _adopt_the_reports_policy(self, policy, recorded_at, named):
+        """Give the report's policy to a status this pass recorded with none,
+        on an entity the report's scan raised under.
 
-        Remediation records REMEDIATED under the policy the entity was last
+        Remediation records a status under the policy the entity was last
         scanned under (`record_phi_status`'s default). An entity reopened
         from the store with no scan behind it -- its audit was never saved,
         and the report was kept across `close()` (#644) -- has none, so its
-        REMEDIATED carried no policy and the export said so, over a graph
-        byte-identical to a fresh pass's. The report knows the policy its
-        findings were raised under (`audit()` puts it there), and that is
-        the scan this remediation concluded from.
+        status carried no policy and the export said so, over a graph
+        byte-identical to a fresh pass's. In the session that scanned it,
+        the same status would carry the scan's policy.
 
-        Only a status the pass recorded (its `_phi_status_revision` moved)
-        as REMEDIATED with no policy: a status a scan recorded keeps its
-        own, a status recorded before the pass is not this pass's to
-        relabel, and a nested item's never has one (it is never scanned).
-        A findings list, or a report rebuilt from one, carries no policy,
-        and nothing is adopted; nor is anything from a report that no longer
-        holds every finding its scan raised (`_the_reports_policy`).
+        The pass settled against the report's tally, so what it recorded
+        is what the scanning session's pass would have: REMEDIATED where
+        the pass settled everything the scan raised under the entity,
+        IDENTIFIED where it did not (#553). This gives either the policy
+        that session's statuses would carry, and nothing else:
+
+        - only an entity in `named` (`_named_by`): one the pass reached
+          that the scan never saw -- an instance ingested since, reached by
+          a patient-level carry -- keeps no policy (review of #750 at
+          17f002c1, (b));
+        - only a status this pass recorded (its `_phi_status_revision`
+          moved): a status recorded before the pass is not this pass's.
         """
         for entity in self._status_bearers():
+            if id(entity) not in named:
+                continue
             if recorded_at.get(id(entity)) == entity._phi_status_revision:
                 continue
             status, recorded = entity._phi_status_record()
-            if status is PhiStatus.REMEDIATED and recorded is None:
+            if status is not PhiStatus.UNSCANNED and recorded is None:
                 entity.record_phi_status(status, policy=policy)
 
     def _nested_finding_owners(self, findings, by_uid) -> dict:
