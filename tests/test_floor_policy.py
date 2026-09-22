@@ -467,7 +467,8 @@ def _report_method_line(session, tmp_path, name):
 def test_the_report_counts_the_policy_in_force(tmp_path):
     """The bare report says 620 rules and `session defaults`; a
     `privacy_profile: none` session says 0. Kills `generate_report`'s
-    `load_phi_config()` fallback for an empty `phi_tags` -- under it the
+    `load_phi_config()` fallback (the loader is gone since #729) for an
+    empty `phi_tags` -- under it the
     `none` session reports a floor the scan never applied, which is the
     #495 defect shape (a policy named that never ran)."""
     from isocenter.profiles import FLOOR_POLICY
@@ -546,15 +547,18 @@ def test_a_saved_configuration_reloads_under_the_same_policy(tmp_path):
     """bare -> `set_phi_tag` -> `save()` -> a new session's `load_config`
     -> the same `phi_tags`, and `privacy_profile is None`. Kills `save()`
     writing `privacy_profile: custom`, an unknown name: dropped with a
-    warning before #456, refused at reload since."""
+    warning before #456, refused at reload since. The floor is saved as no
+    `privacy_profile` line (#715), where 0.9.8 wrote `none` and all 620
+    rules."""
     config = tmp_path / "saved.yaml"
     with Session(str(tmp_path / "a.db")) as session:
         session.configuration.config_path = str(config)
         session.configuration.set_phi_tag("0018,1030", "REMOVE")
+        session.configuration.save()
         expected = dict(session.configuration.phi_tags)
 
     saved = yaml.safe_load(config.read_text(encoding="utf-8"))
-    assert saved["privacy_profile"] == "none"
+    assert "privacy_profile" not in saved
 
     with Session(str(tmp_path / "b.db")) as session:
         session.load_config(str(config))
@@ -657,24 +661,22 @@ def test_keep_opts_a_tag_out_of_the_floor(tmp_path):
 
 
 def test_the_default_phi_policy_is_the_floor():
-    """`ConfigLoader.load_phi_config()` with no path, which `PhiInspector()`
-    with no policy calls, returns a fresh copy of the floor now that
-    `resources/phi_tags.json` is gone. Kills a loader that still reads
-    the resource (RuntimeError on the deleted file) and one that returns
-    the module table itself. The expectation is built here from the two
+    """`PhiInspector()` with no policy holds a fresh copy of the floor now
+    that `resources/phi_tags.json` is gone. It went through
+    `ConfigLoader.load_phi_config()` until #729 deleted that loader. Kills
+    a default that still reads the resource (RuntimeError on the deleted
+    file) and one that holds the module table itself. The expectation is built here from the two
     source tables, never from `FLOOR_POLICY`: comparing a result against
     the table it was copied from passes when both have been edited by the
     same leak (review of #509, mutant O1)."""
-    from isocenter.config_manager import ConfigLoader
     from isocenter.privacy import PhiInspector
     from isocenter.profiles import BASIC_PROFILE, FLOOR_POLICY, RESEARCH_DEFAULTS
 
     expected = {tag: dict(rule) for tag, rule in {**BASIC_PROFILE, **RESEARCH_DEFAULTS}.items()}
-    tags = ConfigLoader.load_phi_config()
+    tags = PhiInspector().phi_tags
     assert tags == expected
     assert tags is not FLOOR_POLICY
     assert tags["0010,0010"] is not FLOOR_POLICY["0010,0010"]
-    assert PhiInspector().phi_tags == expected
 
 
 def test_a_loaded_config_does_not_edit_the_floor_a_later_session_seeds_from(tmp_path):
@@ -682,7 +684,7 @@ def test_a_loaded_config_does_not_edit_the_floor_a_later_session_seeds_from(tmp_
     bare Session still REMOVEs it. Kills the loader's floor taken by
     reference (`floor = FLOOR_POLICY`, O1): the user's KEEP is merged into
     the module table, and every later bare session in the process -- and
-    `load_phi_config()` -- keeps Institution Name."""
+    `PhiInspector()` -- keeps Institution Name."""
     from isocenter.profiles import BASIC_PROFILE, FLOOR_POLICY, RESEARCH_DEFAULTS
 
     expected = {tag: dict(rule) for tag, rule in {**BASIC_PROFILE, **RESEARCH_DEFAULTS}.items()}

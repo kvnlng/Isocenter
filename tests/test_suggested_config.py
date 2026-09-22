@@ -48,7 +48,10 @@ def test_the_fragment_round_trips_through_the_config_loader(tmp_path, capsys):
     path = tmp_path / "suggested.yaml"
     path.write_text(_emit(capsys), encoding="utf-8")
 
-    loaded = ConfigLoader.load_phi_config(str(path))
+    # `privacy_profile: none`, so the result is the fragment's rules alone.
+    path.write_text("privacy_profile: none\n" + path.read_text(encoding="utf-8"),
+                    encoding="utf-8")
+    loaded, _, _, _, _ = ConfigLoader.load_unified_config(str(path))
 
     assert set(loaded) == set(COUNTS)
     assert loaded["0010,0010"]["action"] == "REMOVE"
@@ -113,8 +116,8 @@ def test_patient_id_is_suggested_as_its_pseudonym_not_removed(capsys):
 
 def _load_as_a_config(tmp_path, fragment):
     """The fragment pasted into a config, through the loader `load_config`
-    uses -- which validates keys, where the legacy `load_phi_config` does
-    not. `privacy_profile: none` so the result is the fragment's rules
+    uses, the one loader since #729 deleted `load_phi_config`.
+    `privacy_profile: none` so the result is the fragment's rules
     alone, not the floor merged beneath them."""
     path = tmp_path / "suggested.yaml"
     path.write_text("privacy_profile: none\n" + fragment, encoding="utf-8")

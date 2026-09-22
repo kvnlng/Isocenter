@@ -919,3 +919,21 @@ def test_bytes_as_patient_ids_is_refused_on_both_formats(tmp_path, fmt, value):
     assert label in message, (
         f"format={fmt!r} refused {label} with {message!r}, which does not "
         f"name the type it refused ({label})")
+
+
+def test_a_configuration_file_has_one_loader():
+    """`ConfigLoader.load_redaction_rules` and `load_phi_config` were two
+    more doors into a configuration file, each reading less of it than
+    `load_unified_config`: the first checked nothing at the top level, the
+    second merged no profile and ran no `validate_phi_policy`, so a file
+    one door accepted another refused (#729). Nothing in the package
+    called the first, and the second only through
+    `PhiInspector(config_path=)`, which nothing called. Deleted before the
+    freeze rather than deprecated. Pinned by name, as the other deleted
+    spellings here are."""
+    from isocenter.config_manager import ConfigLoader  # pylint: disable=import-outside-toplevel
+    for name in ("load_redaction_rules", "load_phi_config"):
+        assert not hasattr(ConfigLoader, name), (
+            f"`ConfigLoader.{name}` is back; a configuration has one loader, "
+            f"`load_unified_config` (#729)")
+    assert callable(ConfigLoader.load_unified_config)

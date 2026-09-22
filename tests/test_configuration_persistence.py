@@ -2,7 +2,6 @@
 import pytest
 import os
 import yaml
-import stat
 from isocenter.configuration import IsocenterConfiguration
 from isocenter.session import DicomSession
 
@@ -24,6 +23,8 @@ class TestConfigurationPersistence:
         db_path = str(tmp_path / "isocenter_test.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
+        # The write is this test's subject, and since #715 it is opt-in.
+        session.configuration.auto_save = True
 
         # Add a new rule
         session.configuration.add_rule("NEW002", "NewMan", "NewModel", [[0,10,0,10]])
@@ -45,6 +46,7 @@ class TestConfigurationPersistence:
         db_path = str(tmp_path / "isocenter_test_update.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
+        session.configuration.auto_save = True
 
         # Update existing rule
         session.configuration.update_rule("INIT001", {"redaction_zones": [[50,60,50,60]]})
@@ -63,6 +65,7 @@ class TestConfigurationPersistence:
         db_path = str(tmp_path / "isocenter_test_del.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
+        session.configuration.auto_save = True
 
         # Delete rule
         session.configuration.delete_rule("INIT001")
@@ -80,6 +83,7 @@ class TestConfigurationPersistence:
         db_path = str(tmp_path / "isocenter_test_phi.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
+        session.configuration.auto_save = True
 
         # Add PHI tag
         session.configuration.set_phi_tag("0010,0010", "REPLACE", "John Doe")
@@ -98,35 +102,29 @@ class TestConfigurationPersistence:
 
         session.close()
 
-    def test_save_permission_error_handling(self, config_file, tmp_path, capsys):
+    def test_a_failed_auto_save_raises_and_undoes_the_change(self, config_file, tmp_path, capsys):
         """
-        Ensures that if the file is not writable, the application doesn't crash
-        and prints a warning (as per our implementation).
+        A write that fails raises its `OSError`, and the change is undone
+        (#715). This test pinned the opposite until 1.0 -- no exception, a
+        printed `WARNING: Failed to auto-save configuration`, and the rule
+        kept in memory -- which is the swallow #715 removes.
+
+        The path sits under a regular file rather than on a read-only one,
+        so the write fails whatever the permissions, and as root.
         """
         db_path = str(tmp_path / "isocenter_test_perm.db")
         session = DicomSession(persistence_file=db_path)
         session.load_config(config_file)
+        plain = tmp_path / "plain_file"
+        plain.write_text("")
+        session.configuration.config_path = str(plain / "c.yaml")
+        session.configuration.auto_save = True
+        capsys.readouterr()
 
-        # Make config file read-only
-        os.chmod(config_file, stat.S_IREAD)
-
-        try:
-            # Attempt modification
+        with pytest.raises(NotADirectoryError):
             session.configuration.add_rule("ERR001", "ErrMan", "ErrModel")
 
-            # Capture output
-            captured = capsys.readouterr()
-
-            # Notes:
-            # 1. We expect it NOT to crash (no exception raised out of add_rule)
-            # 2. We expect a warning print.
-            # Depending on how the test runner captures stdout vs internal buffering,
-            # we might see the print.
-
-            assert "WARNING: Failed to auto-save configuration" in captured.out
-
-        finally:
-            # Restore permissions for cleanup
-            os.chmod(config_file, stat.S_IWUSR | stat.S_IREAD)
+        assert "WARNING: Failed to auto-save configuration" not in capsys.readouterr().out
+        assert session.configuration.get_rule("ERR001") is None
 
         session.close()

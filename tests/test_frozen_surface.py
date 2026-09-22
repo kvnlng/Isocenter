@@ -763,7 +763,7 @@ def test_the_frozen_shapes_have_these_fields(tmp_path):
                    "set_phi_tag", "get_rule"):
         assert callable(getattr(config, method))
     assert {"rules", "phi_tags", "date_jitter", "remove_private_tags",
-            "privacy_profile"} <= set(_public_fields(config))
+            "privacy_profile", "config_path", "auto_save"} <= set(_public_fields(config))
 
     assert issubclass(isocenter.RedactionError, RuntimeError)
     assert list(inspect.signature(isocenter.RedactionError.__init__).parameters) == [

@@ -101,13 +101,15 @@ def test_a_file_with_no_version_loads_as_version_2(tmp_path):
 @pytest.mark.parametrize("line", [
     "version: 2.0", "version: 2", "version: true", "version:",
     'version: "2"', 'version: "two"', 'version: " 2.0"', 'version: "2.0.1"',
-    'version: "2.0\\n"', 'version: "02.0"',
+    'version: "2.0\\n"',
     # Falsy but present: refused, not read as absent (review of #728, R6).
     'version: ""', "version: 0", "version: false"])
 def test_a_version_that_is_not_a_quoted_string_is_refused(tmp_path, line):
     """Kills: a `str(version)` coercion (2.0 -> "2.0" would load); an
     unanchored pattern (`" 2.0"`, `"2.0.1"`, `"2.0\\n"`); a null treated
-    as absent; the major compared as an int (`"02.0"`)."""
+    as absent. `"02.0"` was here for the major compared as an int; since
+    #730 a leading zero is refused as a spelling before the major is read,
+    in `test_a_config_value_means_one_thing.py`."""
     message = _refused(tmp_path, f"{line}\nprivacy_profile: basic\n")
     assert "version" in message, message
     assert "(#711)" in message, message
@@ -251,17 +253,6 @@ def test_a_newer_profile_in_a_newer_configuration_is_noted_once(tmp_path):
     profile, message = _with_profile(tmp_path, "2.5", "2.7", "{actoin: KEEP}")
     assert message.count("declares version") == 1, message
     assert f"{profile} declares version 2.7" in message, message
-
-
-def test_load_phi_config_notes_a_newer_minor(tmp_path):
-    """The `load_phi_config` door carries the note too (review of #728,
-    R9). Kills its wrap removed."""
-    path = tmp_path / "cfg.yaml"
-    path.write_text('version: "2.7"\nphi_tags:\n  \'0010,0010\': {actoin: KEEP}\n',
-                    encoding="utf-8")
-    with pytest.raises(ValueError) as caught:
-        ConfigLoader.load_phi_config(str(path))
-    assert f"{path} declares version 2.7" in str(caught.value), str(caught.value)
 
 
 #: The schema, by version. A 1.x that adds a key bumps `CONFIG_VERSION` to

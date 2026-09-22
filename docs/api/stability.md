@@ -177,16 +177,23 @@ three fields. The rest of the fluent chain is tier 2.
 **`IsocenterConfiguration`** as `session.configuration`: `save()`,
 `add_rule()`, `update_rule()`, `delete_rule()`, `set_phi_tag()`,
 `get_rule()`, and the fields `rules`, `phi_tags`, `date_jitter`,
-`remove_private_tags`, `privacy_profile`. On a session that has loaded
+`remove_private_tags`, `privacy_profile`, `config_path`, `auto_save`. On a session that has loaded
 no configuration, `phi_tags` is a copy of the floor policy,
 `profiles.FLOOR_POLICY`, and `audit()`/`anonymize()` apply it; a config
-with no `privacy_profile` line extends it, and one with
+with no `privacy_profile` line, or a null one, extends it, and one with
 `privacy_profile: none` opts out of it. `set_phi_tag()` stores lowercase
 keys, stores `replacement` as the rule's `value`, and raises
 `ValueError`, leaving the policy and its file unchanged, for an unknown
 action or a rule `load_config` would refuse. `add_rule()` and
 `update_rule()` raise `ValueError`, leaving the rules and the file
-unchanged, for a machine rule `load_config` would refuse. A built-in
+unchanged, for a machine rule `load_config` would refuse. The four
+methods that change the configuration write `config_path` only when
+`auto_save` is true (default false). With auto-save on, a change whose
+write fails is undone and the error raised. `save()` raises
+`ValueError` when `config_path` is unset, raises the error of a failed
+write, and writes the profile by name with only the `phi_tags` that
+differ from it, never the profile's rules. A file `save()` writes loads
+to the configuration it was written from. A built-in
 profile's name is pinned to the PS3.15 edition its table was taken from,
 and what a pinned name contains is frozen: `basic@2026c` holds the rules
 1.0 shipped under it in every 1.x. A bare `basic` means `basic@2026c`,
@@ -222,6 +229,11 @@ otherwise.
   when at least one instance failed and none could be read. A scan that
   read some instances returns its report with the others in `failures`.
 - `generate_report()`: `ValueError` on an unknown format.
+- `IsocenterConfiguration.save()`: `ValueError` with no `config_path`,
+  or when `phi_tags` lacks a rule its `privacy_profile` (or the floor)
+  supplies; the `OSError` of a failed write. With `auto_save` on,
+  `add_rule()`, `update_rule()`, `delete_rule()` and `set_phi_tag()`
+  raise the same, and leave the configuration as it was.
 - `load_config(config_file)` and `audit(config_path=)`: `ValueError`
   when the file fails validation — its extension, YAML syntax or shape,
   a `version` this library does not read, a key the schema does not

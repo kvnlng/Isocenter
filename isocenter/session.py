@@ -79,14 +79,14 @@ def scan_worker(args):
             f"scan_worker expects (Patient, config_source, remove_private, "
             f"project_secret); got a {type(patient).__name__} first")
 
-    if isinstance(config_source, dict):
-        inspector = PhiInspector(config_tags=config_source,
-                                 remove_private_tags=remove_private,
-                                 project_secret=project_secret)
-    else:
-        inspector = PhiInspector(config_path=config_source,
-                                 remove_private_tags=remove_private,
-                                 project_secret=project_secret)
+    # The policy itself: `audit()` resolves it in the parent, and the path
+    # arm read a file a weaker second way, through `load_phi_config` (#729).
+    if not isinstance(config_source, dict):
+        raise TypeError(f"scan_worker expects the PHI policy as a mapping of tag "
+                        f"to rule; got a {type(config_source).__name__} (#729)")
+    inspector = PhiInspector(config_tags=config_source,
+                             remove_private_tags=remove_private,
+                             project_secret=project_secret)
 
     findings = inspector.scan_patient(patient)
 
@@ -2284,6 +2284,10 @@ class DicomSession:
         floor = base is profiles.FLOOR
         self.configuration.privacy_profile = None if floor else base
         self.configuration._floor = floor
+        # The file now holds what memory holds, so the next change that
+        # stays in memory says so again (#715). `auto_save` is not
+        # assigned: it is the session's choice, and survives the load.
+        self.configuration._file_in_sync = True
 
         get_logger().info(
             f"Loaded {len(self.configuration.rules)} machine rules and {len(self.configuration.phi_tags)} PHI tags.")
@@ -2881,17 +2885,17 @@ class DicomSession:
 
         if count > 0:
             print(f"Applied {count} updates to in-memory configuration.")
-            # `.save()` writes to `configuration.config_path` and returns
-            # silently when that is unset -- and only `load_config()` sets
-            # it, so a session configured by `create_config()` reaches
-            # here with nothing to save to. The tip says so rather than
-            # naming the attribute and hoping: swapping a loud
-            # AttributeError for a quiet no-op would be a worse tip than
-            # the wrong one it replaces (#234).
-            print("Tip: Run .scan_pixel_content() again to verify fix, "
-                  "then .configuration.save() to persist (set "
-                  ".configuration.config_path first if no config file was "
-                  "loaded -- save() returns silently without one).")
+            # `.save()` writes to `configuration.config_path`, which only
+            # `load_config()` sets, so a session configured by
+            # `create_config()` reaches here with nothing to save to. The
+            # tip names the attribute rather than hoping (#234). Since
+            # #715 `save()` raises ValueError without one, where it
+            # returned silently -- and the suggestions above changed
+            # memory only, as every change now does without auto-save.
+            print("Tip: Run .scan_pixel_content() again to verify the fix, "
+                  "then .configuration.save() to write it to the loaded file "
+                  "(save() raises ValueError when no file was loaded; set "
+                  ".configuration.config_path first).")
 
         return count
 

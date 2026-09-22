@@ -4,16 +4,22 @@ Defines the runtime configuration structures for the Isocenter application.
 This module contains the `IsocenterConfiguration` dataclass which encapsulates everything
 needed to drive a session's behavior, including redaction rules, PHI profiling,
 and date shifting parameters. It also handles the persistent state of these
-settings by syncing with a backing YAML file.
+settings in a backing YAML file, which it writes only when asked:
+`save()`, or every change once `auto_save` is on (#715).
 """
 import copy
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import Any, Callable, Dict, List, Optional
 import yaml
 
 from . import config_manager, profiles
 from .profiles import FLOOR_POLICY
-from .logger import describe_exception
+
+#: `save()` with nowhere to write, and any change under `auto_save` with
+#: nowhere to write (#715). A silent return here was the #234 shape: a
+#: tier-1 method reporting success after doing nothing.
+_NO_FILE = ("configuration.save() has no file to write: load_config(path) "
+            "sets one, or set session.configuration.config_path (#715)")
 
 
 class FlowList(list):
@@ -49,7 +55,11 @@ class IsocenterConfiguration:
             reach another's policy or the module table.
         date_jitter (Dict[str, int]): Date shifting parameters.
         remove_private_tags (bool): Global flag to strip private tags.
-        config_path (Optional[str]): Path to the backing YAML file for auto-save.
+        config_path (Optional[str]): The file `save()` writes. Set by
+            `load_config()`, or by hand.
+        auto_save (bool): Write `config_path` after every `add_rule`,
+            `update_rule`, `delete_rule` and `set_phi_tag`. False by
+            default (#715).
         privacy_profile (Optional[str]): The pinned name of the built-in
             profile whose rules were merged into `phi_tags` -- `basic@2026c`,
             also when the file said `basic` (#714) -- or an external
@@ -65,6 +75,11 @@ class IsocenterConfiguration:
     remove_private_tags: bool = True
     config_path: Optional[str] = None
     privacy_profile: Optional[str] = None
+    #: Off by default since 1.0 (#715): a loaded file is the user's, and
+    #: one `add_rule()` rewrote a 7-line commented file as 1,872 lines.
+    #: Survives `load_config()`, which never assigns it: it is the
+    #: session's choice, not the file's, and a later load is written to.
+    auto_save: bool = False
     # Whether `phi_tags` came from the floor policy: a bare configuration,
     # or a loaded file with no `privacy_profile` line. `Session.load_config`
     # sets it on every load. The floor and `privacy_profile: none` both
@@ -73,6 +88,12 @@ class IsocenterConfiguration:
     # Private and not a constructor parameter, so the frozen field list is
     # unchanged.
     _floor: bool = field(default=True, init=False, repr=False, compare=False)
+    # Whether `config_path` holds what memory holds, as far as this object
+    # knows: cleared by the first change that stays in memory, set by a
+    # save that succeeded and by `Session.load_config`. It exists for the
+    # one-line notice (owner ruling Q4), so a 0.9.x script that relied on
+    # auto-save is told once that its file stopped following its edits.
+    _file_in_sync: bool = field(default=True, init=False, repr=False, compare=False)
 
     @property
     def _policy_base(self) -> str:
@@ -88,69 +109,175 @@ class IsocenterConfiguration:
 
     def save(self) -> None:
         """
-        Persists the current configuration state to `config_path` (YAML).
+        Writes the configuration to `config_path` as YAML (#715).
 
-        Attempts to format lists as flow-style (bracketed) for better readability.
+        The file names the profile rather than copying it:
+        `privacy_profile` is the pinned name (`basic@2026c`), the external
+        profile's path, `none`, or no line at all for the floor, and
+        `phi_tags` holds only the rules that differ from that base's. Then
+        `date_jitter`, `remove_private_tags` and every machine rule, each
+        key kept (`comment:` as data). `version` is always written, as
+        `config_manager.CONFIG_VERSION` (owner ruling Q5): the loader
+        accepts only what this library reads, so what is written is that
+        version's content. A file this writes loads to the configuration it
+        was written from.
+
+        Comments and layout in the file are not kept: this writes a new
+        file. A comment-keeping writer (`ruamel.yaml`) was measured and
+        rejected -- it moved a deleted rule's comment onto the next rule,
+        and it reads YAML 1.2, where `no` and `0123` differ from the
+        loader's readings.
+
+        Raises:
+            ValueError: With no `config_path`; and when `phi_tags` has no
+                rule for a tag its base supplies, because a file naming
+                that base would bring the rule back on reload. Nothing is
+                written.
+            OSError: The write's own error, unchanged. Until 1.0 it was
+                printed as a WARNING and the call returned.
         """
         if not self.config_path:
-            return
+            raise ValueError(_NO_FILE)
+        # Rendered before the file is opened, so a refusal or a rendering
+        # failure cannot leave it truncated. Then written in place rather
+        # than through a temporary file and `os.replace`, which would turn
+        # a symlinked config into a regular file and drop its mode.
+        text = self._rendered()
+        with open(self.config_path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        self._file_in_sync = True
 
-        # Construct Unified Data
-        # Re-using logic similar to session.create_config but simplified for direct object dump
+    def _rendered(self) -> str:
+        """The YAML `save()` writes, or the `ValueError` it raises."""
+        # The base lookup sits beside the loader's resolution, so the two
+        # cannot resolve a name differently.
+        base = config_manager._policy_base_rules(self.privacy_profile, self._floor)
+        # Keys as the loader reads them, lowercase: `phi_tags` assigned in
+        # code can hold `0008,103E`, which the base spells `0008,103e`.
+        # Compared raw, that rule read as missing and the save refused a
+        # policy that has it (review of #742, finding 5).
+        tags = config_manager._lowercase_tag_keys(self.phi_tags)
 
-        # 4b. Enhance PHI Tags (Transform to structured if needed for saving)
-        # We store them as they are set (which should be structured if coming from set_phi_tag)
-        # But for cleanliness in YAML, let's ensure consistency.
+        missing = [tag for tag in base if tag not in tags]
+        if missing:
+            raise ValueError(self._missing_base_rules_refusal(missing))
 
-        # Prepare machines
-        machines_export = []
-        for m in self.rules:
-            m_copy = m.copy()
-            if "redaction_zones" in m_copy:
-                # Wrap internal lists
-                zones = m_copy["redaction_zones"]
-                new_zones = FlowList()
-                for z in zones:
-                    if isinstance(z, list):
-                        new_zones.append(FlowList(z))
-                    else:
-                        new_zones.append(z)
-                m_copy["redaction_zones"] = new_zones
-            machines_export.append(m_copy)
+        # Whole rules, not actions: an action-only diff (the scaffold's)
+        # drops a rule that keeps the base's action and adds a `value`.
+        overrides = {tag: rule for tag, rule in tags.items()
+                     if base.get(tag) != rule}
+
+        machines = []
+        for rule in self.rules:
+            rule_copy = rule.copy()
+            if "redaction_zones" in rule_copy:
+                # One flow list is enough: PyYAML writes everything inside
+                # a flow collection in flow style, zones and `roi`s alike.
+                rule_copy["redaction_zones"] = FlowList(rule_copy["redaction_zones"])
+            machines.append(rule_copy)
 
         data = {
             # The loader's constant, read at call time: one home for the
             # number both writers stamp (#711).
             "version": config_manager.CONFIG_VERSION,
-            # The profile that actually produced these tags, so a round-trip
-            # through save() does not relabel a 'basic' config. With no
-            # named profile, `phi_tags` already holds the whole policy
-            # (the floor included), so the file says `none` -- load no
-            # base beneath it. This wrote "custom" until #495: an unknown
-            # name, which the loader dropped with a warning then and
-            # refuses now (#456), so the round trip would have raised.
-            "privacy_profile": self.privacy_profile or "none",
-            "phi_tags": self.phi_tags,
-            "date_jitter": self.date_jitter,
-            "remove_private_tags": self.remove_private_tags,
-            "machines": machines_export
         }
+        # No line for the floor: an absent line means the floor in every
+        # 1.x (#495, #714). 0.9.8 wrote `none` plus the 620 floor rules,
+        # a file that said "exactly these rules" where the session had
+        # said "the floor".
+        if self.privacy_profile:
+            data["privacy_profile"] = self.privacy_profile
+        elif not self._floor:
+            data["privacy_profile"] = "none"
+        data["phi_tags"] = overrides
+        data["date_jitter"] = self.date_jitter
+        data["remove_private_tags"] = self.remove_private_tags
+        data["machines"] = machines
+        return yaml.dump(data, sort_keys=False, default_flow_style=False,
+                         width=float("inf"))
 
-        try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                yaml.dump(data, f, sort_keys=False, default_flow_style=False, width=float("inf"))
-        except (IOError, OSError, yaml.YAMLError) as e:
-            # We don't want to crash the runtime if save fails, but we should log/warn
-            # Since we don't have logger here easily without import
-            print(f"WARNING: Failed to auto-save configuration: {describe_exception(e)}")
+    def _missing_base_rules_refusal(self, missing: List[str]) -> str:
+        """Why `save()` cannot write a policy that lacks rules its base
+        supplies (#715). There are two ways there: a rule deleted from
+        `phi_tags` directly (no method removes one), or, for an external
+        profile only, a rule the profile file gained after the load. The
+        save cannot tell them apart without a snapshot, so it names both
+        where both are possible."""
+        if self.privacy_profile:
+            base = f"privacy_profile {self.privacy_profile}"
+            brings = f"a file naming {self.privacy_profile} brings them in"
+        else:
+            base = "the floor policy (no privacy_profile line)"
+            brings = "a file with no privacy_profile line brings them in"
+        shown = ", ".join(missing[:3])
+        more = f" (and {len(missing) - 3} more)" if len(missing) > 3 else ""
+        message = (f"configuration.save() cannot write this policy over {base}: "
+                   f"phi_tags has no rule for {shown}{more}, and {brings}. If you "
+                   f"deleted them, give each a rule instead, e.g. "
+                   f"set_phi_tag({missing[0]!r}, 'KEEP'), which is how a file "
+                   f"opts one tag out")
+        pinned = profiles.PROFILE_ALIASES.get(self.privacy_profile, self.privacy_profile)
+        if self.privacy_profile and pinned not in profiles.PRIVACY_PROFILES:
+            message += ("; if the profile file has changed since load_config(), "
+                        "load it again")
+        return message + " (#715)"
+
+    def _refuse_auto_save_without_a_file(self) -> None:
+        """First in every mutator, before anything changes: an opted-in
+        configuration with nowhere to write is a mistake to report, not a
+        no-op (#715). About the setting, not the call, so a `delete_rule`
+        that would change nothing refuses too."""
+        if self.auto_save and not self.config_path:
+            raise ValueError(_NO_FILE)
+
+    def _apply(self, change: Callable[["IsocenterConfiguration"], Any]) -> Any:
+        """Make `change` to this configuration, and write it when
+        `auto_save` is on (#715). The four mutators all come through here,
+        after their validation, so they cannot drift apart.
+
+        Under auto-save the change is tried first on a deep copy and that
+        copy is saved; only a save that succeeded lets the change reach
+        this object. A refused or failed write therefore leaves memory and
+        the file exactly as they were, with nothing to restore -- and a
+        rule `get_rule()` handed out is still the configuration's own
+        dict, which a snapshot-and-restore would have replaced. `change`
+        must be deterministic: it runs twice.
+
+        With auto-save off, the change stays in memory, and the first one
+        after a load or a save says so, once (owner ruling Q4).
+        """
+        self._refuse_auto_save_without_a_file()
+        if self.auto_save:
+            trial = copy.deepcopy(self)
+            change(trial)
+            trial.save()
+            result = change(self)
+            self._file_in_sync = True
+            return result
+        result = change(self)
+        if self.config_path and self._file_in_sync:
+            self._file_in_sync = False
+            print(f"Configuration changed in memory only; {self.config_path} is "
+                  f"unchanged. Call session.configuration.save() to write it, or "
+                  f"set session.configuration.auto_save = True (#715).")
+        return result
+
+    @staticmethod
+    def _without_rule(configuration: "IsocenterConfiguration", serial_number: str) -> bool:
+        """Remove `serial_number`'s rule from `configuration`; whether one
+        was there."""
+        before = len(configuration.rules)
+        configuration.rules = [r for r in configuration.rules
+                               if r.get("serial_number") != serial_number]
+        return len(configuration.rules) < before
 
     def add_rule(self, serial_number: str, manufacturer: str = "Unknown",
                  model: str = "Unknown", zones: List[Any] = None) -> None:
         """
         Adds a new machine redaction rule.
 
-        Overrides any existing rule for the same serial number. Auto-saves if
-        config_path is set.
+        Overrides any existing rule for the same serial number. Changes
+        memory; writes `config_path` only when `auto_save` is on (#715).
 
         Args:
             serial_number (str): The device serial number.
@@ -161,8 +288,12 @@ class IsocenterConfiguration:
         Raises:
             ValueError: For a rule `load_config` would refuse
                 (`ConfigLoader._validate_rule`: a serial that is not a
-                non-empty string, a metadata field that is not a string,
-                a malformed zone), before any rule or the file changes.
+                non-empty, non-blank string, a metadata field that is not
+                a string, a malformed zone), before any rule or the file
+                changes. Under `auto_save`, with no `config_path`, or when
+                `save()` refuses; the rules are then as they were.
+            OSError: Under `auto_save`, when the write fails; the rules
+                are then as they were.
         """
         new_rule = {
             "serial_number": serial_number,
@@ -170,21 +301,24 @@ class IsocenterConfiguration:
             "model_name": model,
             "redaction_zones": zones or []
         }
-        # Before the delete, not merely before the append: `delete_rule`
-        # auto-saves, so a refusal after it would have lost the serial's
-        # existing rule and rewritten the file (#712). The loader's own
-        # check, so this cannot store -- and auto-save -- a rule the
-        # session's next `load_config` of that file refuses.
+        # Before the delete, not merely before the append: a refusal after
+        # it would have lost the serial's existing rule (#712). The
+        # loader's own check, so this cannot store a rule the session's
+        # next `load_config` of the saved file refuses. Ahead of `_apply`,
+        # so a refused rule never reaches the write.
         config_manager.ConfigLoader._validate_rule(new_rule, len(self.rules))
 
-        # Remove existing if any
-        self.delete_rule(serial_number)
-        self.rules.append(new_rule)
-        self.save()
+        def change(configuration):
+            self._without_rule(configuration, serial_number)
+            configuration.rules.append(new_rule)
+        self._apply(change)
 
     def update_rule(self, serial_number: str, updates: Dict[str, Any]) -> None:
         """
         Updates an existing rule identified by `serial_number`.
+
+        Changes memory; writes `config_path` only when `auto_save` is on
+        (#715).
 
         Args:
             serial_number (str): The target rule's serial number.
@@ -195,7 +329,11 @@ class IsocenterConfiguration:
                 serial number, or if the updated rule is one `load_config`
                 would refuse (`ConfigLoader._validate_rule`: an unknown key
                 such as `redaction_zone`, a value of the wrong type, a
-                malformed zone). Raised before the rule or the file changes.
+                malformed zone). Raised before the rule or the file
+                changes. Under `auto_save`, with no `config_path`, or when
+                `save()` refuses; the rule is then as it was.
+            OSError: Under `auto_save`, when the write fails; the rule is
+                then as it was.
         """
         rule = self.get_rule(serial_number)
         if not rule:
@@ -209,28 +347,35 @@ class IsocenterConfiguration:
         # typo `{"redaction_zone": ...}` was stored and auto-saved, writing
         # a file this session's own loader then refused (#712). Updated in
         # place afterwards, not replaced, because `get_rule` hands out the
-        # dict itself.
+        # dict itself -- which is why the change looks the rule up in the
+        # configuration it is given rather than closing over `rule`.
         config_manager.ConfigLoader._validate_rule(
             {**rule, **updates}, self.rules.index(rule))
-        rule.update(updates)
-        self.save()
+        self._apply(lambda configuration: configuration.get_rule(serial_number).update(updates))
 
     def delete_rule(self, serial_number: str) -> bool:
         """
         Removes a rule by serial number.
+
+        Changes memory; writes `config_path` only when `auto_save` is on
+        and a rule was removed (#715).
 
         Args:
             serial_number (str): The serial number to remove.
 
         Returns:
             bool: True if a rule was found and removed, False otherwise.
+
+        Raises:
+            ValueError: Under `auto_save` with no `config_path` -- even
+                when no rule matches -- and when `save()` refuses.
+            OSError: Under `auto_save`, when the write fails; the rules
+                are then as they were.
         """
-        initial_len = len(self.rules)
-        self.rules = [r for r in self.rules if r.get("serial_number") != serial_number]
-        removed = len(self.rules) < initial_len
-        if removed:
-            self.save()
-        return removed
+        self._refuse_auto_save_without_a_file()
+        if self.get_rule(serial_number) is None:
+            return False
+        return self._apply(lambda configuration: self._without_rule(configuration, serial_number))
 
     def set_phi_tag(self, tag: str, action: str, replacement: str = None) -> None:
         """
@@ -251,7 +396,14 @@ class IsocenterConfiguration:
                 a `replacement` under an action other than REPLACE,
                 SHIFT/JITTER on a standard tag that is not DA or DT, or
                 REPLACE on a standard tag whose VR cannot hold the value).
-                Raised before the policy or its file is changed.
+                Raised before the policy or its file is changed. Under
+                `auto_save`, also with no `config_path` and when `save()`
+                refuses; the policy is then as it was.
+            OSError: Under `auto_save`, when the write fails; the policy
+                is then as it was.
+
+        Changes memory; writes `config_path` only when `auto_save` is on
+        (#715).
         """
         # Lowercase, as every other key in the policy is (profiles.py's
         # header comment gives the reason). This was `tag.upper()`, so
@@ -278,14 +430,15 @@ class IsocenterConfiguration:
         if replacement:
             val["value"] = replacement
 
-        # Before the assignment and the save (#456): a refused rule leaves
+        # Before the assignment and any write (#456): a refused rule leaves
         # the policy and its file as they were. This refuses an unknown
         # action too, with the loader's words; until 0.9.8 `OBLITERATE`
         # was stored and scanned as REPLACE.
         config_manager.validate_phi_policy({tag: val}, "set_phi_tag")
 
-        self.phi_tags[tag] = val
-        self.save()
+        def change(configuration):
+            configuration.phi_tags[tag] = val
+        self._apply(change)
 
     def get_rule(self, serial_number: str) -> Optional[Dict[str, Any]]:
         """

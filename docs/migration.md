@@ -167,6 +167,34 @@ loaded in 0.9.x without meaning what it said:
 A refusal changes nothing: the session's configuration is what it was
 before the call.
 
+Three more readings changed in 1.0
+([#730](https://github.com/kvnlng/Isocenter/issues/730)):
+
+| 0.9.x file | Fix |
+| :--- | :--- |
+| `version: "2.00"` or `"02.0"` | write `version: "2.0"` |
+| a blank `serial_number: "  "` (matched no machine) | give the machine's serial |
+| a bare `privacy_profile:` line | nothing to do unless you meant `none`: it now means the floor, as leaving the line out does, where 0.9.x read it as `none` and applied no base; write `privacy_profile: none` to keep that |
+
+A phi rule's `value: null` and `name: null` read as absent, as before:
+`REPLACE` writes `ANONYMIZED`, and the finding is named `Unknown Tag`.
+
+- **Auto-save is off.** In 0.9.x, `add_rule()`, `update_rule()`,
+  `delete_rule()` and `set_phi_tag()` rewrote the loaded file
+  ([#715](https://github.com/kvnlng/Isocenter/issues/715)). They now
+  change memory only, and print a line saying the file is unchanged.
+  Call `session.configuration.save()`, or set
+  `session.configuration.auto_save = True` once per session. A file
+  0.9.x's auto-save wrote loads unchanged, and saving it again rewrites
+  it without the inlined profile.
+- **One loader.** `ConfigLoader.load_redaction_rules()` and
+  `ConfigLoader.load_phi_config()` are gone and raise `AttributeError`;
+  `PhiInspector(config_path=...)` raises `TypeError`
+  ([#729](https://github.com/kvnlng/Isocenter/issues/729)). Read a file
+  with `session.load_config(path)` or
+  `ConfigLoader.load_unified_config(path)`, and hand `PhiInspector` the
+  policy (`config_tags=`).
+
 ## Clinical Trial Processor (CTP)
 
 Isocenter includes a utility to convert legacy CTP `DicomPixelAnonymizer.script` files into the CTP rule-list format (YAML), the format of the knowledge base `create_config()` matches machines against.

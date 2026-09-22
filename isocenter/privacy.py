@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Dict, Tuple
 import hashlib
@@ -6,6 +7,7 @@ import re
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
                        Patient, Study, iter_item_tree)
 from .logger import get_logger
+from .profiles import FLOOR_POLICY
 
 
 # The replacements `scan_patient` proposes, spelled once for the two
@@ -49,6 +51,16 @@ def _owned_rule(phi_tags, tag) -> Tuple[str, Optional[str]]:
                                or (action == "REPLACE" and value is None)):
         return "SHIFT", None
     return action, value
+
+
+def _rule_name(rule: Dict[str, Any]) -> str:
+    """A rule mapping's display name, or `Unknown Tag`.
+
+    `name: null` is absent, as the loader reads it (#728): the finding
+    was named `None` while `get("name", "Unknown Tag")` saw the key
+    present (#730)."""
+    name = rule.get("name")
+    return "Unknown Tag" if name is None else name
 
 
 def _holds_owned_replacement(phi_tags, tag, value, study=None) -> bool:
@@ -419,7 +431,6 @@ class PhiInspector:
     """
 
     def __init__(self,
-                 config_path: str = None,
                  config_tags: Dict[str,
                                    str] = None,
                  remove_private_tags: bool = False,
@@ -428,10 +439,14 @@ class PhiInspector:
         Initializes the inspector.
 
         Args:
-            config_path (str, optional): Path to a JSON/YAML config file.
-            config_tags (Dict[str, Union[str, Dict]], optional): Direct
-                config dictionary, taking precedence over `config_path`.
-                A tag's value is either a **rule** --
+            config_tags (Dict[str, Union[str, Dict]], optional): The PHI
+                policy, as `configuration.phi_tags` holds it; None applies
+                a copy of the floor, `profiles.FLOOR_POLICY`, as a bare
+                session does (#495). There is no path argument: a
+                configuration file is read by `load_config()` or
+                `audit(config_path=)`, the one loader, and the
+                `config_path` this took until 1.0 read it a weaker second
+                way that nothing called (#729). A tag's value is either a **rule** --
                 `{"name": ..., "action": "REMOVE"|"EMPTY"|"SHIFT"|"JITTER"}`
                 -- or a plain string, which is the tag's **display name**
                 and leaves the action as `REPLACE`. The string form names
@@ -449,17 +464,15 @@ class PhiInspector:
                 when it has to mint a keyed replacement without one.
                 `Session.audit()` always passes it.
         """
-        from .config_manager import ConfigLoader
-
         self.remove_private_tags = remove_private_tags
         self.project_secret = project_secret
 
         if config_tags is not None:
             self.phi_tags = config_tags
-        elif config_path:
-            self.phi_tags = ConfigLoader.load_phi_config(config_path)
         else:
-            self.phi_tags = ConfigLoader.load_phi_config()
+            # A copy: the table is normalized below, and a caller may
+            # edit it.
+            self.phi_tags = copy.deepcopy(FLOOR_POLICY)
 
         # Normalize tag-key casing HERE, once, at the boundary between
         # "however phi_tags got built" (a built-in PRIVACY_PROFILES entry,
@@ -808,7 +821,7 @@ class PhiInspector:
                 continue
 
             if isinstance(config_val, dict):
-                description = config_val.get("name", "Unknown Tag")
+                description = _rule_name(config_val)
                 action_code = config_val.get("action", "REPLACE").upper()
                 replace_value = config_val.get("value") or "ANONYMIZED"
             else:
@@ -1006,7 +1019,7 @@ class PhiInspector:
                 if not config_val or (id(owner), seq_tag) in swept:
                     continue
                 if isinstance(config_val, dict):
-                    description = config_val.get("name", "Unknown Tag")
+                    description = _rule_name(config_val)
                     action_code = config_val.get("action", "REPLACE").upper()
                 else:
                     description = str(config_val)
