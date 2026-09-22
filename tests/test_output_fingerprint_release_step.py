@@ -3,8 +3,9 @@
 The recorder and comparer are pinned in `test_output_fingerprint.py`.
 Here: that a real run is deterministic under the fixed secret (and would
 not be without it), that the tracked recording describes the committed
-cohort, and that RELEASING.md runs the check. Only the first two tests
-open sessions (a two-member cohort, a few seconds per take).
+cohort, and that RELEASING.md runs the check. Only the first three tests
+open sessions (the two-member mini cohort, or one member of it; a few
+seconds per take).
 
 As in the sibling file, no package module is named by its dotted name:
 the pipeline is reached through `scripts.output_fingerprint` alone, so
@@ -76,19 +77,65 @@ def test_two_takes_of_a_small_cohort_are_identical(two_takes, mini_cohort, tmp_p
     assert paths(first) and not set(paths(first)) & set(paths(moved))
 
 
-def test_the_reopened_arm_exports_from_a_reopened_store(two_takes):
-    """Pins a defect, #662: the reopened export re-spells DS values.
+def test_the_reopened_arm_exports_what_the_live_arm_exports(two_takes):
+    """#662, fixed: a reopened store keeps a DS value's text.
 
-    When L6 fixes #662 this test is inverted in the same change, and the
-    fingerprint's `A.reopened.dicom` arm shows the fix. Until then the
-    difference is what proves the arm really exports from a reopened
-    store rather than quietly re-using the live session.
+    Until L6 this test pinned the defect (`'1.000000'` live, `'1.0'`
+    reopened), and that difference was also what proved the reopened arm
+    exported from a reopened store. With the two now equal it proves
+    nothing of the kind, so that half moved to
+    `test_the_reopened_arm_runs_on_a_second_session_over_the_same_store`.
     """
     arms = two_takes["first"]["members"]["synthetic:private_nested"]["configs"]["A"]["arms"]
     (live,) = arms["A.dicom"]["files"].values()
     (reopened,) = arms["A.reopened.dicom"]["files"].values()
     assert live["elements"]["0018,0050"] == "DS/implicit '1.000000'"
-    assert reopened["elements"]["0018,0050"] == "DS/implicit '1.0'"
+    assert reopened["elements"]["0018,0050"] == "DS/implicit '1.000000'"
+
+
+def test_the_reopened_arm_runs_on_a_second_session_over_the_same_store(
+        mini_cohort, tmp_path, monkeypatch):
+    """The reopened arm's export runs on a session opened after configuration
+    A's session was closed, over the same store file. Killing mutation: the
+    arm quietly re-using the live session -- which, since #662's fix, no
+    exported byte of this member tells apart.
+
+    In-process (`jobs=1`), so the spy reaches `_run_config`, which imports
+    `Session` from `isocenter` at call time.
+    """
+    import isocenter
+
+    events = []
+
+    class Spy(isocenter.Session):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            events.append(("open", id(self), kwargs.get("persistence_file")))
+
+        def __exit__(self, *exc):
+            events.append(("close", id(self), None))
+            return super().__exit__(*exc)
+
+        def export(self, folder, *args, **kwargs):
+            events.append(("export", id(self), Path(folder).name))
+            return super().export(folder, *args, **kwargs)
+
+    monkeypatch.setattr(isocenter, "Session", Spy)
+    fp.take(tmp_path / "one.json", members="synthetic:private_nested",
+            cohort_root=mini_cohort, pydicom_sets=False, jobs=1,
+            log=lambda line: None)
+
+    def session_of(arm):
+        (sid,) = [s for kind, s, name in events if kind == "export" and name == arm]
+        return sid
+
+    live, reopened = session_of("A.dicom"), session_of("A.reopened.dicom")
+    assert live != reopened
+    opened = {s: (i, path) for i, (kind, s, path) in enumerate(events) if kind == "open"}
+    closed = {s: i for i, (kind, s, _) in enumerate(events) if kind == "close"}
+    assert opened[reopened][0] > closed[live]
+    assert opened[reopened][1] == opened[live][1]
+    assert Path(opened[live][1]).name == "store.db"
 
 
 #: The committed cohort, file by file. A member is never removed and its

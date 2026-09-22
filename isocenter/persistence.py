@@ -26,7 +26,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from contextlib import nullcontext
 
+from pydicom import config as pydicom_config
 from pydicom.multival import MultiValue
+from pydicom.valuerep import DSdecimal, DSfloat, IS, ISfloat
 
 from .entities import (Patient, Study, Series, Instance, Equipment,
                        PhiStatus, normalize_study_date, resolve_item_path)
@@ -5276,7 +5278,43 @@ class SqliteStore:
               f"Reclaimed: {saved / megabyte:.2f}MB.")
 
 
+def _tag_number_strings(obj):
+    """`obj` with every DS and IS atom replaced by its tagged text (#662).
+
+    Returns new containers and never edits `obj`'s: `_serialize_item`
+    hands this a shallow copy whose lists are the graph's own.
+    """
+    # `IS` before anything numeric: `IS` is an `int`, `ISfloat` (what
+    # `IS("1.5")` builds) a `float`, and both are text a reader wrote.
+    if isinstance(obj, (IS, ISfloat)):
+        return {"__type__": "IS", "data": str(obj)}
+    if isinstance(obj, (DSfloat, DSdecimal)):
+        return {"__type__": "DS", "data": str(obj)}
+    if isinstance(obj, dict):
+        return {k: _tag_number_strings(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, MultiValue)):
+        return [_tag_number_strings(v) for v in obj]
+    return obj
+
+
 class IsocenterJSONEncoder(json.JSONEncoder):
+    """How a graph value becomes `attributes_json`, and the one place that decides.
+
+    **The trap (#662): `default()` is never called for a `float` or `int`
+    subclass.** `json` encodes those natively, as the number, so a
+    `DSfloat` arm in `default()` reads right and does nothing -- and that
+    is how `'5.000000'` came back from the store as `5.0`, `'0005'` as
+    `5`, and a 16-character DS as an 18-character one. So `iterencode`,
+    which `encode` calls (overriding both would walk twice), first
+    replaces every DS and IS atom, at every depth and inside every
+    `MultiValue`, with `{"__type__": "DS"|"IS", "data": <its text>}` --
+    the same tagged-value spelling `bytes` uses, one scheme in the store.
+    `isocenter_json_object_hook` turns it back into the pydicom value.
+    """
+
+    def iterencode(self, o, _one_shot=False):
+        return super().iterencode(_tag_number_strings(o), _one_shot)
+
     def default(self, obj):
         if isinstance(obj, bytes):
             return {"__type__": "bytes", "data": base64.b64encode(obj).decode('ascii')}
@@ -5288,6 +5326,24 @@ class IsocenterJSONEncoder(json.JSONEncoder):
 
 
 def isocenter_json_object_hook(d):
-    if "__type__" in d and d["__type__"] == "bytes":
+    """A tagged value back into what the graph held (#662).
+
+    **Any reader of `attributes_json` that needs a value must pass this
+    hook.** The two that pass none (the Rows/Columns read in the blob
+    index, and the key scan) read no DS, IS or bytes value; one that did
+    would get the tag dictionary.
+
+    DS and IS are built under `IGNORE`: the text is what ingest already
+    accepted, perhaps with a warning under pydicom's default `WARN`, and a
+    reload must neither refuse it nor warn about it a second time. A
+    `DSdecimal` comes back a `DSfloat` with the same text; nothing here
+    turns pydicom's `use_DS_decimal` on.
+    """
+    kind = d.get("__type__")
+    if kind == "bytes":
         return base64.b64decode(d["data"])
+    if kind == "DS":
+        return DSfloat(d["data"], validation_mode=pydicom_config.IGNORE)
+    if kind == "IS":
+        return IS(d["data"], validation_mode=pydicom_config.IGNORE)
     return d

@@ -595,7 +595,8 @@ TARGETS = {
     # `isocenter\.persistence\b` (the `\b` correctly excludes
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
-    "isocenter/persistence.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/persistence.py": (["tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
+                                  "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                   "tests/test_a_lock_whose_store_write_fails_raises.py",
                                   "tests/test_a_persisted_lock_needs_a_row.py",
                                   "tests/test_api_coherence.py",
@@ -717,7 +718,8 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+    "isocenter/session.py": (["tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
+                              "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                               "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                               "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
                               "tests/test_a_plugin_value_error_reaches_the_fallback.py",
