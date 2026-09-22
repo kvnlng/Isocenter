@@ -937,3 +937,28 @@ def test_a_configuration_file_has_one_loader():
             f"`ConfigLoader.{name}` is back; a configuration has one loader, "
             f"`load_unified_config` (#729)")
     assert callable(ConfigLoader.load_unified_config)
+
+
+def test_a_project_secret_has_no_carry():
+    """`SqliteStore.write_project_secret(path)` and
+    `load_project_secret(path)` wrote a store's project secret to a file
+    and adopted it into another store (0.9.7). A secret belongs to the
+    store that generated it (#716, owner ruling): the file recovered every
+    date of every store that loaded it, and a later batch for the same
+    patients goes into the same store (#548). Deleted before the freeze.
+    Pinned by name, as the other deleted spellings here are."""
+    for name in ("write_project_secret", "load_project_secret"):
+        assert not hasattr(SqliteStore, name), (
+            f"`SqliteStore.{name}` is back; a project secret stays in its "
+            f"store (#716)")
+    # Nor under another name, on any object a caller holds: no public
+    # attribute mentions a secret (review of #751, N1).
+    import isocenter  # pylint: disable=import-outside-toplevel
+    from isocenter.persistence_manager import PersistenceManager  # pylint: disable=import-outside-toplevel
+    from isocenter.session import DicomSession  # pylint: disable=import-outside-toplevel
+    for owner in (SqliteStore, PersistenceManager, DicomSession, isocenter):
+        public = [name for name in dir(owner)
+                  if "secret" in name.lower() and not name.startswith("_")]
+        assert public == [], (
+            f"{getattr(owner, '__name__', owner)} offers {public}; a project "
+            f"secret stays in its store (#716)")

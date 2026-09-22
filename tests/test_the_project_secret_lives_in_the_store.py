@@ -9,20 +9,20 @@ file beside the database would make "store copied without its secret"
 the common failure, and that failure splits a patient across two
 offsets.
 
-Carrying it between stores is explicit and one-directional per method:
-`write_project_secret(path)` refuses to overwrite, and
-`load_project_secret(path)` refuses a store that already holds one.
+There is no way to carry it to another store (#716): 0.9.7's
+`write_project_secret(path)` and `load_project_secret(path)` were deleted
+before the 1.0 freeze, and `test_a_project_secret_stays_in_its_store.py`
+holds what the documentation says instead.
 
 **What these tests hold.** A fresh store makes its own secret and keeps
 it across reopening; two sessions racing first use converge; nothing an
 export, report, manifest, dataframe or log writes contains it; the
-secret reaches process workers by value; the carry methods refuse what
-they should; a store whose secret was removed after it shifted dates
-refuses to shift more, and one given a secret it cannot verify says so
-at every audit; and the log file names no patient and no offset.
+secret reaches process workers by value; a store whose secret was
+removed after it shifted dates refuses to shift more; and the log file
+names no patient and no offset.
 
-**Why this file imports what it does.** The table, the carry methods and
-the refusal live in `isocenter.persistence`, the wiring in
+**Why this file imports what it does.** The table and the refusal live
+in `isocenter.persistence`, the wiring in
 `isocenter.session`, and the expected pseudonyms are recomputed through
 `isocenter.privacy`; see `test_mutation_probe_targets.py`.
 """
@@ -30,7 +30,6 @@ import base64
 import os
 import re
 import sqlite3
-import stat
 import threading
 from datetime import date
 
@@ -44,7 +43,7 @@ from isocenter.privacy import JITTER_SCHEME_KEYED, PhiFinding, PhiRemediation
 from isocenter.remediation import RemediationService
 from isocenter.session import DicomSession
 
-from support.project_secret import FIXED_A, FIXED_B, load_fixed_secret
+from support.project_secret import FIXED_A, load_fixed_secret
 
 SC_SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7"
 
@@ -77,12 +76,6 @@ def _add_study(patient, suffix, study_date):
     study.series.append(series)
     patient.studies.append(study)
     return study
-
-
-def _warnings(db_path):
-    with sqlite3.connect(db_path) as conn:
-        return [r[0] for r in conn.execute(
-            "SELECT details FROM audit_log WHERE action_type='WARNING'")]
 
 
 # ---------------------------------------------------------------------------
@@ -126,16 +119,15 @@ def test_a_memory_store_makes_a_secret_the_same_way(tmp_path):
         session.anonymize(session.audit())
         assert len(patient.patient_id) == 29
         assert patient.studies[0].study_date != date(2023, 1, 1)
-        path = str(tmp_path / "memory.secret")
-        session.store_backend.write_project_secret(path)
-    assert open(path).read().startswith("isocenter-project-secret-v1:")
+        with session.store_backend._get_connection() as conn:  # pylint: disable=protected-access
+            rows = conn.execute("SELECT secret_hex FROM project_secret").fetchall()
+    assert [len(bytes.fromhex(r[0])) for r in rows] == [32]
 
 
 def test_an_audit_whose_config_raises_makes_no_secret(tmp_path):
     """T7, #456. `audit(config_path=)` that raises leaves the store as it
     was, and a fresh store holds no secret afterwards: one generated and
-    committed first would make a `load_project_secret()` a moment later
-    refuse, against a store the failed call should not have touched.
+    committed first would be a change made by a call that did nothing.
 
     Red on: the secret fetched before the config is resolved.
     """
@@ -604,107 +596,6 @@ def test_the_exported_file_does_not_reveal_its_date(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# T10, T11
-# ---------------------------------------------------------------------------
-
-def test_a_store_keeps_the_secret_it_has(tmp_path):
-    """T10. Once a store holds a secret, loading another is refused, and
-    the row is untouched. Loading the same one is refused too: the
-    owner's rule is "always refuse".
-
-    Red on: the row overwritten.
-    """
-    db = str(tmp_path / "keeps.db")
-    with DicomSession(db) as session:
-        session.store.patients.append(_patient("P1", "keeps"))
-        session.audit()
-        [held] = _stored_secret(db)
-        with pytest.raises(RuntimeError, match="already holds a project secret"):
-            load_fixed_secret(session, tmp_path, FIXED_B)
-        mine = str(tmp_path / "mine.secret")
-        session.store_backend.write_project_secret(mine)
-        with pytest.raises(RuntimeError, match="already holds a project secret"):
-            session.store_backend.load_project_secret(mine)
-    assert _stored_secret(db) == [held]
-
-
-def test_a_secret_that_minted_none_of_the_stores_pseudonyms_is_refused(tmp_path):
-    """T10, the verification half. A fresh store over project A's export
-    accepts A's secret and refuses B's.
-
-    Red on: the verification skipped.
-    """
-    source = str(tmp_path / "in")
-    _synthetic_ct(source, "MRN0012345", "20040119")
-    out = str(tmp_path / "out")
-    with DicomSession(str(tmp_path / "a.db")) as project_a:
-        project_a.ingest(source)
-        load_fixed_secret(project_a, tmp_path, FIXED_A)
-        project_a.anonymize(project_a.audit())
-        project_a.export(out)
-
-    db = str(tmp_path / "other.db")
-    with DicomSession(db) as other:
-        other.ingest(out)
-        with pytest.raises(ValueError, match="did not mint any pseudonym"):
-            load_fixed_secret(other, tmp_path, FIXED_B)
-        assert _stored_secret(db) == []
-        load_fixed_secret(other, tmp_path, FIXED_A)
-    assert _stored_secret(db) == [FIXED_A]
-
-
-def test_writing_the_secret_refuses_to_overwrite_and_is_private(tmp_path):
-    """T11. `O_EXCL`, mode 0600, and a round trip into a fresh store.
-
-    Red on: `open(path, "w")` (the existing file is overwritten and the
-    mode follows the umask).
-    """
-    path = str(tmp_path / "project.secret")
-    with open(path, "w") as handle:
-        handle.write("precious")
-    with DicomSession(str(tmp_path / "w.db")) as session:
-        with pytest.raises(FileExistsError):
-            session.store_backend.write_project_secret(path)
-        assert open(path).read() == "precious"
-
-        os.remove(path)
-        session.store_backend.write_project_secret(path)
-        [held] = _stored_secret(str(tmp_path / "w.db"))
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
-    assert open(path).read() == f"isocenter-project-secret-v1:{held.hex()}\n"
-
-    fresh = str(tmp_path / "fresh.db")
-    store = SqliteStore(fresh)
-    try:
-        store.load_project_secret(path)
-    finally:
-        store.stop()
-    assert _stored_secret(fresh) == [held]
-
-
-@pytest.mark.parametrize("content", [
-    "", "isocenter-project-secret-v1:", "isocenter-project-secret-v2:" + "00" * 32,
-    "isocenter-project-secret-v1:" + "0" * 63, "isocenter-project-secret-v1:" + "AB" * 32,
-    "isocenter-project-secret-v1:" + "00" * 32 + "\n\n"])
-def test_a_malformed_secret_file_is_refused(tmp_path, content):
-    """A file that is not exactly one v1 line is a `ValueError`, and a
-    missing one `FileNotFoundError`; neither creates a row."""
-    path = str(tmp_path / "bad.secret")
-    with open(path, "w") as handle:
-        handle.write(content)
-    db = str(tmp_path / "bad.db")
-    store = SqliteStore(db)
-    try:
-        with pytest.raises(ValueError, match="not a project secret file"):
-            store.load_project_secret(path)
-        with pytest.raises(FileNotFoundError):
-            store.load_project_secret(str(tmp_path / "absent.secret"))
-    finally:
-        store.stop()
-    assert _stored_secret(db) == []
-
-
-# ---------------------------------------------------------------------------
 # T12
 # ---------------------------------------------------------------------------
 
@@ -715,8 +606,8 @@ def _lose_the_secret(db):
 
 def test_a_store_that_lost_its_secret_refuses_to_shift(tmp_path):
     """T12, case D. Dates shifted under a secret the store no longer has:
-    `audit()`, `anonymize()` (both spellings) and `write_project_secret`
-    refuse before any work, and no row is created.
+    `audit()` and `anonymize()` (both spellings) refuse before any work,
+    and no row is created.
 
     Red on: a new secret generated silently.
     """
@@ -748,10 +639,7 @@ def test_a_store_that_lost_its_secret_refuses_to_shift(tmp_path):
                           "jitter_scheme": JITTER_SCHEME_KEYED}))
         with pytest.raises(RuntimeError, match="no longer has"):
             reopened.anonymize([finding])
-        with pytest.raises(RuntimeError, match="no longer has"):
-            reopened.store_backend.write_project_secret(str(tmp_path / "x"))
         assert new_study.study_date == date(2023, 6, 1)
-        assert not os.path.exists(str(tmp_path / "x"))
     assert _stored_secret(db) == []
 
 
@@ -780,113 +668,3 @@ def test_a_keyed_patient_shifted_under_its_raw_id_also_refuses(tmp_path):
         with pytest.raises(RuntimeError, match="no longer has"):
             reopened.audit()
     assert _stored_secret(db) == []
-
-
-def _origin(db_path):
-    with sqlite3.connect(db_path) as conn:
-        return [r[0] for r in conn.execute("SELECT origin FROM project_secret")]
-
-
-def _unverified_notices(db_path):
-    return [w for w in _warnings(db_path) if "could not be verified" in w]
-
-
-def test_a_secret_loaded_with_nothing_to_verify_it_against_is_warned(tmp_path):
-    """T10c. The case-D refusal sends the user to `load_project_secret`.
-    On a store whose shifted patients kept their Patient IDs there is no
-    keyed pseudonym to check a secret against, so any secret file is
-    accepted -- and if it is the wrong one, the patient's next date takes
-    a second offset. The load cannot refuse (a kept-id store would have
-    no way back), so it is recorded as unverified: one `WARNING` row at
-    the load, another at every later `audit()`, and the report grades
-    `REVIEW_REQUIRED` rather than `PASS`.
-
-    The offsets are pinned to show the failure the warning is for: P1's
-    first study moved by FIXED_A's -364, the one shifted after FIXED_B
-    was loaded by FIXED_B's -120.
-
-    Red on: the load recording `loaded` with no row (0.9.7 as first
-    written: no warning, report PASS); the audit not re-reading the
-    origin (one row, not two).
-    """
-    db = str(tmp_path / "unverified.db")
-    with DicomSession(db) as session:
-        load_fixed_secret(session, tmp_path, FIXED_A)
-        patient = _patient("P1", "unv")
-        session.store.patients.append(patient)
-        session.anonymize([f for f in session.audit()
-                           if f.remediation_proposal.action_type == "SHIFT_DATE"])
-        assert patient.patient_id == "P1"
-        assert (patient.studies[0].study_date - date(2023, 1, 1)).days == -364
-        session.save(sync=True)
-    _lose_the_secret(db)
-
-    with DicomSession(db) as reopened:
-        with pytest.raises(RuntimeError, match="no longer has"):
-            reopened.audit()
-        load_fixed_secret(reopened, tmp_path, FIXED_B)
-        reopened.store_backend.flush_audit_queue()
-        assert _origin(db) == ["loaded-unverified"]
-        [at_load] = _unverified_notices(db)
-        assert at_load.startswith("1 patient in this store has dates shifted")
-
-        patient = reopened.store.patients[0]
-        new_study = _add_study(patient, "unv.b", date(2023, 6, 1))
-        reopened.anonymize([f for f in reopened.audit()
-                            if f.remediation_proposal.action_type == "SHIFT_DATE"])
-        assert (new_study.study_date - date(2023, 6, 1)).days == -120
-        reopened.save(sync=True)
-        reopened.store_backend.flush_audit_queue()
-        assert len(_unverified_notices(db)) == 2, "one at the load, one per audit"
-        out = tmp_path / "report.md"
-        reopened.generate_report(str(out))
-    report = out.read_text(encoding="utf-8")
-    assert "REVIEW_REQUIRED" in report
-    assert "PASS" not in report.split("Validation Status")[1].splitlines()[0]
-
-
-def test_a_store_once_unverified_stays_unverified_after_a_verified_reload(tmp_path):
-    """T10d. A store that took a secret unverified, then minted a keyed
-    pseudonym under it, verifies that same secret on any later load. The
-    check proves only that the secret matches what was derived after the
-    unverified load; P1's first date was shifted under the secret that
-    was lost before it. So after the row is lost a second time, the
-    reload is still recorded as unverified, says so at the load, and
-    keeps saying so at every audit().
-
-    Red on: the load reading only this load's evidence (origin `loaded`,
-    no row at the load, no row at the audit -- the review's laundering
-    path on `30ce915`).
-    """
-    db = str(tmp_path / "laundered.db")
-    with DicomSession(db) as session:
-        load_fixed_secret(session, tmp_path, FIXED_A)
-        session.store.patients.append(_patient("P1", "lau"))
-        session.anonymize([f for f in session.audit()
-                           if f.remediation_proposal.action_type == "SHIFT_DATE"])
-        session.save(sync=True)
-    _lose_the_secret(db)
-
-    with DicomSession(db) as reopened:
-        load_fixed_secret(reopened, tmp_path, FIXED_B)
-        assert _origin(db) == ["loaded-unverified"]
-        patient = reopened.store.patients[0]
-        _add_study(patient, "lau.b", date(2023, 6, 1))
-        reopened.anonymize(reopened.audit())
-        assert len(patient.patient_id) == 29, "no pseudonym minted under B"
-        reopened.save(sync=True)
-    _lose_the_secret(db)
-
-    with DicomSession(db) as again:
-        rows_before = len(_unverified_notices(db))
-        load_fixed_secret(again, tmp_path, FIXED_B)
-        assert _origin(db) == ["loaded-unverified"], (
-            "a verified reload cleared the unverified record")
-        again.store_backend.flush_audit_queue()
-        at_load = _unverified_notices(db)[rows_before:]
-        assert len(at_load) == 1, at_load
-        assert "records a project secret loaded earlier without verification" \
-            in at_load[0]
-        again.audit()
-        again.store_backend.flush_audit_queue()
-        assert len(_unverified_notices(db)) == rows_before + 2

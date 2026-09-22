@@ -2520,25 +2520,27 @@ class SqliteStore:
     # The project secret
     # ------------------------------------------------------------------
 
-    #: The secret file's first line, before the 64 hex characters. A
-    #: version in the prefix so a later format is refused, not misread.
-    _SECRET_FILE_PREFIX = "isocenter-project-secret-v1:"
+    # A project secret stays in the store that generated it (#716). There
+    # is no way to write one out or to load one in: 0.9.7's
+    # `write_project_secret`/`load_project_secret` carry was deleted before
+    # the 1.0 freeze, because its file recovered every date of every store
+    # that loaded it, and its main use -- a later batch for the same
+    # patients -- is served by ingesting into the same store (#548). A copy
+    # of the store file is the same store; nothing detects or refuses one.
 
     _MISSING_SECRET_REFUSAL = (
         "This store holds dates shifted under a project secret it no "
-        "longer has ({n}). Load that secret with "
-        "store_backend.load_project_secret(path) before audit() or "
-        "anonymize(); generating a new one would give {those} a second "
-        "date offset.")
+        "longer has ({n}). A new secret would give {those} a second date "
+        "offset, so audit() and anonymize() refuse. The secret cannot be "
+        "restored from outside the store: re-ingest the source files into "
+        "a new store (#716).")
 
     _FOREIGN_PSEUDONYM_NOTICE = (
         "{n} in this store carr{ies} {a}`ANON_` pseudonym{s} minted under a "
         "different project secret{generated}. {their} dates are shifted "
         "with this store's offsets, not the ones {their_lc} source store "
-        "used. If this data belongs to an existing project, load that "
-        "project's secret into a fresh store with "
-        "store_backend.load_project_secret(path) before its first "
-        "audit(), and re-ingest.")
+        "used. If this data belongs to an existing project, ingest it "
+        "into that project's store.")
 
     _LEGACY_PATIENT_NEW_DATA_NOTICE = (
         "{n} in this store {were} added under an original Patient ID whose "
@@ -2582,9 +2584,8 @@ class SqliteStore:
     def _project_secret_for_use(self, diagnose: bool = True) -> bytes:
         """The project secret `audit()` and `anonymize()` derive under.
 
-        Read from the store on every call and never cached, so a secret
-        loaded between two calls takes effect at once and no pickle of
-        this store carries it. The evidence is the store's rows, which is
+        Read from the store on every call and never cached, so no pickle
+        of this store carries it. The evidence is the store's rows, which is
         why `Session.audit()` drains the persistence manager first.
 
         With no secret row:
@@ -2683,177 +2684,29 @@ class SqliteStore:
             inserted = cur.rowcount == 1
             return inserted, self._read_project_secret(conn)
 
-    def write_project_secret(self, path: str) -> None:
-        """Write this store's project secret to a new file at `path`.
-
-        The carry for keeping offsets consistent across stores: write it
-        here, then `load_project_secret(path)` on the other store before
-        its first `audit()`. A store with no secret yet gets one first,
-        under the same rules `audit()` applies.
-
-        The file is created with `O_EXCL` and mode `0o600`, and holds the
-        secret that recovers the dates of every store sharing it: treat
-        it as you treat the store.
-
-        Raises:
-            FileExistsError: `path` exists. Never overwritten: a secret
-                written over another is a project lost.
-            RuntimeError: As `audit()`, for a store holding dates shifted
-                under a secret it no longer has.
-        """
-        if os.path.lexists(path):
-            raise FileExistsError(
-                f"{path} exists; write_project_secret never overwrites a "
-                "file")
-        secret = self._project_secret_for_use(diagnose=False)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="ascii") as handle:
-            handle.write(f"{self._SECRET_FILE_PREFIX}{secret.hex()}\n")
-
-    @classmethod
-    def _parse_secret_file(cls, path: str) -> bytes:
-        with open(path, "r", encoding="ascii", errors="replace") as handle:
-            text = handle.read()
-        body = text[:-1] if text.endswith("\n") else text
-        hex_part = body[len(cls._SECRET_FILE_PREFIX):]
-        if (not body.startswith(cls._SECRET_FILE_PREFIX)
-                or len(hex_part) != 64
-                or any(c not in "0123456789abcdef" for c in hex_part)):
-            # The content is deliberately not quoted: it may be a secret.
-            raise ValueError(
-                f"{path} is not a project secret file (expected one line: "
-                f"{cls._SECRET_FILE_PREFIX} followed by 64 lowercase hex "
-                "characters)")
-        return bytes.fromhex(hex_part)
-
-    def load_project_secret(self, path: str) -> None:
-        """Adopt the project secret in `path` for this store.
-
-        Only for a store with no secret of its own: load it before the
-        store's first `audit()` or `anonymize()`, either of which creates
-        one. A store holding keyed pseudonyms accepts only a secret that
-        minted at least one of them. A store holding shifted dates but no
-        keyed pseudonym (its patients kept their Patient IDs) has nothing
-        to check a secret against: the secret is accepted, recorded as
-        unverified, and a `WARNING` row says so at the load and at every
-        later `audit()`, so the report grades `REVIEW_REQUIRED`.
-
-        Raises:
-            FileNotFoundError: `path` does not exist.
-            ValueError: `path` is not a project secret file, or the store
-                holds keyed pseudonyms and none of them was minted under
-                this secret.
-            RuntimeError: The store already holds a project secret --
-                always, even the same one. Anything it pseudonymized or
-                shifted was derived under that secret, and adopting
-                another would give those patients a second offset.
-        """
-        secret = self._parse_secret_file(path)
-        with self._get_connection() as conn:
-            existing = self._read_project_secret(conn)
-            evidence = self._patient_secret_evidence(conn)
-        if existing is not None:
-            raise RuntimeError(self._SECRET_ALREADY_HELD)
-        keyed_pseudonyms = [
-            pid for pid, scheme, _w in evidence
-            if scheme != entities.JITTER_SCHEME_UNKEYED
-            and _is_keyed_pseudonym_shape(pid)]
-        if keyed_pseudonyms and not any(
-                _pseudonym_verifies(pid, secret) for pid in keyed_pseudonyms):
-            raise ValueError(
-                f"this secret did not mint any pseudonym in this store "
-                f"({len(keyed_pseudonyms)} keyed pseudonym"
-                f"{'' if len(keyed_pseudonyms) == 1 else 's'} checked); "
-                "it belongs to a different project")
-        # Shifted patients with nothing to check this secret against: a
-        # store whose patients kept their Patient IDs. Refusing would
-        # leave such a store no way back after its secret row is lost, so
-        # the load is accepted and recorded as unverified, and says so now
-        # and at every later audit(): if this is not the secret those
-        # dates were shifted under, the next date shifted for them takes a
-        # second offset, and nothing left in the store can tell.
-        unverifiable = 0
-        if not keyed_pseudonyms:
-            unverifiable = sum(
-                1 for _pid, scheme, witnessed in evidence
-                if witnessed and scheme != entities.JITTER_SCHEME_UNKEYED)
-        # Once unverified, always unverified. A store that took a secret
-        # unverified and then minted pseudonyms under it will verify that
-        # same secret on any later load -- after its row is lost again,
-        # say -- but the verification only shows the secret matches what
-        # was derived *after* the unverified load. The dates shifted
-        # before it were shifted under the secret that was lost, and a
-        # verifying pseudonym says nothing about them. So a verified load
-        # is not a reason to stop warning, and the fact is read from the
-        # audit log, which the project_secret row being lost does not
-        # take with it.
-        was_unverified = (not unverifiable
-                          and self._store_recorded_an_unverified_secret())
-        origin = (self._ORIGIN_LOADED_UNVERIFIED
-                  if unverifiable or was_unverified else self._ORIGIN_LOADED)
-        inserted, _row = self._insert_project_secret(secret, origin)
-        if not inserted:
-            raise RuntimeError(self._SECRET_ALREADY_HELD)
-        if unverifiable or was_unverified:
-            if unverifiable:
-                detail = self._UNVERIFIED_LOAD_NOTICE.format(
-                    n=f"{unverifiable} patient{'' if unverifiable == 1 else 's'}",
-                    has="has" if unverifiable == 1 else "have",
-                    those="that patient" if unverifiable == 1 else "those patients")
-            else:
-                detail = self._UNVERIFIED_HISTORY_NOTICE
-            detail += " " + self._UNVERIFIED_SECRET_NOTICE
-            self.logger.warning(detail)
-            self.log_audit(action_type="WARNING", entity_uid=self.db_path,
-                           details=detail)
-
-    def _store_recorded_an_unverified_secret(self) -> bool:
-        """Whether any `WARNING` row says a secret was loaded unverified."""
-        self.flush_audit_queue()
-        with self._get_connection() as conn:
-            return conn.execute(
-                "SELECT 1 FROM audit_log WHERE action_type = 'WARNING' "
-                "AND instr(details, ?) > 0 LIMIT 1",
-                (self._UNVERIFIED_MARKER,)).fetchone() is not None
-
     #: `project_secret.origin` values. A store format, like the scheme
     #: names: `_project_secret_for_use` reads the unverified one back at
-    #: every `audit()`, because after the load nothing else in the store
-    #: records that the secret was never checked.
+    #: every `audit()`, because nothing else in the store records that
+    #: the secret was never checked. Nothing writes `loaded` or
+    #: `loaded-unverified` since the carry was deleted (#716), and both
+    #: stay: a 0.9.7 or 0.9.8 store that took a secret unverified keeps
+    #: warning, and grading REVIEW_REQUIRED, under every 1.x.
     _ORIGIN_GENERATED = "generated"
     _ORIGIN_LOADED = "loaded"
     _ORIGIN_LOADED_UNVERIFIED = "loaded-unverified"
 
-    _UNVERIFIED_LOAD_NOTICE = (
-        "{n} in this store {has} dates shifted under a project secret and "
-        "no keyed `ANON_` pseudonym to check a secret against, so the "
-        "secret just loaded was accepted without verification.")
-    _UNVERIFIED_HISTORY_NOTICE = (
-        "This store's audit log records a project secret loaded earlier "
-        "without verification. The secret just loaded verifies against "
-        "the store's keyed pseudonyms, but those can have been minted "
-        "under that unverified secret, so the check says nothing about "
-        "the dates shifted before it.")
-
-    #: The words `_store_recorded_an_unverified_secret` finds in the audit
-    #: log. A store format: stores written since 0.9.7 carry them in their
-    #: WARNING rows, so rewording `_UNVERIFIED_SECRET_NOTICE` without
-    #: keeping this phrase forgets every unverified load already recorded.
-    _UNVERIFIED_MARKER = "project secret could not be verified when it was loaded"
-
+    # Written at every audit, for good, by a store a 0.9.7 or 0.9.8 load
+    # left `loaded-unverified`. Its last sentence is the remedy a 1.x user
+    # has: until #716 it said to confirm the secret file, and there is no
+    # secret file any more. Rows already written keep their own text.
     _UNVERIFIED_SECRET_NOTICE = (
         "This store's project secret could not be verified when it was "
         "loaded. If it is not the secret this store's earlier dates were "
         "shifted under, every date shifted since the load carries a "
         "different offset from the dates of the same patients shifted "
-        "before it, and the store cannot tell which. Confirm the secret "
-        "file came from this store's own project.")
-
-    _SECRET_ALREADY_HELD = (
-        "load_project_secret() refused: this store already holds a project "
-        "secret, and everything it pseudonymized or shifted was derived "
-        "under it. Load a project's secret into a fresh store, before its "
-        "first audit() or anonymize().")
+        "before it, and the store cannot tell which. The secret cannot be "
+        "checked or replaced from outside the store: where those offsets "
+        "matter, re-ingest the source files into a new store (#716).")
 
     def _serialize_item(self, item: Instance) -> Dict[str, Any]:
         """

@@ -591,12 +591,6 @@ def _export_outcome(result):
     return {"returned": type(result).__name__}
 
 
-def _secret_file(folder: Path, secret: bytes) -> str:
-    path = folder / "secret.txt"
-    path.write_text(f"isocenter-project-secret-v1:{secret.hex()}\n", encoding="ascii")
-    return str(path)
-
-
 def _arm(session, out: Path, fmt: str, options: dict) -> dict:
     try:
         result = _export_outcome(session.export(str(out), format=fmt, **options))
@@ -618,13 +612,19 @@ def _run_config(name: str, src: Path, work: Path, secret: bytes,
     from isocenter import Session  # noqa: PLC0415
     work.mkdir(parents=True)
     db = work / "store.db"
-    secret_path = _secret_file(work, secret)
     steps, results, paths = {}, {}, {}
     with Session(persistence_file=str(db)) as session:
         # Before the first audit(): a store mints its own random secret
         # there, which is self-consistent within one run and so invisible
-        # to anything but a second run.
-        session.store_backend.load_project_secret(secret_path)
+        # to anything but a second run. Through the store's private
+        # insert, the generator's own door, because there is no public
+        # one: a project secret stays in its store (#716), and the
+        # `load_project_secret(path)` this called until then is deleted.
+        # The row is what that load wrote on a fresh store (origin
+        # `loaded`, no audit row), so the recording does not move.
+        store = session.store_backend
+        # pylint: disable-next=protected-access
+        store._insert_project_secret(secret, store._ORIGIN_LOADED)
         steps["ingest"] = _step(lambda: _ingest_outcome(session.ingest(str(src))))
         steps["load_config"] = _step(lambda: session.load_config(str(config)) and "ok"
                                      or "ok")

@@ -153,7 +153,8 @@ def test_a_reingested_export_keeps_its_offset_with_the_projects_secret(tmp_path)
     time; that is pre-existing and not what this pins. What it pins is
     that the second shift is the patient's own offset.)
 
-    Red on: `load_project_secret` a no-op (store two generates its own).
+    Red on: the fixed secret not reaching the store (store two
+    generates its own).
     """
     out = _export_project_a(tmp_path)
     db = str(tmp_path / "two.db")
@@ -180,6 +181,10 @@ def test_a_reingested_export_under_another_secret_is_warned(tmp_path):
     [notice] = _foreign_notices(db)
     assert notice.startswith("1 patient in this store carries an `ANON_` pseudonym")
     assert "a new one was generated" not in notice
+    # Its advice is the one a 1.x user can follow: the carry it named
+    # until #716 raises AttributeError now.
+    assert "ingest it into that project's store" in notice, notice
+    assert "load_project_secret" not in notice, notice
 
 
 def test_a_reingested_export_without_any_secret_generates_and_warns(tmp_path):

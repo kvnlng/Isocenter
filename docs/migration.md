@@ -114,21 +114,15 @@ Opening an older store classifies each patient once. A patient that was already 
 
 Files already exported by an older release stay recoverable, and nothing Isocenter does now changes that. To give those patients the keyed scheme, re-ingest their **source** files into a new store. Re-ingesting an old *export* does not help: an ID that is already `ANON_` is never replaced, so its unkeyed digest is exported unchanged (the load notice and `audit()` count these too). Ingesting raw files for a patient an older release already de-identified, into that same store, makes a second subject: the new data is keyed, its earlier studies keep the old pseudonym and offset, and `audit()` writes a `WARNING` row saying so.
 
-### Carrying a project secret between stores
+### A project secret stays in its store
 
-A store makes its own project secret the first time `audit()` or `anonymize()` needs one, so two stores give the same patient different pseudonyms and different offsets unless they share it. To keep offsets consistent across more than one store (a later batch for the same patients, or re-ingesting an export), carry the secret:
+Until 1.0, `store_backend.write_project_secret(path)` and `load_project_secret(path)` copied a store's project secret into a fresh store. Both are gone and raise `AttributeError`: a secret belongs to the store it was generated in (see [What to keep](configuration.md#what-to-keep); [#716](https://github.com/kvnlng/Isocenter/issues/716)). A later batch for the same patients goes into the same store. Nothing reads a secret file written by 0.9.7 or 0.9.8 any more; delete it as you would a key.
 
-```python
-first.store_backend.write_project_secret("project.secret")   # refuses to overwrite; mode 0600
-second = Session("batch2.db")
-second.store_backend.load_project_secret("project.secret")   # before second's first audit()
-```
+A store that loaded a secret it could not verify, under 0.9.7 or 0.9.8, still warns at every `audit()` and still grades `REVIEW_REQUIRED`. The reason it warns is recorded in the store, and removing the load does not remove it.
 
-`load_project_secret` refuses a store that already holds a secret, whichever one, because everything it pseudonymized or shifted was derived under that secret; load into a fresh store. A store holding keyed pseudonyms accepts only a secret that minted at least one of them. A store whose shifted patients all kept their Patient IDs has no pseudonym to check a secret against: it accepts the secret, records it as unverified, and writes a `WARNING` row at the load and at every later `audit()`, so its reports grade `REVIEW_REQUIRED` -- permanently: there is no call to acknowledge the warning, and a later load into that store is recorded as unverified too, even when the secret verifies against pseudonyms minted after the first load. Make sure that file is this store's own project's secret: a different one gives each patient's later dates a second offset, and nothing in the store can tell.
+A store that holds shifted dates but has lost its secret refuses `audit()`, `anonymize()` and `export(check_burned_in=True)` rather than generate a second offset. Nothing in Isocenter deletes the secret, so this is a store whose `project_secret` row was deleted by hand, and the secret cannot be restored from outside it: re-ingest the source files into a new store.
 
-The file recovers the dates of every store sharing it: keep it with the store, never with an export. A store that holds shifted dates but has lost its secret refuses `audit()`, `anonymize()` and `export(check_burned_in=True)` rather than generate a second offset; load the secret back to continue.
-
-**Starting a new project over another project's export.** A fresh store that ingests an export from another project, without that project's secret, generates its own secret and writes a `WARNING` row naming the pseudonyms it cannot verify: its offsets are its own, not the source project's, and intervals within each patient are kept. That is the one path for a new project. There is no override to adopt a secret into a store that has one, because that is the only guard against silently mixing two projects' offsets. If the data belongs to the existing project, load that project's secret into a fresh store before its first `audit()` and ingest the export there instead.
+**Starting a new project over another project's export.** A fresh store that ingests an export from another project generates its own secret and writes a `WARNING` row naming the pseudonyms it cannot verify: its offsets are its own, not the source project's, and intervals within each patient are kept. That is the one path for a new project. If the data belongs to an existing project, ingest it into that project's store.
 
 ## Configs from 0.9.x
 

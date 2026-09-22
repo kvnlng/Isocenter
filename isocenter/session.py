@@ -2590,8 +2590,8 @@ class DicomSession:
         # not before: on a store with no secret this call generates and
         # commits one, and a config that then raised would have left the
         # store changed by a call that did nothing (#456). Read from the
-        # store rather than held on the session, so a secret loaded between
-        # two calls is the one used. Workers get it by value in their tuple.
+        # store rather than held on the session, so no session can hold a
+        # stale one. Workers get it by value in their tuple.
         project_secret = self.store_backend._project_secret_for_use()
 
         # Uses IsocenterConfiguration derived tags

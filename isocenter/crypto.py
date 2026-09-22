@@ -114,14 +114,6 @@ class KeyManager:
         an `OSError` other than `FileExistsError`) falls back to that
         exclusive create, so the worst case is the previous behaviour.
 
-        `SqliteStore.write_project_secret` keeps the plain `O_EXCL` create
-        for the project secret on purpose: that file is written by the
-        caller's own explicit call, is refused if the path exists, and is
-        read back by a parser that rejects an empty file, so a crash
-        leaves a file the next call names as not a secret file. Two
-        spellings of "create this secret file" are one too many, and a
-        shared helper is #631.
-
         An existing file's mode is left as it is. An existing file that
         is empty or malformed raises as `load_key` does, and is never
         overwritten.

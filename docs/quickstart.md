@@ -54,7 +54,9 @@ print(f"Found {len(report)} potential PHI issues.")
 To enable reversible anonymization, generate a cryptographic key and "lock" the original patient identities into a secure, encrypted DICOM tag. This must be done *before* anonymization: locking after `anonymize()` raises `RuntimeError`, because there is no original value left to stash, and so does locking before `enable_reversible_anonymization()`. Locking again before anonymizing replaces the stored token, and the lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried.
 
 ```python
-# Enable encryption; the first lock creates 'isocenter.key' (mode 0600) if it does not exist
+# Enable encryption; the first lock creates 'isocenter.key' (mode 0600) if it does not exist.
+# The key, the store and the configuration are three different things to keep:
+# see "What to keep" in docs/configuration.md.
 session.enable_reversible_anonymization()
 
 # cryptographically lock identities for all patients found in the audit
