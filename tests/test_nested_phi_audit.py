@@ -188,8 +188,9 @@ def test_the_basic_profile_reaches_unformatted_text_value(tmp_path):
         sess.anonymize()
 
         item = instance.sequences["0040,b020"].items[0]
-        assert item.attributes["0070,0006"] == "", (
-            "the Basic profile's EMPTY action still does not reach "
+        # D in Table E.1-1: emptied until #557, its UT dummy since.
+        assert item.attributes["0070,0006"] == "ANONYMIZED", (
+            "the Basic profile's rule still does not reach "
             "Unformatted Text Value")
     finally:
         sess.close()

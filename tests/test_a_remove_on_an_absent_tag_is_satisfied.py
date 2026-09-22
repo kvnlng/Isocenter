@@ -609,7 +609,8 @@ def test_a_report_kept_across_a_reopen_of_a_saved_pass_still_grades_pass(
                    if not f.entity_path}
         # Per element, not a text search: MR_small's Manufacturer is
         # `TOSHIBA_MEC`, which is not the Institution Name and stays.
-        assert sorted(ds.get("InstitutionName", "") for ds in exported) == ["", ""]
+        # X/Z/D: the dummy since #557, never the source value.
+        assert sorted(ds.get("InstitutionName", "") for ds in exported) == ["ANONYMIZED"] * 2
         for ds in exported:
             assert "CompressedSamples" not in str(ds.get("PatientName", "")), ds.PatientName
             assert (0x0009, 0x1002) not in ds

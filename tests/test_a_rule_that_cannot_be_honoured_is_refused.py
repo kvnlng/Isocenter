@@ -13,6 +13,9 @@ said. Measured on ac33641:
   with a `DATA_LOSS` row; on OB the export failed with `TypeError: a
   bytes-like object is required` (#560). The string form is a REPLACE
   rule, so `"0008,0013": "Instance Creation Time"` is the same case.
+  Since #557 a value-less REPLACE writes the VR's dummy on DA, DT, TM,
+  AS and the binary VRs, so those load; DS, the other numeric VRs, AT
+  and UI are still refused.
 - `JITTER` on a TM declined on every pass and graded the run
   REVIEW_REQUIRED (#559).
 - A `value:` under `KEEP`, a non-string `value:`, and the `replacement:`
@@ -51,14 +54,16 @@ REFUSED = {
                   "Patient ID can only be kept", ("JITTER", None)),
     "id-replace-value": ("0010,0020", {"action": "REPLACE", "value": "X"},
                          "Patient ID can only be kept", ("REPLACE", "X")),
-    "replace-on-da": ("0008,0012", {"action": "REPLACE"},
-                      "0008,0012 is DA, which cannot hold it", ("REPLACE", None)),
-    "string-form-on-tm": ("0008,0013", "Instance Creation Time",
-                          "0008,0013 is TM, which cannot hold it", None),
+    # A value-less REPLACE on DA, TM and OB was refused here until #557,
+    # which gave those VRs a dummy (see ALLOWED). A numeric VR, AT and UI
+    # have none: no Table E.1-1 D row is numeric or AT, and a dummy UID is
+    # UID replacement (#544).
     "replace-on-ds": ("0010,1030", {"action": "REPLACE"},
                       "0010,1030 is DS, which cannot hold it", ("REPLACE", None)),
-    "replace-on-ob": ("0042,0011", {"action": "REPLACE"},
-                      "0042,0011 is OB, which cannot hold it", ("REPLACE", None)),
+    "replace-on-ui": ("0008,0018", {"action": "REPLACE"},
+                      "a UID is replaced by UID replacement (#544)", ("REPLACE", None)),
+    "string-form-on-us": ("0028,0010", "Rows",
+                          "0028,0010 is US, which cannot hold it", None),
     "replace-on-at": ("0028,0009", {"action": "REPLACE", "value": "00100010"},
                       "0028,0009 is AT, which cannot hold it", ("REPLACE", "00100010")),
     "jitter-on-tm":("0008,0030", {"action": "JITTER"},
@@ -129,19 +134,29 @@ def test_the_messages_are_the_ones_the_changelog_quotes():
         "kept (KEEP) or replaced by its keyed pseudonym (REPLACE with no "
         "value), because the ID is what keeps two patients apart and "
         "anonymize() merges patients that share one (#537)")
+    # 0.9.8 quoted the DA and OB refusals; #557 gave both VRs a dummy, and
+    # these two are what a value-less REPLACE is still refused on.
     with pytest.raises(ValueError) as caught:
-        validate_phi_policy({"0008,0012": {"action": "REPLACE"}}, "cfg.yaml")
+        validate_phi_policy({"0010,1030": {"action": "REPLACE"}}, "cfg.yaml")
     assert str(caught.value) == (
-        "cfg.yaml: phi_tags['0008,0012'] is REPLACE, which writes "
-        "'ANONYMIZED', and 0008,0012 is DA, which cannot hold it; use EMPTY "
-        "or REMOVE, or JITTER to shift it, or give a value: that is a valid "
-        "DA (#560)")
+        "cfg.yaml: phi_tags['0010,1030'] is REPLACE, which writes "
+        "'ANONYMIZED', and 0010,1030 is DS, which cannot hold it; use EMPTY "
+        "or REMOVE, or give a value: that is a valid DS (#560)")
     with pytest.raises(ValueError) as caught:
-        validate_phi_policy({"0042,0011": {"action": "REPLACE"}}, "cfg.yaml")
+        validate_phi_policy({"0008,0018": {"action": "REPLACE"}}, "cfg.yaml")
     assert str(caught.value) == (
-        "cfg.yaml: phi_tags['0042,0011'] is REPLACE, which writes "
-        "'ANONYMIZED', and 0042,0011 is OB, which cannot hold it; use EMPTY "
-        "or REMOVE (#560)")
+        "cfg.yaml: phi_tags['0008,0018'] is REPLACE, which writes "
+        "'ANONYMIZED', and 0008,0018 is UI, which cannot hold it; use EMPTY "
+        "or REMOVE, or give a value: that is a valid UI (#560); a UID is "
+        "replaced by UID replacement (#544)")
+    # A `value:` that fails still gets the JITTER advice on a date.
+    with pytest.raises(ValueError) as caught:
+        validate_phi_policy({"0008,0012": {"action": "REPLACE", "value": "X"}},
+                            "cfg.yaml")
+    assert str(caught.value) == (
+        "cfg.yaml: phi_tags['0008,0012'] is REPLACE, which writes 'X', and "
+        "0008,0012 is DA, which cannot hold it; use EMPTY or REMOVE, or "
+        "JITTER to shift it, or give a value: that is a valid DA (#560)")
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0010,0020": {"action": "REPLACE", "value": "S1"}},
                             "cfg.yaml")
@@ -290,8 +305,9 @@ def test_a_refused_audit_raises_in_the_parent_under_processes(tmp_path, monkeypa
     `scan_worker`, where it would come back as a failure row."""
     monkeypatch.delenv("ISOCENTER_FORCE_THREADS", raising=False)
     with DicomSession(str(tmp_path / "s.db")) as session:
-        session.configuration.phi_tags = {"0008,0012": {"action": "REPLACE"}}
-        with pytest.raises(ValueError, match="0008,0012"):
+        # DS: a value-less REPLACE on a DA loads since #557.
+        session.configuration.phi_tags = {"0010,1030": {"action": "REPLACE"}}
+        with pytest.raises(ValueError, match="0010,1030"):
             session.audit()
 
 
@@ -341,6 +357,13 @@ ALLOWED = {
     "sequence-jitter": ("0008,1110", {"action": "JITTER"}),
     "unknown-standard-tag": ("0018,fff0", {"action": "REPLACE"}),
     "value-null": ("0008,0080", {"action": "KEEP", "value": None}),
+    # Refused by 0.9.8 (#560); each writes its VR's dummy since #557.
+    "replace-on-da": ("0008,0012", {"action": "REPLACE"}),
+    "string-form-on-tm": ("0008,0013", "Instance Creation Time"),
+    "replace-on-ob": ("0042,0011", {"action": "REPLACE"}),
+    # A mask key with REMOVE or KEEP (#556).
+    "mask-remove": ("60xx,xxxx", {"action": "REMOVE"}),
+    "mask-keep-element": ("50xx,0022", {"action": "KEEP"}),
 }
 
 

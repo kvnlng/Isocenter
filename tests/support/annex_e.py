@@ -56,25 +56,36 @@ FIXTURE = (pathlib.Path(__file__).resolve().parent.parent
 
 #: The Basic Prof. column's codes, and the action each becomes.
 #:
-#: - `X` removes. `X/D` too: X is the first arm, and a context whose IOD
-#:   needs D (Type 1) is not served by REMOVE or EMPTY alike (#557).
-#: - Every code with a `Z` arm empties (`Z`, `Z/D`, `X/Z`, `X/Z/D`).
-#:   Zero length is valid where the table's X is valid (Type 3) and where
-#:   its Z is (Type 2); removal is valid only for Type 3. So EMPTY is right
-#:   in every context either arm is, without a per-IOD type table (#558).
-#:   Removing was 0.9.7's reading and dropped four Type 2 attributes from
-#:   every export.
-#: - `D` empties. D asks for a non-zero dummy consistent with the VR, and
-#:   Isocenter has no such action yet (#557), so an attribute that is
-#:   Type 1 in its IOD is written zero-length. A stated non-conformance.
+#: - `X` removes.
+#: - `Z` and `X/Z` empty. Zero length is valid where the table's X is
+#:   valid (Type 3) and where its Z is (Type 2); removal is valid only for
+#:   Type 3. So EMPTY is right in every context either arm is, without a
+#:   per-IOD type table (#558). Removing was 0.9.7's reading and dropped
+#:   four Type 2 attributes from every export.
+#: - `D` and every code with a D arm (`X/D`, `Z/D`, `X/Z/D`) REPLACE, and
+#:   a value-less REPLACE writes the dummy of the tag's VR
+#:   (`config_manager.VR_DUMMY`, #557). PS3.15 Table E.1-1a defines D as
+#:   "replace with a non-zero length value that may be a dummy value and
+#:   consistent with the VR", and Z as "a zero length value, or a non-zero
+#:   length value that may be a dummy value and consistent with the VR",
+#:   so the dummy is what the code asks for where it resolves to D, and
+#:   is permitted where it resolves to Z. Where it resolves to X (the
+#:   attribute is Type 3 in its IOD) the code removes it and Isocenter
+#:   writes the dummy instead: a named departure from the X arm. E.1.1
+#:   permits it as protection ("either be removed ... or have its value
+#:   replaced by a different 'replacement value' that does not allow
+#:   identification of the patient"); resolving each arm per IOD is #558.
+#:   Until #557 `D` emptied and `X/D` removed, so an attribute Type 1 in
+#:   its IOD was written zero-length or dropped. Sequences keep their
+#:   actions (`DEVIATIONS`): no dummy item is valid independent of the IOD.
 ACTION_FOR_CODE = {
     "X": "REMOVE",
-    "X/D": "REMOVE",
+    "X/D": "REPLACE",
     "Z": "EMPTY",
-    "Z/D": "EMPTY",
+    "Z/D": "REPLACE",
     "X/Z": "EMPTY",
-    "X/Z/D": "EMPTY",
-    "D": "EMPTY",
+    "X/Z/D": "REPLACE",
+    "D": "REPLACE",
 }
 
 #: Codes that give no rule at all.
@@ -107,10 +118,6 @@ DEVIATIONS = {
         "reason": "Z permits a dummy; ANONYMIZED keeps every existing "
                   "export's Patient's Name and the lock refusal's default "
                   "(#537)"},
-    "0010,0020": {
-        "action": "REPLACE", "authority": "#537",
-        "reason": "a Patient ID rule may not empty or remove it (#537): the "
-                  "keyed pseudonym is the D arm's dummy"},
     "0008,1030": {
         "action": "EMPTY", "authority": "isocenter/io_handlers.py::export_folder_names",
         "reason": "the export directory names read Study Description; zero "
@@ -129,16 +136,58 @@ DEVIATIONS = {
         "reason": "Icon Image Sequence is dropped whenever pixels are redacted "
                   "(#183); without redaction the full frame carries whatever "
                   "the icon does, and the basic profile does not clean pixels"},
-    "50xx,xxxx": {
+    # The four D-arm sequences keep the action they had (#557). PS3.15
+    # E.1-1a applies a sequence's code "to the Sequence and all of its
+    # contents", so D there is a non-empty sequence of valid items, and
+    # what makes an item valid is the sequence's item macro in its IOD
+    # (#558). Without these the mapping gives them REPLACE, which has no
+    # meaning on a sequence.
+    "0008,0082": {
+        "action": "EMPTY", "authority": "#557",
+        "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
+                  "and its Code Meanings name the institution"},
+    "0008,1072": {
+        "action": "REMOVE", "authority": "#557",
+        "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
+                  "and its items identify the operator"},
+    "0008,1111": {
+        "action": "EMPTY", "authority": "#557",
+        "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
+                  "and its items are SOP references, which are UID "
+                  "replacement's (#544)"},
+    "0040,1101": {
+        "action": "EMPTY", "authority": "#557",
+        "reason": "a D-arm sequence: a dummy item depends on the IOD (#557), "
+                  "and its items are person identification codes"},
+    # Folded into the `60xx,xxxx` group rule (#556). With them beside it,
+    # `"60xx,xxxx": {action: KEEP}` would still remove Overlay Data
+    # through the more specific key and leave the invalid module the
+    # group rule exists to prevent.
+    "60xx,3000": {
         "action": None, "authority": "#556",
-        "reason": "Curve Data names a whole retired group, which no rule "
-                  "key can spell; a repeating-group sweep is #556"},
+        "reason": "subsumed by the 60xx,xxxx group rule: one rule, so that "
+                  "a KEEP of the group keeps a valid module (#556)"},
+    "60xx,4000": {
+        "action": None, "authority": "#556",
+        "reason": "subsumed by the 60xx,xxxx group rule: one rule, so that "
+                  "a KEEP of the group keeps a valid module (#556)"},
 }
 
-#: Rows naming an element in a repeating group, written as one rule per
-#: group because the loader refuses mask keys. The groups are the even
-#: groups 6000-601E (PS3.5 7.6).
-REPEATING_GROUPS = {"60xx": [f"{group:04x}" for group in range(0x6000, 0x6020, 2)]}
+#: Rules on keys the table does not have (#556). `60xx,xxxx` is the whole
+#: Overlay Plane module, in every even group 6000-601E (PS3.5 7.6). The
+#: table names only Overlay Data and Overlay Comments, and removing Overlay
+#: Data alone leaves a module without its Type 1 element (PS3.3 C.9-2),
+#: while Overlay Description and Overlay Label, free text the table does
+#: not list, reach the export holding a name.
+GROUP_RULES = {
+    "60xx,xxxx": {
+        "action": "REMOVE", "name": "Overlay (whole group)", "authority": "#556",
+        "reason": "PS3.15 E.1.1: \"If non-pixel data graphics or overlays "
+                  "contain identification, the de-identifier is required to "
+                  "remove them\"; and Overlay Data is Type 1 in the Overlay "
+                  "Plane module (PS3.3 C.9-2), so removing it alone leaves an "
+                  "invalid module (#556)"},
+}
 
 #: Comment lines `render_literal` writes above a rule in the literal, by
 #: rule key: history and cross-references a reader of `profiles.py` needs
@@ -183,10 +232,16 @@ LITERAL_COMMENTS = {
         "when a caller opts in via include_annotation_text; remediated here",
         "so that opting in still does not surface raw text.",
     ],
-    "6000,3000": [
-        "Repeating group 60xx: one rule per even group 6000-601E, because",
-        "the loader refuses mask keys. Removing Overlay Data leaves the",
-        "rest of the Overlay Plane module (#556).",
+    "50xx,xxxx": [
+        "Repeating-group key (#556): every element of every even group",
+        "5000-501E, the retired Curve module. Until #556 no rule key could",
+        "spell it, and every curve element survived every profile.",
+    ],
+    "60xx,xxxx": [
+        "Not a table row: the whole Overlay Plane module in every even group",
+        "6000-601E (#556). The table's Overlay Data and Overlay Comments rows",
+        "are folded into it, so a KEEP of the group keeps a valid module; a",
+        "more specific key (`60xx,0022`, `6002,0022`) still wins over it.",
     ],
 }
 
@@ -216,17 +271,19 @@ def derive(table):
             action = ACTION_FOR_CODE[code]
         if action is None:
             continue
-        group, element = key.split(",")
-        for concrete in REPEATING_GROUPS.get(group, [group]):
-            profile[f"{concrete},{element}"] = {"action": action,
-                                                "name": rule_name(row)}
+        # A repeating-group row keeps its mask key (`50xx,xxxx`): the
+        # loader reads the table's own spelling since #556.
+        profile[key] = {"action": action, "name": rule_name(row)}
+    for key, rule in GROUP_RULES.items():
+        profile[key] = {"action": rule["action"], "name": rule["name"]}
     return profile
 
 
 def render_literal(table):
     """The `BASIC_PROFILE = {...}` block of `isocenter/profiles.py`, as
     text: `derive(table)` in key order, each entry's table code as a
-    trailing comment, and `LITERAL_COMMENTS` above the entries they name.
+    trailing comment (`group rule (#556)` for a `GROUP_RULES` key, which
+    has no row), and `LITERAL_COMMENTS` above the entries they name.
     Paste it over the block to regenerate; the test compares it with the
     file character for character."""
     rows = {row["key"]: row for row in table["rows"]}
@@ -234,12 +291,10 @@ def render_literal(table):
     for key, rule in sorted(derive(table).items()):
         for comment in LITERAL_COMMENTS.get(key, []):
             lines.append(f"    # {comment}")
-        group, element = key.split(",")
-        row = rows.get(key) or next(
-            rows[f"{mask},{element}"] for mask, groups in REPEATING_GROUPS.items()
-            if group in groups)
+        code = (rows[key]["basic"] if key in rows
+                else f"group rule ({GROUP_RULES[key]['authority']})")
         name = json.dumps(rule["name"], ensure_ascii=False)
         lines.append(f'    "{key}": {{"action": "{rule["action"]}", '
-                     f'"name": {name}}},  # {row["basic"]}')
+                     f'"name": {name}}},  # {code}')
     lines.append("}")
     return "\n".join(lines) + "\n"

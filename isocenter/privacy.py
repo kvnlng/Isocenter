@@ -6,6 +6,7 @@ import hmac
 import re
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
                        Patient, Study, iter_item_tree)
+from .config_manager import _vr_dummy
 from .logger import get_logger
 from .profiles import FLOOR_POLICY
 
@@ -61,6 +62,30 @@ def _rule_name(rule: Dict[str, Any]) -> str:
     present (#730)."""
     name = rule.get("name")
     return "Unknown Tag" if name is None else name
+
+
+def _rule_for(phi_tags, tag):
+    """The rule for the concrete `tag`, or None: the most specific key wins
+    (#556).
+
+    `tag` itself first; then, for an even group in 5000-501E or 6000-601E
+    (PS3.5 7.6), the table's element mask (`60xx,0022`) and then its group
+    mask (`60xx,xxxx`). So `6002,0022` beats `60xx,0022`, which beats
+    `60xx,xxxx`. An odd group between them is private and never matches a
+    mask: it is the `remove_private_tags` sweep's. The finding a mask
+    raises names the concrete tag, so remediation, the audit rows and the
+    process boundary see an ordinary rule."""
+    rule = phi_tags.get(tag)
+    if rule:
+        return rule
+    try:
+        group = int(tag[:4], 16)
+    except (TypeError, ValueError):
+        return None
+    if group % 2 or not (0x5000 <= group <= 0x501E or 0x6000 <= group <= 0x601E):
+        return None
+    prefix = tag[:2]
+    return phi_tags.get(f"{prefix}xx,{tag[5:]}") or phi_tags.get(f"{prefix}xx,xxxx")
 
 
 def _holds_owned_replacement(phi_tags, tag, value, study=None) -> bool:
@@ -522,10 +547,10 @@ class PhiInspector:
         rejecting a call that succeeds today would be a breaking change.
         A caller may also legitimately have a tag *described* as "Shift".
 
-        Since 0.9.8 the date example above is no longer the case it was
-        written for. On a standard tag whose VR cannot hold `ANONYMIZED`
-        -- `{"0008,0012": "SHIFT"}` -- the string form is refused at
-        construction (#560), before this runs. On Study Date the string
+        On a date tag other than Study Date -- `{"0008,0012": "SHIFT"}` --
+        the string form writes the DA dummy `19000101` since #557 (0.9.8
+        refused it, #560), which destroys the date as surely, so it is
+        warned about here like any other tag. On Study Date the string
         form means the shift (#537), so `{"0008,0020": "SHIFT"}` and
         `"JITTER"` do what they say and are not warned about. `"REMOVE"`
         and `"EMPTY"` there still are, naming the shift as what happens:
@@ -816,18 +841,20 @@ class PhiInspector:
 
         for item, tag, path in scan_targets:
             # Parse config
-            config_val = self.phi_tags.get(tag)
+            # Through the masks (#556): a `60xx,xxxx` rule covers
+            # `6002,0022`, and a concrete key beats it.
+            config_val = _rule_for(self.phi_tags, tag)
             if not config_val:
                 continue
 
             if isinstance(config_val, dict):
                 description = _rule_name(config_val)
                 action_code = config_val.get("action", "REPLACE").upper()
-                replace_value = config_val.get("value") or "ANONYMIZED"
+                rule_value = config_val.get("value")
             else:
                 description = str(config_val)
                 action_code = "REPLACE"
-                replace_value = "ANONYMIZED"
+                rule_value = None
             # Study Date's REPLACE with no value is the shift, at any depth
             # (#537): the owner's rule reader says so, and the validator
             # lets it through only on that reading, since a DA cannot hold
@@ -964,11 +991,19 @@ class PhiInspector:
             elif action_code == "KEEP":
                 needs_remediation = False
             else:  # REPLACE (Default)
-                # The rule's `value:`, or `ANONYMIZED` (#538): this wrote
-                # the constant whatever the rule said. "Already replaced"
-                # compares with the value this rule writes, so a copy left
-                # at `ANONYMIZED` by an earlier policy is rewritten.
-                if val != replace_value and val != "":
+                # The rule's `value:` (#538), or the dummy of the tag's
+                # dictionary VR (#557), or `ANONYMIZED` for a private or
+                # unknown tag (#571). The loader judges the same spelling
+                # (`_refused_phi_rule`). Computed in this arm alone: Study
+                # Date's value-less REPLACE was read as SHIFT above and
+                # must never get the DA dummy. "Already replaced" compares
+                # with the value this rule writes, so a dummied element
+                # reads clear on a re-audit, and a copy left at another
+                # value by an earlier policy is rewritten. A blank value,
+                # text or binary (#547's `b""`), carries nothing and is
+                # not given one.
+                replace_value = rule_value or _vr_dummy(tag) or "ANONYMIZED"
+                if val != replace_value and val != "" and val != b"":
                     needs_remediation = True
                     remediation_action = "REPLACE_TAG"
                     new_val = replace_value
@@ -1014,7 +1049,9 @@ class PhiInspector:
         swept = {(id(f.entity), f.tag) for f in seq_removals}
         for owner, path in iter_item_tree(instance):
             for seq_tag in list(owner.sequences.keys()):
-                config_val = self.phi_tags.get(seq_tag)
+                # One lookup path with the loop above (#556), though no
+                # 50xx or 60xx element is a sequence.
+                config_val = _rule_for(self.phi_tags, seq_tag)
                 # The private sweep already raised this one.
                 if not config_val or (id(owner), seq_tag) in swept:
                     continue

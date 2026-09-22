@@ -134,7 +134,7 @@ Before changing anything, define your privacy rules.
 
 Measure first, then cut: the audit tells you what the run will change before anything is changed.
 
-Skipping configuration does not skip de-identification. A session that has loaded no configuration applies a **floor policy** of 620 tag rules: the PS3.15 Annex E Basic Profile table (2026c; UIDs not yet replaced), with Study Date jittered and Patient's Sex and Age kept. A config file extends that floor unless it says `privacy_profile: none`, and private tags are removed unless it says `remove_private_tags: false`. See [Configuration](https://kvnlng.github.io/Isocenter/configuration/).
+Skipping configuration does not skip de-identification. A session that has loaded no configuration applies a **floor policy** of 590 tag rules: the PS3.15 Annex E Basic Profile table (2026c; UIDs not yet replaced), with Study Date jittered and Patient's Sex and Age kept. A config file extends that floor unless it says `privacy_profile: none`, and private tags are removed unless it says `remove_private_tags: false`. See [Configuration](https://kvnlng.github.io/Isocenter/configuration/).
 
 ```python
 # Create a default configuration file (v2.0 YAML)

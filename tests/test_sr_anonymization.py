@@ -92,20 +92,20 @@ def test_phi_inspector_deep_scan():
         "found again after crossing a process boundary")
 
 
-def test_sr_d_codes_are_zero_length(tmp_path):
+def test_sr_d_codes_hold_their_dummies(tmp_path):
     """pydicom's `test-SR.dcm` through a bare session: Verifying Observer
-    Name and Verification DateTime are present and zero-length (#547).
+    Name and Verification DateTime are present and hold the dummy of
+    their VR (#557).
 
-    **This pins a documented non-conformance, on purpose.** PS3.15 Table
-    E.1-1 gives both `D`: replace with a non-zero-length dummy consistent
-    with the VR. Isocenter has no dummy-value action, so the basic profile
-    maps `D` to EMPTY, and both are Type 1 in the SR Document General
-    module. The SR still exports, because `IODValidator` does not know SR.
-    When the dummy-value action lands (#557) this test flips, and should.
+    PS3.15 Table E.1-1 gives both `D`: replace with a non-zero-length
+    dummy consistent with the VR, and both are Type 1 in the SR. Until
+    #557 the basic profile mapped `D` to EMPTY and this test pinned that
+    documented non-conformance, zero-length; it flipped when the dummy
+    landed, as it said it would.
 
-    Kills: `D` mapped to REMOVE (the elements become absent), and the
-    Verifying Observer Sequence given a rule of its own (it would be
-    removed or emptied, and its items with it)."""
+    Kills: `D` mapped to REMOVE (the elements become absent) or to EMPTY
+    (zero-length again), and the Verifying Observer Sequence given a rule
+    of its own (it would be removed or emptied, and its items with it)."""
     import os
     import shutil
     import pydicom.data
@@ -130,5 +130,5 @@ def test_sr_d_codes_are_zero_length(tmp_path):
     observers = out.VerifyingObserverSequence
     assert len(observers) == len(original.VerifyingObserverSequence)
     for item in observers:
-        assert "VerifyingObserverName" in item and not item.VerifyingObserverName
-        assert "VerificationDateTime" in item and not item.VerificationDateTime
+        assert item.VerifyingObserverName == "ANONYMIZED"
+        assert item.VerificationDateTime == "19000101"

@@ -683,6 +683,8 @@ class RemediationService:
             # value its VR cannot hold is written as LO, and declining
             # there would keep the identifier. A decline, `(None, reason)`,
             # never `(None, None)`, which says the rule is already met.
+            # A dummy the scan built for a value-less REPLACE (#557) never
+            # reaches this: it is valid for the tag's VR by construction.
             from .config_manager import _dictionary_vr_refuses  # pylint: disable=import-outside-toplevel
             refused_vr = _dictionary_vr_refuses(tag, value)
             if refused_vr is not None:

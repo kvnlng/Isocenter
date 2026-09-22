@@ -83,11 +83,25 @@ def test_study_date_described_as_remove_or_empty_is_reported(caplog, word):
         f"To {word.lower()} this tag, write {{'action': {word!r}, 'name': ...}}."], msgs
 
 
-def test_a_string_form_on_a_date_tag_is_refused():
-    """#560: the string form is REPLACE, and Instance Creation Date is a
-    DA, which cannot hold `ANONYMIZED`. It exported the literal before."""
-    with pytest.raises(ValueError, match="0008,0012 is DA"):
-        PhiInspector(config_tags={"0008,0012": "SHIFT"})
+def test_a_string_form_on_a_date_tag_writes_the_dummy_and_is_warned_about(caplog):
+    """The string form is REPLACE. On Instance Creation Date, a DA, 0.9.8
+    refused it (#560: a DA cannot hold `ANONYMIZED`); since #557 a
+    value-less REPLACE writes the DA dummy, so it loads, and an action
+    word used as the name is warned about as on any other tag: the date
+    is replaced, not shifted. Kills the warning skipped for a date tag."""
+    with caplog.at_level(logging.WARNING):
+        inspector = PhiInspector(config_tags={"0008,0012": "SHIFT"})
+
+    assert [m for m in _warnings(caplog) if "0008,0012" in m] == [
+        "config_tags['0008,0012'] is 'SHIFT', which is read as the tag's "
+        "display name, not its action -- the action stays REPLACE. To shift "
+        "this tag, write {'action': 'SHIFT', 'name': ...}."]
+    instance = _instance_with_date()
+    instance.attributes["0008,0012"] = "20230101"
+    found = [f for f in inspector._scan_instance(instance, "P1", None)
+             if f.tag == "0008,0012"]
+    assert [(f.remediation_proposal.action_type, f.remediation_proposal.new_value)
+            for f in found] == [("REPLACE_TAG", "19000101")]
 
 
 def test_an_ordinary_description_is_not_reported(caplog):

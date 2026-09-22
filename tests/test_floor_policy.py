@@ -85,7 +85,7 @@ def test_the_floor_is_the_basic_profile_plus_the_research_defaults():
     assert all(tag == tag.lower() for tag in FLOOR_POLICY)
     # Patient's Age is a basic rule since #547, so all three research
     # defaults override one and the floor adds nothing.
-    assert len(FLOOR_POLICY) == 620
+    assert len(FLOOR_POLICY) == 590
 
     assert RESEARCH_DEFAULTS["0008,0020"]["action"] == "JITTER"
     assert RESEARCH_DEFAULTS["0010,0040"]["action"] == "KEEP"
@@ -93,10 +93,10 @@ def test_the_floor_is_the_basic_profile_plus_the_research_defaults():
     assert set(RESEARCH_DEFAULTS) == {"0008,0020", "0010,0040", "0010,1010"}
 
     # The two profile edits the ruling and the export need. Station Name
-    # is X/Z/D in Table E.1-1, so EMPTY since #547.
-    assert BASIC_PROFILE["0008,1010"]["action"] == "EMPTY"      # Station Name
+    # is X/Z/D in Table E.1-1: EMPTY since #547, its dummy since #557.
+    assert BASIC_PROFILE["0008,1010"]["action"] == "REPLACE"    # Station Name
     assert BASIC_PROFILE["0008,0030"]["action"] == "EMPTY"      # Study Time
-    assert len(BASIC_PROFILE) == 620
+    assert len(BASIC_PROFILE) == 590
 
     # Derived, not aliased: the floor's entries are not the profile's
     # objects, so an edit to one cannot rewrite the other.
@@ -184,14 +184,16 @@ def _exported_dicoms(folder):
 #: arm in PS3.15 Table E.1-1 empties rather than removes, so only the
 #: `X/D` pair (Series Date and Time) is absent.
 _CT_SMALL_AFTER_THE_FLOOR = {
+    # A D arm holds its VR's dummy since #557: removed (X/D) or emptied
+    # (Z/D, X/Z/D) until then.
     "StudyID": "",               # Z
-    "SeriesDate": None,          # X/D
+    "SeriesDate": "19000101",    # X/D
     "AcquisitionDate": "",       # X/Z
-    "ContentDate": "",           # Z/D
-    "StationName": "",           # X/Z/D
-    "InstitutionName": "",       # X/Z/D
-    "ContentTime": "",           # Z/D
-    "SeriesTime": None,          # X/D
+    "ContentDate": "19000101",   # Z/D
+    "StationName": "ANONYMIZED",  # X/Z/D
+    "InstitutionName": "ANONYMIZED",  # X/Z/D
+    "ContentTime": "000000",     # Z/D
+    "SeriesTime": "000000",      # X/D
     "AcquisitionTime": "",       # X/Z
     "StudyTime": "",             # Z
     "StudyDescription": "",      # X, emptied for folder naming
@@ -288,9 +290,14 @@ def test_the_documented_quick_start_exports_ct_small(tmp_path):
     ds = pydicom.dcmread(written[0])
 
     assert "StudyTime" in ds and str(ds.StudyTime) == ""
-    for keyword in ("StationName", "StudyID", "InstitutionName", "SeriesDate"):
+    # The source values are gone: emptied (Z), or replaced by the VR's
+    # dummy where the table's code has a D arm (#557).
+    for keyword, expected in (("StationName", "ANONYMIZED"), ("StudyID", ""),
+                              ("InstitutionName", "ANONYMIZED"),
+                              ("SeriesDate", "19000101")):
         assert keyword in original, f"fixture drift: CT_small has no {keyword}"
-        assert not ds.get(keyword), f"{keyword} reached the export as {ds[keyword].value!r}"
+        assert str(ds.get(keyword, "")) == expected, (
+            f"{keyword} reached the export as {ds.get(keyword)!r}")
 
 
 def test_a_bare_session_status_and_manifest_after_anonymize(tmp_path):
@@ -465,7 +472,7 @@ def _report_method_line(session, tmp_path, name):
 
 
 def test_the_report_counts_the_policy_in_force(tmp_path):
-    """The bare report says 620 rules and `session defaults`; a
+    """The bare report says 590 rules and `session defaults`; a
     `privacy_profile: none` session says 0. Kills `generate_report`'s
     `load_phi_config()` fallback (the loader is gone since #729) for an
     empty `phi_tags` -- under it the
@@ -568,7 +575,7 @@ def test_a_saved_configuration_reloads_under_the_same_policy(tmp_path):
 
 def test_the_loader_lowercases_user_keys_before_the_merge(tmp_path):
     """A user key spelled `0008,103E` under `privacy_profile: basic` yields
-    one `0008,103e` entry (620, not 621) carrying the user's action. Kills
+    one `0008,103e` entry (590, not 591) carrying the user's action. Kills
     a merge that leaves the uppercase key beside the profile's: the
     inspector collapses them at scan time with the later one winning by
     dict order, and the report counts a rule that never existed."""
@@ -621,8 +628,8 @@ def test_a_config_without_a_profile_line_extends_the_floor(tmp_path, caplog):
 
 def test_keep_opts_a_tag_out_of_the_floor(tmp_path):
     """`action: KEEP` in a file with no profile line opts one tag out of
-    the floor, and the key may be spelled uppercase. Loaded: 620 entries,
-    one `0008,103e` carrying KEEP (not 621 with the KEEP winning only by
+    the floor, and the key may be spelled uppercase. Loaded: 590 entries,
+    one `0008,103e` carrying KEEP (not 591 with the KEEP winning only by
     dict order); the audit raises nothing for it; and a KEEP on
     Institution Name survives to the exported CT_small. Kills the
     override order reversed (floor over user) and the loader not
@@ -696,7 +703,7 @@ def test_a_loaded_config_does_not_edit_the_floor_a_later_session_seeds_from(tmp_
         first.load_config(str(config))
         assert first.configuration.phi_tags["0008,0080"]["action"] == "KEEP"
     with Session(str(tmp_path / "b.db")) as later:
-        assert later.configuration.phi_tags["0008,0080"]["action"] == "EMPTY"
+        assert later.configuration.phi_tags["0008,0080"]["action"] == "REPLACE"
         assert later.configuration.phi_tags == expected
     assert FLOOR_POLICY == expected
 

@@ -109,7 +109,11 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
 
     The count is asserted, not just the rows: read under the pseudonym
     the four owner removals are satisfied and the twenty `REPLACE`s are
-    re-applied, which is the CHANGELOG's 24 -> 20. Lose the pseudonym
+    re-applied, which is the CHANGELOG's 24 -> 20. Twenty-four since
+    #557: the floor's four X/D findings here (Instance Creation Date on
+    both files, Series Date and Series Time on CT_small) were REMOVEs,
+    satisfied on the reopened graph, and are now REPLACEs writing their
+    dummy, re-applied like the other twenty. Lose the pseudonym
     lookup and the pass does not become quiet -- it declines every
     finding, which `_owner_rows` now sees and this count would fail on
     either way.
@@ -125,7 +129,7 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
         second.load_config(str(tmp_path / "cfg.yaml"))
         before = len(_rows(second))
 
-        assert second.anonymize(report) == 20
+        assert second.anonymize(report) == 24
 
         rows = _rows(second)[before:]
         assert [a for a, _ in rows].count("REMEDIATION_DECLINED") == 0, rows

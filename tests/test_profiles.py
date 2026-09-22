@@ -113,12 +113,13 @@ def test_basic_profile_datetime_twins_actually_carry_their_table_action():
     tags Task 1 (#38) added.
 
     All five were REMOVE until #547. Acquisition DateTime is `X/Z/D` in
-    PS3.15 Table E.1-1, and every code with a `Z` arm empties, so it is
-    EMPTY; the four procedure step tags are `X`. Either action removes
+    PS3.15 Table E.1-1: EMPTY from #547, and since #557 REPLACE with no
+    value, which writes the DT dummy `19000101` and nothing of the
+    original; the four procedure step tags are `X`. Each action removes
     the value, which is what this test is about.
     """
     required = {
-        "0008,002a": "EMPTY",    # Acquisition DateTime, X/Z/D
+        "0008,002a": "REPLACE",  # Acquisition DateTime, X/Z/D
         "0040,0244": "REMOVE",   # Performed Procedure Step Start Date, X
         "0040,0245": "REMOVE",   # Performed Procedure Step Start Time, X
         "0040,0250": "REMOVE",   # Performed Procedure Step End Date, X
