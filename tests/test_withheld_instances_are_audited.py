@@ -185,8 +185,13 @@ def test_a_withheld_export_grades_review_required(tmp_path):
 
     assert "REVIEW_REQUIRED" in _grade(text), text
     section_5 = text.split("## 5. Validation & Verification", 1)[1]
-    assert ("**Grade Basis:** REVIEW_REQUIRED, for 1 reason(s):\n"
+    # Two reasons, both true (#573): the withheld row, and the withheld
+    # instance itself, which the pre-export scan left IDENTIFIED.
+    assert ("**Grade Basis:** REVIEW_REQUIRED, for 2 reason(s):\n"
             "    *   1 row(s) in section 4 (Exceptions & Errors)\n"
+            "    *   1 entity read IDENTIFIED: the last PHI scan raised a "
+            "finding under the policy it ran with, and no `anonymize()` pass "
+            "since acted on it (patients 0, studies 0, instances 1)\n"
             in section_5), section_5
     section_4 = text.split("## 4.", 1)[1].split("## 5.", 1)[0]
     assert withheld in section_4 and "withheld" in section_4, section_4

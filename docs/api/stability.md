@@ -319,7 +319,14 @@ default.
 
 **Output vocabularies.** Five separate vocabularies, not one list.
 
-- The **grade**: `PASS`, `REVIEW_REQUIRED`. There is no `FAIL`.
+- The **grade**: `PASS`, `REVIEW_REQUIRED`. There is no `FAIL`. The
+  conditions that decide it are listed in
+  [How the grade is decided](../analytics.md#how-the-grade-is-decided),
+  and they are a promise in one direction: no condition is removed or
+  narrowed in 1.x, and one may be added with a CHANGELOG entry. A run
+  that passed may stop passing after a minor release, never the
+  reverse. The report's layout and the wording of each Grade Basis
+  line are tier 2.
 - The **audit `action_type` strings**, written to the audit table and
   counted by type in section 2 of the report: `DATA_LOSS`, `ERROR`,
   `EXPORT`, `RECONCILE_PRIVATE`, `REDACTION`, `REVERSIBLE_EXPORT`,

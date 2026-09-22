@@ -354,7 +354,7 @@ machines:
 - **Cohort summary**: how many patients and instances the session holds and, after an export, how many instances were written of those requested. A per-instance manifest is a separate document, `generate_manifest()`.
 - **Audit trail**: counts of every action taken (anonymize, redact, export) and every loss recorded.
 - **Exceptions**: every warning and error the run raised, listed rather than summarised.
-- **Grade**: `PASS` or `REVIEW_REQUIRED`. There is no `FAIL`; a run that lost something is a run a person must look at, and the report's *Grade Basis* lists every reason it is not `PASS`.
+- **Grade**: `PASS` or `REVIEW_REQUIRED`. There is no `FAIL`; a run that lost something is a run a person must look at, and the report's *Grade Basis* lists every reason it is not `PASS`. [How the grade is decided](https://kvnlng.github.io/Isocenter/analytics/#how-the-grade-is-decided) lists every condition.
 - **A signature block** for the reviewer who accepts it. The report is evidence for whatever review your institution runs; it is not itself a certification.
 
 Two screens run during processing and feed the report: instances whose `BurnedInAnnotation (0028,0301)` is `YES` are flagged for manual review, and every exception in a batch is captured rather than dropped.

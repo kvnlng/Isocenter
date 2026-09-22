@@ -21,7 +21,7 @@ The team generates a Markdown report at the end of a run. It contains:
 - **A cohort summary**: how many patients and instances the session holds and, after an export, how many instances were written of those requested. A per-instance manifest can be written as a separate document.
 - **An audit trail**: counts of every action taken (tags removed or replaced, dates shifted, pixel regions redacted, files exported) and every loss recorded.
 - **Exceptions**: every warning and error the run raised, listed individually.
-- **A grade**: `PASS` or `REVIEW_REQUIRED`. There is deliberately no `FAIL`. A run that lost something is a run a person must look at, and the report's *Grade Basis* lists every reason the run is not `PASS`.
+- **A grade**: `PASS` or `REVIEW_REQUIRED`. There is deliberately no `FAIL`. A run that lost something is a run a person must look at, and the report's *Grade Basis* lists every reason the run is not `PASS`. Every condition that costs a run its `PASS`, and what `PASS` does not mean, is written down in one place: [How the grade is decided](analytics.md#how-the-grade-is-decided).
 - **A signature block** for the reviewer who accepts the report.
 
 The report is evidence for whatever review the institution runs. It is not itself a determination.

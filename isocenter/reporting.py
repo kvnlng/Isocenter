@@ -105,6 +105,24 @@ def _metadata_line(report: "ComplianceReport") -> str:
             "audit trail, so no metadata remediation is recorded.\n")
 
 
+def _phi_scan_line(report: "ComplianceReport") -> str:
+    """How many instances no PHI scan has seen at their current revision.
+
+    Not a grade term (#573, Q3): an unscanned instance is the absence of a
+    measurement, and grading it would make every ingest -> export
+    conversion REVIEW_REQUIRED. Said on every report, so a PASS over data
+    no scan has read cannot pass for a PASS over data one cleared.
+    """
+    line = (f"*   **PHI Scan (`audit()`):** {report.unscanned_instances} of "
+            f"{report.total_instances} instance(s) have no PHI scan at their "
+            "current revision.")
+    if report.unscanned_instances:
+        line += (" They were never scanned, or were edited after their scan, "
+                 "and are not graded: the grade counts what a scan found, and "
+                 "no scan has looked at them.")
+    return line + "\n"
+
+
 def _pixel_scan_line(report: "ComplianceReport") -> str:
     """What `scan_pixel_content()` did in this session, one line.
 
@@ -211,6 +229,14 @@ class ComplianceReport:
         pixel_scans (List[PixelScanSummary]): Each `scan_pixel_content()`
             call made in this session, in order. Empty means none ran here,
             not that a scan found nothing.
+        unacted_findings (Dict[str, int]): Patients, studies and instances
+            reading IDENTIFIED when the report was assembled, keyed
+            "patients", "studies", "instances": a finding the last PHI
+            scan raised and no `anonymize()` pass since acted on. Any
+            non-zero count grades the run `REVIEW_REQUIRED` (#573).
+        unscanned_instances (int): Instances with no PHI scan at their
+            current revision -- never scanned, or edited since. Rendered
+            in section 5 against `total_instances`; never graded (#573).
     """
     generated_at: datetime.datetime = field(default_factory=datetime.datetime.now)
     isocenter_version: str = "Unknown"
@@ -297,6 +323,15 @@ class ComplianceReport:
     # "metadata was remediated" for every session, whatever it had done.
     metadata_remediations: int = 0
     pixel_scans: List[PixelScanSummary] = field(default_factory=list)
+
+    # Condition 7 of the grade (#573): patients, studies and instances
+    # reading IDENTIFIED, per level. Its reason line in `review_reasons`
+    # is the rendering; this is the count behind it.
+    unacted_findings: Dict[str, int] = field(default_factory=dict)
+    # Instances with no PHI scan at their current revision (Q3 of #573).
+    # Not graded; section 5 says how many, so a PASS over data no scan
+    # has seen does not read as a PASS over data a scan cleared.
+    unscanned_instances: int = 0
 
 
 class ReportRenderer(Protocol):
@@ -491,6 +526,7 @@ The following actions were recorded in the secure audit trail:
         md_content += "\n## 5. Validation & Verification\n\n"
         md_content += _grade_basis_lines(report)
         md_content += _metadata_line(report)
+        md_content += _phi_scan_line(report)
         md_content += _pixel_scan_line(report)
         md_content += (f"*   **Methodology:** {report.deid_method}. "
                        f"{_METHODOLOGY_DISCLAIMER}\n")

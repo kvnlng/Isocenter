@@ -3141,7 +3141,7 @@ class DicomSession:
     @staticmethod
     def _review_reasons(*, audit_summary, exceptions, graded_losses,
                         open_gaps, declined_remediations,
-                        unattested) -> List[str]:
+                        unattested, unacted) -> List[str]:
         """Why a run is not PASS, one entry per term of the grade (#481).
 
         The grade IS this list: `generate_report` grades PASS exactly when
@@ -3150,8 +3150,14 @@ class DicomSession:
         beside a REVIEW_REQUIRED whose section 4 listed the issue. One list
         means a new grade term cannot move the grade without also appearing
         in section 5, because there is no second expression for it to live
-        in. Every term is here, including the two with no row anywhere else
-        in the report: an empty audit trail and an unattested verb.
+        in. Every term is here, including the three with no row anywhere
+        else in the report: an empty audit trail, an unattested verb, and
+        entities whose findings nothing acted on (#573).
+
+        The conditions are numbered in `docs/analytics.md`, "How the grade
+        is decided", in the order they are appended here. They are a 1.x
+        promise in one direction (owner ruling Q1, 2026-09-21): none is
+        removed or narrowed, and one may be added with a CHANGELOG entry.
         """
         review_reasons = []
         if not audit_summary:
@@ -3177,6 +3183,19 @@ class DicomSession:
             review_reasons.append(
                 f"{verb} ran in this session and the audit trail holds none "
                 "of the rows it writes")
+        # Condition 7 (#573). "The policy it ran with", not "the policy in
+        # force": a status is recorded by a scan, and a later session may
+        # load another configuration without rescanning.
+        n_unacted = sum(unacted.values())
+        if n_unacted:
+            noun = "entity" if n_unacted == 1 else "entities"
+            review_reasons.append(
+                f"{n_unacted} {noun} read IDENTIFIED: the last PHI scan "
+                "raised a finding under the policy it ran with, and no "
+                "`anonymize()` pass since acted on it "
+                f"(patients {unacted['patients']}, "
+                f"studies {unacted['studies']}, "
+                f"instances {unacted['instances']})")
         return review_reasons
 
     def generate_report(self, output_path: str, format: str = "markdown") -> None:
@@ -3389,16 +3408,41 @@ class DicomSession:
         unattested = [verb for verb in sorted(self._actions_performed)
                       if not expected_evidence[verb] & audit_summary.keys()]
 
+        # Findings raised and never acted on (#573, condition 7). `audit()`
+        # writes no audit row for a finding, so every term above is blind
+        # to one nobody passed to `anonymize()`: an audit followed by an
+        # export, or a pass handed part of a report, graded PASS with the
+        # identifiers the user's own policy names still in the file.
+        #
+        # Read from `phi_status`, never from the session's scan: the status
+        # is persisted per entity, so a session reopened on this store
+        # grades as the one that scanned did, like every store-wide term.
+        # IDENTIFIED only. UNSCANNED -- never scanned, or edited since --
+        # is the absence of a measurement, not a finding (Q3): it is
+        # counted for section 5 and does not grade. Series are left out
+        # for the reason `phi_status_summary` gives: nothing scans one.
+        unacted = {"patients": 0, "studies": 0, "instances": 0}
+        unscanned_instances = 0
+        for patient in self.store.patients:
+            unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
+            for study in patient.studies:
+                unacted["studies"] += study.phi_status is PhiStatus.IDENTIFIED
+                for series in study.series:
+                    for instance in series.instances:
+                        status = instance.phi_status
+                        unacted["instances"] += status is PhiStatus.IDENTIFIED
+                        unscanned_instances += status is PhiStatus.UNSCANNED
+
         # The grade IS this list: PASS exactly when it is empty (#481). See
         # `_review_reasons` for why it is a list and not a boolean.
-        # Keyword-only: six lists in a row is an easy pair to transpose,
+        # Keyword-only: seven lists in a row is an easy pair to transpose,
         # and a transposed pair would still grade -- it would name the
         # wrong section.
         review_reasons = self._review_reasons(
             audit_summary=audit_summary, exceptions=exceptions,
             graded_losses=graded_losses, open_gaps=open_gaps,
             declined_remediations=declined_remediations,
-            unattested=unattested)
+            unattested=unattested, unacted=unacted)
 
         # 5. Build Report DTO
         report = ComplianceReport(
@@ -3424,6 +3468,8 @@ class DicomSession:
                 audit_summary.get(action, 0)
                 for action in REMEDIATION_ACTION_TYPES),
             pixel_scans=list(self._pixel_scans),
+            unacted_findings=unacted,
+            unscanned_instances=unscanned_instances,
         )
 
         renderer = get_renderer(format)
