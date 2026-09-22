@@ -26,7 +26,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from contextlib import nullcontext
 
+from pydicom import config as pydicom_config
 from pydicom.multival import MultiValue
+from pydicom.valuerep import DSdecimal, DSfloat, IS, ISfloat
 
 from .entities import (Patient, Study, Series, Instance, Equipment,
                        PhiStatus, normalize_study_date, resolve_item_path)
@@ -481,6 +483,20 @@ def _vertical_atom_value(vr: str, text: Optional[str]) -> Any:
         return text
 
 
+def _is_private_tag(key) -> bool:
+    """Whether `key` is a well-formed "gggg,eeee" tag in an odd group.
+
+    The one statement of it for the storage split: `_split_core_and_private`
+    routes by it, and `_serialize_item` picks the root `__vrs__` by it
+    (#676), so the two cannot disagree about which tags the vertical
+    table holds.
+    """
+    try:
+        return int(key.split(',')[0], 16) % 2 != 0
+    except (ValueError, AttributeError):
+        return False
+
+
 def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
                                                                  Dict[Tuple[str, str], Any]]:
     """Separates private tags from the ones stored inline as JSON.
@@ -504,15 +520,9 @@ def _split_core_and_private(attributes: Dict[str, Any]) -> Tuple[Dict[str, Any],
             core[key] = value
             continue
 
-        try:
-            group = int(key.split(',')[0], 16)
-        except (ValueError, AttributeError):
-            # Not a well-formed "gggg,eeee" pair; keep it as a standard
-            # attribute rather than guessing at what it is.
-            core[key] = value
-            continue
-
-        if group % 2 != 0 and not isinstance(value, bytes):
+        # A key that is not a well-formed "gggg,eeee" pair is kept as a
+        # standard attribute rather than guessed at (`_is_private_tag`).
+        if _is_private_tag(key) and not isinstance(value, bytes):
             private[tuple(key.split(','))] = value
         else:
             core[key] = value
@@ -2850,13 +2860,27 @@ class SqliteStore:
         Serializes a DicomItem (or Instance) to a dictionary, including attributes and sequences.
         """
         data = item.attributes.copy()
-        # `__shifted__` here as well as in `_serialize_dicom_item`, and
-        # unlike `__vrs__`, which the root deliberately omits (#510,
-        # #513). A root private tag's VR has a storage home of its own in
-        # `value_rep`, so a copy here would be a second answer; a date
-        # record has no other home at any depth, so the root needs this
-        # key or a top-level shifted date is raised and shifted again on
-        # the next load.
+        # The root `__vrs__` holds exactly the recorded VRs of the private
+        # tags whose value is `bytes` (#676): the set
+        # `_split_core_and_private` keeps here in `attributes_json`, where
+        # the private-tag table and its `value_rep` column never see
+        # them. Every other root private tag's VR lives in `value_rep`,
+        # and copying those here too would be a second answer that can
+        # disagree with it after a partial write (#510, #513). One home
+        # per tag: `value_rep` for the vertical tier, this key for the
+        # bytes beside it, the nested `__vrs__` below the root. Read
+        # from the same `attributes` snapshot as the values, so a tag
+        # that changed tier between two reads cannot be misfiled.
+        vrs = getattr(item, "attribute_vrs", None) or {}
+        binary_vrs = {tag: vrs[tag] for tag, value in data.items()
+                      if tag in vrs and isinstance(value, bytes)
+                      and _is_private_tag(tag)}
+        if binary_vrs:
+            data['__vrs__'] = binary_vrs
+        # `__shifted__` here as well as in `_serialize_dicom_item`, where
+        # it has always sat beside `__vrs__`. A date record has no other
+        # home at any depth, so the root needs this key or a top-level
+        # shifted date is raised and shifted again on the next load.
         if getattr(item, "_shifted_dates", None):
             data['__shifted__'] = dict(item._shifted_dates)
         # What a remediation left at each top-level tag (#537), the root
@@ -2909,10 +2933,11 @@ class SqliteStore:
         private tag would behave differently from an outer one on the
         very same instance.
 
-        `_serialize_item`, the root, deliberately emits **no** top-level
-        `__vrs__`: a root private tag's VR lives in `value_rep`, and a
-        second copy here would be a second answer that can disagree with
-        it after a partial write.
+        `_serialize_item`, the root, emits a top-level `__vrs__` for its
+        private `bytes` values only (#676), the one root population
+        `value_rep` never holds: every other root private tag's VR lives
+        there, and a second copy would be a second answer that can
+        disagree with it after a partial write.
         """
         data = item.attributes.copy()
         if getattr(item, "attribute_vrs", None):
@@ -5276,7 +5301,43 @@ class SqliteStore:
               f"Reclaimed: {saved / megabyte:.2f}MB.")
 
 
+def _tag_number_strings(obj):
+    """`obj` with every DS and IS atom replaced by its tagged text (#662).
+
+    Returns new containers and never edits `obj`'s: `_serialize_item`
+    hands this a shallow copy whose lists are the graph's own.
+    """
+    # `IS` before anything numeric: `IS` is an `int`, `ISfloat` (what
+    # `IS("1.5")` builds) a `float`, and both are text a reader wrote.
+    if isinstance(obj, (IS, ISfloat)):
+        return {"__type__": "IS", "data": str(obj)}
+    if isinstance(obj, (DSfloat, DSdecimal)):
+        return {"__type__": "DS", "data": str(obj)}
+    if isinstance(obj, dict):
+        return {k: _tag_number_strings(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, MultiValue)):
+        return [_tag_number_strings(v) for v in obj]
+    return obj
+
+
 class IsocenterJSONEncoder(json.JSONEncoder):
+    """How a graph value becomes `attributes_json`, and the one place that decides.
+
+    **The trap (#662): `default()` is never called for a `float` or `int`
+    subclass.** `json` encodes those natively, as the number, so a
+    `DSfloat` arm in `default()` reads right and does nothing -- and that
+    is how `'5.000000'` came back from the store as `5.0`, `'0005'` as
+    `5`, and a 16-character DS as an 18-character one. So `iterencode`,
+    which `encode` calls (overriding both would walk twice), first
+    replaces every DS and IS atom, at every depth and inside every
+    `MultiValue`, with `{"__type__": "DS"|"IS", "data": <its text>}` --
+    the same tagged-value spelling `bytes` uses, one scheme in the store.
+    `isocenter_json_object_hook` turns it back into the pydicom value.
+    """
+
+    def iterencode(self, o, _one_shot=False):
+        return super().iterencode(_tag_number_strings(o), _one_shot)
+
     def default(self, obj):
         if isinstance(obj, bytes):
             return {"__type__": "bytes", "data": base64.b64encode(obj).decode('ascii')}
@@ -5288,6 +5349,24 @@ class IsocenterJSONEncoder(json.JSONEncoder):
 
 
 def isocenter_json_object_hook(d):
-    if "__type__" in d and d["__type__"] == "bytes":
+    """A tagged value back into what the graph held (#662).
+
+    **Any reader of `attributes_json` that needs a value must pass this
+    hook.** The two that pass none (the Rows/Columns read in the blob
+    index, and the key scan) read no DS, IS or bytes value; one that did
+    would get the tag dictionary.
+
+    DS and IS are built under `IGNORE`: the text is what ingest already
+    accepted, perhaps with a warning under pydicom's default `WARN`, and a
+    reload must neither refuse it nor warn about it a second time. A
+    `DSdecimal` comes back a `DSfloat` with the same text; nothing here
+    turns pydicom's `use_DS_decimal` on.
+    """
+    kind = d.get("__type__")
+    if kind == "bytes":
         return base64.b64decode(d["data"])
+    if kind == "DS":
+        return DSfloat(d["data"], validation_mode=pydicom_config.IGNORE)
+    if kind == "IS":
+        return IS(d["data"], validation_mode=pydicom_config.IGNORE)
     return d

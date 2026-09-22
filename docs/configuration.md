@@ -204,8 +204,20 @@ decided by its **size**, not its VR
 | Private tag | `remove_private_tags: true` | `remove_private_tags: false` |
 | :--- | :--- | :--- |
 | Text or numeric VR (`LO`, `SH`, `DS`, ...) | Removed | **Kept**, and written to the exported file |
-| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file |
+| Binary value (`OB`, `OW`, `OF`, `OD`, `OL`, or `UN`) of 65534 bytes or less | Removed | **Kept**, and written to the exported file under the VR it was read with (`UN` when the source was Implicit VR, which states none) |
 | Binary value over 65534 bytes | Dropped at ingest, `DATA_LOSS` row | Dropped at ingest, `DATA_LOSS` row |
+
+A kept binary value whose bytes are not a whole number of its VR's words
+-- an `OL` of six bytes, say -- is written `UN` instead, and the
+instance's export draws one `WARNING` row naming the tag, the VR it was
+read with and the one it was written under
+([#676](https://github.com/kvnlng/Isocenter/issues/676)). The VR is
+visible only in an explicit-VR export -- the compressed export of an
+instance with pixels; an uncompressed export, and any export of an
+instance without pixels, is Implicit VR and carries no VR on the wire.
+A binary value read from an Implicit VR source is written `UN` even when
+pydicom's private dictionary names a VR for its creator (a Siemens CSA
+header reads back as `OB`): the file itself stated none.
 
 The limit is `BINARY_RETENTION_MAX_BYTES` in `isocenter/io_handlers.py`,
 the largest value an explicit-VR 16-bit length field can carry. Because it

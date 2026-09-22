@@ -165,7 +165,11 @@ to any of those descriptors made since the set). On `DicomItem`:
 `set_attr()`. On `Instance` it also keeps resident pixels reading as a
 pixel-descriptor edit declares, and raises `ValueError` for an edit that
 pixels set through `set_pixel_data()` and not yet saved cannot be read
-under.
+under. `get_pixel_data()` reads an instance's samples under its pixel
+descriptors — Rows, Columns, SamplesPerPixel, NumberOfFrames,
+BitsAllocated and PixelRepresentation — whether the samples are in the
+store or in the file an `Instance(file_path=...)` names, and raises
+`RuntimeError` for descriptors the samples cannot be read under.
 
 **`Builder`.** The name, `Builder.start_patient()`, and `Equipment`'s
 three fields. The rest of the fluent chain is tier 2.

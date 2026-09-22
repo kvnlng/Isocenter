@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1693 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1696 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1702 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1705 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -1241,6 +1241,18 @@ _INTEGER_VR_RANGE = {
 #: VR.
 _FLOAT_VR_PACK = {'FL': '<f', 'FD': '<d'}
 
+#: The binary VRs a private bytes value can be written under, mapped to
+#: the width of the word its value is a whole number of (PS3.5 6.2):
+#: `OB` bytes, `OW` 16-bit words, `OL`/`OF` 32-bit, `OD`/`OV` 64-bit.
+#: The width is the gate, and not a formality: pydicom 3.0.2 pads an odd
+#: `OW` to even but writes an `OL` of 6 bytes or an `OD` of 12 as they
+#: are, unpadded and without a word (measured) -- a non-conformant element
+#: that says it is `OL`. Such a value does not fit, and is written `UN`
+#: with the re-VR sentence naming it (#676). `UN` is not here: it is never
+#: recorded (`_record_private_vr`), and bytes under `UN` are what the
+#: fallback writes anyway.
+_BINARY_VR_WORD = {'OB': 1, 'OW': 2, 'OL': 4, 'OF': 4, 'OD': 8, 'OV': 8}
+
 #: The VR names alone, derived rather than restated. Two spellings of
 #: "which VRs are binary integers" is exactly the drift
 #: `test_every_binary_vr_the_gate_accepts_has_a_way_back_out_of_the_store`
@@ -1386,9 +1398,13 @@ def _value_fits_vr(value, vr: str) -> bool:
         return bool(value) and all(_value_fits_vr(a, vr) for a in value)
 
     if isinstance(value, (bytes, bytearray, memoryview)):
-        # PS3.5 §6.2.2: raw bytes are `UN`, which is what the fallback
-        # already writes.
-        return False
+        # Bytes fit a binary VR whose words they are a whole number of
+        # (#676): the VR the source file read them with, recorded at
+        # ingest. Everything else -- `UN`, any text or numeric VR, and a
+        # ragged length pydicom would write under the binary VR without
+        # a word -- takes the fallback, which writes `UN`.
+        word = _BINARY_VR_WORD.get(vr)
+        return word is not None and len(value) % word == 0
 
     if isinstance(value, bool):
         return False
@@ -1775,8 +1791,11 @@ def _stored_byte_order(value, vr, tag, path, big_endian, unconverted,
     word reversed, `verify_readback` passing, and nothing anywhere saying
     so. The conversion is here, at ingest, because this is the last place
     that knows both facts it needs: the source's byte order (pydicom's
-    `original_encoding` on the dataset) and the wire VR. Neither survives
-    to the export: a private word value is written `UN` (#154).
+    `original_encoding` on the dataset) and the wire VR. The byte order
+    does not survive to the export, which writes little-endian whatever the
+    element names. The VR of a private value did not either until #676 (it
+    was written `UN`, #154); it is recorded now, and labels words this
+    conversion has already put in little-endian order.
 
     Args:
         value: The value as read. Anything but a non-empty bytes-like
@@ -2026,6 +2045,15 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
     # and not `is not True`: the waveform and Murmur tests hand this a
     # hand-built item whose bytes are already little-endian.
     big_endian = getattr(ds, "original_encoding", (None, None))[1] is False
+    # And whether it was read under Implicit VR, where no element's VR was
+    # on the wire (#676, review of #739). pydicom's default
+    # `replace_un_with_known_vr` still hands back a dictionary VR for a
+    # private element whose creator it knows -- `SIEMENS CSA HEADER`
+    # (0029,xx10) reads `OB`, `TOSHIBA_MEC_MR3` (700D,xx90) `OF` -- which
+    # is pydicom's guess, not the file's statement, so a binary value's VR
+    # is not recorded from such a dataset. `is True`, for the reason the
+    # line above is `is False`: a bare `Dataset` says (None, None).
+    implicit = getattr(ds, "original_encoding", (None, None))[0] is True
 
     # A Waveform Sequence item is where the sample width lives; its
     # Channel Definition items, one level down, hold samples in that width
@@ -2107,6 +2135,12 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                     bytes(value), elem.VR, b_tag, path, big_endian,
                     unconverted, waveform_bits,
                     _declared_width(ds, b_tag) if big_endian else None))
+                # A retained private value keeps the VR it was read with,
+                # so the export can write it under that VR (#676). Only
+                # here, where the value is kept: a dropped one records
+                # nothing. `OV` is not in `BINARY_VRS` and records
+                # through the generic arm below.
+                _record_private_vr(item, b_tag, elem, implicit)
                 continue
             if dropped is not None:
                 dropped.append(
@@ -2219,7 +2253,7 @@ def populate_attrs(ds: Any, item: "DicomItem", dropped: list = None,
                 _process_safe(elem.value), elem.VR, tag, path, big_endian,
                 unconverted, waveform_bits,
                 _declared_width(ds, tag) if big_endian else None))
-            _record_private_vr(item, tag, elem)
+            _record_private_vr(item, tag, elem, implicit)
 
 
 def _read_element(ds, tag, little_endian=True):
@@ -2327,27 +2361,49 @@ def _process_safe(value):
     return value
 
 
-def _record_private_vr(item, tag: str, elem) -> None:
+def _record_private_vr(item, tag: str, elem, implicit: bool = False) -> None:
     """Keep the VR of a private element beside its value (#154).
 
-    Four conditions, and each of them is what keeps some other
-    behaviour unchanged:
+    What is recorded, and why each rule is what keeps some other
+    behaviour as it should be:
 
     * **Odd group only.** An even-group tag resolves its VR from the
       standard dictionary at export time, so recording one here would be
       a second answer that can drift from the dictionary's.
     * **Never `UN`.** `UN` is the absence of an answer, not an answer.
-      It is also what *every* private element resolves to under Implicit
-      VR Little Endian, so this condition is what makes an implicit-VR
-      ingest record nothing at all and keeps
+      It is also what a private element resolves to under Implicit VR
+      Little Endian when pydicom's private dictionary does not know its
+      creator, so this condition is what keeps
       `tests/test_private_sequence_implicit_vr.py` true by construction
-      rather than by luck.
-    * **Never a bytes value.** PS3.5 §6.2.2 makes `UN` the right VR for
-      raw bytes and `_fallback_encoding` already writes that. There is
-      also nowhere to keep it: `_split_core_and_private` routes an
-      odd-group `bytes` value to `attributes_json`, not to the
-      `instance_attributes` table whose `value_rep` column is this
-      carrier's home on the storage side.
+      rather than by luck. (For a creator the dictionary does know,
+      pydicom relabels the `UN`; see the Implicit VR rule below.)
+    * **A bytes value included, since #676.** Until then a bytes value
+      was refused here ("PS3.5 §6.2.2 makes `UN` the right VR for raw
+      bytes"), because there was nowhere to keep its VR:
+      `_split_core_and_private` routes an odd-group `bytes` value to
+      `attributes_json`, not to the `instance_attributes` table whose
+      `value_rep` column is the others' home. So a private `OB` or `OW`
+      read from an explicit-VR file was written `UN`, and a reader of the
+      copy could not tell a word value from a byte stream. The owner's
+      ruling on #676 is that private binary is the user's to keep or to
+      remove (`remove_private_tags`), and a kept element is written
+      faithfully. Its VR now lives beside the value in
+      `attributes_json` -- in the root `__vrs__` for a top-level tag
+      (`_serialize_item`), in the item's own below it, as every nested
+      private VR always has -- and `_value_fits_vr` writes it when the
+      bytes are whole words of it.
+    * **But not from an Implicit VR dataset** (`implicit`, the caller's
+      reading of `original_encoding`). There the file stated no VR, and
+      what pydicom hands back for a private element whose creator is in
+      its private dictionary is that dictionary's guess, relabelled from
+      `UN` by `replace_un_with_known_vr`: `SIEMENS CSA HEADER` (0029,xx10)
+      reads `OB`, `TOSHIBA_MEC_MR3` (700D,xx90) `OF`. Recorded, the
+      guess was written as though the file had said it, and a six-byte
+      `OF` drew a re-VR `WARNING` over a VR the file never declared
+      (review of #739). So a binary-VR element from such a dataset
+      records nothing and is written `UN`, as before #676. A *text* value's
+      dictionary VR is still recorded from one -- that predates #676 and
+      is not this rule's to change.
     * **The private creator included.** (gggg,0010) is `LO`, which is
       what the fallback already guesses, so recording it changes
       nothing -- and leaving it out would make the one tag every private
@@ -2357,7 +2413,9 @@ def _record_private_vr(item, tag: str, elem) -> None:
         return
     if elem.VR == 'UN':
         return
-    if isinstance(elem.value, (bytes, bytearray, memoryview)):
+    # By the VR, not the value's type: a zero-length element's value is
+    # None, and is retained as `b""` all the same.
+    if implicit and elem.VR in _BINARY_VR_WORD:
         return
     item.record_attr_vr(tag, str(elem.VR))
 
@@ -8332,98 +8390,114 @@ class SidecarPixelLoader:
                 )
 
         # Reconstruct based on the capture, by the one reading rule
-        # (`_reading`): the dtype and the shape it names.
-        dt, target_shape = self._reading((
+        # (`_reading`), in `_frame_from_samples` -- which the file arm of
+        # `Instance.get_pixel_data` reads through too (#595).
+        return _frame_from_samples(raw, (
             self.rows, self.cols, self.samples, self.frames, self.bits,
-            self.pixel_representation, self.pixel_dtype))
+            self.pixel_representation, self.pixel_dtype),
+            self.sop_instance_uid)
 
-        # Before `np.frombuffer`, which raises a bare `ValueError: buffer
-        # size must be a multiple of element size` for a byte count that
-        # is not whole samples. That is the right refusal in the wrong
-        # channel: only `RuntimeError("Integrity Error: ...")` rides the
-        # export worker's `Pixel Loader failed` path into an ERROR row,
-        # and `entities.get_pixel_data` wraps it as `Pixel Loader failed
-        # for <uid>`. A 16-bit frame's byte length is even by
-        # construction, so an odd one is not a DICOM pad; it is the wrong
-        # bytes (#373).
-        itemsize = np.dtype(dt).itemsize
-        if len(raw) % itemsize:
-            raise RuntimeError(
-                f"Integrity Error: frame for {self.sop_instance_uid} holds "
-                f"{len(raw)} bytes, which is not a whole number of "
-                f"{itemsize}-byte samples (dtype {np.dtype(dt).name})")
 
-        arr = np.frombuffer(raw, dtype=dt)
+def _frame_from_samples(raw: bytes, descriptors: tuple, uid: str) -> np.ndarray:
+    """Stored samples as the frame `descriptors` declare, or an Integrity Error.
 
-        rows = self.rows
-        cols = self.cols
-        frames = self.frames
+    **The one reading of samples**, for both places they live: the
+    sidecar (`SidecarPixelLoader.__call__`, after its hash check) and a
+    source file an `Instance(file_path=...)` names (`Instance.get_pixel_data`,
+    #595). `descriptors` is `SidecarPixelLoader._descriptors_of`'s tuple;
+    `_reading` names the dtype and shape, and the checks below refuse a
+    byte count that is not whole samples, a geometry of nothing, and any
+    surplus past one pad sample, in words that name `uid` and never a
+    path. Two copies of this would be two answers to "how do these bytes
+    read", the drift #417 and #531 closed.
+    """
+    dt, target_shape = SidecarPixelLoader._reading(descriptors)
 
-        # The element count the bound below compares `arr.size` against.
-        target_size = 1
-        for d in target_shape:
-            target_size *= d
+    # Before `np.frombuffer`, which raises a bare `ValueError: buffer
+    # size must be a multiple of element size` for a byte count that
+    # is not whole samples. That is the right refusal in the wrong
+    # channel: only `RuntimeError("Integrity Error: ...")` rides the
+    # export worker's `Pixel Loader failed` path into an ERROR row,
+    # and `entities.get_pixel_data` wraps it as `Pixel Loader failed
+    # for <uid>`. A 16-bit frame's byte length is even by
+    # construction, so an odd one is not a DICOM pad; it is the wrong
+    # bytes (#373).
+    itemsize = np.dtype(dt).itemsize
+    if len(raw) % itemsize:
+        raise RuntimeError(
+            f"Integrity Error: frame for {uid} holds "
+            f"{len(raw)} bytes, which is not a whole number of "
+            f"{itemsize}-byte samples (dtype {np.dtype(dt).name})")
 
-        # A declared geometry of nothing is an integrity failure, not a
-        # shape to reshape or pad towards. Without this, a one-byte frame
-        # took the old padding fallback -- `arr.size >= 0` is always
-        # true, `arr[:0]` is empty -- and a `(0, 0)` array went back to
-        # the caller with the integrity hash *passing*, because the hash
-        # is over the raw bytes. The export worker then failed with
-        # `Compression failed: cannot write empty image`; a caller who
-        # never exports got an empty image that looked like data. The
-        # reachable shape is an instance whose `pixel_array` was assigned
-        # directly, so no Rows/Columns were ever written (#343).
-        #
-        # Kept ahead of the bound rather than folded into it: an *empty*
-        # frame satisfies `0 <= 0 <= 1`, and `np.frombuffer(b"")
-        # .reshape((0, 0))` succeeds, so without this the empty array
-        # comes back exactly as before. `target_size == 0` names exactly
-        # that case: `frames` enters the shape only when > 1 and
-        # `samples` is normalised to at least 1, so it is zero exactly
-        # when Rows or Columns is (Rows=2, Columns=2, Frames=0 loads as
-        # `(2, 2)`). Same prefix as the hash mismatch so it rides the
-        # export worker's `Pixel Loader failed` channel into an ERROR
-        # row. Here in `__call__` and not in a wrapper: this loader
-        # pickles into spawned export workers, and a guard installed on
-        # the parent would not be in the child.
-        if target_size == 0:
-            raise RuntimeError(
-                f"Integrity Error: {self.sop_instance_uid} declares no "
-                f"pixel geometry (Rows={rows}, Columns={cols}, "
-                f"Frames={frames}); a stored frame of {len(raw)} bytes "
-                f"cannot be reshaped to nothing")
+    arr = np.frombuffer(raw, dtype=dt)
 
-        # The tolerance is one trailing sample, in elements, and nothing
-        # wider in either direction (#373). Why one: DICOM pads an
-        # odd-length OB value to even, which for 8-bit data with an odd
-        # sample count is exactly one byte, and that is the *only*
-        # surplus with a DICOM reason -- ingest itself never writes a
-        # pad (`np.ascontiguousarray(ds.pixel_array).tobytes()`). Why
-        # elements and not bytes: the byte check above has already
-        # refused a partial sample, so here every unit is a whole one.
-        #
-        # This replaced `try: reshape / except ValueError: truncate or
-        # return 1-D`. That fallback took *any* surplus (`arr.size >=
-        # target_size`) and silently truncated -- a 16-byte frame loaded
-        # as a 2x2 image -- and returned a short frame as a 1-D array
-        # that every caller then treated as an image. Both are the right
-        # bytes with the wrong geometry: the hash passes and the reshape
-        # is what lies, which is why this is independent of #368's
-        # hash-beside-the-frame and cannot be produced by any ordering
-        # the sidecar gate closes. The message names the UID, both
-        # sizes and the shape so that an export failing on one frame in
-        # ten thousand is diagnosed from that line alone.
-        if not target_size <= arr.size <= target_size + 1:
-            raise RuntimeError(
-                f"Integrity Error: frame for {self.sop_instance_uid} holds "
-                f"{arr.size} samples; geometry {target_shape} needs "
-                f"{target_size} (one trailing pad byte is tolerated, "
-                f"nothing else)")
+    rows, cols, _, frames = descriptors[:4]
 
-        # Cannot fail after the bound: the slice is exactly `target_size`
-        # elements, which is the product of `target_shape`.
-        return arr[:target_size].reshape(target_shape)
+    # The element count the bound below compares `arr.size` against.
+    target_size = 1
+    for d in target_shape:
+        target_size *= d
+
+    # A declared geometry of nothing is an integrity failure, not a
+    # shape to reshape or pad towards. Without this, a one-byte frame
+    # took the old padding fallback -- `arr.size >= 0` is always
+    # true, `arr[:0]` is empty -- and a `(0, 0)` array went back to
+    # the caller with the integrity hash *passing*, because the hash
+    # is over the raw bytes. The export worker then failed with
+    # `Compression failed: cannot write empty image`; a caller who
+    # never exports got an empty image that looked like data. The
+    # reachable shape is an instance whose `pixel_array` was assigned
+    # directly, so no Rows/Columns were ever written (#343).
+    #
+    # Kept ahead of the bound rather than folded into it: an *empty*
+    # frame satisfies `0 <= 0 <= 1`, and `np.frombuffer(b"")
+    # .reshape((0, 0))` succeeds, so without this the empty array
+    # comes back exactly as before. `target_size == 0` names exactly
+    # that case: `frames` enters the shape only when > 1 and
+    # `samples` is normalised to at least 1, so it is zero exactly
+    # when Rows or Columns is (Rows=2, Columns=2, Frames=0 loads as
+    # `(2, 2)`). Same prefix as the hash mismatch so it rides the
+    # export worker's `Pixel Loader failed` channel into an ERROR
+    # row. Here, on the path `__call__` takes, and not in a wrapper:
+    # the loader pickles into spawned export workers, and a guard
+    # installed on the parent would not be in the child.
+    if target_size == 0:
+        raise RuntimeError(
+            f"Integrity Error: {uid} declares no "
+            f"pixel geometry (Rows={rows}, Columns={cols}, "
+            f"Frames={frames}); a stored frame of {len(raw)} bytes "
+            f"cannot be reshaped to nothing")
+
+    # The tolerance is one trailing sample, in elements, and nothing
+    # wider in either direction (#373). Why one: DICOM pads an
+    # odd-length OB value to even, which for 8-bit data with an odd
+    # sample count is exactly one byte, and that is the *only*
+    # surplus with a DICOM reason -- ingest itself never writes a
+    # pad (`np.ascontiguousarray(ds.pixel_array).tobytes()`). Why
+    # elements and not bytes: the byte check above has already
+    # refused a partial sample, so here every unit is a whole one.
+    #
+    # This replaced `try: reshape / except ValueError: truncate or
+    # return 1-D`. That fallback took *any* surplus (`arr.size >=
+    # target_size`) and silently truncated -- a 16-byte frame loaded
+    # as a 2x2 image -- and returned a short frame as a 1-D array
+    # that every caller then treated as an image. Both are the right
+    # bytes with the wrong geometry: the hash passes and the reshape
+    # is what lies, which is why this is independent of #368's
+    # hash-beside-the-frame and cannot be produced by any ordering
+    # the sidecar gate closes. The message names the UID, both
+    # sizes and the shape so that an export failing on one frame in
+    # ten thousand is diagnosed from that line alone.
+    if not target_size <= arr.size <= target_size + 1:
+        raise RuntimeError(
+            f"Integrity Error: frame for {uid} holds "
+            f"{arr.size} samples; geometry {target_shape} needs "
+            f"{target_size} (one trailing pad byte is tolerated, "
+            f"nothing else)")
+
+    # Cannot fail after the bound: the slice is exactly `target_size`
+    # elements, which is the product of `target_shape`.
+    return arr[:target_size].reshape(target_shape)
 
 
 class SidecarWaveformLoader:

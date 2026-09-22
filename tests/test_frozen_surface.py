@@ -853,6 +853,16 @@ def test_the_stability_page_names_every_tier_one_session_method():
             "since the set") in flat, (
         "stability.md's unload/discard rule no longer says discard also "
         "reverts a descriptor edit made since the set (#434, Q3)")
+    # One reading rule for both places samples live (#595, Q1 (A)): a
+    # file-backed instance reads under its own descriptors, as a stored
+    # one has since #417. Pinned in behaviour by
+    # `tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py`;
+    # this pins that the promise a 1.0 user reads was not narrowed back to
+    # the store alone.
+    assert ("whether the samples are in the store or in the file an "
+            "`Instance(file_path=...)` names") in flat, (
+        "stability.md no longer says get_pixel_data() reads a file-backed "
+        "instance under its own descriptors (#595)")
 
     # The *union* is what is frozen, so the union is what this checks:
     # each word appears **exactly once**, backticked, inside the Output

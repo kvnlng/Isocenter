@@ -171,32 +171,35 @@ def test_a_fitting_private_value_writes_no_sentence(tmp_path):
 
 def test_a_private_binary_value_draws_no_sentence(tmp_path):
     """The other control, and the one that decides how loud this is in
-    practice: a `bytes` value is written `UN`, and that is not a re-VR.
+    practice: a `bytes` value written under the VR it was read with is not
+    a re-VR.
 
-    `_record_private_vr` refuses a bytes value at ingest -- PS3.5 §6.2.2
-    makes `UN` the right VR for raw bytes and `_fallback_encoding`
-    already writes it -- so there is no recorded VR for the written one
-    to differ from. Measured on 3.12.14 over an ingested explicit-VR
-    file carrying private `OB` and `OW` elements: all three record
-    `None` (an empty `OB` arrives as `b""`, bytes like the rest) and the
-    export writes no `WARNING` row. Killing mutation: the bytes
-    condition dropped from `_record_private_vr`, which records `OB`,
-    sees `UN` written, and grades every export of a vendor binary block
-    `REVIEW_REQUIRED`.
+    Until #676 `_record_private_vr` refused a bytes value at ingest, so a
+    private `OB` recorded nothing, was written `UN`, and drew no sentence
+    because there was no recorded VR to differ from. This test's killing
+    mutation was then "the bytes condition dropped from
+    `_record_private_vr`", which recorded `OB`, saw `UN` written, and would
+    have graded every export of a vendor binary block `REVIEW_REQUIRED`.
+    #676 is that mutation, made on purpose and made whole: the owner ruled
+    that a kept private binary element is written faithfully, so the VR is
+    recorded **and** `_value_fits_vr` writes it -- `OB` in, `OB` out, no
+    sentence. Killing mutation now: recording the VR without the fit arm
+    (`UN` written against a recorded `OB`, a sentence per vendor block).
     """
     elem = pydicom.DataElement(Tag(0x0029, 0x101d), 'OB', b"\x01\x02")
     item = DicomItem()
     _record_private_vr(item, "0029,101d", elem)
-    assert item.attribute_vrs.get("0029,101d") is None
+    assert item.attribute_vrs.get("0029,101d") == "OB"
 
-    inst = _image(extra=[("0029,101d", b"\x01\x02")])
+    inst = _image(extra=[("0029,101d", b"\x01\x02")],
+                  vrs=[("0029,101d", "OB")])
 
     outcome = _export(tmp_path, inst, compression="j2k")
 
     assert outcome.ok, outcome.error
     assert _re_vr_sentences(outcome) == [], outcome.warnings
     written = pydicom.dcmread(outcome.output_path)
-    assert written[Tag(0x0029, 0x101d)].VR == 'UN'
+    assert written[Tag(0x0029, 0x101d)].VR == 'OB'
 
 
 def test_a_nested_re_vr_shares_the_instance_sentence(tmp_path):

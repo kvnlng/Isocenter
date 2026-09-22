@@ -828,6 +828,66 @@ def _reading_or_none(reading_of, attributes):
         return None
 
 
+#: The six descriptors a frame is read by, and the file's keyword for each:
+#: `_LOADER_DESCRIBED_TAGS` without the carrier, which no file declares.
+_FILE_DESCRIBED_KEYWORDS = (
+    ("0028,0010", "Rows"),
+    ("0028,0011", "Columns"),
+    ("0028,0002", "SamplesPerPixel"),
+    ("0028,0008", "NumberOfFrames"),
+    ("0028,0100", "BitsAllocated"),
+    ("0028,0103", "PixelRepresentation"),
+)
+
+
+class _FileReadCapture:
+    """What a file-arm read was shaped by, for `_publish_loaded_frame` (#595).
+
+    The file arm's twin of the sidecar loader's capture (#531). The file
+    holds the samples and declares six descriptors; the instance may hold
+    its own, and **the instance's win** where it holds one, as they do for
+    the sidecar (#417). `descriptors` is `SidecarPixelLoader._descriptors_of`
+    over the file's six overlaid with the instance's; `file_descriptors`
+    the same over the file's alone. Equal, and the decode is the frame
+    (every unedited instance, and a bare one that holds no descriptors);
+    different, and the decoded samples are read under `descriptors`.
+
+    The carrier is the same on both sides: the instance's
+    `_ISOCENTER_PIXEL_DTYPE` if it holds one, else the decoded array's
+    dtype name when the sidecar could carry it (float, what ingest records
+    for Float Pixel Data). No descriptor says "float", so without it an
+    edited float frame would be read back as integers.
+
+    `describes()` is asked under `PIXEL_STATE_LOCK`, so it keeps the leaf a
+    leaf: one `dict()` copy of the attributes and six `int()`s, no log, no
+    sqlite, no lock. It can raise `ValueError`/`TypeError` for a descriptor
+    that does not parse, as the sidecar's does -- the #417 refusal.
+    """
+
+    __slots__ = ("_descriptors_of", "_file", "_carrier", "descriptors",
+                 "file_descriptors")
+
+    def __init__(self, descriptors_of, file_attrs, decoded_carrier, attrs):
+        self._descriptors_of = descriptors_of
+        self._file = file_attrs
+        self._carrier = decoded_carrier
+        self.descriptors = self._of(attrs, overlay=True)
+        self.file_descriptors = self._of(attrs, overlay=False)
+
+    def _of(self, attrs, overlay):
+        merged = dict(self._file)
+        if overlay:
+            for tag, _ in _FILE_DESCRIBED_KEYWORDS:
+                if tag in attrs:
+                    merged[tag] = attrs[tag]
+        merged[PIXEL_DTYPE_ATTR] = attrs.get(PIXEL_DTYPE_ATTR) or self._carrier
+        return self._descriptors_of(merged)
+
+    def describes(self, instance) -> bool:
+        """Whether the instance still declares what this read was shaped by."""
+        return self._of(dict(instance.attributes), overlay=True) == self.descriptors
+
+
 def _unparseable_descriptors(descriptors_of, attributes) -> list:
     """The keywords of the described tags `attributes` holds that do not parse.
 
@@ -1282,8 +1342,10 @@ class Instance(DicomItem):
         - An edit under which the bytes read as they read now -- the same
           dtype and shape -- is a plain write.
         - An array a save has written is released after the write, so the
-          next read rebuilds it from the store under the edit (#417).
-          Its bytes are stored; nothing is lost. A memory-only array has
+          next read rebuilds it from the store under the edit (#417) --
+          or, for an instance read from its source file, from the file,
+          under the edit too (#595). Its bytes are stored; nothing is
+          lost. A memory-only array has
           nowhere to be reloaded from and stays, as `unload_pixel_data`
           refuses to drop it.
         - An array set through `set_pixel_data()` and not yet written is
@@ -1567,7 +1629,10 @@ class Instance(DicomItem):
             3. Read from `file_path` through `io_handlers._decode_pixels`,
                the decode `ingest()` makes: pydicom, then imagecodecs where
                pydicom has no plugin. A file ingest refuses is refused here,
-               in the same words (#453).
+               in the same words (#453). The decoded samples are read under
+               the instance's pixel descriptors where it holds them, as the
+               sidecar's are (#595): the file supplies the samples and any
+               descriptor the instance lacks.
 
         Returns:
             Optional[np.ndarray]: The pixel data as a numpy array, or None
@@ -1602,7 +1667,11 @@ class Instance(DicomItem):
                 cannot satisfy (BitsAllocated 16 -> 8, or Rows x Columns
                 smaller than the stored samples) -- "Pixel Loader failed
                 for <uid>: Integrity Error: ..." (#417). A reopened session
-                gives the same refusal.
+                gives the same refusal. From a file, the same refusal for
+                the same edit, as "Lazy load failed for instance <uid>:
+                RuntimeError: Integrity Error: frame for <uid> holds N
+                samples; geometry (R, C) needs M (one trailing pad byte is
+                tolerated, nothing else)" (#595).
             FileNotFoundError: If the file path does not exist.
         """
         if self.pixel_array is not None:
@@ -1768,16 +1837,67 @@ class Instance(DicomItem):
                     # correct.
                     declared = str(getattr(
                         ds, "PhotometricInterpretation", "") or "")
+                    # The instance's descriptors as they stood **before**
+                    # the decode: an edit that lands during it (seconds,
+                    # for a JPEG 2000 frame) is what the capture below
+                    # exists to catch, and a snapshot taken after would
+                    # already contain it and never be tested.
+                    snapshot = dict(self.attributes)
                     arr, decoded = _decode_from_file(ds)
                     relabel = (str(decoded) if decoded is not None
                                and str(decoded) != declared else None)
-                    # Cache it in memory. Assigned, not set through
-                    # set_pixel_data: pydicom shaped this array from the
-                    # file's own descriptors, which are the descriptors
-                    # `attributes` holds, so a re-derivation could only
-                    # disagree with them (#186). Published, relabel and
-                    # all, only into an empty slot (#465).
-                    return self._publish_loaded_frame(arr, relabel)
+                    # **Read under the instance's descriptors (#595).**
+                    # pydicom shaped `arr` from the file's; the instance's
+                    # own win where it holds one, as they do on the sidecar
+                    # arm (#417), by the one reading rule
+                    # (`_frame_from_samples`) and in its words. This arm
+                    # decoded under the file's whatever `attributes` said,
+                    # so a `set_attr` of PixelRepresentation or Rows changed
+                    # nothing it read, and `write_tree()` wrote the file's
+                    # geometry back over the edit. Local import, taken
+                    # outside the leaf: `io_handlers` imports this module.
+                    from .io_handlers import (  # pylint: disable=import-outside-toplevel
+                        SidecarPixelLoader, _frame_from_samples)
+                    file_attrs = {tag: getattr(ds, keyword, None)
+                                  for tag, keyword in _FILE_DESCRIBED_KEYWORDS}
+                    carrier = (arr.dtype.name
+                               if arr.dtype.name in SIDECAR_DTYPE_NAMES else None)
+                    samples = None
+                    # Published, relabel and all, only into an empty slot
+                    # (#465), and only while the instance still declares
+                    # what the frame was read by (#531's capture, on this
+                    # arm too). On a stale capture the **decode is not
+                    # repeated**: it did not depend on the instance, so it
+                    # is still right, and only its reading is redone.
+                    # Assigned, not set through set_pixel_data: a read must
+                    # not write the descriptors it was read by (#186).
+                    while True:
+                        capture = _FileReadCapture(
+                            SidecarPixelLoader._descriptors_of,  # pylint: disable=protected-access
+                            file_attrs, carrier, snapshot)
+                        if capture.descriptors == capture.file_descriptors:
+                            frame = arr
+                        else:
+                            if samples is None:
+                                native = np.ascontiguousarray(arr)
+                                # Defence, not a measured path:
+                                # `_decode_from_file` hands back native
+                                # order even for Explicit VR Big Endian
+                                # (measured, review of #739). A decoder
+                                # that did not would have its bytes read
+                                # swapped by `_frame_from_samples`.
+                                if native.dtype.byteorder not in ('=', '|'):
+                                    native = native.astype(
+                                        native.dtype.newbyteorder('='))
+                                samples = native.tobytes()
+                            frame = _frame_from_samples(
+                                samples, capture.descriptors,
+                                self.sop_instance_uid)
+                        published = self._publish_loaded_frame(
+                            frame, relabel, capture=capture)
+                        if published is not _STALE_CAPTURE:
+                            return published
+                        snapshot = dict(self.attributes)
                 except (AttributeError, TypeError):
                     # "No pixel data element" was the intent and is still
                     # right -- but `.pixel_array` raises AttributeError for
@@ -2058,7 +2178,8 @@ class Instance(DicomItem):
 
         **The one other predicate is the capture, and it is not the
         revision guard rejected above.** `capture` is the loader the
-        sidecar arm read `arr` through, and its `describes(self)` asks
+        sidecar arm read `arr` through (or the file arm's
+        `_FileReadCapture`, #595), and its `describes(self)` asks
         one question: are the six descriptors the frame was shaped and
         typed by still the instance's? A descriptor edit that lands while
         the read is inside its sidecar read is the one change that makes
@@ -2074,8 +2195,11 @@ class Instance(DicomItem):
         edit between the answer and the publish is the same window. It
         keeps the leaf a leaf -- `describes()` is one `dict()` copy of the
         attributes and six `int()`s: no log call, no sqlite, no frame
-        write, and no lock. The file arm passes no capture; pydicom
-        shaped its frame from the file's own descriptors.
+        write, and no lock. The file arm passes one too since #595
+        (`_FileReadCapture`): it reads the decoded samples under the
+        instance's descriptors, so an edit during its decode is the same
+        window, and on `_STALE_CAPTURE` it reinterprets the decode it
+        already holds rather than decoding again.
 
         `relabel` is the colour space the decode converted to (#464,
         #482), written only when this read publishes.

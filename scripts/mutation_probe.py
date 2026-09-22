@@ -438,7 +438,9 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+    "isocenter/io_handlers.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+                                  "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+                                  "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
                                   # `Session.export()` without naming it), and listed for a
                                   # measured kill (#441): `enforce_file_format=True` turned
@@ -595,7 +597,9 @@ TARGETS = {
     # `isocenter\.persistence\b` (the `\b` correctly excludes
     # persistence_manager). #383 named eight; all eight are here and so
     # are 34 others, each of which the guard demands.
-    "isocenter/persistence.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/persistence.py": (["tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+                                  "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
+                                  "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                   "tests/test_a_lock_whose_store_write_fails_raises.py",
                                   "tests/test_a_persisted_lock_needs_a_row.py",
                                   "tests/test_api_coherence.py",
@@ -717,7 +721,10 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
+    "isocenter/session.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+                              "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+                              "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
+                              "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                               "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                               "tests/test_an_unresolvable_ambiguous_vr_is_written.py",
                               "tests/test_a_plugin_value_error_reaches_the_fallback.py",
@@ -991,7 +998,9 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
+    "isocenter/entities.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
+                               "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
                                "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",
                                "tests/test_an_rle_fragment_is_a_frame.py",
                                "tests/test_a_big_endian_word_value_keeps_its_values.py",

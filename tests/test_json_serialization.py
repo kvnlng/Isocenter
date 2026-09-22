@@ -17,10 +17,15 @@ class TestJsonSerialization:
 
         json_str = json.dumps(data, cls=IsocenterJSONEncoder)
 
-        # Verify result is a valid JSON string with a list
+        # A list, each DS atom tagged with its text (#662): `json` writes a
+        # `float` subclass as the bare number without consulting
+        # `default()`, which is how the store used to lose '0.50' -> 0.5.
         decoded = json.loads(json_str)
-        assert decoded["ImagePositionPatient"] == [0.5, 1.5, 2.5]
-        assert isinstance(decoded["ImagePositionPatient"], list)
+        assert decoded["ImagePositionPatient"] == [
+            {"__type__": "DS", "data": text} for text in ('0.5', '1.5', '2.5')]
+        restored = json.loads(json_str, object_hook=isocenter_json_object_hook)
+        assert restored["ImagePositionPatient"] == [0.5, 1.5, 2.5]
+        assert all(isinstance(v, DSfloat) for v in restored["ImagePositionPatient"])
 
     def test_bytes_serialization(self):
         """
