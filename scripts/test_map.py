@@ -260,31 +260,71 @@ class Selection:
     touched: set = field(default_factory=set)
 
 
-def _worker_calls(repo):
-    """(path, dispatching function, worker name) for every pool hand-off.
+#: Calls that hand a function to a pool: `run_parallel(f, ...)`, and a
+#: pool's own methods when called on an attribute (`pool.submit(f)`).
+HAND_OFFS = ("run_parallel",)
+POOL_METHODS = ("submit", "map", "imap", "imap_unordered", "starmap",
+                "starmap_async", "map_async", "apply_async")
+#: Calls that make a pool. What such a pool runs before any task -- its
+#: initializer, `parallel._worker_init` -- is run by every pool made here,
+#: whatever it is later handed, so these dispatch the helpers (worker None).
+POOL_MAKERS = ("Pool", "ProcessPoolExecutor", "ThreadPoolExecutor")
 
-    A hand-off is a call one of whose positional arguments is a bare name
-    ending `_worker`: `run_parallel(ingest_worker, batch, ...)`, or the
-    export pool's call with `_export_instance_worker` on its own line. By
-    convention rather than by list, so a sixth worker is found the day it
-    is written.
+
+def _last_part(node):
+    """`f` -> "f", `service.execute_redaction_task` -> its last part."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def pool_calls(source):
+    """(line, callee, worker) for every call that makes or feeds a pool.
+
+    Found by the call, never by the handed function's name: finding
+    hand-offs by a bare argument ending `_worker` missed `redact()`'s
+    `run_parallel(service.execute_redaction_task, ...)`, so an edit to
+    the redaction worker selected none of the tests that reach it through
+    redact()'s pool (#734 review). `worker` is the handed function's last
+    dotted part, or None for a pool maker or an argument with no name (a
+    lambda, a `partial(...)`), which dispatches only the helpers.
     """
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = _last_part(node.func)
+        feeds = callee in HAND_OFFS or (
+            isinstance(node.func, ast.Attribute) and callee in POOL_METHODS)
+        if feeds:
+            handed = node.args[0] if node.args else next(
+                (k.value for k in node.keywords
+                 if k.arg in ("func", "fn", "worker")), None)
+            yield node.lineno, callee, _last_part(handed)
+        elif callee in POOL_MAKERS:
+            yield node.lineno, callee, None
+
+
+def _worker_calls(repo):
+    """(path, dispatching function, worker name) for every pool call."""
     for path in sorted((Path(repo) / "isocenter").rglob("*.py")):
         source = path.read_text(encoding="utf-8")
         rel = path.relative_to(repo).as_posix()
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Call):
-                for arg in node.args:
-                    if isinstance(arg, ast.Name) and arg.id.endswith("_worker"):
-                        yield rel, function_at(source, node.lineno), arg.id
+        for line, _callee, worker in pool_calls(source):
+            yield rel, function_at(source, line), worker
 
 
 def dispatchers(repo):
-    """{worker name: {(path, the function that hands it to a pool)}}.
+    """{worker's last name part: {(path, the function that hands it on)}}.
 
     Per worker, so rule 2 can ask only the dispatchers of the worker that
-    was edited (spec §10 item 17). `None` for the function is a hand-off
-    at module scope.
+    was edited (spec §10 item 17); keyed on the last dotted part, and an
+    edit's qualname is matched by its own last part, so the method
+    `RedactionService.execute_redaction_task` meets the hand-off
+    `service.execute_redaction_task`. Key None: pools made, and hand-offs
+    of something unnamed -- asked only for a helper. A function of None
+    is a hand-off at module scope.
     """
     out = {}
     for rel, name, worker in _worker_calls(repo):
@@ -293,7 +333,7 @@ def dispatchers(repo):
 
 
 def dispatched_workers(repo):
-    return set(dispatchers(repo))
+    return set(dispatchers(repo)) - {None}
 
 
 def _tests_naming(repo, path):
@@ -309,18 +349,75 @@ def _tests_naming(repo, path):
             if any(n in test.read_text(encoding="utf-8") for n in needles)}
 
 
+_GLOB_CALL = re.compile(r"\bi?glob\(|\.rglob\(")
+_GLOB_PATTERN = re.compile(r"""["']([^"'\s]*\*[^"'\s]*\.\w+)["']""")
+
+
+def glob_readers(repo, path):
+    """Test files that read every file of `path`'s kind by glob.
+
+    A test that walks `docs/**/*.md`, or every `isocenter/**/*.py`, reads
+    a file without naming it: `test_doc_anchors.py` goes red on a broken
+    anchor in a page no test names, `test_source_citations.py` on a line
+    inserted above a cited one (#734 review). Found by what the file
+    does -- it calls a glob and holds a `*.ext`-shaped literal matching
+    the basename -- not by a list, so the next such test is found the day
+    it is written. The literal's directory is not resolved, so this
+    over-selects (an `out.rglob("*.dcm")` over an export matches any
+    `.dcm`); it only ever adds.
+    """
+    import fnmatch
+    name, found = Path(path).name, set()
+    for test in sorted((Path(repo) / "tests").glob("test_*.py")):
+        source = test.read_text(encoding="utf-8")
+        if _GLOB_CALL.search(source) and any(
+                fnmatch.fnmatchcase(name, Path(pattern).name)
+                for pattern in _GLOB_PATTERN.findall(source)):
+            found.add(test.relative_to(repo).as_posix())
+    return found
+
+
+_WIDE_SCOPE = re.compile(
+    r"""scope\s*=\s*["'](?:module|class|package|session)["']""")
+
+
+def has_wide_fixture(repo, test_file):
+    """Does the file hold a fixture set up once for several tests?
+
+    Such a fixture's work is recorded on whichever test consumed it first;
+    every later consumer reads its output and is recorded for none of the
+    code that made it (#734 review, finding 6). So a selection that picks
+    one test of the file takes the file.
+    """
+    path = Path(repo) / test_file
+    return path.exists() and bool(
+        _WIDE_SCOPE.search(path.read_text(encoding="utf-8")))
+
+
 def select(mapping, changes, other, targets, repo, dispatching=None,
-           unspoken=frozenset()):
-    """`unspoken`: test files the map cannot speak for (`cannot_speak_for`)."""
+           unspoken=frozenset(), readers=None, wide=None, no_map=None):
+    """`unspoken`: test files the map cannot speak for (`cannot_speak_for`).
+
+    `readers(path)` and `wide(test_file)` default to `glob_readers` and
+    `has_wide_fixture` over `repo`; `no_map` is why `load` refused a map.
+    """
     sel = Selection()
     if mapping is None:
         sel.reasons.append(
-            f"no usable map at {MAP_FILE}: falling back to TARGETS rows "
+            f"no usable map at {MAP_FILE}"
+            + (f" ({no_map})" if no_map else "")
+            + ": falling back to TARGETS rows "
             "(build one with `python -m scripts.test_map build`)")
     functions = (mapping or {}).get("functions", {})
     workers = (mapping or {}).get("workers", {})
     if dispatching is None:
         dispatching = dispatchers(repo)
+    if readers is None:
+        def readers(path):
+            return glob_readers(repo, path)
+    if wide is None:
+        def wide(test_file):
+            return has_wide_fixture(repo, test_file)
 
     def row(path, why):
         if path in targets:
@@ -348,7 +445,10 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             # every dispatcher. Asking every dispatcher for a worker too
             # left rule 2 dead for all five whenever one dispatcher had no
             # record (spec §10 item 17).
-            own = dispatching.get(change.qualname)
+            # By the last dotted part on both sides: the hand-off
+            # `service.execute_redaction_task` is the method
+            # `RedactionService.execute_redaction_task` (#734 review).
+            own = dispatching.get(change.qualname.rsplit(".", 1)[-1])
             asked = own if own else set().union(*dispatching.values())
             via, blind = set(), []
             for path, name in sorted(asked, key=str):
@@ -364,6 +464,15 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
                                  f"{len(blind)} of its {len(asked)} "
                                  f"dispatcher(s) have no record "
                                  f"({blind[0]})")
+            elif not own and not tests:
+                # A helper no test ran in-process has no record of its
+                # own, which is rule 3's case: the union says which pools
+                # run it, not which tests check it. `parallel._worker_init`
+                # dropped 3 of its row's 13 files, among them the ones
+                # that pin the initializer (#734 review). Five functions on
+                # the first map; a helper with records keeps rule 1.
+                row(change.path, f"{change.qualname} runs only in workers "
+                                 "and is no worker's own")
             tests |= via
         if tests:
             sel.nodeids |= tests
@@ -378,8 +487,15 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             sel.full = True
             sel.reasons.append(f"{path}: shared test machinery -> the full suite")
         elif path.startswith("tests/test_") and path.endswith(".py"):
-            sel.files.add(path)
-            sel.reasons.append(f"{path}: a changed test file -> itself")
+            # Test files import helpers from test files
+            # (`test_export_failure_audit`'s `_session`, three importers):
+            # rule 7's needle finds them (#734 review, finding 3).
+            importers = _tests_naming(repo, path) - {path}
+            sel.files |= {path} | importers
+            sel.reasons.append(
+                f"{path}: a changed test file -> itself"
+                + (f" and the {len(importers)} test files that name it"
+                   if importers else ""))
         elif _is_module(path):
             sel.touched.add(path)
             row(path, "added, deleted, or changed with no hunk")
@@ -393,15 +509,37 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
                 sel.files |= named
                 sel.reasons.append(f"{path}: {len(named)} test files name it")
             elif path.startswith("docs/") or path.endswith(".md"):
-                # Prose no test reads cannot break one. Without this every
-                # dated spec costs the whole suite twice, which is the
-                # per-PR full run the 2026-09-17 ruling ended.
+                # Documentation no test names selects only the tests that
+                # read it by glob, added below. "Prose no test reads
+                # cannot break one" was the premise, and four tests read
+                # every page by glob (#734 review); the whole suite for
+                # every dated spec is still the per-PR full run the
+                # 2026-09-17 ruling ended.
                 sel.reasons.append(
-                    f"{path}: documentation no test names -> nothing")
+                    f"{path}: documentation no test names -> only the "
+                    "tests that read it by glob")
             else:
                 sel.full = True
                 sel.reasons.append(
                     f"{path}: no test names it -> the full suite")
+
+    # Every changed path, whatever else it selected: a test that reads
+    # every file of its kind reads this one.
+    for path in sorted({c.path for c in changes} | set(other)):
+        found = readers(path) - sel.files
+        if found:
+            sel.files |= found
+            sel.reasons.append(
+                f"{path}: {len(found)} test files read every "
+                f"*{Path(path).suffix} by glob -> added")
+
+    held = {n.split("::")[0] for n in sel.nodeids} - sel.files
+    whole = {f for f in held if wide(f)}
+    if whole:
+        sel.files |= whole
+        sel.reasons.append(
+            f"{len(whole)} test files with a module-, class-, package- or "
+            "session-scoped fixture had a test selected -> the whole file")
 
     rows = {f for path in sel.touched for f in targets.get(path, ([],))[0]}
     widened = (set(unspoken) & rows) - sel.files
@@ -433,24 +571,48 @@ def cannot_speak_for(mapping, repo, base):
     return files
 
 
-def unmatched(sel, collected):
-    """Selected tests that no longer exist: renamed or deleted since the build."""
+def vanished(sel, collected, repo):
+    """Selected tests that no longer exist: renamed or deleted since the build.
+
+    Gone means its file is not on disk, or its file was collected and it
+    was not. Asked per file rather than of the whole collection, so a run
+    restricted to some paths (`pytest --changed tests/test_x.py`) does
+    not read every test elsewhere as gone, and one spelled with a path
+    that is the whole suite (`pytest --changed tests`) still checks
+    (#734 review, finding 5).
+    """
     known = {context_to_nodeid(n) for n in collected}
-    return {n for n in sel.nodeids if n not in known}
+    files = {n.split("::")[0] for n in known}
+    return {n for n in sel.nodeids
+            if not (Path(repo) / n.split("::")[0]).exists()
+            or (n.split("::")[0] in files and n not in known)}
+
+
+_MAP_KEYS = ("sha", "python", "functions", "workers", "unmapped")
 
 
 def load(repo):
+    """(the map, None) or (None, why it cannot be used).
+
+    Unusable is no map -- the TARGETS rows and rule 7 -- never a crash: a
+    truncated file failed the run with an INTERNALERROR (#734 review).
+    """
     path = Path(repo) / MAP_FILE
     if not path.exists():
-        return None
-    mapping = json.loads(path.read_text(encoding="utf-8"))
+        return None, "none built"
+    try:
+        mapping = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        return None, f"it does not parse: {exc}"
+    if not isinstance(mapping, dict) or any(k not in mapping for k in _MAP_KEYS):
+        return None, "it lacks the keys a map has: " + ", ".join(_MAP_KEYS)
     try:
         # A map built at a commit this clone does not have cannot be
         # aged: `cannot_speak_for` needs the diff from it.
-        _git(repo, "cat-file", "-e", mapping["sha"] + "^{commit}")
+        _git(repo, "cat-file", "-e", str(mapping["sha"]) + "^{commit}")
     except subprocess.CalledProcessError:
-        return None
-    return mapping
+        return None, f"built at {mapping['sha']}, which this clone does not have"
+    return mapping, None
 
 
 def selection_for(repo, upstream=None):
@@ -459,14 +621,14 @@ def selection_for(repo, upstream=None):
         "mutation_probe", Path(__file__).resolve().parent / "mutation_probe.py")
     probe = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(probe)
-    mapping = load(repo)
+    mapping, why = load(repo)
     base = merge_base(repo, upstream)
     changes, other = changed(repo, base)
     unspoken = cannot_speak_for(mapping, repo, base) if mapping else set()
     # TARGETS rides along: the conftest hook needs it for
     # `fall_back_for_missing`, and loading the probe twice is waste.
     return (select(mapping, changes, other, probe.TARGETS, repo,
-                   unspoken=unspoken), mapping, probe.TARGETS)
+                   unspoken=unspoken, no_map=why), mapping, probe.TARGETS)
 
 
 def fall_back_for_missing(sel, missing, targets):

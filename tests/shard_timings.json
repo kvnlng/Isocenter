@@ -309,6 +309,7 @@
  "tests/test_the_project_secret_keys_the_pseudonym_and_offset.py": 0.02,
  "tests/test_the_project_secret_lives_in_the_store.py": 4.1,
  "tests/test_the_repo_root_stays_clean.py": 0.47,
+ "tests/test_the_selector_reads_the_live_source.py": 5.69,
  "tests/test_uid_regeneration.py": 0.01,
  "tests/test_unified_config.py": 0.34,
  "tests/test_validation.py": 0.0,

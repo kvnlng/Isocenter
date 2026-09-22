@@ -161,19 +161,8 @@ def test_a_one_line_function_is_counted_as_run_by_a_worker():
     # dispatchers' tests (rule 2) instead of its row (rule 3).
     source = "def f(): return 1\n"
     assert test_map.split_functions(source, {1: [""]}) == ({}, ["f"])
-
-
-def test_the_package_has_no_one_line_function():
-    # Why the case above is accepted rather than handled.
-    one_line = [
-        f"{path.relative_to(REPO)}::{name}"
-        for path in sorted((REPO / "isocenter").rglob("*.py"))
-        for name, _def, _end, body in test_map.functions_in(
-            path.read_text(encoding="utf-8"))
-        if body == _def]
-    assert one_line == [], (
-        "a one-line def is filed as worker-run whenever a spawned process "
-        "imports its module; see split_functions before adding one")
+    # That the package has none is checked in
+    # tests/test_the_selector_reads_the_live_source.py.
 
 
 def test_paths_with_spaces_and_modes(repo):
@@ -200,7 +189,12 @@ EXPORT_BATCH = ("isocenter/io_handlers.py", "DicomExporter.export_batch")
 C = test_map.Change
 
 def _select(changes=(), other=(), mapping=MAP, **kw):
-    return test_map.select(mapping, set(changes), list(other), TARGETS, REPO,
+    # The glob and wide-fixture detectors read the real tests/; each has
+    # its own tests below, so the rule tests here see neither.
+    kw.setdefault("readers", lambda path: set())
+    kw.setdefault("wide", lambda test_file: False)
+    return test_map.select(mapping, set(changes), list(other), TARGETS,
+                           kw.pop("repo", REPO),
                            dispatching=kw.pop("dispatching", DISPATCHING), **kw)
 
 def test_rule_1_a_function_a_test_ran_selects_those_tests():
@@ -256,6 +250,31 @@ def test_a_helper_only_workers_run_uses_every_dispatcher():
     assert {"tests/test_session.py", "tests/test_new.py"} <= sel.files
     assert "tests/test_multiprocessing.py::test_parallel" in sel.nodeids
 
+def test_a_workers_method_is_matched_by_its_last_name_part():
+    # `run_parallel(service.execute_redaction_task, ...)` hands on the
+    # method `RedactionService.execute_redaction_task` (#734 review).
+    mapping = dict(MAP, workers={"isocenter/services.py": [
+        "RedactionService.execute_redaction_task"]})
+    sel = _select([C("isocenter/services.py",
+                     "RedactionService.execute_redaction_task")],
+                  mapping=mapping,
+                  dispatching={"execute_redaction_task": {
+                      ("isocenter/session.py", "DicomSession.ingest")}})
+    assert sel.nodeids == {"tests/test_multiprocessing.py::test_parallel"}
+    assert not sel.files and not sel.full
+
+
+def test_a_helper_with_no_record_of_its_own_takes_its_row_too():
+    # `parallel._worker_init`: every pool runs it, no test ran it
+    # in-process, and the dispatchers' tests missed 3 of its row's 13
+    # files, among them the ones that pin the initializer (#734 review).
+    mapping = dict(MAP, workers={"isocenter/session.py": ["_only_in_workers"]})
+    sel = _select([C("isocenter/session.py", "_only_in_workers")],
+                  mapping=mapping)
+    assert "tests/test_multiprocessing.py::test_parallel" in sel.nodeids
+    assert {"tests/test_session.py", "tests/test_new.py"} <= sel.files
+
+
 def test_rule_3_no_record_falls_to_the_targets_row():
     assert _select([C("isocenter/session.py", "DicomSession.brand_new")]).files == {"tests/test_session.py", "tests/test_new.py"}
     assert _select([C("isocenter/session.py", None)]).files == {"tests/test_session.py", "tests/test_new.py"}
@@ -263,9 +282,18 @@ def test_rule_3_no_record_falls_to_the_targets_row():
 def test_rule_4_no_row_selects_the_full_suite():
     assert _select([C("isocenter/profiles.py", None)]).full
 
-def test_rule_5_a_changed_test_file_selects_itself():
-    sel = _select(other=["tests/test_crypto.py"])
-    assert sel.files == {"tests/test_crypto.py"} and not sel.full
+def test_rule_5_a_changed_test_file_selects_itself_and_its_importers(tmp_path):
+    # `test_export_failure_audit.py`'s `_session` is imported by three
+    # other test files; an edit to it selected that file only (#734
+    # review, finding 3).
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_helpers.py").write_text("def _session(): pass\n")
+    (tmp_path / "tests" / "test_user.py").write_text(
+        "from tests.test_helpers import _session\n")
+    (tmp_path / "tests" / "test_other.py").write_text("x = 1\n")
+    sel = _select(other=["tests/test_helpers.py"], repo=tmp_path)
+    assert sel.files == {"tests/test_helpers.py", "tests/test_user.py"}
+    assert not sel.full
 
 @pytest.mark.parametrize("path", ["tests/conftest.py", "tests/support/shards.py", "setup.py", "pytest.ini", ".coveragerc", "pyproject.toml", "MANIFEST.in"])
 def test_rule_6_shared_machinery_selects_the_full_suite(path):
@@ -277,15 +305,51 @@ def test_rule_7_a_path_no_test_names_selects_the_full_suite():
     assert _select(other=["scripts/" + "nobody_" + "names_this.py"]).full
 
 
-def test_rule_7_documentation_no_test_names_selects_nothing():
+def test_rule_7_documentation_no_test_names_selects_only_its_glob_readers():
     # Every dated spec has a basename no test names. Sending those to the
     # suite is the per-PR full run the 2026-09-17 ruling ended -- found
-    # when the PR that wrote this rule selected the suite for itself.
+    # when the PR that wrote this rule selected the suite for itself. But
+    # "nothing" rested on "no test reads prose", and four read every page
+    # by glob: a broken anchor in a page no test names exited 5 (#734).
+    # (Named here, the page would select this file for every edit to it.)
     for path in ("docs/superpowers/specs/" + "nobody-" + "names-this.md",
                  "NOBODY_" + "NAMES_THIS.md"):
         sel = _select(other=[path])
         assert not sel.full and not sel.files and not sel.nodeids
-        assert "nothing" in sel.reasons[-1]
+        sel = _select(other=[path], readers=lambda p: {"tests/test_doc_anchors.py"})
+        assert sel.files == {"tests/test_doc_anchors.py"} and not sel.full
+        assert any("by glob" in reason for reason in sel.reasons)
+
+
+def test_the_glob_detector_wants_a_glob_and_a_matching_pattern(tmp_path):
+    star = "*"
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_reads.py").write_text(
+        f'for p in root.rglob("{star}.md"): pass\n')
+    (tmp_path / "tests" / "test_says.py").write_text(f'X = "{star}.md"\n')
+    (tmp_path / "tests" / "test_other.py").write_text(
+        f'for p in out.rglob("{star}.dcm"): pass\n')
+    assert test_map.glob_readers(tmp_path, "docs/a.md") == {"tests/test_reads.py"}
+
+
+def test_every_changed_path_adds_its_glob_readers():
+    sel = _select([C("isocenter/session.py", "DicomSession.compact")],
+                  readers=lambda p: {"tests/test_source_citations.py"})
+    assert sel.files == {"tests/test_source_citations.py"}
+    assert "tests/test_compaction.py::TestCompaction::test_a" in sel.nodeids
+
+
+def test_a_test_with_a_wide_fixture_takes_its_whole_file(tmp_path):
+    # A module-scoped fixture's work is recorded on its first consumer
+    # only; a later consumer is dropped the day it becomes mapped (#734
+    # review, finding 6).
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_compaction.py").write_text(
+        '@pytest.fixture(scope="module")\ndef built(): pass\n')
+    sel = _select([C("isocenter/session.py", "DicomSession.compact")],
+                  wide=lambda f: test_map.has_wide_fixture(tmp_path, f))
+    assert "tests/test_compaction.py" in sel.files
+    assert not test_map.has_wide_fixture(tmp_path, "tests/test_absent.py")
 
 
 def test_rule_7_matches_a_python_file_by_its_stem_and_nothing_else_by_it(tmp_path):
@@ -312,10 +376,20 @@ def test_unspoken_widens_within_rows_only():
                   unspoken={"tests/test_new.py", "tests/test_elsewhere.py"})
     assert sel.files == {"tests/test_new.py"}
 
-def test_a_selected_test_that_no_longer_exists_is_reported():
+def test_a_selected_test_that_no_longer_exists_is_reported(tmp_path):
+    # Per file (#734 review, finding 5): gone when its file is not on disk,
+    # or its file was collected and it was not; a file left out of a
+    # restricted run is not evidence either way.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_compaction.py").write_text("")
     sel = _select([C("isocenter/session.py", "DicomSession.compact")])
-    assert test_map.unmatched(sel, ["tests/test_other.py::test_x[1]"]) == sel.nodeids
-    assert not test_map.unmatched(sel, ["tests/test_compaction.py::TestCompaction::test_a[p]"])
+    node = "tests/test_compaction.py::TestCompaction::test_a"
+    assert not test_map.vanished(sel, [node + "[p]"], tmp_path)
+    assert not test_map.vanished(sel, ["tests/test_other.py::test_x[1]"], tmp_path)
+    assert test_map.vanished(
+        sel, ["tests/test_compaction.py::TestCompaction::test_b"], tmp_path) == {node}
+    (tmp_path / "tests" / "test_compaction.py").unlink()
+    assert test_map.vanished(sel, [], tmp_path) == {node}
 
 def test_an_old_map_names_what_it_cannot_speak_for(repo):
     path, git = repo
@@ -330,17 +404,18 @@ def test_an_old_map_names_what_it_cannot_speak_for(repo):
         "tests/test_skipped.py", "tests/test_added.py", "tests/test_f.py"}
 
 
-def test_the_dispatch_finder_sees_every_worker_in_the_live_source():
-    found = test_map.dispatched_workers(REPO)
-    assert {"scan_worker", "_verify_worker", "_discover_worker",
-            "ingest_worker", "_export_instance_worker"} <= found, (
-        "a worker function has no hand-off the finder recognises, so an "
-        "edit to it would fall past rule 2")
-    assert all(name for handoffs in test_map.dispatchers(REPO).values()
-               for _path, name in handoffs), (
-        "a worker is handed to a pool at module scope; rule 2 cannot "
-        "reach its tests and widens to the row instead -- decide whether "
-        "that is wanted before accepting it")
+def test_a_hand_off_is_found_by_the_call_whatever_the_argument():
+    source = ("def a(service, pool):\n"
+              "    run_parallel(service.execute_redaction_task, items)\n"
+              "    run_parallel(func=plain, items=items)\n"
+              "    pool.submit(os.getpid)\n"
+              "    run_parallel(lambda x: x, items)\n"
+              "    ProcessPoolExecutor(max_workers=2)\n"
+              "    map(str, items)\n")
+    assert sorted(test_map.pool_calls(source), key=str) == sorted([
+        (2, "run_parallel", "execute_redaction_task"),
+        (3, "run_parallel", "plain"), (4, "submit", "getpid"),
+        (5, "run_parallel", None), (6, "ProcessPoolExecutor", None)], key=str)
 
 
 def _git_tree(path):
@@ -396,11 +471,32 @@ def test_a_map_whose_commit_is_not_here_is_no_map(tmp_path):
         '{"sha": "0000000000000000000000000000000000000000", "python": "x", '
         '"functions": {}, "workers": {}, "unmapped": []}')
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    assert test_map.load(tmp_path) is None
+    mapping, why = test_map.load(tmp_path)
+    assert mapping is None and "does not have" in why
+
+
+@pytest.mark.parametrize("text, said", [
+    ('{"sha": "abc", "funct', "does not parse"),
+    ("\xff\xfe", "does not parse"),
+    ('{"sha": "abc"}', "lacks the keys"),
+    ("[]", "lacks the keys")])
+def test_a_corrupt_map_is_no_map_and_says_why(tmp_path, text, said):
+    # A truncated map failed the run with an INTERNALERROR (#734 review,
+    # finding 4); unusable is the no-map fallback, with its reason.
+    (tmp_path / test_map.MAP_FILE).write_bytes(text.encode("latin-1"))
+    mapping, why = test_map.load(tmp_path)
+    assert mapping is None and said in why
+    sel = _select([C("isocenter/session.py", "DicomSession.compact")],
+                  mapping=None, no_map=why)
+    assert sel.files == {"tests/test_session.py", "tests/test_new.py"}
+    assert said in sel.reasons[0]
 
 
 @pytest.mark.parametrize("base_args", [
-    ["--changed-base=main"], ["--changed-base", "main"]])
+    ["--changed-base=main"], ["--changed-base", "main"],
+    # A path that is the whole suite: `args_source` said ARGS and the
+    # check was skipped (#734 review, finding 5).
+    ["--changed-base=main", "tests"]])
 def test_a_vanished_test_widens_whichever_way_the_base_is_spelled(
         tmp_path, base_args):
     """`pytest --changed` end to end, in a scratch repository (#707).
@@ -498,7 +594,11 @@ def test_a_compact_edit_selects_the_compaction_tests_only(small_real_map):
         mapping, {C("isocenter/session.py", "DicomSession.compact")}, [],
         {}, proj)
     assert not sel.full, sel.reasons
-    assert _files(sel) == {"tests/test_compaction.py"}
+    # The tests that read every `*.py` by glob come along with any
+    # package edit (#734 review); what rule 1 chose is the rest.
+    readers = test_map.glob_readers(proj, "isocenter/session.py")
+    assert readers <= sel.files
+    assert _files(sel) - readers == {"tests/test_compaction.py"}
 
 
 @pytest.mark.parametrize("path, qualname", [

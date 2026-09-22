@@ -287,15 +287,16 @@ def _select_changed(config, items):
     spec.loader.exec_module(test_map)
     sel, mapping, targets = test_map.selection_for(
         config.rootpath, config.getoption("--changed-base"))
-    # Only against a whole collection: under `pytest --changed
-    # tests/test_x.py` every selected test elsewhere would read as gone.
-    # Asked of pytest, not of argv: sniffing argv for a word without a
-    # leading `-` read `--changed-base main` and `-p no:cacheprovider` as
-    # paths and skipped the check (#719 review).
-    if config.args_source is not pytest.Config.ArgsSource.ARGS:
-        test_map.fall_back_for_missing(
-            sel, test_map.unmatched(sel, [item.nodeid for item in items]),
-            targets)
+    # Every run, whatever its arguments: `vanished` asks per file, so a
+    # run restricted to `tests/test_x.py` does not read every test
+    # elsewhere as gone. Deciding "whole collection" first -- by argv, then
+    # by `config.args_source` -- skipped the check for `--changed-base
+    # main`, `-p no:cacheprovider` (#719 review) and `pytest --changed
+    # tests` (#734 review).
+    test_map.fall_back_for_missing(
+        sel, test_map.vanished(sel, [item.nodeid for item in items],
+                               config.rootpath),
+        targets)
     reporter = config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_line(test_map.describe(sel, mapping, config.rootpath))
@@ -314,9 +315,10 @@ def _select_changed(config, items):
 def pytest_collection_modifyitems(config, items):
     """`--changed`, then `--shard=I/N` (#707): select, then split.
 
-    An empty selection is a result, not an error: a change to
-    documentation no test names selects nothing (rule 7), and pytest
-    exits 5. RELEASING.md step 3 says how that is recorded.
+    An empty selection is a result, not an error: a change no rule sends
+    to any test (a docs asset that no test names or reads by glob)
+    selects nothing, and pytest exits 5. RELEASING.md step 3 says how
+    that is recorded.
     """
     if config.getoption("--changed"):
         _select_changed(config, items)
