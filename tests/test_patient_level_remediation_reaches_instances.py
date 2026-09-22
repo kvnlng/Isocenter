@@ -35,7 +35,7 @@ instance copies. Since #495 a bare session applies the floor policy,
 whose own instance rules remove `0010,0010`/`0010,0020` and jitter the
 instance's `0008,0020` -- acting on the same copies and hiding the
 mechanism under test. So both helpers set `phi_tags = {}` (by assignment:
-`set_phi_tag` would call `save()`), and `tests/test_floor_policy.py` pins
+`set_phi_tag` sets one rule, not the whole table), and `tests/test_floor_policy.py` pins
 the floor path, including the re-lock refusal there.
 
 **Why this file imports what it does.** It reaches `RemediationService`

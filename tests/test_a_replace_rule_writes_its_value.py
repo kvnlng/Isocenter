@@ -69,6 +69,7 @@ def test_set_phi_tag_replacement_is_the_value(tmp_path):
         session.configuration.config_path = str(saved)
         session.configuration.set_phi_tag(INSTITUTION, "REPLACE",
                                           replacement="RESEARCH STUDY")
+        session.configuration.save()
         assert session.configuration.phi_tags[INSTITUTION] == {
             "name": "Custom Tag", "action": "REPLACE", "value": "RESEARCH STUDY"}
     rule = yaml.safe_load(saved.read_text(encoding="utf-8"))["phi_tags"][INSTITUTION]

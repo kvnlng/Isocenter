@@ -359,8 +359,10 @@ def test_a_0_9_8_autosave_with_null_metadata_still_loads():
 
 
 def _configuration_with_a_rule(tmp_path):
+    # Auto-save on: these tests read the file each door writes, and since
+    # #715 the doors write only when asked.
     path = tmp_path / "project.yaml"
-    configuration = IsocenterConfiguration(config_path=str(path))
+    configuration = IsocenterConfiguration(config_path=str(path), auto_save=True)
     configuration.add_rule("SN1", zones=[[0, 4, 0, 4]])
     return configuration, path
 
@@ -438,7 +440,7 @@ def test_add_rule_with_null_metadata_writes_a_file_that_loads(tmp_path):
     Manufacturer or model -- is accepted, and the file it auto-saves loads
     (review of #728, finding 1)."""
     path = tmp_path / "project.yaml"
-    configuration = IsocenterConfiguration(config_path=str(path))
+    configuration = IsocenterConfiguration(config_path=str(path), auto_save=True)
     configuration.add_rule("SN-1", manufacturer=None, model=None, zones=[[0, 4, 0, 4]])
     configuration.update_rule("SN-1", {"comment": None})
     _, rules, _, _, _ = ConfigLoader.load_unified_config(str(path))
@@ -461,19 +463,3 @@ def test_update_rule_refuses_a_value_the_loader_would_refuse(tmp_path, updates, 
         configuration.update_rule("SN1", updates)
     assert configuration.rules == rules_before
     assert path.read_bytes() == bytes_before
-
-
-# --- The convenience loader -----------------------------------------------
-
-
-def test_load_phi_config_reads_a_config_file_as_strictly_as_load_config(tmp_path):
-    """Kills the top-level check missing from `load_phi_config`'s
-    unified-file arm."""
-    path = tmp_path / "cfg.yaml"
-    path.write_text("phi_tags:\n  '0010,0010': {action: REMOVE}\nbogus: 1\n",
-                    encoding="utf-8")
-    with pytest.raises(ValueError, match="unknown key 'bogus'"):
-        ConfigLoader.load_phi_config(str(path))
-    path.write_text('version: "9.9"\nphi_tags: {}\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="version '9.9'"):
-        ConfigLoader.load_phi_config(str(path))

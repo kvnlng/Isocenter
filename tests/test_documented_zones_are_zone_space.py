@@ -150,11 +150,11 @@ def test_the_configuration_page_discovery_example_stores_zones():
              for k in range(3)], 3)
 
     configuration = IsocenterConfiguration()
-    # `add_rule` auto-saves when `config_path` is set. It is not, so the
-    # example's save returns at once and writes nothing to disk; asserted
-    # rather than assumed, so a future default cannot turn this test into
-    # a stray file in the repo.
-    assert configuration.config_path is None
+    # `add_rule` writes only under `auto_save`, with a `config_path`
+    # (#715). Neither is set, so the example changes memory only and
+    # writes nothing to disk; asserted rather than assumed, so a future
+    # default cannot turn this test into a stray file.
+    assert configuration.config_path is None and not configuration.auto_save
     session = SimpleNamespace(discover_redaction_zones=discover,
                               configuration=configuration)
 

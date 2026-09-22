@@ -300,6 +300,8 @@ def test_set_phi_tag_leaves_the_policy_and_file_unchanged_when_refused(tmp_path)
     with DicomSession(str(tmp_path / "s.db")) as session:
         config = session.configuration
         config.config_path = str(tmp_path / "saved.yaml")
+        # On, or the file this reads is never written (#715).
+        config.auto_save = True
         config.set_phi_tag("0008,0080", "KEEP")
         before = {tag: dict(rule) if isinstance(rule, dict) else rule
                   for tag, rule in config.phi_tags.items()}

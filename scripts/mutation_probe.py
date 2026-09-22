@@ -256,7 +256,7 @@ TARGETS = {
     # Their NOT_PROBED notes (config_manager 29/40 killed, configuration
     # 21/31) were measured before either bunch and are not carried over:
     # the first default run is the new measurement.
-    "isocenter/config_manager.py": (["tests/test_api_coherence.py",
+    "isocenter/config_manager.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_api_coherence.py",
                                      "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
                                      "tests/test_config.py",
                                      "tests/test_config_scalar_types.py",
@@ -273,7 +273,7 @@ TARGETS = {
                                      "tests/test_structured_export.py",
                                      "tests/test_suggested_config.py",
                                      "tests/test_zone_validation.py"], 30),
-    "isocenter/configuration.py": (["tests/test_automation.py",
+    "isocenter/configuration.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_automation.py",
                                     "tests/test_a_replace_rule_writes_its_value.py",
                                     "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
                                     "tests/test_config_schema_version.py",
@@ -345,7 +345,7 @@ TARGETS = {
                                 "tests/test_reporting.py",
                                 "tests/test_report_export_boundary.py",
                                 "tests/test_export_delivery_counters.py"], 30),
-    "isocenter/privacy.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/privacy.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                               "tests/test_suggested_config.py", "tests/test_analysis.py", "tests/test_analysis_persistence.py",
                               "tests/test_anonymize_records_what_it_left.py",
                               "tests/test_a_partial_findings_list_is_not_remediated.py",
@@ -721,7 +721,7 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+    "isocenter/session.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                               "tests/test_a_reopened_store_keeps_the_text_of_ds_and_is.py",
                               "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
@@ -998,7 +998,7 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
+    "isocenter/entities.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py",
                                "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                "tests/test_a_walked_frame_excess_is_dropped_with_its_row.py",
                                "tests/test_an_ambiguous_vr_pydicom_cannot_resolve_at_read_is_ingested.py",

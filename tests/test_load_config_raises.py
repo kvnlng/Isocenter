@@ -81,8 +81,9 @@ CASES = {
 def _set_sentinels(configuration, tmp_path):
     """A prior configuration in every field `load_config` writes.
 
-    Assigned rather than set through `set_phi_tag`/`add_rule`: those call
-    `save()`, which would write the sentinel `config_path`. The path sits
+    Assigned rather than set through `set_phi_tag`/`add_rule`: those
+    print the memory-only notice for a set `config_path`, and with
+    `auto_save` on would write it (#715). The path sits
     under `tmp_path` so that even a regression that saves writes nothing
     into the repository.
     """

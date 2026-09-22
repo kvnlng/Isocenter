@@ -82,17 +82,17 @@ file did not say.
 
 | Level | Key | Type |
 | :--- | :--- | :--- |
-| top level | `version` | a quoted `"MAJOR.MINOR"` string: `"2.0"` |
-| top level | `privacy_profile` | `"basic@2026c"` or `"basic"`, `"none"`, or a path to a profile file |
+| top level | `version` | a quoted `"MAJOR.MINOR"` string with no leading zero: `"2.0"` |
+| top level | `privacy_profile` | `"basic@2026c"` or `"basic"`, `"none"`, or a path to a profile file; `null` (a bare `privacy_profile:`) is absent, and means the floor |
 | top level | `phi_tags` | a mapping of quoted `"gggg,eeee"` tag to rule |
 | top level | `date_jitter` | `{min_days: int, max_days: int}`, with `min_days` not greater than `max_days` |
 | top level | `remove_private_tags` | `true` or `false` (unquoted) |
 | top level | `machines` | a list of machine rules |
-| machine rule | `serial_number` | a non-empty string, **quoted** if it is all digits (required) |
+| machine rule | `serial_number` | a non-blank string, **quoted** if it is all digits (required) |
 | machine rule | `manufacturer`, `model_name`, `comment` | strings (metadata; nothing reads them; `null` is read as absent) |
 | machine rule | `redaction_zones` | a list of zones |
 | zone | a list `[y1, y2, x1, x2]`, or a mapping of `roi` and `note` | `roi`: four non-negative integers; `note`: a string, or `null` (absent) |
-| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the actions below; `name`: a string, or `null` (absent); `value`: a string |
+| `phi_tags` rule | a string (the tag's name), or a mapping of `action`, `name`, `value` | `action`: one of the actions below; `name`: a string, or `null` (absent); `value`: a string, or `null` (absent: `REPLACE` writes its default) |
 
 Three of these are traps YAML sets, and are refused rather than read:
 
@@ -109,7 +109,8 @@ Three of these are traps YAML sets, and are refused rather than read:
 
 **`version`.** A file with no `version` line is version 2.0, and always
 will be. A present `version` must be a quoted string whose major is `2`;
-any `2.x` loads. A 1.x release that adds a key or a value does so under a
+any `2.x` loads. It is written one way: `"2.00"` and `"02.0"` are refused
+rather than read as 2.0 ([#730](https://github.com/kvnlng/Isocenter/issues/730)). A 1.x release that adds a key or a value does so under a
 new `2.x` minor, and never changes what an existing key means, so a file
 written for a newer minor either means the same thing here or is refused
 by the key or value this release does not have -- and then the refusal says
@@ -138,7 +139,7 @@ privacy_profile: "basic@2026c"
     * Deliberate departures from the table: Study and Series Description are emptied rather than removed, because the export directory names read them. Waveform Annotation Sequence (the Murmur annotation bridge reads it) and Icon Image Sequence have no rule; attributes inside them are still scanned, and an icon is dropped when its pixels may show what redaction removed, in two tiers ([#542](https://github.com/kvnlng/Isocenter/issues/542)): an instance's own Icon Image Sequence is dropped when that instance is redacted or has redaction zones applied at export, and every other nested icon -- a thumbnail under Referenced Image Sequence, of a *different* instance -- is dropped when any instance in the store is redacted or a zones rule matches any series in the store, whether or not that instance is in the export. The retired Curve groups `(50xx)` are not removed, and removing Overlay Data `(60xx,3000)` leaves the rest of its Overlay Plane module ([#556](https://github.com/kvnlng/Isocenter/issues/556)). Isocenter's own redaction note in Derivation Description `(0008,2111)` is kept; any other Derivation Description is removed. Private attributes are the `remove_private_tags` sweep, not a rule.
 
     The table removes or empties attributes research often wants: Patient's Weight and Size (PET SUV), Patient's Age, Protocol Name, Contrast/Bolus Agent, ROI Name and Channel Label. Give any of them `action: "KEEP"` to retain it. What `basic@2026c` contains is frozen for every 1.x: the rules 1.0 ships under it, which are the table, this mapping and these departures. The one exception is a row the published 2026c standard shows was transcribed wrongly, which a 1.x may correct as a **Breaking** changelog entry quoting the standard's row; anything else is a new name. A store anonymized under 0.9.7's 35-rule profile still reads as anonymized: run `audit()` and then `anonymize()` on it before exporting again ([#555](https://github.com/kvnlng/Isocenter/issues/555)). That removes what 0.9.8 removes, but cannot bring back the Type 2 attributes 0.9.7 removed (Accession Number, Referring Physician's Name, Study ID, Patient's Birth Date); only re-ingesting the source restores them.
-* **`none`**: No base. The file's `phi_tags` are the whole policy.
+* **`none`**: No base. The file's `phi_tags` are the whole policy. A bare `privacy_profile:` line (YAML null) is **not** `none`: it is absent, and means the floor ([#730](https://github.com/kvnlng/Isocenter/issues/730); until 1.0 it meant `none`, so a template's blank left unfilled switched the floor off).
 * **External File**: You can provide a path to another YAML file (e.g., `./profiles/my_hospital_standard.yaml`) to inherit its rules. That file carries its rules under a `phi_tags:` mapping and nothing else, beside an optional `version`; any other key raises `ValueError` naming it ([#712](https://github.com/kvnlng/Isocenter/issues/712)). A profile file contributes only its `phi_tags`, so a `privacy_profile: basic` or `remove_private_tags:` line inside it would be ignored, and is refused instead: a configuration is not a profile. A bare tag map at its root raises `ValueError` too, because the root used to be read as the tags and a profile written like a config then loaded `privacy_profile` itself as a "tag".
 
 Any other value is refused: `load_config()` raises `ValueError` naming it. (These docs once offered a `comprehensive` profile, which never existed; loading it warned and applied no base.)
@@ -311,7 +312,7 @@ Define specific rules for individual DICOM tags. Keys are `"gggg,eeee"` hex stri
 
 | Action | Logic | Example Config |
 | :--- | :--- | :--- |
-| **`REPLACE`** | Replaces the value with its `value:`, or with `ANONYMIZED` when there is none ([#538](https://github.com/kvnlng/Isocenter/issues/538)). A tag's string form (`"0008,0080": "Institution Name"`) is `REPLACE` with no value. | `action: "REPLACE"`, `value: "Project-X"` |
+| **`REPLACE`** | Replaces the value with its `value:`, or with `ANONYMIZED` when there is none or it is `null` ([#538](https://github.com/kvnlng/Isocenter/issues/538), [#730](https://github.com/kvnlng/Isocenter/issues/730)). A tag's string form (`"0008,0080": "Institution Name"`) is `REPLACE` with no value. | `action: "REPLACE"`, `value: "Project-X"` |
 | **`REMOVE`** | Completely deletes the tag from the dataset. Patient's Name and Study Date are the exception: they are written at zero length (see the note above). | `action: "REMOVE"` |
 | **`EMPTY`** | Sets the tag value to an empty string (zero-length bytes for a binary VR). | `action: "EMPTY"` |
 | **`SHIFT`** | Applies the per-patient Date Jitter offset. DA and DT only; a value that is not a date (a time, a six-digit date, a range, a DateTime at hour or minute precision) is left unchanged and recorded as declined ([#559](https://github.com/kvnlng/Isocenter/issues/559)). | `action: "SHIFT"` |
@@ -389,7 +390,9 @@ print(config.phi_tags) # the full tag policy in force, floor included
 
 ### Methods
 
-These methods change the configuration in memory and, if it came from `load_config(path)`, **write it back to `path` immediately**. The rewritten file holds the whole policy in force, with the profile and floor tags expanded inline and comments dropped, so keep your hand-edited original under version control. A session that loaded no file keeps the changes in memory only. `auto_remediate_config()` is the exception: it edits the rules in memory and does not save.
+These methods change the configuration **in memory**. Since 1.0 they do not write the file `load_config()` read ([#715](https://github.com/kvnlng/Isocenter/issues/715)); the first change after a load or a save prints one line saying the file is unchanged. Call `session.configuration.save()` to write it, or turn on auto-save for the session with `session.configuration.auto_save = True`, after which every change is written as it is made, to whichever file the session loaded last. `save()` raises `ValueError` when there is no file to write (a session that loaded none: set `session.configuration.config_path` first), and it raises the error of a write that fails. With auto-save on, a change whose write fails or is refused is undone, and with no file to write each method raises that `ValueError` before changing anything.
+
+`save()` writes a new file. It names the profile rather than copying it: `privacy_profile: basic@2026c` (or the external file's path, `none`, or no line for the floor), and under `phi_tags` only the rules that differ from the profile's. Then it writes `date_jitter`, `remove_private_tags` and every machine rule. It always writes a `version` line, `"2.0"`. **Comments and layout in the loaded file are not kept.** Keep a hand-edited file under version control, and if its comments matter, edit it by hand rather than through these methods. `save()` refuses a policy that has lost a rule its profile supplies (by deleting from `phi_tags` directly), because the file would restore that rule; give the tag `action: KEEP` instead. An external profile is read again when `save()` runs, so the saved file reloads to what the session holds; if the profile file has gained a rule since the load, `save()` refuses and asks you to load it again. `auto_remediate_config()` changes the rules in memory; call `save()` afterwards to keep them.
 
 #### add_rule()
 
@@ -405,6 +408,7 @@ session.configuration.add_rule(
     model="Voluson",
     zones=[[0, 50, 0, 800]] # [y1, y2, x1, x2]
 )
+session.configuration.save()  # write it to the loaded file
 ```
 
 #### delete_rule()
@@ -422,7 +426,7 @@ session.configuration.delete_rule("US-5555")
 
 Update a rule by serial number.
 
-`add_rule()` and `update_rule()` refuse, with `ValueError`, a rule `load_config()` would refuse -- an unknown key such as `redaction_zone`, a serial that is not a string, a malformed zone -- and leave the rules and the file unchanged, so the file they write back always loads again ([#712](https://github.com/kvnlng/Isocenter/issues/712)).
+`add_rule()` and `update_rule()` refuse, with `ValueError`, a rule `load_config()` would refuse -- an unknown key such as `redaction_zone`, a serial that is not a string, a malformed zone -- and leave the rules and the file unchanged, so the file `save()` writes always loads again ([#712](https://github.com/kvnlng/Isocenter/issues/712)).
 
 #### set_phi_tag()
 
