@@ -382,7 +382,7 @@ def test_a_pass_that_shifted_nothing_still_lets_the_real_id_re_key(tmp_path):
     assert linked == [], linked
 
 
-@pytest.mark.parametrize("mode", ["lock-only", "lock-then-patient-pass"])
+@pytest.mark.parametrize("mode", ["lock-only", "lock-then-patient-pass", "lock-then-reopen"])
 def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
     """Review round 2, R2-1. `lock_identities()` stashes an ID-less
     patient's Patient ID as `''` (the ID the export writes). If a real-ID
@@ -410,7 +410,8 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
     ds.save_as(str(c))
     sop_b = study_uid("5895") + ".1.2"
     sop_c = study_uid("5895") + ".1.3"
-    with Session(str(tmp_path / "s.db")) as session:
+    session = Session(str(tmp_path / "s.db"))
+    try:
         session.ingest(str(tmp_path / "in1"))
         session.enable_reversible_anonymization(str(tmp_path / "k.key"))
         report = session.audit()
@@ -420,6 +421,13 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
                                if f.entity_type == "Patient"])
         [patient] = session.store.patients
         assert not patient.studies[0].date_shifted
+        if mode == "lock-then-reopen":
+            # The token gate across a reopen: the stamp is stored and
+            # hydrated (#607), and the gate reads the hydrated stamp.
+            session.save(sync=True)
+            session.close()
+            session = Session(str(tmp_path / "s.db"))
+            session.enable_reversible_anonymization(str(tmp_path / "k.key"))
         session.ingest(str(tmp_path / "in2"))
         [patient] = session.store.patients
         assert is_synthetic_patient_id(patient.patient_id)
@@ -442,10 +450,110 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
                     if "PatientID" in d]
         assert declined == [], declined
         session.save(sync=True)
+    finally:
+        session.close()
     with Session(str(tmp_path / "s.db")) as reopened:
         pre_1_0 = [d for _uid, d in _audit_rows(reopened, "WARNING")
                    if "before 1.0" in d]
     assert pre_1_0 == [], pre_1_0
+
+
+@pytest.mark.parametrize("order", ["rekey", "forward", "rekey-reopened"])
+@pytest.mark.parametrize("how", ["empty", "absent"])
+def test_a_restore_gives_a_joined_patient_its_real_id(tmp_path, order, how):
+    """Review round 3, R3-1. An ID-less file a and a `PA` file b of one
+    study make patient `PA` (a re-key, or a forward join) before any lock.
+    The lock stashes each instance's own copy, faithfully: a's is `''`
+    when its ID was empty. The restore took the patient's ID from the
+    first token in graph order, so with a first it wrote `''` over `PA`,
+    and a token-less `PA` file c took `''` too; the next open wrote a false
+    pre-1.0 row. Now the patient, and a token-less instance, take the
+    first token whose Patient ID is not blank (coordinator ruling): the
+    patient and c get `PA`, a gets back its own. Red at 9b831175 for
+    `rekey-empty`. Kills MS2 (the first token speaks)."""
+    first, second = ("in2", "in1") if order == "forward" else ("in1", "in2")
+    _id_less(tmp_path / first / "a.dcm", "5897", "Alpha^One", how)
+    _with_id(tmp_path / second / "b.dcm", "PA", "5897", ".1.2", "Alpha^One")
+    _with_id(tmp_path / "in3" / "c.dcm", "PA", "5897", ".1.3", "Alpha^One")
+    sop_a, sop_b, sop_c = (study_uid("5897") + tail for tail in (".1.1", ".1.2", ".1.3"))
+    session = Session(str(tmp_path / "s.db"))
+    try:
+        session.ingest(str(tmp_path / "in1"))
+        session.ingest(str(tmp_path / "in2"))
+        [patient] = session.store.patients
+        assert patient.patient_id == "PA"
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        report = session.audit()
+        session.lock_identities(report)
+        session.ingest(str(tmp_path / "in3"))
+        session.anonymize(report)
+        if order == "rekey-reopened":
+            # The tokens and the patient come back from the store.
+            session.save(sync=True)
+            session.close()
+            session = Session(str(tmp_path / "s.db"))
+            session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        [patient] = session.store.patients
+        session.recover_patient_identity(patient.patient_id, restore=True)
+        [patient] = session.store.patients
+        assert patient.patient_id == "PA"
+        held = {i.sop_instance_uid: i for st in patient.studies
+                for se in st.series for i in se.instances}
+        # a's own copy comes back as the file held it: `''` when empty;
+        # when absent the lock stashed the patient's `PA` for it.
+        assert held[sop_a].attributes.get("0010,0020") == ("" if how == "empty" else "PA")
+        assert held[sop_b].attributes.get("0010,0020") == "PA"
+        assert held[sop_c].attributes.get("0010,0020") == "PA"
+        session.anonymize(session.audit())
+        declined = [d for _uid, d in _audit_rows(session, "REMEDIATION_DECLINED")
+                    if "PatientID" in d]
+        assert declined == [], declined
+        session.save(sync=True)
+    finally:
+        session.close()
+    with Session(str(tmp_path / "s.db")) as reopened:
+        assert [p.patient_id for p in reopened.store.patients] == [
+            patient.patient_id]
+        pre_1_0 = [d for _uid, d in _audit_rows(reopened, "WARNING")
+                   if "before 1.0" in d]
+    assert pre_1_0 == [], pre_1_0
+
+
+def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(tmp_path):
+    """The other side of R3-1's rule. An ID-less patient locked, then a
+    `PA` file of its study linked under it (the token refuses the re-key),
+    then locked again: its tokens are a's `''` and b's `PA`. The patient
+    keeps its key -- the first token speaks for an ID-less patient, never
+    the first non-blank one, which would rename it to `PA` after values
+    were derived under the key (review round 2's rule) -- and a token-less
+    ID-less file c still takes the blank ID. Kills MS3 (the non-blank
+    choice applied to an ID-less patient too)."""
+    _id_less(tmp_path / "in1" / "a.dcm", "5898", "Alpha^One", "absent")
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", "5898", ".1.2", "Alpha^One")
+    c = tmp_path / "in3" / "c.dcm"
+    _id_less(c, "5898", "Alpha^One", "absent")
+    ds = pydicom.dcmread(str(c))
+    ds.SOPInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID = study_uid("5898") + ".1.3"
+    ds.save_as(str(c))
+    sop_b, sop_c = study_uid("5898") + ".1.2", study_uid("5898") + ".1.3"
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
+        session.enable_reversible_anonymization(str(tmp_path / "k.key"))
+        session.lock_identities(session.audit())
+        session.ingest(str(tmp_path / "in2"))
+        [patient] = session.store.patients
+        key = patient.patient_id
+        assert is_synthetic_patient_id(key)
+        session.lock_identities(session.audit())
+        session.ingest(str(tmp_path / "in3"))
+        session.anonymize(session.audit())
+        session.recover_patient_identity(key, restore=True)
+        [patient] = session.store.patients
+        assert patient.patient_id == key
+        held = {i.sop_instance_uid: i for st in patient.studies
+                for se in st.series for i in se.instances}
+        assert held[sop_b].attributes.get("0010,0020") == "PA"
+        assert str(held[sop_c].attributes.get("0010,0020", "")).strip() == ""
 
 
 #: The floor, plus SHIFT on Series, Acquisition and Content Date: dates an

@@ -4657,8 +4657,14 @@ class DicomSession:
         token, or with an Encrypted Attributes Sequence this library did
         not write, is walked past. Until 0.9.8 the walk read the first
         instance of the last study that had one, so a patient whose token
-        sat on an earlier study raised the "no token" message. **Every
-        distinct token is opened before anything is written (#583)**, with
+        sat on an earlier study raised the "no token" message. For a
+        patient with a Patient ID, a first token holding a blank one is
+        passed over for the first token holding a non-blank one, when
+        there is one (#584): the lock keeps each file's copy as it was, so
+        a file whose ID was empty, joined to its study's patient, stashes
+        `''`, and that is not the patient's ID. A subject with no Patient
+        ID is spoken for by its first token always, and keeps its key.
+        **Every distinct token is opened before anything is written (#583)**, with
         `restore=False` too: a token of ours on any study that this key
         cannot open, or that holds no record, raises and writes nothing.
 
@@ -4775,10 +4781,24 @@ class DicomSession:
         recovered: Dict[str, Dict[str, Any]] = {
             inst.sop_instance_uid: copy.deepcopy(opened[content])
             for _, inst, content in walk if content is not None}
-        # The first token found speaks for the patient -- its name and ID,
-        # the #548 scheme check, and the instances carrying no token --
-        # as it spoke for every instance before.
-        original_attrs = opened[next(iter(carrying))]
+        # One token speaks for the patient -- its name and ID, the #548
+        # scheme check, and the instances carrying no token. The first
+        # found, as before, unless its Patient ID is blank and a later
+        # token's is not (review of #584, R3-1): a patient whose first
+        # file had an empty ID and whose second carried `PA` (a re-key, or
+        # a join) holds a token of `''` first, since the lock stashes each
+        # copy as it is, and a restore from it wrote `''` over `PA`. **Not
+        # for a subject with no Patient ID**: its first token is the file
+        # that made it, and a later token holding a real ID is a file that
+        # linked under it (the WARNING case) -- taking that ID would
+        # rename the patient after values were derived under its key.
+        speaker = next(iter(carrying))
+        if not is_synthetic_patient_id(p.patient_id) and not str(
+                opened[speaker].get("0010,0020") or "").strip():
+            speaker = next((content for content in carrying
+                            if str(opened[content].get("0010,0020") or "").strip()),
+                           speaker)
+        original_attrs = opened[speaker]
         # The Patient ID a restore gives the patient. A subject with no
         # Patient ID locked a blank one; writing that back would make every
         # restored ID-less subject `''`, and `audit()`'s shared-ID merge
