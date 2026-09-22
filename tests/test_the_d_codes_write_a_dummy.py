@@ -334,6 +334,12 @@ def test_study_dates_string_form_still_shifts(tmp_path, profile, phi_tags):
     override that changes only the action: a tidy-up reordering the two
     would write `19000101` over the shift."""
     source = pydicom.dcmread(pydicom.data.get_testdata_file("CT_small.dcm"))
+    # A Study Date nested in an item: the owner's scan never reaches it,
+    # so the instance scan's own reading of the rule (the shift) is the
+    # only thing between it and the DA dummy.
+    nested = pydicom.Dataset()
+    nested.StudyDate = source.StudyDate
+    source.add_new(0x00081250, "SQ", pydicom.Sequence([nested]))  # Related Series Sequence
     src = tmp_path / "in"
     src.mkdir()
     source.save_as(str(src / "ct.dcm"))
@@ -347,6 +353,8 @@ def test_study_dates_string_form_still_shifts(tmp_path, profile, phi_tags):
     (written,) = list((tmp_path / "out").rglob("*.dcm"))
     out = pydicom.dcmread(str(written))
     assert out.StudyDate not in ("", None, source.StudyDate, "19000101"), out.StudyDate
+    inner = out[0x00081250].value[0].StudyDate
+    assert inner not in ("", None, source.StudyDate, "19000101"), inner
 
 
 def test_no_rule_0_9_8_loaded_writes_something_else():
