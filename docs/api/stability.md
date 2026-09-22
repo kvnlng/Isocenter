@@ -322,10 +322,11 @@ default.
 - The **grade**: `PASS`, `REVIEW_REQUIRED`. There is no `FAIL`. The
   conditions that decide it are listed in
   [How the grade is decided](../analytics.md#how-the-grade-is-decided),
-  and they are a promise in one direction: no condition is removed or
-  narrowed in 1.x, and one may be added with a CHANGELOG entry. A run
-  that passed may stop passing after a minor release, never the
-  reverse. The report's layout and the wording of each Grade Basis
+  and they are a promise about the conditions: no condition is removed
+  or narrowed in 1.x, and one may be added with a CHANGELOG entry. It
+  is not a promise about which way a grade can move: a 1.x fix that
+  stops writing a wrong row can move a run from REVIEW_REQUIRED to
+  PASS, and the CHANGELOG entry for that fix says so. The report's layout and the wording of each Grade Basis
   line are tier 2.
 - The **audit `action_type` strings**, written to the audit table and
   counted by type in section 2 of the report: `DATA_LOSS`, `ERROR`,

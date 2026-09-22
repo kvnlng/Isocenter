@@ -67,7 +67,7 @@ The conditions are read from the store's audit log and from the store itself. Th
 
 The grade describes a run. Whether the result meets a protocol or a regulation is the data steward's determination.
 
-The conditions are a 1.x promise in one direction: none is removed or narrowed in a 1.x release, and one may be added, with a CHANGELOG entry. A run can move from `PASS` to `REVIEW_REQUIRED` in a minor release, never the reverse. The wording of the report and of each Grade Basis line is not part of that promise ([API stability](api/stability.md)).
+The conditions are a 1.x promise: none is removed or narrowed in a 1.x release, and one may be added, with a CHANGELOG entry. The promise covers the conditions, not the direction a grade can move: a 1.x fix that stops writing a wrong row can move a run from `REVIEW_REQUIRED` to `PASS`, and the CHANGELOG entry for that fix says so. The wording of the report and of each Grade Basis line is not part of that promise ([API stability](api/stability.md)).
 
 !!! note "A `WARNING` row is about your data; a correction is not reported"
 
