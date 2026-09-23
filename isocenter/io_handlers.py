@@ -9293,13 +9293,14 @@ def unmatched_subset_uids_sentence(selection):
     level to report. Its pinned substring is "nothing in the session
     matches". The last sentence is the #544 rule, which a caller is likely
     to have tripped over: a Study, Series or SOP Instance UID taken before
-    `anonymize()` still names its entity, and a Patient ID -- a keyed
-    pseudonym, not a UID replacement -- does not.
+    `anonymize()` or `redact()` still names its entity
+    (`Session._subset_names`), and a Patient ID -- a keyed pseudonym, not
+    a UID replacement -- does not.
     """
     return (f"subset: nothing in the session matches "
             f"{_unmatched_count(selection, 'UID')}. A Study, Series or SOP "
-            f"Instance UID taken before anonymize() selects its "
-            f"replacement; a Patient ID does not: select by the replacement "
+            f"Instance UID taken before anonymize() or redact() still names "
+            f"its entity; a Patient ID does not: select by the replacement "
             f"Patient ID.")
 
 

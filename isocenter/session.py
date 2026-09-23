@@ -6429,9 +6429,10 @@ class DicomSession:
                 value, a non-iterable, or an element that is not a
                 `str` raises `TypeError` before anything is scanned,
                 flushed or written. A value that names nothing in the
-                session at any level, itself or as the UID this store
-                replaced it with (#544), is counted by position and
-                never named: one `WARNING` log line and one `WARNING`
+                session at any level -- itself, the UID this store
+                replaced it with (#544), or, for a SOP Instance UID
+                taken before `redact()`, the instance's redacted UID --
+                is counted by position and never named: one `WARNING` log line and one `WARNING`
                 audit row, so the report grades `REVIEW_REQUIRED`, while
                 the rest is exported as asked. A query cannot name
                 anything the session lacks, so it is never counted.
@@ -6914,8 +6915,10 @@ class DicomSession:
         nothing".
 
         A value is unmatched when it names nothing in the session at any
-        of the four levels the walk matches (`_uid_path`), itself or as
-        the UID this store replaced it with (#544): the whole graph, not
+        of the four levels the walk matches (`_uid_path`), itself or
+        anything it stands for (`_subset_names`: the UID this store
+        replaced it with, and the current UID of an instance `redact()` or
+        `anonymize()` moved off it): the whole graph, not
         this export's `patient_ids`, as `select_patient_ids` counts. No
         level is recorded, because the caller named none. A query can
         only name what the cohort report holds, so it never counts; one
@@ -6961,45 +6964,86 @@ class DicomSession:
             subset, "subset", kind="UID",
             takes="None, a query str, a DataFrame, or an iterable of UIDs")
 
-        aliases = self._uid_aliases()
-        held = set()
+        held, names_of = self._subset_names()
+        allowed, unmatched = set(), []
+        for position, value in enumerate(values, start=1):
+            names = names_of(value)
+            allowed |= names
+            if held.isdisjoint(names):
+                unmatched.append(position)
+        return _SubsetSelection(allowed, len(values), tuple(unmatched))
+
+    def _subset_names(self):
+        """What the session holds, and what one subset value names (#544,
+        #725): `(held, names_of)`.
+
+        `held` is every UID the walk matches (`_uid_path`), at every
+        level: each Patient ID, Study, Series and SOP Instance UID in the
+        graph. `names_of(value)` is the set of those a value may stand
+        for, which `_resolve_subset` lets through the walk and counts a
+        value unknown only when it meets none of `held`:
+
+        - **itself**;
+        - **the UID this store replaces it with** (`_replacement_uid_for`):
+          a subset taken before `anonymize()` -- a cohort report, a list of
+          source UIDs -- names UIDs the graph no longer holds, and read as
+          they stand it matched nothing, #678's silence by a new road. A
+          Patient ID's replacement names nothing, so adding it is harmless
+          -- and a source Patient ID is counted (#725), because the
+          pseudonym is keyed, not a UID replacement;
+        - **the current SOP Instance UID of an instance whose recorded
+          source UID (`SOURCE_SOP_UID_ATTR`) it is, or whose source's
+          replacement it is** (review of #780). `redact()` derives a new
+          SOP UID from the source (`services._redacted_uid_for`), so a
+          report taken at examine time holds the source and one taken
+          between `anonymize()` and `redact()` holds its replacement, and
+          in the documented order -- anonymize, redact, export -- both
+          named nothing. `Session._instances_by_uid` and
+          `DicomStore`'s superseded map read the same attribute for the
+          same reason. Only the first move is recorded (`_take_sop_uid`),
+          so a UID taken between a first redaction and a `force=True`
+          second one still names nothing, and is counted.
+
+        The source map widens what a value names, never `held`: a UID no
+        instance here was ever ingested under stays unknown. Read-only on
+        the secret, read once per export: a store without one has replaced
+        nothing.
+        """
+        secret = self.store_backend._project_secret_if_present()
+        if secret:
+            from .privacy import _replacement_uid_for  # pylint: disable=import-outside-toplevel
+            replacement = lambda uid: _replacement_uid_for(uid, secret)  # noqa: E731
+        else:
+            replacement = None
+        held, moved = set(), {}
         for patient in self.store.patients:
             held.add(patient.patient_id)
             for study in patient.studies:
                 held.add(study.study_instance_uid)
                 for series in study.series:
                     held.add(series.series_instance_uid)
-                    held.update(instance.sop_instance_uid
-                                for instance in series.instances)
-        allowed, unmatched = set(), []
-        for position, value in enumerate(values, start=1):
-            names = aliases(value)
-            allowed |= names
-            if held.isdisjoint(names):
-                unmatched.append(position)
-        return _SubsetSelection(allowed, len(values), tuple(unmatched))
+                    for instance in series.instances:
+                        current = instance.sop_instance_uid
+                        held.add(current)
+                        source = instance.attributes.get(SOURCE_SOP_UID_ATTR)
+                        if not source or source == current:
+                            continue
+                        # A set per key: a hand-built graph can give two
+                        # instances one source, and both are named.
+                        moved.setdefault(source, set()).add(current)
+                        if replacement is not None:
+                            moved.setdefault(replacement(source),
+                                             set()).add(current)
 
-    def _uid_aliases(self):
-        """A function from one subset value to the UIDs it names: itself,
-        and the UID this store replaces it with (#544).
+        def names_of(value):
+            names = {value}
+            if replacement is not None and value:
+                names.add(replacement(value))
+            for name in tuple(names):
+                names |= moved.get(name, set())
+            return names
 
-        A subset taken before `anonymize()` -- a cohort report, a list of
-        source UIDs -- names UIDs the graph no longer holds, and read as
-        they stand it matched nothing: an empty export under a filter,
-        #678's silence by a new road. A UID names an entity if it is the
-        entity's UID or the entity's UID is its replacement. Read-only on
-        the secret, and read once per export: a store without one has
-        replaced nothing. A Patient ID's replacement names nothing, so
-        adding it is harmless -- and a source Patient ID is counted
-        unmatched (#725), because the pseudonym is keyed, not a UID
-        replacement.
-        """
-        secret = self.store_backend._project_secret_if_present()
-        if not secret:
-            return lambda uid: {uid}
-        from .privacy import _replacement_uid_for  # pylint: disable=import-outside-toplevel
-        return lambda uid: ({uid, _replacement_uid_for(uid, secret)} if uid
-                            else {uid})
+        return held, names_of
 
     #: The substring the export notice is pinned by (#555).
     _OTHER_POLICY_NOTICE = ("recorded under a policy other than the one "

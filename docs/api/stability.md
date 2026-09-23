@@ -102,8 +102,10 @@ that is not a `str` raises `TypeError` before anything is written. A
 DataFrame is read by the first of `SOPInstanceUID`,
 `SeriesInstanceUID`, `StudyInstanceUID` and `PatientID` it carries,
 and one with none of them raises `ValueError`. A UID matches at any of
-the four levels, and a Study, Series or SOP Instance UID taken before
-`anonymize()` still names its entity. A value that names nothing in the
+the four levels. A Study, Series or SOP Instance UID taken before
+`anonymize()` or `redact()` still names its entity, except a SOP
+Instance UID taken between a first redaction and a `force=True` second
+one. A value that names nothing in the
 session is counted, never named, in one `WARNING` line and one
 `WARNING` audit row, which grades the report `REVIEW_REQUIRED`.
 

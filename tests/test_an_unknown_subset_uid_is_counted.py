@@ -295,7 +295,7 @@ def test_positions_are_capped_at_ten(tmp_path, caplog):
     assert "(positions 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, and 2 more," in message
 
 
-# --- S4: a UID from before anonymize() selects its replacement; a Patient ID does not
+# --- S4: a UID from before anonymize() names its replacement; a Patient ID does not
 
 def test_a_source_uid_after_anonymize_is_not_counted(tmp_path, caplog):
     """#544: a Study UID taken before the pass names its replacement, so
@@ -321,7 +321,96 @@ def test_a_source_uid_after_anonymize_is_not_counted(tmp_path, caplog):
             for p in (tmp_path / "study").rglob("*.dcm")] == [M(STUDY)]
     assert _count_rows(known) == [], known
     (row,) = _count_rows(rows)
-    assert "selects its replacement" in row[2], row[2]
+    assert "taken before anonymize() or redact() still names its entity" in row[2], row[2]
     assert "replacement Patient ID" in row[2], row[2]
     assert "L10-P1" not in row[2]
 
+
+
+# --- S5: a SOP UID taken before redact() names the redacted instance ----------------
+
+def _redacting_session(tmp_path, name):
+    """One CT under a redaction zone, in a store with the fixed secret, so
+    `anonymize()` replaces its UIDs and `redact()` re-derives its SOP
+    Instance UID (`services._redacted_uid_for`)."""
+    from test_a_redacted_uid_is_derived_not_drawn import _config, _write_ct
+
+    src = tmp_path / f"src_{name}"
+    src.mkdir()
+    _write_ct(src / "a.dcm")
+    session = DicomSession(str(tmp_path / f"{name}.db"))
+    load_fixed_secret(session)
+    session.ingest(str(src))
+    session.load_config(_config(tmp_path))
+    return session
+
+
+def _the_instance(session):
+    return session.store.patients[0].studies[0].series[0].instances[0]
+
+
+@pytest.mark.parametrize("taken", ["before-anonymize", "between-the-passes"])
+def test_a_report_taken_before_redact_still_selects(tmp_path, taken, caplog):
+    """The documented order is anonymize, redact, export. A cohort report
+    taken at examine time holds the source SOP UID; one taken between
+    the passes holds the anonymize-time replacement. `redact()` derives a
+    third UID from the source, so both named nothing and the export wrote
+    nothing -- in silence before #725, and under a count row that called
+    the whole cohort unknown after it (review of #780). Both now name the
+    instance through its recorded source UID."""
+    with _redacting_session(tmp_path, taken) as session:
+        if taken == "before-anonymize":
+            report = session.get_cohort_report(expand_metadata=True)
+        session.audit()
+        session.anonymize()
+        if taken == "between-the-passes":
+            report = session.get_cohort_report(expand_metadata=True)
+        taken_uid = report["SOPInstanceUID"].tolist()
+        session.redact(show_progress=False)
+        instance = _the_instance(session)
+        assert instance.sop_instance_uid not in taken_uid, (
+            "the fixture did not move the SOP UID; the test would not test it")
+        before = len(_rows(session))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            summary = session.export(str(tmp_path / "out"), subset=report,
+                                     use_compression=False, show_progress=False)
+        added = _rows(session)[before:]
+        current = instance.sop_instance_uid
+    assert list(summary.written_uids) == [current]
+    assert _count_rows(added) == [] and _warnings(caplog) == [], added
+
+
+def test_a_sop_uid_from_another_store_still_counts_after_redact(tmp_path):
+    """The source map widens what a value names, never what counts as held:
+    a UID no instance here was ever ingested under is still unknown."""
+    with _redacting_session(tmp_path, "foreign") as session:
+        session.audit()
+        session.anonymize()
+        session.redact(show_progress=False)
+        before = len(_rows(session))
+        summary = session.export(str(tmp_path / "out"),
+                                 subset=[UNKNOWN_1, "1.2.3.99.30"],
+                                 use_compression=False, show_progress=False)
+        added = _rows(session)[before:]
+    assert summary.written == 1
+    (row,) = _count_rows(added)
+    assert "1 of the 2 UIDs given (position 1," in row[2], row[2]
+
+
+def test_a_moved_uid_in_a_store_with_no_secret_still_selects(tmp_path, caplog):
+    """`Instance.regenerate_uid()` is documented surface, and a caller can
+    move a UID in a store that has replaced nothing, so no replacement
+    covers the source: the recorded source UID alone must name it."""
+    with _session(tmp_path, "nosecret") as session:
+        assert not session.store_backend._project_secret_if_present(), (
+            "the fixture has a secret; the test would not test the source arm")
+        instance = session.store.patients[0].studies[0].series[0].instances[0]
+        source = instance.sop_instance_uid
+        instance.regenerate_uid("1.2.826.0.1.725.99")
+        before = len(_rows(session))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            summary = session.export(str(tmp_path / "out"), subset=[source],
+                                     use_compression=False, show_progress=False)
+        added = _rows(session)[before:]
+    assert list(summary.written_uids) == ["1.2.826.0.1.725.99"]
+    assert _count_rows(added) == [] and _warnings(caplog) == [], added
