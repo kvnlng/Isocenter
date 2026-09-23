@@ -303,3 +303,146 @@ def test_a_0_9_x_redacted_store_is_not_refused(tmp_path, src, held):
         session.audit()
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM project_secret").fetchone()[0] == 1
+
+
+def test_a_fresh_store_ingesting_another_projects_export_is_not_refused(tmp_path, src):
+    """A recipient ingests a 1.0 export into a new store: its SOP UIDs have
+    the minted shape, but no instance recorded a UID it replaced, so it is
+    not evidence of a lost secret. The store runs and mints its own. Kills
+    the source-record condition dropped from the evidence (review of #544,
+    finding 3; the L12 path)."""
+    with DicomSession(str(tmp_path / "a.db")) as session:
+        load_fixed_secret(session)
+        session.ingest(str(src))
+        session.load_config(_config(tmp_path))
+        session.anonymize()
+        session.export(str(tmp_path / "exp"), use_compression=False)
+    db = tmp_path / "b.db"
+    with DicomSession(str(db)) as session:
+        session.ingest(str(tmp_path / "exp"))
+        session.load_config(_config(tmp_path))
+        session.audit()
+        session.anonymize()
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT origin FROM project_secret").fetchall() == [("generated",)]
+
+
+def _no_match_config(tmp_path):
+    path = tmp_path / "nope.yaml"
+    path.write_text("privacy_profile: basic\nmachines:\n- serial_number: NOPE\n"
+                    "  redaction_zones: [{roi: [0, 4, 0, 4]}]\n", encoding="utf-8")
+    return str(path)
+
+
+def test_redact_refuses_on_a_lost_secret_store_even_when_no_rule_matches(tmp_path, src):
+    """The refusal is read before any task, not when a task first needs the
+    secret: with rules that match no instance, task preparation returns
+    before it reaches the secret. Kills the session's early secret read
+    dropped (review of #544, finding 4: SS1 is not equivalent)."""
+    db = tmp_path / "s.db"
+    with DicomSession(str(db)) as session:
+        load_fixed_secret(session)
+        session.ingest(str(src))
+        session.load_config(_config(tmp_path))
+        session.anonymize()
+        session.save(sync=True)
+    _drop_secret(db)
+    with DicomSession(str(db)) as session:
+        session.load_config(_no_match_config(tmp_path))
+        with pytest.raises(RuntimeError, match="replaced UIDs"):
+            session.redact(show_progress=False)
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM project_secret").fetchone()[0] == 0
+
+
+def test_redact_mints_the_secret_even_when_no_rule_matches(tmp_path, src):
+    """`redact()` is a caller that creates the secret, whatever its rules
+    match. Kills the same early read dropped."""
+    db = tmp_path / "s.db"
+    with DicomSession(str(db)) as session:
+        session.ingest(str(src))
+        session.load_config(_no_match_config(tmp_path))
+        session.redact(show_progress=False)
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT origin FROM project_secret").fetchall() == [("generated",)]
+
+
+# --------------------------------------------------------------------
+# A report kept from before redact() (review of #544, finding 1)
+# --------------------------------------------------------------------
+
+def test_a_report_kept_from_before_redact_leaves_the_redacted_uid(tmp_path, src, executor):
+    """`anonymize(findings=)` takes a kept report, and a redacted instance
+    is still found by the UID the report names (its source). The report's
+    SOP Instance UID finding was raised against the source; the instance
+    now holds its redacted UID, which this project minted, so the finding
+    is already met. Moving it to M(source) gave the redacted pixels the
+    unredacted export's UID. Kills the SOP arm acting whatever UID the
+    instance holds now."""
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.ingest(str(src))
+        session.load_config(_config(tmp_path))
+        report = session.audit()
+        session.redact(show_progress=False)
+        session.anonymize(report)
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        assert inst.sop_instance_uid == PINNED
+        session.export(str(tmp_path / "out"), use_compression=False)
+    assert _exported_sops(tmp_path / "out") == [PINNED]
+
+
+def _pixels_by_sop(out):
+    return {ds.SOPInstanceUID: hashlib.sha256(ds.PixelData).hexdigest()
+            for ds in (pydicom.dcmread(p) for p in sorted(out.rglob("*.dcm")))}
+
+
+def test_export_redact_and_reapply_never_gives_one_uid_two_pixel_sets(
+        tmp_path, src, executor):
+    """Export, notice burned-in text, add zones, redact, re-apply the kept
+    report, export again: the second export's SOP Instance UID is the
+    redacted one, and no UID names two different pixel sets across the
+    exports (#237's harm: a receiver de-duplicating on SOP Instance UID
+    keeps whichever copy it saw first)."""
+    plain = tmp_path / "plain.yaml"
+    plain.write_text("privacy_profile: basic\n", encoding="utf-8")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.ingest(str(src))
+        session.load_config(str(plain))
+        report = session.audit()
+        session.anonymize(report)
+        session.export(str(tmp_path / "out1"), use_compression=False)
+        session.load_config(_config(tmp_path))
+        session.redact(show_progress=False)
+        session.anonymize(report)
+        session.export(str(tmp_path / "out2"), use_compression=False)
+    first = _pixels_by_sop(tmp_path / "out1")
+    second = _pixels_by_sop(tmp_path / "out2")
+    assert list(first) == [_replacement_uid_for(SOURCE_SOP, FIXED_A)]
+    assert list(second) == [PINNED]
+    for uid in set(first) & set(second):
+        assert first[uid] == second[uid], uid
+
+
+def test_a_moved_uid_not_minted_here_is_declined_not_overwritten(tmp_path, src):
+    """The instance left the scanned UID for one this project did not mint
+    (a caller's `_take_sop_uid`, a 0.9.x redaction's random UID): the kept
+    finding declines and names both UIDs, and the instance is not given
+    the source's replacement. Kills the decline arm read as met."""
+    db = tmp_path / "s.db"
+    elsewhere = "1.2.826.0.1.3680043.8.498.777"
+    with DicomSession(str(db)) as session:
+        load_fixed_secret(session)
+        session.ingest(str(src))
+        session.load_config(_config(tmp_path))
+        report = session.audit()
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        inst._take_sop_uid(elsewhere, pixels_changed=False)
+        session.anonymize(report)
+        assert inst.sop_instance_uid == elsewhere
+        session.save(sync=True)
+    with sqlite3.connect(str(db)) as conn:
+        declined = [d for (d,) in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type='REMEDIATION_DECLINED'")]
+    assert [d for d in declined if elsewhere in d and SOURCE_SOP in d], declined

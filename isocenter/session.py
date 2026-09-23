@@ -2778,9 +2778,13 @@ class DicomSession:
 
         Every entity the inspector reports on gets a status: IDENTIFIED
         where a finding names it, CLEARED where the scan looked and found
-        nothing. Series are deliberately left alone -- the inspector emits
-        findings for patients, studies and instances only, so a series has
-        not been examined and must not claim it has.
+        nothing. A Series has no status of its own (no store column, and
+        nothing the grade reads): since #544 the scan raises its Series
+        Instance UID on it, and **its instances bear that finding** -- each
+        reads IDENTIFIED while the Series has one, as it would for a
+        finding of its own. Otherwise a Series finding raised and never
+        acted on cost nothing, and the export graded PASS with the source
+        Series UID in every file (review of #544, finding 2).
 
         The status is stamped at each entity's current revision, so a
         later edit invalidates it. That is why this runs after
@@ -2799,9 +2803,12 @@ class DicomSession:
         # by every audit, so a new report settles against its own scan.
         self._scan_tally = _ScanTally(findings)
 
-        def record(entity, uid):
+        series_identified = {f.entity_uid for f in findings
+                             if f.entity_type == "Series" and f.entity_uid is not None}
+
+        def record(entity, uid, carried=False):
             entity.record_phi_status(
-                PhiStatus.IDENTIFIED if uid in identified
+                PhiStatus.IDENTIFIED if carried or uid in identified
                 else PhiStatus.CLEARED, policy=policy)
 
         for patient in self.store.patients:
@@ -2809,8 +2816,9 @@ class DicomSession:
             for study in patient.studies:
                 record(study, study.study_instance_uid)
                 for series in study.series:
+                    carried = series.series_instance_uid in series_identified
                     for instance in series.instances:
-                        record(instance, instance.sop_instance_uid)
+                        record(instance, instance.sop_instance_uid, carried)
 
     def scan_pixel_content(self, serial_number: str = None) -> "PhiReport":
         """
@@ -5985,6 +5993,9 @@ class DicomSession:
             remediator._use_removal_targets(
                 self._removal_targets(findings, by_uid, project_secret))
             remediator._use_scan_tally(tally, findings)
+            remediator._use_series(
+                series for patient in self.store.patients
+                for study in patient.studies for series in study.series)
             count = remediator.apply_remediation(findings)
             if named:
                 self._adopt_the_reports_policy(report_policy, recorded_at, named)

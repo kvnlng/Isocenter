@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 from .parallel import progress_bar
-from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Study
+from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Series, Study
 from .privacy import PhiFinding, PhiRemediation, canonical_patient_key
 from .logger import describe_exception, get_logger
 
@@ -713,10 +713,33 @@ class RemediationService:
                     vr is None and isinstance(
                         (attributes or {}).get(tag), (bytes, bytearray))):
                 value = b""
+        sop_move = (tag == "0008,0018" and not finding.entity_path
+                    and hasattr(entity, "_take_sop_uid")
+                    and (proposal.metadata or {}).get(UID_REPLACEMENT))
+        if sop_move and entity.sop_instance_uid not in (proposal.original_value,
+                                                        proposal.new_value):
+            # The instance left the UID the scan saw for one other than
+            # this finding's replacement (review of #544, finding 1); at
+            # that replacement already, the write repeats itself as any
+            # REPLACE does. A kept report still reaches a redacted instance
+            # -- `_instances_by_uid` files it under its source on purpose
+            # -- and moving it to the source's replacement would give the
+            # redacted pixels the UID of the unredacted export (#237's
+            # harm). A UID this project minted, redacted or replaced, is
+            # what the rule asks for: met. Anything else was not ours to
+            # overwrite.
+            from .privacy import _uid_is_minted  # pylint: disable=import-outside-toplevel
+            if _uid_is_minted(entity.sop_instance_uid, self.project_secret):
+                return None, None
+            reason = (f"the SOP Instance UID is {entity.sop_instance_uid!r}, "
+                      f"not {proposal.original_value!r} as scanned; the "
+                      "identity is left as it is (#544)")
+            self.logger.warning(
+                f"Remediation declined for {self._log_subject(finding)}: "
+                f"{reason}")
+            return None, reason
         self._record_what_is_left(entity, proposal.target_attr, value)
-        if (tag == "0008,0018" and not finding.entity_path
-                and hasattr(entity, "_take_sop_uid")
-                and (proposal.metadata or {}).get(UID_REPLACEMENT)):
+        if sop_move:
             # An Instance's own SOP Instance UID under the keyed UID
             # replacement (#544): the property moves with the element, or
             # the export would name the file, write the file meta and key
@@ -1316,14 +1339,16 @@ class RemediationService:
         for key in handled | self._satisfied_keys | self._gone_keys:
             by_uid.setdefault(key[0], set()).add(key)
         demote = list(self._declined_entities)
+        promote = []
         if self._scan_tally is not None:
             live = {id(f): self._live_uid(f.entity) for f in findings
                     if f.remediation_proposal and f.entity is not None}
-            incomplete = {
-                uid for uid in ({f.entity_uid for f in findings
-                                 if f.remediation_proposal}
-                                | set(live.values()))
-                if self._scan_tally.settle(uid, by_uid.get(uid, ())) is False}
+            settled = {
+                uid: self._scan_tally.settle(uid, by_uid.get(uid, ()))
+                for uid in ({f.entity_uid for f in findings
+                             if f.remediation_proposal}
+                            | set(live.values()))}
+            incomplete = {uid for uid, done in settled.items() if done is False}
             for finding in findings:
                 if finding.entity is not None and (
                         finding.entity_uid in incomplete
@@ -1332,9 +1357,46 @@ class RemediationService:
                     owner = self._instance_owners.get(id(finding.entity))
                     if owner is not None:
                         demote.append(owner)
+            # A Series' instances bear its findings (#544, review finding
+            # 2): a series whose scan-time UID the tally holds open --
+            # raised and not handed in, or handed and declined -- keeps
+            # them from reading REMEDIATED, whether or not this pass named
+            # it; a series this pass completed lifts the IDENTIFIED it put
+            # on them, for each instance the tally holds nothing else open
+            # under. A uid this pass already settled is not asked twice.
+            for series, uid in self._series_at_start:
+                if uid is None:
+                    continue
+                done = (settled[uid] if uid in settled
+                        else self._scan_tally.settle(uid, by_uid.get(uid, ())))
+                if done is False:
+                    demote.append(series)
+                elif done is True:
+                    promote.extend(series.instances)
+            for instance in promote:
+                if (instance.phi_status is PhiStatus.IDENTIFIED
+                        and not self._raised_open(instance)):
+                    instance.record_phi_status(PhiStatus.REMEDIATED)
+        # A Series in the list demotes itself and the instances that bear
+        # its status.
+        demote = [bearer for entity in demote
+                  for bearer in ([entity, *entity.instances] if isinstance(entity, Series)
+                                 else [entity])]
         for entity in demote:
             if getattr(entity, "phi_status", None) is PhiStatus.REMEDIATED:
                 entity.record_phi_status(PhiStatus.IDENTIFIED)
+
+    def _raised_open(self, instance) -> bool:
+        """Whether the tally still holds anything open under `instance`:
+        under the UID it has now, or the one it was ingested under, which
+        is what the scan filed its findings under if a pass moved it since
+        (#544). Fail-closed: either one open keeps it IDENTIFIED. The
+        import is local so the module's import lines, above the five
+        pinned lines (#310), stay as they are."""
+        from .entities import SOURCE_SOP_UID_ATTR  # pylint: disable=import-outside-toplevel
+        return any(uid is not None and self._scan_tally.raised_under(uid)
+                   for uid in (instance.sop_instance_uid,
+                               instance.attributes.get(SOURCE_SOP_UID_ATTR)))
 
     def _live_uid(self, entity) -> Optional[str]:
         """The UID the scan files `entity`'s findings under.
@@ -1693,6 +1755,19 @@ class RemediationService:
         self._pass_start_uids = self._MappingProxyType({
             id(f.entity): self._uid_of(f.entity) for f in findings
             if f.entity is not None and not isinstance(f.entity, Patient)})
+
+    #: `(series, its Series Instance UID as the pass began)` for every
+    #: series of the session's graph (#544, review finding 2). A Series has
+    #: no status; its instances bear its findings, so an incomplete Series
+    #: uid demotes them at the pass end. Empty without a session, where a
+    #: declined Series still demotes its own instances. Read-only for
+    #: `_instance_owners`' reason.
+    _series_at_start = ()
+
+    def _use_series(self, series) -> None:
+        """Snapshot each series and its UID before the pass can replace it."""
+        self._series_at_start = tuple(
+            (s, getattr(s, "series_instance_uid", None)) for s in series)
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each

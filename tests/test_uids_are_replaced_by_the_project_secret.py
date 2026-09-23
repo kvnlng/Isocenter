@@ -721,7 +721,9 @@ def test_a_misnamed_finding_that_moves_its_entity_settles_the_uid_it_had(tmp_pat
     nothing, and the entity was stamped REMEDIATED over every finding the
     audit raised under its real UID that the pass was never handed. The UID
     is read as the pass began. Kills the pass-start snapshot dropped from
-    `_live_uid`, and a Series' UID not read by `_uid_of`."""
+    `_live_uid`. (For a Series the pass-end series settle asks its
+    pass-start UID too, since review finding 2 of #544, so `_uid_of`'s
+    Series arm is a second road there.)"""
     import dataclasses
 
     src = tmp_path / "src"
@@ -815,3 +817,100 @@ def test_a_nested_sop_uid_is_replaced_in_its_item_and_moves_no_instance(tmp_path
     with sqlite3.connect(str(db)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action_type IN "
                             "('ERROR', 'REMEDIATION_DECLINED')").fetchone()[0] == 0
+
+
+# --------------------------------------------------------------------
+# A Series finding raised and not acted on (review of #544, finding 2)
+# --------------------------------------------------------------------
+
+def _validation_status(session, tmp_path, name):
+    path = tmp_path / name
+    session.generate_report(str(path))
+    return [line for line in path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("| **Validation Status**")]
+
+
+def _series_filtered(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    _ct(src / "a.dcm", "1.2.3.99.71", study="1.2.3.99.70", series="1.2.3.99.72")
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("privacy_profile: basic\n", encoding="utf-8")
+    return src, str(cfg)
+
+
+@pytest.mark.parametrize("reaudit", [False, True], ids=["same-report", "fresh-audit"])
+def test_a_series_finding_not_acted_on_does_not_grade_pass(tmp_path, reaudit):
+    """A Series has no status of its own; its instances bear it. A report
+    filtered to everything but the Series finding -- a filter code written
+    before "Series" was an entity type would write -- leaves the source
+    Series Instance UID in every file, and the instances under it read
+    IDENTIFIED, so the export grades REVIEW_REQUIRED, not PASS; and a fresh
+    audit that raises the Series finding reads them IDENTIFIED too. Kills
+    an unacted Series finding costing nothing (#573's condition 7)."""
+    src, cfg = _series_filtered(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.load_config(cfg)
+        session.ingest(str(src))
+        report = session.audit()
+        series = session.store.patients[0].studies[0].series[0]
+        (inst,) = series.instances
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        session.anonymize([f for f in report if f.entity_type != "Series"])
+        assert series.series_instance_uid == "1.2.3.99.72"
+        assert inst.sop_instance_uid == M("1.2.3.99.71")
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        if reaudit:
+            again = session.audit()
+            assert [(f.entity_type, f.tag) for f in again] == [("Series", "0020,000e")]
+            assert inst.phi_status is PhiStatus.IDENTIFIED
+        session.export(str(tmp_path / "out"), use_compression=False)
+        grade = _validation_status(session, tmp_path, "r.md")
+    assert grade and "REVIEW_REQUIRED" in grade[0], grade
+    (path,) = (tmp_path / "out").rglob("*.dcm")
+    assert pydicom.dcmread(path).SeriesInstanceUID == "1.2.3.99.72"
+
+
+def test_a_series_finding_handed_later_completes_its_instances(tmp_path):
+    """The rest of the report, handed afterwards, replaces the Series UID
+    and completes the instances: REMEDIATED, and the export grades PASS.
+    Kills a Series-demoted instance that no later pass can complete."""
+    src, cfg = _series_filtered(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.load_config(cfg)
+        session.ingest(str(src))
+        report = session.audit()
+        session.anonymize([f for f in report if f.entity_type != "Series"])
+        session.anonymize([f for f in report if f.entity_type == "Series"])
+        series = session.store.patients[0].studies[0].series[0]
+        assert series.series_instance_uid == M("1.2.3.99.72")
+        assert series.instances[0].phi_status is PhiStatus.REMEDIATED
+        session.export(str(tmp_path / "out"), use_compression=False)
+        grade = _validation_status(session, tmp_path, "r.md")
+    assert grade and "PASS" in grade[0], grade
+
+
+@pytest.mark.parametrize("first", ["series-only", "sop-then-series"])
+def test_a_completed_series_lifts_no_instance_with_its_own_findings_open(tmp_path, first):
+    """Completing a Series lifts the IDENTIFIED it put on its instances,
+    and only that: an instance whose own findings are still open stays
+    IDENTIFIED. `sop-then-series` moves the instance's UID first, so what
+    is open is filed under the UID it was ingested under. Kills the lift
+    ignoring the tally, and the tally read under the current UID alone."""
+    src, cfg = _series_filtered(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.load_config(cfg)
+        session.ingest(str(src))
+        report = session.audit()
+        if first == "sop-then-series":
+            session.anonymize([f for f in report if f.entity_type == "Instance"
+                               and f.tag == "0008,0018" and not f.entity_path])
+            inst = session.store.patients[0].studies[0].series[0].instances[0]
+            assert inst.sop_instance_uid == M("1.2.3.99.71")
+        session.anonymize([f for f in report if f.entity_type == "Series"])
+        series = session.store.patients[0].studies[0].series[0]
+        assert series.series_instance_uid == M("1.2.3.99.72")
+        assert series.instances[0].phi_status is PhiStatus.IDENTIFIED
