@@ -362,3 +362,39 @@ def test_a_copy_edited_after_the_audit_is_synced_back_without_a_record(tmp_path)
         assert inst.attributes["0010,0010"] == "Alpha^One"
         assert not inst.remediation_vouches_for("0010,0010", "Alpha^One")
         assert inst.phi_status is PhiStatus.IDENTIFIED
+
+
+def test_a_study_date_no_study_holds_is_satisfied_by_the_empty_copy(tmp_path):
+    """Q-C8, the fingerprint's `color-pl`/`ExplVR_BigEnd` shape: the source
+    Study Date `1994.11.05` does not parse, so the Study holds none and
+    raises no finding; only the instance's copy is raised. The export has
+    always stamped it `''`. The copy is synced to `''`, nothing is left in
+    the graph or the file, and the finding is satisfied: the file is
+    written by the safe export, the instance reads REMEDIATED, no decline
+    row, and the run grades PASS. Before #624 the instance's own shift
+    declined on the date format and `check_burned_in=True` withheld a file
+    that carried no date. Kills M-C17 (the empty copy left unhandled) and
+    M-C18 (the sentinel written as a decline)."""
+    path = write_ct(tmp_path / "in" / "a.dcm", "PID-624", "5693", name="Alpha^One")
+    ds = pydicom.dcmread(str(path))
+    ds.StudyDate = "1994.11.05"
+    ds.save_as(str(path))
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        [patient] = session.store.patients
+        [study] = patient.studies
+        [inst] = [i for se in study.series for i in se.instances]
+        assert study.study_date is None
+        assert [f.entity_type for f in report.findings if f.tag == "0008,0020"
+                and not f.entity_path] == ["Instance"]
+        session.anonymize(report)
+        assert inst.attributes["0008,0020"] == ""
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        assert _declines(session) == []
+        session.export(str(tmp_path / "out"), use_compression=False, check_burned_in=True)
+        session.generate_report(str(tmp_path / "r.md"))
+        grade = (tmp_path / "r.md").read_text(encoding="utf-8")
+    [out] = list((tmp_path / "out").rglob("*.dcm"))
+    assert _exported(pydicom.dcmread(str(out)), "0008,0020") == ""
+    assert "**PASS**" in grade and "**REVIEW_REQUIRED**" not in grade, grade

@@ -808,6 +808,14 @@ class RemediationService:
         no `loss_scope` and no `element_tag` to describe still writes
         both slots.
         """
+        if isinstance(reason, _CopyLeftEmpty):
+            # Not a decline either: an owner-stamped copy left empty, as
+            # its owner holds no value, with nothing handed in to write
+            # one -- nothing remains in the graph or the file, so the
+            # finding is satisfied (#624, coordinator ruling Q-C8). Routed
+            # through here so the arms' pinned lines do not move.
+            self._satisfied(finding, None)
+            return
         if isinstance(reason, _OwnerNotHandedIn):
             # Not a decline: an owner-stamped copy whose owner this pass
             # was not handed (#624, Q-C5). No row and no demotion; the
@@ -1561,6 +1569,17 @@ class RemediationService:
                 entity.record_phi_status(status)
         field = next(f for f, t in self.ENTITY_FIELD_TAGS.items() if t == tag)
         if not {(id(owner), field), (None, field)} & self._owners_handed:
+            if value == "" and entity.attributes.get(tag, "") == "":
+                # The owner holds no value -- a Study Date the source
+                # spelled `1994.11.05`, which no Study holds -- so the
+                # export writes the element empty and the copy is empty
+                # too: nothing is left to act on, and the finding is
+                # satisfied, not left for an owner finding that will
+                # never exist. Left unhandled, the instance read
+                # IDENTIFIED beside a PASS (coordinator ruling, Q-C8).
+                # A declined owner keeps its row (above is only the
+                # not-handed case).
+                return _CopyLeftEmpty(tag)
             # The owner was not handed in: no decline row, since nothing
             # declined, and the finding is left unhandled, so the scan
             # tally keeps the instance IDENTIFIED and condition 7 grades
@@ -2364,6 +2383,14 @@ class _ScanTally:
             return True
         self._partial[uid] = merged
         return False
+
+
+class _CopyLeftEmpty(str):
+    """The reason `RemediationService._owner_stamps_copy` gives for an
+    owner-stamped copy left empty under an owner holding no value, with
+    no owner finding handed in (#624, Q-C8): truthy, so both arms stop,
+    and routed by type in `_record_decline` to `_satisfied`. Carries the
+    tag only."""
 
 
 class _OwnerNotHandedIn(str):
