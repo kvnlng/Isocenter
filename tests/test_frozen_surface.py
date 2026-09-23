@@ -174,6 +174,9 @@ TIER_ONE_NAMES = {
     "DiscoveryResult": {"filter", "to_zones", "to_dataframe"},
     "DicomBuilder": {"start_patient"},
     "DicomStore": {"patients"},
+    "LockingResult": set(),
+    "RedactionError": {"failures", "attempted"},
+    "ExportError": {"failures", "attempted"},
 }
 
 #: The tier-2 names on the same classes, each named on stability.md's
@@ -1327,12 +1330,16 @@ def _tier_one_class_instances(session, summary):
         DiscoveryResult: DiscoveryResult([], 0),
         type(summary): summary,
         type(session.store): session.store,
+        isocenter.RedactionError: isocenter.RedactionError([], 0),
+        isocenter.ExportError: isocenter.ExportError([], 0),
     }
     classes = (TrackedEntity, DicomItem, Instance, Patient, Study, Series,
                Equipment, session_module.IsocenterConfiguration,
                session_module.PhiReport, session_module.PhiFinding,
                session_module.ExportSummary, DiscoveryResult,
-               isocenter.Builder, type(summary), type(session.store))
+               isocenter.Builder, type(summary), type(session.store),
+               session_module.LockingResult, isocenter.RedactionError,
+               isocenter.ExportError)
     return {cls.__name__: (cls, instances.get(cls)) for cls in classes}
 
 
