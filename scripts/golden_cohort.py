@@ -256,10 +256,28 @@ def no_patient_id(out: Path):
         write(ds, out / f"no_patient_id-s{study}-1.dcm")
 
 
+def withheld(out: Path):
+    """A CT carrying a Study Date inside `ReferencedImageSequence`, spelled
+    `2023.01.01`, which no date shift can read: the nested shift declines
+    on the format, the item keeps the date, and `export(check_burned_in=
+    True)` withholds the instance. The withholding path on the fingerprint:
+    #624 wrote the corpus's three withheld instances, whose only unreadable
+    date was the top-level Study Date the export stamps from the Study. A
+    nested copy is not stamped (#496 N4), so a change to what the export
+    stamps does not move this member."""
+    ds = ct("withheld")
+    item = Dataset()
+    item.ReferencedSOPClassUID = CT
+    item.ReferencedSOPInstanceUID = uid("withheld", "referenced")
+    item.StudyDate = "2023.01.01"
+    ds.ReferencedImageSequence = Sequence([item])
+    write(ds, out / "withheld-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
-    no_patient_id)}
+    no_patient_id, withheld)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
