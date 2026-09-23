@@ -126,7 +126,8 @@ def test_an_edit_saved_and_reopened_still_grades(tmp_path, shape):
             # #544 as it stands, on main as here, reopened or not: the
             # re-audit raises the Series finding alone, and its pass leaves
             # the instance IDENTIFIED until a second round reads the copy
-            # the Series wrote (a Series handed in late, Q-C5).
+            # the Series wrote (a Series handed in late, Q-C5). Filed as
+            # #777; when it is fixed, this second round goes.
             session.anonymize(session.audit())
         reasons, passed, ds = _graded(session, tmp_path, "reaudited")
     assert passed and reasons == [], reasons
