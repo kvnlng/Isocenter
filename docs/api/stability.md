@@ -237,10 +237,10 @@ otherwise.
 - `compact()`: `RuntimeError` while a pass is open (below).
 - `redact()`: `RuntimeError` on a `:memory:` store when the environment
   asks for worker recycling.
-- `audit()`, `anonymize()` and `export(check_burned_in=True)`:
-  `RuntimeError` on a store holding dates shifted under a project secret
-  it no longer has (on a store with no secret yet, each generates one
-  and commits it); and, with `recover_patient_identity(restore=True)`,
+- `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)`:
+  `RuntimeError` on a store holding dates shifted, or UIDs replaced,
+  under a project secret it no longer has (on a store with no secret
+  yet, each generates one and commits it); and, with `recover_patient_identity(restore=True)`,
   `RuntimeError` when patients sharing a Patient ID were de-identified
   under different date-offset schemes, which `audit()` raises before it
   creates a project secret.
@@ -321,9 +321,12 @@ default.
 - Date jitter and the `ANON_` pseudonym are deterministic per patient
   within a store: the same patient under the same `date_jitter` range
   gets the same offset and pseudonym every time that store derives
-  them, and in every copy of its file. They are derived from the
-  store's project secret, which the store generates and never exports.
-  The same configuration over a different store gives different ones.
+  them, and in every copy of its file. So is a replacement UID: the same
+  source UID gets the same replacement, and a redaction with the same
+  zones the same SOP Instance UID. Pseudonyms, date offsets and
+  replacement UIDs are derived from the store's project secret, which
+  the store generates and never exports. The same configuration over a
+  different store gives different ones.
   A patient a store classed as de-identified before 0.9.7 keeps that
   store's offset.
 - A configuration file determines the policy, not the pseudonyms or
@@ -333,7 +336,8 @@ default.
 - The offset is not derivable from the exported pseudonym, or from any
   other value its derivation uses, without the secret. That is not a
   promise that no exported date is recoverable: a date tag no rule names
-  is exported as ingested, and UIDs can embed dates.
+  is exported as ingested, and a UID the configuration keeps can embed
+  one.
 - A configuration file that 1.0 loads, every 1.x loads and applies the
   same way. Its schema is version 2. A 1.x adds keys and values only,
   under a new 2.x minor, and never changes what an existing one means.
