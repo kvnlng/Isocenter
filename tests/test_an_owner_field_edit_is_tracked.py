@@ -357,3 +357,25 @@ def test_a_series_with_a_status_is_counted_when_edited(tmp_path):
     assert not passed
     assert _edited(reasons) and _edited(reasons)[0].endswith(
         "(patients 0, studies 0, series 1)"), reasons
+
+
+def test_a_cleared_instance_synced_to_a_source_value_reads_identified(tmp_path):
+    """(A) on a CLEARED instance, which the pass-end demotion does not
+    touch (it takes REMEDIATED only): a full pass and a re-audit leave
+    everything CLEARED; the name is set back on the Patient, and the pass
+    is handed only the instance's name finding from the first report, so
+    the sync is the instance's only write. Handed back, CLEARED said a
+    scan found nothing on a copy that holds the source name. Kills the
+    sync keeping the status it had."""
+    with _saved(tmp_path) as session:
+        report = session.audit()
+        session.anonymize(report)
+        session.anonymize(session.audit())
+        patient, _study, series = _owners(session)
+        [inst] = series.instances
+        assert inst.phi_status is PhiStatus.CLEARED
+        patient.patient_name = "Alpha^One"
+        session.anonymize([f for f in report.findings if f.entity_type == "Instance"
+                           and f.tag == "0010,0010" and not f.entity_path])
+        assert inst.attributes["0010,0010"] == "Alpha^One"
+        assert inst.phi_status is PhiStatus.IDENTIFIED
