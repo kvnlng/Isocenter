@@ -4,6 +4,7 @@ from typing import List, Any, Optional, Dict, Tuple
 import hashlib
 import hmac
 import re
+from pydicom.multival import MultiValue
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
                        Patient, Study, is_synthetic_patient_id,
                        iter_item_tree)
@@ -169,11 +170,12 @@ def _require_secret(secret) -> bytes:
     """
     if not secret:
         raise RuntimeError(
-            "No project secret: the pseudonym and date offset are derived "
-            "under the store's project secret, and there is no unkeyed "
-            "fallback. Session.audit() and anonymize() obtain it from the "
-            "store; a PhiInspector or RemediationService built by hand has "
-            "to be given one.")
+            "No project secret: the pseudonym, the date offset and the "
+            "replacement UIDs are derived under the store's project secret, "
+            "and there is no unkeyed fallback. Session.audit(), anonymize() "
+            "and redact() obtain it from the store; a PhiInspector, "
+            "RemediationService or RedactionService built by hand has to be "
+            "given one.")
     return bytes(secret)
 
 
@@ -194,6 +196,187 @@ def _replacement_id_for(patient_id, secret) -> str:
     digest = _hmac(secret, _LABEL_PATIENT_ID, patient_id).hex()[:_DIGEST_HEX]
     check = _hmac(secret, _LABEL_PSEUDONYM_CHECK, digest).hex()[:_CHECK_HEX]
     return f"ANON_{digest}{check}"
+
+
+#: UID replacement (#544). Three more labels, disjoint from the three
+#: above, so a minted UID is not readable out of a pseudonym or an
+#: offset, nor a redacted instance's UID out of its unredacted one.
+#: Changing a label re-maps every UID a store has minted: every exported
+#: path and every UI element moves (fingerprint/output.json).
+_LABEL_UID = b"isocenter/v1/uid\x00"
+_LABEL_REDACTED_UID = b"isocenter/v1/redacted-uid\x00"
+_LABEL_UID_CHECK = b"isocenter/v1/uid-check\x00"
+#: How the 16 bytes of a minted UUID split: an 11-byte digest of the
+#: source (82 bits once the version and variant are set) and a 5-byte
+#: (40-bit) keyed check over those 11 bytes as written.
+_UID_DIGEST_BYTES = 11
+_UID_CHECK_BYTES = 5
+#: `2.25.` and a UUID integer with no leading zero: the one spelling
+#: `uids.uid_from_bytes16` writes, so no other spelling of the same
+#: number verifies.
+_MINTED_UID = re.compile(r"2\.25\.(0|[1-9][0-9]{0,38})")
+
+
+def _uid_check(secret, digest11: bytes) -> bytes:
+    return hmac.new(_require_secret(secret), _LABEL_UID_CHECK + digest11,
+                    hashlib.sha256).digest()[:_UID_CHECK_BYTES]
+
+
+def _mint_uid(secret, label: bytes, text: str) -> str:
+    """`2.25.<n>`, `n` an RFC 9562 version-8 UUID: 82 bits of an HMAC of
+    `text` under `label`, and 40 bits of a keyed check over them.
+
+    The version and variant are set on the 11 digest bytes *before* the
+    check is computed, so a verifier reading the UID back recomputes it
+    over exactly what it reads; `uid_from_bytes16` sets them again, which
+    changes nothing (both are in the first 11 bytes, and masking is
+    idempotent).
+    """
+    from .uids import uid_from_bytes16  # pylint: disable=import-outside-toplevel
+    digest = bytearray(_hmac(secret, label, text)[:_UID_DIGEST_BYTES])
+    digest[6] = (digest[6] & 0x0F) | 0x80
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return uid_from_bytes16(bytes(digest) + _uid_check(secret, bytes(digest)))
+
+
+def _replacement_uid_for(uid, secret) -> str:
+    """The UID that replaces `uid` in this project (#544).
+
+    A function of the value alone -- never the tag it sits under, the
+    patient or the study -- so a SOP Instance UID, the Referenced SOP
+    Instance UID in another file that names it, and the file meta's copy
+    all map to one replacement. Deterministic per project secret, and
+    recognisable by `_uid_is_minted` under that secret.
+    """
+    return _mint_uid(secret, _LABEL_UID, str(uid))
+
+
+def _redaction_uid_for(source_uid, config_hash, secret) -> str:
+    """The SOP Instance UID a redaction gives an instance (#544).
+
+    Keyed on the instance's **source** SOP Instance UID and the redaction
+    configuration's hash, so the same redaction in the same project gives
+    the same UID whether it runs before or after `anonymize()`, a
+    different set of zones gives a different one (#237), and the label
+    keeps it from ever equalling `_replacement_uid_for(source_uid)`: the
+    redacted pixels never share a UID with the unredacted image.
+    """
+    return _mint_uid(secret, _LABEL_REDACTED_UID,
+                     f"{source_uid}\x00{config_hash}")
+
+
+def _uid_is_minted(value, secret) -> bool:
+    """Whether `value` is a UID this project minted, of either kind.
+
+    What makes UID replacement idempotent without stored state: a scan
+    leaves a minted UID alone, so a second `anonymize()`, a reopened
+    store and a re-ingested export of this project do not replace it
+    again. A UID minted under another secret does not verify and is
+    replaced like any source UID. Exactly one spelling verifies (no
+    leading zero, no whitespace, below 2**128), and only a `str`: a
+    multi-valued element is judged value by value by the caller.
+    """
+    secret = _require_secret(secret)
+    raw = _minted_uid_bytes(value)
+    if raw is None:
+        return False
+    return hmac.compare_digest(raw[_UID_DIGEST_BYTES:],
+                               _uid_check(secret, raw[:_UID_DIGEST_BYTES]))
+
+
+def _minted_uid_bytes(value) -> Optional[bytes]:
+    """The 16 bytes of `value` if it has the shape this library mints --
+    `2.25.`, the one spelling of an integer below 2**128, version 8,
+    variant `10` -- else None. No secret: the shape alone."""
+    if not isinstance(value, str):
+        return None
+    match = _MINTED_UID.fullmatch(value)
+    if match is None:
+        return None
+    number = int(match.group(1))
+    if number >= 1 << 128:
+        return None
+    raw = number.to_bytes(16, "big")
+    if raw[6] >> 4 != 0x8 or raw[8] >> 6 != 0b10:
+        return None
+    return raw
+
+
+def _has_minted_uid_shape(value) -> bool:
+    """Whether `value` has a minted UID's shape, verifiable or not: the
+    evidence a store that lost its secret refuses on (#544, Q-B), where
+    there is no secret left to verify with."""
+    return _minted_uid_bytes(value) is not None
+
+
+#: The proposal metadata key that marks a keyed UID replacement (#544).
+#: What remediation reads to move an Instance's own SOP Instance UID with
+#: its top-level element (`Instance._take_sop_uid`), rather than write the
+#: element alone as a `REPLACE value:` does (0.9.8's behaviour, kept).
+UID_REPLACEMENT = "uid_replacement"
+
+
+def _owned_uid_is_open(phi_tags, tag, uid, secret) -> bool:
+    """Whether the owner holding `uid` under `tag` is raised (#544): the
+    policy's rule on `tag` is the value-less REPLACE, and `uid` is a
+    non-blank UID this project did not mint.
+
+    One spelling for `PhiInspector._scan_owned_uid`, which raises the
+    finding, and `RemediationService._settle_statuses`, which asks the
+    same question of every Series at a pass end (review of #544, round 2):
+    a Series has no stored status, so after a reopen a pass handed a plain
+    list has nothing else to say its UID is still open.
+    """
+    return (_is_uid_replacement(_rule_for(phi_tags, tag), tag) and uid is not None
+            and bool(str(uid).strip()) and not _uid_is_minted(str(uid), secret))
+
+
+def _is_uid_replacement(rule, tag) -> bool:
+    """Whether `rule` on `tag` is the keyed UID replacement (#544): REPLACE
+    with no `value:` (or the string form, which is that), on a tag whose
+    standard dictionary VR is UI.
+
+    One reading for the instance scan and the owners' scans, and the
+    loader admits exactly this spelling (`_refused_phi_rule`). A private
+    key has no dictionary VR, so it keeps writing `ANONYMIZED` (#765); a
+    rule with a `value:` writes the value, as in 0.9.8; and no rule is not
+    this rule, so `privacy_profile: none` with no tags keeps every UID.
+    """
+    if isinstance(rule, dict):
+        if (str(rule.get("action") or "REPLACE").upper() != "REPLACE"
+                or rule.get("value")):
+            return False
+    elif not isinstance(rule, str):
+        return False
+    from .config_manager import _standard_dictionary_vr  # pylint: disable=import-outside-toplevel
+    return _standard_dictionary_vr(tag) == "UI"
+
+
+def _uid_text(value) -> str:
+    """One UI value as the text the derivation reads. A `bytes` value is
+    what a UI element arrives as when its VR was not on the wire and the
+    dictionary did not name it: decoded, with its padding stripped."""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("ascii", "replace").rstrip("\x00 ")
+    return str(value)
+
+
+def _replaced_uids(value, secret):
+    """What the keyed UID replacement writes over `value`, or None when it
+    writes nothing: every value is blank or was minted by this project.
+
+    A multi-valued element (`0008,0058`, VM 1-n) is judged and replaced
+    value by value and comes back as a list, which the exporter writes as
+    a multi-value; a value this project minted keeps its place unchanged.
+    """
+    multi = isinstance(value, (list, tuple, MultiValue))
+    texts = [_uid_text(v) for v in (value if multi else [value])]
+    todo = [bool(t.strip()) and not _uid_is_minted(t, secret) for t in texts]
+    if not any(todo):
+        return None
+    new = [_replacement_uid_for(t, secret) if replace else t
+           for t, replace in zip(texts, todo)]
+    return new if multi else new[0]
 
 
 def _pseudonym_verifies(patient_id, secret) -> bool:
@@ -709,6 +892,7 @@ class PhiInspector:
                 jitter_scheme=patient._jitter_scheme))
 
             for series in study.series:
+                findings.extend(self._scan_series(series, patient.patient_id))
                 for instance in series.instances:
                     findings.extend(self._scan_instance(instance, patient.patient_id,
                                                         study=study, patient=patient))
@@ -907,6 +1091,7 @@ class PhiInspector:
             needs_remediation = False
             remediation_action = "REPLACE_TAG"
             new_val = None
+            uid_replacement = False
 
             if action_code == "REMOVE":
                 # If user wants it gone, and it exists (val is not None), finding!
@@ -1008,11 +1193,23 @@ class PhiInspector:
                 # value by an earlier policy is rewritten. A blank value,
                 # text or binary (#547's `b""`), carries nothing and is
                 # not given one.
-                replace_value = rule_value or _vr_dummy(tag) or "ANONYMIZED"
-                if val != replace_value and val != "" and val != b"":
-                    needs_remediation = True
-                    remediation_action = "REPLACE_TAG"
-                    new_val = replace_value
+                #
+                # On a UI with no `value:` it is the keyed UID replacement
+                # instead (#544): each value replaced by the UID derived
+                # from it, at any depth, so every reference to one UID
+                # gets one replacement. "Already replaced" is a UID this
+                # project minted (`_uid_is_minted`), not agreement with
+                # anything: a copy of an owner's source UID is raised
+                # like any other (#496's shape).
+                if rule_value is None and _is_uid_replacement(config_val, tag):
+                    new_val = _replaced_uids(val, self.project_secret)
+                    needs_remediation = uid_replacement = new_val is not None
+                else:
+                    replace_value = rule_value or _vr_dummy(tag) or "ANONYMIZED"
+                    if val != replace_value and val != "" and val != b"":
+                        needs_remediation = True
+                        remediation_action = "REPLACE_TAG"
+                        new_val = replace_value
 
             if needs_remediation:
                 proposal = PhiRemediation(
@@ -1030,7 +1227,8 @@ class PhiInspector:
                         "patient_id": patient_id,
                         "jitter_scheme": getattr(
                             patient, "_jitter_scheme", JITTER_SCHEME_KEYED),
-                    } if remediation_action == "SHIFT_DATE" else {})
+                    } if remediation_action == "SHIFT_DATE"
+                    else {UID_REPLACEMENT: True} if uid_replacement else {})
 
                 findings.append(PhiFinding(
                     entity_uid=instance.sop_instance_uid,
@@ -1182,11 +1380,52 @@ class PhiInspector:
         # is PHI -- the case this function exists to refuse.
         return False
 
+    def _scan_owned_uid(self, entity, tag: str, attr: str, entity_type: str,
+                        patient_id: str) -> List[PhiFinding]:
+        """The owner's own UID under the keyed UID replacement (#544).
+
+        A Study owns `0020,000d` and a Series `0020,000e`: the exporter
+        stamps each file's copy from the entity (`export_stamp_attributes`),
+        so the entity is what has to move, and its remediation writes the
+        new UID onto each instance's top-level copy (#492). Raised against
+        the entity itself -- a Series is a finding entity of its own
+        (Q4 of #544) -- and only for the value-less REPLACE: `KEEP` retains
+        the UID, and a `REPLACE value:` leaves the owner as 0.9.8 did,
+        since one literal written into every Study would merge them under
+        the store's UNIQUE key. A UID this project minted is not raised.
+        """
+        rule = _rule_for(self.phi_tags, tag)
+        uid = getattr(entity, attr, None)
+        if not _owned_uid_is_open(self.phi_tags, tag, uid, self.project_secret):
+            return []
+        name = _rule_name(rule) if isinstance(rule, dict) else str(rule)
+        return [PhiFinding(
+            entity_uid=uid, entity_type=entity_type, field_name=attr, value=uid,
+            reason=f"Matched PHI Tag {tag} ({name})", tag=tag,
+            patient_id=patient_id, entity=entity,
+            remediation_proposal=PhiRemediation(
+                action_type="REPLACE_TAG", target_attr=attr,
+                new_value=_replacement_uid_for(uid, self.project_secret),
+                original_value=uid, metadata={UID_REPLACEMENT: True}))]
+
+    def _scan_series(self, series, patient_id: str = None) -> List[PhiFinding]:
+        """A Series' own PHI: its Series Instance UID (#544)."""
+        return self._scan_owned_uid(series, "0020,000e", "series_instance_uid",
+                                    "Series", patient_id)
+
     def _scan_study(self, study: Study, patient_id: str = None,
                     jitter_scheme: str = JITTER_SCHEME_KEYED) -> List[PhiFinding]:
         """
-        Scans a Study entity for study-level PHI (e.g. StudyDate).
+        Scans a Study entity for study-level PHI: its Study Instance UID
+        (#544) and its Study Date.
         """
+        return (self._scan_owned_uid(study, "0020,000d", "study_instance_uid",
+                                     "Study", patient_id)
+                + self._scan_study_date(study, patient_id, jitter_scheme))
+
+    def _scan_study_date(self, study: Study, patient_id: str = None,
+                         jitter_scheme: str = JITTER_SCHEME_KEYED) -> List[PhiFinding]:
+        """The Study Date arm of `_scan_study`."""
         findings = []
         uid = study.study_instance_uid
 

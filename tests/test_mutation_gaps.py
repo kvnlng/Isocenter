@@ -85,7 +85,7 @@ def _instance_with(attrs):
 
 
 def _private_tag_findings(inst):
-    inspector = PhiInspector(remove_private_tags=True)
+    inspector = PhiInspector(remove_private_tags=True, project_secret=FIXED_A)
     return [f for f in inspector._scan_instance(inst, "P1", None)
             if f.tag and int(f.tag.split(',')[0], 16) % 2 != 0]
 

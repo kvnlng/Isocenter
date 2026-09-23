@@ -27,12 +27,14 @@ import pydicom
 import pytest
 
 from isocenter import Session
-from isocenter.entities import (NO_PATIENT_ID_PREFIX, PhiStatus,
+from isocenter.entities import (NO_PATIENT_ID_PREFIX, SOURCE_SOP_UID_ATTR, PhiStatus,
                                 exported_patient_id, is_synthetic_patient_id)
 from isocenter.exporters.wfdb import record_name_for
+from isocenter.privacy import _replacement_uid_for
 
 from support.ct_small_files import study_uid, write_ct
-from support.project_secret import load_fixed_secret
+from support.project_secret import FIXED_A, load_fixed_secret
+from support.store_secret import secret_of
 
 MODES = ["threads", "processes"]
 
@@ -94,6 +96,14 @@ def _id_less(path, suffix, name, how):
     return str(path)
 
 
+def _by_source_sop(patient):
+    """The patient's instances by the SOP Instance UID each was ingested
+    under: a pass replaces the UID of every instance its report scanned
+    (#544), and a file ingested after the audit keeps its own."""
+    return {i.attributes.get(SOURCE_SOP_UID_ATTR, i.sop_instance_uid): i
+            for st in patient.studies for se in st.series for i in se.instances}
+
+
 def _exported(out):
     return {str(ds.StudyInstanceUID): ds for ds in
             (pydicom.dcmread(str(p)) for p in sorted(out.rglob("*.dcm")))}
@@ -137,7 +147,8 @@ def test_two_id_less_subjects_stay_two_patients(tmp_path, mode, how):
         frame = session.export_dataframe(expand_metadata=True)
 
     files = _exported(tmp_path / "out")
-    a, b = files[study_uid("5841")], files[study_uid("5842")]
+    # Each study's UID is replaced (#544); the patient key keeps the source.
+    a, b = (files[_replacement_uid_for(study_uid(n), FIXED_A)] for n in ("5841", "5842"))
     assert str(a.PatientID) == "" and str(b.PatientID) == ""
     source = datetime.datetime.strptime(source_date, "%Y%m%d")
     offsets = {(datetime.datetime.strptime(ds.StudyDate, "%Y%m%d") - source).days
@@ -438,7 +449,10 @@ def test_an_audited_id_less_patient_is_not_re_keyed(tmp_path, shape):
                            for f in (tmp_path / "out").rglob("*.dcm"))}
     assert "PA" not in exported.values(), exported
     if shape != "check-burned-in":
-        assert exported == {study_uid("5905") + ".1.1": "", sop_b: ""}, exported
+        # a's UID is replaced by the report's pass (#544); b arrived after
+        # the audit, so the report holds no finding on it.
+        sop_a = _replacement_uid_for(study_uid("5905") + ".1.1", secret_of(tmp_path / "s.db"))
+        assert exported == {sop_a: "", sop_b: ""}, exported
     content = (tmp_path / "r.md").read_text(encoding="utf-8")
     assert "**REVIEW_REQUIRED**" in content
     assert "**PASS**" not in content
@@ -575,7 +589,10 @@ def test_a_report_from_an_unsaved_audit_across_a_reopen_grades_review_required(
         (NO_PATIENT_ID_PREFIX + study, False, True, False)], declined
     assert sorted(d.split(": ")[1].split(" ")[0] for uid, d in declined
                   if uid == study + ".1.1") == ["0008,0020", "0010,0010"], declined
-    assert exported == {study + ".1.1": ("PA", "Alpha^One", source_date),
+    # a's UID is replaced by the old report's pass (#544); b arrived
+    # after the audit.
+    sop_a = _replacement_uid_for(study + ".1.1", secret_of(tmp_path / "s.db"))
+    assert exported == {sop_a: ("PA", "Alpha^One", source_date),
                         study + ".1.2": ("PA", "Alpha^One", source_date)}, exported
     content = (tmp_path / "r.md").read_text(encoding="utf-8")
     assert "**REVIEW_REQUIRED**" in content
@@ -734,8 +751,7 @@ def test_a_restore_gives_a_joined_patient_its_real_id(tmp_path, order, how, capl
         assert warnings == [_tokenless(1, 3)], warnings
         [patient] = session.store.patients
         assert patient.patient_id == "PA"
-        held = {i.sop_instance_uid: i for st in patient.studies
-                for se in st.series for i in se.instances}
+        held = _by_source_sop(patient)
         # a's own copy comes back as the file held it: `''` when empty;
         # when absent the lock stashed the patient's `PA` for it.
         assert held[sop_a].attributes.get("0010,0020") == ("" if how == "empty" else "PA")
@@ -791,8 +807,7 @@ def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(
         session.lock_identities(session.audit())
         session.ingest(str(tmp_path / "in3"))
         session.anonymize(session.audit())
-        held = {i.sop_instance_uid: i for st in patient.studies
-                for se in st.series for i in se.instances}
+        held = _by_source_sop(patient)
         assert "0010,0020" not in held[sop_c].attributes
         warnings = _restore_warnings(session, caplog, key)
         assert warnings == [_tokenless(1, 3), _disagree(1, 2)], warnings

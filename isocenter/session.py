@@ -2778,9 +2778,13 @@ class DicomSession:
 
         Every entity the inspector reports on gets a status: IDENTIFIED
         where a finding names it, CLEARED where the scan looked and found
-        nothing. Series are deliberately left alone -- the inspector emits
-        findings for patients, studies and instances only, so a series has
-        not been examined and must not claim it has.
+        nothing. A Series has no status of its own (no store column, and
+        nothing the grade reads): since #544 the scan raises its Series
+        Instance UID on it, and **its instances bear that finding** -- each
+        reads IDENTIFIED while the Series has one, as it would for a
+        finding of its own. Otherwise a Series finding raised and never
+        acted on cost nothing, and the export graded PASS with the source
+        Series UID in every file (review of #544, finding 2).
 
         The status is stamped at each entity's current revision, so a
         later edit invalidates it. That is why this runs after
@@ -2799,9 +2803,12 @@ class DicomSession:
         # by every audit, so a new report settles against its own scan.
         self._scan_tally = _ScanTally(findings)
 
-        def record(entity, uid):
+        series_identified = {f.entity_uid for f in findings
+                             if f.entity_type == "Series" and f.entity_uid is not None}
+
+        def record(entity, uid, carried=False):
             entity.record_phi_status(
-                PhiStatus.IDENTIFIED if uid in identified
+                PhiStatus.IDENTIFIED if carried or uid in identified
                 else PhiStatus.CLEARED, policy=policy)
 
         for patient in self.store.patients:
@@ -2809,8 +2816,9 @@ class DicomSession:
             for study in patient.studies:
                 record(study, study.study_instance_uid)
                 for series in study.series:
+                    carried = series.series_instance_uid in series_identified
                     for instance in series.instances:
-                        record(instance, instance.sop_instance_uid)
+                        record(instance, instance.sop_instance_uid, carried)
 
     def scan_pixel_content(self, serial_number: str = None) -> "PhiReport":
         """
@@ -3655,6 +3663,11 @@ class DicomSession:
         It is not "`anonymize()` ran" -- a clean input reads True after
         `audit()` alone -- and it says nothing about burned-in pixel text
         (#486). See `docs/api/stability.md`.
+
+        After `anonymize()` the UIDs listed are the replacements, beside
+        each instance's source file path, so the manifest is a crosswalk
+        from source file to exported UID (#544): keep it with the store,
+        not with an export.
 
         Args:
             output_path (str): The file path where the manifest should be saved.
@@ -5326,6 +5339,15 @@ class DicomSession:
         _report_processes_lever_on_a_memory_store(
             self.store_backend.db_path, strategy)
 
+        # The project secret each redacted UID is derived under (#544),
+        # read once, in the parent, and handed to task preparation: no
+        # worker and no task ever holds it. Created on a store that has
+        # none, as `audit()` and `anonymize()` create it, and refused on a
+        # store that lost the one its dates or UIDs were derived under.
+        # After the refusal above, which changes nothing, and before the
+        # pass-lock and any task.
+        project_secret = self.store_backend._project_secret_for_use(diagnose=False)
+
         service = RedactionService(self.store, self.store_backend)
         try:
             # The pass-lock (#368), shared, held from before the first
@@ -5341,14 +5363,16 @@ class DicomSession:
             # a `Session` concept -- and `redact_by_machine` goes
             # through here, so it does not open a second one.
             with self.store_backend._hold_pass_lock():
-                return self._apply_redaction_rules(service, strategy, force)
+                return self._apply_redaction_rules(service, strategy, force,
+                                                   project_secret)
         except Exception:
             get_logger().exception(
                 "Redaction failed. Images already processed are still redacted "
                 "in memory; the rest are untouched.")
             raise
 
-    def _apply_redaction_rules(self, service, strategy, force=False):
+    def _apply_redaction_rules(self, service, strategy, force=False,
+                               project_secret=None):
         """Runs every loaded rule and applies the results to the store.
 
         Returns the number of instances whose pixels a zone was applied
@@ -5365,7 +5389,8 @@ class DicomSession:
         tasks = []
         get_logger().info("Analyzing workload...")
         for pass_key, rule in enumerate(self.configuration.rules):
-            rule_tasks = service.prepare_redaction_tasks(rule, force=force)
+            rule_tasks = service.prepare_redaction_tasks(
+                rule, force=force, project_secret=project_secret)
             # The audit accounting's unit is the rule-pass, and the rule
             # index is the only thing that can key it: `load_config`
             # takes rules verbatim from user YAML with no serial
@@ -5963,11 +5988,19 @@ class DicomSession:
                 self._copy_owners(),
                 {(None if f.entity is None else id(f.entity),
                   f.remediation_proposal.target_attr) for f in findings
-                 if f.entity_type in ("Patient", "Study")
+                 if f.entity_type in ("Patient", "Study", "Series")
                  and f.remediation_proposal is not None})
             remediator._use_removal_targets(
                 self._removal_targets(findings, by_uid, project_secret))
             remediator._use_scan_tally(tally, findings)
+            remediator._use_series(
+                (series for patient in self.store.patients
+                 for study in patient.studies for series in study.series),
+                # The policy the lock reads a rule by (review of #574): the
+                # last audit's, which `audit(config_path=)` does not put on
+                # the configuration, else the configuration's.
+                (self._audited_phi_tags if self._audited_phi_tags is not None
+                 else self.configuration.phi_tags))
             count = remediator.apply_remediation(findings)
             if named:
                 self._adopt_the_reports_policy(report_policy, recorded_at, named)
@@ -6625,7 +6658,7 @@ class DicomSession:
         if isinstance(subset, list):
             # A bare list of UIDs at any level: patient, study, series or
             # instance. All four are matched during the walk.
-            return set(subset)
+            return self._with_replacements(set(subset))
 
         # pandas is an optional dependency, imported only on the paths that
         # need it so `import isocenter` does not require it.
@@ -6646,7 +6679,25 @@ class DicomSession:
                 f"subset must be a query string, a DataFrame, or a list of "
                 f"UIDs; got {type(subset).__name__}")
 
-        return _uids_from_frame(frame)
+        return self._with_replacements(_uids_from_frame(frame))
+
+    def _with_replacements(self, uids: Set[str]) -> Set[str]:
+        """`uids`, and the UID this store replaces each with (#544).
+
+        A subset taken before `anonymize()` -- a cohort report, a list of
+        source UIDs -- names UIDs the graph no longer holds, and read as
+        they stand it matched nothing: an empty export under a filter,
+        #678's silence by a new road. A UID names an entity if it is the
+        entity's UID or the entity's UID is its replacement. Read-only on
+        the secret: a store without one has replaced nothing. A patient
+        ID's replacement names nothing, so adding it is harmless.
+        """
+        secret = self.store_backend._project_secret_if_present()
+        if not secret:
+            return uids
+        from .privacy import _replacement_uid_for  # pylint: disable=import-outside-toplevel
+        return uids | {_replacement_uid_for(uid, secret) for uid in uids
+                       if isinstance(uid, str) and uid}
 
     #: The substring the export notice is pinned by (#555).
     _OTHER_POLICY_NOTICE = ("recorded under a policy other than the one "
@@ -7018,12 +7069,16 @@ class DicomSession:
         """
         patient_map = {p.patient_id: p for p in self.store.patients}
         study_map = {}
+        series_map = {}
         instance_map = {}
 
         for p in self.store.patients:
             for s in p.studies:
                 study_map[s.study_instance_uid] = s
                 for se in s.series:
+                    # A Series is a finding entity since #544 (Q4): it
+                    # owns `0020,000e`.
+                    series_map[se.series_instance_uid] = se
                     for i in se.instances:
                         instance_map[i.sop_instance_uid] = i
 
@@ -7034,6 +7089,9 @@ class DicomSession:
             elif f.entity_type == "Study":
                 if f.entity_uid in study_map:
                     f.entity = study_map[f.entity_uid]
+            elif f.entity_type == "Series":
+                if f.entity_uid in series_map:
+                    f.entity = series_map[f.entity_uid]
             elif f.entity_type == "Instance":
                 f.entity = self._live_target(instance_map.get(f.entity_uid), f)
 
@@ -7141,8 +7199,9 @@ class DicomSession:
         under the pseudonym this store mints for that ID (the keyed one,
         and the unkeyed one for a patient its store classed legacy): a
         saved pass replaced the ID the report names. Skipped when the
-        `entity_uid` is itself a replacement. A study is looked up by its
-        Study Instance UID. Any other entity type resolves only by
+        `entity_uid` is itself a replacement. A study or a series is looked
+        up by its UID, or by the UID this store replaced it with (#544).
+        Any other entity type resolves only by
         identity -- live, it is handed over; dead, it declines. That
         lookup is `_owner_candidates`, shared with `_removal_targets`
         since #661, so an owner's address cannot mean one thing to the
@@ -7159,7 +7218,7 @@ class DicomSession:
         import dataclasses  # pylint: disable=import-outside-toplevel
         from .remediation import _remediation_key  # pylint: disable=import-outside-toplevel
 
-        by_pid, by_study, instances, top = {}, {}, [], set()
+        by_pid, by_study, by_series, instances, top = {}, {}, {}, [], set()
         for patient in self.store.patients:
             by_pid.setdefault(patient.patient_id, []).append(patient)
             top.add(id(patient))
@@ -7167,6 +7226,7 @@ class DicomSession:
                 by_study.setdefault(study.study_instance_uid, []).append(study)
                 top.add(id(study))
                 for series in study.series:
+                    by_series.setdefault(series.series_instance_uid, []).append(series)
                     top.add(id(series))
                     for inst in series.instances:
                         top.add(id(inst))
@@ -7186,7 +7246,8 @@ class DicomSession:
                     resolved.append(finding)
                     continue
             else:
-                candidates = self._owner_candidates(finding, by_pid, by_study, secret)
+                candidates = self._owner_candidates(finding, by_pid, by_study,
+                                                    secret, by_series)
             unique = {id(c): c for c in candidates}
             if id(entity) in unique:
                 resolved.append(finding)
@@ -7215,15 +7276,16 @@ class DicomSession:
         return resolved, frozenset(gone)
 
     @staticmethod
-    def _owner_candidates(finding, by_pid, by_study, secret) -> list:
+    def _owner_candidates(finding, by_pid, by_study, secret, by_series=None) -> list:
         """The live `Patient`s or `Study`s a finding's address names (#644).
 
         A patient under its `entity_uid`, under this store's keyed
         pseudonym for that ID, and under the unkeyed one for a patient
         its store classed legacy -- a saved pass replaced the ID the
         report names, and there has been no unkeyed derivation since
-        0.9.7 for a store that is not legacy. A study under its Study
-        Instance UID. Any other type names none, and resolves by identity
+        0.9.7 for a store that is not legacy. A study or a series under its
+        UID, or under the UID this store replaced it with (#544). Any other
+        type names none, and resolves by identity
         alone.
 
         Extracted from `_live_findings` so `_removal_targets` reads an
@@ -7242,7 +7304,7 @@ class DicomSession:
         """
         from .entities import JITTER_SCHEME_UNKEYED  # pylint: disable=import-outside-toplevel
         from .privacy import (  # pylint: disable=import-outside-toplevel
-            _replacement_id_for, _unkeyed_replacement_id_for)
+            _replacement_id_for, _replacement_uid_for, _unkeyed_replacement_id_for)
 
         uid = finding.entity_uid
         if finding.entity_type == "Patient":
@@ -7253,9 +7315,16 @@ class DicomSession:
                     p for p in by_pid.get(_unkeyed_replacement_id_for(uid), ())
                     if p._jitter_scheme == JITTER_SCHEME_UNKEYED]
             return candidates
-        if finding.entity_type == "Study":
-            return list(by_study.get(uid, ()))
-        return []
+        # A Study or a Series under its UID, and under the UID this store
+        # replaced it with (#544): a pass since the report replaced the
+        # UID the report names. A Series is a finding entity since #544.
+        owners = {"Study": by_study, "Series": by_series or {}}.get(finding.entity_type)
+        if owners is None:
+            return []
+        candidates = list(owners.get(uid, ()))
+        if uid and secret:
+            candidates += owners.get(_replacement_uid_for(uid, secret), ())
+        return candidates
 
     def _status_bearers(self):
         """Every patient, study and instance: what a status column holds."""
@@ -7292,10 +7361,11 @@ class DicomSession:
         return tally
 
     def _copy_owners(self) -> dict:
-        """`id(Instance) -> (Patient, Study)` for every instance, the owners
-        the export stamps Patient's Name, Patient ID and Study Date from
-        (`RemediationService._use_copy_owners`, #624)."""
-        return {id(inst): (patient, study)
+        """`id(Instance) -> (Patient, Study, Series)` for every instance,
+        the owners the export stamps Patient's Name, Patient ID, Study Date
+        and the Study and Series Instance UIDs from
+        (`RemediationService._use_copy_owners`, #624, #544)."""
+        return {id(inst): (patient, study, series)
                 for patient in self.store.patients for study in patient.studies
                 for series in study.series for inst in series.instances}
 

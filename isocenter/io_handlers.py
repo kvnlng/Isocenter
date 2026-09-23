@@ -4221,6 +4221,26 @@ def _audit_linkage(store_backend, uid, meta, linked_under_id_less):
                      "them (#584)."))
 
 
+def _held_under(held, uid, secret):
+    """The key `held` files `uid`'s entity under: `uid` itself, or its
+    replacement when this store replaced it (#544); `uid` when neither is
+    held, so a new entity is created under the UID the file carries.
+
+    A Study or Series `anonymize()` renamed is keyed on its replacement,
+    and a later file of it carries the source UID. Without this the file
+    made a second Study under the source UID -- two studies for one, and
+    the next `anonymize()` gave the second the first's UID, which the
+    store's UNIQUE key refuses. The patient key of an ID-less subject
+    embeds the **source** Study UID and is never rewritten
+    (`NO_PATIENT_ID_PREFIX`), so it is found by the file's own UID.
+    """
+    if uid in held or not secret:
+        return uid
+    from .privacy import _replacement_uid_for  # pylint: disable=import-outside-toplevel
+    replaced = _replacement_uid_for(uid, secret)
+    return replaced if replaced in held else uid
+
+
 def _linkage_keys(ds) -> dict:
     """The keys ingest links a file by: its patient, study and series (#584).
 
@@ -4922,6 +4942,14 @@ class DicomImporter:
         # it, and re-querying per result would walk the whole graph once
         # per file.
         superseded = store.get_superseded_uids()
+        # The project secret, only if the store already holds one (#544):
+        # a study or series this store replaced is found again under the
+        # replacement of the UID a new file carries. Read-only, so ingest
+        # still never creates a secret; a store without one has replaced
+        # nothing.
+        uid_secret = (store_backend._project_secret_if_present()
+                      if hasattr(store_backend, "_project_secret_if_present")
+                      else None)
 
         # The sidecar gate for sites 1-3 below (#368). Every frame this
         # loop appends is written under it, per result, so no append
@@ -5097,12 +5125,19 @@ class DicomImporter:
                     # write here would also strand the frame (#235).
                     supersedes = superseded.get(inst.sop_instance_uid)
                     if supersedes:
+                        # Since #544 UID replacement moves the identity
+                        # too, so the file is not always an un-redacted
+                        # original: it may be the source of an instance
+                        # `anonymize()` renamed. Either way the store
+                        # already holds this image.
                         detail = (
                             f"Not importing {inst.file_path}: SOP Instance "
-                            f"UID {inst.sop_instance_uid} is the "
-                            f"pre-redaction identity of {supersedes}, which "
-                            f"this session already holds. The file still "
-                            f"carries the un-redacted original.")
+                            f"UID {inst.sop_instance_uid} is the identity "
+                            f"instance {supersedes} held before this store "
+                            f"replaced it (redaction or UID replacement), and "
+                            f"this session already holds that instance. The "
+                            f"file carries the source identifiers, and the "
+                            f"un-redacted pixels if it was redacted.")
                         declined_superseded += 1
                         # First five individually, as
                         # `scan_burned_in_annotations` does: a re-run over
@@ -5643,8 +5678,8 @@ class DicomImporter:
 
                     # Linkage Logic
                     pid = meta['pid']
-                    sid = meta['sid']
-                    ser_id = meta['ser_id']
+                    sid = _held_under(study_map, meta['sid'], uid_secret)
+                    ser_id = _held_under(series_map, meta['ser_id'], uid_secret)
 
                     # Patient, after the study is looked up (#584): a file
                     # with no Patient ID joins the patient holding its
@@ -5722,8 +5757,8 @@ class DicomImporter:
         if declined_superseded:
             logger.warning(
                 f"Declined {declined_superseded} file(s) whose SOP Instance "
-                "UID is the pre-redaction identity of an instance already in "
-                "this session; see the compliance report.")
+                "UID is the identity an instance already in this session held "
+                "before this store replaced it; see the compliance report.")
         if declined_duplicate:
             logger.warning(
                 f"Declined {declined_duplicate} file(s) whose SOP Instance "

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 from isocenter.services import RedactionService
 from isocenter.entities import Instance, Series, Study, Patient, Equipment
 from isocenter.io_handlers import DicomStore
+from support.project_secret import FIXED_A
 
 def test_redaction_rgb_dimensions():
     """
@@ -37,7 +38,7 @@ def test_redaction_rgb_dimensions():
     # 3. Apply Redaction
     # ROI: x=50, w=10 -> c1=50, c2=60
     # If logic thinks cols=3, this will trigger "completely outside" warning
-    service.redact_machine_instances("SN-RGB", [(0, 10, 50, 60)])
+    service.redact_machine_instances("SN-RGB", [(0, 10, 50, 60)], project_secret=FIXED_A)
 
     # 4. Verify Failure
     # If the bug exists, we expect a warning about "outside image dimensions"

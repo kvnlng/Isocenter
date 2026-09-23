@@ -145,12 +145,11 @@ def private_nested(out: Path):
 
 def redacted(out: Path):
     """A CT whose serial the configuration's machine rule matches: the
-    redacted pixels, and `regenerate_uid()`'s random SOP Instance UID."""
+    redacted pixels, and the SOP Instance UID the redaction derives under
+    the cohort's secret. Marked varying until #544, when that UID was
+    random."""
     write(ct("redacted", serial="GOLD-SN-REDACT", rows=32, cols=32),
           out / "redacted-1.dcm")
-    (out / "VARIES").write_text(
-        "regenerate_uid() draws a random SOP Instance UID for a redacted "
-        "instance until #544 (L10)\n", encoding="utf-8")
 
 
 def curve_overlay(out: Path):

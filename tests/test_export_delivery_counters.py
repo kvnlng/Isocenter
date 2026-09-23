@@ -61,6 +61,15 @@ def _instance(uid, number):
     return inst
 
 
+def _keep_the_duplicate(session):
+    """KEEP on SOP Instance UID, so the two instances still share one after
+    `anonymize()`. Under the floor the pass replaces it (#544), and findings
+    on a UID two instances hold resolve to one of them
+    (`docs/api/stability.md`), so only that one would move and the export
+    would hold two files, not the #197 collision these tests are about."""
+    session.configuration.set_phi_tag("0008,0018", "KEEP")
+
+
 def _session(tmp_path, uids, lock=False):
     session = DicomSession(str(tmp_path / "counters.db"))
     if lock:
@@ -216,6 +225,7 @@ def test_duplicate_uid_counters_count_files_not_write_operations(tmp_path):
     """One file exists; "2 of 2 requested" described the overwrite as
     two delivered files."""
     session = _session(tmp_path, [DUP_UID, DUP_UID])
+    _keep_the_duplicate(session)
     out = tmp_path / "out"
     try:
         session.anonymize()
@@ -267,6 +277,7 @@ def test_the_overwrite_is_filed_in_the_audit_log_and_moves_the_grade(
     the same as any other undelivered instance.
     """
     session = _session(tmp_path, [DUP_UID, DUP_UID])
+    _keep_the_duplicate(session)
     try:
         session.anonymize()
         session.export(str(tmp_path / "out"), show_progress=False)

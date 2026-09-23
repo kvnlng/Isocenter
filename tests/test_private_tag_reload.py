@@ -122,9 +122,14 @@ def _sole_instance(session):
 
 
 def _private(attributes):
-    """The odd-group subset of a `{"gggg,eeee": value}` mapping."""
+    """The odd-group subset of a `{"gggg,eeee": value}` mapping.
+
+    Bookkeeping keys are not tags: `anonymize()` records the source SOP
+    Instance UID under `SOURCE_SOP_UID_ATTR` since #544, when it gives the
+    instance its replacement UID.
+    """
     return {tag: val for tag, val in attributes.items()
-            if int(tag.split(',')[0], 16) % 2 == 1}
+            if not tag.startswith("_") and int(tag.split(',')[0], 16) % 2 == 1}
 
 
 @pytest.fixture

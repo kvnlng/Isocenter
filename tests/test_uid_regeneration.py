@@ -21,13 +21,15 @@ def test_regenerate_uid_functionality():
     assert inst.file_path == "/tmp/dummy.dcm"
 
     # 3. Regenerate UID
-    inst.regenerate_uid()
+    # The caller supplies the UID since #544: `redact()` derives it under
+    # the project secret (`services._redacted_uid_for`) rather than drawing
+    # one here.
+    inst.regenerate_uid("2.25.544")
 
     # 4. Verify post-regeneration state
     new_uid = inst.sop_instance_uid
 
-    assert new_uid != original_uid, "UID should have changed"
-    assert new_uid.startswith("1.2.826.0.1.3680043.8.498."), "Should use pydicom default prefix"
+    assert new_uid == "2.25.544", "UID should be the one given"
 
     # Attribute sync
     assert inst.attributes["0008,0018"] == new_uid, "DICOM Tag 0008,0018 should match new UID"

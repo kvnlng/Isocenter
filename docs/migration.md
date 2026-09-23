@@ -133,13 +133,23 @@ Opening an older store splits nothing, because splitting would give dates alread
 
 To separate the subjects, re-ingest their **source** files into a new store.
 
+### Stores and exports from before 1.0: UIDs (#544)
+
+Before 1.0 Isocenter exported Study, Series, SOP Instance and every other UID as it was ingested, except that redaction gave a redacted instance a random SOP Instance UID under pydicom's root. From 1.0 the floor and `basic@2026c` replace each UID the PS3.15 table codes `U` with one derived from the store's project secret (see [Configuration](configuration.md#privacy-profile)).
+
+Opening an older store changes nothing by itself. Its instances still hold their source UIDs, so the next `audit()` raises a finding on each, and `anonymize()` replaces them. A redacted instance's random UID is replaced like any other, and is stable from then on.
+
+Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same data carry replacements, so the two do not link by UID. That is inherent: it is what replacing them means. A study exported in part before 1.0 and in part after is two studies to anything that groups by Study Instance UID. To keep a project's exports linkable across the upgrade, keep the UIDs: `KEEP` on the `U` rows ([Keeping UIDs](configuration.md#privacy-profile)).
+
+A configuration that gave a UI attribute `REPLACE` with no value failed to load before 1.0 (#560) and now means UID replacement. `REPLACE` with a `value:` on a UI attribute writes that value, as before.
+
 ### A project secret stays in its store
 
 Until 1.0, `store_backend.write_project_secret(path)` and `load_project_secret(path)` copied a store's project secret into a fresh store. Both are gone and raise `AttributeError`: a secret belongs to the store it was generated in (see [What to keep](configuration.md#what-to-keep); [#716](https://github.com/kvnlng/Isocenter/issues/716)). A later batch for the same patients goes into the same store. Nothing reads a secret file written by 0.9.7 or 0.9.8 any more; delete it as you would a key.
 
 A store that loaded a secret it could not verify, under 0.9.7 or 0.9.8, still warns at every `audit()` and still grades `REVIEW_REQUIRED`. The reason it warns is recorded in the store, and removing the load does not remove it.
 
-A store that holds shifted dates but has lost its secret refuses `audit()`, `anonymize()` and `export(check_burned_in=True)` rather than generate a second offset. Nothing in Isocenter deletes the secret, so this is a store whose `project_secret` row was deleted by hand, and the secret cannot be restored from outside it: re-ingest the source files into a new store.
+A store that holds shifted dates, or UIDs replaced since 1.0, but has lost its secret refuses `audit()`, `anonymize()`, `redact()` and `export(check_burned_in=True)` rather than generate a second offset or a second UID for each instance. Nothing in Isocenter deletes the secret, so this is a store whose `project_secret` row was deleted by hand, and the secret cannot be restored from outside it: re-ingest the source files into a new store.
 
 **Starting a new project over another project's export.** A fresh store that ingests an export from another project generates its own secret and writes a `WARNING` row naming the pseudonyms it cannot verify: its offsets are its own, not the source project's, and intervals within each patient are kept. That is the one path for a new project. If the data belongs to an existing project, ingest it into that project's store.
 

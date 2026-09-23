@@ -92,14 +92,14 @@ There are three configurations a reader of this guide can be in:
 - **A bare `Session()`, never `load_config()`-ed.** `phi_tags` is the
   floor policy, `FLOOR_POLICY` (`isocenter/profiles.py`): the basic
   profile below plus the three research defaults `create_config()`
-  writes (Study Date jittered, Patient's Sex and Age kept) -- 590 rules.
+  writes (Study Date jittered, Patient's Sex and Age kept) -- 646 rules.
   Until #495 this configuration applied no tag policy at all, and Study
   ID, Institution Name, Station Name and the series/acquisition/content
   dates reached the export.
 - **The Quick Start above.** `create_config()` scaffolds a config with
   `privacy_profile: basic@2026c` (the pinned name; `basic` is its short
   form, #714); `load_config()` expands that into
-  `PRIVACY_PROFILES["basic@2026c"]` (`isocenter/profiles.py`) -- **590 tags, 590
+  `PRIVACY_PROFILES["basic@2026c"]` (`isocenter/profiles.py`) -- **646 tags, 646
   effective** -- the Basic Profile column of DICOM PS3.15 Annex E Table
   E.1-1 (2026c), with its departures named in
   [Configuration](configuration.md#privacy-profile). This is what
@@ -109,7 +109,7 @@ There are three configurations a reader of this guide can be in:
   sat in the profile doing nothing. It fires now.
   The scaffold lists only the three research defaults beneath
   `privacy_profile: basic@2026c` -- the entries of the floor whose action
-  differs from the profile's -- so the loaded policy is the same 590
+  differs from the profile's -- so the loaded policy is the same 646
   rules a bare session applies.
 - **Your own `phi_tags` configuration.** With no `privacy_profile`
   line it is layered on the floor policy; with `privacy_profile: basic`

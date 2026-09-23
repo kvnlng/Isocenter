@@ -40,9 +40,11 @@ from cryptography.fernet import Fernet
 
 from isocenter.entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED,
                                 DicomItem, Instance, Patient, Series, Study)
+from isocenter.privacy import _replacement_uid_for
 from isocenter.session import DicomSession
 
 from support.ct_small_files import study_uid, write_ct
+from support.store_secret import secret_of
 
 PID, NAME = "PAT-616", "Secret^Sixteen"
 SEQ, CONTENT, SYNTAX = "0400,0500", "0400,0510", "0400,0520"
@@ -68,6 +70,13 @@ def _threads(monkeypatch):
 # ---------------------------------------------------------------------------
 # #616
 # ---------------------------------------------------------------------------
+
+def _replaced(db, suffix):
+    """Study `suffix`'s UID as `anonymize()` replaced it (#544), under the
+    secret the store at `db` generated. None of these tests fixes one,
+    and a restore puts back what a token holds, not the source UIDs."""
+    return _replacement_uid_for(study_uid(suffix), secret_of(db))
+
 
 def _instance(uid):
     inst = Instance(uid, "1.2.840.10008.5.1.4.1.1.2", 1)
@@ -214,8 +223,9 @@ def test_a_pair_merged_by_audit_after_a_lock_recovers(tmp_path, caplog):
         [patient] = session.store.patients
         carrying = [SEQ in st.series[0].instances[0].sequences for st in patient.studies]
         assert carrying == [True, False]
+        db = tmp_path / "s.db"
         assert [st.study_instance_uid for st in patient.studies] == [
-            study_uid("6161"), study_uid("6162")]
+            _replaced(db, "6161"), _replaced(db, "6162")]
         pseudonym = patient.patient_id
         passed = patient.studies[1].series[0].instances[0].attributes.get("0008,0050")
         assert passed != ACC_ONE
@@ -295,8 +305,8 @@ def _locked_then_second_study_ingested(tmp_path):
         session.save(sync=True)
         [patient] = session.store.patients
         assert {st.study_instance_uid: SEQ in st.series[0].instances[0].sequences
-                for st in patient.studies} == {study_uid("6171"): True,
-                                               study_uid("6172"): False}
+                for st in patient.studies} == {_replaced(db, "6171"): True,
+                                               _replaced(db, "6172"): False}
         passed = patient.studies[1].series[0].instances[0].attributes.get("0008,0050")
         assert passed != ACC_ONE
         return db, key, patient.patient_id, passed
@@ -314,7 +324,7 @@ def test_a_restore_onto_a_study_ingested_after_the_lock_warns(tmp_path, caplog):
     db, key, pseudonym, passed = _locked_then_second_study_ingested(tmp_path)
 
     assert _restored_accessions(db, key, pseudonym, caplog) == {
-        study_uid("6171"): ACC_ONE, study_uid("6172"): passed}
+        _replaced(db, "6171"): ACC_ONE, _replaced(db, "6172"): passed}
     warnings = _tokenless_warnings(caplog)
     assert warnings == [tokenless(1, 2)], caplog.text
     _value_free(warnings[0], pseudonym)
@@ -340,9 +350,9 @@ def test_a_restore_onto_a_study_ingested_after_the_lock_exports_no_other_studys_
         ds = pydicom.dcmread(str(path))
         written[str(ds.StudyInstanceUID)] = (str(ds.get("AccessionNumber", None)),
                                              str(ds.PatientID))
-    assert written[study_uid("6171")] == (ACC_ONE, "PAT-A")
-    assert written[study_uid("6172")][0] != ACC_ONE
-    assert written[study_uid("6172")][1] == "PAT-A"
+    assert written[_replaced(db, "6171")] == (ACC_ONE, "PAT-A")
+    assert written[_replaced(db, "6172")][0] != ACC_ONE
+    assert written[_replaced(db, "6172")][1] == "PAT-A"
 
 
 def test_a_study_carrying_another_token_is_restored_from_it(tmp_path, caplog):
@@ -374,11 +384,11 @@ def test_a_study_carrying_another_token_is_restored_from_it(tmp_path, caplog):
         session.save(sync=True)
         [patient] = session.store.patients
         assert [st.study_instance_uid for st in patient.studies] == [
-            study_uid("6173"), study_uid("6174")]
+            _replaced(db, "6173"), _replaced(db, "6174")]
         pseudonym = patient.patient_id
 
     assert _restored_accessions(db, key, pseudonym, caplog) == {
-        study_uid("6173"): ACC_ONE, study_uid("6174"): ACC_TWO}
+        _replaced(db, "6173"): ACC_ONE, _replaced(db, "6174"): ACC_TWO}
     assert _tokenless_warnings(caplog) == [], caplog.text
 
 
@@ -688,6 +698,6 @@ def test_an_unreadable_date_on_one_study_warns_for_that_study_only(
             session.recover_patient_identity(pseudonym, restore=True)
         after = {st.study_instance_uid: st.study_date
                  for st in session.store.patients[0].studies}
-    assert after == {study_uid("6191"): stored[study_uid("6191")],
-                     study_uid("6192"): date(2005, 5, 5)}
+    one, two = _replaced(db, "6191"), _replaced(db, "6192")
+    assert after == {one: stored[one], two: date(2005, 5, 5)}
     assert _study_date_warnings(caplog) == [UNREADABLE], caplog.text

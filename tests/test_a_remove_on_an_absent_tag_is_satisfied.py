@@ -42,7 +42,7 @@ import pytest
 from pydicom.data import get_testdata_file
 
 from isocenter.entities import DicomItem, Instance, PhiStatus
-from isocenter.privacy import PhiFinding, PhiRemediation
+from isocenter.privacy import PhiFinding, PhiRemediation, _replacement_uid_for
 from isocenter.remediation import RemediationService, _remediation_key
 from isocenter.session import DicomSession
 from support.project_secret import FIXED_A, load_fixed_secret
@@ -897,6 +897,13 @@ def test_a_shared_uid_resolves_to_the_instance_the_finding_names(tmp_path):
         b.sop_instance_uid = a.sop_instance_uid
         del a.attributes[ABSENT]
         assert b.attributes.get(ABSENT) == "TOSHIBA"
+        # A's Series under this store's replacement: a source Series UID
+        # under the floor would keep A from reading REMEDIATED whatever this
+        # finding did (review of #544, round 2, R2-1).
+        for series in (se for p in session.store.patients for st in p.studies
+                       for se in st.series if a in se.instances):
+            series.series_instance_uid = _replacement_uid_for(
+                series.series_instance_uid, FIXED_A)
 
         session.anonymize([_finding(a, "REMOVE_TAG", ABSENT, uid=a.sop_instance_uid)])
 

@@ -41,7 +41,8 @@ from pydicom.data import get_testdata_file
 from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
 
-from isocenter.entities import Instance, Patient, PhiStatus, Series, Study
+from isocenter.entities import (SOURCE_SOP_UID_ATTR, Instance, Patient, PhiStatus,
+                                Series, Study)
 from isocenter.privacy import PhiFinding, PhiRemediation
 from isocenter.remediation import RemediationService
 from isocenter.session import DicomSession
@@ -273,7 +274,10 @@ def test_a_private_date_the_first_call_removed_is_not_recreated_by_the_second(
         session.anonymize(report)
 
         assert PRIVATE_DATE not in instance.attributes, mode
-        uid = instance.sop_instance_uid
+        # The row names the instance as the report did, by the UID it was
+        # scanned under: the first call replaced it (#544).
+        uid = instance.attributes[SOURCE_SOP_UID_ATTR]
+        assert uid != instance.sop_instance_uid
         gone = [d for d in _declines_on(session, uid, PRIVATE_DATE) if "no longer on" in d]
         assert len(gone) == 1, _rows(session, "REMEDIATION_DECLINED")
         assert [d for u, d in _rows(session, "REMEDIATION_SHIFT_DATE")

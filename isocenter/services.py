@@ -171,6 +171,18 @@ def _report_redaction_failures(failures, store_backend=None):
     return reported
 
 
+def _redacted_uid_for(inst, config_hash, secret) -> str:
+    """The SOP Instance UID `inst` takes when redacted under `config_hash`
+    (#544): derived from the UID it was **ingested** under -- the source
+    recorded by an earlier UID replacement or redaction, else its own --
+    so redacting before or after `anonymize()` gives one UID, and a
+    `force=True` re-redaction under other zones another. Always computed
+    in the parent: a worker is handed the result, never the secret."""
+    from .privacy import _redaction_uid_for  # pylint: disable=import-outside-toplevel
+    source = inst.attributes.get(SOURCE_SOP_UID_ATTR) or inst.sop_instance_uid
+    return _redaction_uid_for(source, config_hash, secret)
+
+
 #: What `_apply_redaction_flags` writes, spelled once. The #486 guard
 #: (`_flags_are_redactions`) accepts each of these tags at the value
 #: captured before the pass or at exactly this value, and nothing else.
@@ -583,7 +595,8 @@ class RedactionService:
         return targets
 
     def prepare_redaction_tasks(self, machine_rules: dict, verbose: bool = False,
-                                force: bool = False) -> List[dict]:
+                                force: bool = False,
+                                project_secret: Optional[bytes] = None) -> List[dict]:
         """
         Generates a list of fine-grained tasks (dicts) from a single machine rule.
 
@@ -598,9 +611,17 @@ class RedactionService:
                 `Session.redact()`, which is where a caller chooses it, and
                 `redact_machine_instances`, which takes the same flag as a
                 keyword so the two paths stay symmetrical (#237).
+            project_secret (bytes, optional): What each task's
+                `new_sop_uid` is derived under (#544); without it, the
+                store backend's. `Session.redact()` passes it.
 
         Returns:
             List[dict]: A list of task dictionaries ready for `execute_redaction_task`.
+
+        Raises:
+            RuntimeError: When a rule has targets and there is no project
+                secret to derive their UIDs under (#544), as
+                `redact_machine_instances` raises.
         """
         serial = machine_rules.get("serial_number")
         zones = machine_rules.get("redaction_zones", [])
@@ -642,10 +663,18 @@ class RedactionService:
         config_str = json.dumps({"serial": serial, "rois": rois_stable}, sort_keys=True)
         config_hash = hashlib.md5(config_str.encode('utf-8')).hexdigest()
 
+        # The redacted UIDs are derived here, in the parent (#544): the
+        # secret is read once and never put on a task or on the service.
+        secret = self._redaction_secret(project_secret)
+
         # Create Tasks
         tasks = []
         for inst in targets:
             tasks.append({
+                # The UID the worker gives the instance if a zone lands
+                # (`Instance.regenerate_uid`), derived from its source UID
+                # and this configuration, so the worker needs no secret.
+                "new_sop_uid": _redacted_uid_for(inst, config_hash, secret),
                 "instance": inst,
                 # Captured here -- parent-side, before any worker runs --
                 # and the worker reads *this*, never the live attribute.
@@ -759,7 +788,7 @@ class RedactionService:
 
             attested_from = _capture_attestation(inst)
             self._apply_redaction_flags(inst)
-            inst.regenerate_uid()
+            inst.regenerate_uid(task["new_sop_uid"])
             # Mark as redacted with this hash
             inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
             inst.mark_modified()
@@ -919,7 +948,8 @@ class RedactionService:
             self,
             machine_rules: dict,
             show_progress: bool = True,
-            verbose: bool = False):
+            verbose: bool = False,
+            project_secret: Optional[bytes] = None):
         """
         Applies all zones defined in a single machine config object sequentially.
 
@@ -974,7 +1004,29 @@ class RedactionService:
                 valid_rois,
                 targets=targets,
                 show_progress=show_progress,
-                verbose=verbose)
+                verbose=verbose,
+                project_secret=project_secret)
+
+    def _redaction_secret(self, project_secret: Optional[bytes]) -> bytes:
+        """The project secret a redaction derives its UIDs under (#544).
+
+        The one given; otherwise the store backend's, read in the parent
+        (`_project_secret_for_use`, which creates one on a store that has
+        none and refuses on a store that lost its own); otherwise
+        `RuntimeError`, never a random UID. Returned to the caller and
+        **never kept on the service**: under processes the service is
+        pickled to every worker with its bound `execute_redaction_task`,
+        and the worker is handed the UID, not the secret.
+        """
+        if project_secret:
+            return project_secret
+        reader = getattr(self.store_backend, "_project_secret_for_use", None)
+        if reader is None:
+            # `_require_secret`'s refusal, so there is one wording for "no
+            # secret, no unkeyed fallback".
+            from .privacy import _require_secret  # pylint: disable=import-outside-toplevel
+            return _require_secret(None)
+        return reader(diagnose=False)
 
     def redact_machine_instances(
             self,
@@ -983,7 +1035,8 @@ class RedactionService:
             targets: List[Instance] = None,
             show_progress: bool = True,
             verbose: bool = False,
-            force: bool = False):
+            force: bool = False,
+            project_secret: Optional[bytes] = None):
         """
         Applies a LIST of ROIs to all images from the specified machine.
 
@@ -1003,6 +1056,10 @@ class RedactionService:
                 all call this method positionally with two arguments.
                 `Session.redact(force=True)` is the same lever on the
                 parallel path (#237).
+            project_secret (bytes, optional): The project secret each
+                redacted instance's SOP Instance UID is derived under
+                (#544). Without it, the store backend's; a service with
+                no backend has to be given one.
 
         Raises:
             RedactionError: If any instance's zone could not be applied.
@@ -1013,6 +1070,12 @@ class RedactionService:
                 question the parallel one does -- it is public, it is what
                 `process_machine_rules` calls, and a failure here left the
                 burned-in identifier in the pixels just as silently (#213).
+            RuntimeError: Before any instance is touched, when there is
+                no project secret to derive a UID under -- no
+                `project_secret` and no store backend -- or the backend's
+                store refuses one (it lost the secret its dates or UIDs
+                were derived under). Until 1.0 this drew a random UID and
+                needed no secret (#544).
 
         Returns:
             None. The signature is unchanged;
@@ -1021,6 +1084,8 @@ class RedactionService:
         """
         if targets is None:
             targets = self.index.get_by_machine(machine_sn)
+        # Before the first instance, so a refusal changes nothing.
+        secret = self._redaction_secret(project_secret)
 
         self.logger.info(f"Redacting {len(targets)} images for {machine_sn} ({len(rois)} zones)...")
 
@@ -1109,7 +1174,7 @@ class RedactionService:
                 if modified:
                     attested_from = _capture_attestation(inst)
                     self._apply_redaction_flags(inst)
-                    inst.regenerate_uid()
+                    inst.regenerate_uid(_redacted_uid_for(inst, config_hash, secret))
                     # Mark as redacted with this hash
                     inst.attributes["_ISOCENTER_REDACTION_HASH"] = config_hash
                     # Force Dirty to persist metadata update

@@ -69,6 +69,15 @@ SENTINEL = "VALUE-SENTINEL-644"
 #: ruling on #624, Q-C4): the copy follows its owner either way.
 OWNER_ROW = "is written by the export from the"
 
+#: The three owned UIDs kept. The floor gives each a replacement derived
+#: under the store's secret since #544, and a finding raised after that
+#: pass names its instance by the replacement: a store under another
+#: secret, holding the source UIDs, declines it as naming no entity before
+#: the seed check the cross-store tests below are about is reached.
+KEEP_UIDS = {tag: {"name": name, "action": "KEEP"} for tag, name in (
+    ("0008,0018", "SOP Instance UID"), ("0020,000d", "Study Instance UID"),
+    ("0020,000e", "Series Instance UID"))}
+
 #: The floor, plus a rule on each shape a finding can live in: a
 #: top-level REPLACE, a SHIFT at both levels, a sequence kept (so its
 #: items are addressed) and a sequence emptied (so its items are
@@ -203,6 +212,22 @@ def _rows(session):
     session.store_backend.flush_audit_queue()
     with sqlite3.connect(session.store_backend.db_path) as conn:
         return list(conn.execute("SELECT action_type, details FROM audit_log ORDER BY rowid"))
+
+
+#: Since #544 a report from another store also carries that store's
+#: replacement UIDs, which this store refuses (the UID analogue of #644),
+#: and the instances' Study and Series UID copies follow their refusing
+#: owners (#624). Those rows are the UID tests' subject; these tests count
+#: the pseudonym and seed rows, so each asserts the UID rows are there and
+#: then sets them aside.
+FOREIGN_UID = "is not this store's replacement for the UID the scan saw"
+
+
+def _without_uid_rows(declines):
+    uid_rows = [d for d in declines if FOREIGN_UID in d
+                or (OWNER_ROW in d and ("0020,000d" in d or "0020,000e" in d))]
+    assert uid_rows, declines
+    return [d for d in declines if d not in uid_rows]
 
 
 def _declined(session):
@@ -624,7 +649,13 @@ def test_a_nested_finding_from_before_redact_reaches_its_instance_after_a_reopen
     with _reopen(root) as second:
         assert second.anonymize([nested]) == 1
         assert _declined(second) == []
-        assert _by_modality(second)["MR"][2].phi_status is PhiStatus.REMEDIATED
+        # IDENTIFIED, not REMEDIATED: a plain list after a reopen, without
+        # the Series' finding, leaves the MR under its source Series
+        # Instance UID, which the policy replaces (review of #544, round 2,
+        # R2-1). This line asserted REMEDIATED until then, pinning that
+        # hole's PASS side incidentally; the write is still marked, which
+        # the export below is what checks.
+        assert _by_modality(second)["MR"][2].phi_status is PhiStatus.IDENTIFIED
         second.save(sync=True)
     with _reopen(root) as third:
         mr = _datasets(third, root / "out")["MR"]
@@ -836,7 +867,7 @@ def test_a_report_from_another_store_writes_no_pseudonym_minted_there(tmp_path):
                   for el in ds.iterall() if el.VR != "SQ"
                   and any(p in str(el.value) for p in minted_by_a)]
         assert not leaked, leaked
-        declines = _declined(b)
+        declines = _without_uid_rows(_declined(b))
         # B's Patient refuses each ID (#644), so each instance's 0010,0020
         # copy, carrying A's pseudonym too, does not fold and follows its
         # Patient (#624): one row per patient for each.
@@ -865,12 +896,13 @@ def test_a_date_seeded_on_another_stores_pseudonym_is_not_shifted(tmp_path):
     them, and the run grades REVIEW_REQUIRED.
 
     Kills: the seed check dropped from `_shift_target_moved`."""
-    keep = {"0008,0021": {"name": "Series Date", "action": "KEEP"}}
+    keep = {"0008,0021": {"name": "Series Date", "action": "KEEP"}, **KEEP_UIDS}
     root_a = tmp_path / "a"
     with _store(root_a, keep) as a:
         a.anonymize(a.audit())
         a.save(sync=True)
-        (root_a / "cfg.yaml").write_text(json.dumps({"phi_tags": RULES}), encoding="utf-8")
+        (root_a / "cfg.yaml").write_text(json.dumps({"phi_tags": {**RULES, **KEEP_UIDS}}),
+                                     encoding="utf-8")
         a.load_config(str(root_a / "cfg.yaml"))
         report = a.audit()
     seeds = {_proposal(f).metadata["patient_id"] for f in report.findings
@@ -909,13 +941,14 @@ def test_a_foreign_seed_is_not_exempted_by_another_patient_holding_it(tmp_path):
     declines on 1CT1, whose dates stay as the source had them.
 
     Kills: a seed admitted when any patient in the store holds it."""
-    keep = {"0008,0021": {"name": "Series Date", "action": "KEEP"}}
+    keep = {"0008,0021": {"name": "Series Date", "action": "KEEP"}, **KEEP_UIDS}
     root_a = tmp_path / "a"
     with _store(root_a, keep) as a:
         a.anonymize(a.audit())
         a.save(sync=True)
         a.export(str(root_a / "out"), use_compression=False)
-        (root_a / "cfg.yaml").write_text(json.dumps({"phi_tags": RULES}), encoding="utf-8")
+        (root_a / "cfg.yaml").write_text(json.dumps({"phi_tags": {**RULES, **KEEP_UIDS}}),
+                                     encoding="utf-8")
         a.load_config(str(root_a / "cfg.yaml"))
         report = a.audit()
     pseudonym = _replacement_id_for("1CT1", FIXED_A)
@@ -993,7 +1026,7 @@ def test_a_legacy_stores_report_writes_no_unkeyed_pseudonym_or_offset_into_a_key
         assert _ct_tag(got["CT"], "0008,0021") == "20040119"
         assert _ct_tag(got["CT"], IMAGE_SEQ, 0, "0008,0021") == "20010101"
         assert _ct_tag(got["MR"], "0008,0020") == "20040826"
-        declines = [_reason(d) for d in _declined(b)]
+        declines = _without_uid_rows([_reason(d) for d in _declined(b)])
         # The instances' top-level Study Date copies, one per patient,
         # carry the #624 reason instead of the seed's; the Patient ID copies
         # follow their refusing Patients (#624) too.
@@ -1020,13 +1053,14 @@ def test_a_legacy_pseudonym_seed_shifts_no_date_in_a_keyed_store(tmp_path):
     pseudonym anywhere in the report to warn anyone (review of #665, M1).
 
     Kills: the holder's scheme ignored by the seed check."""
-    keep = {"0008,0021": {"name": "Series Date", "action": "KEEP"}}
+    keep = {"0008,0021": {"name": "Series Date", "action": "KEEP"}, **KEEP_UIDS}
     root_a = tmp_path / "a"
     _store(root_a, keep).close()
     with _classed_legacy(root_a) as a:
         a.anonymize(a.audit())
         a.save(sync=True)
-        (root_a / "cfg.yaml").write_text(json.dumps({"phi_tags": RULES}), encoding="utf-8")
+        (root_a / "cfg.yaml").write_text(json.dumps({"phi_tags": {**RULES, **KEEP_UIDS}}),
+                                     encoding="utf-8")
         a.load_config(str(root_a / "cfg.yaml"))
         report = a.audit()
     seeds = {(_proposal(f).metadata["patient_id"], _proposal(f).metadata["jitter_scheme"])
@@ -1068,7 +1102,7 @@ def test_a_date_seeded_on_another_sites_patient_id_is_not_shifted(tmp_path):
 
         b.anonymize(findings)
 
-        declines = [_reason(d) for d in _declined(b)]
+        declines = _without_uid_rows([_reason(d) for d in _declined(b)])
         # The instances' top-level Study Date copies follow their Study
         # (#624), which was handed in and declined on the seed, and their
         # #624 reason wins over the seed's (Q-C4): one row per study. The

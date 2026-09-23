@@ -26,6 +26,7 @@ from isocenter.io_handlers import (
 )
 from isocenter.services import RedactionService
 from isocenter.session import DicomSession
+from support.project_secret import FIXED_A
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +341,7 @@ def test_redaction_zeroes_the_zone_in_every_frame():
 
     service = RedactionService(store)
     # Zone: rows 0-3, all four columns.
-    service.redact_machine_instances("SN-RED", [(0, 3, 0, 4)],
+    service.redact_machine_instances("SN-RED", [(0, 3, 0, 4)], project_secret=FIXED_A,
                                      show_progress=False)
 
     result = inst.pixel_array

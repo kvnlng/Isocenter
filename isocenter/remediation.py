@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
 from .parallel import progress_bar
-from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Study
+from .entities import JITTER_SCHEME_KEYED, Instance, Patient, PhiStatus, Series, Study
 from .privacy import PhiFinding, PhiRemediation, canonical_patient_key
 from .logger import describe_exception, get_logger
 
@@ -643,6 +643,7 @@ class RemediationService:
         # is imported at module scope for other names already.
         from pydicom.datadict import dictionary_VR  # pylint: disable=import-outside-toplevel
         from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
+        from .privacy import UID_REPLACEMENT  # pylint: disable=import-outside-toplevel
 
         proposal = finding.remediation_proposal
         tag = _canonical_tag(proposal.target_attr)
@@ -655,6 +656,13 @@ class RemediationService:
         stamped = self._owner_stamps_copy(entity, finding)
         if stamped is not None:
             return None, stamped or None
+        # After the owner's: for a stamped copy the owner's reason wins, as
+        # it does over the #644 seed check (coordinator ruling on #624).
+        foreign = self._foreign_uid_refused(proposal)
+        if foreign:
+            self.logger.warning(
+                f"Remediation declined for {self._log_subject(finding)}: {foreign}")
+            return None, foreign
 
         if tag in sequences and proposal.new_value == "":
             if not entity.clear_sequence_items(tag):
@@ -712,8 +720,43 @@ class RemediationService:
                     vr is None and isinstance(
                         (attributes or {}).get(tag), (bytes, bytearray))):
                 value = b""
+        sop_move = (tag == "0008,0018" and not finding.entity_path
+                    and hasattr(entity, "_take_sop_uid")
+                    and (proposal.metadata or {}).get(UID_REPLACEMENT))
+        if sop_move and entity.sop_instance_uid not in (proposal.original_value,
+                                                        proposal.new_value):
+            # The instance left the UID the scan saw for one other than
+            # this finding's replacement (review of #544, finding 1); at
+            # that replacement already, the write repeats itself as any
+            # REPLACE does. A kept report still reaches a redacted instance
+            # -- `_instances_by_uid` files it under its source on purpose
+            # -- and moving it to the source's replacement would give the
+            # redacted pixels the UID of the unredacted export (#237's
+            # harm). A UID this project minted, redacted or replaced, is
+            # what the rule asks for: met. Anything else was not ours to
+            # overwrite.
+            from .privacy import _uid_is_minted  # pylint: disable=import-outside-toplevel
+            if _uid_is_minted(entity.sop_instance_uid, self.project_secret):
+                return None, None
+            reason = (f"the SOP Instance UID is {entity.sop_instance_uid!r}, "
+                      f"not {proposal.original_value!r} as scanned; the "
+                      "identity is left as it is (#544)")
+            self.logger.warning(
+                f"Remediation declined for {self._log_subject(finding)}: "
+                f"{reason}")
+            return None, reason
         self._record_what_is_left(entity, proposal.target_attr, value)
-        entity.set_attr(proposal.target_attr, value)
+        if sop_move:
+            # An Instance's own SOP Instance UID under the keyed UID
+            # replacement (#544): the property moves with the element, or
+            # the export would name the file, write the file meta and key
+            # the store by the source UID while the element said another.
+            # The pixels are unchanged, so the source file still serves
+            # them. A `REPLACE value:` writes the element alone, as in
+            # 0.9.8 (owner ruling on Q-C of #544).
+            entity._take_sop_uid(value, pixels_changed=False)
+        else:
+            entity.set_attr(proposal.target_attr, value)
         return (f"Remediated {finding.entity_uid} (Tag {proposal.target_attr}) "
                 f"-> {proposal.new_value}"), None
 
@@ -1083,7 +1126,34 @@ class RemediationService:
                 and not self._is_holders_pseudonym(proposal, self._holders.get(id(entity)))):
             return (f"{attr}: the value is not this store's pseudonym for the "
                     "patient it would be written to, so it is not written")
-        return None
+        return self._foreign_uid_refused(proposal)
+
+    def _foreign_uid_refused(self, proposal) -> Optional[str]:
+        """Why a UID replacement must not be written, or None when it may.
+
+        The UID analogue of #644's refusal above. A report resolves against
+        the live graph by the UIDs it names, so a report raised in another
+        store over the same files reaches this one, and its proposals carry
+        that store's replacements: written, they link this store's export
+        to the other project's by UID -- the link the project secret exists
+        to prevent -- and this store's next `audit()`, which does not
+        recognise them as its own, replaces them a second time. Found in
+        the rebase of #544 over #624. So the value written must be the one
+        this store mints for `original_value`. Without a secret (a service
+        used with none) nothing is checked, as `_holders` reads it. The
+        reason names no value.
+        """
+        from .privacy import UID_REPLACEMENT, _replaced_uids  # pylint: disable=import-outside-toplevel
+
+        if not (self.project_secret and (proposal.metadata or {}).get(UID_REPLACEMENT)):
+            return None
+
+        # Both sides as the scan builds them: `_replaced_uids` gives a str,
+        # or a list for a multi-valued element, and a pickle keeps either.
+        if _replaced_uids(proposal.original_value, self.project_secret) == proposal.new_value:
+            return None
+        return (f"{proposal.target_attr}: the value is not this store's "
+                "replacement for the UID the scan saw, so it is not written")
 
     @classmethod
     def _holds_attr_to_remove(cls, entity, attr) -> bool:
@@ -1150,16 +1220,10 @@ class RemediationService:
             return False
         if getattr(entity, attr) is not None:
             return False
-        # A Patient walks its studies; a Study walks its own series and
-        # no sibling's -- `_write_to_instances`' walk, in its words.
-        studies = getattr(entity, "studies", None)
-        if studies is None:
-            studies = [entity]
-        for study in studies:
-            for series in getattr(study, "series", []):
-                for instance in getattr(series, "instances", []):
-                    if tag in getattr(instance, "attributes", {}):
-                        return False
+        # `_write_to_instances`' walk, the same helper.
+        for instance in cls._instances_beneath(entity):
+            if tag in getattr(instance, "attributes", {}):
+                return False
         return True
 
     def _belongs_to_holder(self, patient_id, scheme, holder) -> bool:
@@ -1312,11 +1376,12 @@ class RemediationService:
         if self._scan_tally is not None:
             live = {id(f): self._live_uid(f.entity) for f in findings
                     if f.remediation_proposal and f.entity is not None}
-            incomplete = {
-                uid for uid in ({f.entity_uid for f in findings
-                                 if f.remediation_proposal}
-                                | set(live.values()))
-                if self._scan_tally.settle(uid, by_uid.get(uid, ())) is False}
+            settled = {
+                uid: self._scan_tally.settle(uid, by_uid.get(uid, ()))
+                for uid in ({f.entity_uid for f in findings
+                             if f.remediation_proposal}
+                            | set(live.values()))}
+            incomplete = {uid for uid, done in settled.items() if done is False}
             for finding in findings:
                 if finding.entity is not None and (
                         finding.entity_uid in incomplete
@@ -1325,6 +1390,53 @@ class RemediationService:
                     owner = self._instance_owners.get(id(finding.entity))
                     if owner is not None:
                         demote.append(owner)
+            # A Series' instances bear its findings (#544, review finding
+            # 2): a series whose scan-time UID the tally holds open --
+            # raised and not handed in, or handed and declined -- keeps
+            # them from reading REMEDIATED, whether or not this pass named
+            # it. Nothing here lifts them when a later pass completes the
+            # Series: as for an owner handed in late (#624, Q-C5), the
+            # instance findings handed again, or a re-audit, do. A uid this
+            # pass already settled is not asked twice.
+            for series, uid in self._series_at_start:
+                if uid is None:
+                    continue
+                done = (settled[uid] if uid in settled
+                        else self._scan_tally.settle(uid, by_uid.get(uid, ())))
+                if done is False:
+                    demote.append(series)
+        # The same question asked of the Series as it stands, tally or none
+        # (review of #544, round 2, R2-1). A Series has no stored status, so
+        # after a reopen its finding survives only in a report, and a pass
+        # handed a plain list without it had no tally to hold it open: the
+        # instances read REMEDIATED over a file carrying the source Series
+        # UID, and the export graded PASS. So at the pass end each Series is
+        # asked the scan's own condition (`_owned_uid_is_open`) under the
+        # policy the session judges by: its UID *now* -- one this pass
+        # replaced is minted and asks nothing -- non-blank, not minted here,
+        # under a value-less REPLACE on `0020,000e`. An open Series demotes
+        # only the instances beneath it whose status this pass recorded: a
+        # status recorded before the pass is not this pass's to change
+        # (#750), and the check has no audit behind it, so it speaks only
+        # for what the pass itself stamped. Only a demotion: a Series found
+        # closed lifts nothing.
+        if self._series_at_start and self._series_policy is not None and self.project_secret:
+            from .privacy import _owned_uid_is_open  # pylint: disable=import-outside-toplevel
+            before = self._status_revisions_at_start
+            for series, _ in self._series_at_start:
+                stamped = [instance for instance in series.instances
+                           if getattr(instance, "_phi_status_revision", None)
+                           != before.get(id(instance))]
+                if stamped and _owned_uid_is_open(
+                        self._series_policy, "0020,000e",
+                        getattr(series, "series_instance_uid", None),
+                        self.project_secret):
+                    demote.extend(stamped)
+        # A Series in the list demotes itself and the instances that bear
+        # its status.
+        demote = [bearer for entity in demote
+                  for bearer in ([entity, *entity.instances] if isinstance(entity, Series)
+                                 else [entity])]
         for entity in demote:
             if getattr(entity, "phi_status", None) is PhiStatus.REMEDIATED:
                 entity.record_phi_status(PhiStatus.IDENTIFIED)
@@ -1344,13 +1456,33 @@ class RemediationService:
         mis-named nested finding stamps the item alone, never the
         instance.
         """
+        if isinstance(entity, Patient):
+            return self._pass_start_ids.get(id(entity))
+        # As the pass began, like a patient's: since #544 the pass itself
+        # moves an instance's, a study's and a series' UID, and read now
+        # it would be the replacement, under which the audit raised
+        # nothing. Read now only for an entity the snapshot does not hold.
+        if id(entity) in self._pass_start_uids:
+            return self._pass_start_uids[id(entity)]
+        return self._uid_of(entity)
+
+    @staticmethod
+    def _uid_of(entity) -> Optional[str]:
+        """An Instance's, a Study's or a Series' own UID now; None for a
+        nested item, which has none.
+
+        The Series arm feeds only `_live_uid`, and through it
+        `_pass_start_uids`; it is redundant with the Series settle at the
+        pass end only because `_use_series` is always called beside
+        `_use_scan_tally` -- once, in `Session.anonymize()`, the one place
+        a tally is set. A new caller of `_use_scan_tally` that skips
+        `_use_series` makes this arm load-bearing again (review of #544,
+        R11)."""
         if isinstance(entity, Instance):
             return entity.sop_instance_uid
         if isinstance(entity, Study):
             return entity.study_instance_uid
-        if isinstance(entity, Patient):
-            return self._pass_start_ids.get(id(entity))
-        return None
+        return getattr(entity, "series_instance_uid", None)
 
     #: The `Patient`/`Study` fields the exporter stamps onto every exported
     #: instance from the entity, with the tag each is the value of
@@ -1380,7 +1512,30 @@ class RemediationService:
         # reaches today" -- a hand-built finding on it gets the same
         # one-truth treatment (#497 review, R7).
         "study_time": "0008,0030",
+        # The owners' own UIDs (#544): the exporter stamps both from the
+        # entity, and the keyed UID replacement moves the entity, so its
+        # instances' top-level copies take the same value in the same
+        # write. A Series walks its own instances.
+        "study_instance_uid": "0020,000d",
+        "series_instance_uid": "0020,000e",
     }
+
+    @staticmethod
+    def _instances_beneath(entity):
+        """Every instance under a Patient, a Study or a Series: the walk
+        `_write_to_instances` writes and `_owner_field_gone` reads, spelled
+        once so the writer and the reader cannot disagree about one
+        instance. `getattr` with defaults because the arms fire for any
+        object carrying the field, test doubles included."""
+        if hasattr(entity, "instances"):
+            yield from getattr(entity, "instances", [])
+            return
+        studies = getattr(entity, "studies", None)
+        if studies is None:
+            studies = [entity]
+        for study in studies:
+            for series in getattr(study, "series", []):
+                yield from getattr(series, "instances", [])
 
     #: `id(nested item) -> Instance` holding it, for the findings of this
     #: pass raised inside a sequence (#494). Empty unless
@@ -1463,15 +1618,16 @@ class RemediationService:
         """Name the patient holding each entity of this pass, as it begins."""
         self._holders = self._MappingProxyType(dict(holders))
 
-    #: `id(Instance) -> (Patient, Study)` holding it, for every instance
-    #: of the graph (`Session._copy_owners`, #624): the owners the export
-    #: stamps Patient's Name, Patient ID and Study Date from. Instances
+    #: `id(Instance) -> (Patient, Study, Series)` holding it, for every
+    #: instance of the graph (`Session._copy_owners`, #624): the owners the
+    #: export stamps Patient's Name, Patient ID, Study Date and, since
+    #: #544, the Study and Series Instance UIDs from. Instances
     #: only, so a nested item is never found in it -- the stamp reaches
     #: the dataset root only (#496 N4). **None as the whole map means no
     #: session**, and nothing is checked, as `_holders` reads it. A class
     #: attribute for `_instance_owners`' reason.
     _copy_owners = None
-    #: `(id(owner), field)` for each Patient or Study finding this pass was
+    #: `(id(owner), field)` for each Patient, Study or Series finding this pass was
     #: handed, by the field it writes. A copy whose owner field is not in
     #: it was not declined by its owner: the owner was simply not handed in
     #: (coordinator ruling on #624, Q-C5). An owner finding that could not
@@ -1483,8 +1639,8 @@ class RemediationService:
     _owners_handed = frozenset()
 
     def _use_copy_owners(self, owners, handed=()) -> None:
-        """Name the Patient and Study the export stamps each instance from,
-        and the owner fields this pass was handed."""
+        """Name the Patient, Study and Series the export stamps each
+        instance from, and the owner fields this pass was handed."""
         self._copy_owners = self._MappingProxyType(dict(owners))
         self._owners_handed = frozenset(handed)
 
@@ -1492,8 +1648,9 @@ class RemediationService:
         """Why an instance finding on an owner-stamped copy must not run, or
         None when the copy is not one (#624).
 
-        The export writes `0010,0010` and `0010,0020` from the `Patient`
-        and `0008,0020` from the `Study` over whatever the instance holds
+        The export writes `0010,0010` and `0010,0020` from the `Patient`,
+        `0008,0020` and `0020,000d` from the `Study` and `0020,000e` from
+        the `Series` (the UIDs since #544) over whatever the instance holds
         (`io_handlers.export_stamp_attributes`), so an instance's
         top-level copy of one of them is never what the file carries. An
         owner's write in this pass reaches the copy and the instance
@@ -1527,7 +1684,7 @@ class RemediationService:
         owners = (self._copy_owners or {}).get(id(entity))
         if owners is None:
             return None
-        patient, study = owners
+        patient, study, series = owners
         tag = _canonical_tag(finding.remediation_proposal.target_attr)
         if tag == "0010,0010":
             owner, value = patient, patient.patient_name
@@ -1536,6 +1693,14 @@ class RemediationService:
         elif tag == "0008,0020":
             from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
             owner, value = study, format_study_date(study.study_date)
+        # The owned UIDs (#544): the export stamps them from the Study and
+        # the Series as they stand, so a copy written as the replacement
+        # while its owner kept the source was a file carrying the source
+        # beside a graph and a REMEDIATED stamp that said otherwise.
+        elif tag == "0020,000d":
+            owner, value = study, study.study_instance_uid
+        elif tag == "0020,000e":
+            owner, value = series, series.series_instance_uid
         else:
             return None
         value = "" if value is None else value
@@ -1559,10 +1724,10 @@ class RemediationService:
             # declined or was not handed in -- and a record would make the
             # next lock read an original as a replacement, and a later
             # pass read it as already remediated.
-            scope = patient.studies if owner is patient else [study]
+            # Every instance under the owner: the walk `_write_to_instances`
+            # writes, so "another copy under the same owner" means one thing.
             if any(other.remediation_vouches_for(tag, value)
-                   for each in scope for series in each.series
-                   for other in series.instances if other is not entity):
+                   for other in self._instances_beneath(owner) if other is not entity):
                 self._record_what_is_left(entity, tag, value)
             entity.set_attr(tag, value)
             # Not re-recorded when it read UNSCANNED: that would write
@@ -1623,6 +1788,9 @@ class RemediationService:
     #: `id(Patient) -> patient_id` as the pass began, for `_live_uid`.
     #: Set with the tally; read-only for `_instance_owners`' reason.
     _pass_start_ids = _MappingProxyType({})
+    #: `id(entity) -> its SOP, Study or Series Instance UID` as the pass
+    #: began (#544), for `_live_uid`. Set with the tally; read-only.
+    _pass_start_uids = _MappingProxyType({})
 
     def _use_scan_tally(self, tally, findings=()) -> None:
         """Settle this service's passes against `tally` (#553).
@@ -1644,6 +1812,35 @@ class RemediationService:
         self._pass_start_ids = self._MappingProxyType({
             id(f.entity): f.entity.patient_id for f in findings
             if isinstance(f.entity, Patient)})
+        # The same for the UIDs the pass may replace (#544).
+        self._pass_start_uids = self._MappingProxyType({
+            id(f.entity): self._uid_of(f.entity) for f in findings
+            if f.entity is not None and not isinstance(f.entity, Patient)})
+
+    #: `(series, its Series Instance UID as the pass began)` for every
+    #: series of the session's graph (#544, review finding 2). A Series has
+    #: no status; its instances bear its findings, so an incomplete Series
+    #: uid demotes them at the pass end. Empty without a session, where a
+    #: declined Series still demotes its own instances. Read-only for
+    #: `_instance_owners`' reason.
+    _series_at_start = ()
+    #: The policy the pass end asks each Series under (R2-1): the one the
+    #: session last audited under, else its configuration's.
+    _series_policy = None
+    #: Each instance's status revision as the pass began, so the pass end
+    #: can tell the statuses this pass recorded from the rest (R2-1).
+    _status_revisions_at_start = {}
+
+    def _use_series(self, series, phi_tags) -> None:
+        """Snapshot each series and its UID before the pass can replace it,
+        each instance's status revision, and the policy a Series' UID is
+        judged under at the pass end."""
+        self._series_at_start = tuple(
+            (s, getattr(s, "series_instance_uid", None)) for s in series)
+        self._status_revisions_at_start = self._MappingProxyType({
+            id(instance): getattr(instance, "_phi_status_revision", None)
+            for s, _ in self._series_at_start for instance in s.instances})
+        self._series_policy = phi_tags
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each
@@ -1707,35 +1904,28 @@ class RemediationService:
             value = format_study_date(value)
 
         # A Patient walks its studies; a Study walks its own series and
-        # no sibling's. `getattr` with defaults because the arm fires
-        # for any object carrying the field, test doubles included.
-        studies = getattr(entity, "studies", None)
-        if studies is None:
-            studies = [entity]
+        # no sibling's; a Series its own instances (#544).
         written = folds = 0
-        for study in studies:
-            for series in getattr(study, "series", []):
-                for instance in getattr(series, "instances", []):
-                    if tag not in instance.attributes:
-                        continue
-                    status = instance.phi_status
-                    self._record_what_is_left(instance, tag, value)
-                    if value is None:
-                        del instance.attributes[tag]
-                        instance.mark_modified()
-                    else:
-                        instance.set_attr(tag, value)
-                    if status is not PhiStatus.UNSCANNED:
-                        instance.record_phi_status(status)
-                    # This copy now holds the owner's value; an
-                    # instance finding on it later in the pass folds
-                    # into this write rather than running (#496).
-                    # Whether the write removed it: a REMOVE folds only
-                    # into a removal, anything else only into a value.
-                    removed = value is None
-                    self._owner_copies[(id(instance), tag)] = removed
-                    folds += self._pending_folds.get((id(instance), tag, removed), 0)
-                    written += 1
+        for instance in self._instances_beneath(entity):
+            if tag not in instance.attributes:
+                continue
+            status = instance.phi_status
+            self._record_what_is_left(instance, tag, value)
+            if value is None:
+                del instance.attributes[tag]
+                instance.mark_modified()
+            else:
+                instance.set_attr(tag, value)
+            if status is not PhiStatus.UNSCANNED:
+                instance.record_phi_status(status)
+            # This copy now holds the owner's value; an instance finding
+            # on it later in the pass folds into this write rather than
+            # running (#496). Whether the write removed it: a REMOVE folds
+            # only into a removal, anything else only into a value.
+            removed = value is None
+            self._owner_copies[(id(instance), tag)] = removed
+            folds += self._pending_folds.get((id(instance), tag, removed), 0)
+            written += 1
         return written, folds
 
     @staticmethod

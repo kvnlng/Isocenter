@@ -1,6 +1,7 @@
 from isocenter.services import MachinePixelIndex, RedactionService
 from isocenter.io_handlers import DicomStore
 import numpy as np
+from support.project_secret import FIXED_A
 
 
 def test_machine_index(dummy_patient):
@@ -27,7 +28,7 @@ def test_redaction_service(dummy_patient):
     inst.pixel_array[20, 20] = 500
 
     # Act: Redact region 10-50
-    svc.redact_machine_instances("SN-999", [(10, 50, 10, 50)])
+    svc.redact_machine_instances("SN-999", [(10, 50, 10, 50)], project_secret=FIXED_A)
 
     # Assert
     # Assert

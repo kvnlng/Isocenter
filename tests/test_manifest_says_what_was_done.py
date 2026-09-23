@@ -157,9 +157,12 @@ def test_an_edit_after_anonymize_says_false(tmp_path):
 def test_a_declined_study_remediation_says_false(tmp_path):
     """A study date remediation declined leaves the study IDENTIFIED.
 
-    The instance's own status is CLEARED and its patient's REMEDIATED, so
+    The instance's own status is REMEDIATED (its SOP Instance UID is
+    replaced since #544; CLEARED before) and its patient's REMEDIATED, so
     a rule that consulted only the instance, or skipped the study, would
-    say `true` over a study date that reaches the export unshifted.
+    say `true` over a study date that reaches the export unshifted. The
+    study's own UID replacement is applied beside the declined date, and
+    does not lift it out of IDENTIFIED.
 
     Kills: the study dropped from the chain.
     """
@@ -168,7 +171,7 @@ def test_a_declined_study_remediation_says_false(tmp_path):
         session.anonymize()
         study = session.store.patients[0].studies[0]
         assert study.phi_status.value == "identified"
-        assert instance.phi_status.value == "cleared"
+        assert instance.phi_status.value == "remediated"
         answers = _manifest(session, tmp_path)
     assert answers == {instance.sop_instance_uid: False}, answers
 

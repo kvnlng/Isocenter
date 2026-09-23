@@ -39,7 +39,7 @@ from .sidecar import SidecarManager
 from .logger import describe_exception, get_logger
 from .privacy import (PhiFinding, PhiRemediation, _is_keyed_pseudonym_shape,
                       _is_replacement_id, _is_unkeyed_pseudonym_shape,
-                      _pseudonym_verifies, _unkeyed_replacement_id_for)
+                      _has_minted_uid_shape, _pseudonym_verifies, _unkeyed_replacement_id_for)
 from .io_handlers import (NestedPixelRef, SidecarPixelLoader,
                           nested_item_geometry, normalize_id_filter)
 
@@ -2735,6 +2735,10 @@ class SqliteStore:
                 raise RuntimeError(self._MISSING_SECRET_REFUSAL.format(
                     n=f"{lost} patient{'' if lost == 1 else 's'}",
                     those="that patient" if lost == 1 else "those patients"))
+            replaced = self._replaced_uid_evidence()
+            if replaced:
+                raise RuntimeError(self._MISSING_SECRET_UID_REFUSAL.format(
+                    n=f"{replaced} instance{'' if replaced == 1 else 's'}"))
             generated_here, secret = self._insert_project_secret(
                 secrets.token_bytes(32), self._ORIGIN_GENERATED)
 
@@ -2777,6 +2781,50 @@ class SqliteStore:
             self.log_audit(action_type="WARNING", entity_uid=self.db_path,
                            details=detail)
         return secret
+
+    #: The refusal for a store whose UIDs were replaced under a secret it
+    #: no longer has (#544, owner ruling Q-B). Under `basic` Study Date is
+    #: emptied, so no shifted date is left to refuse on; the UIDs are the
+    #: evidence instead.
+    _MISSING_SECRET_UID_REFUSAL = (
+        "This store holds replaced UIDs derived under a project secret it "
+        "no longer has ({n}). A new secret would not recognise them and "
+        "would replace them a second time, a second UID for each of those "
+        "instances, so audit(), anonymize() and redact() refuse. The secret "
+        "cannot be restored from outside the store: re-ingest the source "
+        "files into a new store (#716, #544).")
+
+    def _replaced_uid_evidence(self) -> int:
+        """How many instances carry a SOP Instance UID of the shape this
+        library mints (`2.25.` and an RFC 9562 version-8 UUID) beside the
+        UID they were ingested under (`SOURCE_SOP_UID_ATTR`): a UID replaced
+        by `anonymize()` or `redact()` since #544.
+
+        By shape, since the secret that would verify them is what is
+        missing. 0.9.x redaction drew its UIDs under pydicom's root
+        (`1.2.826.0.1.3680043.8.498.`), so a 0.9.x store that never
+        audited is not counted and still gets a secret. A UID L8
+        generated for an absent Study or Series has the shape too, but no
+        source record beside it, and it is not a SOP Instance UID.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT sop_instance_uid FROM instances WHERE sop_instance_uid "
+                "LIKE '2.25.%' AND instr(attributes_json, ?) > 0",
+                (f'"{entities.SOURCE_SOP_UID_ATTR}"',)).fetchall()
+        return sum(1 for (uid,) in rows if _has_minted_uid_shape(uid))
+
+    def _project_secret_if_present(self) -> Optional[bytes]:
+        """The project secret if this store holds one, else None (#544).
+
+        Never creates one and writes no notice: for the readers that must
+        not change the store -- `ingest()`, which recognises a file of a
+        study this store already replaced, and an export subset naming a
+        UID from before the replacement. On a store with no secret nothing
+        has been replaced, so there is nothing to recognise.
+        """
+        with self._get_connection() as conn:
+            return self._read_project_secret(conn)
 
     def _insert_project_secret(self, secret: bytes, origin: str):
         """Insert `secret` unless a row exists; return `(inserted, row)`.
@@ -4310,6 +4358,19 @@ class SqliteStore:
                     inst.sop_instance_uid,
                     serialize_blob_kind('pixels', path, terminal_tag),
                     ref.offset, ref.length, ref.blob_hash, ref.alg))
+
+            # The waveform's row, re-emitted for the same reason as the
+            # nested rows above: ingest writes it once, under the UID of
+            # that moment, and it has no column on `instances` to ride.
+            # `anonymize()` replaces the SOP Instance UID since #544, and
+            # a row left under the source UID reopened the instance with
+            # no samples and was reclaimed by `compact()` as an orphan's.
+            # The loader holds the frame's reference; never re-append.
+            wave = inst._waveform_loader
+            if getattr(wave, "offset", None) is not None and wave.length is not None:
+                blob_rows.append((
+                    inst.sop_instance_uid, 'waveform', wave.offset,
+                    wave.length, inst._waveform_hash, wave.alg))
 
         return rows, blob_rows, vertical_rows
 

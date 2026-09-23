@@ -8,9 +8,10 @@ overridden by the user's specific "phi_tags" configuration.
 
 `BASIC_PROFILE` is the Basic Prof. column of DICOM PS3.15 Annex E, Table
 E.1-1, edition 2026c: one rule per row, apart from the departures
-`tests/support/annex_e.py` names with their reasons. It is not the whole
-of Annex E -- UIDs are not replaced (#544), and the attributes that record
-de-identification are not written (#554). See docs/configuration.md.
+`tests/support/annex_e.py` names with their reasons. Its `U` rows replace
+each UID with one derived from the project secret (#544). It is not the
+whole of Annex E -- the attributes that record de-identification are not
+written (#554). See docs/configuration.md.
 
 A profile's name is pinned to the PS3.15 edition its table was taken from
 (#714): `PRIVACY_PROFILES` names `BASIC_PROFILE` `basic@2026c`, and a bare
@@ -46,7 +47,9 @@ this module is data, with zero mutation sites.
 # in the IOD) the table removes the attribute and this writes the dummy
 # instead, a named departure (docs/configuration.md). The four D-arm
 # sequences keep EMPTY or REMOVE: no dummy item is valid in every IOD.
-# `U` rows get no rule (#544).
+# `U` REPLACEs with no value, which on a UI is the keyed UID (#544); the
+# two `X/Z/U*` sequences get no rule, so they are kept and the UIDs inside
+# them are replaced as `U` rows of their own.
 #
 # `50xx,xxxx` and `60xx,xxxx` are repeating-group keys (#556): every
 # element of every even group 5000-501E or 6000-601E. The overlay group
@@ -66,9 +69,19 @@ this module is data, with zero mutation sites.
 # remediated on any documented path as a result.)
 BASIC_PROFILE = {
     "0000,1000": {"action": "REMOVE", "name": "Affected SOP Instance UID"},  # X
+    "0000,1001": {"action": "REPLACE", "name": "Requested SOP Instance UID"},  # U
+    "0002,0003": {"action": "REPLACE", "name": "Media Storage SOP Instance UID"},  # U
+    "0004,1511": {"action": "REPLACE", "name": "Referenced SOP Instance UID in File"},  # U
     "0008,0012": {"action": "REPLACE", "name": "Instance Creation Date"},  # X/D
     "0008,0013": {"action": "REPLACE", "name": "Instance Creation Time"},  # X/Z/D
+    "0008,0014": {"action": "REPLACE", "name": "Instance Creator UID"},  # U
     "0008,0015": {"action": "REMOVE", "name": "Instance Coercion DateTime"},  # X
+    "0008,0017": {"action": "REPLACE", "name": "Acquisition UID"},  # U
+    # U in the table, as every UI row below is. REPLACE with no value on a
+    # UI is the keyed UID (#544): one value, one replacement, wherever it
+    # sits; a UID this project minted is left as it is.
+    "0008,0018": {"action": "REPLACE", "name": "SOP Instance UID"},  # U
+    "0008,0019": {"action": "REPLACE", "name": "Pyramid UID"},  # U
     # Z in the table. Owned by the Study, and since #537 this rule governs
     # the study's own date: `basic` exports it zero-length. The floor
     # JITTERs it (RESEARCH_DEFAULTS).
@@ -95,6 +108,7 @@ BASIC_PROFILE = {
     "0008,0050": {"action": "EMPTY", "name": "Accession Number"},  # Z
     "0008,0054": {"action": "REMOVE", "name": "Retrieve AE Title"},  # X
     "0008,0055": {"action": "REMOVE", "name": "Station AE Title"},  # X
+    "0008,0058": {"action": "REPLACE", "name": "Failed SOP Instance UID List"},  # U
     "0008,0080": {"action": "REPLACE", "name": "Institution Name"},  # X/Z/D
     "0008,0081": {"action": "REMOVE", "name": "Institution Address"},  # X
     "0008,0082": {"action": "EMPTY", "name": "Institution Code Sequence"},  # X/Z/D
@@ -132,6 +146,8 @@ BASIC_PROFILE = {
     "0008,1110": {"action": "EMPTY", "name": "Referenced Study Sequence"},  # X/Z
     "0008,1111": {"action": "EMPTY", "name": "Referenced Performed Procedure Step Sequence"},  # X/Z/D
     "0008,1120": {"action": "REMOVE", "name": "Referenced Patient Sequence"},  # X
+    "0008,1155": {"action": "REPLACE", "name": "Referenced SOP Instance UID"},  # U
+    "0008,1195": {"action": "REPLACE", "name": "Transaction UID"},  # U
     "0008,1301": {"action": "REMOVE", "name": "Principal Diagnosis Code Sequence"},  # X
     "0008,1302": {"action": "REMOVE", "name": "Primary Diagnosis Code Sequence"},  # X
     "0008,1303": {"action": "REMOVE", "name": "Secondary Diagnoses Code Sequence"},  # X
@@ -140,6 +156,7 @@ BASIC_PROFILE = {
     # `PhiInspector._scan_instance`: safe export would otherwise skip
     # every redacted instance.
     "0008,2111": {"action": "REMOVE", "name": "Derivation Description"},  # X
+    "0008,3010": {"action": "REPLACE", "name": "Irradiation Event UID"},  # U
     "0008,4000": {"action": "REMOVE", "name": "Identifying Comments"},  # X
     # Z in the table, REPLACE here: ANONYMIZED is a dummy Z permits. Owned
     # by the Patient, as Patient ID below (Z/D, the keyed pseudonym): #537.
@@ -265,12 +282,14 @@ BASIC_PROFILE = {
     "0018,0027": {"action": "REMOVE", "name": "Intervention Drug Stop Time"},  # X
     "0018,0035": {"action": "REMOVE", "name": "Intervention Drug Start Time"},  # X
     "0018,1000": {"action": "REPLACE", "name": "Device Serial Number"},  # X/Z/D
+    "0018,1002": {"action": "REPLACE", "name": "Device UID"},  # U
     "0018,1004": {"action": "REMOVE", "name": "Plate ID"},  # X
     "0018,1005": {"action": "REMOVE", "name": "Generator ID"},  # X
     "0018,1007": {"action": "REMOVE", "name": "Cassette ID"},  # X
     "0018,1008": {"action": "REMOVE", "name": "Gantry ID"},  # X
     "0018,1009": {"action": "REMOVE", "name": "Unique Device Identifier"},  # X
     "0018,100a": {"action": "REMOVE", "name": "UDI Sequence"},  # X
+    "0018,100b": {"action": "REPLACE", "name": "Manufacturer's Device Class UID"},  # U
     "0018,1010": {"action": "REMOVE", "name": "Secondary Capture Device ID"},  # X
     "0018,1011": {"action": "REMOVE", "name": "Hardcopy Creation Device ID"},  # X
     "0018,1012": {"action": "REMOVE", "name": "Date of Secondary Capture"},  # X
@@ -290,6 +309,7 @@ BASIC_PROFILE = {
     "0018,1204": {"action": "REMOVE", "name": "Date of Manufacture"},  # X
     "0018,1205": {"action": "REMOVE", "name": "Date of Installation"},  # X
     "0018,1400": {"action": "REPLACE", "name": "Acquisition Device Processing Description"},  # X/D
+    "0018,2042": {"action": "REPLACE", "name": "Target UID"},  # U
     "0018,4000": {"action": "REMOVE", "name": "Acquisition Comments"},  # X
     "0018,5011": {"action": "REMOVE", "name": "Transducer Identification Sequence"},  # X
     "0018,700a": {"action": "REPLACE", "name": "Detector ID"},  # X/D
@@ -315,14 +335,22 @@ BASIC_PROFILE = {
     "0018,9937": {"action": "REMOVE", "name": "Requested Series Description"},  # X
     "0018,a002": {"action": "REMOVE", "name": "Contribution DateTime"},  # X
     "0018,a003": {"action": "REMOVE", "name": "Contribution Description"},  # X
+    "0020,000d": {"action": "REPLACE", "name": "Study Instance UID"},  # U
+    "0020,000e": {"action": "REPLACE", "name": "Series Instance UID"},  # U
     "0020,0010": {"action": "EMPTY", "name": "Study ID"},  # Z
     "0020,0027": {"action": "REMOVE", "name": "Pyramid Label"},  # X
+    "0020,0052": {"action": "REPLACE", "name": "Frame of Reference UID"},  # U
+    "0020,0200": {"action": "REPLACE", "name": "Synchronization Frame of Reference UID"},  # U
     "0020,3401": {"action": "REMOVE", "name": "Modifying Device ID"},  # X
     "0020,3403": {"action": "REMOVE", "name": "Modified Image Date"},  # X
     "0020,3405": {"action": "REMOVE", "name": "Modified Image Time"},  # X
     "0020,3406": {"action": "REMOVE", "name": "Modified Image Description"},  # X
     "0020,4000": {"action": "REMOVE", "name": "Image Comments"},  # X
     "0020,9158": {"action": "REMOVE", "name": "Frame Comments"},  # X
+    "0020,9161": {"action": "REPLACE", "name": "Concatenation UID"},  # U
+    "0020,9164": {"action": "REPLACE", "name": "Dimension Organization UID"},  # U
+    "0028,1199": {"action": "REPLACE", "name": "Palette Color Lookup Table UID"},  # U
+    "0028,1214": {"action": "REPLACE", "name": "Large Palette Color Lookup Table UID"},  # U
     "0028,4000": {"action": "REMOVE", "name": "Image Presentation Comments"},  # X
     "0032,0012": {"action": "REMOVE", "name": "Study ID Issuer"},  # X
     "0032,0032": {"action": "REMOVE", "name": "Study Verified Date"},  # X
@@ -376,6 +404,7 @@ BASIC_PROFILE = {
     "003a,0020": {"action": "REMOVE", "name": "Multiplex Group Label"},  # X
     "003a,0203": {"action": "REMOVE", "name": "Channel Label"},  # X
     "003a,020c": {"action": "REMOVE", "name": "Channel Derivation Description"},  # X
+    "003a,0310": {"action": "REPLACE", "name": "Multiplex Group UID"},  # U
     "003a,0314": {"action": "REPLACE", "name": "Impedance Measurement DateTime"},  # D
     "003a,0329": {"action": "REMOVE", "name": "Waveform Filter Description"},  # X
     "003a,032b": {"action": "REMOVE", "name": "Filter Lookup Table Description"},  # X
@@ -408,6 +437,7 @@ BASIC_PROFILE = {
     "0040,0513": {"action": "EMPTY", "name": "Issuer of the Container Identifier Sequence"},  # Z
     "0040,051a": {"action": "REMOVE", "name": "Container Description"},  # X
     "0040,0551": {"action": "REPLACE", "name": "Specimen Identifier"},  # D
+    "0040,0554": {"action": "REPLACE", "name": "Specimen UID"},  # U
     "0040,0555": {"action": "EMPTY", "name": "Acquisition Context Sequence"},  # X/Z
     "0040,0556": {"action": "REMOVE", "name": "Acquisition Context Description"},  # X
     "0040,0562": {"action": "EMPTY", "name": "Issuer of the Specimen Identifier Sequence"},  # Z
@@ -442,6 +472,7 @@ BASIC_PROFILE = {
     "0040,4008": {"action": "REMOVE", "name": "Scheduled Procedure Step Expiration DateTime"},  # X
     "0040,4010": {"action": "REMOVE", "name": "Scheduled Procedure Step Modification DateTime"},  # X
     "0040,4011": {"action": "REMOVE", "name": "Expected Completion DateTime"},  # X
+    "0040,4023": {"action": "REPLACE", "name": "Referenced General Purpose Scheduled Procedure Step Transaction UID"},  # U
     "0040,4025": {"action": "REMOVE", "name": "Scheduled Station Name Code Sequence"},  # X
     "0040,4027": {"action": "REMOVE", "name": "Scheduled Station Geographic Location Code Sequence"},  # X
     "0040,4028": {"action": "REMOVE", "name": "Performed Station Name Code Sequence"},  # X
@@ -473,7 +504,10 @@ BASIC_PROFILE = {
     "0040,a121": {"action": "REPLACE", "name": "Date"},  # D
     "0040,a122": {"action": "REPLACE", "name": "Time"},  # D
     "0040,a123": {"action": "REPLACE", "name": "Person Name"},  # D
+    "0040,a124": {"action": "REPLACE", "name": "UID"},  # U
     "0040,a13a": {"action": "REPLACE", "name": "Referenced DateTime"},  # D
+    "0040,a171": {"action": "REPLACE", "name": "Observation UID"},  # U
+    "0040,a172": {"action": "REPLACE", "name": "Referenced Observation UID (Trial)"},  # U
     "0040,a192": {"action": "REMOVE", "name": "Observation Date (Trial)"},  # X
     "0040,a193": {"action": "REMOVE", "name": "Observation Time (Trial)"},  # X
     "0040,a307": {"action": "REMOVE", "name": "Current Observer (Trial)"},  # X
@@ -481,12 +515,15 @@ BASIC_PROFILE = {
     "0040,a353": {"action": "REMOVE", "name": "Address (Trial)"},  # X
     "0040,a354": {"action": "REMOVE", "name": "Telephone Number (Trial)"},  # X
     "0040,a358": {"action": "REMOVE", "name": "Verbal Source Identifier Code Sequence (Trial)"},  # X
+    "0040,a402": {"action": "REPLACE", "name": "Observation Subject UID (Trial)"},  # U
     "0040,b034": {"action": "REMOVE", "name": "Annotation DateTime"},  # X
     "0040,b036": {"action": "REMOVE", "name": "Segment Definition DateTime"},  # X
     "0040,b03b": {"action": "REMOVE", "name": "Montage Name"},  # X
     "0040,b03f": {"action": "REMOVE", "name": "Montage Channel Label"},  # X
     "0040,db06": {"action": "REMOVE", "name": "Template Version"},  # X
     "0040,db07": {"action": "REMOVE", "name": "Template Local Version"},  # X
+    "0040,db0c": {"action": "REPLACE", "name": "Template Extension Organization UID"},  # U
+    "0040,db0d": {"action": "REPLACE", "name": "Template Extension Creator UID"},  # U
     "0040,e004": {"action": "REMOVE", "name": "HL7 Document Effective Time"},  # X
     "0040,e012": {"action": "REMOVE", "name": "Display URI"},  # X
     "0042,0011": {"action": "REPLACE", "name": "Encapsulated Document"},  # D
@@ -498,8 +535,13 @@ BASIC_PROFILE = {
     "0050,001b": {"action": "REMOVE", "name": "Container Component ID"},  # X
     "0050,0020": {"action": "REMOVE", "name": "Device Description"},  # X
     "0050,0021": {"action": "REMOVE", "name": "Long Device Description"},  # X
+    "0062,0021": {"action": "REPLACE", "name": "Tracking UID"},  # U
+    "0064,0003": {"action": "REPLACE", "name": "Source Frame of Reference UID"},  # U
     "0068,6226": {"action": "REPLACE", "name": "Effective DateTime"},  # D
     "0068,6270": {"action": "REPLACE", "name": "Information Issue DateTime"},  # D
+    # D on a UI: the keyed UID is a non-zero value consistent with the VR,
+    # which is what D asks for (#544).
+    "006a,0003": {"action": "REPLACE", "name": "Annotation Group UID"},  # D
     "006a,0005": {"action": "REPLACE", "name": "Annotation Group Label"},  # D
     "006a,0006": {"action": "REMOVE", "name": "Annotation Group Description"},  # X
     # Free-text annotation commentary. Reaches annotations.json `note`
@@ -510,6 +552,9 @@ BASIC_PROFILE = {
     "0070,0083": {"action": "REMOVE", "name": "Presentation Creation Time"},  # X
     "0070,0084": {"action": "REPLACE", "name": "Content Creator's Name"},  # Z/D
     "0070,0086": {"action": "REMOVE", "name": "Content Creator's Identification Code Sequence"},  # X
+    "0070,031a": {"action": "REPLACE", "name": "Fiducial UID"},  # U
+    "0070,1101": {"action": "REPLACE", "name": "Presentation Display Collection UID"},  # U
+    "0070,1102": {"action": "REPLACE", "name": "Presentation Sequence Collection UID"},  # U
     "0072,000a": {"action": "REPLACE", "name": "Hanging Protocol Creation DateTime"},  # D
     "0072,005e": {"action": "REPLACE", "name": "Selector AE Value"},  # D
     "0072,005f": {"action": "REPLACE", "name": "Selector AS Value"},  # D
@@ -527,11 +572,13 @@ BASIC_PROFILE = {
     "0072,0071": {"action": "REPLACE", "name": "Selector UR Value"},  # D
     "0074,1234": {"action": "REMOVE", "name": "Receiving AE"},  # X
     "0074,1236": {"action": "REMOVE", "name": "Requesting AE"},  # X
+    "0088,0140": {"action": "REPLACE", "name": "Storage Media File-set UID"},  # U
     "0088,0904": {"action": "REMOVE", "name": "Topic Title"},  # X
     "0088,0906": {"action": "REMOVE", "name": "Topic Subject"},  # X
     "0088,0910": {"action": "REMOVE", "name": "Topic Author"},  # X
     "0088,0912": {"action": "REMOVE", "name": "Topic Keywords"},  # X
     "0100,0420": {"action": "REMOVE", "name": "SOP Authorization DateTime"},  # X
+    "0400,0100": {"action": "REPLACE", "name": "Digital Signature UID"},  # U
     "0400,0105": {"action": "REPLACE", "name": "Digital Signature DateTime"},  # D
     "0400,0115": {"action": "REPLACE", "name": "Certificate of Signer"},  # D
     "0400,0310": {"action": "REMOVE", "name": "Certified Timestamp"},  # X
@@ -561,6 +608,7 @@ BASIC_PROFILE = {
     "3006,0006": {"action": "REMOVE", "name": "Structure Set Description"},  # X
     "3006,0008": {"action": "EMPTY", "name": "Structure Set Date"},  # Z
     "3006,0009": {"action": "EMPTY", "name": "Structure Set Time"},  # Z
+    "3006,0024": {"action": "REPLACE", "name": "Referenced Frame of Reference UID"},  # U
     "3006,0026": {"action": "EMPTY", "name": "ROI Name"},  # Z
     "3006,0028": {"action": "REMOVE", "name": "ROI Description"},  # X
     "3006,002d": {"action": "REMOVE", "name": "ROI DateTime"},  # X
@@ -571,6 +619,7 @@ BASIC_PROFILE = {
     "3006,0085": {"action": "REMOVE", "name": "ROI Observation Label"},  # X
     "3006,0088": {"action": "REMOVE", "name": "ROI Observation Description"},  # X
     "3006,00a6": {"action": "EMPTY", "name": "ROI Interpreter"},  # Z
+    "3006,00c2": {"action": "REPLACE", "name": "Related Frame of Reference UID"},  # U
     "3008,0024": {"action": "REPLACE", "name": "Treatment Control Point Date"},  # D
     "3008,0025": {"action": "REPLACE", "name": "Treatment Control Point Time"},  # D
     "3008,0054": {"action": "REPLACE", "name": "First Treatment Date"},  # X/D
@@ -589,8 +638,11 @@ BASIC_PROFILE = {
     "300a,0007": {"action": "REPLACE", "name": "RT Plan Time"},  # X/D
     "300a,000b": {"action": "REMOVE", "name": "Treatment Sites"},  # X
     "300a,000e": {"action": "REMOVE", "name": "Prescription Description"},  # X
+    "300a,0013": {"action": "REPLACE", "name": "Dose Reference UID"},  # U
     "300a,0016": {"action": "REMOVE", "name": "Dose Reference Description"},  # X
+    "300a,0054": {"action": "REPLACE", "name": "Table Top Position Alignment UID"},  # U
     "300a,0072": {"action": "REMOVE", "name": "Fraction Group Description"},  # X
+    "300a,0083": {"action": "REPLACE", "name": "Referenced Dose Reference UID"},  # U
     "300a,00b2": {"action": "EMPTY", "name": "Treatment Machine Name"},  # X/Z
     "300a,00c3": {"action": "REMOVE", "name": "Beam Description"},  # X
     "300a,00dd": {"action": "REMOVE", "name": "Bolus Description"},  # X
@@ -602,14 +654,17 @@ BASIC_PROFILE = {
     "300a,022e": {"action": "REPLACE", "name": "Source Strength Reference Time"},  # D
     "300a,02eb": {"action": "REMOVE", "name": "Compensator Description"},  # X
     "300a,0608": {"action": "REPLACE", "name": "Treatment Position Group Label"},  # D
+    "300a,0609": {"action": "REPLACE", "name": "Treatment Position Group UID"},  # U
     "300a,0611": {"action": "EMPTY", "name": "RT Accessory Holder Slot ID"},  # Z
     "300a,0615": {"action": "EMPTY", "name": "RT Accessory Device Slot ID"},  # Z
     "300a,0619": {"action": "REPLACE", "name": "Radiation Dose Identification Label"},  # D
     "300a,0623": {"action": "REPLACE", "name": "Radiation Dose In-Vivo Measurement Label"},  # D
     "300a,062a": {"action": "REPLACE", "name": "RT Tolerance Set Label"},  # D
+    "300a,0650": {"action": "REPLACE", "name": "Patient Setup UID"},  # U
     "300a,0676": {"action": "REMOVE", "name": "Equipment Frame of Reference Description"},  # X
     "300a,067c": {"action": "REPLACE", "name": "Radiation Generation Mode Label"},  # D
     "300a,067d": {"action": "EMPTY", "name": "Radiation Generation Mode Description"},  # Z
+    "300a,0700": {"action": "REPLACE", "name": "Treatment Session UID"},  # U
     "300a,0734": {"action": "REPLACE", "name": "Treatment Tolerance Violation Description"},  # D
     "300a,0736": {"action": "REPLACE", "name": "Treatment Tolerance Violation DateTime"},  # D
     "300a,073a": {"action": "REPLACE", "name": "Recorded RT Control Point DateTime"},  # D
@@ -617,6 +672,7 @@ BASIC_PROFILE = {
     "300a,0742": {"action": "REPLACE", "name": "Interlock Description"},  # D
     "300a,0760": {"action": "REPLACE", "name": "Override DateTime"},  # D
     "300a,0783": {"action": "REPLACE", "name": "Interlock Origin Description"},  # D
+    "300a,0785": {"action": "REPLACE", "name": "Referenced Treatment Position Group UID"},  # U
     "300a,078e": {"action": "REMOVE", "name": "Patient Treatment Preparation Procedure Parameter Description"},  # X
     "300a,0792": {"action": "REMOVE", "name": "Patient Treatment Preparation Method Description"},  # X
     "300a,0794": {"action": "REMOVE", "name": "Patient Setup Photo Description"},  # X
@@ -626,16 +682,22 @@ BASIC_PROFILE = {
     "300e,0004": {"action": "EMPTY", "name": "Review Date"},  # Z
     "300e,0005": {"action": "EMPTY", "name": "Review Time"},  # Z
     "300e,0008": {"action": "EMPTY", "name": "Reviewer Name"},  # X/Z
+    "3010,0006": {"action": "REPLACE", "name": "Conceptual Volume UID"},  # U
+    "3010,000b": {"action": "REPLACE", "name": "Referenced Conceptual Volume UID"},  # U
     "3010,000f": {"action": "EMPTY", "name": "Conceptual Volume Combination Description"},  # Z
+    "3010,0013": {"action": "REPLACE", "name": "Constituent Conceptual Volume UID"},  # U
+    "3010,0015": {"action": "REPLACE", "name": "Source Conceptual Volume UID"},  # U
     "3010,0017": {"action": "EMPTY", "name": "Conceptual Volume Description"},  # Z
     "3010,001b": {"action": "EMPTY", "name": "Device Alternate Identifier"},  # Z
     "3010,002d": {"action": "REPLACE", "name": "Device Label"},  # D
+    "3010,0031": {"action": "REPLACE", "name": "Referenced Fiducials UID"},  # U
     "3010,0033": {"action": "REPLACE", "name": "User Content Label"},  # D
     "3010,0034": {"action": "REPLACE", "name": "User Content Long Label"},  # D
     "3010,0035": {"action": "REPLACE", "name": "Entity Label"},  # D
     "3010,0036": {"action": "REMOVE", "name": "Entity Name"},  # X
     "3010,0037": {"action": "REMOVE", "name": "Entity Description"},  # X
     "3010,0038": {"action": "REPLACE", "name": "Entity Long Label"},  # D
+    "3010,003b": {"action": "REPLACE", "name": "RT Treatment Phase UID"},  # U
     "3010,0043": {"action": "EMPTY", "name": "Manufacturer's Device Identifier"},  # Z
     "3010,004c": {"action": "REPLACE", "name": "Intended Phase Start Date"},  # X/D
     "3010,004d": {"action": "REPLACE", "name": "Intended Phase End Date"},  # X/D
@@ -644,6 +706,8 @@ BASIC_PROFILE = {
     "3010,005a": {"action": "EMPTY", "name": "RT Physician Intent Narrative"},  # Z
     "3010,005c": {"action": "EMPTY", "name": "Reason for Superseding"},  # Z
     "3010,0061": {"action": "REMOVE", "name": "Prior Treatment Dose Description"},  # X
+    "3010,006e": {"action": "REPLACE", "name": "Dosimetric Objective UID"},  # U
+    "3010,006f": {"action": "REPLACE", "name": "Referenced Dosimetric Objective UID"},  # U
     "3010,0077": {"action": "REPLACE", "name": "Treatment Site"},  # X/D
     "3010,007a": {"action": "EMPTY", "name": "Treatment Technique Notes"},  # Z
     "3010,007b": {"action": "EMPTY", "name": "Prescription Notes"},  # Z

@@ -167,7 +167,9 @@ def test_an_instance_only_pass_grades(tmp_path):
     The instance counts too: its copies of those three are written only
     through their owners (#624), so its findings on them are left
     unhandled rather than written as `ANONYMIZED` and a shift no file
-    carries (coordinator ruling Q-C5)."""
+    carries (coordinator ruling Q-C5). Since #544 it carries the source
+    Series Instance UID as well, which its Series' finding, borne by the
+    instance, says the same way (review of #544, finding 2)."""
     with _ingested(tmp_path) as session:
         report = session.audit()
         session.anonymize(_only(report.findings, "Instance"))

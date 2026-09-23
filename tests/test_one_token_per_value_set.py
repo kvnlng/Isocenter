@@ -47,9 +47,11 @@ import pytest
 from cryptography.fernet import Fernet
 
 from isocenter.entities import Instance, Patient, Series, Study
+from isocenter.privacy import _replacement_uid_for
 from isocenter.session import DicomSession
 
 from support.ct_small_files import study_uid, write_ct
+from support.kept_uids import keep_uids
 
 PID, NAME = "PAT-583", "Secret^Eighty"
 SEQ, CONTENT = "0400,0500", "0400,0510"
@@ -104,6 +106,11 @@ def _threads(monkeypatch):
     monkeypatch.setenv("ISOCENTER_MAX_WORKERS", "2")
     monkeypatch.delenv("ISOCENTER_FORCE_PROCESSES", raising=False)
     monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
+
+
+def _replaced(session, uid):
+    """`uid` as `anonymize()` replaced it under this store's secret (#544)."""
+    return _replacement_uid_for(uid, session.store_backend._project_secret_if_present())
 
 
 def _session(tmp_path, key="k.key"):
@@ -236,6 +243,7 @@ def test_two_studies_get_their_own_tokens_and_their_own_accessions_back(tmp_path
         session.anonymize(report)
         session.save(sync=True)
         pseudonym = patient.patient_id
+        one, two = _replaced(session, study_uid("5831")), _replaced(session, study_uid("5832"))
 
     with DicomSession(db) as session:
         session.enable_reversible_anonymization(key)
@@ -250,11 +258,10 @@ def test_two_studies_get_their_own_tokens_and_their_own_accessions_back(tmp_path
         assert not [r for r in caplog_records if "(#583)" in r.getMessage()]
         [patient] = session.store.patients
         assert {st.study_instance_uid: st.series[0].instances[0].attributes[ACC]
-                for st in patient.studies} == {study_uid("5831"): ACC_ONE,
-                                               study_uid("5832"): ACC_TWO}
+                for st in patient.studies} == {one: ACC_ONE, two: ACC_TWO}
         session.export(str(tmp_path / "out"), use_compression=False)
     assert _exported(tmp_path / "out", "AccessionNumber") == {
-        study_uid("5831"): (ACC_ONE,), study_uid("5832"): (ACC_TWO,)}
+        one: (ACC_ONE,), two: (ACC_TWO,)}
 
 
 def test_a_value_set_shares_one_token_across_its_instances(tmp_path):
@@ -573,10 +580,11 @@ def test_a_study_ingested_after_the_lock_takes_only_patient_level_identifiers(
             "0010,0040": "F", ACC: passed.get(ACC)}
         session.save(sync=True)
         session.export(str(tmp_path / "out"), use_compression=False)
+        one, two = _replaced(session, study_uid("5835")), _replaced(session, study_uid("5836"))
     written = _exported(tmp_path / "out", "AccessionNumber", "PatientID")
-    assert written[study_uid("5835")] == (ACC_ONE, PID)
-    assert written[study_uid("5836")][0] != ACC_ONE
-    assert written[study_uid("5836")][1] == PID
+    assert written[one] == (ACC_ONE, PID)
+    assert written[two][0] != ACC_ONE
+    assert written[two][1] == PID
 
 
 def test_a_patient_study_tag_reaches_a_study_carrying_no_token(tmp_path, caplog):
@@ -744,17 +752,18 @@ def test_a_merged_pair_whose_tokens_disagree_on_the_id_stays_one_patient(
         assert warnings == [disagree(1, 2)], caplog.text
         assert len(session.store.patients) == 1
         assert (patient.patient_name, patient.patient_id) == ("Doe^Ann", "PAT-A")
+        one, two = _replaced(session, study_uid("5837")), _replaced(session, study_uid("5838"))
         assert {st.study_instance_uid: (st.series[0].instances[0].attributes["0010,0020"],
                                         st.series[0].instances[0].attributes[ACC])
-                for st in patient.studies} == {study_uid("5837"): ("PAT-A", ACC_ONE),
-                                               study_uid("5838"): ("PAT-B", ACC_TWO)}
+                for st in patient.studies} == {one: ("PAT-A", ACC_ONE),
+                                               two: ("PAT-B", ACC_TWO)}
         session.save(sync=True)
     with DicomSession(db) as session:
         [patient] = session.store.patients
         assert patient.patient_id == "PAT-A" and len(patient.studies) == 2
         session.export(str(tmp_path / "out"), use_compression=False)
     assert _exported(tmp_path / "out", "PatientID", "AccessionNumber") == {
-        study_uid("5837"): ("PAT-A", ACC_ONE), study_uid("5838"): ("PAT-A", ACC_TWO)}
+        one: ("PAT-A", ACC_ONE), two: ("PAT-A", ACC_TWO)}
 
 
 # ---------------------------------------------------------------------------
@@ -866,7 +875,11 @@ def _a_097_export(tmp_path):
     Source order puts `5841` (dated 2005, `ACC-ONE`) first, so the one
     unstamped token holds `ACC-ONE` on both; `5842` is dated 2004 and held
     `ACC-TWO`. Audited, anonymized, saved and exported, whose folders are
-    `Study_<date>_...`. Returns (export folder, key path, pseudonym)."""
+    `Study_<date>_...`. Returns (export folder, key path, pseudonym).
+
+    With `KEEP` on the UID rows: a release before 1.0 exported every UID
+    as ingested (#544), and the tests below find `5842`'s folder, and its
+    re-ingested study, by the source UID."""
     write_ct(tmp_path / "src" / "a" / "1.dcm", PID, "5841", study_date="20050601",
              name=NAME, accession=ACC_ONE)
     write_ct(tmp_path / "src" / "b" / "2.dcm", PID, "5842", study_date="20040601",
@@ -881,6 +894,7 @@ def _a_097_export(tmp_path):
         instances = [i for st in patient.studies for se in st.series for i in se.instances]
         _pre_098_token(session, instances,
                        {"0010,0010": NAME, "0010,0020": PID, ACC: ACC_ONE})
+        keep_uids(session)
         session.anonymize(session.audit())
         session.save(sync=True)
         pseudonym = patient.patient_id

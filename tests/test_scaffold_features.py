@@ -41,7 +41,7 @@ def test_scaffold_config_structure(tmp_path):
 
 def test_private_tag_removal():
     """Verify private tag removal logic."""
-    inspector = PhiInspector(remove_private_tags=True)
+    inspector = PhiInspector(remove_private_tags=True, project_secret=FIXED_A)
 
     inst = Instance("1.2.3", "dcm_file")
     # Odd group = Private

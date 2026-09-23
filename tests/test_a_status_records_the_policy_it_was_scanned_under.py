@@ -41,8 +41,8 @@ from pydicom.data import get_testdata_file
 
 from isocenter import config_manager
 from isocenter.configuration import _scan_policy_for
-from isocenter.entities import (Equipment, Instance, Patient, PhiStatus,
-                                ScanPolicy, Series, Study)
+from isocenter.entities import (SOURCE_SOP_UID_ATTR, Equipment, Instance, Patient,
+                                PhiStatus, ScanPolicy, Series, Study)
 from isocenter.session import DicomSession
 
 NOTICE = "recorded under a policy other than the one in force"
@@ -783,7 +783,9 @@ def test_the_reviewers_carry_sequence_gives_the_unseen_instance_no_policy(
         session.save(sync=True)
     with DicomSession(db) as session:                                # S4
         session.anonymize(r1)
-        [i2] = [i for i in _instances(session) if i.sop_instance_uid == i2_uid]
+        # By the UID it was ingested under: S3 replaced it (#544).
+        [i2] = [i for i in _instances(session)
+                if i.attributes.get(SOURCE_SOP_UID_ATTR) == i2_uid]
         assert i2.attributes.get(INSTITUTION) == "JFK IMAGING CENTER"
         assert i2.phi_status_policy is None
         session.export(str(tmp_path / "out"))

@@ -22,6 +22,7 @@ import pydicom
 import pytest
 
 from isocenter import Session
+from isocenter.privacy import _replacement_uid_for
 from isocenter.uids import generated_uid, uid_from_bytes16
 
 from support.ct_small_files import study_uid, write_ct
@@ -96,6 +97,12 @@ def test_two_patients_without_a_uid_keep_their_own_study(tmp_path, case):
         session.anonymize(session.audit())
         session.export(str(tmp_path / "out"), use_compression=False)
         warnings = _warnings(session)
+        secret = session.store_backend._project_secret_if_present()
+
+    def replaced(uid):
+        # The export carries each UID's replacement since #544; a
+        # generated UID is replaced like any other.
+        return _replacement_uid_for(uid, secret)
 
     assert held == {
         "PA": [(*expected("5851"), [sops["PA"]])],
@@ -105,10 +112,11 @@ def test_two_patients_without_a_uid_keep_their_own_study(tmp_path, case):
     exported = {str(ds.SOPInstanceUID): ds for ds in
                 (pydicom.dcmread(str(p)) for p in (tmp_path / "out").rglob("*.dcm"))}
     for pid, suffix in (("PA", "5851"), ("PB", "5852")):
-        ds = exported[sops[pid]]
-        assert (str(ds.StudyInstanceUID), str(ds.SeriesInstanceUID)) == expected(suffix)
-    assert (exported[sops["PA"]].StudyInstanceUID
-            != exported[sops["PB"]].StudyInstanceUID)
+        ds = exported[replaced(sops[pid])]
+        assert (str(ds.StudyInstanceUID), str(ds.SeriesInstanceUID)) == tuple(
+            replaced(uid) for uid in expected(suffix))
+    assert (exported[replaced(sops["PA"])].StudyInstanceUID
+            != exported[replaced(sops["PB"])].StudyInstanceUID)
 
     generated = sorted((uid, details) for uid, details in warnings
                        if element in details)

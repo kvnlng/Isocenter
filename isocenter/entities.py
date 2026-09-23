@@ -8,7 +8,6 @@ from enum import Enum
 import numpy as np
 import pydicom
 from pydicom.pixels import get_decoder
-from pydicom.uid import generate_uid
 import isocenter.imagecodecs_handler as h
 from .logger import describe_exception_without_paths, get_logger
 from .pixel_geometry import (
@@ -60,7 +59,8 @@ def normalize_study_date(value):
 
 
 #: Attribute key under which an instance records the SOP Instance UID it
-#: carried before `regenerate_uid()` first replaced it.
+#: was ingested under, before UID replacement or redaction first moved it
+#: (`Instance._take_sop_uid`, #238, #544).
 #:
 #: Assigned into `attributes` **directly, never through `set_attr`** --
 #: `set_attr` runs the key through `_canonical_tag`, which lowercases it,
@@ -1360,55 +1360,59 @@ class Instance(DicomItem):
         self.set_attr("0008,0016", self.sop_class_uid)
         self.set_attr("0020,0013", self.instance_number)
 
-    def regenerate_uid(self):
+    def regenerate_uid(self, new_uid: str):
         """
-        Generates a new, globally unique SOP Instance UID.
+        Gives this instance the SOP Instance UID its redacted pixels take.
 
-        Call this whenever pixel data is modified to ensure the instance is treated
-        as a new distinct entity, preventing collisions with the original data.
+        Call this whenever pixel data is modified, so the changed image is
+        never mistaken for the original. `new_uid` is **required**: the
+        redaction pass derives it in the parent from the source SOP
+        Instance UID, the redaction's configuration and the project secret
+        (`privacy._redaction_uid_for`, #544), so no path can draw a random
+        one again and no worker ever holds the secret. Until 1.0 this drew
+        `pydicom.uid.generate_uid()` -- a random UID under pydicom's own
+        registered root -- which differed on every run.
 
-        This method:
-            1. Generates a new SOP Instance UID.
-            2. Updates the internal object property.
-            3. Updates the '0008,0018' DICOM attribute.
-            4. Records the retired SOP Instance UID under
-               `SOURCE_SOP_UID_ATTR`, the first time only (#238).
-            5. Detaches the instance from its physical file path (since consistent hash changed).
+        Moves the UID as `_take_sop_uid` does and also detaches the
+        instance from its source file, whose pixels it no longer matches.
+        """
+        self._take_sop_uid(new_uid, pixels_changed=True)
+        get_logger().debug(f"  -> Identity regenerated: {new_uid}")
+
+    def _take_sop_uid(self, new_uid: str, *, pixels_changed: bool) -> None:
+        """Move this instance to `new_uid` (#544): the property and the
+        `0008,0018` element together, and `SOURCE_SOP_UID_ATTR` the first
+        time only.
+
+        Shared by the two things that move a SOP Instance UID -- UID
+        replacement at `anonymize()` (`pixels_changed=False`) and
+        redaction (`pixels_changed=True`, through `regenerate_uid`) -- so
+        "the UID this instance was ingested under" has one record, which
+        the ingest gate (#238), a report from before the move
+        (`Session._instances_by_uid`) and redaction's own UID all read.
+
+        Only the first one is recorded. The UIDs written here exist in no
+        source file, so recording a later one would replace the single
+        value a re-ingested source file could actually carry. A second
+        redaction (`force=True`, #237), or a redaction after UID
+        replacement, must leave it alone. Direct assignment, not
+        `set_attr`: `set_attr` lowercases the key. The revision already
+        moved on the `set_attr`, so the store still sees this instance as
+        unsaved.
+
+        `pixels_changed` detaches the instance from its source file: its
+        pixels no longer match it, and `get_pixel_data()` would otherwise
+        fall back to the unredacted frame. A UID replacement leaves the
+        pixels as they were, so the file still serves them. `source_path`
+        is never touched: it records where the bytes came from.
         """
         previous_uid = self.sop_instance_uid
-
-        # 1. Generate new UID using pydicom's generator (or your org root)
-        new_uid = generate_uid()
-
-        # 2. Update the Object Property
         self.sop_instance_uid = new_uid
-
-        # 3. Update the DICOM Attribute Dictionary
         self.set_attr("0008,0018", new_uid)
-
-        # 4. Record the identity this instance is leaving behind, once.
-        #
-        # Only the first one. The UIDs generated here exist in no file,
-        # so recording a later one would replace the single value a
-        # re-ingested source file could actually carry -- which is what
-        # the ingest gate matches on (#238). A second redaction
-        # (`force=True`, #237) must therefore leave this alone.
-        #
-        # Direct assignment, not `set_attr`: `set_attr` lowercases the
-        # key. The revision already moved on the `set_attr` above, so
-        # the store still sees this instance as unsaved.
         if previous_uid and SOURCE_SOP_UID_ATTR not in self.attributes:
             self.attributes[SOURCE_SOP_UID_ATTR] = previous_uid
-
-        # 5. Detach from physical file
-        # Since this object is now a "new" instance in memory,
-        # it no longer matches the file on disk.
-        #
-        # `source_path` is deliberately not touched here: it records
-        # where the bytes came from, which redaction does not change.
-        self.file_path = None
-
-        get_logger().debug(f"  -> Identity regenerated: {new_uid}")
+        if pixels_changed:
+            self.file_path = None
 
     def set_attr(self, tag: str, value: Any):
         """

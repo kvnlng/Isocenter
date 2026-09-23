@@ -3,11 +3,21 @@ import pytest
 from isocenter.entities import Patient, Study, Series, Instance
 from isocenter.session import DicomSession
 from isocenter.io_handlers import DicomExporter
+from isocenter.privacy import _replacement_uid_for
 import os
+
+from support.project_secret import FIXED_A, load_fixed_secret
+
+
+def _replaced(uid):
+    """`uid` as this project replaces it (#544): what a de-identified
+    instance holds, so the floor has nothing left to raise on it."""
+    return _replacement_uid_for(uid, FIXED_A)
 
 def test_safe_export_skips_phi(tmp_path):
     # 1. Setup Session & Store
     with DicomSession(":memory:") as sess:
+        load_fixed_secret(sess)
         # --- Patient still carrying an identifier (a real name) ---
         p_identifying = Patient("P_DIRTY", "Real Name")
         st1 = Study("S1", "20230101")
@@ -42,10 +52,12 @@ def test_safe_export_skips_phi(tmp_path):
 
         # --- Clean Patient (Anonymized Name) ---
         p_clean = Patient("ANON_CLEAN", "ANONYMIZED")
-        st2 = Study("S2", None) # No date allowed in safe mode currently
-        se2 = Series("SE2", "OT", 1)
+        # Its UIDs are already replacements (#544): the floor replaces a
+        # source UID, so an instance holding one is not clean.
+        st2 = Study(_replaced("S2"), None) # No date allowed in safe mode currently
+        se2 = Series(_replaced("SE2"), "OT", 1)
 
-        inst2 = Instance("I2", "1.2.840.2", 1)
+        inst2 = Instance(_replaced("I2"), "1.2.840.2", 1)
         # Carries no value any floor-policy rule would act on (#495): no
         # Study Date at all (JITTER flags even an empty one, since it has
         # not been shifted), and Study Time already empty (EMPTY is
@@ -130,7 +142,7 @@ def test_safe_export_skips_phi(tmp_path):
         dirty_files = [f for f in all_files if "Subject_P_DIRTY" in str(f)]
         assert len(dirty_files) == 0
 
-        clean_files = [f for f in all_files if "Subject_ANON_CLEAN" in str(f) and f.name == "I2.dcm"]
+        clean_files = [f for f in all_files if "Subject_ANON_CLEAN" in str(f) and f.name == f"{_replaced('I2')}.dcm"]
         assert len(clean_files) == 1
         assert clean_files[0].exists()
 

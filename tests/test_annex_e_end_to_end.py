@@ -9,13 +9,14 @@ file.
 The walk is the assertion, not the probe list. Every element in the
 written file whose tag the table has must be absent, zero-length, or a
 zero-item sequence -- or, where the row's code has a D arm, hold its
-VR's dummy (#557) -- unless the table gives it no rule or a named
+VR's dummy (#557), or, on a `U` row, a `2.25.` UID the source did not
+carry (#544) -- unless the table gives it no rule or a named
 departure says why not. Every even-group 50xx and 60xx element must be
 absent outright, whatever its row (#556). The probe list only makes sure
 each kind of identifier is in the input, so an edit to the fixture
 cannot quietly stop testing one.
 
-Both worker paths, because the process path pickles the 590-rule policy
+Both worker paths, because the process path pickles the 646-rule policy
 into every scan task and the thread path does not.
 """
 import os
@@ -161,6 +162,25 @@ def _row_for(rows, tag):
     return None
 
 
+_REPLACED_UID = re.compile(r"2\.25\.(0|[1-9][0-9]*)")
+
+
+def _uid_values(element):
+    value = element.value
+    return [str(v) for v in (value if isinstance(value, (list, tuple, pydicom.multival.MultiValue))
+                             else [value])]
+
+
+def _is_replaced_uid(element, source_uids):
+    """A UI element whose every value is a `2.25.` UID the source file
+    carried nowhere: what UID replacement writes (#544). The derivation
+    itself is pinned in `test_uids_are_replaced_by_the_project_secret.py`;
+    here only that nothing of the source's UIDs survives."""
+    values = _uid_values(element)
+    return (element.VR == "UI" and bool(values)
+            and all(_REPLACED_UID.fullmatch(v) and v not in source_uids for v in values))
+
+
 def _is_empty(element):
     if element.VR == "SQ":
         return len(element.value) == 0
@@ -241,6 +261,8 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
     # it since #537).
     floor_keeps = {"0010,0040", "0010,1010", "0008,0020"}
 
+    source_uids = {v for element in source.iterall() if element.VR == "UI"
+                   for v in _uid_values(element)}
     survivors = []
     for element in out.iterall():
         # Every curve and overlay element goes, whatever its row: the
@@ -260,6 +282,10 @@ def test_end_to_end_every_identifier_type_is_gone(tmp_path, strategy, monkeypatc
         # dummy and nothing of the original (#557).
         if ("D" in row["basic"].split("/") and element.VR != "SQ"
                 and element.value == DUMMY.get(element.VR)):
+            continue
+        # A U row, and Annotation Group UID's D, is UID replacement (#544).
+        if ((row["basic"] == "U" or key == "006a,0003")
+                and _is_replaced_uid(element, source_uids)):
             continue
         survivors.append((_key(element.tag), row["name"], element.value))
     assert survivors == [], survivors

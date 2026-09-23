@@ -61,7 +61,10 @@ def _owner_declines(rows):
     for _uid, details in rows:
         for owner in ("Study", "Patient"):
             if REASON.format(owner=owner) in details:
-                tag = next(t for t in OWNED if t in details)
+                # A UID copy's row (#544) is `_uid_declines`'.
+                tag = next((t for t in OWNED if t in details), None)
+                if tag is None:
+                    continue
                 assert tag not in found, rows
                 found[tag] = owner
     return found
@@ -234,7 +237,9 @@ def _session_with(tmp_path, suffix):
     report = session.audit()
     [patient] = session.store.patients
     [inst] = [i for st in patient.studies for se in st.series for i in se.instances]
-    owners = [f for f in report.findings if f.entity_type in ("Patient", "Study")]
+    # The Series is an owner too since #544: the export stamps its Series
+    # Instance UID, and its finding is borne by its instances.
+    owners = [f for f in report.findings if f.entity_type in ("Patient", "Study", "Series")]
     instance = [f for f in report.findings if f.entity_type == "Instance"]
     return session, patient, inst, owners, instance
 
@@ -464,3 +469,138 @@ def test_a_date_is_recorded_only_on_the_word_of_its_own_study(tmp_path):
         session.anonymize(mine)
         assert late.attributes["0008,0020"] == shifted
         assert not late.remediation_vouches_for("0008,0020", shifted)
+
+
+# --- the owned UIDs (#544 over #624) -----------------------------------------
+#
+# Since #544 the Study and Series Instance UIDs are replaced, and the export
+# stamps both from their owners (`0020,000d` from the Study, `0020,000e` from
+# the Series). An instance's top-level copy of either follows its owner the
+# way the three tags above do: never written as the replacement while the
+# file carries the source, never stamped REMEDIATED over it.
+
+OWNED_UIDS = {"0020,000d": "Study", "0020,000e": "Series"}
+
+
+def _uid_declines(rows):
+    """`{tag: owner}` for each #624 decline on an owned UID copy."""
+    found = {}
+    for _uid, details in rows:
+        for tag, owner in OWNED_UIDS.items():
+            if tag in details and REASON.format(owner=owner) in details:
+                assert tag not in found, rows
+                found[tag] = owner
+    return found
+
+
+def _everything_but(entity_type):
+    def pick(report):
+        return [f for f in report.findings if f.entity_type != entity_type]
+    return pick
+
+
+def _run_uids(tmp_path, suffix, between=_nothing, pick=None):
+    path = write_ct(tmp_path / "in" / "a.dcm", "PID-624", suffix, name="Alpha^One")
+    source = pydicom.dcmread(str(path))
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in"))
+        report = session.audit()
+        [patient] = session.store.patients
+        [study] = patient.studies
+        [inst] = [i for se in study.series for i in se.instances]
+        between(patient, study)
+        session.anonymize(report if pick is None else pick(report))
+        rows = _declines(session)
+        session.export(str(tmp_path / "out"), use_compression=False)
+        session.generate_report(str(tmp_path / "r.md"))
+        grade = (tmp_path / "r.md").read_text(encoding="utf-8")
+    [out] = list((tmp_path / "out").rglob("*.dcm"))
+    return inst, source, rows, pydicom.dcmread(str(out)), grade
+
+
+def test_t_u1_a_report_from_another_store_leaves_the_uid_copies_as_the_file(tmp_path):
+    """T-U1 (T-C1 and Q-C4 for UIDs). Store B handed store A's report over
+    the same file: B's Study and Series refuse A's replacements (the UID
+    analogue of #644), so the owners keep their source UIDs, and the
+    instance's copies of both follow their refusing owners -- each holds
+    what B's export writes, with one row carrying the owner's reason,
+    which wins for a stamped copy (#624, Q-C4). No UID A minted reaches
+    B's graph or file; the instance reads IDENTIFIED. Kills the UID tags
+    missing from `_owner_stamps_copy`, and the owners' refusal."""
+    from isocenter.privacy import _replacement_uid_for
+    from support.project_secret import FIXED_A, FIXED_B, load_fixed_secret
+
+    path = write_ct(tmp_path / "in" / "a.dcm", "PID-624", "5640", name="Alpha^One")
+    src = pydicom.dcmread(str(path))
+    with Session(str(tmp_path / "a.db")) as store_a:
+        load_fixed_secret(store_a, secret=FIXED_A)
+        store_a.ingest(str(tmp_path / "in"))
+        report = store_a.audit()
+    with Session(str(tmp_path / "b.db")) as store_b:
+        load_fixed_secret(store_b, secret=FIXED_B)
+        store_b.ingest(str(tmp_path / "in"))
+        [inst] = [i for p in store_b.store.patients for st in p.studies
+                  for se in st.series for i in se.instances]
+        store_b.anonymize(report)
+        rows = _declines(store_b)
+        store_b.export(str(tmp_path / "out"), use_compression=False)
+    [out] = list((tmp_path / "out").rglob("*.dcm"))
+    ds = pydicom.dcmread(str(out))
+    for tag, keyword in (("0020,000d", "StudyInstanceUID"),
+                         ("0020,000e", "SeriesInstanceUID")):
+        assert inst.attributes[tag] == _exported(ds, tag) == str(getattr(src, keyword)), tag
+    assert _uid_declines(rows) == OWNED_UIDS, rows
+    minted_by_a = {_replacement_uid_for(str(getattr(src, k)), FIXED_A)
+                   for k in ("SOPInstanceUID", "StudyInstanceUID", "SeriesInstanceUID",
+                             "FrameOfReferenceUID")}
+    assert not [el for el in ds.iterall() if str(el.value) in minted_by_a]
+    assert inst.phi_status is PhiStatus.IDENTIFIED
+
+
+def test_t_u2_a_pass_given_only_the_instance_findings_leaves_the_uid_copies_as_the_file(
+        tmp_path):
+    """T-U2 (T-C4). Only the instance findings: the Study and Series keep
+    their source UIDs, which the file carries, and the copies equal them
+    -- not the replacements a copy-only write left beside a file carrying
+    the source -- with no row (the owners were not handed in, Q-C5), the
+    instance IDENTIFIED, and REVIEW_REQUIRED. The instance's own SOP
+    Instance UID is still replaced: it is not stamped from an owner."""
+    inst, src, rows, ds, grade = _run_uids(tmp_path, "5641",
+                                           pick=_everything_but_owners)
+    for tag, keyword in (("0020,000d", "StudyInstanceUID"),
+                         ("0020,000e", "SeriesInstanceUID")):
+        assert inst.attributes[tag] == _exported(ds, tag) == str(getattr(src, keyword)), tag
+    assert str(ds.SOPInstanceUID) != str(src.SOPInstanceUID)
+    assert inst.phi_status is PhiStatus.IDENTIFIED
+    assert rows == []
+    assert "**REVIEW_REQUIRED**" in grade and "**PASS**" not in grade
+
+
+def _everything_but_owners(report):
+    return [f for f in report.findings if f.entity_type == "Instance"]
+
+
+def test_t_u3_a_series_not_handed_in_costs_pass(tmp_path):
+    """T-U3. Patient, Study and instance findings handed in, the Series'
+    not: the file carries the source Series Instance UID, the instance's
+    copy equals it (no row, Q-C5), and the run grades REVIEW_REQUIRED --
+    the Series' instances bear its finding (review of #544, finding 2)."""
+    inst, src, rows, ds, grade = _run_uids(tmp_path, "5642",
+                                           pick=_everything_but("Series"))
+    assert inst.attributes["0020,000e"] == _exported(ds, "0020,000e") == str(src.SeriesInstanceUID)
+    assert _exported(ds, "0020,000d") != str(src.StudyInstanceUID)
+    assert inst.phi_status is PhiStatus.IDENTIFIED
+    assert rows == []
+    assert "**REVIEW_REQUIRED**" in grade and "**PASS**" not in grade
+
+
+def test_t_u4_a_full_pass_folds_the_uid_copies(tmp_path):
+    """T-U4 (T-C5, control). The owners write their replacements and every
+    instance copy folds: no row, copies equal the file, REMEDIATED, PASS."""
+    inst, src, rows, ds, grade = _run_uids(tmp_path, "5643")
+    assert rows == []
+    for tag in OWNED_UIDS:
+        assert inst.attributes[tag] == _exported(ds, tag), tag
+    assert _exported(ds, "0020,000e") != str(src.SeriesInstanceUID)
+    assert inst.phi_status is PhiStatus.REMEDIATED
+    assert "**PASS**" in grade

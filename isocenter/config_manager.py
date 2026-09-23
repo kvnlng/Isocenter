@@ -524,11 +524,13 @@ _NON_STRING_VRS = frozenset({"OB", "OD", "OF", "OL", "OV", "OW", "UN",
 #: - Binary: zero bytes, one word of the VR's width, so the value field is
 #:   even (PS3.5 7.1.1).
 #:
-#: A VR not here has no dummy (`_vr_dummy` is None), and a value-less
-#: REPLACE on it is refused: numeric VRs and AT (no Table E.1-1 D row is
-#: either, and a zero reads as a plausible value), UI (a dummy UID is UID
-#: replacement, #544), SQ (no dummy item is valid independent of the IOD;
-#: the scan warns and applies nothing), and a compound dictionary VR.
+#: A VR not here has no dummy (`_vr_dummy` is None). A value-less REPLACE
+#: on UI is the keyed UID replacement instead (#544; `privacy.
+#: _replacement_uid_for`), never a constant: one dummy UID would merge
+#: every study under it. On the rest it is refused: numeric VRs and AT (no
+#: Table E.1-1 D row is either, and a zero reads as a plausible value), SQ
+#: (no dummy item is valid independent of the IOD; the scan warns and
+#: applies nothing), and a compound dictionary VR.
 #: Changing a value here changes `basic@2026c`'s output, which is frozen
 #: from the v1.0.0 tag (#714).
 VR_DUMMY = {
@@ -684,7 +686,12 @@ def _dictionary_vr_refuses(tag: str, value: Any) -> Optional[str]:
     # and passes any value, and the scan warns about a value on one.
     arms = [arm.strip() for arm in vr.split(" or ")]
     parts = [value]
-    if isinstance(value, str) and _dictionary_vm(tag) != "1":
+    if isinstance(value, (list, tuple)):
+        # A multi-valued write, one value at a time: the keyed UID
+        # replacement of a VM 1-n element is a list (#544), and
+        # `validate_value` reads a list as one value and refuses it.
+        parts = list(value)
+    elif isinstance(value, str) and _dictionary_vm(tag) != "1":
         parts = value.split("\\")
 
     def holds(arm):
@@ -730,10 +737,12 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
     6. REPLACE on a standard tag whose VR cannot hold what it writes
        (#560). Study Date's REPLACE with no value is the shift (#537, Q3)
        and is not judged as a literal. With no `value:` it writes the
-       VR's dummy (`VR_DUMMY`, #557), so it is refused only on a VR with
-       none: numeric VRs, AT, a compound VR, and UI, whose message names
-       UID replacement (#544). Until #557 DA, DT, TM, AS and the binary
-       VRs were refused here too, for the `ANONYMIZED` they could not hold.
+       VR's dummy (`VR_DUMMY`, #557), and on UI the keyed UID replacement
+       (#544), so it is refused only on a VR with neither: numeric VRs,
+       AT and a compound VR. A `value:` a UI cannot hold is refused with
+       advice naming the value-less spelling. Until #557 DA, DT, TM, AS
+       and the binary VRs were refused here too, for the `ANONYMIZED`
+       they could not hold; until #544, UI was.
     7. A REPLACE `value:` pydicom's `validate_value` passes and the tag
        still cannot hold (review of #574): a `-` in a DA or TM, which is
        a range, and a `\\` on a tag of multiplicity 1, which is a second
@@ -806,6 +815,11 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
                     f"SHIFT and JITTER move a date by the patient's offset "
                     f"and apply only to DA and DT (#559)")
         return None
+    if action == "REPLACE" and not value and _standard_dictionary_vr(tag) == "UI":
+        # The keyed UID replacement (#544), which a UI holds by
+        # construction. Refused until 1.0 (#560), so no configuration that
+        # loaded in 0.9.8 changes meaning.
+        return None
     if action == "REPLACE" and not (tag == _STUDY_DATE and not value):
         # With no `value:`, the VR's dummy (#557): the same spelling as the
         # scan's, so the loader judges exactly what the scan will write.
@@ -822,7 +836,8 @@ def _refused_phi_rule(tag: Any, rule: Any) -> Optional[str]:
             # By arm: `US or SS` is as numeric as `US` (review of #574).
             if not set(vr.split(" or ")) <= _NON_STRING_VRS:
                 advice += f", or give a value: that is a valid {vr}"
-            uid = "; a UID is replaced by UID replacement (#544)" if vr == "UI" else ""
+            uid = ("; REPLACE with no value gives it this project's "
+                   "replacement UID (#544)") if vr == "UI" else ""
             return (f"phi_tags['{tag}'] is REPLACE, which writes {written!r}, "
                     f"and {tag} is {vr}, which cannot hold it; use {advice} "
                     f"(#560){uid}")

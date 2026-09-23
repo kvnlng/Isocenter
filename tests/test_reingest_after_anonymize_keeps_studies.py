@@ -27,8 +27,10 @@ import pydicom
 import pytest
 
 from isocenter import Session
+from isocenter.privacy import _replacement_uid_for
 
 from support.ct_small_files import row_counts, stored_study_uids, study_uid, write_ct
+from support.store_secret import secret_of
 
 MODES = ["threads", "processes"]
 
@@ -87,8 +89,14 @@ def test_a_later_study_for_an_anonymized_patient_keeps_every_study(
                 session.export(str(out))
 
     assert row_counts(db) == (2, 3, 3, 3)
-    assert stored_study_uids(db) == {study_uid("1"), study_uid("2"),
-                                     study_uid("3")}
+
+    # Every study went through a pass, so each carries its replacement
+    # UID (#544); a later file of study 1 would join it at ingest.
+    def replaced(suffix):
+        return _replacement_uid_for(study_uid(suffix), secret_of(db))
+
+    assert stored_study_uids(db) == {replaced("1"), replaced("2"),
+                                     replaced("3")}
 
     if flow == "export":
         files = sorted(glob.glob(str(out / "**" / "*.dcm"), recursive=True))
@@ -97,19 +105,19 @@ def test_a_later_study_for_an_anonymized_patient_keeps_every_study(
         for path in files:
             ds = pydicom.dcmread(path)
             by_study[ds.StudyInstanceUID] = ds.PatientID
-        assert by_study[study_uid("1")] == by_study[study_uid("3")]
-        assert by_study[study_uid("1")].startswith("ANON_")
-        assert by_study[study_uid("2")] != by_study[study_uid("1")]
+        assert by_study[replaced("1")] == by_study[replaced("3")]
+        assert by_study[replaced("1")].startswith("ANON_")
+        assert by_study[replaced("2")] != by_study[replaced("1")]
 
     with Session(db) as session:
         assert len(session.store.patients) == 2
         holder = next(p for p in session.store.patients
-                      if study_uid("1") in
+                      if replaced("1") in
                       [s.study_instance_uid for s in p.studies])
         studies = {s.study_instance_uid: s for s in holder.studies}
-        assert sorted(studies) == [study_uid("1"), study_uid("3")]
-        shifted_1 = studies[study_uid("1")].study_date
-        shifted_3 = studies[study_uid("3")].study_date
+        assert sorted(studies) == sorted([replaced("1"), replaced("3")])
+        shifted_1 = studies[replaced("1")].study_date
+        shifted_3 = studies[replaced("3")].study_date
         assert isinstance(shifted_1, date) and isinstance(shifted_3, date)
         assert shifted_1 != date(2004, 1, 19), "setup: the date was not shifted"
         # One offset for the subject: the ten days between the originals
