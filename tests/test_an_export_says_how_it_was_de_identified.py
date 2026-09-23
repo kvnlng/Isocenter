@@ -238,25 +238,28 @@ def _instance_edited(session, tmp_path):
 
 
 def _patient_edited(session, tmp_path):
-    """#767's shape: an owner field set after the pass. Only the patient
-    changes; the instance still reads REMEDIATED."""
+    """#767's shape: an owner field set after the pass. The assignment
+    makes the patient's status stale (#767); the instance still reads
+    REMEDIATED, so this is the predicate reading the patient."""
     session.anonymize(session.audit())
-    session.store.patients[0].patient_name = "Doe^Real"
+    patient = session.store.patients[0]
+    patient.patient_name = "Doe^Real"
     [inst] = _instances(session)
+    assert patient.phi_status is PhiStatus.UNSCANNED, "setup: the edit is seen"
     assert inst.phi_status is PhiStatus.REMEDIATED, "setup: only the patient moved"
 
 
 def _series_edited(session, tmp_path):
-    """Review of L12, F2: a Series field set back after the pass. No status
-    is recorded on a Series, so none goes stale, and the instance, its
-    study and its patient still read REMEDIATED beside the source Series
-    Instance UID."""
+    """Review of L12, F2: a Series field set back after the pass. The
+    marker reads no Series; since #767 the edit marks each instance of the
+    series changed, so the instance reads UNSCANNED and the file, carrying
+    the source Series Instance UID, says nothing."""
     session.anonymize(session.audit())
     [inst] = _instances(session)
     inst_series = session.store.patients[0].studies[0].series[0]
     inst_series.series_instance_uid = pydicom.dcmread(
         get_testdata_file("CT_small.dcm")).SeriesInstanceUID
-    assert inst.phi_status is PhiStatus.REMEDIATED, "setup: no status moved"
+    assert inst.phi_status is PhiStatus.UNSCANNED, "setup: the edit is seen"
 
 
 def _with_a_referenced_image(ds):
@@ -268,11 +271,12 @@ def _with_a_referenced_image(ds):
 
 def _nested_edited(session, tmp_path):
     """Review of L12, F3: a name written into a nested item after the pass.
-    The item's revision moves; its instance's status does not."""
+    Since #767 the item's change reaches its instance, which reads
+    UNSCANNED."""
     session.anonymize(session.audit())
     [inst] = _instances(session)
     inst.sequences["0008,1140"].items[0].set_attr("0010,0010", "Doe^Nested")
-    assert inst.phi_status is PhiStatus.REMEDIATED, "setup: no status moved"
+    assert inst.phi_status is PhiStatus.UNSCANNED, "setup: the edit is seen"
 
 
 _nested_edited.source_edit = _with_a_referenced_image
@@ -324,24 +328,8 @@ def _instances(session):
             for se in st.series for i in se.instances]
 
 
-#: #767, open: an edit after the pass that moves no status the marker
-#: reads. An owner field assigned directly (measured:
-#: `Patient.patient_name = ...` leaves `_revision` where it was), a Series
-#: field (no Series records a status), or a nested item (its revision
-#: moves, its instance's status does not): the three entities still read
-#: REMEDIATED and the file says YES beside the value set back. The marker
-#: rests on the status and is as honest as it is. Owner ruling: #767's PR
-#: makes each of these edits mark the containing instances changed; strict,
-#: so that fix turns these red, and whichever of L12 and #767 lands second
-#: removes all three marks.
-_EDIT_UNTRACKED = pytest.mark.xfail(
-    strict=True, reason="#767: an edit after the pass that moves no status")
-
-
 @pytest.mark.parametrize("step", [_no_audit, _declined, _instance_edited,
-                                  pytest.param(_patient_edited, marks=_EDIT_UNTRACKED),
-                                  pytest.param(_series_edited, marks=_EDIT_UNTRACKED),
-                                  pytest.param(_nested_edited, marks=_EDIT_UNTRACKED),
+                                  _patient_edited, _series_edited, _nested_edited,
                                   _owner_status_moved("patient"),
                                   _owner_status_moved("study"),
                                   _mixed_policies, _series_finding_left],

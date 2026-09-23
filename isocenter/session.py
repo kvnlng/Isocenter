@@ -6937,13 +6937,13 @@ class DicomSession:
         A stand-in that is no `TrackedEntity` records no status, so it
         gets none.
 
-        Not caught, until #767 (owner ruling on the review of L12): an
-        owner field assigned directly, a Series field (no Series records a
-        status), and a nested item edited after the pass (its revision
-        moves, its instance's status does not). Each leaves all three
-        statuses where the pass put them, so the file says YES; #767 makes
-        each such edit mark the containing instances changed. Pinned by
-        strict xfails in `test_an_export_says_how_it_was_de_identified.py`.
+        An edit after the pass moves one of the three whatever it edits
+        (#767): an owner field assigned directly makes that owner's status
+        stale (`entities._assign_owner_field`), and a Series field or a
+        nested item marks the instance changed (the Series has no status
+        this reads; `DicomItem.mark_modified` reaches the root). Pinned in
+        `test_an_export_says_how_it_was_de_identified.py`, beside the
+        instance edit.
         A declared burned-in annotation is the writer's to read
         (`io_handlers._write_deid_markers`), from the file itself.
 

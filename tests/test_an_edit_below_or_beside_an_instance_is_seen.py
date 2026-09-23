@@ -343,12 +343,16 @@ def test_the_pass_writing_a_series_uid_is_not_an_edit(tmp_path):
         assert inst.phi_status is PhiStatus.IDENTIFIED
         session.anonymize(rest)
         assert inst.phi_status is PhiStatus.REMEDIATED
-        reasons, passed, _ds = _graded(session, tmp_path)
+        reasons, passed, ds = _graded(session, tmp_path)
         assert passed and reasons == [], reasons
+        # The markers (#554) read the same statuses: the pass's own Series
+        # write withholds nothing.
+        assert ds.PatientIdentityRemoved == "YES"
         series.series_number = 767
-        reasons, passed, _ds = _graded(session, tmp_path, "r2.md")
+        reasons, passed, ds = _graded(session, tmp_path, "r2.md")
     assert not passed
     assert _edited(reasons) == [_line(2, series=1, instances=1)], reasons
+    assert "PatientIdentityRemoved" not in ds
 
 
 def test_an_instance_attribute_edited_after_the_pass_is_not_pass(tmp_path):
@@ -423,8 +427,11 @@ def test_the_lock_carries_the_status_it_found(tmp_path):
         assert "0400,0500" in inst.sequences
         assert inst.phi_status is PhiStatus.CLEARED
         session.anonymize(report)
-        reasons, passed, _ds = _graded(session, tmp_path)
+        reasons, passed, ds = _graded(session, tmp_path)
     assert passed and reasons == [], reasons
+    # The markers (#554) read the same statuses: the lock withholds them
+    # no more than it grades.
+    assert ds.PatientIdentityRemoved == "YES"
 
 
 def test_the_lock_does_not_launder_an_edit_made_before_it(tmp_path):
@@ -441,9 +448,10 @@ def test_the_lock_does_not_launder_an_edit_made_before_it(tmp_path):
         session.lock_identities("PID-W", verbose=False)
         assert inst.phi_status is PhiStatus.UNSCANNED
         session.anonymize(report)
-        reasons, passed, _ds = _graded(session, tmp_path)
+        reasons, passed, ds = _graded(session, tmp_path)
     assert not passed
     assert _edited(reasons) == [_line(1, instances=1)], reasons
+    assert "PatientIdentityRemoved" not in ds
 
 
 def test_the_documented_reversible_path_stays_pass(tmp_path):
