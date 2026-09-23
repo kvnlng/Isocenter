@@ -300,8 +300,11 @@ def test_a_malformed_key_in_the_working_directory_makes_session_raise(tmp_path):
     Killing mutation: the auto-enable wrapped in `except ValueError: pass`
     (the reviewer's n6), which left 153 tests green."""
     (tmp_path / "isocenter.key").write_bytes(b"not a key")
+    # Written as a `with` for #371's construction-site check; the
+    # constructor raises, so the block never runs and nothing is closed.
     with pytest.raises(ValueError):
-        DicomSession(str(tmp_path / "auto.db"))
+        with DicomSession(str(tmp_path / "auto.db")):
+            pass
 
 
 def test_the_audit_report_names_nobody_after_anonymize(session):
