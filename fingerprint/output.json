@@ -125892,14 +125892,14 @@
   }
  },
  "provenance": {
-  "dirty": true,
+  "dirty": false,
   "gil": true,
-  "git_sha": "3af9c7dbbbcd73ddcc584877615bed7ed17db674",
+  "git_sha": "1f1ebcd7ec63e7c1aa6ac60db76d4f568889e5ec",
   "isocenter_version": "0.9.8",
   "jobs": 8,
   "platform": "macOS-27.0-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 468
+  "seconds": 508
  },
  "schema": 1,
  "toolchain": {
