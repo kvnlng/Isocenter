@@ -350,12 +350,18 @@ def test_the_detector_sees_a_walk_filtered_by_suffix(tmp_path, call):
         f'for f in {call}:\n    if str(f).endswith("{md}"): pass\n')
     (tests / "test_says.py").write_text(f'SUFFIX = "{md}"\n')
     (tests / "test_other_kind.py").write_text(
-        f'for f in {call}:\n    if str(f).endswith("{dcm}"): pass\n')
+        f'for f in {call}:\n    if str(f).endswith("{dcm}"): pass\n'
+        f'NOTES = "notes{md}"\n')
     (tests / "test_ast.py").write_text(
         f'for n in ast.' + f'walk(tree):\n    name = "x{md}"\nS = "{md}"\n')
+    # test_other_kind walks for another suffix and names one page: a
+    # reader of neither every page nor that one.
     assert test_map.glob_readers(tmp_path, "docs/a.md") == {"tests/test_walks.py"}
-    assert test_map.glob_readers(tmp_path, "LICENSE") == set(), (
-        "a path with no suffix is no kind")
+    # A suffix may start with a digit.
+    (tests / "test_archives.py").write_text(
+        f'for f in {call}:\n    if str(f).endswith(".7z"): pass\n')
+    assert test_map.glob_readers(tmp_path, "fixtures/a.7z") == {
+        "tests/test_archives.py"}
 
 
 def test_every_changed_path_adds_its_glob_readers():

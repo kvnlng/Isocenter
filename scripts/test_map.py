@@ -358,8 +358,11 @@ _TREE_CALL = re.compile(
     r"|\.iterdir\(")
 _GLOB_PATTERN = re.compile(r"""["']([^"'\s]*\*[^"'\s]*\.\w+)["']""")
 # A literal that is a whole suffix: `.endswith(".py")`, `suffix == ".md"`.
-# A letter first, so a UID fragment such as ".57" is not a suffix.
-_SUFFIX_LITERAL = re.compile(r"""["'](\.[A-Za-z]\w*)["']""")
+# Whole strings only: "notes.md" names one page, not every page. Never
+# empty, so a path with no suffix (`LICENSE`) is no file's kind. A digit
+# may lead (".7z"): a UID fragment such as ".57" then counts as a suffix,
+# which costs nothing while no tracked path ends in one.
+_SUFFIX_LITERAL = re.compile(r"""["'](\.\w+)["']""")
 
 
 def glob_readers(repo, path):
@@ -390,7 +393,7 @@ def glob_readers(repo, path):
         if _TREE_CALL.search(source) and (
                 any(fnmatch.fnmatchcase(name, Path(pattern).name)
                     for pattern in _GLOB_PATTERN.findall(source))
-                or (suffix and suffix in _SUFFIX_LITERAL.findall(source))):
+                or suffix in _SUFFIX_LITERAL.findall(source)):
             found.add(test.relative_to(repo).as_posix())
     return found
 
