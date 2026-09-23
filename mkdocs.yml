@@ -102,6 +102,8 @@ nav:
       - 'Migration Tools': migration.md
       - 'Analytics & Reporting': analytics.md
       - 'Waveforms & WFDB': waveforms.md
+  - Tutorials:
+      - 'De-identify and read the grade': tutorials/deidentify-and-read-the-grade.md
   - API Reference:
       - 'API stability': api/stability.md
       - 'Session': api/session.md
