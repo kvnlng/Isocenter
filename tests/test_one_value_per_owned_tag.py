@@ -354,9 +354,8 @@ def test_a_keep_policy_leaves_the_patients_value_on_every_instance(tmp_path, ord
 def test_when_the_owners_own_finding_declines_the_instance_copy_follows_the_owner(
         tmp_path, order):
     """F. The study's SHIFT_DATE declines on 'NOT-A-DATE', so no write
-    reached the instance copies. Folding them anyway would leave the real
-    original date in `export_dataframe(expand_metadata=True)` and
-    `get_flattened_instances()`. Until #624 the instance then shifted its
+    reached the instance copies. Folding them anyway would stamp them
+    REMEDIATED over a copy no write reached. Until #624 the instance shifted its
     own date, a value no file carried: the export stamps the Study's.
     Now each copy holds what the export writes, 'NOT-A-DATE', and each
     instance's finding declines with its own row, beside the study's."""

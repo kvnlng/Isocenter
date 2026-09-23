@@ -395,7 +395,7 @@ TARGETS = {
                               "tests/test_an_empty_report_is_not_a_blind_pass.py",
                               "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                               "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/remediation.py": (["tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_audit_suppression.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/remediation.py": (["tests/test_the_grade_counts_findings_not_acted_on.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_audit_suppression.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_partial_findings_list_is_not_remediated.py",

@@ -398,3 +398,69 @@ def test_a_study_date_no_study_holds_is_satisfied_by_the_empty_copy(tmp_path):
     [out] = list((tmp_path / "out").rglob("*.dcm"))
     assert _exported(pydicom.dcmread(str(out)), "0008,0020") == ""
     assert "**PASS**" in grade and "**REVIEW_REQUIRED**" not in grade, grade
+
+
+def test_a_copy_ingested_after_its_owners_wrote_is_synced_with_a_record(tmp_path):
+    """Refinement 2's positive branch: the owners wrote in a full pass,
+    then a second file of the same study is ingested carrying the source
+    name, ID and date, and only its instance findings are handed in. Each
+    copy is synced to the owner's value -- a remediation's output, which
+    the first instance's record vouches for -- so the sync is recorded as
+    one: the copy vouches for it, and the findings handed in again are
+    satisfied (REMEDIATED). Unrecorded, the copy would read as an
+    original, and every later hand-in would leave it unhandled. Kills MX1
+    (the sibling rule never records)."""
+    write_ct(tmp_path / "in1" / "a.dcm", "PID-624", "5694", name="Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
+        session.anonymize(session.audit())
+        [patient] = [p for p in session.store.patients if p.studies]
+        [study] = patient.studies
+        ds = pydicom.dcmread(str(tmp_path / "in1" / "a.dcm"))
+        ds.SOPInstanceUID = ds.SOPInstanceUID + ".7"
+        (tmp_path / "in2").mkdir()
+        ds.save_as(str(tmp_path / "in2" / "b.dcm"))
+        session.ingest(str(tmp_path / "in2"))
+        [late] = [i for se in study.series for i in se.instances
+                  if i.sop_instance_uid.endswith(".7")]
+        mine = [f for f in session.audit().findings if f.entity_type == "Instance"
+                and f.entity_uid == late.sop_instance_uid]
+        session.anonymize(mine)
+        written = {"0010,0010": patient.patient_name,
+                   "0010,0020": patient.patient_id,
+                   "0008,0020": study.study_date.strftime("%Y%m%d")}
+        for tag, value in written.items():
+            assert late.attributes[tag] == value, tag
+            assert late.remediation_vouches_for(tag, value), tag
+        session.anonymize(mine)
+        assert late.phi_status is PhiStatus.REMEDIATED
+        assert _declines(session) == []
+
+
+def test_a_date_is_recorded_only_on_the_word_of_its_own_study(tmp_path):
+    """Refinement 2's scope for a Study Date: the Study, not the Patient.
+    Study A's date is shifted in a full pass. Study B of the same patient
+    is ingested afterwards carrying, as its *source* date, exactly A's
+    shifted date; its instance copy is edited after the audit, and only
+    its instance findings are handed in. The sync writes B's own value
+    back -- a source date -- and A's instance, which vouches for the same
+    string as a shift, must not make it read as a remediation. Kills MX6
+    (the date's sibling scope widened to the whole patient)."""
+    write_ct(tmp_path / "in1" / "a.dcm", "PID-624", "5695", name="Alpha^One")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
+        session.anonymize(session.audit())
+        [patient] = [p for p in session.store.patients if p.studies]
+        shifted = patient.studies[0].study_date.strftime("%Y%m%d")
+        write_ct(tmp_path / "in2" / "b.dcm", patient.patient_id, "5696",
+                 study_date=shifted, name=patient.patient_name)
+        session.ingest(str(tmp_path / "in2"))
+        [study_b] = [st for st in patient.studies
+                     if st.study_instance_uid == study_uid("5696")]
+        [late] = [i for se in study_b.series for i in se.instances]
+        mine = [f for f in session.audit().findings if f.entity_type == "Instance"
+                and f.entity_uid == late.sop_instance_uid]
+        late.set_attr("0008,0020", "19990101")
+        session.anonymize(mine)
+        assert late.attributes["0008,0020"] == shifted
+        assert not late.remediation_vouches_for("0008,0020", shifted)

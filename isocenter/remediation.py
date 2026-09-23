@@ -1565,6 +1565,11 @@ class RemediationService:
                    for other in series.instances if other is not entity):
                 self._record_what_is_left(entity, tag, value)
             entity.set_attr(tag, value)
+            # Not re-recorded when it read UNSCANNED: that would write
+            # UNSCANNED over the raw `_phi_status` a stale status leaves,
+            # which the pass reads the same, but which #584's re-key gate
+            # (`io_handlers._its_key_is_in_use`) reads as scan evidence,
+            # stale included. Equivalent for the pass; not for the gate.
             if status is not PhiStatus.UNSCANNED:
                 entity.record_phi_status(status)
         field = next(f for f, t in self.ENTITY_FIELD_TAGS.items() if t == tag)
@@ -1775,11 +1780,13 @@ class RemediationService:
           owner wrote, so the lookup cannot find one. A check was written
           first and measured dead (#496 mutant N4).
         - **A copy the owner's write did not reach** -- the owner's own
-          finding declined, or was not handed in. Folding it anyway would
-          leave the original value in the instance dict, which is what
-          `export_dataframe(expand_metadata=True)` and
-          `get_flattened_instances()` read (#492). The owner's DECLINED
-          row already grades such a run REVIEW_REQUIRED.
+          finding declined, or was not handed in. A fold would stamp
+          REMEDIATED over a copy no write reached. Since #624 the copy is
+          set to what the export writes by `_owner_stamps_copy` either
+          way -- the original, when the owner declined -- and the finding
+          declines beside its owner's DECLINED row, or is left unhandled
+          when the owner was not handed in; either grades
+          REVIEW_REQUIRED.
         """
         proposal = finding.remediation_proposal
         # No "is this an instance?" check either, for the same reason as
