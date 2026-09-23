@@ -161,7 +161,7 @@ COMMITTED = {
                       "no_patient_id-s3-1.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
-    "redacted": ["redacted-1.dcm", "VARIES"],
+    "redacted": ["redacted-1.dcm"],
     "withheld": ["withheld-1.dcm"],
 }
 
