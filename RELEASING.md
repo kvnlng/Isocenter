@@ -56,15 +56,21 @@ never collide, so `git checkout v0.9.8` always means the published commit.
    - any other path: the test files whose text names it --
      `grep -l <basename> tests/test_*.py`, and for a `.py` file its name
      without the suffix as well. If none does: for a path under `docs/` or
-     any `*.md`, only the tests that read it by glob (next rule); the
-     whole suite for anything else (`scripts/`, `.github/`, root files).
+     any `*.md`, only the tests that read it by glob or walk (next rule);
+     the whole suite for anything else (`scripts/`, `.github/`, root files).
    - whatever else it selected, every changed path also selects the test
-     files that read every file of its kind by glob: a `tests/test_*.py`
-     that calls `glob`/`rglob` and holds a `*.ext` pattern matching the
-     path's name. That is how a page no test names reaches the tests that
-     walk `docs/**/*.md`, and a module reaches the ones that read
-     `isocenter/**/*.py` as text (`test_source_citations.py`,
-     `test_documented_env_vars.py`).
+     files that read every file of its kind by glob or walk: a
+     `tests/test_*.py` that calls `glob`, `iglob`, `rglob`, `os.walk`,
+     `os.listdir`, `os.scandir` or `.iterdir()`, and holds either a
+     `*.ext` pattern matching the path's name or the path's suffix as a
+     whole string (`".py"`, as in `name.endswith(".py")`). That is how a
+     page no test names reaches the tests that walk `docs/**/*.md`, and a
+     module reaches the ones that read `isocenter/**/*.py` as text
+     (`test_source_citations.py`, `test_documented_env_vars.py`, and
+     `test_api_coherence.py`, which walks the package with `os.walk`,
+     #744). Where the walk goes and what the literal is for are not
+     read, so this over-selects; it never narrows. A tree read with
+     none of those calls, or kept by no suffix, is not seen.
    - a selected test in a file with a module-, class-, package- or
      session-scoped fixture brings its whole file.
 
@@ -74,7 +80,11 @@ never collide, so `git checkout v0.9.8` always means the published commit.
    directory (#707), so the two runs may overlap in one checkout -- unless
    both include `tests/test_packaging_contract.py`, which builds the
    distributions in the repository root (setuptools' `build/` and
-   `isocenter.egg-info/`); run those one after the other. Paste each
+   `isocenter.egg-info/`); run those one after the other. That is nearly
+   every run: the packaging test reads every `*.py`, so any change to a
+   `.py` file anywhere in the repository selects it (#744). Plan on running
+   the two interpreters one after the other unless the change touches no
+   Python file. Paste each
    run's command, its SHA, its last line and its exit status
    (`…; echo "exit=$?"`) into the PR body, and keep the body current: it
    describes the SHA to be merged, not the first one pushed. A run that

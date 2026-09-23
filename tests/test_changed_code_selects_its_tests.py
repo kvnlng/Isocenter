@@ -332,6 +332,32 @@ def test_the_glob_detector_wants_a_glob_and_a_matching_pattern(tmp_path):
     assert test_map.glob_readers(tmp_path, "docs/a.md") == {"tests/test_reads.py"}
 
 
+@pytest.mark.parametrize("call", ["os." + "walk(root)", "os." + "listdir(root)",
+                                  "os." + "scandir(root)", "root." + "iterdir()",
+                                  "root." + "rglob('" + "*')"])
+def test_the_detector_sees_a_walk_filtered_by_suffix(tmp_path, call):
+    # A test that walks a tree and keeps one suffix reads every file of
+    # that kind without a glob literal: `test_equipment_has_one_constructor
+    # _outside_entities` reads every package module through os.walk and an
+    # endswith on the Python suffix, and an `Equipment()` added to
+    # privacy.py was not selected and failed (#744). Spelled in pieces, and
+    # no suffix quoted whole even in a comment (the detector reads
+    # comments too), or this file would read every page or module itself.
+    md, dcm = "." + "md", "." + "dcm"
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_walks.py").write_text(
+        f'for f in {call}:\n    if str(f).endswith("{md}"): pass\n')
+    (tests / "test_says.py").write_text(f'SUFFIX = "{md}"\n')
+    (tests / "test_other_kind.py").write_text(
+        f'for f in {call}:\n    if str(f).endswith("{dcm}"): pass\n')
+    (tests / "test_ast.py").write_text(
+        f'for n in ast.' + f'walk(tree):\n    name = "x{md}"\nS = "{md}"\n')
+    assert test_map.glob_readers(tmp_path, "docs/a.md") == {"tests/test_walks.py"}
+    assert test_map.glob_readers(tmp_path, "LICENSE") == set(), (
+        "a path with no suffix is no kind")
+
+
 def test_every_changed_path_adds_its_glob_readers():
     sel = _select([C("isocenter/session.py", "DicomSession.compact")],
                   readers=lambda p: {"tests/test_source_citations.py"})

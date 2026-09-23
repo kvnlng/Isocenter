@@ -74,7 +74,7 @@ def test_every_pool_call_in_the_package_resolves_to_a_dispatcher():
 def test_the_glob_detector_finds_the_tests_that_read_docs_and_source():
     # The tests the #734 review found reading by glob, and the two
     # source-text tests no TARGETS row holds (finding 7).
-    md = test_map.glob_readers(REPO, "docs/" + "nobody-names-this" + ".md")
+    md = test_map.glob_readers(REPO, "docs/" + "nobody-names-this." + "md")
     assert {"tests/test_doc_anchors.py", "tests/test_documented_api_exists.py",
             "tests/test_documented_output_matches.py",
             "tests/test_documented_zones_are_zone_space.py",
@@ -83,6 +83,10 @@ def test_the_glob_detector_finds_the_tests_that_read_docs_and_source():
     assert {"tests/test_source_citations.py",
             "tests/test_documented_env_vars.py",
             "tests/test_the_selector_reads_the_live_source.py"} <= py
+    # Walks the package with os.walk and keeps what ends with the Python
+    # suffix: no glob literal, and an `Equipment()` added to privacy.py
+    # selected 2909 tests but not this one, which failed on the edit (#744).
+    assert "tests/test_api_coherence.py" in py
     assert "tests/test_doc_anchors.py" not in py
     assert "tests/test_changed_code_selects_its_tests.py" not in py, (
         "the selector's slow test file reads the package by glob, so every "
