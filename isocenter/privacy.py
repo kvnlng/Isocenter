@@ -316,6 +316,21 @@ def _has_minted_uid_shape(value) -> bool:
 UID_REPLACEMENT = "uid_replacement"
 
 
+def _owned_uid_is_open(phi_tags, tag, uid, secret) -> bool:
+    """Whether the owner holding `uid` under `tag` is raised (#544): the
+    policy's rule on `tag` is the value-less REPLACE, and `uid` is a
+    non-blank UID this project did not mint.
+
+    One spelling for `PhiInspector._scan_owned_uid`, which raises the
+    finding, and `RemediationService._settle_statuses`, which asks the
+    same question of every Series at a pass end (review of #544, round 2):
+    a Series has no stored status, so after a reopen a pass handed a plain
+    list has nothing else to say its UID is still open.
+    """
+    return (_is_uid_replacement(_rule_for(phi_tags, tag), tag) and uid is not None
+            and bool(str(uid).strip()) and not _uid_is_minted(str(uid), secret))
+
+
 def _is_uid_replacement(rule, tag) -> bool:
     """Whether `rule` on `tag` is the keyed UID replacement (#544): REPLACE
     with no `value:` (or the string form, which is that), on a tag whose
@@ -1381,8 +1396,7 @@ class PhiInspector:
         """
         rule = _rule_for(self.phi_tags, tag)
         uid = getattr(entity, attr, None)
-        if (not _is_uid_replacement(rule, tag) or uid is None
-                or not str(uid).strip() or _uid_is_minted(str(uid), self.project_secret)):
+        if not _owned_uid_is_open(self.phi_tags, tag, uid, self.project_secret):
             return []
         name = _rule_name(rule) if isinstance(rule, dict) else str(rule)
         return [PhiFinding(

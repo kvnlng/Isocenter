@@ -39,10 +39,11 @@ from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
 
 from isocenter.entities import PhiStatus
-from isocenter.privacy import PhiFinding, PhiRemediation
+from isocenter.privacy import PhiFinding, PhiRemediation, _replacement_uid_for
 from isocenter.session import DicomSession
 
 from support.ct_small_files import write_ct
+from support.project_secret import FIXED_A, load_fixed_secret
 
 MODES = ["threads", "processes"]
 
@@ -428,11 +429,24 @@ def test_a_misnamed_finding_beside_the_full_report_stays_remediated(
         session.close()
 
 
-def test_hand_built_findings_without_an_audit_keep_pass_accounting(tmp_path):
-    """No audit, no tally: the pass speaks for the findings it was given."""
+@pytest.mark.parametrize("series_uid", ["minted", "source"])
+def test_hand_built_findings_without_an_audit_keep_pass_accounting(tmp_path, series_uid):
+    """No audit, no tally: the pass speaks for the findings it was given --
+    with one exception it cannot vouch past. A Series has no status of its
+    own, so under a policy that replaces its UID (the floor's value-less
+    REPLACE on `0020,000e`) an instance under a Series still holding its
+    source UID ends IDENTIFIED: its file carries that UID (review of #544,
+    round 2, R2-1). With the Series' UID already minted, the pass's own
+    accounting stands. Kills the pass-end Series check run only under a
+    tally, and run over a Series this store minted."""
     session = _session(tmp_path)
     try:
+        load_fixed_secret(session)
         instance = _instances(session)[0]
+        if series_uid == "minted":
+            series = session.store.patients[0].studies[0].series[0]
+            series.series_instance_uid = _replacement_uid_for(
+                series.series_instance_uid, FIXED_A)
         finding = PhiFinding(
             entity_uid=instance.sop_instance_uid, entity_type="Instance",
             field_name="Institution Name",
@@ -444,7 +458,8 @@ def test_hand_built_findings_without_an_audit_keep_pass_accounting(tmp_path):
 
         assert session.anonymize(findings=[finding]) == 1
 
-        assert instance.phi_status is PhiStatus.REMEDIATED
+        assert instance.phi_status is (PhiStatus.REMEDIATED if series_uid == "minted"
+                                       else PhiStatus.IDENTIFIED)
     finally:
         session.close()
 

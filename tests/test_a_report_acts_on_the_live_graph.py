@@ -649,7 +649,13 @@ def test_a_nested_finding_from_before_redact_reaches_its_instance_after_a_reopen
     with _reopen(root) as second:
         assert second.anonymize([nested]) == 1
         assert _declined(second) == []
-        assert _by_modality(second)["MR"][2].phi_status is PhiStatus.REMEDIATED
+        # IDENTIFIED, not REMEDIATED: a plain list after a reopen, without
+        # the Series' finding, leaves the MR under its source Series
+        # Instance UID, which the policy replaces (review of #544, round 2,
+        # R2-1). This line asserted REMEDIATED until then, pinning that
+        # hole's PASS side incidentally; the write is still marked, which
+        # the export below is what checks.
+        assert _by_modality(second)["MR"][2].phi_status is PhiStatus.IDENTIFIED
         second.save(sync=True)
     with _reopen(root) as third:
         mr = _datasets(third, root / "out")["MR"]

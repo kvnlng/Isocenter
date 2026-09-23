@@ -5994,8 +5994,13 @@ class DicomSession:
                 self._removal_targets(findings, by_uid, project_secret))
             remediator._use_scan_tally(tally, findings)
             remediator._use_series(
-                series for patient in self.store.patients
-                for study in patient.studies for series in study.series)
+                (series for patient in self.store.patients
+                 for study in patient.studies for series in study.series),
+                # The policy the lock reads a rule by (review of #574): the
+                # last audit's, which `audit(config_path=)` does not put on
+                # the configuration, else the configuration's.
+                (self._audited_phi_tags if self._audited_phi_tags is not None
+                 else self.configuration.phi_tags))
             count = remediator.apply_remediation(findings)
             if named:
                 self._adopt_the_reports_policy(report_policy, recorded_at, named)

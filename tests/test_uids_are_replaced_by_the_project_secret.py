@@ -1012,3 +1012,105 @@ def test_a_copy_less_instance_bears_its_series_finding(tmp_path, reaudit):
         session.export(str(tmp_path / "out"), use_compression=False)
         grade = _validation_status(session, tmp_path, "r.md")
     assert grade and "REVIEW_REQUIRED" in grade[0], grade
+
+
+# --------------------------------------------------------------------
+# The Series across a reopen (review of #544, round 2, R2-1)
+# --------------------------------------------------------------------
+
+def _audited_and_closed(tmp_path, shape):
+    """Audit under basic, save, close. Returns the report, the config, and
+    the Series' source UID -- for the copy-less shape, the one ingest
+    generated."""
+    src, cfg = (_series_filtered if shape == "copy" else _series_uid_absent)(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.load_config(cfg)
+        session.ingest(str(src))
+        report = session.audit()
+        series = session.store.patients[0].studies[0].series[0]
+        assert series.instances[0].phi_status is PhiStatus.IDENTIFIED
+        source = series.series_instance_uid
+        session.save(sync=True)
+    return report, cfg, source
+
+
+@pytest.mark.parametrize("shape", ["copy", "copy-less"])
+def test_a_reopened_pass_without_the_series_does_not_grade_pass(tmp_path, shape):
+    """A Series has no stored status, so what its finding said is gone once
+    the session closes, and a plain list carries no tally: a pass after a
+    reopen handed every finding but the Series' stamped the instance
+    REMEDIATED over a file carrying the source Series Instance UID, and the
+    export graded PASS. At the end of every pass a Series whose UID the
+    policy would still raise -- a value-less REPLACE on `0020,000e`, and a
+    UID this store did not mint -- keeps its instances from reading
+    REMEDIATED, tally or none. Kills the live check dropped, or run only
+    under a tally."""
+    report, cfg, source = _audited_and_closed(tmp_path, shape)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.load_config(cfg)
+        session.anonymize([f for f in report.findings if f.entity_type != "Series"])
+        series = session.store.patients[0].studies[0].series[0]
+        assert series.series_instance_uid == source
+        assert series.instances[0].phi_status is PhiStatus.IDENTIFIED
+        session.export(str(tmp_path / "out"), use_compression=False)
+        grade = _validation_status(session, tmp_path, "r.md")
+    assert grade and "REVIEW_REQUIRED" in grade[0], grade
+    (path,) = (tmp_path / "out").rglob("*.dcm")
+    assert pydicom.dcmread(path).SeriesInstanceUID == source
+
+
+@pytest.mark.parametrize("shape", ["copy", "copy-less"])
+def test_a_reopened_pass_with_the_series_grades_pass(tmp_path, shape):
+    """The same reopen handed the whole report replaces the Series UID, and
+    the check reads the UID the Series holds at the pass end -- the one it
+    minted -- so the instance reads REMEDIATED and the export grades PASS.
+    Kills the check reading the pass-start UID, or ignoring whether the
+    UID was minted here. The copy-less shape is graded by its status only:
+    its export writes a Series UID ingest generated, and says so in a
+    WARNING row (#584) that grades it REVIEW_REQUIRED on its own."""
+    report, cfg, source = _audited_and_closed(tmp_path, shape)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.load_config(cfg)
+        session.anonymize(list(report.findings))
+        series = session.store.patients[0].studies[0].series[0]
+        assert series.series_instance_uid == M(source)
+        assert series.instances[0].phi_status is PhiStatus.REMEDIATED
+        session.export(str(tmp_path / "out"), use_compression=False)
+        grade = _validation_status(session, tmp_path, "r.md")
+    (path,) = (tmp_path / "out").rglob("*.dcm")
+    assert pydicom.dcmread(path).SeriesInstanceUID == M(source)
+    if shape == "copy":
+        assert grade and "PASS" in grade[0], grade
+
+
+def test_a_series_kept_by_the_audited_policy_is_not_held_open(tmp_path):
+    """The check reads the policy the session last audited under, as the
+    lock does (review of #574), and the configuration only when no audit
+    ran: audited under a config that KEEPs the Series Instance UID, then
+    handed the report under basic, the Series was never raised, the pass
+    applied everything that was, and the export grades PASS with the
+    source UID the audited policy kept -- #555's rule as released. Kills
+    the check reading the configuration over the audited policy, or
+    dropping the value-less REPLACE condition."""
+    src, _ = _series_filtered(tmp_path)
+    keep = tmp_path / "keep.yaml"
+    keep.write_text('privacy_profile: basic\nphi_tags:\n'
+                    '  "0020,000e": {name: Series Instance UID, action: KEEP}\n',
+                    encoding="utf-8")
+    basic = tmp_path / "basic.yaml"
+    basic.write_text("privacy_profile: basic\n", encoding="utf-8")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.ingest(str(src))
+        session.load_config(str(keep))
+        report = session.audit()
+        assert not [f for f in report if f.entity_type == "Series"]
+        session.load_config(str(basic))
+        session.anonymize(report)
+        series = session.store.patients[0].studies[0].series[0]
+        assert series.series_instance_uid == "1.2.3.99.72"
+        assert series.instances[0].phi_status is PhiStatus.REMEDIATED
+        session.export(str(tmp_path / "out"), use_compression=False)
+        grade = _validation_status(session, tmp_path, "r.md")
+    assert grade and "PASS" in grade[0], grade

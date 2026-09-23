@@ -1405,6 +1405,33 @@ class RemediationService:
                         else self._scan_tally.settle(uid, by_uid.get(uid, ())))
                 if done is False:
                     demote.append(series)
+        # The same question asked of the Series as it stands, tally or none
+        # (review of #544, round 2, R2-1). A Series has no stored status, so
+        # after a reopen its finding survives only in a report, and a pass
+        # handed a plain list without it had no tally to hold it open: the
+        # instances read REMEDIATED over a file carrying the source Series
+        # UID, and the export graded PASS. So at the pass end each Series is
+        # asked the scan's own condition (`_owned_uid_is_open`) under the
+        # policy the session judges by: its UID *now* -- one this pass
+        # replaced is minted and asks nothing -- non-blank, not minted here,
+        # under a value-less REPLACE on `0020,000e`. An open Series demotes
+        # only the instances beneath it whose status this pass recorded: a
+        # status recorded before the pass is not this pass's to change
+        # (#750), and the check has no audit behind it, so it speaks only
+        # for what the pass itself stamped. Only a demotion: a Series found
+        # closed lifts nothing.
+        if self._series_at_start and self._series_policy is not None and self.project_secret:
+            from .privacy import _owned_uid_is_open  # pylint: disable=import-outside-toplevel
+            before = self._status_revisions_at_start
+            for series, _ in self._series_at_start:
+                stamped = [instance for instance in series.instances
+                           if getattr(instance, "_phi_status_revision", None)
+                           != before.get(id(instance))]
+                if stamped and _owned_uid_is_open(
+                        self._series_policy, "0020,000e",
+                        getattr(series, "series_instance_uid", None),
+                        self.project_secret):
+                    demote.extend(stamped)
         # A Series in the list demotes itself and the instances that bear
         # its status.
         demote = [bearer for entity in demote
@@ -1442,7 +1469,15 @@ class RemediationService:
     @staticmethod
     def _uid_of(entity) -> Optional[str]:
         """An Instance's, a Study's or a Series' own UID now; None for a
-        nested item, which has none."""
+        nested item, which has none.
+
+        The Series arm feeds only `_live_uid`, and through it
+        `_pass_start_uids`; it is redundant with the Series settle at the
+        pass end only because `_use_series` is always called beside
+        `_use_scan_tally` -- once, in `Session.anonymize()`, the one place
+        a tally is set. A new caller of `_use_scan_tally` that skips
+        `_use_series` makes this arm load-bearing again (review of #544,
+        R11)."""
         if isinstance(entity, Instance):
             return entity.sop_instance_uid
         if isinstance(entity, Study):
@@ -1789,11 +1824,23 @@ class RemediationService:
     #: declined Series still demotes its own instances. Read-only for
     #: `_instance_owners`' reason.
     _series_at_start = ()
+    #: The policy the pass end asks each Series under (R2-1): the one the
+    #: session last audited under, else its configuration's.
+    _series_policy = None
+    #: Each instance's status revision as the pass began, so the pass end
+    #: can tell the statuses this pass recorded from the rest (R2-1).
+    _status_revisions_at_start = {}
 
-    def _use_series(self, series) -> None:
-        """Snapshot each series and its UID before the pass can replace it."""
+    def _use_series(self, series, phi_tags) -> None:
+        """Snapshot each series and its UID before the pass can replace it,
+        each instance's status revision, and the policy a Series' UID is
+        judged under at the pass end."""
         self._series_at_start = tuple(
             (s, getattr(s, "series_instance_uid", None)) for s in series)
+        self._status_revisions_at_start = self._MappingProxyType({
+            id(instance): getattr(instance, "_phi_status_revision", None)
+            for s, _ in self._series_at_start for instance in s.instances})
+        self._series_policy = phi_tags
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each
