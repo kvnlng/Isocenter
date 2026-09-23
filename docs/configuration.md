@@ -462,7 +462,7 @@ The markers rest on the same status the report's grade reads, so any edit after 
 * **Patient Identity Removed `(0012,0062)`: `YES`.** A source value of `NO` is replaced, and a source `YES` stays.
 * **De-identification Method `(0012,0063)`** gains one value, after any values the source carried, which are kept in order: `isocenter/<version>; <policy>; v1:<8 hex>`.
     * `<policy>` is `basic@2026c`, `floor over basic@2026c` or `none`. An external profile is `external profile`, never its path.
-    * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides.
+    * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides. The fingerprint includes the configuration schema version, so a release that raises that version's minor moves the hex in every file it writes, under an unchanged configuration.
     * No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.
 * **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element from an implicit-VR source has no recorded VR, so a date in it is not read and does not stop `MODIFIED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
     * `REMOVED` when every date is empty or the dummy `19000101`.

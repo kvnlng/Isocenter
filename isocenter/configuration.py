@@ -53,7 +53,8 @@ yaml.add_representer(FlowList, _flow_list_representer)
 # the in-force policy's *v1* fingerprint. A stored fingerprint is never
 # rewritten -- the input it hashed is gone, and deriving it again would be
 # the back-fill the migration refuses. `test_the_v1_fingerprint_is_pinned`
-# holds the bytes.
+# holds the bytes, under a fixed `CONFIG_VERSION`: a minor bump moves
+# every fingerprint by design and is not a change of the form.
 #
 # **The rule it keeps: it may tell apart two policies that scan alike, and
 # must never equate two that scan differently.** Telling them apart costs a
@@ -63,13 +64,28 @@ yaml.add_representer(FlowList, _flow_list_representer)
 # `rule.get("action", "REPLACE")`, so `action: ""` is two different things
 # at two sites and hashes as itself.
 #
-# In: every rule key except `name`, the rule's form, and
+# In: every rule key except `name`, the rule's form,
 # `remove_private_tags` (on CT_small the difference between 183 findings
-# and 4). Out: `name` and a bare-string rule's text, which only label a
-# finding; `date_jitter`, which moves a shift and not what is flagged; the
-# pixel rules; the project secret; the library version (owner's ruling
-# Q4: a 1.x that changes what an unchanged config detects says so under
-# Breaking); and the base, which is a label.
+# and 4), and `config_manager.CONFIG_VERSION` (#762). Out: `name` and a
+# bare-string rule's text, which only label a finding; `date_jitter`,
+# which moves a shift and not what is flagged; the pixel rules; the
+# project secret; the library version; and the base, which is a label.
+#
+# **What `CONFIG_VERSION` is doing here (#762, owner's ruling).** The dict
+# is not the whole of what a scan does with it: across #760 a value-less
+# REPLACE on a UN tag began writing the VR dummy (#556) and a repeating-
+# group mask key began resolving (#557), and two identical dicts scanned
+# differently under one fingerprint -- the rule above, broken by the
+# library rather than the config. A release that changes what an
+# unchanged configuration does bumps `CONFIG_VERSION`'s minor, so the
+# version names the behaviour the dict was read with, and a store's
+# statuses from before the bump read as another policy at export. Not the
+# library version: every release would then cost every store a re-audit,
+# for releases that change nothing a scan reads. The cost of the version
+# is the same in kind and rarer: a minor bumped for a key added, with no
+# behaviour changed, tells apart two policies that scan alike. Added
+# before any release carried a v1 record, so nothing was migrated, and
+# the prefix stayed `v1:`: no store holds a v1 hash of the older form.
 
 
 def _tagged(value):
@@ -104,7 +120,10 @@ def _canonical_policy_v1(phi_tags, remove_private_tags) -> bytes:
             rules[_key(tag)] = {"__form__": "string" if rule else "empty-string"}
         else:
             rules[_key(tag)] = {"__form__": _tagged(rule)}
-    doc = {"phi_tags": rules, "remove_private_tags": bool(remove_private_tags)}
+    # Read through the module at call time, never bound by a `from`
+    # import (CLAUDE.md): the bump is what moves every fingerprint (#762).
+    doc = {"config_version": config_manager.CONFIG_VERSION,
+           "phi_tags": rules, "remove_private_tags": bool(remove_private_tags)}
     return json.dumps(doc, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=True, default=_tagged).encode("ascii")
 
@@ -162,7 +181,8 @@ def _deid_method_value(policy: ScanPolicy, version: str) -> str:
       release bump moves no recorded output. Any other spelling would.
     - The label is the recorded policy's, through `_deid_method_label`.
     - 8 hex characters of `ScanPolicy.fingerprint`, never recomputed, so
-      there is one answer to "which policy" (#762 may move it). Eight,
+      there is one answer to "which policy". It carries `CONFIG_VERSION`
+      (#762), so a minor bump moves it in every exported file. Eight,
       not more, for LO's 64: the floor's label with a 17-character
       version is exactly 64 (`tests/test_an_export_says_how_it_was_de_
       identified.py`, M12).

@@ -138,8 +138,9 @@ class ScanPolicy:
 
     `fingerprint` decides whether two policies are the same: `"v1:"` and
     the sha256 of the canonical form (`configuration._canonical_policy_v1`),
-    which covers what a scan reads -- every rule key but `name`, and
-    `remove_private_tags`. `base` is what a person reads: `basic@2026c`,
+    which covers what a scan reads -- every rule key but `name`,
+    `remove_private_tags`, and the `CONFIG_VERSION` that names how the
+    library reads them (#762). `base` is what a person reads: `basic@2026c`,
     `floor over basic@2026c`, `none`, or an external profile's path (the
     configuration's `_policy_base`). Two policies with one fingerprint and
     different bases scan identically -- a `create_config()` scaffold and
