@@ -334,7 +334,8 @@ def test_the_glob_detector_wants_a_glob_and_a_matching_pattern(tmp_path):
 
 @pytest.mark.parametrize("call", ["os." + "walk(root)", "os." + "listdir(root)",
                                   "os." + "scandir(root)", "root." + "iterdir()",
-                                  "root." + "rglob('" + "*')"])
+                                  "root." + "rglob('" + "*')",
+                                  "glob." + "glob(root)", "glob." + "iglob(root)"])
 def test_the_detector_sees_a_walk_filtered_by_suffix(tmp_path, call):
     # A test that walks a tree and keeps one suffix reads every file of
     # that kind without a glob literal: `test_equipment_has_one_constructor

@@ -43,6 +43,20 @@ def test_the_dispatch_finder_sees_every_worker_in_the_live_source():
         "a worker is handed to a pool at module scope; rule 2 cannot "
         "reach its tests and widens to the row instead -- decide whether "
         "that is wanted before accepting it")
+    # Rule 2 pairs a worker with its dispatchers by the last dotted part
+    # alone, so a handed name must be the last part of one function only:
+    # a `pool.submit(self.run)` would make every `*.run` ask that one
+    # dispatcher, merged silently in `dispatchers()` (#744, review of #734).
+    defined = {}
+    for path in sorted((REPO / "isocenter").rglob("*.py")):
+        for qualname, *_ in test_map.functions_in(path.read_text(encoding="utf-8")):
+            defined.setdefault(qualname.rsplit(".", 1)[-1], []).append(
+                f"{path.relative_to(REPO).as_posix()}::{qualname}")
+    shared = {name: defined[name] for name in found
+              if len(defined.get(name, ())) > 1}
+    assert shared == {}, (
+        "two functions share a handed worker's last name part; key "
+        "`dispatchers()` on more of the name (see the comment in select())")
 
 
 def test_every_pool_call_in_the_package_resolves_to_a_dispatcher():
