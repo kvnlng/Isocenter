@@ -45,6 +45,8 @@ pip install isocenter
 
 Then the [Quick Start](quickstart.md) walks the pipeline end to end: ingest, examine, configure, audit, anonymize, redact, export, report. The [Configuration](configuration.md) guide is where your protocol becomes a profile.
 
+The **Tutorials** each follow one question end to end over files bundled with pydicom, and every code block in them runs in the test suite. Start with [De-identify a cohort and read the grade](tutorials/deidentify-and-read-the-grade.md): what `PASS` and `REVIEW_REQUIRED` mean, and what to keep so a later export matches this one.
+
 If you are evaluating Isocenter for an institution rather than running it, [For institutions](for-institutions.md) is the page to read: the license, the citation, and what the report gives a reviewer.
 
 ## Measured, not promised
