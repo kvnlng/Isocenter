@@ -304,21 +304,51 @@ def test_a_nested_item_edited_after_the_pass_is_not_pass(tmp_path):
         str(ds.ReferencedImageSequence[0].PatientName) != "Doe^Nested"
 
 
-def test_a_series_field_edited_after_the_pass_is_not_pass(tmp_path):
-    """L12's probe P1's shape: a Series field assigned after the pass. The
-    export writes it into every instance, and nothing recorded on the
-    Series could go stale. Now each instance of the series does. (On this
-    release no scan reads a Series UID, so the probe's exact form -- the
-    UID set back to the source -- assigns the value already held; #544's
-    replacement is what makes it an edit, and its test lands with it.)"""
+def test_a_series_uid_set_back_after_the_pass_is_not_pass(tmp_path):
+    """L12's probe P1. The pass replaces the Series Instance UID (#544);
+    it is then set back to the source by plain assignment. The export
+    writes it into every instance, and the run graded PASS. Now the Series
+    and each of its instances read UNSCANNED and condition 8 names both."""
+    source = study_uid("7672") + ".1"
     with _session(tmp_path) as session:
         session.anonymize(session.audit())
         [series] = session.store.patients[0].studies[0].series
-        series.series_instance_uid = study_uid("7672") + ".99"
+        assert series.series_instance_uid != source
+        series.series_instance_uid = source
         reasons, passed, ds = _graded(session, tmp_path)
     assert not passed
-    assert _edited(reasons) == [_line(1, instances=1)], reasons
-    assert ds.SeriesInstanceUID == study_uid("7672") + ".99"
+    assert _edited(reasons) == [_line(2, series=1, instances=1)], reasons
+    assert ds.SeriesInstanceUID == source
+
+
+def test_the_pass_writing_a_series_uid_is_not_an_edit(tmp_path):
+    """Q-W1. A pass handed the Series finding after the instance findings
+    writes the Series UID onto the Series and records each instance's
+    status after writing its copy (#544: IDENTIFIED, until its own
+    findings are handed again). A cascade from the Series write, landing
+    after that record, made it stale -- condition 8 tripped by the pass's
+    own write (`entities.PASS_WRITING`). The instance findings handed again
+    grade PASS; a user's edit after the pass is outside it and still
+    cascades. Kills the flag dropped, and the flag left set after the
+    pass."""
+    source = study_uid("7672") + ".1"
+    with _session(tmp_path) as session:
+        report = session.audit()
+        rest = [f for f in report.findings if f.entity_type != "Series"]
+        session.anonymize(rest)
+        session.anonymize([f for f in report.findings if f.entity_type == "Series"])
+        [series] = session.store.patients[0].studies[0].series
+        [inst] = series.instances
+        assert series.series_instance_uid != source
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        session.anonymize(rest)
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        reasons, passed, _ds = _graded(session, tmp_path)
+        assert passed and reasons == [], reasons
+        series.series_number = 767
+        reasons, passed, _ds = _graded(session, tmp_path, "r2.md")
+    assert not passed
+    assert _edited(reasons) == [_line(2, series=1, instances=1)], reasons
 
 
 def test_an_instance_attribute_edited_after_the_pass_is_not_pass(tmp_path):

@@ -51,7 +51,7 @@ from .configuration import (IsocenterConfiguration, FlowList, _policy_base_label
 from ._version import __version__
 from .entities import (Patient, PhiStatus, ScanPolicy, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree,
-                       exported_patient_id, is_synthetic_patient_id)
+                       exported_patient_id, is_synthetic_patient_id, PASS_WRITING)
 from .profiles import FLOOR_POLICY
 # The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
 # and diffs against its table, and the two must be one read (#714).
@@ -6184,7 +6184,15 @@ class DicomSession:
                 # the configuration, else the configuration's.
                 (self._audited_phi_tags if self._audited_phi_tags is not None
                  else self.configuration.phi_tags))
-            count = remediator.apply_remediation(findings)
+            # The pass's own Series writes do not cascade to its instances
+            # (`entities.PASS_WRITING`, #767 Q-W1); set here rather than in
+            # `apply_remediation`, whose five pinned `mark_modified()` lines
+            # would move.
+            passing = PASS_WRITING.set(True)
+            try:
+                count = remediator.apply_remediation(findings)
+            finally:
+                PASS_WRITING.reset(passing)
             if named:
                 self._adopt_the_reports_policy(report_policy, recorded_at, named)
 

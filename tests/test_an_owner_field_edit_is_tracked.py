@@ -172,14 +172,20 @@ def _owners(session):
 def test_a_reopened_store_is_clean_and_keeps_its_statuses(tmp_path):
     """Hydration assigns `Series.equipment` after construction; that runs
     before the statuses are restored and the subtree is marked persisted,
-    so a reopened store reads clean with every status it saved."""
+    so a reopened store reads clean with every status it saved.
+
+    Only the patient's and the study's statuses are compared across the
+    reopen, and that is correct rather than a gap: under #544 a Series'
+    status is carried by its instances (they bear its findings, and the
+    grade reads them), not stored -- the `series` table has no status
+    column -- so the Series is compared only for being clean."""
     with _saved(tmp_path) as session:
         session.anonymize(session.audit())
         session.save(sync=True)
-        expected = [e.phi_status for e in _owners(session)]
+        expected = [e.phi_status for e in _owners(session)[:2]]
     with Session(str(tmp_path / "s.db")) as session:
         owners = _owners(session)
-        assert [e.phi_status for e in owners] == expected
+        assert [e.phi_status for e in owners[:2]] == expected
         assert not any(e.has_unsaved_changes for e in owners)
 
 

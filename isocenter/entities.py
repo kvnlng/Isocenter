@@ -1,3 +1,4 @@
+import contextvars
 import hashlib
 import os
 import threading
@@ -3076,10 +3077,28 @@ def _assign_owner_field(entity, name, value) -> None:
     object.__setattr__(entity, name, value)
     if old != value:
         entity.mark_modified()
-        # A Series holds no PHI status, and the export writes its fields
-        # into every instance of it: those are what a scan read, and what
-        # an edit here makes stale (#767 widened, owner ruling). Patient
-        # and Study hold their own status and grade on it.
-        if isinstance(entity, Series):
+        # A Series holds no PHI status of its own that survives a reopen,
+        # and the export writes its fields into every instance of it: those
+        # are what a scan read, and what an edit here makes stale (#767
+        # widened, owner ruling). Patient and Study hold their own status
+        # and grade on it. Not while a pass writes (`PASS_WRITING`): the
+        # pass records what it wrote in each instance itself, and a
+        # cascade from its own Series write would stale instances it had
+        # already stamped -- condition 8 tripped by the pass (Q-W1).
+        if isinstance(entity, Series) and not PASS_WRITING.get():
             for instance in entity.instances:
                 instance.mark_modified()
+
+
+#: True while `Session.anonymize` applies a pass (#767, Q-W1). The one
+#: thing it changes: a Series field the pass writes does not mark the
+#: series' instances changed, because the pass records each instance's
+#: status after writing it (`_owner_stamps_copy` for the UID copies, the
+#: stamp for its own findings) and a cascade landing after that would make
+#: a status it had just recorded stale -- condition 8 tripped by the pass's
+#: own write. A user's edit after the pass is outside it and cascades.
+#:
+#: A `ContextVar`, not a module flag or a session attribute: the pass runs
+#: in the thread that called `anonymize()`, and a concurrent edit from
+#: another thread must still cascade. `apply_remediation` spawns no thread.
+PASS_WRITING = contextvars.ContextVar("isocenter_pass_writing", default=False)
