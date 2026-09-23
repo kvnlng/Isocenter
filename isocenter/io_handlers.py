@@ -8032,8 +8032,9 @@ _J2K_ENCODABLE_FRAMES = frozenset({
 #: no identifier: the parent prefixes the SOP Instance UID (D10).
 _PILLOW_J2K_NOTE = (
     "written as JPEG 2000 Lossless at BitsAllocated {bits} with {samples} "
-    "samples per pixel, exactly. pydicom's Pillow plugin, the JPEG 2000 "
-    "decoder this package installs, refuses JPEG 2000 above 8 bits with "
+    "samples per pixel, exactly. pydicom's Pillow plugin, the only one of "
+    "pydicom's JPEG 2000 plugins this package installs, refuses JPEG 2000 "
+    "above 8 bits with "
     "more than one sample (\"Pillow cannot decode 16-bit multi-sample data "
     "correctly\"); pydicom with pylibjpeg-openjpeg reads it exactly, and "
     "this library reads it back through imagecodecs. For a reader with "
@@ -8292,8 +8293,9 @@ def _compress_j2k(ds, pixel_array=None):
         # bit-exactly, but pydicom's only J2K plugin here (Pillow) cannot
         # decode it, so this library could not ingest its own export. It
         # is written now because ingest falls back to `imagecodecs`; see
-        # `_J2K_ENCODABLE_FRAMES`. `int8` RGB, which Pillow also refused,
-        # *is* exact and was never refused by this guard.
+        # `_J2K_ENCODABLE_FRAMES`. `int8` RGB, which Pillow's encoder
+        # refused before #404, *is* exact and was never refused by this
+        # guard.
         _refuse_unencodable_j2k_frame(arr, ds, samples)
 
         # **The multiple-component transform is the label, and both are

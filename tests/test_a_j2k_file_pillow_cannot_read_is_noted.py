@@ -4,8 +4,8 @@ Since #416 a 16-bit image with more than one sample is written under
 `use_compression=True` as JPEG 2000 Lossless. The file is conformant and
 its codestream is bit-exact: `imagecodecs.jpeg2k_decode`, this library's
 `ingest()` and pydicom 3.0.2 with `pylibjpeg-openjpeg` 2.5.0 read it
-sample for sample. pydicom's Pillow plugin, the only JPEG 2000 decoder
-that installs with this package, does not: it refuses every codestream
+sample for sample. pydicom's Pillow plugin, the only one of pydicom's JPEG
+2000 plugins that installs with this package, does not: it refuses every codestream
 with a precision above 8 bits and more than one sample ("Pillow cannot
 decode 16-bit multi-sample data correctly"), because Pillow narrows such
 data to 8 bits. Measured at 82e82386 on 3.12.14 and 3.14.7t over a
