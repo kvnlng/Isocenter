@@ -78,6 +78,22 @@ class Spoofed:
         return []
 
 
+class _EqualToEverything(type):
+    def __eq__(cls, other):
+        return True
+
+    __hash__ = type.__hash__
+
+
+class Impostor(metaclass=_EqualToEverything):
+    """Compares equal to every class, so a built-in test that falls back
+    to `==` -- `type(x) in (A, B)` does -- takes it for one. Only `is`
+    sees through it (review of #786)."""
+
+    def export(self, session, folder, **options):
+        return []
+
+
 def _session(tmp_path, name="s.db"):
     src = tmp_path / "src"
     if not src.exists():
@@ -184,6 +200,17 @@ def test_a_class_that_spells_the_built_in_module_is_third_party(
     exporters.register("spoof", Spoofed)
     with _session(tmp_path) as session:
         session.export(str(tmp_path / "out"), format="spoof")
+        rows = _marked(session)
+    assert len(rows) == 1, rows
+
+
+def test_a_class_that_compares_equal_to_the_built_ins_is_third_party(
+        tmp_path, _clean_registry):
+    """Kills `type(exporter) not in (...)`, which asks `==`, not `is`."""
+    assert Impostor == DicomFormatExporter  # the premise
+    exporters.register("impostor", Impostor)
+    with _session(tmp_path) as session:
+        session.export(str(tmp_path / "out"), format="impostor")
         rows = _marked(session)
     assert len(rows) == 1, rows
 

@@ -6373,20 +6373,24 @@ class DicomSession:
         # Q2, 2026-09-23); #783 moves the gates above this line in 1.1.
         # By class identity: `__module__` is whatever a plugin spells and
         # a subclass inherits it, a subclass may override anything, and a
-        # format name is whatever was registered over. Before dispatch,
-        # so a plugin that raises still leaves the row.
-        if type(exporter) not in (exporters.dicom.DicomFormatExporter,
-                                  exporters.wfdb.WfdbExporter):
-            cls = type(exporter)
+        # format name is whatever was registered over. `is not`, never
+        # `not in (...)`: a tuple's `in` falls back to `==`, and a
+        # metaclass whose `__eq__` answers True would pass for a built-in.
+        # Before dispatch, so a plugin that raises still leaves the row.
+        cls = type(exporter)
+        if (cls is not exporters.dicom.DicomFormatExporter
+                and cls is not exporters.wfdb.WfdbExporter):
             detail = (
                 f"Export to {folder} in format {format!r} ran "
                 f"{cls.__module__}.{cls.__qualname__}, an exporter "
                 "Isocenter does not ship: its output is not attested by "
                 "Isocenter. None of the export gates ran for it (the "
-                "burned-in re-audit, the recoverable-identity disclosure, "
-                "the de-identification markers, the owner stamps, the "
-                "EXPORT and DATA_LOSS rows), so this report does not know "
-                "what it wrote (#527).")
+                "burned-in re-audit, the configured redaction zones, the "
+                "drop of nested icons that may show redacted pixels, the "
+                "recoverable-identity disclosure, the de-identification "
+                "markers, the owner stamps, the EXPORT and DATA_LOSS "
+                "rows), so this report does not know what it wrote "
+                "(#527).")
             get_logger().warning(detail)
             self.store_backend.log_audit(action_type="WARNING",
                                          entity_uid=folder, details=detail)

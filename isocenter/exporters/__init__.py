@@ -27,10 +27,14 @@ class Exporter:
     Implementations must not mutate the session's object graph -- export is
     a read operation over already-de-identified data. For a class other
     than the two built-ins, that is the whole of the boundary: `export()`
-    applies none of the built-ins' gates (burned-in re-audit, identity
-    disclosure, de-identification markers, owner stamps, `EXPORT` and
-    `DATA_LOSS` rows) before or after calling it, and writes one `WARNING`
-    audit row saying the output is not attested by Isocenter.
+    applies none of the built-ins' gates (burned-in re-audit, the
+    configured redaction zones, the drop of nested icons that may show
+    redacted pixels, identity disclosure, de-identification markers, owner
+    stamps, `EXPORT` and `DATA_LOSS` rows) before or after calling it, and
+    writes one `WARNING` audit row saying the output is not attested by
+    Isocenter. Call `redact()` first, and write no nested pixel payload
+    such as an Icon Image Sequence `(0088,0200)` item: nothing scans or
+    redacts one.
     """
 
     def export(self, session, folder: str, **options):

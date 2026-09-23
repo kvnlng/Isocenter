@@ -166,7 +166,7 @@ TARGETS = {
     # 17 sites, exhaustive: all 17 killed. One file, 1.4s per pass.
     "isocenter/automation.py": (["tests/test_automation.py"], 30),
     "isocenter/uids.py": (["tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py"], 30),
-    # 5 sites, exhaustive: all 5 killed. Seven files, 20.3s per pass.
+    # 5 sites, exhaustive: all 5 killed. Thirteen files; 20.3s/pass at seven.
     "isocenter/exporters/__init__.py": (["tests/test_a_third_party_export_is_not_attested.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_export_delivery_counters.py", "tests/test_export_failure_text_carries_no_path.py", "tests/test_exporter_registry.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py",
                                          "tests/test_murmur_annotations.py",
                                          "tests/test_study_date_roundtrip.py",
@@ -200,12 +200,12 @@ TARGETS = {
                                     "tests/test_redaction_robustness.py",
                                     "tests/test_verification_logic.py",
                                     "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    # 2 sites, exhaustive: both killed. No test names this module -- it is
-    # reached through `export(format="dicom")` -- so the scan demands
-    # nothing and both files are hand extras (#441). Each was measured to
-    # kill both mutants alone, so either would do; two, because a row
+    # 2 sites, exhaustive: both killed. The scan demands only the #527 file
+    # (it imports `DicomFormatExporter`); the other two reach this module via
+    # `export(format="dicom")` and are hand extras (#441). Each was measured
+    # to kill both mutants alone, so either would do; two, because a row
     # resting on one file is one refactor of that file from empty. 10.3s
-    # per pass for the pair.
+    # per pass for those two, measured before #527 added the third.
     "isocenter/exporters/dicom.py": (["tests/test_a_third_party_export_is_not_attested.py", "tests/test_api_coherence.py",
                                       "tests/test_export_contract.py"], 30),
     # 7 sites, exhaustive: all 7 killed, measured in the review of #491.

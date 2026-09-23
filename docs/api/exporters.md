@@ -31,13 +31,27 @@ print(exporters.available_formats())  # ['acme', 'dicom', 'wfdb']
 
 ## What a third-party exporter receives
 
-**The graph as `anonymize()` and `redact()` left it, and nothing else.**
-Every export-time gate lives inside the built-in formats. `export()` itself
-only resolves the format and dispatches, so for any exporter other than the
-two built-in classes, none of the following runs:
+**The session's graph and nothing else.** That graph is not what the
+built-in formats write. Every export-time gate lives inside the built-in
+formats, and some of them change pixels and sequences on the way out.
+`export()` itself only resolves the format and dispatches, so for any
+exporter other than the two built-in classes, none of the following runs:
 
 - the burned-in re-audit that withholds an instance still carrying an
   identifier (`check_burned_in`, [#536](https://github.com/kvnlng/Isocenter/issues/536));
+- the configured redaction zones. The DICOM export looks up each series'
+  zones in the configuration in force and applies them to a copy of every
+  frame it writes, whether or not `redact()` ran. For a plugin,
+  `instance.get_pixel_data()` holds only what `redact()` changed: with
+  zones configured and `redact()` not run, the pixels are unredacted;
+- the drop of nested icons ([#183](https://github.com/kvnlng/Isocenter/issues/183),
+  [#542](https://github.com/kvnlng/Isocenter/issues/542)). An Icon Image
+  Sequence `(0088,0200)` item is a downsampled copy of a frame, and nothing
+  scans or redacts one. The DICOM export drops an instance's own icon when
+  its pixels are redacted or have zones configured, and every other nested
+  icon when any instance in the store is redacted or any configured zone
+  matches a series in it. A plugin that copies `instance.sequences` ships a
+  thumbnail of what redaction removed, **even after `redact()` ran**;
 - the recoverable-identity disclosure (`check_reversibility`). After
   `lock_identities()`, the graph still carries the encrypted identity token
   at `(0400,0500)`;
@@ -99,6 +113,10 @@ what the gates decided.
    nothing was written: an empty list, a zero count, or a raise.
 6. **`register()` checks only that the class has an `export` attribute.**
    1.1 may check more.
+7. **Call `redact()` before exporting, and write no nested pixel payload.**
+   `export()` does not apply the configured zones for you. An Icon Image
+   Sequence `(0088,0200)` item, or any other pixel data nested in a
+   sequence, is never scanned or redacted, so leave it out.
 
 There is no reader or codec plugin point: ingest reads through pydicom and
 Isocenter's own codec dispatch, and a read-side seam is 1.1 or later
@@ -110,11 +128,15 @@ syntaxes it reads and the two it writes are in the
 ## Writing DICOM without the pipeline
 
 `DicomExporter.write_tree()` is the serializer alone. It writes a graph as
-it stands, applying the owner stamps and the no-Patient-ID rule (both write
-paths share those, [#570](https://github.com/kvnlng/Isocenter/issues/570)),
-and none of the rest: no burned-in re-audit, no `patient_ids` or `subset`
-selection, no recoverable-identity disclosure, no de-identification
-markers, no notices, and no `EXPORT` row. It writes `DATA_LOSS` rows only
+it stands. It applies the owner stamps and the no-Patient-ID rule (both
+write paths share those, [#570](https://github.com/kvnlng/Isocenter/issues/570)),
+and it drops nested icons by the redaction already recorded on the graph:
+an instance's own icon when that instance was redacted, and every other one
+when any instance it writes was. This half of the gate needs no
+configuration. It applies none of the rest: no burned-in
+re-audit, no redaction zones, no `patient_ids` or `subset` selection, no
+recoverable-identity disclosure, no de-identification markers, no notices,
+and no `EXPORT` row. It writes `DATA_LOSS` rows only
 to a `store_backend` you pass. Use `session.export()` to de-identify a
 cohort; use `write_tree()` for a graph you built by hand, with no session
 behind it.

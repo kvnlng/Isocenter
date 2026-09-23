@@ -132,6 +132,9 @@ def test_the_exporters_page_is_in_the_nav_and_renders_the_registry():
         assert f"- {name}\n" in page, name
     assert "#783" in page
     assert "REVIEW_REQUIRED" in page
+    # The two pixel gates a plugin misses (review of #786).
+    assert "redaction zones" in page
+    assert "(0088,0200)" in page
 
 
 def test_the_two_docstrings_say_provisional():
