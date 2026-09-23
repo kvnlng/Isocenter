@@ -77,3 +77,63 @@ def test_registering_a_class_without_export_is_rejected():
 
     with pytest.raises(TypeError):
         exporters.register("bogus", NotAnExporter)
+
+
+# ------------------------------------------------ #527: provisional at 1.0
+#
+# Owner ruling Q1 (2026-09-23): the registry is marked provisional in the
+# documentation only -- a named tier-2 subsection on the stability page,
+# the two docstrings, and its own page in the API reference. No runtime
+# warning: both built-ins register at import, so one would fire on every
+# `import isocenter` (PEP 411 marks provisional packages the same way).
+# These pin that the marking is there; the prose is the reviewer's.
+
+import pathlib  # noqa: E402
+import re  # noqa: E402
+
+_REPO = pathlib.Path(__file__).resolve().parent.parent
+_REGISTRY_NAMES = ("Exporter", "register", "get_exporter", "available_formats")
+
+
+def _section(text, heading):
+    """The body under `heading` up to the next heading of its level or
+    higher."""
+    level = len(heading) - len(heading.lstrip("#"))
+    start = text.index(heading + "\n")
+    stop = re.compile(rf"^#{{1,{level}}} ", re.MULTILINE)
+    end = stop.search(text, start + len(heading))
+    return text[start:end.start() if end else len(text)]
+
+
+def test_the_stability_page_names_the_registry_provisional_in_tier_two():
+    """In "Documented but internal", under its own heading: tier 2 is
+    what "may change in a 1.x with a CHANGELOG entry" already means, and
+    the subsection is what says the change is expected."""
+    page = (_REPO / "docs/api/stability.md").read_text(encoding="utf-8")
+    tier_two = _section(page, "## Documented but internal")
+    sub = _section(tier_two, "### The exporter registry: provisional until 1.1")
+    for name in _REGISTRY_NAMES:
+        assert f"`{name}" in sub, name
+    assert "provisional" in sub
+    assert "exporters.md" in sub
+    assert "#783" in sub
+    assert "isocenter>=1.0,<1.1" in sub
+
+
+def test_the_exporters_page_is_in_the_nav_and_renders_the_registry():
+    """A page outside the nav is not built into the site, and
+    `test_doc_anchors` does not read it."""
+    nav = (_REPO / "mkdocs.yml").read_text(encoding="utf-8")
+    assert re.search(r"^\s+- '[^']+': api/exporters\.md$", nav, re.MULTILINE), nav
+    page = (_REPO / "docs/api/exporters.md").read_text(encoding="utf-8")
+    assert '!!! warning "Provisional"' in page
+    assert re.search(r"^::: isocenter\.exporters$", page, re.MULTILINE)
+    for name in _REGISTRY_NAMES:
+        assert f"- {name}\n" in page, name
+    assert "#783" in page
+    assert "REVIEW_REQUIRED" in page
+
+
+def test_the_two_docstrings_say_provisional():
+    for obj in (exporters.Exporter, exporters.register):
+        assert "provisional until 1.1" in obj.__doc__.lower(), obj

@@ -108,12 +108,16 @@ def _resolve(target, package=PACKAGE):
     """`(module path, class name or None)` for one `:::` target.
 
     The longest dotted prefix that names a `.py` file under the package
-    is the module; one further segment, if any, is a class in it.
+    is the module; one further segment, if any, is a class in it. A
+    prefix naming a subpackage is its `__init__.py`: the exporter
+    registry page renders the `exporters` package itself (#527).
     """
     parts = target.split(".")
     root = package.parent
     for cut in range(len(parts), 0, -1):
         candidate = root.joinpath(*parts[:cut]).with_suffix(".py")
+        if not candidate.is_file():
+            candidate = root.joinpath(*parts[:cut], "__init__.py")
         if candidate.is_file():
             rest = parts[cut:]
             if len(rest) > 1:

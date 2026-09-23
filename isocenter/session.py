@@ -6332,6 +6332,15 @@ class DicomSession:
         exported as asked; nothing raises. The `dicom` format does the
         same for a `subset` value that names nothing in the session at
         any level (#725).
+
+        A format served by any exporter other than the two built-in
+        classes -- one registered through `exporters.register`, a
+        subclass of a built-in, or another class registered as `dicom`
+        -- writes one `WARNING` audit row before it runs, saying its
+        output is not attested by Isocenter, so the report grades
+        `REVIEW_REQUIRED` (#527). None of the gates above runs for it,
+        and it writes no `EXPORT` row. The registry is provisional until
+        1.1; see the exporter registry page in the API reference.
         """
         # Cleared first, before the exporter is even resolved. These are
         # session-scoped, and assigning them only on success let an
@@ -6357,6 +6366,30 @@ class DicomSession:
         from . import exporters
 
         exporter = exporters.get_exporter(format)
+        # Every export gate lives inside the two built-ins (#527), so an
+        # exporter that is neither runs behind none of them and its
+        # output is not something this report can vouch for. One
+        # `WARNING` row, so the run grades `REVIEW_REQUIRED` (owner ruling
+        # Q2, 2026-09-23); #783 moves the gates above this line in 1.1.
+        # By class identity: `__module__` is whatever a plugin spells and
+        # a subclass inherits it, a subclass may override anything, and a
+        # format name is whatever was registered over. Before dispatch,
+        # so a plugin that raises still leaves the row.
+        if type(exporter) not in (exporters.dicom.DicomFormatExporter,
+                                  exporters.wfdb.WfdbExporter):
+            cls = type(exporter)
+            detail = (
+                f"Export to {folder} in format {format!r} ran "
+                f"{cls.__module__}.{cls.__qualname__}, an exporter "
+                "Isocenter does not ship: its output is not attested by "
+                "Isocenter. None of the export gates ran for it (the "
+                "burned-in re-audit, the recoverable-identity disclosure, "
+                "the de-identification markers, the owner stamps, the "
+                "EXPORT and DATA_LOSS rows), so this report does not know "
+                "what it wrote (#527).")
+            get_logger().warning(detail)
+            self.store_backend.log_audit(action_type="WARNING",
+                                         entity_uid=folder, details=detail)
         return exporter.export(self, folder, **options)
 
     def _export_dicom(self, folder: str, use_compression=True,

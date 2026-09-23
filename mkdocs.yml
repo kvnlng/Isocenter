@@ -111,6 +111,7 @@ nav:
       - 'Configuration': api/configuration.md
       - 'Entities': api/entities.md
       - 'Persistence': api/persistence.md
+      - 'Exporter registry': api/exporters.md
       - 'Intelligent OCR': api/ocr.md
   - Project Info:
       - 'For institutions': for-institutions.md
