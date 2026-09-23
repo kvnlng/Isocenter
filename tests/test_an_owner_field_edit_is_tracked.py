@@ -342,3 +342,18 @@ def test_a_restored_identity_grades_until_a_scan_reads_it(tmp_path):
     assert _edited(reasons) and "patients 1" in _edited(reasons)[0], reasons
     [written] = list(out.rglob("*.dcm"))
     assert str(pydicom.dcmread(str(written)).PatientName) == "Alpha^One"
+
+
+def test_a_series_with_a_status_is_counted_when_edited(tmp_path):
+    """Condition 8 counts series: nothing on this release records a status
+    on one, but a scan that reads a Series UID may (#544), and an edit then
+    makes it stale like any owner's. The status is recorded by hand here."""
+    with _saved(tmp_path) as session:
+        session.anonymize(session.audit())
+        _patient, _study, series = _owners(session)
+        series.record_phi_status(PhiStatus.CLEARED)
+        series.series_number = 9
+        reasons, passed, _out = _graded(session, tmp_path)
+    assert not passed
+    assert _edited(reasons) and _edited(reasons)[0].endswith(
+        "(patients 0, studies 0, series 1)"), reasons
