@@ -10,8 +10,11 @@ writes no audit row for a finding. So a finding nobody passed to
   IDENTIFIED, the file carrying the original name, ID and date;
 - (d) `anonymize()` handed only the patient's findings: study and instance
   IDENTIFIED, the Study Date unshifted in the file;
-- (e) `anonymize()` handed only the instance's findings: patient and study
-  IDENTIFIED, and the export stamped the original name, ID and date.
+- (e) `anonymize()` handed only the instance's findings: patient, study
+  and instance IDENTIFIED -- the instance's copies of the name, ID and
+  date follow their owners, which the pass never touched, so those
+  findings are left unhandled (#624) -- and the export stamped the
+  original name, ID and date.
 
 The term reads `phi_status`, the per-entity result of the last scan, which
 is persisted per entity. So it holds in a store reopened by a session that
@@ -160,7 +163,11 @@ def test_the_count_is_over_the_whole_store_not_the_export(tmp_path):
 
 def test_an_instance_only_pass_grades(tmp_path):
     """Scenario (e): the file carries the original name, ID and date,
-    because the export stamps them from the owners the pass never touched."""
+    because the export stamps them from the owners the pass never touched.
+    The instance counts too: its copies of those three are written only
+    through their owners (#624), so its findings on them are left
+    unhandled rather than written as `ANONYMIZED` and a shift no file
+    carries (coordinator ruling Q-C5)."""
     with _ingested(tmp_path) as session:
         report = session.audit()
         session.anonymize(_only(report.findings, "Instance"))
@@ -168,9 +175,9 @@ def test_an_instance_only_pass_grades(tmp_path):
         section_5 = _section_5(session, tmp_path)
 
     assert _unacted(_reasons(section_5)) == [
-        "2 entities read IDENTIFIED: the last PHI scan raised a finding "
+        "3 entities read IDENTIFIED: the last PHI scan raised a finding "
         "under the policy it ran with, and no `anonymize()` pass since "
-        "acted on it (patients 1, studies 1, instances 0)"], section_5
+        "acted on it (patients 1, studies 1, instances 1)"], section_5
 
 
 def test_a_full_pass_grades_pass(tmp_path):

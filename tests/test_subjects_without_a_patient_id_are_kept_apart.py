@@ -561,18 +561,26 @@ def test_a_report_from_an_unsaved_audit_across_a_reopen_grades_review_required(
                            for f in (tmp_path / "out").rglob("*.dcm"))}
     study = study_uid("5906")
     # The old report's findings were filed under the key: the patient's
-    # (its name) no longer resolves, and the Study Date on the study and
-    # on a's instance declines because the offset's seed is not the
-    # patient's ID any more.
-    assert [(uid, "offset is seeded on" in d or "could not be resolved" in d)
-            for uid, d in declined] == [
-        (study, True), (study + ".1.1", True), (NO_PATIENT_ID_PREFIX + study, True)], declined
+    # (its name) no longer resolves, and the Study Date on the study
+    # declines because the offset's seed is not the patient's ID any more.
+    # a's instance copies of the name and the date follow their owners,
+    # which did not write (#624): each declines, holding the source value
+    # the export writes.
+    owner_row = "is written by the export from the"
+    assert [(uid, "offset is seeded on" in d, "could not be resolved" in d,
+             owner_row in d) for uid, d in declined] == [
+        (study, True, False, False),
+        (study + ".1.1", False, False, True),
+        (study + ".1.1", False, False, True),
+        (NO_PATIENT_ID_PREFIX + study, False, True, False)], declined
+    assert sorted(d.split(": ")[1].split(" ")[0] for uid, d in declined
+                  if uid == study + ".1.1") == ["0008,0020", "0010,0010"], declined
     assert exported == {study + ".1.1": ("PA", "Alpha^One", source_date),
                         study + ".1.2": ("PA", "Alpha^One", source_date)}, exported
     content = (tmp_path / "r.md").read_text(encoding="utf-8")
     assert "**REVIEW_REQUIRED**" in content
     assert "**PASS**" not in content
-    assert "3 declined remediation(s)" in content
+    assert "4 declined remediation(s)" in content
 
 
 

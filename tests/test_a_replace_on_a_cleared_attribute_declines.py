@@ -169,10 +169,11 @@ def test_a_study_date_cleared_after_the_audit_is_not_recreated_by_replace(
     fold, REMEDIATED, PASS, and `19000101` in the exported file.
 
     The instance's own copy of the tag is not folded into a write that
-    did not happen, so it takes the rule's value by itself and the
-    instance reads REMEDIATED: the graph and the file then disagree the
-    way they do when a Study's shift declines (#624, accepted for 1.0).
-    The exported Study Date is stamped from the Study, so it is empty.
+    did not happen. Until #624 it then took the rule's value by itself
+    and read REMEDIATED, so the graph and the file disagreed; now the
+    copy is written only through its owner: it holds the `''` the export
+    stamps from the cleared Study, the instance's finding declines with
+    its own row, and the instance reads IDENTIFIED.
     """
     session = _session(tmp_path)
     with session:
@@ -189,13 +190,17 @@ def test_a_study_date_cleared_after_the_audit_is_not_recreated_by_replace(
         declines = [d for u, d in _rows(session, "REMEDIATION_DECLINED")
                     if u == STUDY_UID]
         assert len(declines) == 1, declines
+        copy_declines = [d for u, d in _rows(session, "REMEDIATION_DECLINED")
+                         if u == instance.sop_instance_uid]
+        assert len(copy_declines) == 1 and "written by the export from the Study" \
+            in copy_declines[0], copy_declines
         assert "study_date is no longer set on the Study" in declines[0], declines
         assert "1900" not in declines[0], declines
         assert [d for u, d in _rows(session, "REMEDIATION_REPLACE")
                 if u == STUDY_UID] == []
         assert study.phi_status is PhiStatus.IDENTIFIED
-        assert instance.attributes[STUDY_DATE] == VALUE
-        assert instance.phi_status is PhiStatus.REMEDIATED
+        assert instance.attributes[STUDY_DATE] == ""
+        assert instance.phi_status is PhiStatus.IDENTIFIED
         assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]
         assert _exported(session, tmp_path).StudyDate == ""
 
