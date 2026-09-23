@@ -19,9 +19,11 @@ breaks one is red, never skipped):
    the runner would not run is refused, not passed over
    (`_shape_failures`): a fence that is indented (in a list item, an
    admonition or a tab), spelled `~~~` or with four backticks, or left
-   unclosed; a `<pre>` block; a line in a `>>>` fence that is not an
-   example; and any `doctest:` directive. A run page's fences start at
-   column 0 with exactly three backticks. One gap is stated rather than
+   unclosed; a `<pre>` block; a fence inside an HTML comment (it would
+   run, hidden from the reader); a `--8<--` snippet include; a line in a
+   `>>>` fence that is not an example; and any `doctest:` directive. A
+   run page's fences start at column 0 with exactly three backticks, and
+   outside any HTML comment. One gap is stated rather than
    closed: a four-space indented code block with no fence is not seen,
    because telling it from list-item prose needs a full Markdown parser.
 
@@ -131,6 +133,9 @@ _FENCE = re.compile(r"^```([^\n`]*)\n(.*?)^```[ \t]*$", re.DOTALL | re.MULTILINE
 _ANY_FENCE_LINE = re.compile(r"^[ \t]*(```|~~~)", re.MULTILINE)
 # Raw HTML code, which Markdown renders as code and `_FENCE` never sees.
 _PRE = re.compile(r"<pre\b", re.IGNORECASE)
+# A pymdownx.snippets include: mkdocs inlines the named file's text.
+_SNIPPET = re.compile(r"^[ \t]*-+8<-+", re.MULTILINE)
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 def tutorial_pages(root=None):
@@ -239,6 +244,11 @@ def _shape_failures(text, where):
     - In a `>>>` fence, anything that is not an example: `doctest` reads
       a line before the first `>>>`, or after the blank line that ends
       an example's output, as prose and drops it.
+    - A fence inside an HTML comment: it would run and be checked, but
+      the reader never sees it, which makes it a hidden assertion. The
+      one-line `tutorial:` markers are comments with no fence in them.
+    - A `--8<--` snippet include: mkdocs inlines a file's text as page
+      content, code included, that the runner never read.
     - A `doctest:` directive: `+SKIP` is a skip dressed as a pass, and
       the others change what "matches" means page by page.
     An expected output of only `...` needs no rule: doctest reads a `...`
@@ -260,6 +270,19 @@ def _shape_failures(text, where):
                 f"{where}:{line_of(match.start())}: a fence the runner does "
                 "not run (indented, `~~~`, four backticks, or unclosed); a "
                 "run page's fences start at column 0 with exactly ```")
+    comments = [(m.start(), m.end()) for m in _COMMENT.finditer(text)]
+    for start, _ in consumed:
+        if any(c_start <= start < c_end for c_start, c_end in comments):
+            failures.append(
+                f"{where}:{line_of(start)}: a fence inside an HTML comment "
+                "runs, but the reader never sees it; a tutorial's checks "
+                "are shown, never hidden")
+    for match in _SNIPPET.finditer(text):
+        if outside(match.start()):
+            failures.append(
+                f"{where}:{line_of(match.start())}: a `--8<--` snippet "
+                "include puts text on the page the runner never read; "
+                "write the code into the page")
     for match in _PRE.finditer(text):
         if outside(match.start()):
             failures.append(
@@ -623,6 +646,11 @@ _CHECKED = "```python\n>>> 1\n1\n```\n"
     ("````python\n" + _BOOM + "\n````\n\n", "a fence the runner does not run"),
     (_CHECKED + "\n```python\n" + _BOOM + "\n", "a fence the runner does not run"),
     ("<pre>\n" + _BOOM + "\n</pre>\n\n", "a <pre> block"),
+    ("<!--\n```python\n" + _BOOM + "\n```\n-->\n\n", "inside an HTML comment"),
+    # A hidden check that would *pass*: the hole is that it is hidden.
+    ("<!--\n```python\n>>> 1\n1\n```\n-->\n\n", "inside an HTML comment"),
+    ('--8<-- "snippets/boom.py"\n\n', "snippet include"),
+    ('    ---8<--- "boom.py"\n\n', "snippet include"),
     ("```python\n" + _BOOM + "\n>>> 1\n1\n```\n\n", "not an example"),
     ("```python\n>>> 1\n1\n\n" + _BOOM + "\n```\n\n", "not an example"),
     ("```python\n>>> 1/0  # doctest: +SKIP\n```\n\n", "`doctest:` directive"),
@@ -631,7 +659,8 @@ _CHECKED = "```python\n>>> 1\n1\n```\n"
     # Red because it fails, not by a rule: see `_shape_failures`.
     ("```python\n>>> 'anything at all'\n...\n```\n\n", "Expected nothing"),
 ], ids=["admonition", "list-item", "tilde", "four-backticks", "unclosed",
-        "pre", "code-before-example", "code-after-output", "skip",
+        "pre", "comment-exec", "comment-doctest", "snippet",
+        "snippet-indented", "code-before-example", "code-after-output", "skip",
         "other-directive", "ellipsis-only"])
 def test_code_the_runner_would_not_run_is_red(tmp_path, body, says):
     page = _page(tmp_path, _OK_HEADER + _CHECKED + "\n" + body)
@@ -645,4 +674,12 @@ def test_a_fence_nested_in_a_consumed_fence_is_content(tmp_path):
     # A fence line *inside* a fence the runner runs is that fence's text.
     page = _page(tmp_path, _OK_HEADER + (
         "```python\n>>> print('    ```')\n    ```\n```\n"))
+    assert run_page(page, tmp_path, root=tmp_path) == []
+
+
+def test_a_one_line_marker_is_a_comment_that_holds_no_fence(tmp_path):
+    # The comment rule must not catch the page's own markers, or a note.
+    page = _page(tmp_path, _OK_HEADER + (
+        "<!-- tutorial: file=config.yaml -->\n```yaml\na: 1\n```\n\n"
+        + _READS_IT + "\n<!-- a note for editors -->\n" + _CHECKED))
     assert run_page(page, tmp_path, root=tmp_path) == []
