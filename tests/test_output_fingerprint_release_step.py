@@ -157,6 +157,8 @@ COMMITTED = {
                      "longitudinal-s1-3.dcm", "longitudinal-s2-1.dcm",
                      "longitudinal-s2-2.dcm", "longitudinal-s2-3.dcm"],
     "lut_ambiguous": ["lut_ambiguous-1.dcm"],
+    "no_patient_id": ["no_patient_id-s1-1.dcm", "no_patient_id-s2-1.dcm",
+                      "no_patient_id-s3-1.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "redacted": ["redacted-1.dcm", "VARIES"],

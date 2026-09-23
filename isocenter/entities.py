@@ -2860,6 +2860,47 @@ JITTER_SCHEME_KEYED = "keyed-hmac-v1"
 JITTER_SCHEME_UNKEYED = "unkeyed-sha256"
 
 
+#: The prefix of the `patient_id` ingest gives a subject whose files carry
+#: no usable Patient ID (#584): `NO_PATIENT_ID_PREFIX + <StudyInstanceUID>`.
+#:
+#: **The backslash is the point.** It is DICOM's value delimiter, so
+#: pydicom reads a Patient ID holding one as a `MultiValue`, and ingest
+#: refuses a multi-valued Patient ID. No single-valued Patient ID read
+#: from a file can therefore equal a key built on this prefix, which no
+#: placeholder string (`UnknownPatient`, `''`) could promise: a real
+#: Patient ID `UnknownPatient` exists, and merged with every ID-less file.
+#:
+#: Not `ANON_`-shaped, so `_is_replacement_id` and `canonical_patient_key`
+#: treat the key as an original: its date offset is the pseudonym it would
+#: be replaced by, under the project secret, and it is never replaced.
+#: The key never leaves the store: `exported_patient_id` is what every
+#: writer reads. It embeds the **source** Study Instance UID and stays
+#: anchored there whatever a later UID replacement does to the study.
+#:
+#: `is_synthetic_patient_id` is the only test for it. Do not spell the
+#: prefix anywhere else.
+NO_PATIENT_ID_PREFIX = "\\no-patient-id\\"
+
+
+def is_synthetic_patient_id(value) -> bool:
+    """Whether `value` is the key ingest gave a subject with no Patient ID (#584)."""
+    return isinstance(value, str) and value.startswith(NO_PATIENT_ID_PREFIX)
+
+
+def exported_patient_id(patient) -> str:
+    """The Patient ID a writer puts in a file for `patient` (#584).
+
+    `''` for a subject whose files carried no Patient ID -- what the source
+    had, under `KEEP` and `REPLACE` alike (owner ruling Q4, 2026-09-21) --
+    and `patient.patient_id` otherwise. The one reader of `patient_id` on
+    the way out: the stamp, the folder name, the WFDB record name and the
+    instance copies all go through it, so the synthetic key, and the source
+    Study Instance UID inside it, never reach an exported file or path.
+    """
+    pid = patient.patient_id
+    return "" if is_synthetic_patient_id(pid) else pid
+
+
 @dataclass(slots=True, eq=False)
 class Patient(TrackedEntity):
     """

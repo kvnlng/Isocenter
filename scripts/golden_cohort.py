@@ -240,9 +240,26 @@ def no_study_date(out: Path):
     write(ct("no_study_date", study_date=None), out / "no_study_date-1.dcm")
 
 
+def no_patient_id(out: Path):
+    """Two subjects with no Patient ID in one session (#584): `ALPHA`, the
+    element absent, over two studies, and `BETA`, the element empty, over
+    one. Each study is its own patient with its own date offset, and every
+    file exports an empty Patient ID. Nothing in pydicom's corpus has two
+    ID-less subjects in one session."""
+    for study, name in ((1, "ALPHA^ONE"), (2, "ALPHA^ONE"), (3, "BETA^TWO")):
+        ds = ct("no_patient_id", study=study, study_date=f"2023020{study}")
+        ds.PatientName = name
+        if study == 3:
+            ds.PatientID = ""
+        else:
+            del ds.PatientID
+        write(ds, out / f"no_patient_id-s{study}-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
-    lut_ambiguous, big_endian_words, float_pixels, no_study_date)}
+    lut_ambiguous, big_endian_words, float_pixels, no_study_date,
+    no_patient_id)}
 
 
 def build(out: Path = COHORT, only=None) -> list:

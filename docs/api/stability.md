@@ -155,6 +155,16 @@ instance_number, file_path, source_path` (`pixel_array` and
 `AttributeError`. `Equipment`: `manufacturer, model_name,
 device_serial_number`.
 
+A subject whose files carry no Patient ID (absent, empty or blank) is a
+`Patient` per study, whose `patient_id` is
+`entities.NO_PATIENT_ID_PREFIX + <its source Study Instance UID>`
+(`"\\no-patient-id\\1.2.3..."`); `entities.is_synthetic_patient_id()`
+is the test for it (#584). No single-valued Patient ID read from a file
+can take that form, because the backslash is DICOM's value delimiter. The
+key is never exported: such a subject's exported Patient ID is empty
+under `KEEP` and `REPLACE` alike, and its folder is
+`Subject_UnknownPatient`.
+
 `attributes` is keyed by lowercase `"gggg,eeee"` strings. On `Instance`:
 `get_pixel_data()`, `set_pixel_data()`, `unload_pixel_data()`,
 `discard_pixel_data()`, `get_waveform_data()`, and the

@@ -5,7 +5,8 @@ import hashlib
 import hmac
 import re
 from .entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED, Instance,
-                       Patient, Study, iter_item_tree)
+                       Patient, Study, is_synthetic_patient_id,
+                       iter_item_tree)
 from .config_manager import _vr_dummy
 from .logger import get_logger
 from .profiles import FLOOR_POLICY
@@ -664,7 +665,12 @@ class PhiInspector:
         id_action, _ = _owned_rule(self.phi_tags, "0010,0020")
         assert id_action in ("KEEP", "REPLACE"), id_action
         if (id_action == "REPLACE" and patient.patient_id
-                and patient.patient_id != "UNKNOWN"
+                # A subject with no Patient ID has nothing to pseudonymize
+                # (#584): its key is never exported, and replacing it would
+                # move its date offset. This read `!= "UNKNOWN"`, which
+                # matched nothing once the placeholder became
+                # `UnknownPatient`.
+                and not is_synthetic_patient_id(patient.patient_id)
                 and not _is_replacement_id(patient.patient_id)):
             # Through the constructors, not spelled here: the date
             # jitter canonicalizes an original id to this value (#517),
@@ -1157,6 +1163,15 @@ class PhiInspector:
             return (value == patient.patient_name
                     and _holds_owned_replacement(self.phi_tags, tag, value))
         if tag == "0010,0020":
+            # A subject with no Patient ID (#584): the export stamps its
+            # ID empty whatever the copy holds, and its key is never
+            # replaced, so a finding here could only write a pseudonym
+            # onto a copy no file carries. Not dead: the copy is usually
+            # absent or `''`, which raise nothing, but pydicom keeps a
+            # blank ID's leading whitespace (" \t " reads " \t"), which
+            # ingest counts as no ID and the scan would raise.
+            if is_synthetic_patient_id(patient.patient_id):
+                return True
             return (value == patient.patient_id
                     and _holds_owned_replacement(self.phi_tags, tag, value))
         # No StudyTime (0008,0030) arm, though `ENTITY_FIELD_TAGS` carries

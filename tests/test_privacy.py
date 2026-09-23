@@ -33,11 +33,23 @@ def test_phi_detection():
     assert date_finding.tag == "0008,0020"
 
 def test_no_phi():
-    # Setup a patient with no PHI (sanitized)
-    pat = Patient("UNKNOWN", "Unknown")
+    # Setup a patient with no PHI (sanitized): its ID is already a
+    # replacement. This used `"UNKNOWN"`, which the scan exempted by name
+    # until #584; that string is a Patient ID a file can carry, and is
+    # pseudonymized like any other now.
+    pat = Patient("ANON_0123456789abcdef01234567", "Unknown")
     # No studies
 
     inspector = PhiInspector(project_secret=FIXED_A)
     findings = inspector.scan_patient(pat)
 
     assert len(findings) == 0
+
+
+def test_a_patient_id_reading_unknown_is_pseudonymized():
+    """The scan's exemption of the literal `UNKNOWN` is gone (#584): no
+    ingest path produced it, a file can carry it, and it is an ID like
+    any other. Kills MP1 (the exemption restored)."""
+    findings = PhiInspector(project_secret=FIXED_A).scan_patient(
+        Patient("UNKNOWN", "Unknown"))
+    assert [f.tag for f in findings if f.field_name == "patient_id"] == ["0010,0020"]

@@ -15,6 +15,7 @@ from ..config_manager import _vr_dummy
 from ..io_handlers import (ExportError, export_folder_names,
                            format_study_date, LOSS_SCOPE_STANDARD,
                            normalize_patient_id_subset)
+from ..entities import exported_patient_id
 from ..logger import describe_exception_without_paths, get_logger
 from ..waveform import Waveform, WaveformChannel
 
@@ -94,7 +95,9 @@ def record_name_for(patient, study, series, instance) -> str:
     (see `WfdbExporter._unique_record_name`).
     """
     return "_".join([
-        _sanitize(patient.patient_id),
+        # Never `patient_id` itself: a subject with no Patient ID is keyed
+        # on its source Study UID (#584), which must not name a record.
+        _sanitize(exported_patient_id(patient)),
         _sanitize(series.series_number if series.series_number is not None else 0),
         _sanitize(instance.instance_number if instance.instance_number is not None else 0),
     ])

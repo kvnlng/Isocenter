@@ -44,7 +44,8 @@ from .parallel import (run_parallel, _env_int, _resolve_strategy,
 from .configuration import (IsocenterConfiguration, FlowList, _policy_base_label,
                             _scan_policy_for)
 from .entities import (Patient, PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
-                       resolve_item_path, iter_item_tree)
+                       resolve_item_path, iter_item_tree,
+                       exported_patient_id, is_synthetic_patient_id)
 from .profiles import FLOOR_POLICY
 # The module, read at call time: `create_config` names `profiles.FLOOR_BASE`
 # and diffs against its table, and the two must be one read (#714).
@@ -928,6 +929,8 @@ class DicomSession:
         # run its PASS through the COMPLIANCE_CHECK channel.
         for uid, _path, details in self.store_backend.check_pixel_geometry():
             get_logger().warning(f"{uid}: {details}")
+
+        self._audit_pre_1_0_id_less_groups()
 
         # Initialize Configuration Object
         self.configuration = IsocenterConfiguration()
@@ -2688,6 +2691,36 @@ class DicomSession:
         report._scan_tally = self._scan_tally.copy()
         return report
 
+    def _audit_pre_1_0_id_less_groups(self):
+        """One count-only `WARNING` row at every open of a store holding a
+        pre-1.0 ID-less group (#584, owner ruling Q5).
+
+        Before 1.0 ingest grouped every file with an empty Patient ID under
+        `''`, and every file without one under `UnknownPatient`, so such a
+        patient may be several subjects. Nothing is split on open: that
+        would give already-shifted dates a second offset (docs/migration.md
+        says how to separate them). A `''` group is loud already -- its date
+        shift declines on every pass -- but an `UnknownPatient` group shares
+        one pseudonym and one offset and graded PASS, silently. A real
+        Patient ID `UnknownPatient` is counted too, which "may" covers.
+
+        Counts only, as the log since 0.9.7 names no Patient ID. Every open,
+        not once: the row is about the store's contents, and a report over
+        any later session of this store has to carry it.
+        """
+        count = sum(1 for p in self.store.patients
+                    if p.patient_id in ("", "UnknownPatient"))
+        if not count:
+            return
+        detail = (f"{count} patient{' was' if count == 1 else 's were'} "
+                  "grouped by a release before 1.0 from files with no Patient "
+                  "ID and may be more than one subject; re-ingest their source "
+                  "files into a new store to separate them (#584).")
+        get_logger().warning(detail)
+        self.store_backend.log_audit(action_type="WARNING",
+                                     entity_uid=self.persistence_file,
+                                     details=detail)
+
     def phi_status_summary(self) -> Dict[str, Counter]:
         """What the session currently knows about the PHI in each entity.
 
@@ -2744,8 +2777,9 @@ class DicomSession:
         """
         from .remediation import _ScanTally
 
-        # `is not None`, not truthiness: `''` is a Patient ID ingest keeps
-        # (an empty element; an absent one is `UnknownPatient`), and a
+        # `is not None`, not truthiness: `''` is a Patient ID a store
+        # written before 1.0 can hold, and a hand-built graph too (ingest
+        # keys an ID-less subject on its study since #584), and a
         # falsy filter stamped such a patient CLEARED with its name finding
         # outstanding and let its instances through the safe export
         # (#581). The same test in `_scan_before_export` and `_ScanTally`.
@@ -3917,7 +3951,9 @@ class DicomSession:
         # {'0010,0040': 'O'} over the good one (review of #509). Where the
         # patient is itself a replacement, the refusal below names it.
         entity_fallback = {"0010,0010": patient.patient_name,
-                           "0010,0020": patient.patient_id}
+                           # What the export writes: never the synthetic
+                           # key of a subject with no Patient ID (#584).
+                           "0010,0020": exported_patient_id(patient)}
 
         def captured(inst, tag):
             """The value the lock stashes for `tag` on `inst`, and whether
@@ -3954,7 +3990,7 @@ class DicomSession:
             if "0010,0010" in tags_to_lock:
                 record["0010,0010"] = patient.patient_name
             if "0010,0020" in tags_to_lock:
-                record["0010,0020"] = patient.patient_id
+                record["0010,0020"] = exported_patient_id(patient)
             groups.append((record, []))
 
         # A replacement is not an identity to keep. Since #492 the
@@ -4595,11 +4631,17 @@ class DicomSession:
                             it is, with one WARNING per such study that
                             carries no date (#619). An instance carrying no
                             token takes only the patient-level identifiers
-                            (group 0010) of the first token found -- which
+                            (group 0010) of the token that speaks for the
+                            patient (below) -- which
                             include Patient's Age, Size and Weight, and so
                             may be another study's -- and keeps its other
                             locked identifiers as the pass left them; one
-                            WARNING gives the count. A token a release before
+                            WARNING gives the count. Of a patient with no
+                            Patient ID (#584), such an instance keeps a
+                            non-blank Patient ID of its own rather than
+                            take the token's blank one, and a second
+                            WARNING counts those; the kept ID is the one
+                            identifier excluded. A token a release before
                             0.9.8 shared across studies, holding a non-blank
                             value outside group 0010 and not stamped by this
                             store, is restored in full on the first study
@@ -4609,15 +4651,23 @@ class DicomSession:
                             restored in full everywhere. Where tokens
                             disagree on Patient's Name or Patient ID, each
                             instance keeps its own and the `Patient` takes
-                            the first token's, with a WARNING.
+                            the speaking token's, with a WARNING; a token
+                            whose Patient ID is blank does not disagree on
+                            it.
 
         The token that speaks for the patient is the first one **of ours**
         in study, series and instance order (#616): a study without a
         token, or with an Encrypted Attributes Sequence this library did
         not write, is walked past. Until 0.9.8 the walk read the first
         instance of the last study that had one, so a patient whose token
-        sat on an earlier study raised the "no token" message. **Every
-        distinct token is opened before anything is written (#583)**, with
+        sat on an earlier study raised the "no token" message. For a
+        patient with a Patient ID, a first token holding a blank one is
+        passed over for the first token holding a non-blank one, when
+        there is one (#584): the lock keeps each file's copy as it was, so
+        a file whose ID was empty, joined to its study's patient, stashes
+        `''`, and that is not the patient's ID. A subject with no Patient
+        ID is spoken for by its first token always, and keeps its key.
+        **Every distinct token is opened before anything is written (#583)**, with
         `restore=False` too: a token of ours on any study that this key
         cannot open, or that holds no record, raises and writes nothing.
 
@@ -4734,10 +4784,33 @@ class DicomSession:
         recovered: Dict[str, Dict[str, Any]] = {
             inst.sop_instance_uid: copy.deepcopy(opened[content])
             for _, inst, content in walk if content is not None}
-        # The first token found speaks for the patient -- its name and ID,
-        # the #548 scheme check, and the instances carrying no token --
-        # as it spoke for every instance before.
-        original_attrs = opened[next(iter(carrying))]
+        # One token speaks for the patient -- its name and ID, the #548
+        # scheme check, and the instances carrying no token. The first
+        # found, as before, unless its Patient ID is blank and a later
+        # token's is not (review of #584, R3-1): a patient whose first
+        # file had an empty ID and whose second carried `PA` (a re-key, or
+        # a join) holds a token of `''` first, since the lock stashes each
+        # copy as it is, and a restore from it wrote `''` over `PA`. **Not
+        # for a subject with no Patient ID**: its first token is the file
+        # that made it, and a later token holding a real ID is a file that
+        # linked under it (the WARNING case) -- taking that ID would
+        # rename the patient after values were derived under its key.
+        speaker = next(iter(carrying))
+        if not is_synthetic_patient_id(p.patient_id) and not str(
+                opened[speaker].get("0010,0020") or "").strip():
+            speaker = next((content for content in carrying
+                            if str(opened[content].get("0010,0020") or "").strip()),
+                           speaker)
+        original_attrs = opened[speaker]
+        # The Patient ID a restore gives the patient. A subject with no
+        # Patient ID locked a blank one; writing that back would make every
+        # restored ID-less subject `''`, and `audit()`'s shared-ID merge
+        # (#563) would collapse them into one -- #584 again, by another
+        # door. So a blank token ID leaves the synthetic key in place.
+        restored_id = original_attrs.get("0010,0020", p.patient_id)
+        if (is_synthetic_patient_id(p.patient_id)
+                and not str(restored_id or "").strip()):
+            restored_id = p.patient_id
 
         if original_attrs:
             if restore:
@@ -4747,7 +4820,7 @@ class DicomSession:
                 # and a refusal there would leave two patients with one
                 # ID under two schemes in the graph (#548).
                 self.store._refuse_a_merge_across_schemes(
-                    renamed=(p, original_attrs.get("0010,0020", p.patient_id)))
+                    renamed=(p, restored_id))
                 # Drained before the first write, as `audit()` and
                 # `redact()` drain on entry: the loop below writes onto
                 # every instance and the patient, and a queued save could
@@ -4810,14 +4883,15 @@ class DicomSession:
                                         for _, inst in holders)):
                         partial[content] = holders[0][0]
 
-                tokenless = elsewhere = count = 0
+                tokenless = elsewhere = count = kept_ids = 0
                 study_dates: Dict[int, Tuple["Study", Any]] = {}
                 fallback = patient_level(original_attrs)
                 for st, inst, content in walk:
                     if content is None:
                         # **An instance carrying no token takes the
                         # patient-level identifiers only (#583, Q-A)**:
-                        # group 0010, from the first token found. Until
+                        # group 0010, from the token that speaks for the
+                        # patient (`original_attrs`, above). Until
                         # 0.9.8 it took every value of that token, so a
                         # study ingested after the lock, or the unlocked
                         # half of a pair `audit()` merged, took another
@@ -4830,6 +4904,21 @@ class DicomSession:
                         # Weight, which can differ by study; disclosed.
                         values = fallback
                         tokenless += 1
+                        # **Not a blank token ID over a real one (#584).**
+                        # An ID-less patient's token holds the ID the
+                        # export writes, `''`. A file carrying a Patient ID
+                        # that linked under it after the lock (the WARNING
+                        # case) holds its own; writing `''` over that would
+                        # lose it, not restore it. The instance mirror of
+                        # the `restored_id` guard; only this tag, only a
+                        # blank token value, only a non-blank copy.
+                        if (is_synthetic_patient_id(p.patient_id)
+                                and "0010,0020" in values
+                                and not str(values["0010,0020"] or "").strip()
+                                and str(inst.attributes.get("0010,0020") or "").strip()):
+                            values = {tag: val for tag, val in values.items()
+                                      if tag != "0010,0020"}
+                            kept_ids += 1
                     elif content in partial and st is not partial[content]:
                         values = patient_level(opened[content])
                         elsewhere += 1
@@ -4846,9 +4935,16 @@ class DicomSession:
                     get_logger().warning(
                         "%d of %d instances of this patient carry no identity "
                         "token, so they took only the patient-level identifiers "
-                        "(group 0010) of the first token found, and their other "
+                        "(group 0010) of the token the patient's identity was "
+                        "restored from, and their other "
                         "locked identifiers keep what anonymize() left (#583).",
                         tokenless, count)
+                if kept_ids:
+                    get_logger().warning(
+                        "%d of them kept their own Patient ID: the token holds "
+                        "the blank one a subject with no Patient ID exports, "
+                        "and a restore does not write it over a real one (#584).",
+                        kept_ids)
                 if elsewhere:
                     get_logger().warning(
                         "%d of %d instances of this patient carry an identity "
@@ -4861,20 +4957,35 @@ class DicomSession:
                 # **Tokens that disagree on the name or ID (#583, Q-F).**
                 # Each instance keeps its own token's, so a re-lock after
                 # the restore stashes each again; the `Patient` has one
-                # name and one ID, and takes the first token's, which is
-                # what `export()` stamps on every study -- as the #548
-                # merge already stamps the surviving patient's.
+                # name and one ID, and takes the speaking token's
+                # (`original_attrs`), which is what `export()` stamps on
+                # every study -- as the #548 merge already stamps the
+                # surviving patient's. The speaker is not always the first
+                # token found (#584): the WARNING names it, and a token
+                # whose Patient ID is blank does not count as disagreeing
+                # on the ID -- for a patient with one, the speaker rule
+                # passed that token over on purpose, and its `''` is the
+                # file's own empty copy, not a rival ID (review round 4 of
+                # #584, R4-1). A later token holding `PA` under an ID-less
+                # patient still disagrees: the patient keeps its key.
+                def disagrees(values, tag):
+                    if tag not in values or tag not in original_attrs:
+                        return False
+                    if tag == "0010,0020" and not str(values[tag] or "").strip():
+                        return False
+                    return values[tag] != original_attrs[tag]
                 disagreeing = sum(
                     1 for values in opened.values()
-                    if any(tag in values and tag in original_attrs
-                           and values[tag] != original_attrs[tag]
+                    if any(disagrees(values, tag)
                            for tag in ("0010,0010", "0010,0020")))
                 if disagreeing:
                     get_logger().warning(
                         "%d of %d identity tokens of this patient hold a "
-                        "Patient's Name or Patient ID different from the first "
-                        "token found; the patient takes the first token's, which "
-                        "export() stamps on every study (#583).",
+                        "Patient's Name or Patient ID different from the token "
+                        "the patient's identity was restored from (the first "
+                        "found, or the first holding a Patient ID); the patient "
+                        "takes that token's, which export() stamps on every "
+                        "study (#583).",
                         disagreeing, len(opened))
 
                 # Update Patient Object top-level properties if Name/ID changed
@@ -4882,7 +4993,7 @@ class DicomSession:
                 if "0010,0010" in original_attrs:
                     p.patient_name = original_attrs["0010,0010"]
                 if "0010,0020" in original_attrs:
-                    p.patient_id = original_attrs["0010,0020"]
+                    p.patient_id = restored_id
                 # Recorded, because `Patient` tracks no assignment: a
                 # restore that marked nothing was skipped by the next save,
                 # which then deleted the pseudonym's row and every study
