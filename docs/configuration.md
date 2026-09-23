@@ -448,12 +448,14 @@ phi_tags:
 
 * an instance never audited;
 * an instance with a finding left open, whether declined, not handed to `anonymize()`, or a Series finding;
-* an instance edited after its pass;
+* an instance whose own attributes were edited after its pass;
 * a patient restored with `recover_patient_identity(restore=True)`;
 * a store reopened under another policy and not audited again;
 * a store written before 1.0.
 
-The markers rest on the same status the report's grade reads. An owner field assigned directly after the pass, such as `patient.patient_name = ...`, does not yet move that status ([#767](https://github.com/kvnlng/Isocenter/issues/767)), so the file still says `YES`.
+The markers rest on the same status the report's grade reads. Three kinds of edit after the pass do not yet move that status, so the file still says `YES` ([#767](https://github.com/kvnlng/Isocenter/issues/767)): an owner field assigned directly, such as `patient.patient_name = ...`; a Series field, such as `series.series_instance_uid = ...`; and a value set inside a nested sequence item.
+
+**Attributes, not pixels.** `YES` records that the attribute policy was applied in full and that the file declares no burned-in text. Isocenter does not read the pixels to decide it. PS3.3 defines `YES` as identity removed from the Pixel Data as well, so a file whose Burned In Annotation `(0028,0301)` says `YES` does not get it: the source's own `(0012,0062)`, if any, stays, and the De-identification Method value and the temporal marker are still written. Text drawn into the pixels is `redact()`'s to clear (see [Pixel Redaction](#pixel-redaction-machines)); it writes Burned In Annotation `NO` on the pixels it clears, and that file then says `YES`.
 
 **What.**
 
@@ -462,7 +464,7 @@ The markers rest on the same status the report's grade reads. An owner field ass
     * `<policy>` is `basic@2026c`, `floor over basic@2026c` or `none`. An external profile is `external profile`, never its path.
     * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides.
     * No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.
-* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded.
+* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element from an implicit-VR source has no recorded VR, so a date in it is not read and does not stop `MODIFIED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
     * `REMOVED` when every date is empty or the dummy `19000101`.
     * `MODIFIED` when the rest are shifts this store wrote.
     * Nothing when any date is as it was ingested; the source's value, if any, then stays.

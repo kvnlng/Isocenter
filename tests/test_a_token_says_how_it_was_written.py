@@ -287,7 +287,9 @@ def _hand_token(session, instances, payload):
     return token
 
 
-@pytest.mark.parametrize("scheme", [3, "x"])
+#: `True` is an int to Python and equals 1, so without the bool check it
+#: would pass as scheme 1 (review of L12, N2); 0 is below every scheme.
+@pytest.mark.parametrize("scheme", [3, "x", True, 0])
 def test_a_token_of_a_later_scheme_is_refused_not_guessed(tmp_path, scheme, caplog):
     """K9. A token whose scheme this release does not know holds a record,
     so "holds no identity record" would be false: refused with its own

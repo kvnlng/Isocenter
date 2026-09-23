@@ -327,8 +327,10 @@ default.
   Patient Identity Removed `(0012,0062)` `YES` and one De-identification
   Method `(0012,0063)` value naming the release and the policy, and,
   where its dates determine it, Longitudinal Temporal Information
-  Modified `(0028,0303)`. The fields and the condition are what is
-  promised
+  Modified `(0028,0303)`. `YES` reflects the attribute policy and no
+  declared burned-in text: it is held back from a file whose Burned In
+  Annotation `(0028,0301)` says `YES`, and the pixels themselves are not
+  read. The fields and the condition are what is promised
   ([What an exported file says about itself](../configuration.md#what-an-exported-file-says-about-itself));
   the value's exact text moves with the release and the policy's
   fingerprint.

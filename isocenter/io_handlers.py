@@ -5846,7 +5846,19 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
     """
     if markers is None:
         return
-    if markers.identity_removed:
+    # YES is held back from a file that says Burned In Annotation
+    # `(0028,0301) YES` (owner ruling on the review of L12): PS3.3
+    # C.7.1.1's YES covers the Pixel Data too, Isocenter does not read the
+    # pixels, and this file declares text drawn into them. Held back means
+    # not written, so a source's own `(0012,0062)` stays as it was. Read
+    # from `ds`, because the file's value is the one that must not
+    # contradict YES; `redact()` writes `NO` on the pixels it clears. Case
+    # is ignored, as the scaffold's burned-in warning ignores it: `yes` is
+    # no valid CS, but the scanner meant it.
+    burned_in = ds.get(0x00280301)
+    declares_burned_in = (burned_in is not None
+                          and str(burned_in.value).upper() == "YES")
+    if markers.identity_removed and not declares_burned_in:
         ds.add_new(0x00120062, "CS", "YES")
     if markers.method_value:
         held = ds.get(0x00120063)

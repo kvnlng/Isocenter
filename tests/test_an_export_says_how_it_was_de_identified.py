@@ -246,6 +246,38 @@ def _patient_edited(session, tmp_path):
     assert inst.phi_status is PhiStatus.REMEDIATED, "setup: only the patient moved"
 
 
+def _series_edited(session, tmp_path):
+    """Review of L12, F2: a Series field set back after the pass. No status
+    is recorded on a Series, so none goes stale, and the instance, its
+    study and its patient still read REMEDIATED beside the source Series
+    Instance UID."""
+    session.anonymize(session.audit())
+    [inst] = _instances(session)
+    inst_series = session.store.patients[0].studies[0].series[0]
+    inst_series.series_instance_uid = pydicom.dcmread(
+        get_testdata_file("CT_small.dcm")).SeriesInstanceUID
+    assert inst.phi_status is PhiStatus.REMEDIATED, "setup: no status moved"
+
+
+def _with_a_referenced_image(ds):
+    item = Dataset()
+    item.ReferencedSOPClassUID = ds.SOPClassUID
+    item.ReferencedSOPInstanceUID = "1.2.3.4"
+    ds.ReferencedImageSequence = Sequence([item])
+
+
+def _nested_edited(session, tmp_path):
+    """Review of L12, F3: a name written into a nested item after the pass.
+    The item's revision moves; its instance's status does not."""
+    session.anonymize(session.audit())
+    [inst] = _instances(session)
+    inst.sequences["0008,1140"].items[0].set_attr("0010,0010", "Doe^Nested")
+    assert inst.phi_status is PhiStatus.REMEDIATED, "setup: no status moved"
+
+
+_nested_edited.source_edit = _with_a_referenced_image
+
+
 def _owner_status_moved(level):
     """The patient's, or the study's, status alone off REMEDIATED, the
     instance's left as the pass recorded it. No pipeline gives that today
@@ -292,24 +324,30 @@ def _instances(session):
             for se in st.series for i in se.instances]
 
 
-#: #767, open: an owner field assigned after the pass moves no revision
-#: (measured: `Patient.patient_name = ...` leaves `_revision` where it
-#: was), so the patient still reads REMEDIATED and the file says YES
-#: beside the name set back. The marker rests on the status and is as
-#: honest as it is; strict, so a fix of #767 turns this red and it is
-#: un-marked then.
-_OWNER_FIELD_UNTRACKED = pytest.mark.xfail(
-    strict=True, reason="#767: an owner field set after the pass is not tracked")
+#: #767, open: an edit after the pass that moves no status the marker
+#: reads. An owner field assigned directly (measured:
+#: `Patient.patient_name = ...` leaves `_revision` where it was), a Series
+#: field (no Series records a status), or a nested item (its revision
+#: moves, its instance's status does not): the three entities still read
+#: REMEDIATED and the file says YES beside the value set back. The marker
+#: rests on the status and is as honest as it is. Owner ruling: #767's PR
+#: makes each of these edits mark the containing instances changed; strict,
+#: so that fix turns these red, and whichever of L12 and #767 lands second
+#: removes all three marks.
+_EDIT_UNTRACKED = pytest.mark.xfail(
+    strict=True, reason="#767: an edit after the pass that moves no status")
 
 
 @pytest.mark.parametrize("step", [_no_audit, _declined, _instance_edited,
-                                  pytest.param(_patient_edited,
-                                               marks=_OWNER_FIELD_UNTRACKED),
+                                  pytest.param(_patient_edited, marks=_EDIT_UNTRACKED),
+                                  pytest.param(_series_edited, marks=_EDIT_UNTRACKED),
+                                  pytest.param(_nested_edited, marks=_EDIT_UNTRACKED),
                                   _owner_status_moved("patient"),
                                   _owner_status_moved("study"),
                                   _mixed_policies, _series_finding_left],
                          ids=["never_audited", "a_finding_left_open",
                               "the_instance_edited_after", "the_patient_edited_after",
+                              "the_series_edited_after", "a_nested_item_edited_after",
                               "the_patient_not_remediated", "the_study_not_remediated",
                               "two_policies_in_one_file", "a_series_finding_left_open"])
 def test_no_marker_where_the_policy_was_not_applied_in_full(tmp_path, step):
@@ -318,7 +356,8 @@ def test_no_marker_where_the_policy_was_not_applied_in_full(tmp_path, step):
     the Series seam (a marker beside a source Series Instance UID)."""
     out = tmp_path / "out"
     with DicomSession(str(tmp_path / "s.db")) as session:
-        session.ingest(_source(tmp_path / "in"))
+        session.ingest(_source(tmp_path / "in",
+                               edit=getattr(step, "source_edit", None)))
         step(session, tmp_path)
         session.export(str(out), use_compression=False, show_progress=False)
     markers = _markers(_written(out))
@@ -630,6 +669,52 @@ def test_the_temporal_marker_follows_the_files_dates(
     ds = _pipeline(tmp_path, profile, source=source, **extra)
     assert _markers(ds)["removed"] == "YES", "setup: the pass was whole"
     assert _markers(ds)["temporal"] == expected
+
+
+# --- M13: a declared burned-in annotation (review of L12, F1) ---------------
+
+def _burned_in(value):
+    def edit(ds):
+        ds.BurnedInAnnotation = value
+    return edit
+
+
+@pytest.mark.parametrize("value", ["YES", "yes"])
+def test_a_declared_burned_in_annotation_holds_back_yes(tmp_path, value):
+    """Owner ruling on the review of L12 (F1). PS3.3 C.7.1.1 defines
+    `(0012,0062) YES` as identity removed from the Attributes *and the Pixel
+    Data*, and Isocenter does not read the pixels: a file that itself says
+    `(0028,0301) YES` (text drawn into the pixels, by the scanner's own
+    account) cannot also say the identity is gone. YES is held back; the
+    method value, which only names what ran, and the temporal marker are
+    written as ever. `yes` is not a valid CS, and is read as the scanner
+    meant it. Kills: the check dropped; a case-sensitive comparison;
+    everything held back, not YES alone."""
+    ds = _pipeline(tmp_path, source=_source(tmp_path / "in",
+                                            edit=_burned_in(value)))
+    assert ds.BurnedInAnnotation == value, "setup: the flag reaches the file"
+    assert _markers(ds) == {"removed": None, "method": ours(*FLOOR),
+                            "codes": None, "temporal": "MODIFIED"}
+
+
+def test_a_burned_in_annotation_of_no_leaves_yes(tmp_path):
+    """The other direction: `(0028,0301) NO`, the flag `redact()` writes on
+    the pixels it cleared, is no declaration of burned-in text, so the file
+    says YES. Kills: holding back on the element's presence, not its
+    value."""
+    ds = _pipeline(tmp_path, source=_source(tmp_path / "in",
+                                            edit=_burned_in("NO")))
+    assert ds.BurnedInAnnotation == "NO", "setup"
+    assert _markers(ds)["removed"] == "YES"
+
+
+def test_held_back_yes_leaves_a_source_no_as_it_was(tmp_path):
+    """Held back means not written: a source `(0012,0062) NO` stays `NO`,
+    and nothing else is put in its place. Kills: YES held back by writing
+    `NO`, or by deleting the source's value."""
+    ds = _pipeline(tmp_path, source=_source(tmp_path / "in", identity_removed="NO",
+                                            edit=_burned_in("YES")))
+    assert _markers(ds)["removed"] == "NO"
 
 
 # --- M11, M12 ---------------------------------------------------------------
