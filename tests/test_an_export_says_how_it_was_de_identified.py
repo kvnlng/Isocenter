@@ -197,6 +197,24 @@ def test_the_label_is_the_policy_the_scan_ran_under(tmp_path):
     assert _markers(_written(out))["removed"] == "YES"
 
 
+def test_a_cleared_status_is_applied_in_full_too(tmp_path):
+    """A re-audit after the pass finds nothing and records CLEARED: the
+    policy was applied in full all the same, so the file says so. Kills:
+    the predicate accepting REMEDIATED only."""
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(_source(tmp_path / "in"))
+        session.anonymize(session.audit())
+        session.audit()
+        patient = session.store.patients[0]
+        assert {e.phi_status for e in (patient, patient.studies[0],
+                                       *_instances(session))} == {PhiStatus.CLEARED}, \
+            "setup"
+        session.export(str(out), use_compression=False, show_progress=False)
+    assert _markers(_written(out))["removed"] == "YES"
+    assert _markers(_written(out))["method"] == ours(*FLOOR)
+
+
 # --- M2 ---------------------------------------------------------------------
 
 def _no_audit(session, tmp_path):
@@ -245,6 +263,19 @@ def _owner_status_moved(level):
     return step
 
 
+def _mixed_policies(session, tmp_path):
+    """The patient's status recorded under one policy this session audited
+    under, its instance's under another: both accepted, and still no
+    single policy the file can name. Kills: the one-fingerprint check."""
+    basic = session.audit(config_path=_config(tmp_path, "b.yaml",
+                                              privacy_profile="basic"))._scan_policy
+    session.anonymize(session.audit())
+    session.store.patients[0].record_phi_status(PhiStatus.REMEDIATED, basic)
+    [inst] = _instances(session)
+    assert inst.phi_status is PhiStatus.REMEDIATED, "setup"
+    assert inst.phi_status_policy.fingerprint != basic.fingerprint, "setup"
+
+
 def _series_finding_left(session, tmp_path):
     """After L10: a report with its Series findings filtered out leaves the
     Series' instances IDENTIFIED (f54deaa1's pass-end demotion), and the
@@ -276,11 +307,11 @@ _OWNER_FIELD_UNTRACKED = pytest.mark.xfail(
                                                marks=_OWNER_FIELD_UNTRACKED),
                                   _owner_status_moved("patient"),
                                   _owner_status_moved("study"),
-                                  _series_finding_left],
+                                  _mixed_policies, _series_finding_left],
                          ids=["never_audited", "a_finding_left_open",
                               "the_instance_edited_after", "the_patient_edited_after",
                               "the_patient_not_remediated", "the_study_not_remediated",
-                              "a_series_finding_left_open"])
+                              "two_policies_in_one_file", "a_series_finding_left_open"])
 def test_no_marker_where_the_policy_was_not_applied_in_full(tmp_path, step):
     """M2 (a)-(d), (f). Kills: the predicate reading the instance only
     (the patient and study cases); reading a status without its revision;
@@ -332,6 +363,13 @@ def test_another_tools_markers_are_kept_and_ours_appended(tmp_path):
                    source=_source(tmp_path / "no_in", identity_removed="NO"))
     assert _markers(ds)["removed"] == "YES", "a source NO is replaced"
 
+    def empty_method(dataset):
+        dataset.DeidentificationMethod = ""
+    ds = _pipeline(tmp_path, "floor", name="empty",
+                   source=_source(tmp_path / "empty_in", edit=empty_method))
+    assert _markers(ds)["method"] == ours(*FLOOR), \
+        "a zero-length source value is no step to keep"
+
 
 def test_re_exporting_our_own_export_adds_no_second_value(tmp_path):
     """M4. Our export re-ingested and passed again under the same policy
@@ -350,6 +388,12 @@ def test_re_exporting_our_own_export_adds_no_second_value(tmp_path):
 
     other = _pipeline(tmp_path, "basic", source=str(first), name="other")
     assert _markers(other)["method"] == [ours(*FLOOR), ours(*BASIC)]
+
+    # Back under the floor: the last value is basic's, so the floor is a
+    # step again, although it is also the first value.
+    other_folder = tmp_path / "other_out"
+    back = _pipeline(tmp_path, "floor", source=str(other_folder), name="back")
+    assert _markers(back)["method"] == [ours(*FLOOR), ours(*BASIC), ours(*FLOOR)]
 
 
 # --- M5, M6, M7 -------------------------------------------------------------

@@ -5857,7 +5857,7 @@ def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
                       if isinstance(raw, (list, tuple, MultiValue)) else [str(raw)])
         if not values or values[-1] != markers.method_value:
             values.append(markers.method_value)
-        ds.add_new(0x00120063, "LO", values if len(values) > 1 else values[0])
+        ds.add_new(0x00120063, "LO", values)
     if markers.temporal:
         ds.add_new(0x00280303, "CS", markers.temporal)
 

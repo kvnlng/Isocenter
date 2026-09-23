@@ -609,22 +609,17 @@ _IDENTITY_REMOVED, _DEID_METHOD, _TEMPORAL_MODIFIED = (
 
 
 @functools.lru_cache(maxsize=None)
-def _standard_date_vr(tag: str) -> Optional[str]:
-    """`"DA"` or `"DT"` for a standard tag whose dictionary VR is one, else
-    None -- including a malformed key, a private (odd-group) tag, and a tag
-    the dictionary does not know. Cached: the plan asks it for every
-    element of every instance, and the answer is a fact about the tag."""
+def _dictionary_vr(tag: str) -> Optional[str]:
+    """A `gggg,eeee` key's dictionary VR, or None for a key that is not
+    one (`_ISO...` bookkeeping, a malformed key) and for a tag the
+    dictionary does not know, which every private tag is. Cached: the plan
+    asks it for every element of every instance, and the answer is a fact
+    about the tag."""
     try:
         group, element = (int(part, 16) for part in tag.split(","))
-    except ValueError:
+        return dictionary_VR((group << 16) | element)
+    except (ValueError, KeyError):
         return None
-    if group % 2:
-        return None
-    try:
-        vr = dictionary_VR((group << 16) | element)
-    except KeyError:
-        return None
-    return vr if vr in ("DA", "DT") else None
 
 
 def _date_state(value, vr: str, vouched: bool) -> str:
@@ -675,9 +670,7 @@ def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
         if not path:
             attributes = {**attributes, **stamps}
         for tag, value in attributes.items():
-            if tag.startswith("_") or "," not in tag:
-                continue
-            vr = _standard_date_vr(tag)
+            vr = _dictionary_vr(tag)
             if vr is None and _is_private_tag(tag):
                 vr = item.attribute_vrs.get(tag)
             if vr not in ("DA", "DT"):
@@ -6914,9 +6907,7 @@ class DicomSession:
         """
         accepted = self._accepted_policy_fingerprints(
             self.configuration._scan_policy())
-        ruled = {str(tag).strip().lower()
-                 for tag in (self.configuration.phi_tags or {})}
-        values: Dict[ScanPolicy, str] = {}
+        ruled = set(self.configuration.phi_tags or {})
 
         def plan(patient, study, instance, stamps):
             policy = self._deid_marker_policy(patient, study, instance, accepted)
@@ -6924,9 +6915,7 @@ class DicomSession:
                 return None
             method = None
             if _DEID_METHOD not in ruled:
-                method = values.get(policy)
-                if method is None:
-                    method = values[policy] = _deid_method_value(policy, __version__)
+                method = _deid_method_value(policy, __version__)
             temporal = None
             if _TEMPORAL_MODIFIED not in ruled:
                 temporal = _longitudinal_temporal_marker(study, instance, stamps)
