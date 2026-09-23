@@ -14,11 +14,11 @@ from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
 
 import yaml
 
-from .io_handlers import (DicomImporter, DicomExporter, ExportContext,
-                          ExportError, ExportSummary, SidecarPixelLoader,
-                          SidecarWaveformLoader, export_folder_names,
-                          export_stamp_attributes, GRADED_LOSS_SCOPES,
-                          normalize_patient_id_subset, redaction_in_effect)
+from .io_handlers import (DicomImporter, DicomExporter, ExportContext, ExportError,
+                          ExportSummary, SidecarPixelLoader, SidecarWaveformLoader,
+                          export_folder_names, export_stamp_attributes, GRADED_LOSS_SCOPES,
+                          normalize_id_filter, redaction_in_effect, select_patient_ids,
+                          unmatched_patient_ids_sentence)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
@@ -710,6 +710,17 @@ def _suggested_tag_name(tag: str) -> str:
     if isinstance(entry, dict) and entry.get("name"):
         return str(entry["name"])
     return tag
+
+
+def _lock_selection(value, option):
+    """The lock pair's reading of a selection (#696): the shape every door
+    reads, except that `None` is refused -- there is no "lock everyone"
+    spelling, and read as every patient it would lock the whole session --
+    and an item may be a finding, the batch's documented input."""
+    return normalize_id_filter(
+        value, option, allow_none=False,
+        element=lambda item: isinstance(item, str) or hasattr(item, 'patient_id'),
+        element_is="a str or a finding")
 
 
 class LockingResult(list):
@@ -3118,18 +3129,36 @@ class DicomSession:
 
         Args:
             expand_metadata (bool): If True, includes all DICOM attributes as columns.
-            patient_ids (List[str], optional): Restrict the report to these
-                Patient IDs. ``None`` means every patient in the session.
-                An empty list matches nobody -- it is a filter that
-                selected nothing, not an absent filter.
+            patient_ids (Iterable[str], optional): Restrict the report to
+                these Patient IDs, read exactly as `export()` reads its
+                `patient_ids` (#696). ``None`` means every patient in the
+                session. An empty iterable matches nobody -- it is a filter
+                that selected nothing, not an absent filter. An iterator is
+                read once. An ID no patient holds selects nothing and is
+                counted, never named, in one `WARNING` log line; a report
+                is a read and writes no audit row (#686). A subject whose
+                files carried no Patient ID is selected by the key this
+                report's `PatientID` column shows for it, not by `""`.
+
+        Raises:
+            TypeError: If `patient_ids` is a bare `str` (wrap one ID in a
+                list), bytes-like, not iterable, or holds an element that
+                is not a `str` (named by its position and type, never its
+                value). Until #696 a `str` was substring-matched here --
+                `"PAT-APAT-B"` reported both patients -- and a generator
+                was consumed by the first patient.
         """
         import pandas as pd
+        # Before anything is read, so a refusal is the whole answer.
+        selection = select_patient_ids(patient_ids, self.store.patients)
+        if selection.unmatched:
+            get_logger().warning(unmatched_patient_ids_sentence(selection))
         rows = []
         for p in self.store.patients:
-            # `is not None` rather than a truth test: `[]` must exclude
-            # everyone. A caller computing a cohort that came back empty
-            # would otherwise export the whole dataset.
-            if patient_ids is not None and p.patient_id not in patient_ids:
+            # `is not None` rather than a truth test: an empty selection
+            # must exclude everyone. A caller computing a cohort that came
+            # back empty would otherwise export the whole dataset.
+            if selection.ids is not None and p.patient_id not in selection.ids:
                 continue
             for s in p.studies:
                 for se in s.series:
@@ -3704,8 +3733,9 @@ class DicomSession:
 
         Must be called BEFORE anonymization/redaction if recovery is required.
 
-        A list of patient IDs, a `PhiReport` or a list of findings is
-        dispatched to `lock_identities_batch()` with the same `persist`,
+        Anything but a `str` -- an iterable of patient IDs, a `PhiReport`
+        or a list of findings -- is dispatched to `lock_identities_batch()`,
+        which refuses what is not a selection (#696), with the same `persist`,
         `verbose` and `tags_to_lock`; chunked persistence
         (`auto_persist_chunk_size`) is that method's own argument, because
         it means nothing for one patient. Until 0.9.4 the batch loop
@@ -3722,7 +3752,9 @@ class DicomSession:
         otherwise have a `Patient` silently read as `verbose`.
 
         Args:
-            patient_id (str): The ID of the patient to preserve (or a list/report for batch processing).
+            patient_id (str): The ID of the patient to preserve; anything
+                that is not a `str` (a list, set, frozenset or iterator of
+                IDs, or a report) is handed to `lock_identities_batch()`.
             persist (bool): If True, writes each instance's token into the
                 row the store holds for it, immediately; an instance the
                 store holds no row for raises (see `RuntimeError` below).
@@ -3777,6 +3809,13 @@ class DicomSession:
                 lock creates the key file (the first lock under a path
                 with none, #539), it is created already written, with
                 mode 0600 (#618).
+            TypeError: When `patient_id` is not a `str` and is not a
+                selection `lock_identities_batch()` accepts: `None`,
+                bytes-like, not iterable, or an iterable holding an item
+                that is neither a `str` nor a finding (#696). Raised
+                before the key is loaded or created. Until #696 each of
+                these was looked up as one Patient ID, logged an error and
+                locked nobody.
             ValueError: The key file at the path is empty (the message
                 names the path) or is not a Fernet key (#618). Neither is
                 cached: a later call reads the file again.
@@ -3810,8 +3849,19 @@ class DicomSession:
             raise RuntimeError(
                 "Reversible anonymization not enabled. Call enable_reversible_anonymization() first.")
 
-        # Dispatch to batch method if a list is provided
-        if isinstance(patient_id, (list, tuple, set)) or hasattr(patient_id, 'findings'):
+        # A `str` is the single-id spelling; everything else goes to the
+        # batch, which locks a selection or refuses what is not one
+        # (#696). This read `isinstance(..., (list, tuple, set))` until
+        # then, so a `frozenset` or a generator was looked up as one
+        # Patient ID and locked nobody, and `None`, `bytes` and `42` were
+        # each an ERROR line rather than a refusal -- and a patient left
+        # unlocked loses its identity at `anonymize()`.
+        if not isinstance(patient_id, str):
+            # Read here, under the name the caller used, so a refusal says
+            # `patient_id` (review of #696); the batch gets the tuple and
+            # reads it again, which a tuple survives.
+            if not hasattr(patient_id, 'findings'):
+                patient_id = _lock_selection(patient_id, "patient_id")
             return self.lock_identities_batch(
                 patient_id, persist=persist, verbose=verbose, tags_to_lock=tags_to_lock)
 
@@ -3859,9 +3909,11 @@ class DicomSession:
 
         Called by the single lock only once its patient is found, so a lock
         of an ID no patient holds creates no key file. The batch calls it
-        before it plans, found or not, because it cannot plan without the
-        engine; a batch of IDs that match no patient therefore creates the
-        key, as does a lock that is then refused for any other reason.
+        after it has read its selection -- so an argument refused for its
+        shape creates no key (#696) -- and before it plans, found or not,
+        because it cannot plan without the engine; a batch of IDs that
+        match no patient therefore creates the key, as does a lock that is
+        then refused for any other reason.
         Neither writes a token.
 
         Raises:
@@ -4423,7 +4475,13 @@ class DicomSession:
         Batch process multiple patients to lock identities.
 
         Args:
-            patient_ids (Union[List[str], PhiReport]): List of PatientIDs to process.
+            patient_ids (Union[Iterable[str], PhiReport]): The patients to
+                lock: an iterable of Patient IDs (read once, so an iterator
+                works), a `PhiReport`, or an iterable of findings, which
+                may be mixed with IDs. Read as every other door reads
+                `patient_ids` (#696), except that `None` is refused: there
+                is no spelling for "lock every patient", and the report
+                `audit()` returns locks every patient its scan found.
             auto_persist_chunk_size (int): If > 0, persists changes and releases memory every N instances.
                                            IMPORTANT: Returns an empty list if enabled to prevent OOM.
             tags_to_lock (List[str], optional): Passed to every patient's
@@ -4459,6 +4517,15 @@ class DicomSession:
                 raised before any plan -- no key file, and a token this
                 library wrote somewhere in the session (Q8) -- is one
                 message with no number, and creates no key.
+            TypeError: When `patient_ids` is `None`, a bare `str` (the
+                single-ID spelling is `lock_identities(patient_id)`),
+                bytes-like, not iterable, or holds an item that is neither
+                a `str` nor a finding, named by its position and type,
+                never its value (#696). Raised before the key is loaded or
+                created and before any patient is planned. Until #696 a
+                `str` was iterated as its characters and `bytes` as ints,
+                each locking nobody; `None` raised Python's own
+                `TypeError` after the key was created.
             ValueError: The key file is empty or is not a Fernet key
                 (#618), as for `lock_identities()`.
             sqlite3.Error: A store write failed while tokens were being
@@ -4482,15 +4549,23 @@ class DicomSession:
         """
         if not self.reversibility_service:
             raise RuntimeError("Reversible anonymization not enabled.")
+
+        # The selection is read before the key, so a refused argument
+        # creates no key file (#696). Its shape through the one helper
+        # every door uses, with the two knobs that exist for this caller:
+        # `None` is refused rather than read as every patient -- which
+        # would lock the whole session -- and an item may be a finding,
+        # this method's documented input. Until #696 a bare `str` was
+        # iterated as its characters, and `bytes` as ints that were
+        # skipped in silence; both locked nobody before `anonymize()`.
+        if hasattr(patient_ids, 'findings'):  # PhiReport
+            iterable_data = patient_ids.findings
+        else:
+            iterable_data = _lock_selection(patient_ids, "patient_ids")
         self._key_for_locking()
 
         # Normalize input to a set of strings
         normalized_ids = set()
-
-        # Handle PhiReport or list containers
-        iterable_data = patient_ids
-        if hasattr(patient_ids, 'findings'):  # PhiReport
-            iterable_data = patient_ids.findings
 
         for item in iterable_data:
             if isinstance(item, str):
@@ -5955,9 +6030,12 @@ class DicomSession:
                 the option in silence and a mistyped `patient_ids`
                 exported every patient. Nothing is written either way.
                 The two formats do not accept the same options, so a
-                caller forwarding one dict to both must split it. Also
-                for a bytes-like `patient_ids`, on both formats, since
-                no `PatientID` in the graph could match it (#678).
+                caller forwarding one dict to both must split it. Also,
+                on both formats and before anything is written, for a
+                `patient_ids` that is a bare `str` (wrap one ID in a
+                list; 0.9.8 read it as one ID), bytes-like (#678), not
+                iterable, or holds an element that is not a `str`
+                (#696).
             io_handlers.ExportError: From either exporter, when zero of
                 N attempted instances reached disk and at least one
                 failed -- the DICOM path since #191, the WFDB path since
@@ -5974,6 +6052,12 @@ class DicomSession:
         this session scanned under, or with no recorded policy (a store
         written before 1.0): the report then grades `REVIEW_REQUIRED`
         (#555). `check_burned_in=True` re-audits first, so it never does.
+
+        Either format also writes one `WARNING` audit row, and logs one
+        `WARNING` line, when `patient_ids` names an ID no patient in the
+        session holds: counted by position, never named, and the report
+        then grades `REVIEW_REQUIRED` (#686). The patients that match are
+        exported as asked; nothing raises.
         """
         # Cleared first, before the exporter is even resolved. These are
         # session-scoped, and assigning them only on success let an
@@ -6035,20 +6119,26 @@ class DicomSession:
                 stating they already know; it silences the warning and skips
                 the audit entry. The export itself is unchanged either way --
                 this reports, it does not withhold.
-            patient_ids (List[str], optional): Limit export to specific
-                Patient IDs. Only `None`, or the parameter omitted,
-                means every patient: an empty list, tuple or set is a
-                filter that selected nobody and nothing is written
-                (#678, and #142 for the same rule on
-                `SqliteStore.get_flattened_instances`). A bare `str`
-                names exactly one id and logs a warning rather than
-                substring-matching; a bytes-like value is refused with
-                `TypeError`, since no `PatientID` in the graph could
-                match it. An iterator is read once before the walk, so
-                a generator is not consumed by the first patient.
-                `exporters.wfdb.WfdbExporter.export` reads its own
-                `patient_ids` option through the same helper, so the
-                two formats agree.
+            patient_ids (Iterable[str], optional): Limit export to
+                specific Patient IDs. Only `None`, or the parameter
+                omitted, means every patient: an empty list, tuple or
+                set is a filter that selected nobody and nothing is
+                written (#678, and #142 for the same rule on
+                `SqliteStore.get_flattened_instances`). An iterator is
+                read once before the walk, so a generator is not
+                consumed by the first patient. A bare `str` (wrap one ID
+                in a list), a bytes-like value, a non-iterable, or an
+                element that is not a `str` is refused with `TypeError`
+                before anything is flushed or written (#696; 0.9.8 read
+                a bare `str` as one ID). An ID no patient in the session
+                holds selects nothing and is counted, never named: one
+                `WARNING` log line and one `WARNING` audit row, so the
+                report grades `REVIEW_REQUIRED`, while the patients that
+                do match are exported as asked (#686). After
+                `anonymize()` a patient is selected by its replacement
+                ID. `exporters.wfdb.WfdbExporter.export` and
+                `get_cohort_report()` read `patient_ids` through the
+                same helper, so every door agrees.
             show_progress (bool): If True, shows progress bar.
             subset (Union[str, list, pd.DataFrame]): Filter the export
                 using a query string, a list of UIDs, or a DataFrame.
@@ -6111,18 +6201,20 @@ class DicomSession:
                 (x1.06). Each worker holds one more decoded array while
                 it checks.
         """
-        # One helper for both write doors, so `patient_ids` means the
-        # same thing whichever format was named (#678): only `None` is
-        # every patient, an iterator is materialised before the walk can
-        # eat it, a bare `str` names one id rather than substring-matching,
-        # and a bytes-like value is refused. The wfdb door calls the same
-        # function -- reading the argument here and not there is how the
-        # two doors came to disagree in the first place.
+        # One helper for every door that selects patients, so
+        # `patient_ids` means the same thing whichever format was named
+        # (#678) and whichever door was used (#696): only `None` is every
+        # patient, an iterator is materialised before the walk can eat
+        # it, and a bare `str`, a bytes-like value, a non-iterable or a
+        # non-`str` element is refused. The wfdb door and
+        # `get_cohort_report` call the same function -- reading the
+        # argument here and not there is how the doors came to disagree.
         #
         # First statement in the method, and before the `save(sync=True)`
         # below on purpose: a refusal that arrives after the flush has
         # already moved the session for an export that will not happen.
-        target_ids = normalize_patient_id_subset(patient_ids)
+        selection = select_patient_ids(patient_ids, self.store.patients)
+        target_ids = selection.ids
         if target_ids is None:
             target_ids = frozenset(p.patient_id for p in self.store.patients)
 
@@ -6173,6 +6265,22 @@ class DicomSession:
         # (#536). Until then the filter logged a line and nothing else,
         # and a cohort withheld whole read as an empty plan under PASS.
         _audit_withheld_instances(self.store_backend, folder, withheld)
+
+        # The ids that selected nobody, counted and never named (#686).
+        # Here and not at the selection above: `_resolve_subset` and
+        # `_scan_before_export` can still refuse between the two, and a
+        # row saying an export selected short, for an export that never
+        # ran, is a fabrication. Before both empty-plan branches and
+        # outside the `if tasks:` below, so an export whose every id was
+        # unknown -- which plans nothing -- still says why. `WARNING`, so
+        # the report grades `REVIEW_REQUIRED`: a short export under PASS
+        # read as a complete one (owner ruling Q3 on #686).
+        if selection.unmatched:
+            sentence = unmatched_patient_ids_sentence(selection)
+            get_logger().warning(sentence)
+            self.store_backend.log_audit(
+                action_type="WARNING", entity_uid=folder,
+                details=f"DICOM export to {folder}: {sentence}")
 
         # Over the instances this export will write, after the pre-export
         # scan -- which re-records every status under the policy in force,
@@ -6827,8 +6935,11 @@ class DicomSession:
         Args:
             output_path (str): The output file path (ends with .csv or .parquet).
             expand_metadata (bool): If True, includes all DICOM attributes as columns.
-            patient_ids (List[str], optional): Restrict the export to these
-                Patient IDs. ``None`` means every patient in the session.
+            patient_ids (Iterable[str], optional): Restrict the export to
+                these Patient IDs, read by `get_cohort_report()`, which
+                this calls: ``None`` means every patient in the session,
+                and an ID no patient holds is counted in a `WARNING` log
+                line.
 
         Returns:
             pd.DataFrame: The frame that was written.
@@ -6836,6 +6947,10 @@ class DicomSession:
         Raises:
             ImportError: If pandas (or, for Parquet, a Parquet engine) is
                 not installed.
+            TypeError: For a `patient_ids` `get_cohort_report()` refuses
+                (a bare `str`, bytes-like, not iterable, or a non-`str`
+                element), before the directory is created or any file
+                is written (#696).
         """
         try:
             # Guarded here purely for the message. `get_cohort_report`
@@ -6850,6 +6965,8 @@ class DicomSession:
                 "Please install pandas to use this feature: "
                 "pip install pandas pyarrow") from e
 
+        # Before `makedirs` below: a refused `patient_ids` (#696) must
+        # leave no directory and no file behind.
         df = self.get_cohort_report(
             expand_metadata=expand_metadata, patient_ids=patient_ids)
 

@@ -41,7 +41,7 @@ from .privacy import (PhiFinding, PhiRemediation, _is_keyed_pseudonym_shape,
                       _is_replacement_id, _is_unkeyed_pseudonym_shape,
                       _pseudonym_verifies, _unkeyed_replacement_id_for)
 from .io_handlers import (NestedPixelRef, SidecarPixelLoader,
-                          nested_item_geometry)
+                          nested_item_geometry, normalize_id_filter)
 
 
 
@@ -4680,13 +4680,20 @@ class SqliteStore:
           join happened to produce.
 
         Args:
-            patient_ids (List[str], optional): Restrict the rows to these
-                Patient IDs. ``None`` means every patient in the store.
-                An empty list matches nobody -- it is a filter that
-                selected nothing, not an absent filter.
-            instance_uids (List[str], optional): Restrict the rows to
-                these SOP Instance UIDs. Same rule: ``None`` is no
-                filter, an empty list matches nobody. Both filters
+            patient_ids (Iterable[str], optional): Restrict the rows to
+                these Patient IDs, read as every `patient_ids` in the
+                package is read (`io_handlers.normalize_id_filter`,
+                #696). ``None`` means every patient in the store. An
+                empty iterable matches nobody -- it is a filter that
+                selected nothing, not an absent filter. An iterator is
+                read once, at the call. An ID no patient holds is **not
+                counted** here, unlike the `Session` doors: this is a
+                paged query whose pages are separate reads (above), so
+                there is no single moment at which an ID is or is not
+                held, and rows that match nothing are the query's answer.
+            instance_uids (Iterable[str], optional): Restrict the rows to
+                these SOP Instance UIDs. Same rules: ``None`` is no
+                filter, an empty iterable matches nobody. Both filters
                 together intersect.
             page_size (int, optional): Rows per page, defaulting to 500.
                 Trades resident memory against the number of queries.
@@ -4704,6 +4711,13 @@ class SqliteStore:
                 which is what a `2.5` used to do, reaching `LIMIT ?` and
                 raising `sqlite3.IntegrityError: datatype mismatch` a
                 page later, out of a public method, for a caller's typo.
+            TypeError: If either filter is a bare `str`, bytes-like, not
+                iterable, or holds an element that is not a `str` (named
+                by position and type, never by value), at the call (#696).
+                Until #696 a `str` was split into its characters, `bytes`
+                matched nothing, and a generator raised
+                `sqlite3.ProgrammingError` a page later. `page_size` is
+                checked first.
         """
         # `bool` before `int`, and the ordering is the mechanism:
         # `isinstance(True, int)` is True and `True < 1` is False, so
@@ -4722,6 +4736,15 @@ class SqliteStore:
                 or page_size < 1):
             raise ValueError(
                 f"page_size must be a whole number >= 1, got {page_size!r}")
+        # Here, in the plain method, and not in the generator below, for
+        # the reason `page_size` is: a refusal fires at the call, not on
+        # the first `next()`. Materialised to tuples, because the walk
+        # builds its placeholders from them and then binds them -- a
+        # generator was consumed by the first and raised
+        # `ProgrammingError` at the second (#696).
+        patient_ids = normalize_id_filter(patient_ids, "patient_ids")
+        instance_uids = normalize_id_filter(instance_uids, "instance_uids",
+                                            kind="SOP Instance UID")
         return self._iter_flattened_instances(
             patient_ids, instance_uids, page_size)
 

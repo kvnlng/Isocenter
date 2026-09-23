@@ -14,7 +14,7 @@ from . import Exporter, register
 from ..config_manager import _vr_dummy
 from ..io_handlers import (ExportError, export_folder_names,
                            format_study_date, LOSS_SCOPE_STANDARD,
-                           normalize_patient_id_subset)
+                           select_patient_ids, unmatched_patient_ids_sentence)
 from ..entities import exported_patient_id
 from ..logger import describe_exception_without_paths, get_logger
 from ..waveform import Waveform, WaveformChannel
@@ -344,14 +344,16 @@ class WfdbExporter(Exporter):
         Args:
             session (DicomSession): Active session.
             folder (str): Output root.
-            **options: `patient_ids` (list, optional) limits the export
-                to those patients. Only `None`, or the option omitted,
-                means every patient: an empty list, tuple or set is a
-                filter that selected nobody and the export writes
-                nothing (#678). A bare `str` names exactly one id and
-                logs a warning; bytes are refused. An iterator is
-                materialised, so a generator is not consumed by the
-                first patient walked.
+            **options: `patient_ids` (iterable, optional) limits the
+                export to those patients, read exactly as the `dicom`
+                format reads it (`io_handlers.select_patient_ids`). Only
+                `None`, or the option omitted, means every patient: an
+                empty list, tuple or set is a filter that selected
+                nobody and the export writes nothing (#678). An iterator
+                is materialised, so a generator is not consumed by the
+                first patient walked. An ID no patient holds is counted,
+                never named, in one `WARNING` log line and one `WARNING`
+                audit row, and the matching patients are written (#686).
                 `include_annotation_text` (bool, default False) releases
                 the operator-typed text in annotations.json: Unformatted
                 Text Value (0070,0006) into `note`, and a site-defined
@@ -385,9 +387,10 @@ class WfdbExporter(Exporter):
                 `_WFDB_OPTIONS`. Until #410 an unrecognised option was
                 dropped without a word, so a mistyped `patient_ids`
                 exported every patient. Nothing is written when this
-                raises. Also when `patient_ids` is bytes-like, which no
-                `PatientID` in the graph could match, or is neither
-                `None` nor iterable (#678).
+                raises. Also when `patient_ids` is a bare `str` (wrap one
+                ID in a list; 0.9.8 read it as one ID), bytes-like
+                (#678), not iterable, or holds an element that is not a
+                `str` (#696).
         """
         logger = get_logger()
         # First thing, before `patient_ids` is read and before any file
@@ -413,11 +416,33 @@ class WfdbExporter(Exporter):
                 f"{', '.join(repr(name) for name in sorted(_WFDB_OPTIONS))}.")
         # Straight after the unknown-option refusal above and before any
         # file is written, for the same reason: a refusal raised later
-        # arrives with records already on disk. `normalize_patient_id_subset`
-        # is the one reading of this option, shared with
-        # `DicomSession._export_dicom` (#678) -- see its docstring for the
-        # three forms it settles and why `bytes` is the only refusal.
-        patient_ids = normalize_patient_id_subset(options.get("patient_ids"))
+        # arrives with records already on disk. `select_patient_ids` is the
+        # one reading of this option, shared with
+        # `DicomSession._export_dicom` and `get_cohort_report` (#678, #696)
+        # -- see `io_handlers.normalize_id_filter` for what it refuses.
+        #
+        # `store_backend` is read first so the count below can write its
+        # row, and is passed down to `_write_instance` explicitly rather
+        # than read off `session` there, so the one place that writes an
+        # audit entry names its dependency instead of reaching back
+        # through the facade. `None` is a legitimate value:
+        # `_write_instance` is called directly by tests with no session
+        # behind it.
+        store_backend = getattr(session, "store_backend", None)
+        selection = select_patient_ids(options.get("patient_ids"),
+                                       session.store.patients)
+        patient_ids = selection.ids
+        # Straight after the selection: nothing can refuse between here and
+        # the walk, so the export this row describes is certain to run.
+        # Counted and never named, one row per export; `WARNING`, so a
+        # short export grades `REVIEW_REQUIRED` rather than PASS (#686).
+        if selection.unmatched:
+            sentence = unmatched_patient_ids_sentence(selection)
+            logger.warning(sentence)
+            if store_backend is not None:
+                store_backend.log_audit(
+                    action_type="WARNING", entity_uid=folder,
+                    details=f"WFDB export to {folder}: {sentence}")
         # Off by default: (0070,0006) is free-text clinical commentary, and
         # a site-defined Concept Name's Code Meaning is operator-typed too.
         # This is the auditor's override, not a debug switch -- it says the
@@ -444,12 +469,6 @@ class WfdbExporter(Exporter):
                  if getattr(instance.sequences.get(WAVEFORM_SEQUENCE_TAG),
                             "items", None)],
                 folder, "WFDB")
-        # Passed down explicitly rather than read off `session` inside
-        # `_write_instance`, so the one place that writes an audit entry
-        # names its dependency instead of reaching back through the
-        # facade. `None` is a legitimate value: `_write_instance` is
-        # called directly by tests with no session behind it.
-        store_backend = getattr(session, "store_backend", None)
         written = []
         failed = 0
         # `(uid, detail)` per failed record, the shape `ExportError`

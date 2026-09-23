@@ -808,9 +808,9 @@ def test_a_generator_of_patient_ids_selects_by_id_not_by_store_order(
 
     The second patient is the discriminating case; a generator yielding
     the first passes today by accident and proves nothing. Both doors
-    normalise through `io_handlers.normalize_patient_id_subset`, which
-    is why this is parametrised over the two formats rather than written
-    twice.
+    normalise through `io_handlers.select_patient_ids`, which is why this
+    is parametrised over the two formats rather than written twice; the
+    other doors are in `test_every_door_selects_patients_one_way.py`.
     """
     with _two_patient_waveform_session(tmp_path, f"gen_{fmt}") as session:
         second = _patients_written(session, tmp_path / f"gen2_{fmt}", fmt,
@@ -827,50 +827,16 @@ def test_a_generator_of_patient_ids_selects_by_id_not_by_store_order(
         f"{sorted(both)}; the first membership test ate the rest")
 
 
-@pytest.mark.parametrize("fmt", ["dicom", "wfdb"])
-def test_a_bare_string_patient_ids_names_one_patient_on_both_formats(
-        tmp_path, fmt, caplog):
-    """A bare `str` selects exactly that id, and never a substring match.
-
-    `"COH-A" in "COH-ACOH-B"` is True, so a caller who wrote a string
-    where a list was meant got a fuzzy match that looked like it worked.
-    Measured on 0.9.8, identically on both doors: `patient_ids="COH-A"`
-    exported A, `patient_ids="COH-ACOH-B"` exported **both** patients,
-    and a common prefix exported none.
-
-    Chosen over a refusal because the write path warns and writes the
-    closest honest output rather than refusing: one id is the only
-    reading of a bare string, and it is the reading the caller meant.
-    The warning is the other half -- a caller who passed the wrong type
-    hears about it even though the export succeeded. `bytes` is refused
-    instead; `test_bytes_as_patient_ids_is_refused_on_both_formats`
-    says why.
-    """
-    with _two_patient_waveform_session(tmp_path, f"str_{fmt}") as session:
-        # Inside the session, not around its construction:
-        # `DicomSession()` resets the `isocenter` logger's handlers, and
-        # a level set before that is set on a logger the session
-        # replaces the handlers of.
-        with caplog.at_level(logging.WARNING, logger="isocenter"):
-            one = _patients_written(session, tmp_path / f"str1_{fmt}", fmt,
-                                    patient_ids=_COH_A)
-        concatenated = _patients_written(
-            session, tmp_path / f"str2_{fmt}", fmt,
-            patient_ids=_COH_A + _COH_B)
-
-    assert one == {_COH_A}, (
-        f"format={fmt!r} with patient_ids={_COH_A!r} wrote "
-        f"{sorted(one)}; a bare string names exactly one patient id")
-    assert concatenated == set(), (
-        f"format={fmt!r} with patient_ids={_COH_A + _COH_B!r} wrote "
-        f"{sorted(concatenated)}; no patient carries that id, and a "
-        "substring match handed the caller patients they never named")
-    warned = [record.getMessage() for record in caplog.records
-              if record.levelno >= logging.WARNING
-              and "patient_ids" in record.getMessage()]
-    assert warned, (
-        "a bare string passed as `patient_ids` was read as one id and "
-        f"logged nothing about it; records were {caplog.messages}")
+def test_the_patient_id_subset_helper_has_one_spelling():
+    """`io_handlers.normalize_patient_id_subset` was the #678 reading of
+    `patient_ids` on the two export doors; #696 replaced it with
+    `select_patient_ids`, the reading on every door, and a bare `str` --
+    which it read as one id -- is refused
+    (`test_every_door_selects_patients_one_way.py`). Deleted, not aliased,
+    and pinned by name as the other deleted spellings here are."""
+    from isocenter import io_handlers  # pylint: disable=import-outside-toplevel
+    assert not hasattr(io_handlers, "normalize_patient_id_subset")
+    assert callable(io_handlers.select_patient_ids)
 
 
 @pytest.mark.parametrize("fmt", ["dicom", "wfdb"])
