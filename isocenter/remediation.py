@@ -1726,8 +1726,9 @@ class RemediationService:
             # pass read it as already remediated.
             # Every instance under the owner: the walk `_write_to_instances`
             # writes, so "another copy under the same owner" means one thing.
-            if any(other.remediation_vouches_for(tag, value)
-                   for other in self._instances_beneath(owner) if other is not entity):
+            vouched = any(other.remediation_vouches_for(tag, value)
+                          for other in self._instances_beneath(owner) if other is not entity)
+            if vouched:
                 self._record_what_is_left(entity, tag, value)
             entity.set_attr(tag, value)
             # Not re-recorded when it read UNSCANNED: that would write
@@ -1736,7 +1737,21 @@ class RemediationService:
             # (`io_handlers._its_key_is_in_use`) reads as scan evidence,
             # stale included. Equivalent for the pass; not for the gate.
             if status is not PhiStatus.UNSCANNED:
-                entity.record_phi_status(status)
+                # Fail-closed (#767, owner ruling (A)): a value no record
+                # vouches for, and not empty, is an identifier the policy
+                # names -- the source name or date the file carries -- so
+                # the instance reads IDENTIFIED, not the REMEDIATED an
+                # earlier pass left it. Handed back, that status graded
+                # PASS over a name set back on its Patient after the pass.
+                entity.record_phi_status(
+                    status if vouched or value == "" else PhiStatus.IDENTIFIED)
+            if not (vouched or value == ""):
+                # ...and named for the pass-end demotion, as a decline
+                # names its entity: the instance's other findings in this
+                # pass stamp it REMEDIATED after this, and the scan tally
+                # does not demote it -- an earlier pass already acted on
+                # this key. Not a decline: no row (Q-C5).
+                self._declined_entities.append(entity)
         field = next(f for f, t in self.ENTITY_FIELD_TAGS.items() if t == tag)
         if not {(id(owner), field), (None, field)} & self._owners_handed:
             if value == "" and entity.attributes.get(tag, "") == "":

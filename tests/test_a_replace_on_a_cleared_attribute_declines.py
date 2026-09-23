@@ -173,7 +173,9 @@ def test_a_study_date_cleared_after_the_audit_is_not_recreated_by_replace(
     and read REMEDIATED, so the graph and the file disagreed; now the
     copy is written only through its owner: it holds the `''` the export
     stamps from the cleared Study, the instance's finding declines with
-    its own row, and the instance reads IDENTIFIED.
+    its own row, and the instance reads IDENTIFIED. Since #767 the clear
+    is an edit of the Study: it reads UNSCANNED (the status the audit
+    recorded no longer describes it), and condition 8 grades it too.
     """
     session = _session(tmp_path)
     with session:
@@ -198,7 +200,7 @@ def test_a_study_date_cleared_after_the_audit_is_not_recreated_by_replace(
         assert "1900" not in declines[0], declines
         assert [d for u, d in _rows(session, "REMEDIATION_REPLACE")
                 if u == STUDY_UID] == []
-        assert study.phi_status is PhiStatus.IDENTIFIED
+        assert study.phi_status is PhiStatus.UNSCANNED
         assert instance.attributes[STUDY_DATE] == ""
         assert instance.phi_status is PhiStatus.IDENTIFIED
         assert _grade(session, tmp_path) == ["REVIEW_REQUIRED"]

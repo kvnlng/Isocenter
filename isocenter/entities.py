@@ -2,7 +2,7 @@ import hashlib
 import os
 import threading
 from datetime import date, datetime
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, ClassVar
 from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
@@ -2714,6 +2714,21 @@ class Series(TrackedEntity):
     equipment: Optional[Equipment] = None
     instances: List[Instance] = field(default_factory=list)
 
+    #: The fields an assignment of which is a change (#767): what the
+    #: export writes from the series, what a scan reads on it, and its
+    #: equipment, which the save writes and redaction matches on
+    #: (coordinator ruling Q1). Structure (`instances`) is not a value.
+    _OWNER_FIELDS: ClassVar[frozenset] = frozenset({
+        "series_instance_uid", "modality", "series_number", "equipment"})
+
+    def __setattr__(self, name, value):
+        # `object.__setattr__`, never zero-argument `super()`: see
+        # `Study.__setattr__` for why a slots dataclass cannot use it.
+        if name in Series._OWNER_FIELDS:
+            _assign_owner_field(self, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
     def mark_subtree_persisted(self):
         """Marks this series and every instance beneath it as stored."""
         self._persisted_revision = self._revision
@@ -2766,6 +2781,13 @@ class Study(TrackedEntity):
     _shifted_study_date: Optional[str] = field(
         default=None, init=False, repr=False)
 
+    #: The fields an assignment of which is a change (#767): what the
+    #: export writes from the study and a scan reads on it. Not
+    #: `date_shifted` or `_shifted_study_date`, which only remediation
+    #: writes, beside its own `mark_modified()`; not `series`, structure.
+    _OWNER_FIELDS: ClassVar[frozenset] = frozenset({
+        "study_instance_uid", "study_date", "study_time"})
+
     def __setattr__(self, name, value):
         # The boundary for #188, and it is one spelling on purpose: the
         # dataclass __init__ assigns through here too, so the
@@ -2814,7 +2836,12 @@ class Study(TrackedEntity):
         # `@dataclass(slots=True)` builds a *new* class, so the closure
         # cell zero-arg super() reads still names the discarded one and
         # every assignment raises "obj must be an instance or subtype".
-        object.__setattr__(self, name, value)
+        # Compared after normalising, so the DA string of the date a
+        # study holds is not an edit of it (#767).
+        if name in Study._OWNER_FIELDS:
+            _assign_owner_field(self, name, value)
+        else:
+            object.__setattr__(self, name, value)
 
     def record_date_shift(self, value) -> None:
         """Records that a `SHIFT_DATE` on this study produced `value`.
@@ -2934,8 +2961,62 @@ class Patient(TrackedEntity):
     _jitter_scheme: str = field(
         default=JITTER_SCHEME_KEYED, init=False, repr=False)
 
+    #: The fields an assignment of which is a change (#767): what the
+    #: export writes from the patient and a scan reads on it. Not
+    #: `_jitter_scheme`, fixed by the store at open; not `studies`.
+    _OWNER_FIELDS: ClassVar[frozenset] = frozenset({
+        "patient_id", "patient_name"})
+
+    def __setattr__(self, name, value):
+        # `object.__setattr__`, never zero-argument `super()`: see
+        # `Study.__setattr__` for why a slots dataclass cannot use it.
+        if name in Patient._OWNER_FIELDS:
+            _assign_owner_field(self, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
     def mark_subtree_persisted(self):
         """Marks this patient and every study beneath it as stored."""
         self._persisted_revision = self._revision
         for study in self.studies:
             study.mark_subtree_persisted()
+
+
+def _assign_owner_field(entity, name, value) -> None:
+    """Assign an owner's field, and record the change when it is one (#767).
+
+    `Patient`, `Study` and `Series` route the fields the export writes
+    from them, or the scan reads on them, through here (their
+    `_OWNER_FIELDS`). A plain assignment used to leave `_revision` where
+    it was, so a status recorded before it went on describing a value no
+    scan had read -- the export stamped the real name beside a PASS --
+    and the save, which writes an owner row only when it holds unsaved
+    changes, never stored it.
+
+    - **The value first, then the revision.** A background `save()`
+      captures the revision before it reads the fields. Moved first, a
+      save between the two statements would capture the new revision,
+      read the old value and mark it persisted: the edit lost. Written
+      first, a racing save writes the new value at the old revision and
+      the entity stays unsaved -- `record_phi_status`'s order, for the
+      same reason.
+    - **An empty slot is not an edit.** The dataclass `__init__` assigns
+      each field once, into an unset slot. Pickle and deepcopy never come
+      here: a slots dataclass restores its fields with
+      `object.__setattr__`.
+    - **The value it already holds is not an edit**, as recording the
+      status an entity already carries is not: re-assigning in place must
+      not dirty a graph.
+
+    This is `mark_modified()`, forward only -- the entity is told what
+    happened to it, never told it is saved or scanned, so the "no setter"
+    rule on `TrackedEntity` stands.
+    """
+    try:
+        old = object.__getattribute__(entity, name)
+    except AttributeError:
+        object.__setattr__(entity, name, value)
+        return
+    object.__setattr__(entity, name, value)
+    if old != value:
+        entity.mark_modified()

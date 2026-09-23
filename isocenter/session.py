@@ -980,6 +980,24 @@ def _unheld_spelling(value):
     return ["\x00unheld", type(value).__name__, repr(value)]
 
 
+
+def _edited_since_its_status(entity) -> bool:
+    """Whether a status recorded on `entity` has gone stale (#767).
+
+    Grade condition 8. The raw record is read, not `phi_status`: a
+    status that no longer applies reads UNSCANNED there, exactly as a
+    never-scanned entity does, and only the record tells the two apart
+    -- a status once recorded (by a scan, or a pass after one) at a
+    revision the entity has since left. On an owner the revision moves
+    on an assignment of a field it writes or a scan reads
+    (`entities._assign_owner_field`), and on the ordinary paths
+    everything else that moves it records a status after: remediation
+    stamps what it wrote, a scan records what it read.
+    """
+    status, recorded_at = entity._phi_status, entity._phi_status_revision
+    return (status is not None and status is not PhiStatus.UNSCANNED
+            and recorded_at != entity._revision)
+
 class DicomSession:
     """
     The Main Facade for the Isocenter library.
@@ -3373,7 +3391,7 @@ class DicomSession:
     @staticmethod
     def _review_reasons(*, audit_summary, exceptions, graded_losses,
                         open_gaps, declined_remediations,
-                        unattested, unacted) -> List[str]:
+                        unattested, unacted, edited) -> List[str]:
         """Why a run is not PASS, one entry per term of the grade (#481).
 
         The grade IS this list: `generate_report` grades PASS exactly when
@@ -3382,9 +3400,10 @@ class DicomSession:
         beside a REVIEW_REQUIRED whose section 4 listed the issue. One list
         means a new grade term cannot move the grade without also appearing
         in section 5, because there is no second expression for it to live
-        in. Every term is here, including the three with no row anywhere
-        else in the report: an empty audit trail, an unattested verb, and
-        entities whose findings nothing acted on (#573).
+        in. Every term is here, including the four with no row anywhere
+        else in the report: an empty audit trail, an unattested verb,
+        entities whose findings nothing acted on (#573), and owners edited
+        after their status was recorded (#767).
 
         The conditions are numbered in `docs/analytics.md`, "How the grade
         is decided", in the order they are appended here. They are a 1.x
@@ -3428,6 +3447,24 @@ class DicomSession:
                 f"(patients {unacted['patients']}, "
                 f"studies {unacted['studies']}, "
                 f"instances {unacted['instances']})")
+        # Condition 8 (#767). A status an edit made stale, not the absence
+        # of one: an owner never scanned is UNSCANNED and does not grade
+        # (Q3). The export writes an owner's fields into every file of its
+        # subtree, so a value no scan has read there is graded until one
+        # does. Its own line, not folded into condition 7's: that one
+        # names a finding, this one the absence of a measurement a scan
+        # once made.
+        n_edited = sum(edited.values())
+        if n_edited:
+            noun = "entity" if n_edited == 1 else "entities"
+            review_reasons.append(
+                f"{n_edited} {noun} edited after the last PHI scan: a field "
+                "the export writes from it, or the scan reads on it, was "
+                "assigned a new value after its PHI status was recorded, "
+                "and no scan has read that value; `audit()` reads it "
+                f"(patients {edited['patients']}, "
+                f"studies {edited['studies']}, "
+                f"series {edited['series']})")
         return review_reasons
 
     def generate_report(self, output_path: str, format: str = "markdown") -> None:
@@ -3671,11 +3708,19 @@ class DicomSession:
         # for the reason `phi_status_summary` gives: nothing scans one.
         unacted = {"patients": 0, "studies": 0, "instances": 0}
         unscanned_instances = 0
+        # Condition 8 (#767, owner ruling 2026-09-23): an owner edited
+        # after its status was recorded. Counted beside condition 7 in
+        # the same walk, per level; series are counted because a scan
+        # that reads one may record a status on it.
+        edited = {"patients": 0, "studies": 0, "series": 0}
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
+            edited["patients"] += _edited_since_its_status(patient)
             for study in patient.studies:
                 unacted["studies"] += study.phi_status is PhiStatus.IDENTIFIED
+                edited["studies"] += _edited_since_its_status(study)
                 for series in study.series:
+                    edited["series"] += _edited_since_its_status(series)
                     for instance in series.instances:
                         status = instance.phi_status
                         unacted["instances"] += status is PhiStatus.IDENTIFIED
@@ -3690,7 +3735,7 @@ class DicomSession:
             audit_summary=audit_summary, exceptions=exceptions,
             graded_losses=graded_losses, open_gaps=open_gaps,
             declined_remediations=declined_remediations,
-            unattested=unattested, unacted=unacted)
+            unattested=unattested, unacted=unacted, edited=edited)
 
         # 5. Build Report DTO
         report = ComplianceReport(
