@@ -36,7 +36,7 @@ from pydicom.dataset import Dataset
 from pydicom.sequence import Sequence
 
 from isocenter import Session
-from isocenter.entities import DicomItem, Instance, PhiStatus, Series
+from isocenter.entities import DicomItem, Equipment, Instance, PhiStatus, Series
 
 from support.ct_small_files import study_uid, write_ct
 
@@ -52,12 +52,12 @@ def _threads(monkeypatch):
     monkeypatch.delenv("ISOCENTER_MAX_TASKS_PER_CHILD", raising=False)
 
 
-def _line(n, patients=0, studies=0, series=0, instances=0):
+def _line(n, patients=0, studies=0, instances=0):
     noun = "entity" if n == 1 else "entities"
     return (f"{n} {noun} {EDITED}: its content was changed after its PHI "
             "status was recorded, and no scan has read the change; "
             f"`audit()` reads it (patients {patients}, studies {studies}, "
-            f"series {series}, instances {instances})")
+            f"instances {instances})")
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +307,9 @@ def test_a_nested_item_edited_after_the_pass_is_not_pass(tmp_path):
 def test_a_series_uid_set_back_after_the_pass_is_not_pass(tmp_path):
     """L12's probe P1. The pass replaces the Series Instance UID (#544);
     it is then set back to the source by plain assignment. The export
-    writes it into every instance, and the run graded PASS. Now the Series
-    and each of its instances read UNSCANNED and condition 8 names both."""
+    writes it into every instance, and the run graded PASS. Now each of
+    its instances reads UNSCANNED and condition 8 names them; the Series'
+    own status is not counted (review of #774, finding 2)."""
     source = study_uid("7672") + ".1"
     with _session(tmp_path) as session:
         session.anonymize(session.audit())
@@ -317,7 +318,7 @@ def test_a_series_uid_set_back_after_the_pass_is_not_pass(tmp_path):
         series.series_instance_uid = source
         reasons, passed, ds = _graded(session, tmp_path)
     assert not passed
-    assert _edited(reasons) == [_line(2, series=1, instances=1)], reasons
+    assert _edited(reasons) == [_line(1, instances=1)], reasons
     assert ds.SeriesInstanceUID == source
 
 
@@ -351,7 +352,7 @@ def test_the_pass_writing_a_series_uid_is_not_an_edit(tmp_path):
         series.series_number = 767
         reasons, passed, ds = _graded(session, tmp_path, "r2.md")
     assert not passed
-    assert _edited(reasons) == [_line(2, series=1, instances=1)], reasons
+    assert _edited(reasons) == [_line(1, instances=1)], reasons
     assert "PatientIdentityRemoved" not in ds
 
 
@@ -396,6 +397,74 @@ def test_a_nested_edit_in_a_reopened_store_reaches_the_store(tmp_path):
     with Session(str(tmp_path / "s.db")) as session:
         item = _only(session).sequences["0008,1140"].items[0]
         assert item.attributes["0008,1150"] == "1.2.3.4.767"
+
+
+@pytest.mark.parametrize("edit", [
+    lambda se: setattr(se, "series_number", 767),
+    lambda se: setattr(se, "modality", "MR"),
+    lambda se: setattr(se, "equipment", Equipment.from_parts("Acme", "Golden", "SN-2")),
+], ids=["series_number", "modality", "equipment"])
+@pytest.mark.parametrize("then", ["a_reaudit", "a_reaudit_and_a_pass"])
+def test_a_series_edit_grades_through_its_instances_until_a_reaudit(tmp_path, edit, then):
+    """Review of #774, finding 2: a Series field edited after the pass
+    grades REVIEW_REQUIRED through its instances, and a re-audit -- alone,
+    or followed by a pass -- grades PASS. With the Series counted as well,
+    it graded REVIEW_REQUIRED for good: the scan records nothing on a
+    Series. Kills the series term restored."""
+    with _session(tmp_path) as session:
+        session.anonymize(session.audit())
+        [series] = session.store.patients[0].studies[0].series
+        edit(series)
+        reasons, passed, _ds = _graded(session, tmp_path)
+        assert not passed
+        assert _edited(reasons) == [_line(1, instances=1)], reasons
+        report = session.audit()
+        if then == "a_reaudit_and_a_pass":
+            session.anonymize(report)
+        reasons, passed, _ds = _graded(session, tmp_path, "r2.md")
+    assert passed and reasons == [], reasons
+
+
+def test_an_instance_uid_set_back_after_the_pass_is_not_pass(tmp_path):
+    """Review of #774, finding 3: `instance.sop_instance_uid` set back to
+    the source after the pass replaced it (#544). The export names the
+    file by it and writes it as 0008,0018; the instance kept REMEDIATED,
+    the run graded PASS and the file said YES. Now the instance reads
+    UNSCANNED, condition 8 names it and no marker is written; a re-audit
+    and a pass replace it again."""
+    source = study_uid("7672") + ".1.1"
+    with _session(tmp_path) as session:
+        session.anonymize(session.audit())
+        inst = _only(session)
+        assert inst.sop_instance_uid != source, "setup: #544 replaced it"
+        inst.sop_instance_uid = source
+        assert inst.phi_status is PhiStatus.UNSCANNED
+        reasons, passed, ds = _graded(session, tmp_path)
+        assert not passed
+        assert _edited(reasons) == [_line(1, instances=1)], reasons
+        assert "PatientIdentityRemoved" not in ds
+        assert [p.name for p in (tmp_path / "out-r.md").rglob("*.dcm")] == [f"{source}.dcm"]
+        session.anonymize(session.audit())
+        reasons, passed, ds = _graded(session, tmp_path, "r2.md")
+    assert passed and reasons == [], reasons
+    assert ds.SOPInstanceUID != source
+
+
+def test_an_instance_uid_assignment_is_tracked_like_an_owner_field():
+    """Construction, pickle and deepcopy are not edits; the value it holds
+    is not an edit; a new one is, after the value is in place."""
+    inst = Instance(sop_instance_uid="1.2.3")
+    # `__post_init__` writes its identity elements with `set_attr`, one
+    # revision each; the constructor's assignment of the field into its
+    # empty slot adds none.
+    assert inst._revision == 1 + len(inst.attributes)
+    inst.record_phi_status(PhiStatus.REMEDIATED)
+    for other in (pickle.loads(pickle.dumps(inst)), copy.deepcopy(inst)):
+        assert other.phi_status is PhiStatus.REMEDIATED
+    inst.sop_instance_uid = "1.2.3"
+    assert inst.phi_status is PhiStatus.REMEDIATED
+    inst.sop_instance_uid = "1.2.4"
+    assert inst.phi_status is PhiStatus.UNSCANNED and inst.has_unsaved_changes
 
 
 # ---------------------------------------------------------------------------

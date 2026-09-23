@@ -988,11 +988,14 @@ def _edited_since_its_status(entity) -> bool:
     status that no longer applies reads UNSCANNED there, exactly as a
     never-scanned entity does, and only the record tells the two apart
     -- a status once recorded (by a scan, or a pass after one) at a
-    revision the entity has since left. On an owner the revision moves
-    on an assignment of a field it writes or a scan reads
-    (`entities._assign_owner_field`); on an instance, on any change to it
-    or to an item nested in it (`DicomItem.mark_modified`), and on an
-    assignment of a field of its series. On the ordinary paths everything
+    revision the entity has since left. Read for patients, studies and
+    instances only: the scan records nothing on a Series, so no scan could
+    clear one (review of #774, finding 2). On a patient or a study the
+    revision moves on an assignment of a field the export writes or a scan
+    reads (`entities._assign_tracked_field`); on an instance, on any change
+    through its methods or to an item nested in it
+    (`DicomItem.mark_modified`), on an assignment of its
+    `sop_instance_uid`, and on an assignment of a field of its series. On the ordinary paths everything
     the library itself writes after a scan records a status after it:
     remediation stamps what it wrote, a scan records what it read, and
     redaction (#486) and the reversible lock (#767) carry the status they
@@ -3467,7 +3470,6 @@ class DicomSession:
                 "and no scan has read the change; `audit()` reads it "
                 f"(patients {edited['patients']}, "
                 f"studies {edited['studies']}, "
-                f"series {edited['series']}, "
                 f"instances {edited['instances']})")
         return review_reasons
 
@@ -3714,11 +3716,14 @@ class DicomSession:
         unscanned_instances = 0
         # Condition 8 (#767, owner rulings 2026-09-23): an entity edited
         # after its status was recorded. Counted beside condition 7 in
-        # the same walk, per level; series are counted because a scan
-        # that reads one may record a status on it. An edit of a nested
-        # item or of a series field moves the instance's revision, so it
-        # is counted there.
-        edited = {"patients": 0, "studies": 0, "series": 0, "instances": 0}
+        # the same walk, per level, at the levels condition 7 counts.
+        # **Not series** (review of #774, finding 2): the scan records
+        # nothing on a Series, so a Series status an edit made stale could
+        # never be cleared by `audit()`, the one thing the line says does.
+        # A Series field edit is counted where it is read -- the cascade
+        # marks every instance of the series changed -- and an edit of a
+        # nested item moves its instance the same way.
+        edited = {"patients": 0, "studies": 0, "instances": 0}
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
             edited["patients"] += _edited_since_its_status(patient)
@@ -3726,7 +3731,6 @@ class DicomSession:
                 unacted["studies"] += study.phi_status is PhiStatus.IDENTIFIED
                 edited["studies"] += _edited_since_its_status(study)
                 for series in study.series:
-                    edited["series"] += _edited_since_its_status(series)
                     for instance in series.instances:
                         status = instance.phi_status
                         unacted["instances"] += status is PhiStatus.IDENTIFIED
@@ -6939,7 +6943,7 @@ class DicomSession:
 
         An edit after the pass moves one of the three whatever it edits
         (#767): an owner field assigned directly makes that owner's status
-        stale (`entities._assign_owner_field`), and a Series field or a
+        stale (`entities._assign_tracked_field`), and a Series field or a
         nested item marks the instance changed (the Series has no status
         this reads; `DicomItem.mark_modified` reaches the root). Pinned in
         `test_an_export_says_how_it_was_de_identified.py`, beside the

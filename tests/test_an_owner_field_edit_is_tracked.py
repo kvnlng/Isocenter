@@ -260,7 +260,7 @@ def test_a_name_set_back_after_a_pass_then_an_instance_only_pass_is_not_pass(tmp
     assert _edited(reasons) == [
         f"1 entity {EDITED}: its content was changed after its PHI status "
         "was recorded, and no scan has read the change; `audit()` reads it "
-        "(patients 1, studies 0, series 0, instances 0)"], reasons
+        "(patients 1, studies 0, instances 0)"], reasons
     assert any("read IDENTIFIED" in r and "instances 1" in r for r in reasons), reasons
 
 
@@ -349,22 +349,25 @@ def test_a_restored_identity_grades_until_a_scan_reads_it(tmp_path):
     assert str(pydicom.dcmread(str(written)).PatientName) == "Alpha^One"
 
 
-def test_a_series_with_a_status_is_counted_when_edited(tmp_path):
-    """Condition 8 counts series: nothing on this release records a status
-    on one, but a scan that reads a Series UID may (#544), and an edit then
-    makes it stale like any owner's. The status is recorded by hand here.
-    The edit also makes the series' instance stale (it writes the field
-    into the file), so both are counted."""
+def test_a_series_status_is_not_counted_its_instances_are(tmp_path):
+    """Condition 8 does not count series (review of #774, finding 2). The
+    pass records a status on a Series (#544), but the scan never does, so
+    a Series status an edit made stale could not be cleared by `audit()` --
+    the one thing the line says clears it -- and the run graded
+    REVIEW_REQUIRED for the rest of the session. The edit is counted where
+    it is read: the cascade marks the series' instance changed."""
     with _saved(tmp_path) as session:
         session.anonymize(session.audit())
         _patient, _study, series = _owners(session)
-        series.record_phi_status(PhiStatus.CLEARED)
+        assert series.phi_status is PhiStatus.REMEDIATED, "setup: #544 stamps it"
         series.series_number = 9
+        assert series.phi_status is PhiStatus.UNSCANNED
         reasons, passed, _out = _graded(session, tmp_path)
     assert not passed
-    assert _edited(reasons) and _edited(reasons)[0].startswith(
-        "2 entities ") and _edited(reasons)[0].endswith(
-        "(patients 0, studies 0, series 1, instances 1)"), reasons
+    assert _edited(reasons) == [
+        f"1 entity {EDITED}: its content was changed after its PHI status "
+        "was recorded, and no scan has read the change; `audit()` reads it "
+        "(patients 0, studies 0, instances 1)"], reasons
 
 
 def test_a_cleared_instance_synced_to_a_source_value_reads_identified(tmp_path):

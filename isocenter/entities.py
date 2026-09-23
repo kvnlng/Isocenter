@@ -1471,6 +1471,20 @@ class Instance(DicomItem):
         if pixels_changed:
             self.file_path = None
 
+    def __setattr__(self, name, value):
+        """An assignment of `sop_instance_uid` that changes it is a change
+        (#767, review finding 3), as an owner's tracked field is
+        (`_assign_tracked_field`): the export names the file by it and
+        writes it as `0008,0018`, so a UID set back after the pass is a
+        value no scan read, and the status recorded before it goes stale.
+        Every other field is assigned as a plain slot: the pixel and loader
+        bookkeeping moves the revision where it means to, and the check here
+        is one string comparison on the paths that set them."""
+        if name == "sop_instance_uid":
+            _assign_tracked_field(self, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
     def set_attr(self, tag: str, value: Any):
         """
         Sets an attribute, and keeps resident pixels reading as it declares.
@@ -2775,14 +2789,14 @@ class Series(TrackedEntity):
     #: export writes from the series, what a scan reads on it, and its
     #: equipment, which the save writes and redaction matches on
     #: (coordinator ruling Q1). Structure (`instances`) is not a value.
-    _OWNER_FIELDS: ClassVar[frozenset] = frozenset({
+    _TRACKED_FIELDS: ClassVar[frozenset] = frozenset({
         "series_instance_uid", "modality", "series_number", "equipment"})
 
     def __setattr__(self, name, value):
         # `object.__setattr__`, never zero-argument `super()`: see
         # `Study.__setattr__` for why a slots dataclass cannot use it.
-        if name in Series._OWNER_FIELDS:
-            _assign_owner_field(self, name, value)
+        if name in Series._TRACKED_FIELDS:
+            _assign_tracked_field(self, name, value)
         else:
             object.__setattr__(self, name, value)
 
@@ -2842,7 +2856,7 @@ class Study(TrackedEntity):
     #: export writes from the study and a scan reads on it. Not
     #: `date_shifted` or `_shifted_study_date`, which only remediation
     #: writes, beside its own `mark_modified()`; not `series`, structure.
-    _OWNER_FIELDS: ClassVar[frozenset] = frozenset({
+    _TRACKED_FIELDS: ClassVar[frozenset] = frozenset({
         "study_instance_uid", "study_date", "study_time"})
 
     def __setattr__(self, name, value):
@@ -2895,8 +2909,8 @@ class Study(TrackedEntity):
         # every assignment raises "obj must be an instance or subtype".
         # Compared after normalising, so the DA string of the date a
         # study holds is not an edit of it (#767).
-        if name in Study._OWNER_FIELDS:
-            _assign_owner_field(self, name, value)
+        if name in Study._TRACKED_FIELDS:
+            _assign_tracked_field(self, name, value)
         else:
             object.__setattr__(self, name, value)
 
@@ -3021,14 +3035,14 @@ class Patient(TrackedEntity):
     #: The fields an assignment of which is a change (#767): what the
     #: export writes from the patient and a scan reads on it. Not
     #: `_jitter_scheme`, fixed by the store at open; not `studies`.
-    _OWNER_FIELDS: ClassVar[frozenset] = frozenset({
+    _TRACKED_FIELDS: ClassVar[frozenset] = frozenset({
         "patient_id", "patient_name"})
 
     def __setattr__(self, name, value):
         # `object.__setattr__`, never zero-argument `super()`: see
         # `Study.__setattr__` for why a slots dataclass cannot use it.
-        if name in Patient._OWNER_FIELDS:
-            _assign_owner_field(self, name, value)
+        if name in Patient._TRACKED_FIELDS:
+            _assign_tracked_field(self, name, value)
         else:
             object.__setattr__(self, name, value)
 
@@ -3039,12 +3053,13 @@ class Patient(TrackedEntity):
             study.mark_subtree_persisted()
 
 
-def _assign_owner_field(entity, name, value) -> None:
-    """Assign an owner's field, and record the change when it is one (#767).
+def _assign_tracked_field(entity, name, value) -> None:
+    """Assign a tracked field, and record the change when it is one (#767).
 
     `Patient`, `Study` and `Series` route the fields the export writes
     from them, or the scan reads on them, through here (their
-    `_OWNER_FIELDS`). A plain assignment used to leave `_revision` where
+    `_TRACKED_FIELDS`), and `Instance` its `sop_instance_uid` (review of
+    #774, finding 3). A plain assignment used to leave `_revision` where
     it was, so a status recorded before it went on describing a value no
     scan had read -- the export stamped the real name beside a PASS --
     and the save, which writes an owner row only when it holds unsaved

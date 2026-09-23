@@ -285,15 +285,16 @@ def test_a_caller_set_numpy_table_is_one_element_lost(tmp_path):
     anything `pack` can consume -- raises and becomes one `DATA_LOSS` row.
     The wider refusal is deliberate: "anything the buffer protocol
     accepts" would also swallow a numpy *scalar*, which is a number and
-    belongs in the `US` arm. No ingest produces an array here; a caller's
-    `set_attr` does, and `tobytes()` is the one-line fix for one.
+    belongs in the `US` arm.
 
-    Written into the item's `attributes` directly, not through `set_attr`:
-    since #767 a nested `set_attr` marks the instance changed, so the save
-    `export()` begins with tries to store the array and raises `TypeError`
-    (the store's JSON holds no `ndarray`), as a top-level `set_attr` of one
-    already did. What is pinned here is the exporter's refusal, which only
-    a value the store never saw reaches.
+    No ingest produces an array here, and since #767 a caller's `set_attr`
+    of one never reaches the exporter either: a nested `set_attr` marks the
+    instance changed, so the save `export()` begins with tries to store the
+    array and raises `TypeError` (the store's JSON holds no `ndarray`), as
+    a top-level `set_attr` of one already did -- what the save should do
+    with it is #775. So the array is written into the item's `attributes`
+    directly, a value the store never sees: what is pinned here is the
+    exporter's refusal, for any path that still hands it one.
     """
     import numpy as np
 
