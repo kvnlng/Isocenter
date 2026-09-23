@@ -167,7 +167,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **An edit made after a PHI scan is a change, and costs the `PASS` until a scan reads it (#767, #768).** Assigning `patient.patient_name`, `study.study_date` or any field the export writes from an owner left `_revision` where it was, and so did editing a nested item (`items[0].set_attr(...)`). Measured on 82e82386, CT_small under the floor: the owners were written in a full pass, `patient.patient_name` was set back to the source by plain assignment, and a pass was handed the instance findings only. The Patient read `REMEDIATED`, and the instance kept the `REMEDIATED` it had across #624's sync of its copy to the source name. The file carried `Alpha^One`, and the run graded `PASS`; with L12's Patient Identity Removed it would also have written `YES`. The L12 review found two more shapes that graded `PASS`:
   - a nested item's Patient's Name set after the pass: the instance kept `REMEDIATED`, and the file carried the name inside the sequence;
-  - a Series field assigned after the pass: nothing is recorded on a Series, so nothing went stale.
+  - the Series Instance UID set back to the source after the pass replaced it: the export wrote it into every instance, and nothing that graded went stale.
 
   The changes (owner rulings, 2026-09-23):
   - **An assignment of a tracked owner field that changes its value advances the revision** (`mark_modified()`), after the value is in place, so a background `save()` racing it writes the new value.
@@ -175,7 +175,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - A status recorded before the edit reads `UNSCANNED`.
     - These are not edits: construction, pickle, deepcopy, and assigning the value a field already holds (`study.study_date = "20030306"` over `date(2003, 3, 6)` included).
     - The five pinned `mark_modified()` lines in `remediation.py` do not move. Its owner arms now bump twice, which a monotonic counter does not notice.
-  - **A Series field edit marks every instance of the series changed.** A Series holds no status, and the export writes its fields into each instance, so the instances are what go stale. A Patient or Study edit does not cascade: each holds its own status.
+  - **A Series field edit marks every instance of the series changed.**
+    - The export writes a Series' fields into each instance. The instances also carry the Series' status (#544): its findings are borne by them, and a Series status is not stored across a reopen. So the instances are what go stale.
+    - A Patient or Study edit does not cascade: each holds its own status.
+    - **Not while a pass writes.** `Session.anonymize` sets `entities.PASS_WRITING` (a `ContextVar`) around `apply_remediation`, so none of the five pinned lines moves.
+      - Without it, a pass handed a Series finding after the instance findings wrote the Series UID after it had recorded each instance's status. The cascade then made that status stale, and condition 8 tripped on the pass's own write.
+      - A user's edit after the pass is outside it and cascades.
   - **A nested item edit marks its instance changed.**
     - A `DicomItem` now holds its container (`_parent`, `repr=False, compare=False`). It is set wherever an item is attached: `add_sequence_item` (ingest and hydration), `clone_sequences` (which now takes the container the copies go into), the lock's token item, and redaction's derivation code item.
     - `DicomItem.mark_modified()`, which every mutator calls, also advances the instance at the top of the chain.
