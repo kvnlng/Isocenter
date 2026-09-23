@@ -511,6 +511,46 @@ def test_a_recorded_scan_status_refuses_the_re_key(tmp_path, state):
         session.close()
 
 
+
+def test_a_report_from_an_unsaved_audit_across_a_reopen_grades_review_required(
+        tmp_path):
+    """The path the gate cannot close (owner ruling, 2026-09-22: #752's
+    class). An ID-less file a, `audit()` never saved, `close()`: the store
+    holds no status for it. Reopened, a `PA` file b of its study re-keys
+    the patient -- nothing in the store says a value was derived under
+    the key -- and `anonymize()` of the old report has no finding for
+    `PA`. Both files export `PA`: b's own ID, and a joined to b's patient.
+    `main` (8f631b99) links b under a's patient and grades PASS on these
+    inputs; here the run grades REVIEW_REQUIRED, which tells the truth
+    (a report applied to a graph that changed after the scan). Pinned as
+    it stands: `PA` is Patient ID in the exported files and nowhere else
+    in them, and the grade is never PASS."""
+    _study_with_and_without_an_id(tmp_path, "5906", study_date=None)
+    session = Session(str(tmp_path / "s.db"))
+    session.ingest(str(tmp_path / "in1"))
+    report = session.audit()
+    session.close()
+    with Session(str(tmp_path / "s.db")) as session:
+        [patient] = session.store.patients
+        assert patient._phi_status in (None, PhiStatus.UNSCANNED)
+        session.ingest(str(tmp_path / "in2"))
+        assert [p.patient_id for p in session.store.patients] == ["PA"]
+        session.anonymize(report)
+        session.export(str(tmp_path / "out"), use_compression=False)
+        session.generate_report(str(tmp_path / "r.md"))
+    holding = {}
+    for path in (tmp_path / "out").rglob("*.dcm"):
+        ds = pydicom.dcmread(str(path))
+        holding[str(ds.SOPInstanceUID)] = sorted(
+            str(elem.tag) for elem in ds.iterall()
+            if elem.VR not in ("SQ", "OB", "OW", "UN")
+            and "PA" in (list(elem.value) if elem.VM > 1 else [elem.value]))
+    assert holding == {study_uid("5906") + ".1.1": ["(0010,0020)"],
+                       study_uid("5906") + ".1.2": ["(0010,0020)"]}, holding
+    content = (tmp_path / "r.md").read_text(encoding="utf-8")
+    assert "**REVIEW_REQUIRED**" in content
+    assert "**PASS**" not in content
+
 def test_an_id_less_patient_never_scanned_is_still_re_keyed(tmp_path):
     """The other side of the status read: with no scan recorded, no shift
     and no lock, nothing has been derived under the key, so a real ID
