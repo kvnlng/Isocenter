@@ -22,7 +22,7 @@ from .io_handlers import (DicomImporter, DicomExporter, DeidMarkers, ExportConte
                           SidecarWaveformLoader,
                           export_folder_names, export_stamp_attributes, GRADED_LOSS_SCOPES,
                           normalize_id_filter, redaction_in_effect, select_patient_ids,
-                          unmatched_patient_ids_sentence)
+                          unmatched_patient_ids_sentence, unmatched_subset_uids_sentence)
 from .store import DicomStore
 from .services import (RedactionService, RedactionOutcome, RedactionError,
                        capture_phi_status_for_redaction,
@@ -695,19 +695,49 @@ def _is_private_tag(tag: str) -> bool:
         return False
 
 
-def _uids_from_frame(frame) -> Set[str]:
-    """The UIDs a subset DataFrame selects, at the most precise level present.
+#: The columns a subset DataFrame is read by, most precise first.
+_SUBSET_FRAME_COLUMNS = ("SOPInstanceUID", "SeriesInstanceUID",
+                         "StudyInstanceUID", "PatientID")
+
+
+def _uids_from_frame(frame) -> List[Any]:
+    """The values a subset DataFrame selects by, one per row in row order,
+    from the most precise of `_SUBSET_FRAME_COLUMNS` present.
 
     Only one column is read, deliberately. A frame filtered down to the CT
     series of a patient still carries that patient's ID in every row, so
     adding PatientID to the set would pull the MR series back in and undo
     the filter the caller asked for.
+
+    Raises:
+        ValueError: If the frame has none of the four columns (#725). It
+            read as an empty selection, so the export wrote nothing and
+            said nothing -- and no frame without one of them can ever
+            select anything. A frame that has the column and no rows is
+            a selection of nothing, and is not refused.
     """
-    for column in ("SOPInstanceUID", "SeriesInstanceUID",
-                   "StudyInstanceUID", "PatientID"):
+    for column in _SUBSET_FRAME_COLUMNS:
         if column in frame.columns:
-            return set(frame[column].tolist())
-    return set()
+            return frame[column].tolist()
+    raise ValueError(
+        f"subset is a DataFrame with none of the columns it is read by "
+        f"({', '.join(_SUBSET_FRAME_COLUMNS)}), so it could select nothing. "
+        f"Pass a frame from get_cohort_report(), or one carrying one of "
+        f"those columns.")
+
+
+class _SubsetSelection(NamedTuple):
+    """What a `subset` argument selected, from `_resolve_subset` (#725):
+    the shape `io_handlers.PatientSelection` has, so the two unmatched
+    counts share one sentence's arithmetic."""
+
+    #: The UIDs the walk lets through (the replacements included), or
+    #: `None` for no subset.
+    uids: Optional[Set[str]]
+    #: How many values were given, counting each position.
+    given: int
+    #: The 1-based positions whose value names nothing in the session.
+    unmatched: Tuple[int, ...]
 
 
 def _report_phi_findings(findings) -> None:
@@ -6257,6 +6287,11 @@ class DicomSession:
 
         Raises:
             ValueError: If `format` is not a registered export format.
+                Also on `dicom`, before anything is written, for a
+                `subset` query that does not run, or a `subset`
+                DataFrame with none of SOPInstanceUID,
+                SeriesInstanceUID, StudyInstanceUID and PatientID
+                (#725).
             TypeError: For an option name the selected exporter does not
                 recognise. The `dicom` path has always raised this,
                 because `_export_dicom` has a real signature; the `wfdb`
@@ -6269,7 +6304,10 @@ class DicomSession:
                 `patient_ids` that is a bare `str` (wrap one ID in a
                 list; 0.9.8 read it as one ID), bytes-like (#678), not
                 iterable, or holds an element that is not a `str`
-                (#696).
+                (#696); and on `dicom` for a `subset` that is
+                bytes-like, not iterable, or holds an element that is
+                not a `str` (#725; `[42]` and `[None]` selected nothing
+                in silence before).
             io_handlers.ExportError: From either exporter, when zero of
                 N attempted instances reached disk and at least one
                 failed -- the DICOM path since #191, the WFDB path since
@@ -6291,7 +6329,9 @@ class DicomSession:
         `WARNING` line, when `patient_ids` names an ID no patient in the
         session holds: counted by position, never named, and the report
         then grades `REVIEW_REQUIRED` (#686). The patients that match are
-        exported as asked; nothing raises.
+        exported as asked; nothing raises. The `dicom` format does the
+        same for a `subset` value that names nothing in the session at
+        any level (#725).
         """
         # Cleared first, before the exporter is even resolved. These are
         # session-scoped, and assigning them only on success let an
@@ -6377,8 +6417,24 @@ class DicomSession:
                 `get_cohort_report()` read `patient_ids` through the
                 same helper, so every door agrees.
             show_progress (bool): If True, shows progress bar.
-            subset (Union[str, list, pd.DataFrame]): Filter the export
-                using a query string, a list of UIDs, or a DataFrame.
+            subset (Union[str, pd.DataFrame, Iterable[str]]): Filter the
+                export: a pandas query string run against
+                `get_cohort_report(expand_metadata=True)`, a DataFrame
+                (read by the first of SOPInstanceUID, SeriesInstanceUID,
+                StudyInstanceUID and PatientID it carries; one with none
+                of them raises `ValueError`), or any other iterable of
+                UIDs at any level -- list, tuple, set, a generator --
+                read as `patient_ids` is (#725). Only `None` means no
+                filter; an empty one selects nothing. A bytes-like
+                value, a non-iterable, or an element that is not a
+                `str` raises `TypeError` before anything is scanned,
+                flushed or written. A value that names nothing in the
+                session at any level, itself or as the UID this store
+                replaced it with (#544), is counted by position and
+                never named: one `WARNING` log line and one `WARNING`
+                audit row, so the report grades `REVIEW_REQUIRED`, while
+                the rest is exported as asked. A query cannot name
+                anything the session lacks, so it is never counted.
             verify_readback (bool): If True, each worker re-reads the file
                 it just wrote before it is published under its real name,
                 and holds it against what it meant to write: Rows,
@@ -6455,12 +6511,19 @@ class DicomSession:
         if target_ids is None:
             target_ids = frozenset(p.patient_id for p in self.store.patients)
 
+        # The subset, read whole -- shape, query and count -- before the
+        # pre-export scan (#725). It was read after it, so a subset
+        # refused for its shape arrived once `check_burned_in=True` had
+        # re-recorded every status: an export that never ran had moved
+        # the session.
+        subset_selection = self._resolve_subset(subset)
+        allowed_uids = subset_selection.uids
+
         # None means "no safety filter"; an empty set means "the scan ran and
         # found nothing". The two are not the same and the walk treats them
         # differently, so they must not collapse into one falsy value.
         identifying_uids = (self._scan_before_export()
                             if check_burned_in else None)
-        allowed_uids = self._resolve_subset(subset)
 
         get_logger().info("Exporting session to: %s", folder)
         print("Preparing export plan...")
@@ -6503,17 +6566,23 @@ class DicomSession:
         # and a cohort withheld whole read as an empty plan under PASS.
         _audit_withheld_instances(self.store_backend, folder, withheld)
 
-        # The ids that selected nobody, counted and never named (#686).
-        # Here and not at the selection above: `_resolve_subset` and
-        # `_scan_before_export` can still refuse between the two, and a
-        # row saying an export selected short, for an export that never
-        # ran, is a fabrication. Before both empty-plan branches and
+        # The ids that selected nobody, counted and never named (#686),
+        # and the subset's values that name nothing (#725), the same way.
+        # Here and not at the selections above: `_scan_before_export` can
+        # still refuse after them, and a row saying an export selected
+        # short, for an export that never ran, is a fabrication. Before both empty-plan branches and
         # outside the `if tasks:` below, so an export whose every id was
         # unknown -- which plans nothing -- still says why. `WARNING`, so
         # the report grades `REVIEW_REQUIRED`: a short export under PASS
         # read as a complete one (owner ruling Q3 on #686).
         if selection.unmatched:
             sentence = unmatched_patient_ids_sentence(selection)
+            get_logger().warning(sentence)
+            self.store_backend.log_audit(
+                action_type="WARNING", entity_uid=folder,
+                details=f"DICOM export to {folder}: {sentence}")
+        if subset_selection.unmatched:
+            sentence = unmatched_subset_uids_sentence(subset_selection)
             get_logger().warning(sentence)
             self.store_backend.log_audit(
                 action_type="WARNING", entity_uid=folder,
@@ -6831,32 +6900,47 @@ class DicomSession:
         # `''` is a uid: an empty Patient ID (#581, `_record_scan_results`).
         return {f.entity_uid for f in findings if f.entity_uid is not None}
 
-    def _resolve_subset(self, subset) -> Optional[Set[str]]:
-        """Turns a subset argument into the UIDs allowed through the walk.
+    def _resolve_subset(self, subset) -> _SubsetSelection:
+        """Turns a subset argument into the UIDs allowed through the walk,
+        and counts the values that name nothing (#725).
 
-        Accepts a pandas query string, a DataFrame, or a list of UIDs at any
-        level. Returns None when no subset was given, which means "export
-        everything" -- distinct from an empty set, which means "the filter
-        matched nothing".
+        Accepts a pandas query string, a DataFrame, or any other iterable
+        of UIDs at any level -- list, tuple, set, frozenset, a one-shot
+        iterator, a pandas Series -- read by `normalize_id_filter`, as
+        `patient_ids` is. Only a `list` was taken until #725, so
+        `subset=(uid,)` raised where `patient_ids=(uid,)` did not. `uids`
+        is None when no subset was given, which means "export everything"
+        -- distinct from an empty set, which means "the filter matched
+        nothing".
+
+        A value is unmatched when it names nothing in the session at any
+        of the four levels the walk matches (`_uid_path`), itself or as
+        the UID this store replaced it with (#544): the whole graph, not
+        this export's `patient_ids`, as `select_patient_ids` counts. No
+        level is recorded, because the caller named none. A query can
+        only name what the cohort report holds, so it never counts; one
+        that keeps no row selects nothing, as `[]` does.
+
+        It logs and writes nothing, so a refusal after it leaves no row
+        saying the export selected short; `_export_dicom` reports the
+        count once the export is certain to run.
 
         Raises:
-            TypeError: If `subset` is not one of the three accepted forms.
-                It used to be ignored, so a caller who asked for a filter
-                and mistyped it got a full unfiltered export instead.
+            TypeError: For a bytes-like value, a non-iterable, or an
+                element that is not a `str` (a DataFrame column's too),
+                naming the position. `[42]` and `[None]` selected
+                nothing in silence until #725. A non-iterable was always
+                refused: ignored, a mistyped filter became a full export.
             ValueError: If a query string does not run against the cohort
-                report. That also used to abort the export silently, which
-                is indistinguishable from a query that matched nothing.
+                report (which used to abort the export silently, and is
+                indistinguishable from a query that matched nothing), or
+                a DataFrame has none of `_SUBSET_FRAME_COLUMNS` (#725).
         """
         if subset is None:
-            return None
+            return _SubsetSelection(None, 0, ())
 
-        if isinstance(subset, list):
-            # A bare list of UIDs at any level: patient, study, series or
-            # instance. All four are matched during the walk.
-            return self._with_replacements(set(subset))
-
-        # pandas is an optional dependency, imported only on the paths that
-        # need it so `import isocenter` does not require it.
+        # pandas is imported only on the paths that need it, to keep it
+        # off `import isocenter`'s cost.
         import pandas as pd
 
         if isinstance(subset, str):
@@ -6867,32 +6951,55 @@ class DicomSession:
                 raise ValueError(
                     f"subset query {subset!r} could not be run against the "
                     f"cohort report: {exc}") from exc
+            subset = _uids_from_frame(frame)
         elif isinstance(subset, pd.DataFrame):
-            frame = subset
-        else:
-            raise TypeError(
-                f"subset must be a query string, a DataFrame, or a list of "
-                f"UIDs; got {type(subset).__name__}")
+            subset = _uids_from_frame(subset)
+        # The one reading of a list of UIDs, the one `patient_ids` has. A
+        # str was a query above, so the helper's bare-str refusal is never
+        # reached from here.
+        values = normalize_id_filter(
+            subset, "subset", kind="UID",
+            takes="None, a query str, a DataFrame, or an iterable of UIDs")
 
-        return self._with_replacements(_uids_from_frame(frame))
+        aliases = self._uid_aliases()
+        held = set()
+        for patient in self.store.patients:
+            held.add(patient.patient_id)
+            for study in patient.studies:
+                held.add(study.study_instance_uid)
+                for series in study.series:
+                    held.add(series.series_instance_uid)
+                    held.update(instance.sop_instance_uid
+                                for instance in series.instances)
+        allowed, unmatched = set(), []
+        for position, value in enumerate(values, start=1):
+            names = aliases(value)
+            allowed |= names
+            if held.isdisjoint(names):
+                unmatched.append(position)
+        return _SubsetSelection(allowed, len(values), tuple(unmatched))
 
-    def _with_replacements(self, uids: Set[str]) -> Set[str]:
-        """`uids`, and the UID this store replaces each with (#544).
+    def _uid_aliases(self):
+        """A function from one subset value to the UIDs it names: itself,
+        and the UID this store replaces it with (#544).
 
         A subset taken before `anonymize()` -- a cohort report, a list of
         source UIDs -- names UIDs the graph no longer holds, and read as
         they stand it matched nothing: an empty export under a filter,
         #678's silence by a new road. A UID names an entity if it is the
         entity's UID or the entity's UID is its replacement. Read-only on
-        the secret: a store without one has replaced nothing. A patient
-        ID's replacement names nothing, so adding it is harmless.
+        the secret, and read once per export: a store without one has
+        replaced nothing. A Patient ID's replacement names nothing, so
+        adding it is harmless -- and a source Patient ID is counted
+        unmatched (#725), because the pseudonym is keyed, not a UID
+        replacement.
         """
         secret = self.store_backend._project_secret_if_present()
         if not secret:
-            return uids
+            return lambda uid: {uid}
         from .privacy import _replacement_uid_for  # pylint: disable=import-outside-toplevel
-        return uids | {_replacement_uid_for(uid, secret) for uid in uids
-                       if isinstance(uid, str) and uid}
+        return lambda uid: ({uid, _replacement_uid_for(uid, secret)} if uid
+                            else {uid})
 
     #: The substring the export notice is pinned by (#555).
     _OTHER_POLICY_NOTICE = ("recorded under a policy other than the one "

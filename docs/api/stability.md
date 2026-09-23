@@ -94,6 +94,19 @@ one `WARNING` line for it. `export` also writes one `WARNING` audit row,
 which grades the report `REVIEW_REQUIRED`. The lock methods log the
 count as an error.
 
+`export(subset=)` (the `dicom` format) takes a pandas query string, a
+DataFrame, or any other iterable of UIDs, and reads that iterable the
+way `patient_ids` is read: only `None` means no filter, an empty one
+selects nothing, and a bytes-like value, a non-iterable, or an element
+that is not a `str` raises `TypeError` before anything is written. A
+DataFrame is read by the first of `SOPInstanceUID`,
+`SeriesInstanceUID`, `StudyInstanceUID` and `PatientID` it carries,
+and one with none of them raises `ValueError`. A UID matches at any of
+the four levels, and a Study, Series or SOP Instance UID taken before
+`anonymize()` still names its entity. A value that names nothing in the
+session is counted, never named, in one `WARNING` line and one
+`WARNING` audit row, which grades the report `REVIEW_REQUIRED`.
+
 `generate_report(format=)` accepts `'markdown'` only. On
 `lock_identities` and `lock_identities_batch`, `persist` and `verbose`
 reach every patient.

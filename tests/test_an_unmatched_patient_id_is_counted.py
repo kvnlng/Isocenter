@@ -216,7 +216,7 @@ def test_no_row_for_an_export_that_did_not_run(tmp_path):
         before = len(_rows(session))
         with pytest.raises(TypeError):
             session.export(str(tmp_path / "out"), patient_ids=[UNKNOWN_1],
-                           subset=("x",), show_progress=False)
+                           subset=[42], show_progress=False)
         added = _rows(session)[before:]
     assert _count_rows(added) == [], added
 
