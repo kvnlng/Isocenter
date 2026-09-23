@@ -29520,7 +29520,7 @@
        [
         "EXPORT",
         "<out:A.dicom>",
-        "DICOM export to <out:A.dicom>: wrote 0 of 1 requested instances; all 1 were withheld by the pre-export scan (check_burned_in=True).",
+        "DICOM export to <out:A.dicom>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -29537,29 +29537,67 @@
         "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
         null,
         null
-       ],
-       [
-        "REMEDIATION_DECLINED",
-        "999.999.2.19941105.112000.2.107",
-        "Remediation declined for 999.999.2.19941105.112000.2.107: invalid date format for 0008,0020: '1994.11.05', so the value is unchanged",
-        null,
-        null
-       ],
-       [
-        "WARNING",
-        "999.999.2.19941105.112000.2.107",
-        "DICOM export to <out:A.dicom> withheld instance 999.999.2.19941105.112000.2.107: its instance still carries an identifier the pre-export scan raised (check_burned_in=True).",
-        null,
-        null
        ]
       ]
      },
      "arms": {
       "A.dicom": {
-       "files": {},
+       "files": {
+        "Subject_UnknownPatient/Study_NoDate__12000/Series_2_US__000.2/999.999.2.19941105.112000.2.107.dcm": {
+         "elements": {
+          "0008,0008": "CS/implicit 'ORIGINAL\\\\PRIMARY\\\\TEE\\\\0011'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.6'",
+          "0008,0018": "UI/implicit '999.999.2.19941105.112000.2.107'",
+          "0008,0020": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0060": "CS/implicit 'US'",
+          "0008,0070": "LO/implicit 'Acme Products'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,2122": "IS/implicit '1'",
+          "0008,2124": "IS/implicit '1'",
+          "0008,2128": "IS/implicit '1'",
+          "0008,212a": "IS/implicit '4'",
+          "0008,9215": "SQ/implicit items=1",
+          "0008,9215[0]>0008,0100": "SH/implicit '121327'",
+          "0008,9215[0]>0008,0102": "SH/implicit 'DCM'",
+          "0008,9215[0]>0008,0104": "LO/implicit 'Full fidelity image'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit ''",
+          "0018,1030": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '999.999.2.19941105.112000'",
+          "0020,000e": "UI/implicit '999.999.2.19941105.112000.2'",
+          "0020,0011": "IS/implicit '2'",
+          "0020,0013": "IS/implicit '107'",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [120]",
+          "0028,0011": "US/implicit [256]",
+          "0028,0034": "IS/implicit '4\\\\3'",
+          "0028,0100": "US/implicit [8]",
+          "0028,0101": "US/implicit [8]",
+          "0028,0102": "US/implicit [7]",
+          "0028,0103": "US/implicit [0]",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [172]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.6'",
+          "0002,0003": "UI '999.999.2.19941105.112000.2.107'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "|u1 [120, 256, 3] sha256:4631a14e915f1a7f"
+        }
+       },
        "result": {
         "failures": [],
-        "written": 0
+        "written": 1
        }
       },
       "A.dicom-j2k": {
@@ -29728,13 +29766,6 @@
         "EXPORT",
         "<out:B.dicom>",
         "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
-        null,
-        null
-       ],
-       [
-        "REMEDIATION_DECLINED",
-        "999.999.2.19941105.112000.2.107",
-        "Remediation declined for 999.999.2.19941105.112000.2.107: invalid date format for 0008,0020: '1994.11.05', so the value is unchanged",
         null,
         null
        ]
@@ -29906,7 +29937,7 @@
        [
         "EXPORT",
         "<out:A.dicom>",
-        "DICOM export to <out:A.dicom>: wrote 0 of 1 requested instances; all 1 were withheld by the pre-export scan (check_burned_in=True).",
+        "DICOM export to <out:A.dicom>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -29923,29 +29954,67 @@
         "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
         null,
         null
-       ],
-       [
-        "REMEDIATION_DECLINED",
-        "999.999.2.19941105.112000.2.107",
-        "Remediation declined for 999.999.2.19941105.112000.2.107: invalid date format for 0008,0020: '1994.11.05', so the value is unchanged",
-        null,
-        null
-       ],
-       [
-        "WARNING",
-        "999.999.2.19941105.112000.2.107",
-        "DICOM export to <out:A.dicom> withheld instance 999.999.2.19941105.112000.2.107: its instance still carries an identifier the pre-export scan raised (check_burned_in=True).",
-        null,
-        null
        ]
       ]
      },
      "arms": {
       "A.dicom": {
-       "files": {},
+       "files": {
+        "Subject_UnknownPatient/Study_NoDate__12000/Series_2_US__000.2/999.999.2.19941105.112000.2.107.dcm": {
+         "elements": {
+          "0008,0008": "CS/implicit 'ORIGINAL\\\\PRIMARY\\\\TEE\\\\0011'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.6'",
+          "0008,0018": "UI/implicit '999.999.2.19941105.112000.2.107'",
+          "0008,0020": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0060": "CS/implicit 'US'",
+          "0008,0070": "LO/implicit 'Acme Products'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,2122": "IS/implicit '1'",
+          "0008,2124": "IS/implicit '1'",
+          "0008,2128": "IS/implicit '1'",
+          "0008,212a": "IS/implicit '4'",
+          "0008,9215": "SQ/implicit items=1",
+          "0008,9215[0]>0008,0100": "SH/implicit '121327'",
+          "0008,9215[0]>0008,0102": "SH/implicit 'DCM'",
+          "0008,9215[0]>0008,0104": "LO/implicit 'Full fidelity image'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit ''",
+          "0018,1030": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '999.999.2.19941105.112000'",
+          "0020,000e": "UI/implicit '999.999.2.19941105.112000.2'",
+          "0020,0011": "IS/implicit '2'",
+          "0020,0013": "IS/implicit '107'",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [120]",
+          "0028,0011": "US/implicit [256]",
+          "0028,0034": "IS/implicit '4\\\\3'",
+          "0028,0100": "US/implicit [8]",
+          "0028,0101": "US/implicit [8]",
+          "0028,0102": "US/implicit [7]",
+          "0028,0103": "US/implicit [0]",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [172]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.6'",
+          "0002,0003": "UI '999.999.2.19941105.112000.2.107'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "|u1 [120, 256, 3] sha256:4631a14e915f1a7f"
+        }
+       },
        "result": {
         "failures": [],
-        "written": 0
+        "written": 1
        }
       },
       "A.dicom-j2k": {
@@ -30114,13 +30183,6 @@
         "EXPORT",
         "<out:B.dicom>",
         "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
-        null,
-        null
-       ],
-       [
-        "REMEDIATION_DECLINED",
-        "999.999.2.19941105.112000.2.107",
-        "Remediation declined for 999.999.2.19941105.112000.2.107: invalid date format for 0008,0020: '1994.11.05', so the value is unchanged",
         null,
         null
        ]
@@ -44576,7 +44638,7 @@
        [
         "EXPORT",
         "<out:A.dicom>",
-        "DICOM export to <out:A.dicom>: wrote 0 of 1 requested instances; all 1 were withheld by the pre-export scan (check_burned_in=True).",
+        "DICOM export to <out:A.dicom>: wrote 1 of 1 planned instances from 1 patients.",
         null,
         null
        ],
@@ -44593,29 +44655,62 @@
         "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
         null,
         null
-       ],
-       [
-        "REMEDIATION_DECLINED",
-        "1.2.840.1136190195280574824680000700.3.0.1.19970424140438",
-        "Remediation declined for 1.2.840.1136190195280574824680000700.3.0.1.19970424140438: invalid date format for 0008,0020: '1997.04.24', so the value is unchanged",
-        null,
-        null
-       ],
-       [
-        "WARNING",
-        "1.2.840.1136190195280574824680000700.3.0.1.19970424140438",
-        "DICOM export to <out:A.dicom> withheld instance 1.2.840.1136190195280574824680000700.3.0.1.19970424140438: its instance still carries an identifier the pre-export scan raised (check_burned_in=True).",
-        null,
-        null
        ]
       ]
      },
      "arms": {
       "A.dicom": {
-       "files": {},
+       "files": {
+        "Subject_UnknownPatient/Study_NoDate_Study_748.3/Series_0_US_Series_8.3.0/1.2.840.1136190195280574824680000700.3.0.1.19970424140438.dcm": {
+         "elements": {
+          "0008,0008": "CS/implicit 'ORIGINAL\\\\PRIMARY\\\\EPICARDIAL'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.6.1'",
+          "0008,0018": "UI/implicit '1.2.840.1136190195280574824680000700.3.0.1.19970424140438'",
+          "0008,0020": "DA/implicit ''",
+          "0008,0030": "TM/implicit ''",
+          "0008,0060": "CS/implicit 'US'",
+          "0008,0070": "LO/implicit 'G.E. Medical Systems'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,1010": "SH/implicit 'ANONYMIZED'",
+          "0008,1090": "LO/implicit 'LOGIQ 700'",
+          "0008,2122": "IS/implicit '0'",
+          "0008,2124": "IS/implicit '1'",
+          "0008,2128": "IS/implicit '0'",
+          "0008,212a": "IS/implicit '1'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit ''",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0018,1020": "LO/implicit 'R6.1'",
+          "0020,000d": "UI/implicit '1.2.840.113619.2.21.848.246800003.0.1952805748.3'",
+          "0020,000e": "UI/implicit '1.2.840.113619.2.21.24680000.700.0.1952805748.3.0'",
+          "0020,0011": "IS/implicit '0'",
+          "0020,0013": "IS/implicit '1'",
+          "0028,0002": "US/implicit [3]",
+          "0028,0004": "CS/implicit 'RGB'",
+          "0028,0006": "US/implicit [0]",
+          "0028,0010": "US/implicit [60]",
+          "0028,0011": "US/implicit [80]",
+          "0028,0100": "US/implicit [8]",
+          "0028,0101": "US/implicit [8]",
+          "0028,0102": "US/implicit [7]",
+          "0028,0103": "US/implicit [0]",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [200]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.6.1'",
+          "0002,0003": "UI '1.2.840.1136190195280574824680000700.3.0.1.19970424140438'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "|u1 [60, 80, 3] sha256:1583c4339dd36e91"
+        }
+       },
        "result": {
         "failures": [],
-        "written": 0
+        "written": 1
        }
       },
       "A.dicom-j2k": {
@@ -44774,13 +44869,6 @@
         "EXPORT",
         "<out:B.dicom>",
         "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
-        null,
-        null
-       ],
-       [
-        "REMEDIATION_DECLINED",
-        "1.2.840.1136190195280574824680000700.3.0.1.19970424140438",
-        "Remediation declined for 1.2.840.1136190195280574824680000700.3.0.1.19970424140438: invalid date format for 0008,0020: '1997.04.24', so the value is unchanged",
         null,
         null
        ]
@@ -122546,12 +122634,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "d1bc7b83f8ed5457454428a421a76b6db2147bdf",
+  "git_sha": "ffbbfa6f4acc09e551d6addf33fbc24ed6de6b9c",
   "isocenter_version": "0.9.8",
   "jobs": 4,
   "platform": "macOS-27.0-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 525
+  "seconds": 536
  },
  "schema": 1,
  "toolchain": {
