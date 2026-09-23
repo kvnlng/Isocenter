@@ -445,7 +445,8 @@ def test_an_audited_id_less_patient_is_not_re_keyed(tmp_path, shape):
 
 
 @pytest.mark.parametrize("state", ["audited", "patient-pass", "stale", "reopened",
-                                   "reopened-patient-only"])
+                                   "reopened-patient-only", "reopened-study-only",
+                                   "reopened-instance-only"])
 def test_a_recorded_scan_status_refuses_the_re_key(tmp_path, state):
     """The gate's status read, in each state it must hold (F5-1's ruling):
 
@@ -461,12 +462,16 @@ def test_a_recorded_scan_status_refuses_the_re_key(tmp_path, state):
       stored and hydrated;
     - `reopened-patient-only`: the studies and instances edited before
       the save, so each is stored UNSCANNED and only the patient's status
-      survives the reopen.
+      survives the reopen;
+    - `reopened-study-only` / `reopened-instance-only`: likewise, only
+      the study's, or only the instance's, status survives (review round
+      6: a patient-level edit after the scan, then a save).
 
     Each refuses the re-key: b links under the ID-less patient with one
     WARNING row. Kills MG6 (the read dropped) and, `stale`, MG7 (the
     revision-checked `phi_status` read instead of the record) and,
-    `reopened-patient-only`, MG8 (the patient's status not read)."""
+    `reopened-patient-only`, MG8 (the patient's status not read), and
+    MG9 / MG10 (a study's, an instance's status not read)."""
     _study_with_and_without_an_id(tmp_path, "5871")
     sop_b = study_uid("5871") + ".1.2"
     session = Session(str(tmp_path / "s.db"))
@@ -487,21 +492,27 @@ def test_a_recorded_scan_status_refuses_the_re_key(tmp_path, state):
                 entity.mark_modified()
             assert {e.phi_status for e in bearers} == {PhiStatus.UNSCANNED}
         elif state.startswith("reopened"):
-            if state == "reopened-patient-only":
-                for entity in (*patient.studies,
-                               *(i for st in patient.studies for se in st.series
-                                 for i in se.instances)):
-                    entity.mark_modified()
+            def levels(p):
+                return {"patient": [p], "study": list(p.studies),
+                        "instance": [i for st in p.studies for se in st.series
+                                     for i in se.instances]}
+            kept = state[len("reopened-"):-len("-only")] if state != "reopened" else None
+            if kept:
+                for level, entities in levels(patient).items():
+                    if level != kept:
+                        for entity in entities:
+                            entity.mark_modified()
             session.save(sync=True)
             session.close()
             session = Session(str(tmp_path / "s.db"))
-            if state == "reopened-patient-only":
+            if kept:
                 [patient] = session.store.patients
-                below = [*patient.studies,
-                         *(i for st in patient.studies for se in st.series
-                           for i in se.instances)]
-                assert {e._phi_status for e in below} <= {None, PhiStatus.UNSCANNED}
-                assert patient._phi_status is PhiStatus.IDENTIFIED
+                for level, entities in levels(patient).items():
+                    statuses = {e._phi_status for e in entities}
+                    if level == kept:
+                        assert statuses == {PhiStatus.IDENTIFIED}, (level, statuses)
+                    else:
+                        assert statuses <= {None, PhiStatus.UNSCANNED}, (level, statuses)
         session.ingest(str(tmp_path / "in2"))
         [patient] = session.store.patients
         assert is_synthetic_patient_id(patient.patient_id)
@@ -518,14 +529,18 @@ def test_a_report_from_an_unsaved_audit_across_a_reopen_grades_review_required(
     class). An ID-less file a, `audit()` never saved, `close()`: the store
     holds no status for it. Reopened, a `PA` file b of its study re-keys
     the patient -- nothing in the store says a value was derived under
-    the key -- and `anonymize()` of the old report has no finding for
-    `PA`. Both files export `PA`: b's own ID, and a joined to b's patient.
+    the key -- and `anonymize()` of the old report declines its patient-
+    and study-level findings, which were filed under the key. Both files
+    export the patient-level identity as the source held it: Patient ID
+    `PA` (b's own, and a's through its patient), Patient's Name
+    `Alpha^One`, and the source Study Date, unshifted (review round 6,
+    F6-1: the date is kept in the fixture, so that half is asserted).
     `main` (8f631b99) links b under a's patient and grades PASS on these
-    inputs; here the run grades REVIEW_REQUIRED, which tells the truth
-    (a report applied to a graph that changed after the scan). Pinned as
-    it stands: `PA` is Patient ID in the exported files and nowhere else
-    in them, and the grade is never PASS."""
-    _study_with_and_without_an_id(tmp_path, "5906", study_date=None)
+    inputs; here the run grades REVIEW_REQUIRED on the declines, which
+    tells the truth: a report applied to a graph that changed after the
+    scan."""
+    _study_with_and_without_an_id(tmp_path, "5906")
+    source_date = str(pydicom.dcmread(str(tmp_path / "in1" / "a.dcm")).StudyDate)
     session = Session(str(tmp_path / "s.db"))
     session.ingest(str(tmp_path / "in1"))
     report = session.audit()
@@ -536,20 +551,30 @@ def test_a_report_from_an_unsaved_audit_across_a_reopen_grades_review_required(
         session.ingest(str(tmp_path / "in2"))
         assert [p.patient_id for p in session.store.patients] == ["PA"]
         session.anonymize(report)
+        declined = sorted((uid, d) for uid, d in
+                          _audit_rows(session, "REMEDIATION_DECLINED"))
         session.export(str(tmp_path / "out"), use_compression=False)
         session.generate_report(str(tmp_path / "r.md"))
-    holding = {}
-    for path in (tmp_path / "out").rglob("*.dcm"):
-        ds = pydicom.dcmread(str(path))
-        holding[str(ds.SOPInstanceUID)] = sorted(
-            str(elem.tag) for elem in ds.iterall()
-            if elem.VR not in ("SQ", "OB", "OW", "UN")
-            and "PA" in (list(elem.value) if elem.VM > 1 else [elem.value]))
-    assert holding == {study_uid("5906") + ".1.1": ["(0010,0020)"],
-                       study_uid("5906") + ".1.2": ["(0010,0020)"]}, holding
+    exported = {str(ds.SOPInstanceUID):
+                (str(ds.PatientID), str(ds.PatientName), str(ds.StudyDate))
+                for ds in (pydicom.dcmread(str(f))
+                           for f in (tmp_path / "out").rglob("*.dcm"))}
+    study = study_uid("5906")
+    # The old report's findings were filed under the key: the patient's
+    # (its name) no longer resolves, and the Study Date on the study and
+    # on a's instance declines because the offset's seed is not the
+    # patient's ID any more.
+    assert [(uid, "offset is seeded on" in d or "could not be resolved" in d)
+            for uid, d in declined] == [
+        (study, True), (study + ".1.1", True), (NO_PATIENT_ID_PREFIX + study, True)], declined
+    assert exported == {study + ".1.1": ("PA", "Alpha^One", source_date),
+                        study + ".1.2": ("PA", "Alpha^One", source_date)}, exported
     content = (tmp_path / "r.md").read_text(encoding="utf-8")
     assert "**REVIEW_REQUIRED**" in content
     assert "**PASS**" not in content
+    assert "3 declined remediation(s)" in content
+
+
 
 def test_an_id_less_patient_never_scanned_is_still_re_keyed(tmp_path):
     """The other side of the status read: with no scan recorded, no shift
