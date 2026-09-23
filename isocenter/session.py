@@ -3515,7 +3515,9 @@ class DicomSession:
 
         Args:
             output_path (str): The file path where the report should be saved.
-            format (str): The output format ('markdown' or 'md'). Defaults to "markdown".
+            format (str): The output format: `'markdown'`, the one spelling
+                accepted (`'md'` and case variants raise `ValueError` since
+                #26). Defaults to "markdown".
         """
         get_logger().info(f"Generating Compliance Report ({format}) to {output_path}...")
 
@@ -3859,7 +3861,9 @@ class DicomSession:
 
         Args:
             output_path (str): The file path where the manifest should be saved.
-            format (str): The output format ('html' or 'json'). Defaults to "html".
+            format (str): The output format: `'html'` or `'json'`, exactly
+                (a case variant raises `ValueError` since #26). Defaults to
+                "html".
         """
         get_logger().info(f"Generating Manifest ({format}) to {output_path}...")
 

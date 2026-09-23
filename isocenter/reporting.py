@@ -543,6 +543,14 @@ __________________________________________________
 
 
 def get_renderer(format_type: str) -> ReportRenderer:
-    if format_type.lower() in ["md", "markdown"]:
+    """The renderer for `generate_report(format=)`: `'markdown'`, exactly.
+
+    `'md'` and every case variant were accepted until the 1.0 freeze
+    (#26). One spelling per behaviour: a second one accepted at the tag
+    could never be removed in 1.x, so it is refused now, not tolerated.
+    """
+    if format_type == "markdown":
         return MarkdownRenderer()
-    raise ValueError(f"Unsupported report format: {format_type}")
+    raise ValueError(
+        f"Unsupported report format: {format_type!r}; the one accepted "
+        f"spelling is 'markdown'")

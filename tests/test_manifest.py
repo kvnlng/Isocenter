@@ -61,3 +61,24 @@ def test_session_integration(tmp_path):
         assert output.exists()
         content = output.read_text()
         assert "Files:</strong> 0" in content
+
+
+@pytest.mark.parametrize("spelling", ["HTML", "Json", "JSON", "htm", " json"])
+def test_a_second_spelling_of_the_manifest_format_is_refused(tmp_path, spelling):
+    """One spelling per behaviour (#26): `generate_manifest(format=)` takes
+    `'html'` and `'json'`, the values `docs/api/stability.md` freezes. A
+    case variant was accepted until the freeze (`format.lower()`), a
+    second spelling a 1.x could never remove. Refused before anything is
+    written, and the message names both accepted spellings.
+
+    The controls are the two frozen spellings, each writing its file.
+    """
+    out = tmp_path / "manifest.out"
+    with DicomSession(str(tmp_path / "formats.db")) as session:
+        with pytest.raises(ValueError, match="'html' or 'json'"):
+            session.generate_manifest(str(out), format=spelling)
+        assert not out.exists()
+        for accepted in ("html", "json"):
+            written = tmp_path / f"manifest.{accepted}"
+            session.generate_manifest(str(written), format=accepted)
+            assert written.exists(), accepted

@@ -19,6 +19,23 @@ behaves is on its own page — start at [Session](session.md) — and how a
 behaviour came to be is in the
 [changelog](https://github.com/kvnlng/Isocenter/blob/main/CHANGELOG.md).
 
+## What 1.0 promises
+
+- **The facade.** `Session`, its 28 methods and their parameters, the
+  shapes they return, and the other callables the frozen tables list
+  keep their spelling and behaviour for every 1.x
+  ([Frozen at 1.0](#frozen-at-10)).
+- **The output.** For the same input, configuration and project secret,
+  a 1.x exports what the previous release exported, or its changelog
+  says what changed ([Data promises](#frozen-at-10); #717). The grade,
+  the audit words and the conditions that grade a run are frozen too.
+- **The configuration.** A file 1.0 loads, every 1.x loads, and a 1.x
+  that applies an unchanged file differently raises the schema's minor
+  version ([Data promises](#frozen-at-10)).
+- **Plugins, provisionally.** The exporter registry is tier 2: usable,
+  and changeable in 1.x with a changelog entry
+  ([Documented but internal](#documented-but-internal)).
+
 ## Frozen at 1.0
 
 **Package.** `isocenter.Session`, `isocenter.Builder`,
@@ -67,6 +84,44 @@ moved across it is a different call.
 | `compact` | — |
 | `release_memory` | — |
 
+**Other frozen callables, with their parameters.** Spelled as the
+Session table spells them, and each qualified by the class (or module)
+that defines it. The classes' fields and the rules each method follows
+are in the paragraphs below.
+
+| Callable | Parameters |
+| --- | --- |
+| `Session.__init__` | `persistence_file=None` |
+| `IsocenterConfiguration.save` | — |
+| `IsocenterConfiguration.add_rule` | `serial_number, manufacturer='Unknown', model='Unknown', zones=None` |
+| `IsocenterConfiguration.update_rule` | `serial_number, updates` |
+| `IsocenterConfiguration.delete_rule` | `serial_number` |
+| `IsocenterConfiguration.set_phi_tag` | `tag, action, replacement=None` |
+| `IsocenterConfiguration.get_rule` | `serial_number` |
+| `DicomItem.set_attr` | `tag, value` |
+| `Instance.set_attr` | `tag, value` |
+| `Instance.get_pixel_data` | — |
+| `Instance.set_pixel_data` | `array` |
+| `Instance.unload_pixel_data` | — |
+| `Instance.discard_pixel_data` | — |
+| `Instance.get_waveform_data` | — |
+| `Builder.start_patient` | `name` |
+| `PhiReport.__init__` | `findings, failures=None` |
+| `PhiReport.to_dataframe` | — |
+| `DiscoveryResult.filter` | `predicate=0.0` |
+| `DiscoveryResult.to_zones` | `pad_x=20, pad_y=10, min_occurrence=0.1` |
+| `DiscoveryResult.to_dataframe` | — |
+| `entities.is_synthetic_patient_id` | `value` |
+
+`DiscoveryResult.filter(predicate=)` takes either a minimum confidence
+(a number, `0.0` by default) or a callable given each candidate, and
+keeps what passes; both forms are frozen.
+
+**Module-level names.** `entities.NO_PATIENT_ID_PREFIX`
+(`"\\no-patient-id\\"`) and `entities.is_synthetic_patient_id()`: the
+key a subject with no Patient ID is held under, and the test for it
+(below).
+
 `export(format=)` accepts `'dicom'` and `'wfdb'`, and the option names
 are frozen with the method. The `dicom` options are
 `use_compression=True, check_burned_in=False,
@@ -104,12 +159,16 @@ DataFrame is read by the first of `SOPInstanceUID`,
 and one with none of them raises `ValueError`. A UID matches at any of
 the four levels. A Study, Series or SOP Instance UID taken before
 `anonymize()` or `redact()` still names its entity, except a SOP
-Instance UID taken between a first redaction and a `force=True` second
-one. A value that names nothing in the
+Instance UID that is neither the one the file was ingested under, nor
+that UID's `anonymize()` replacement, nor the current one: one taken
+between a first redaction and a `force=True` second, or between two
+`Instance.regenerate_uid()` calls. A value that names nothing in the
 session is counted, never named, in one `WARNING` line and one
 `WARNING` audit row, which grades the report `REVIEW_REQUIRED`.
 
-`generate_report(format=)` accepts `'markdown'` only. On
+`generate_report(format=)` accepts `'markdown'` only, and
+`generate_manifest(format=)` `'html'` and `'json'`; any other spelling
+raises `ValueError`, a case variant included. On
 `lock_identities` and `lock_identities_batch`, `persist` and `verbose`
 reach every patient.
 
@@ -136,6 +195,9 @@ entity_path)`; `DiscoveryResult.filter(...)`, `.to_zones()`,
 SOP Instance UID of each instance that carries an identity token of ours
 to a copy of the values that token holds, in graph order, from both
 `restore=False` and `restore=True`;
+`export(format='dicom')` → `ExportSummary`, and
+`export(format='wfdb')` → `List[str]`, the paths written, empty
+when nothing was attempted;
 `get_cohort_report()` → `pandas.DataFrame`; `phi_status_summary()` →
 `Dict[str, Counter]`; `redact()`, `reconcile_private_tags()`,
 `auto_remediate_config()` → `int`.
@@ -214,8 +276,9 @@ three fields. The rest of the fluent chain is tier 2.
 `add_rule()`, `update_rule()`, `delete_rule()`, `set_phi_tag()`,
 `get_rule()`, and the fields `rules`, `phi_tags`, `date_jitter`,
 `remove_private_tags`, `privacy_profile`, `config_path`, `auto_save`. On a session that has loaded
-no configuration, `phi_tags` is a copy of the floor policy,
-`profiles.FLOOR_POLICY`, and `audit()`/`anonymize()` apply it; a config
+no configuration, `phi_tags` is a copy of the floor policy
+(`basic@2026c` with the three research defaults, below; the name it is
+held under is tier 2), and `audit()`/`anonymize()` apply it; a config
 with no `privacy_profile` line, or a null one, extends it, and one with
 `privacy_profile: none` opts out of it. `set_phi_tag()` stores lowercase
 keys, stores `replacement` as the rule's `value`, and raises
@@ -264,7 +327,9 @@ otherwise.
   unavailable to the calling process; and `RuntimeError` after the pass
   when at least one instance failed and none could be read. A scan that
   read some instances returns its report with the others in `failures`.
-- `generate_report()`: `ValueError` on an unknown format.
+- `generate_report()` and `generate_manifest()`: `ValueError` for a
+  `format` other than the spellings above, naming them; no file is
+  written.
 - `IsocenterConfiguration.save()`: `ValueError` with no `config_path`,
   or when `phi_tags` lacks a rule its `privacy_profile` (or the floor)
   supplies; the `OSError` of a failed write. With `auto_save` on,
@@ -459,6 +524,16 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   `Instance.regenerate_uid()`, `get_waveform_bytes()`,
   `unload_waveform_data()`, `pixel_array`, `waveform_array`;
   `Equipment.from_parts()`.
+- **The recording helpers** the scan, remediation and the reversible
+  lock call on an entity: `Instance.record_remediation()`,
+  `remediation_vouches_for()`, `record_identity_token()`,
+  `identity_token_is_this_stores()`; `DicomItem.record_date_shift()`,
+  `date_shift_vouches_for()`, `clear_sequence_items()`; and `Study`'s
+  own `record_date_shift()` and `date_shift_vouches_for()`. Every other
+  public name on a class tier 1 names is listed on this page, in one
+  tier or the other.
+- **`profiles.FLOOR_POLICY`**, the name the floor policy is held under.
+  What the floor *contains* is frozen (above); the name is not.
 - **`entities` helpers** `clone_sequences`, `iter_item_tree`,
   `normalize_study_date`, `resolve_item_path`.
 - **The [Intelligent OCR](ocr.md) page**: `ZoneDiscoverer.group_boxes`,
@@ -519,5 +594,6 @@ and the two summaries, `privacy.py` except `PhiFinding` and `PhiReport`,
 except `DiscoveryResult` and `ZoneDiscoverer.group_boxes`,
 `verification.py` except `RedactionVerifier`, `automation.py` except
 `ConfigAutomator.suggest_config_updates`, `config_manager.py`,
+`profiles.py` except `FLOOR_POLICY` (tier 2),
 `builders.py` internals, `utils/`, `logger.py`, `_version.py`'s module
 (the `__version__` string is frozen, its module is not).

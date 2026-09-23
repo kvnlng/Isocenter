@@ -183,16 +183,20 @@ def generate_manifest_file(manifest: Manifest, output_path: str, format: str = "
     Args:
         manifest (Manifest): The manifest object to export.
         output_path (str): The destination file path.
-        format (str): 'json' or 'html'.
+        format (str): 'json' or 'html', exactly.
 
     Raises:
-        ValueError: If format is unsupported.
+        ValueError: If format is any other spelling. A case variant
+            (`'HTML'`) was accepted until the 1.0 freeze (#26); one spelling
+            per behaviour, so it is refused rather than frozen.
     """
-    if format.lower() == "json":
+    if format == "json":
         renderer = JSONManifestRenderer()
-    elif format.lower() == "html":
+    elif format == "html":
         renderer = HTMLManifestRenderer()
     else:
-        raise ValueError(f"Unsupported manifest format: {format}")
+        raise ValueError(
+            f"Unsupported manifest format: {format!r}; the accepted "
+            f"spellings are 'html' or 'json'")
 
     renderer.render(manifest, output_path)
