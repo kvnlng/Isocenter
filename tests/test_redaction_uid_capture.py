@@ -85,7 +85,7 @@ def test_the_worker_trusts_the_task_over_the_shared_object(
         {"serial_number": "SN_RELOAD", "redaction_zones": [IN_IMAGE_ZONE]})
 
     # The sibling worker's mutation, landed before this worker starts.
-    inst.regenerate_uid()
+    inst.regenerate_uid("2.25.88")
     assert inst.sop_instance_uid != uid_at_prep, (
         "regenerate_uid() must move the live attribute for this test to "
         "exercise anything")

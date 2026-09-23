@@ -338,9 +338,10 @@ def test_a_failed_instance_does_not_cost_the_others_their_status(
     session.store.patients[0].studies[0].series[0].instances.append(other)
     real = RedactionService.execute_redaction_task
 
+    # By identity, not by UID: `anonymize()` below replaces `UID_2` (#544).
     def one_fails(self, task):
-        if task["instance"].sop_instance_uid == UID_2:
-            return RedactionOutcome(ok=False, sop_instance_uid=UID_2,
+        if task["instance"] is other:
+            return RedactionOutcome(ok=False, sop_instance_uid=other.sop_instance_uid,
                                     error="synthetic failure for the pin")
         return real(self, task)
 

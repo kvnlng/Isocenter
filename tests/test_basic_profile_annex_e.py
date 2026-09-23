@@ -64,11 +64,13 @@ def test_basic_profile_is_derived_from_annex_e():
 
     # 590 since #556/#557: the 32 concrete `60xx` keys became the two
     # group rules, and 119 D-arm rules moved from EMPTY or REMOVE to
-    # REPLACE, which writes the VR's dummy. Literal numbers, checked
+    # REPLACE, which writes the VR's dummy. 646 since #544: the 55 `U`
+    # rows and Annotation Group UID (`006a,0003`, D on a UI) REPLACE with
+    # no value, which on a UI is the keyed UID. Literal numbers, checked
     # against the arithmetic by hand, never computed.
-    assert len(BASIC_PROFILE) == 590
+    assert len(BASIC_PROFILE) == 646
     assert collections.Counter(rule["action"] for rule in BASIC_PROFILE.values()) == {
-        "REMOVE": 412, "EMPTY": 57, "REPLACE": 121}
+        "REMOVE": 412, "EMPTY": 57, "REPLACE": 177}
 
 
 #: Rows read off PS3.15 2026c Table E.1-1 itself, not off the fixture: one
@@ -95,7 +97,10 @@ FROM_THE_STANDARD = {
     "50xx,xxxx": ("Curve Data", "X", "REMOVE"),
     "0040,0275": ("Request Attributes Sequence", "X", "REMOVE"),
     "0008,1110": ("Referenced Study Sequence", "X/Z", "EMPTY"),
-    "0020,000d": ("Study Instance UID", "U", None),
+    # A `U` row REPLACEs with no value, the keyed UID (#544).
+    "0020,000d": ("Study Instance UID", "U", "REPLACE"),
+    # Kept: the UID references inside it are `U` rows of their own.
+    "0008,1140": ("Referenced Image Sequence", "X/Z/U*", None),
 }
 
 
@@ -113,7 +118,7 @@ def test_rows_pinned_from_the_standard_itself():
         else:
             assert BASIC_PROFILE[key]["action"] == action, key
     assert {code for _, code, _ in FROM_THE_STANDARD.values()} == (
-        set(ACTION_FOR_CODE) | {"U"})
+        set(ACTION_FOR_CODE) | set(NO_ENTRY_CODES))
 
 
 def test_the_literal_is_its_rendering_comments_included():
@@ -136,7 +141,7 @@ def test_the_floor_overrides_three_basic_rules_and_adds_none():
     """Patient's Age is a basic rule since 0.9.8, so all three research
     defaults override one and the floor is the profile's size."""
     assert set(RESEARCH_DEFAULTS) <= set(BASIC_PROFILE)
-    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 590
+    assert len(FLOOR_POLICY) == len(BASIC_PROFILE) == 646
 
 
 def test_every_departure_is_a_row_and_is_a_departure():
@@ -219,10 +224,11 @@ def _dictionary(key):
 
 def test_no_dummy_lands_on_a_sequence_or_a_uid():
     """Every value-less REPLACE in the literal is on a VR that has a dummy
-    (#557). The mapping sends every D arm to REPLACE, so a later table
-    giving D to a sequence or a UID row would become a REPLACE the scan
-    ignores (SQ) or the loader refuses (UI); this says why, where the
-    derivation test would only say the literal differs.
+    (#557), or on a UI, where it is the keyed UID replacement and never a
+    dummy (#544). The mapping sends every D arm to REPLACE, so a later
+    table giving D to a sequence would become a REPLACE the scan ignores;
+    this says why, where the derivation test would only say the literal
+    differs.
 
     Kills: a D-arm sequence departure deleted from `DEVIATIONS` (its row
     derives to REPLACE on an SQ)."""
@@ -230,6 +236,9 @@ def test_no_dummy_lands_on_a_sequence_or_a_uid():
         if rule["action"] != "REPLACE" or "value" in rule:
             continue
         vr, _vm = _dictionary(key)
+        if vr == "UI":
+            # Not a dummy: the keyed UID replacement (#544).
+            continue
         assert vr in DUMMY_VRS, (
             f"{key} ({rule['name']}) is a value-less REPLACE on {vr}, which "
             f"has no dummy; give the row a departure or a dummy")

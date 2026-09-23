@@ -55,13 +55,15 @@ REFUSED = {
     "id-replace-value": ("0010,0020", {"action": "REPLACE", "value": "X"},
                          "Patient ID can only be kept", ("REPLACE", "X")),
     # A value-less REPLACE on DA, TM and OB was refused here until #557,
-    # which gave those VRs a dummy (see ALLOWED). A numeric VR, AT and UI
-    # have none: no Table E.1-1 D row is numeric or AT, and a dummy UID is
-    # UID replacement (#544).
+    # which gave those VRs a dummy (see ALLOWED). A numeric VR and AT have
+    # none: no Table E.1-1 D row is numeric or AT. A value-less REPLACE on
+    # UI loads since #544 -- it is the keyed UID replacement -- and a
+    # `value:` a UI cannot hold is still refused.
     "replace-on-ds": ("0010,1030", {"action": "REPLACE"},
                       "0010,1030 is DS, which cannot hold it", ("REPLACE", None)),
-    "replace-on-ui": ("0008,0018", {"action": "REPLACE"},
-                      "a UID is replaced by UID replacement (#544)", ("REPLACE", None)),
+    "replace-bad-value-on-ui": ("0008,0016", {"action": "REPLACE", "value": "x.y"},
+                                "0008,0016 is UI, which cannot hold it",
+                                ("REPLACE", "x.y")),
     "string-form-on-us": ("0028,0010", "Rows",
                           "0028,0010 is US, which cannot hold it", None),
     "replace-on-at": ("0028,0009", {"action": "REPLACE", "value": "00100010"},
@@ -142,13 +144,17 @@ def test_the_messages_are_the_ones_the_changelog_quotes():
         "cfg.yaml: phi_tags['0010,1030'] is REPLACE, which writes "
         "'ANONYMIZED', and 0010,1030 is DS, which cannot hold it; use EMPTY "
         "or REMOVE, or give a value: that is a valid DS (#560)")
+    # A value-less REPLACE on a UI is the keyed UID since #544; a value
+    # the UI cannot hold is refused, and the message names the spelling
+    # that replaces it.
     with pytest.raises(ValueError) as caught:
-        validate_phi_policy({"0008,0018": {"action": "REPLACE"}}, "cfg.yaml")
+        validate_phi_policy({"0008,0018": {"action": "REPLACE", "value": "x.y"}},
+                            "cfg.yaml")
     assert str(caught.value) == (
         "cfg.yaml: phi_tags['0008,0018'] is REPLACE, which writes "
-        "'ANONYMIZED', and 0008,0018 is UI, which cannot hold it; use EMPTY "
-        "or REMOVE, or give a value: that is a valid UI (#560); a UID is "
-        "replaced by UID replacement (#544)")
+        "'x.y', and 0008,0018 is UI, which cannot hold it; use EMPTY "
+        "or REMOVE, or give a value: that is a valid UI (#560); REPLACE "
+        "with no value gives it this project's replacement UID (#544)")
     # A `value:` that fails still gets the JITTER advice on a date.
     with pytest.raises(ValueError) as caught:
         validate_phi_policy({"0008,0012": {"action": "REPLACE", "value": "X"}},

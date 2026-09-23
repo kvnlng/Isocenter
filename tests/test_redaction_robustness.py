@@ -39,7 +39,8 @@ def test_redaction_crash_prevention(mock_store):
     from unittest.mock import patch
     with patch.object(Instance, 'get_pixel_data', return_value=None):
         try:
-            service.redact_machine_instances("SN-FAIL", [(0, 100, 0, 100)], verbose=True)
+            service.redact_machine_instances("SN-FAIL", [(0, 100, 0, 100)], verbose=True,
+                                             project_secret=FIXED_A)
         except AttributeError as e:
             pytest.fail(f"Crash detected: {e}")
 
@@ -91,6 +92,7 @@ import logging
 import numpy as np
 
 from isocenter.pixel_geometry import resolve_pixel_geometry
+from support.project_secret import FIXED_A
 
 
 def test_a_zone_that_cannot_be_applied_raises_instead_of_reporting_nothing():

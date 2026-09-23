@@ -181,11 +181,13 @@ def test_a_scan_that_could_not_read_one_instance_says_so(tmp_path, ocr_present):
     two words, not one: with one, both counts are 1.
     """
     ocr_present.image_to_data = lambda *a, **k: TWO_WORDS
-    with _session(tmp_path, [_instance("1.2.481.1"),
-                             _instance("1.2.481.2", readable=False)]) as session:
+    broken = _instance("1.2.481.2", readable=False)
+    with _session(tmp_path, [_instance("1.2.481.1"), broken]) as session:
         session.anonymize()
+        # Named by the UID it holds now: the pass replaced 1.2.481.2 (#544).
+        assert broken.sop_instance_uid != "1.2.481.2"
         report = session.scan_pixel_content()
-        assert [uid for uid, _ in report.failures] == ["1.2.481.2"]
+        assert [uid for uid, _ in report.failures] == [broken.sop_instance_uid]
         assert len(report.findings) == 2
         text = _report(session, tmp_path)
     line = _scan_line(text)
@@ -331,13 +333,14 @@ def test_a_real_scan_failure_is_counted_where_section_4_lists_it(tmp_path, ocr_p
     beside a scan that ran.
     """
     ocr_present.image_to_data = lambda *a, **k: WORD
-    with _session(tmp_path, [_instance("1.2.481.1"),
-                             _instance("1.2.481.2", readable=False)]) as session:
+    broken = _instance("1.2.481.2", readable=False)
+    with _session(tmp_path, [_instance("1.2.481.1"), broken]) as session:
         session.anonymize()
         session.scan_pixel_content()
         text = _report(session, tmp_path)
     rows = _warning_rows(text)
-    assert len(rows) == 1 and "1.2.481.2" in rows[0], _section4_rows(text)
+    # The UID the instance holds after the pass (#544).
+    assert len(rows) == 1 and broken.sop_instance_uid in rows[0], _section4_rows(text)
     assert REVIEW_LINE in text
     assert "Identified Issues" not in text
     assert OLD_CLAIM not in text

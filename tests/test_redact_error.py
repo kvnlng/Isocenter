@@ -3,6 +3,7 @@ import pytest
 from isocenter.session import DicomSession
 from isocenter.services import RedactionService
 from unittest.mock import MagicMock
+from support.project_secret import FIXED_A
 
 def test_execute_config_crash_repro(tmp_path):
     """
@@ -41,7 +42,7 @@ def test_execute_config_crash_repro(tmp_path):
 
         # This should NOT raise AttributeError anymore
         try:
-            service.process_machine_rules(rule_with_list_zone)
+            service.process_machine_rules(rule_with_list_zone, project_secret=FIXED_A)
         except AttributeError as e:
             pytest.fail(f"Regression: List-based zones crashed: {e}")
 

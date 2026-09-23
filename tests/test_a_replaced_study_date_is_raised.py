@@ -114,7 +114,11 @@ def _instance(session):
 
 
 def _study_findings(report):
-    return [f for f in report.findings if f.entity_type == "Study"]
+    """The study's date findings. Not its UID's: a reopen with no
+    configuration scans under the floor, which replaces the Study Instance
+    UID the pass under `phi_tags` alone left (#544)."""
+    return [f for f in report.findings
+            if f.entity_type == "Study" and f.tag == STUDY_DATE]
 
 
 def test_a_hand_replaced_study_date_is_raised_and_shifted(tmp_path):

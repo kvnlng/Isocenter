@@ -232,12 +232,15 @@ class DicomStore:
         return files
 
     def get_superseded_uids(self) -> Dict[str, str]:
-        """Pre-redaction identities, mapped to the instance that holds them now.
+        """The identities instances were ingested under, mapped to the
+        instance that holds them now.
 
-        `regenerate_uid()` records the SOP Instance UID an instance
-        carried before redaction gave it a new one. A file offered to
-        `ingest()` under one of these UIDs is the un-redacted original of
-        an image this store already holds, reached by a path
+        `Instance._take_sop_uid` records the SOP Instance UID an instance
+        carried before redaction (`regenerate_uid()`) or, since #544, UID
+        replacement at `anonymize()` first gave it a new one. A file
+        offered to `ingest()` under one of these UIDs is the source of an
+        image this store already holds -- un-redacted, if it was
+        redacted -- reached by a path
         de-duplication did not recognise -- a copy, a move, or a
         symlinked mount. `DicomImporter.import_files` declines it (#238).
 

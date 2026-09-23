@@ -129,7 +129,19 @@ def test_a_saved_and_reopened_store_reads_its_owner_removals_as_done(tmp_path):
         second.load_config(str(tmp_path / "cfg.yaml"))
         before = len(_rows(second))
 
-        assert second.anonymize(report) == 24
+        # And the UID replacements (#544), re-applied like the REPLACEs,
+        # each writing the replacement its entity already holds: fourteen
+        # findings over the two files, ten applications, because each
+        # instance's copy of its Study and Series Instance UID folds into
+        # the owner's write.
+        uids = sorted((f.entity_type, f.tag) for f in report.findings
+                      if f.remediation_proposal is not None
+                      and f.remediation_proposal.metadata.get("uid_replacement"))
+        assert uids == sorted(
+            [("Instance", tag) for tag in ("0008,0014", "0008,0018", "0020,000d",
+                                           "0020,000e", "0020,0052")] * 2
+            + [("Series", "0020,000e"), ("Study", "0020,000d")] * 2), uids
+        assert second.anonymize(report) == 24 + 10
 
         rows = _rows(second)[before:]
         assert [a for a, _ in rows].count("REMEDIATION_DECLINED") == 0, rows

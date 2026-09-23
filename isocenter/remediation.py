@@ -643,6 +643,7 @@ class RemediationService:
         # is imported at module scope for other names already.
         from pydicom.datadict import dictionary_VR  # pylint: disable=import-outside-toplevel
         from .entities import _canonical_tag  # pylint: disable=import-outside-toplevel
+        from .privacy import UID_REPLACEMENT  # pylint: disable=import-outside-toplevel
 
         proposal = finding.remediation_proposal
         tag = _canonical_tag(proposal.target_attr)
@@ -713,7 +714,19 @@ class RemediationService:
                         (attributes or {}).get(tag), (bytes, bytearray))):
                 value = b""
         self._record_what_is_left(entity, proposal.target_attr, value)
-        entity.set_attr(proposal.target_attr, value)
+        if (tag == "0008,0018" and not finding.entity_path
+                and hasattr(entity, "_take_sop_uid")
+                and (proposal.metadata or {}).get(UID_REPLACEMENT)):
+            # An Instance's own SOP Instance UID under the keyed UID
+            # replacement (#544): the property moves with the element, or
+            # the export would name the file, write the file meta and key
+            # the store by the source UID while the element said another.
+            # The pixels are unchanged, so the source file still serves
+            # them. A `REPLACE value:` writes the element alone, as in
+            # 0.9.8 (owner ruling on Q-C of #544).
+            entity._take_sop_uid(value, pixels_changed=False)
+        else:
+            entity.set_attr(proposal.target_attr, value)
         return (f"Remediated {finding.entity_uid} (Tag {proposal.target_attr}) "
                 f"-> {proposal.new_value}"), None
 
@@ -1150,16 +1163,10 @@ class RemediationService:
             return False
         if getattr(entity, attr) is not None:
             return False
-        # A Patient walks its studies; a Study walks its own series and
-        # no sibling's -- `_write_to_instances`' walk, in its words.
-        studies = getattr(entity, "studies", None)
-        if studies is None:
-            studies = [entity]
-        for study in studies:
-            for series in getattr(study, "series", []):
-                for instance in getattr(series, "instances", []):
-                    if tag in getattr(instance, "attributes", {}):
-                        return False
+        # `_write_to_instances`' walk, the same helper.
+        for instance in cls._instances_beneath(entity):
+            if tag in getattr(instance, "attributes", {}):
+                return False
         return True
 
     def _belongs_to_holder(self, patient_id, scheme, holder) -> bool:
@@ -1344,13 +1351,25 @@ class RemediationService:
         mis-named nested finding stamps the item alone, never the
         instance.
         """
+        if isinstance(entity, Patient):
+            return self._pass_start_ids.get(id(entity))
+        # As the pass began, like a patient's: since #544 the pass itself
+        # moves an instance's, a study's and a series' UID, and read now
+        # it would be the replacement, under which the audit raised
+        # nothing. Read now only for an entity the snapshot does not hold.
+        if id(entity) in self._pass_start_uids:
+            return self._pass_start_uids[id(entity)]
+        return self._uid_of(entity)
+
+    @staticmethod
+    def _uid_of(entity) -> Optional[str]:
+        """An Instance's, a Study's or a Series' own UID now; None for a
+        nested item, which has none."""
         if isinstance(entity, Instance):
             return entity.sop_instance_uid
         if isinstance(entity, Study):
             return entity.study_instance_uid
-        if isinstance(entity, Patient):
-            return self._pass_start_ids.get(id(entity))
-        return None
+        return getattr(entity, "series_instance_uid", None)
 
     #: The `Patient`/`Study` fields the exporter stamps onto every exported
     #: instance from the entity, with the tag each is the value of
@@ -1380,7 +1399,30 @@ class RemediationService:
         # reaches today" -- a hand-built finding on it gets the same
         # one-truth treatment (#497 review, R7).
         "study_time": "0008,0030",
+        # The owners' own UIDs (#544): the exporter stamps both from the
+        # entity, and the keyed UID replacement moves the entity, so its
+        # instances' top-level copies take the same value in the same
+        # write. A Series walks its own instances.
+        "study_instance_uid": "0020,000d",
+        "series_instance_uid": "0020,000e",
     }
+
+    @staticmethod
+    def _instances_beneath(entity):
+        """Every instance under a Patient, a Study or a Series: the walk
+        `_write_to_instances` writes and `_owner_field_gone` reads, spelled
+        once so the writer and the reader cannot disagree about one
+        instance. `getattr` with defaults because the arms fire for any
+        object carrying the field, test doubles included."""
+        if hasattr(entity, "instances"):
+            yield from getattr(entity, "instances", [])
+            return
+        studies = getattr(entity, "studies", None)
+        if studies is None:
+            studies = [entity]
+        for study in studies:
+            for series in getattr(study, "series", []):
+                yield from getattr(series, "instances", [])
 
     #: `id(nested item) -> Instance` holding it, for the findings of this
     #: pass raised inside a sequence (#494). Empty unless
@@ -1623,6 +1665,9 @@ class RemediationService:
     #: `id(Patient) -> patient_id` as the pass began, for `_live_uid`.
     #: Set with the tally; read-only for `_instance_owners`' reason.
     _pass_start_ids = _MappingProxyType({})
+    #: `id(entity) -> its SOP, Study or Series Instance UID` as the pass
+    #: began (#544), for `_live_uid`. Set with the tally; read-only.
+    _pass_start_uids = _MappingProxyType({})
 
     def _use_scan_tally(self, tally, findings=()) -> None:
         """Settle this service's passes against `tally` (#553).
@@ -1644,6 +1689,10 @@ class RemediationService:
         self._pass_start_ids = self._MappingProxyType({
             id(f.entity): f.entity.patient_id for f in findings
             if isinstance(f.entity, Patient)})
+        # The same for the UIDs the pass may replace (#544).
+        self._pass_start_uids = self._MappingProxyType({
+            id(f.entity): self._uid_of(f.entity) for f in findings
+            if f.entity is not None and not isinstance(f.entity, Patient)})
 
     def _write_to_instances(self, entity, field: str) -> Optional[Tuple[int, int]]:
         """Write the value a Patient/Study field now holds onto each
@@ -1707,35 +1756,28 @@ class RemediationService:
             value = format_study_date(value)
 
         # A Patient walks its studies; a Study walks its own series and
-        # no sibling's. `getattr` with defaults because the arm fires
-        # for any object carrying the field, test doubles included.
-        studies = getattr(entity, "studies", None)
-        if studies is None:
-            studies = [entity]
+        # no sibling's; a Series its own instances (#544).
         written = folds = 0
-        for study in studies:
-            for series in getattr(study, "series", []):
-                for instance in getattr(series, "instances", []):
-                    if tag not in instance.attributes:
-                        continue
-                    status = instance.phi_status
-                    self._record_what_is_left(instance, tag, value)
-                    if value is None:
-                        del instance.attributes[tag]
-                        instance.mark_modified()
-                    else:
-                        instance.set_attr(tag, value)
-                    if status is not PhiStatus.UNSCANNED:
-                        instance.record_phi_status(status)
-                    # This copy now holds the owner's value; an
-                    # instance finding on it later in the pass folds
-                    # into this write rather than running (#496).
-                    # Whether the write removed it: a REMOVE folds only
-                    # into a removal, anything else only into a value.
-                    removed = value is None
-                    self._owner_copies[(id(instance), tag)] = removed
-                    folds += self._pending_folds.get((id(instance), tag, removed), 0)
-                    written += 1
+        for instance in self._instances_beneath(entity):
+            if tag not in instance.attributes:
+                continue
+            status = instance.phi_status
+            self._record_what_is_left(instance, tag, value)
+            if value is None:
+                del instance.attributes[tag]
+                instance.mark_modified()
+            else:
+                instance.set_attr(tag, value)
+            if status is not PhiStatus.UNSCANNED:
+                instance.record_phi_status(status)
+            # This copy now holds the owner's value; an instance finding
+            # on it later in the pass folds into this write rather than
+            # running (#496). Whether the write removed it: a REMOVE folds
+            # only into a removal, anything else only into a value.
+            removed = value is None
+            self._owner_copies[(id(instance), tag)] = removed
+            folds += self._pending_folds.get((id(instance), tag, removed), 0)
+            written += 1
         return written, folds
 
     @staticmethod

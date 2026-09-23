@@ -36,6 +36,7 @@ import pydicom
 import pytest
 from pydicom.data import get_testdata_file
 
+from isocenter.entities import SOURCE_SOP_UID_ATTR
 from isocenter.io_handlers import DicomExporter, ExportError, ExportSummary
 from isocenter.session import DicomSession
 
@@ -118,7 +119,8 @@ def _two_patients_one_identified(tmp_path, level):
 
     `level` picks where the identifier goes, so the row's level word is
     measured rather than assumed. Returns (session, withheld uid, kept
-    uid, the value put back).
+    uid, the value put back): the UIDs the pass gave the two instances,
+    which the rows and the files name (#544).
     """
     src = tmp_path / "src"
     a = _write_ct(str(src), "PAT-536-A", "11", "Alpha^Test")
@@ -126,7 +128,9 @@ def _two_patients_one_identified(tmp_path, level):
     session = DicomSession(persistence_file=str(tmp_path / "b.db"))
     session.ingest(str(src))
     session.anonymize()
-    patient, inst = _instances(session)[a]
+    by_source = {i.attributes.get(SOURCE_SOP_UID_ATTR): (p, i)
+                 for p, i in _instances(session).values()}
+    patient, inst = by_source[a]
     if level == "instance":
         value = "St Elsewhere Hospital"
         inst.set_attr("0008,0080", value)
@@ -134,7 +138,7 @@ def _two_patients_one_identified(tmp_path, level):
         value = "Doe^Jane"
         patient.patient_name = value
         patient.mark_modified()
-    return session, a, b, value
+    return session, inst.sop_instance_uid, by_source[b][1].sop_instance_uid, value
 
 
 @pytest.mark.parametrize("mode", MODES, indirect=True)

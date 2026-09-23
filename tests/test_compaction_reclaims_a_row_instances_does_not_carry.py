@@ -66,7 +66,7 @@ def test_a_row_under_a_regenerated_uid_is_reclaimed_at_the_store_layer(
         # The worker's exact sequence, with no save in between.
         target = live[1]
         old_uid = target.sop_instance_uid
-        target.regenerate_uid()
+        target.regenerate_uid("2.25.1001")
         new_uid = target.sop_instance_uid
         assert new_uid != old_uid
         target.set_pixel_data(np.zeros((64, 64), dtype=np.uint8))

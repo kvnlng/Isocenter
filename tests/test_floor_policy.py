@@ -85,7 +85,7 @@ def test_the_floor_is_the_basic_profile_plus_the_research_defaults():
     assert all(tag == tag.lower() for tag in FLOOR_POLICY)
     # Patient's Age is a basic rule since #547, so all three research
     # defaults override one and the floor adds nothing.
-    assert len(FLOOR_POLICY) == 590
+    assert len(FLOOR_POLICY) == 646
 
     assert RESEARCH_DEFAULTS["0008,0020"]["action"] == "JITTER"
     assert RESEARCH_DEFAULTS["0010,0040"]["action"] == "KEEP"
@@ -96,7 +96,7 @@ def test_the_floor_is_the_basic_profile_plus_the_research_defaults():
     # is X/Z/D in Table E.1-1: EMPTY since #547, its dummy since #557.
     assert BASIC_PROFILE["0008,1010"]["action"] == "REPLACE"    # Station Name
     assert BASIC_PROFILE["0008,0030"]["action"] == "EMPTY"      # Study Time
-    assert len(BASIC_PROFILE) == 590
+    assert len(BASIC_PROFILE) == 646
 
     # Derived, not aliased: the floor's entries are not the profile's
     # objects, so an edit to one cannot rewrite the other.
@@ -478,7 +478,7 @@ def _report_method_line(session, tmp_path, name):
 
 
 def test_the_report_counts_the_policy_in_force(tmp_path):
-    """The bare report says 590 rules and `session defaults`; a
+    """The bare report says 646 rules and `session defaults`; a
     `privacy_profile: none` session says 0. Kills `generate_report`'s
     `load_phi_config()` fallback (the loader is gone since #729) for an
     empty `phi_tags` -- under it the
@@ -581,7 +581,7 @@ def test_a_saved_configuration_reloads_under_the_same_policy(tmp_path):
 
 def test_the_loader_lowercases_user_keys_before_the_merge(tmp_path):
     """A user key spelled `0008,103E` under `privacy_profile: basic` yields
-    one `0008,103e` entry (590, not 591) carrying the user's action. Kills
+    one `0008,103e` entry (646, not 647) carrying the user's action. Kills
     a merge that leaves the uppercase key beside the profile's: the
     inspector collapses them at scan time with the later one winning by
     dict order, and the report counts a rule that never existed."""
@@ -634,8 +634,8 @@ def test_a_config_without_a_profile_line_extends_the_floor(tmp_path, caplog):
 
 def test_keep_opts_a_tag_out_of_the_floor(tmp_path):
     """`action: KEEP` in a file with no profile line opts one tag out of
-    the floor, and the key may be spelled uppercase. Loaded: 590 entries,
-    one `0008,103e` carrying KEEP (not 591 with the KEEP winning only by
+    the floor, and the key may be spelled uppercase. Loaded: 646 entries,
+    one `0008,103e` carrying KEEP (not 647 with the KEEP winning only by
     dict order); the audit raises nothing for it; and a KEEP on
     Institution Name survives to the exported CT_small. Kills the
     override order reversed (floor over user) and the loader not

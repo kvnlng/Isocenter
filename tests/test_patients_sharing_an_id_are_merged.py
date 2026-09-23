@@ -31,9 +31,16 @@ import pytest
 from isocenter import Session
 from isocenter.entities import (JITTER_SCHEME_KEYED, JITTER_SCHEME_UNKEYED,
                                 Instance, Patient, PhiStatus, Series, Study)
+from isocenter.privacy import _replacement_uid_for
 from isocenter.store import DicomStore
 
 from support.ct_small_files import row_counts, study_uid, write_ct
+from support.store_secret import secret_of
+
+
+def _replaced(db, suffix):
+    """Study `suffix`'s UID as `anonymize()` replaced it (#544)."""
+    return _replacement_uid_for(study_uid(suffix), secret_of(db))
 
 MODES = ["threads", "processes"]
 
@@ -101,12 +108,14 @@ def _two_passes_in_one_session(tmp_path):
     session.save(sync=True)
     session.ingest(str(tmp_path / "second"))
 
-    def holding(suffix):
+    def holding(uid):
         return next(p for p in session.store.patients
-                    if study_uid(suffix) in
-                    [s.study_instance_uid for s in p.studies])
+                    if uid in [s.study_instance_uid for s in p.studies])
 
-    stored, arrived = holding("1"), holding("3")
+    # Study 1 carries its replacement since pass 1 (#544); study 3 has
+    # not been through a pass yet.
+    stored = holding(_replaced(tmp_path / "store.db", "1"))
+    arrived = holding(study_uid("3"))
     assert stored is not arrived
     report = session.audit()
     return session, report, stored, arrived
@@ -124,8 +133,9 @@ def test_anonymize_merges_a_reingested_patient_into_the_stored_one(
         survivor = next(p for p in session.store.patients
                         if p.patient_id == stored.patient_id)
         assert survivor is stored
+        db = tmp_path / "store.db"
         assert [s.study_instance_uid for s in survivor.studies] == [
-            study_uid("1"), study_uid("3")]
+            _replaced(db, "1"), _replaced(db, "3")]
         assert not any(p is arrived for p in session.store.patients)
         assert arrived.studies == []
     finally:
@@ -303,8 +313,10 @@ def test_restore_onto_an_id_a_raw_patient_holds_merges_them(tmp_path, mode):
         assert len(session.store.patients) == 1
         assert session.store.patients[0] is stored
         assert stored.patient_id == "PAT-001"
+        # The stored study was replaced by the pass; the raw one was never
+        # anonymized, and a restore puts back no UID.
         assert [s.study_instance_uid for s in stored.studies] == [
-            study_uid("1"), study_uid("3")]
+            _replaced(db, "1"), study_uid("3")]
         session.save(sync=True)
 
     assert row_counts(db) == (1, 2, 2, 2)

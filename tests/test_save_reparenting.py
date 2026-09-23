@@ -209,35 +209,58 @@ def mode(request, monkeypatch):
     return request.param
 
 
+@pytest.mark.parametrize("uids", ["kept", "replaced"])
 @pytest.mark.parametrize("mode", MODES, indirect=True)
-def test_anonymize_after_a_reload_keeps_an_undated_study(tmp_path, mode):
+def test_anonymize_after_a_reload_keeps_an_undated_study(tmp_path, mode, uids):
     """#551 end to end, through the public API only.
 
-    One patient whose study has no StudyDate, so no finding dirties the
-    study: `ingest()`, `audit()`, `save()`; reopen; `audit()` records the
-    status the study already carries (the #173 short-circuit) and
+    One patient whose study has no StudyDate, so no date finding dirties
+    the study: `ingest()`, `audit()`, `save()`; reopen; `audit()` records
+    the status the study already carries (the #173 short-circuit) and
     `anonymize()` replaces the Patient ID. Measured on 1c41e5e:
     (1, 1, 1, 1) after the first session and (1, 0, 0, 0) after the second.
+
+    `kept` is that clean-study path: since #544 the floor replaces the
+    Study Instance UID, which dirties the study, so the path is reached
+    only with the UIDs kept. `replaced` is the floor's own path, where the
+    one save re-parents the study under the pseudonym *and* re-keys it
+    under its replacement UID.
     """
+    import sqlite3
+
     from isocenter import Session
     from support.ct_small_files import row_counts, write_ct
+    from support.kept_uids import keep_uids
 
     write_ct(tmp_path / "in" / "a.dcm", "PAT-001", "1", study_date=None)
     db = tmp_path / "store.db"
     with Session(str(db)) as session:
+        if uids == "kept":
+            keep_uids(session)
         session.ingest(str(tmp_path / "in"))
         session.audit()
         session.save(sync=True)
     assert row_counts(db) == (1, 1, 1, 1)
 
     with Session(str(db)) as session:
+        if uids == "kept":
+            keep_uids(session)
         report = session.audit()
         study = session.store.patients[0].studies[0]
+        source = study.study_instance_uid
         session.anonymize(report)
         assert session.store.patients[0].patient_id.startswith("ANON_")
-        assert not study.has_unsaved_changes, (
-            "the study was dirtied by the pass, so this no longer reaches "
-            "the clean-study path it exists to cover")
+        if uids == "kept":
+            assert not study.has_unsaved_changes, (
+                "the study was dirtied by the pass, so this no longer reaches "
+                "the clean-study path it exists to cover")
+        else:
+            assert study.study_instance_uid != source
+            assert study.has_unsaved_changes
         session.save(sync=True)
+        held = study.study_instance_uid
 
     assert row_counts(db) == (1, 1, 1, 1)
+    with sqlite3.connect(str(db)) as conn:
+        assert [r[0] for r in conn.execute(
+            "SELECT study_instance_uid FROM studies")] == [held]

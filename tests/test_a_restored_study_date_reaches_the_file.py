@@ -24,8 +24,16 @@ import pytest
 
 from isocenter import Session
 from isocenter.io_handlers import format_study_date
+from isocenter.privacy import _replacement_uid_for
 
 from support.ct_small_files import study_uid, write_ct
+from support.store_secret import secret_of
+
+
+def _replaced(db, suffix):
+    """Study `suffix`'s UID as `anonymize()` replaced it (#544). A restore
+    puts back what a token holds, and the tokens here hold no UID."""
+    return _replacement_uid_for(study_uid(suffix), secret_of(db))
 
 TAGS = ["0010,0010", "0010,0020", "0008,0020"]
 PID = "PAT-566"
@@ -115,12 +123,13 @@ def test_a_multi_study_restore_gives_each_study_its_own_date(tmp_path, caplog):
                  for st in session.store.patients[0].studies}
         session.save(sync=True)
         session.export(str(tmp_path / "out"), use_compression=False)
-    assert after == {study_uid("5661"): "20040119", study_uid("5662"): "20050505"}
+    one, two = _replaced(db, "5661"), _replaced(db, "5662")
+    assert after == {one: "20040119", two: "20050505"}
     assert not [r for r in caplog.records
                 if r.name == "isocenter" and r.levelno == logging.WARNING
                 and "Study Date" in r.getMessage()], caplog.text
     assert _exported_study_dates(tmp_path / "out") == [
-        (study_uid("5661"), "20040119"), (study_uid("5662"), "20050505")]
+        (one, "20040119"), (two, "20050505")]
     with Session(db) as session:
         assert {st.study_instance_uid: format_study_date(st.study_date)
                 for st in session.store.patients[0].studies} == after
@@ -142,7 +151,9 @@ def test_the_study_count_is_taken_before_the_merge(tmp_path, caplog):
             session.recover_patient_identity(pseudonym, restore=True)
         [patient] = session.store.patients
         dates = {st.study_instance_uid: st.study_date for st in patient.studies}
-    assert dates == {study_uid("5661"): date(2004, 1, 19),
+    # The stored study was replaced by the pass; the raw one ingested
+    # after it was never anonymized and keeps its source UID.
+    assert dates == {_replaced(db, "5661"): date(2004, 1, 19),
                      study_uid("5669"): date(2005, 5, 5)}
     assert not [r for r in caplog.records if "Study Date" in r.getMessage()], caplog.text
 

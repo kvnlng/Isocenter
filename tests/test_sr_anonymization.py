@@ -7,6 +7,7 @@ from isocenter import Session
 from isocenter.entities import Instance
 from isocenter.io_handlers import populate_attrs, process_sequence
 from isocenter.privacy import PhiInspector, PhiFinding
+from support.project_secret import FIXED_A
 
 def test_the_scan_finds_the_same_tag_at_every_level_it_appears():
     """A tag reused at two depths yields a finding per occurrence.
@@ -40,7 +41,7 @@ def test_the_scan_finds_the_same_tag_at_every_level_it_appears():
     inst = Instance("1.2.3", "1.2.840.10008.5.1.4.1.1.88.33", 1)
     populate_attrs(ds, inst)
 
-    findings = PhiInspector()._scan_instance(inst, "P1", None)
+    findings = PhiInspector(project_secret=FIXED_A)._scan_instance(inst, "P1", None)
     names = [f for f in findings if f.tag == "0010,0010"]
 
     assert len(names) == 2, [(f.tag, f.value) for f in findings]

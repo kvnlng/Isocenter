@@ -13,13 +13,16 @@ def test_phi_detection():
     inspector = PhiInspector(project_secret=FIXED_A)
     findings = inspector.scan_patient(pat)
 
-    # Assert
-    assert len(findings) == 3
+    # Assert: the three owned identifiers, and the Study Instance UID the
+    # floor replaces since #544.
+    assert len(findings) == 4
 
     names = [f.field_name for f in findings]
     assert "patient_name" in names
     assert "patient_id" in names
     assert "study_date" in names
+    uid_finding = next(f for f in findings if f.field_name == "study_instance_uid")
+    assert (uid_finding.tag, uid_finding.value) == ("0020,000d", "1.2.3.4")
 
     # Validate reason
     name_finding = next(f for f in findings if f.field_name == "patient_name")

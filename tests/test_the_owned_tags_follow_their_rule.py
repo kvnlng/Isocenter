@@ -201,16 +201,16 @@ def test_patient_id_under_keep_is_kept(run):
 
 
 def test_a_bare_inspector_scans_an_instance_holding_a_patient_id():
-    """Guard. `PhiInspector()._scan_instance` is called with no project
-    secret in several tests, and the floor's ID row is REPLACE: the
-    instance arm proposes the generic `ANONYMIZED`, which folds into the
-    patient's pseudonym write, and mints nothing. Kills a pseudonym mint
-    moved into the instance arm (it raises `RuntimeError` without a
-    secret)."""
+    """Guard. The floor's ID row is REPLACE: the instance arm proposes
+    the generic `ANONYMIZED`, which folds into the patient's pseudonym
+    write, and mints nothing. Kills a pseudonym mint moved into the
+    instance arm (it would propose `ANON_...`). The inspector is given a
+    secret since #544: the floor's SOP Instance UID row is a keyed UID
+    replacement, and without one the scan raises `RuntimeError` there."""
     from isocenter.entities import Instance
     instance = Instance("1.2.826.0.1.537.1", "1.2.840.10008.5.1.4.1.1.7", 1)
     instance.set_attr("0010,0020", PID)
-    findings = [f for f in PhiInspector()._scan_instance(instance, PID)  # pylint: disable=protected-access
+    findings = [f for f in PhiInspector(project_secret=FIXED_A)._scan_instance(instance, PID)  # pylint: disable=protected-access
                 if f.tag == "0010,0020"]
     assert [(f.remediation_proposal.action_type, f.remediation_proposal.new_value)
             for f in findings] == [("REPLACE_TAG", "ANONYMIZED")]

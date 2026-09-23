@@ -361,11 +361,14 @@ def test_a_pre_096_study_date_is_not_raised_either(tmp_path):
         study = reopened.store.patients[0].studies[0]
         assert study.date_shifted and study._shifted_study_date is None
         settled = study.study_date
+        # The date only: this store's pass ran under `phi_tags` alone, and
+        # the reopen scans under the floor, which replaces the Study
+        # Instance UID (#544).
         assert [f for f in reopened.audit().findings
-                if f.entity_type == "Study"] == []
+                if f.entity_type == "Study" and f.field_name == "study_date"] == []
         study.study_date = date(2024, 7, 4)
         assert [f for f in reopened.audit().findings
-                if f.entity_type == "Study"] == []
+                if f.entity_type == "Study" and f.field_name == "study_date"] == []
         reopened.anonymize(reopened.audit())
         assert study.study_date == date(2024, 7, 4)
     assert settled != date(2023, 1, 1)

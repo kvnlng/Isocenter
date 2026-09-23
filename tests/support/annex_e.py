@@ -78,7 +78,14 @@ FIXTURE = (pathlib.Path(__file__).resolve().parent.parent
 #:   Until #557 `D` emptied and `X/D` removed, so an attribute Type 1 in
 #:   its IOD was written zero-length or dropped. Sequences keep their
 #:   actions (`DEVIATIONS`): no dummy item is valid independent of the IOD.
+#: - `U` REPLACEs, with no value, which on a UI is the keyed UID
+#:   replacement (#544): `U` is "replace with a non-zero length UID that
+#:   is internally consistent within a set of Instances", and the
+#:   replacement is a function of the value alone, so every reference to
+#:   one UID gets the same one. Every `U` row is a UI. Until #544 `U` gave
+#:   no rule and every UID was exported as ingested.
 ACTION_FOR_CODE = {
+    "U": "REPLACE",
     "X": "REMOVE",
     "X/D": "REPLACE",
     "Z": "EMPTY",
@@ -90,15 +97,16 @@ ACTION_FOR_CODE = {
 
 #: Codes that give no rule at all.
 NO_ENTRY_CODES = {
-    "U": "#544: replacing UIDs consistently is its own mechanism, not a tag rule",
-    "X/Z/U*": "#544: a sequence of UID references; its contents need UID replacement",
+    "X/Z/U*": "#544: the sequence is kept; the UID references inside it "
+              "(0008,1155, ...) are U rows of their own and are replaced "
+              "wherever they sit, which keeps the references resolving. X/Z "
+              "would drop them",
 }
 
 #: Rows whose code would give a rule, and which get none.
 NO_ENTRY = {
     "gggg,eeee": "private attributes are the `remove_private_tags` sweep, "
                  "on by default, not a rule",
-    "006a,0003": "#544: D on a UI, and a dummy UID is UID replacement",
     "0040,a730": "D on a sequence whose identifying contents are rows of "
                  "their own, so recursion cleans it",
     "0070,0001": "D on a sequence whose identifying contents are rows of "
@@ -193,6 +201,15 @@ GROUP_RULES = {
 #: rule key: history and cross-references a reader of `profiles.py` needs
 #: at the entry. A departure's reason belongs in `DEVIATIONS`.
 LITERAL_COMMENTS = {
+    "0008,0018": [
+        "U in the table, as every UI row below is. REPLACE with no value on a",
+        "UI is the keyed UID (#544): one value, one replacement, wherever it",
+        "sits; a UID this project minted is left as it is.",
+    ],
+    "006a,0003": [
+        "D on a UI: the keyed UID is a non-zero value consistent with the VR,",
+        "which is what D asks for (#544).",
+    ],
     "0008,0020": [
         "Z in the table. Owned by the Study, and since #537 this rule governs",
         "the study's own date: `basic` exports it zero-length. The floor",

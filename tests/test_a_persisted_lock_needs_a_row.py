@@ -145,7 +145,7 @@ def test_a_regenerated_uid_persisted_raises(tmp_path):
     db, session = _ingested(tmp_path, "PAT-641")
     with session:
         [inst] = _instances(session, "PAT-641")
-        inst.regenerate_uid()
+        inst.regenerate_uid("2.25.641")
         with pytest.raises(RuntimeError) as raised:
             session.lock_identities("PAT-641", tags_to_lock=TAGS, persist=True)
         assert str(raised.value) == row_text(1, 1)

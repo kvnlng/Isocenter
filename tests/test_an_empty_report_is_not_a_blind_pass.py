@@ -156,8 +156,12 @@ def test_a_filtered_report_that_matched_nothing_remediates_nothing(tmp_path):
     the filter matches nothing, so nothing is asked for."""
     with _session(tmp_path) as session:
         report = session.audit()
+        # Patient's Address, which the fixture does not carry. It was
+        # `entity_type == "Series"` until a Series had findings of its own
+        # (#544).
+        assert report.findings
         subset = PhiReport([f for f in report.findings
-                            if f.entity_type == "Series"])
+                            if f.tag == "0010,1040"])
         assert list(subset) == []
         before = len(_rows(session))
 
