@@ -965,3 +965,50 @@ def test_another_stores_report_writes_no_uid_minted_there(tmp_path):
             "SELECT details FROM audit_log WHERE action_type='REMEDIATION_DECLINED'")]
     refused = [d for d in rows if "is not this store's replacement for the UID" in d]
     assert refused and not [d for d in refused for u in minted_by_a if u in d], rows
+
+
+def _series_uid_absent(tmp_path):
+    """A CT whose file carries no Series Instance UID: ingest generates one
+    for the Series (#554's L8 half), and the instance holds no copy of it."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _ct(src / "a.dcm", "1.2.3.99.91", study="1.2.3.99.90")
+    ds = pydicom.dcmread(str(src / "a.dcm"))
+    del ds.SeriesInstanceUID
+    ds.save_as(str(src / "a.dcm"))
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("privacy_profile: basic\n", encoding="utf-8")
+    return src, str(cfg)
+
+
+@pytest.mark.parametrize("reaudit", [False, True], ids=["same-report", "fresh-audit"])
+def test_a_copy_less_instance_bears_its_series_finding(tmp_path, reaudit):
+    """Where an instance carries a top-level Series Instance UID, its own
+    copy's finding follows the Series (#624) and keeps it IDENTIFIED while
+    the Series is not acted on. An instance whose file carried none has no
+    such finding, and only its Series' finding can say so: the scan records
+    it IDENTIFIED while its Series has one, a pass that leaves the Series
+    unhandled keeps it from reading REMEDIATED, and the export grades
+    REVIEW_REQUIRED, not PASS (review of #544, finding 2). Kills the scan's
+    carry dropped, the pass-end Series settle dropped, a held-open Series
+    demoting itself but not its instances, and the Series list not handed
+    to the service."""
+    src, cfg = _series_uid_absent(tmp_path)
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.load_config(cfg)
+        session.ingest(str(src))
+        series = session.store.patients[0].studies[0].series[0]
+        (inst,) = series.instances
+        assert "0020,000e" not in inst.attributes
+        report = session.audit()
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        session.anonymize([f for f in report if f.entity_type != "Series"])
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        if reaudit:
+            again = session.audit()
+            assert [(f.entity_type, f.tag) for f in again] == [("Series", "0020,000e")]
+            assert inst.phi_status is PhiStatus.IDENTIFIED
+        session.export(str(tmp_path / "out"), use_compression=False)
+        grade = _validation_status(session, tmp_path, "r.md")
+    assert grade and "REVIEW_REQUIRED" in grade[0], grade
