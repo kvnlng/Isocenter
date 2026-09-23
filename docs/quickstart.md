@@ -65,6 +65,10 @@ session.lock_identities(report, tags_to_lock=["0010,0010", "0010,0020", "0010,00
 session.save()
 ```
 
+`lock_identities(report)` locks the patients the report's findings name, so the report `audit()` returns locks every patient its scan found. A list of Patient IDs works too, and may mix IDs and findings.
+
+A `Session()` created while a file named `isocenter.key` is in the current working directory enables reversible anonymization with that key by itself, as if you had called `enable_reversible_anonymization()`. The key is looked for there only, not beside the store. With no such file nothing is enabled and no key is created, and a malformed one makes `Session()` raise `ValueError`. Keep the key somewhere else than the store and the exported data: whoever holds the key and an export can read the identities it carries ([What to keep](configuration.md#what-to-keep)).
+
 ## 5. Anonymize, Redact & Export
 
 Remediation is a multi-stage process performed in-memory:

@@ -35,6 +35,7 @@ and finding classes are reached through `isocenter.session`, which
 binds both, so this file names no probe target's module.
 """
 import inspect
+import os
 
 import pytest
 
@@ -214,3 +215,76 @@ def test_the_signatures_are_closed():
         "persist and verbose are keyword-only on the batch method (Q10)")
     assert [p.default for p in params.values()][4:] == [False, True], (
         "the batch method's persist/verbose defaults are lock_identities's")
+
+
+# --- #26: the report arm, and the cwd key, frozen (owner rulings on #789) -----
+
+def _instance_of(session, pid):
+    (patient,) = [p for p in session.store.patients if p.patient_id == pid]
+    return patient.studies[0].series[0].instances[0]
+
+
+def test_a_report_locks_the_patients_its_findings_name_and_no_other(session):
+    """`lock_identities(report)` is tier 1 (owner ruling Q1 on #789): a
+    `PhiReport` selects the patients its findings name. The README test
+    above locks every patient in the session, so a report read as "every
+    patient" would pass it; this one names P1 alone, and P2 is untouched."""
+    result = session.lock_identities(_report_for("P1"), tags_to_lock=TAGS)
+    assert [inst.sop_instance_uid for inst in result] == ["1.2.3.P1"]
+    assert not _instance_of(session, "P2").has_unsaved_changes, (
+        "a patient the report does not name was locked")
+
+
+def test_findings_may_be_mixed_with_patient_ids(session):
+    """The same arm as elements: a finding in a list stands for its
+    patient, beside a plain Patient ID."""
+    (finding,) = _report_for("P1").findings
+    result = session.lock_identities([finding, "P2"], tags_to_lock=TAGS)
+    assert sorted(inst.sop_instance_uid for inst in result) == ["1.2.3.P1", "1.2.3.P2"]
+
+
+def test_a_report_with_no_findings_locks_nobody(session, tmp_path):
+    """What the code does with an empty report, pinned as it stands: it
+    locks nobody and returns an empty `LockingResult`, and, like any lock,
+    creates the key file when none exists (the key is resolved before the
+    selection is read)."""
+    result = session.lock_identities(PhiReport([]))
+    assert isinstance(result, session_module.LockingResult) and list(result) == []
+    assert not any(_instance_of(session, pid).has_unsaved_changes for pid in ("P1", "P2"))
+    assert (tmp_path / "k.key").exists()
+
+
+def _write_key(path):
+    from cryptography.fernet import Fernet
+    path.write_bytes(Fernet.generate_key())
+
+
+def test_a_key_in_the_working_directory_enables_reversible_anonymization(tmp_path):
+    """`Session()` enables reversible anonymization when `isocenter.key`
+    exists in the current working directory at construction (owner ruling
+    Q2 on #789: frozen, not deleted). The path is resolved then, so a
+    later `chdir` does not move it. conftest runs each test in `tmp_path`."""
+    _write_key(tmp_path / "isocenter.key")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    with DicomSession(str(tmp_path / "auto.db")) as session:
+        assert session.reversibility_service is not None
+        assert session.key_manager.key_path == str(tmp_path / "isocenter.key")
+        os.chdir(elsewhere)
+        try:
+            assert session.key_manager.key_path == str(tmp_path / "isocenter.key")
+        finally:
+            os.chdir(tmp_path)
+
+
+def test_no_key_in_the_working_directory_leaves_it_off_and_creates_none(tmp_path):
+    """The other arm: with no `isocenter.key` in the working directory --
+    even one beside the store, in another directory -- nothing is enabled
+    and no key is created."""
+    store_dir = tmp_path / "store"
+    store_dir.mkdir()
+    _write_key(store_dir / "isocenter.key")
+    with DicomSession(str(store_dir / "auto.db")) as session:
+        assert session.reversibility_service is None
+        assert session.key_manager is None
+    assert not (tmp_path / "isocenter.key").exists()

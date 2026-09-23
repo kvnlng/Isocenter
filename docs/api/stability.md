@@ -49,7 +49,16 @@ behaviour came to be is in the
 `None` meaning `ISOCENTER_DB_PATH` then `isocenter.db`; `":memory:"` is
 accepted. `with Session(...) as s:` (`__enter__` returns the session,
 `__exit__` closes); `close()` is idempotent and releases the executor
-and both threads.
+and both threads. When a file named `isocenter.key` exists in the
+current working directory at construction, `Session()` calls
+`enable_reversible_anonymization()` with it, resolved to an absolute
+path then, so a later change of directory does not move it; a key
+beside the store in another directory is not looked for. With no such
+file, reversible anonymization stays off and no key is created. A
+malformed one makes `Session()` raise its `ValueError`. Keeping the key
+in the directory you run from, beside the store and the exported data,
+is not advised: whoever holds the key and an export can read the
+identities it carries.
 
 **`Session` methods — all 28 public names, with their parameters.**
 `self` is omitted, `*` marks the keyword-only boundary, and a parameter
@@ -141,7 +150,11 @@ not a `str` to `lock_identities_batch`. Only `None` means every patient,
 and neither lock method accepts `None`. An empty iterable selects
 nobody, and an iterator is read once. A bare `str`, a bytes-like value,
 a non-iterable, or an element that is not a `str` raises `TypeError`
-before anything is written. A patient is selected by its `patient_id`
+before anything is written, with one exception: the two lock methods
+also take a `PhiReport`, and `PhiFinding` elements mixed with IDs, and
+lock the patients those findings name. The report `audit()` returns
+locks every patient its scan found; a report with no findings locks
+nobody. A patient is selected by its `patient_id`
 exactly: after `anonymize()` that is its replacement Patient ID, and a
 subject whose files carried no Patient ID is selected by the key
 `get_cohort_report` shows in its `PatientID` column, not by `""`. An ID

@@ -1628,6 +1628,18 @@ def test_the_stability_page_says_what_the_freeze_covers():
     assert ("`generate_report(format=)` accepts `'markdown'` only, and "
             "`generate_manifest(format=)` `'html'` and `'json'`; any other "
             "spelling raises `ValueError`") in frozen
+    # Owner rulings Q1 and Q2 on #789, frozen here: the lock's report arm
+    # (the `patient_ids` paragraph said every non-`str` element raised),
+    # and the constructor's cwd key. Their behaviour is pinned in
+    # `test_lock_identities_signature.py`.
+    assert ("with one exception: the two lock methods also take a "
+            "`PhiReport`, and `PhiFinding` elements mixed with IDs, and lock "
+            "the patients those findings name") in frozen
+    assert ("When a file named `isocenter.key` exists in the current working "
+            "directory at construction, `Session()` calls "
+            "`enable_reversible_anonymization()` with it") in frozen
+    assert ("With no such file, reversible anonymization stays off and no "
+            "key is created.") in frozen
     assert ("except a SOP Instance UID that is none of these three: the one "
             "the first move of the instance's UID (by `anonymize()`, "
             "`redact()` or `Instance.regenerate_uid()`) left, which is the "
