@@ -38,6 +38,7 @@ cannot change the keys whatever the order; no test is needed for it.
 **Why this file imports what it does.** `isocenter.session` and
 `isocenter.entities` are named, so their probe rows are charged.
 """
+import json
 from datetime import date
 
 import numpy as np
@@ -222,12 +223,17 @@ def test_a_pre_0_9_8_shared_token_is_returned_whole(tmp_path):
     after the restore loop rather than before it. That form is
     **equivalent**: the opened tokens do not change, and no restore can
     move a key (see the module docstring). No test kills it and none
-    claims to."""
+    claims to.
+
+    The token is encrypted here and not through `generate_identity_token`,
+    which since 1.0 adds the scheme key (#652): a 0.9.7 lock wrote the bare
+    record, and a marked token is exempt from the shared-token partial
+    restore, which would make this a test of a token 1.0 wrote."""
     with _session(tmp_path) as session:
         patient, instances = _patient(session, [[(A, "ACC-1")], [(D, "ACC-2")]])
         rs = session.reversibility_service
         session._key_for_locking()
-        token = rs.generate_identity_token(_held("ACC-1"))
+        token = rs.engine.encrypt(json.dumps(_held("ACC-1")).encode("utf-8"))
         for inst in instances:
             rs.embed_identity_token(inst, token)
             inst._locked_token = None

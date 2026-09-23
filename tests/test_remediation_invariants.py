@@ -37,55 +37,6 @@ def _saved_instance():
 
 
 # --------------------------------------------------------------------
-# The de-identification method code sequence (0012,0064)
-# --------------------------------------------------------------------
-
-def test_the_deid_method_code_carries_its_coding_scheme():
-    """Mutant: `item.set_attr("0008,0102", "DCM")` deleted, and survived.
-
-    A Code Sequence item is a triple: Code Value, Coding Scheme
-    Designator, Code Meaning. Drop the designator and `113100` names
-    nothing -- code values are only unique within a scheme, so a reader
-    cannot tell "Basic Application Confidentiality Profile" from any
-    other registry's 113100.
-
-    This is the 0.8.1 family exactly: the exported artefact asserting
-    something a consumer has no way to check. Here the assertion is the
-    de-identification conformance claim itself.
-    """
-    inst = _saved_instance()
-    RemediationService().add_global_deid_tags(inst)
-
-    item = inst.sequences["0012,0064"].items[0]
-    assert item.attributes.get("0008,0100") == "113100"
-    assert item.attributes.get("0008,0102") == "DCM", \
-        "the code value has no scheme, so it identifies nothing"
-    assert item.attributes.get("0008,0104") == \
-        "Basic Application Confidentiality Profile"
-
-
-def test_stamping_twice_does_not_duplicate_the_code_item():
-    """The dedup check reads `0008,0100`; nothing pinned that it works."""
-    inst = _saved_instance()
-    service = RemediationService()
-    service.add_global_deid_tags(inst)
-    service.add_global_deid_tags(inst)
-
-    codes = [i.attributes.get("0008,0100")
-             for i in inst.sequences["0012,0064"].items]
-    assert codes == ["113100"], codes
-
-
-def test_the_deid_method_string_is_not_repeated():
-    inst = _saved_instance()
-    service = RemediationService()
-    service.add_global_deid_tags(inst)
-    service.add_global_deid_tags(inst)
-
-    assert inst.attributes["0012,0063"] == ["Isocenter Privacy Profile"]
-
-
-# --------------------------------------------------------------------
 # PatientID resolution -- the input to deterministic date shifting
 # --------------------------------------------------------------------
 

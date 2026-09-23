@@ -160,6 +160,7 @@ COMMITTED = {
     "no_patient_id": ["no_patient_id-s1-1.dcm", "no_patient_id-s2-1.dcm",
                       "no_patient_id-s3-1.dcm"],
     "no_study_date": ["no_study_date-1.dcm"],
+    "prior_markers": ["prior_markers-1.dcm"],
     "private_nested": ["private_nested-1.dcm"],
     "redacted": ["redacted-1.dcm"],
     "withheld": ["withheld-1.dcm"],

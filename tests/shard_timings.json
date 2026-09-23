@@ -96,7 +96,6 @@
  "tests/test_date_shifted_roundtrip.py": 2.94,
  "tests/test_declined_date_recurs.py": 0.19,
  "tests/test_declined_remediation_is_recorded.py": 1.05,
- "tests/test_deid_tags.py": 0.0,
  "tests/test_descriptor_edit_with_pixels_unloaded.py": 16.79,
  "tests/test_discovery.py": 0.01,
  "tests/test_discovery_integration.py": 0.0,

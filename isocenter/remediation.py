@@ -2235,63 +2235,6 @@ class RemediationService:
             rendered += f"{match.group(4)}{hour:02d}:{minute:02d}:{second:02d}"
         return rendered
 
-    def add_global_deid_tags(self, entity):
-        """
-        Stamps the entity with standard De-Identification Method tags.
-
-        Adds:
-        - (0012,0063) De-identification Method (Isocenter Signature)
-        - (0012,0064) De-identification Method Code Sequence (Basic Profile)
-
-        Args:
-            entity: The instance/series to stamp.
-        """
-        if not hasattr(entity, "set_attr"):
-            return
-
-        # 1. 0012,0063 De-identification Method
-        # We append our method string if one exists, or set it fresh
-        # Standard says: "Creator of the De-identification"
-        current_method = entity.attributes.get("0012,0063", [])
-        if isinstance(current_method, str):
-            current_method = [current_method]
-
-        our_method = "Isocenter Privacy Profile"
-        if our_method not in current_method:
-            current_method.append(our_method)
-            # Remove empty/None if any
-            current_method = [x for x in current_method if x]
-
-        entity.set_attr("0012,0063", current_method)
-
-        # 2. 0012,0064 De-identification Method Code Sequence
-        # We assume "Basic Application Confidentiality Profile" (113100)
-        from .entities import DicomSequence, DicomItem
-
-        seq = entity.sequences.get("0012,0064")
-        if not seq:
-            seq = DicomSequence(tag="0012,0064")
-
-        # Create Item
-        # Code: 113100, Scheme: DCM, Meaning: Basic Application Confidentiality Profile
-        item = DicomItem()
-        item.set_attr("0008,0100", "113100")
-        item.set_attr("0008,0102", "DCM")
-        item.set_attr("0008,0104", "Basic Application Confidentiality Profile")
-
-        # Avoid duplication if possible?
-        # A simple check: do we have an item with 113100?
-        exists = False
-        for existing_item in seq.items:
-            if existing_item.attributes.get("0008,0100") == "113100":
-                exists = True
-                break
-
-        if not exists:
-            seq.items.append(item)
-
-        entity.sequences["0012,0064"] = seq
-
 
 def _date_shift_declines(value) -> bool:
     """True when the `SHIFT_DATE` arm's parser would leave `value` unshifted (#498).

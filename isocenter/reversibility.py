@@ -23,13 +23,47 @@ class _TokenHoldsNoRecord(RuntimeError):
     """
 
 
+class _TokenOfALaterScheme(_TokenHoldsNoRecord):
+    """A token of ours whose plaintext names a scheme this release does not
+    know (#652): a later release wrote it.
+
+    A subclass of `_TokenHoldsNoRecord`, so every caller that refuses on
+    that refuses on this, and its own class, so a caller that words its
+    own refusal (the lock's plan) can tell the two apart: such a token
+    *does* hold a record, and "holds no identity record" would be false.
+    Refused rather than read, because a later scheme's meaning is not this
+    release's to guess.
+    """
+
+
 class ReversibilityService:
     """
     Handles the embedding and recovery of encrypted original data in DICOM files.
 
     Compliant with DICOM Part 15, E.1.2 "Re-identifier" logic via the
     Encrypted Attributes Sequence (0400,0500). Uses `CryptoEngine` for encryption.
+
+    **What a token's plaintext holds (#652).** A JSON object of the locked
+    tags' values and, since 1.0, one more key, `TOKEN_SCHEME_KEY`, whose
+    value `TOKEN_SCHEME` says how the lock captured it: per instance, one
+    token per value-set (#583). Inside the encryption, so it is bound to
+    the token, authenticated with it, carried through every export,
+    re-ingest and store, and readable by exactly whoever can restore. A
+    token with no key is scheme 1, every token written through 0.9.8.
+    Written in one place (`generate_identity_token`) and stripped in one
+    (`_split_record`, behind `open_token` and `recover_original_data`), so
+    no caller ever sees it as a tag.
     """
+
+    #: The key the scheme travels under inside a token's plaintext (#652).
+    #: It begins with `_` and holds no comma, so it can never be a
+    #: `gggg,eeee` tag, and 0.9.8's `_merge` skips such a key at export.
+    TOKEN_SCHEME_KEY = "__isocenter_token__"
+
+    #: Captured per instance, one token per distinct value-set (#583): the
+    #: scheme every token 1.0 writes. 1 is implicit (no key). A token
+    #: naming a scheme above this one is refused (`_TokenOfALaterScheme`).
+    TOKEN_SCHEME = 2
 
     # DICOM Standard Tags for Encrypted Attributes
     TAG_ENCRYPTED_ATTRS_SEQ = "0400,0500"
@@ -66,6 +100,10 @@ class ReversibilityService:
         """
         Serializes and encrypts the attributes into a reusable token.
 
+        The one place a token's plaintext is built, so the one place the
+        scheme key is added (#652). After the empty check: the marker never
+        turns an empty record into a token.
+
         Args:
             original_attributes (Dict[str, Any]): Dictionary of tag-value pairs to preserve.
 
@@ -75,7 +113,8 @@ class ReversibilityService:
         if not original_attributes:
             return b""
 
-        json_str = json.dumps(original_attributes)
+        json_str = json.dumps({**original_attributes,
+                               self.TOKEN_SCHEME_KEY: self.TOKEN_SCHEME})
         data_bytes = json_str.encode('utf-8')
         return self.engine.encrypt(data_bytes)
 
@@ -219,7 +258,25 @@ class ReversibilityService:
         return content.encode("utf-8") if isinstance(content, str) else bytes(content)
 
     def open_token(self, content: bytes) -> Dict[str, Any]:
-        """The values a token of ours holds, under this key.
+        """The values a token of ours holds, under this key: the locked
+        tags only, the scheme key stripped (#652).
+
+        `open_token_with_scheme` without the scheme, for every caller that
+        reads values alone (the lock's plan, `held_identity`,
+        `recover_or_raise`). One decrypt, as there.
+
+        Raises:
+            RuntimeError, _TokenHoldsNoRecord: as `open_token_with_scheme`.
+        """
+        return self.open_token_with_scheme(content)[0]
+
+    def open_token_with_scheme(self, content: bytes):
+        """`(values, scheme)` for a token of ours, under this key, from one
+        decrypt (#652): the locked tags' values with the scheme key
+        stripped, and the scheme it names -- 1 for a token with none, which
+        is every token written through 0.9.8. The restore reads the scheme
+        to tell a token captured per value-set from one an earlier release
+        may have shared across studies.
 
         Raises:
             RuntimeError: The key does not decrypt it. No message names
@@ -240,7 +297,11 @@ class ReversibilityService:
                 so no formatted traceback prints the `JSONDecodeError`;
                 the object stays attached as `__context__`, reachable
                 to whoever holds the exception, who also holds the key
-                and the session (review of #633 round 2, P-1).
+                and the session (review of #633 round 2, P-1). A
+                plaintext holding the scheme key and nothing else is an
+                empty record too: the check runs after the strip.
+            _TokenOfALaterScheme: The key opens it and it holds a record,
+                under a scheme this release does not know (#652).
         """
         try:
             decrypted_bytes = self.engine.decrypt(content)
@@ -261,14 +322,40 @@ class ReversibilityService:
         # any `except`, where it changes no traceback: it lets "nothing
         # is chained behind this refusal" be the one assertion
         # (`__suppress_context__`) at every raise of this door.
-        if not isinstance(record, dict) or not record:
+        if not isinstance(record, dict):
             raise _TokenHoldsNoRecord(self._no_record_message()) from None
-        return record
+        values, scheme = self._split_record(record)
+        if not values:
+            raise _TokenHoldsNoRecord(self._no_record_message()) from None
+        return values, scheme
+
+    def _split_record(self, record: Dict[str, Any]):
+        """`(values, scheme)` from a decrypted record: the one door between
+        a token's plaintext and anything that reads it as tags (#652).
+
+        A copy without the scheme key, never the record with it popped, so
+        the caller's dict is untouched. No key is scheme 1. A scheme that
+        is not an int (a bool is not one here), or is not a scheme this
+        release knows, is refused with `_TokenOfALaterScheme`, whatever the
+        record holds: its meaning is a later release's to say.
+        """
+        values = {tag: val for tag, val in record.items()
+                  if tag != self.TOKEN_SCHEME_KEY}
+        scheme = record.get(self.TOKEN_SCHEME_KEY, 1)
+        if (isinstance(scheme, bool) or not isinstance(scheme, int)
+                or not 1 <= scheme <= self.TOKEN_SCHEME):
+            raise _TokenOfALaterScheme(self._later_scheme_message()) from None
+        return values, scheme
 
     def _no_record_message(self) -> str:
         return (f"the key at {self.key_manager.key_path} opens this patient's "
                 "identity token, but it holds no identity record this library "
                 "writes, so nothing can be recovered from it")
+
+    def _later_scheme_message(self) -> str:
+        return (f"the key at {self.key_manager.key_path} opens this patient's "
+                "identity token, but it was written by a later release of this "
+                "library, which recovering it needs")
 
     def held_identity(self, instance: Instance):
         """`(token bytes, values)` for a token of ours this key opens, or
@@ -362,9 +449,15 @@ class ReversibilityService:
             # 3. Decrypt
             decrypted_bytes = self.engine.decrypt(encrypted_bytes)
 
-            # 4. Deserialize
+            # 4. Deserialize, and strip the scheme key through the one
+            # door (#652): a later scheme raises into the `except` below
+            # and reads None, as any token this read cannot open does.
+            # A plaintext that is not an object is returned as it was.
             json_str = decrypted_bytes.decode('utf-8')
-            return json.loads(json_str)
+            record = json.loads(json_str)
+            if isinstance(record, dict):
+                record = self._split_record(record)[0]
+            return record
 
         except Exception as e:
             # `describe_exception`, not `{e}`. The one failure that

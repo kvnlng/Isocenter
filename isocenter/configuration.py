@@ -130,6 +130,48 @@ def _policy_base_label(base) -> str:
     return base
 
 
+#: What `(0012,0063)` calls a policy whose base is an external profile's
+#: path (#554): the path is the operator's directory layout, and exported
+#: data is de-identification scope (#655).
+EXTERNAL_PROFILE_LABEL = "external profile"
+
+
+def _deid_method_label(base: str) -> str:
+    """A recorded `ScanPolicy.base` as De-identification Method names it
+    (#554): verbatim when it is one of the shapes this library spells --
+    a pinned profile name, `none`, or the floor's label -- and
+    `external profile` for anything else, which is a path.
+
+    Exact matches only, so no string that merely looks like one of them
+    (a pinned name in another case, a relative path beginning `floor
+    over `) is written verbatim.
+    """
+    if (base in profiles.PRIVACY_PROFILES
+            or base in (_policy_base_label(None),
+                        _policy_base_label(profiles.FLOOR))):
+        return base
+    return EXTERNAL_PROFILE_LABEL
+
+
+def _deid_method_value(policy: ScanPolicy, version: str) -> str:
+    """This step's De-identification Method `(0012,0063)` value (#554,
+    owner ruling Q4): `isocenter/<version>; <label>; v1:<8 hex>`.
+
+    - `isocenter/<version>` is the exact spelling the output fingerprint's
+      N2 substitution normalises (`scripts/output_fingerprint.py`), so a
+      release bump moves no recorded output. Any other spelling would.
+    - The label is the recorded policy's, through `_deid_method_label`.
+    - 8 hex characters of `ScanPolicy.fingerprint`, never recomputed, so
+      there is one answer to "which policy" (#762 may move it). Eight,
+      not more, for LO's 64: the floor's label with a 17-character
+      version is exactly 64 (`tests/test_an_export_says_how_it_was_de_
+      identified.py`, M12).
+    """
+    scheme, _, digest = policy.fingerprint.partition(":")
+    return (f"isocenter/{version}; {_deid_method_label(policy.base)}; "
+            f"{scheme}:{digest[:8]}")
+
+
 @dataclass
 class IsocenterConfiguration:
     """

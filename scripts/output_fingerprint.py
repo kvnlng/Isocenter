@@ -61,8 +61,12 @@ produces, so a change in where or whether the value appears still shows:
   directories, output folders, the source copy), in step outcomes, export
   results and audit rows. Both the given and the resolved spelling
   (`/var` vs `/private/var` on macOS).
-- N2: `isocenter/<running __version__>`, the WFDB annotations' `source`.
-  Never the bare version string, which is ordinary data in an LO or DS.
+- N2: `isocenter/<running __version__>`, the WFDB annotations' `source`
+  and the De-identification Method `(0012,0063)` value `export()` appends
+  (#554). Applied to a text element before its length test and its hash,
+  so a long value that is recorded as a hash does not carry the version
+  either. Never the bare version string, which is ordinary data in an LO
+  or DS.
 - N3: pydicom's own implementation UID and version name in `0002,0012` /
   `0002,0013`. If Isocenter ever writes its own, that is a difference.
 - The per-element remediation trail rows (`REMEDIATION_REMOVE`,
@@ -138,7 +142,9 @@ SCHEMA = 1
 #: records for the same output (a new field, a new rendering, a new
 #: normalization): `compare` reports a changed recorder under Cohort, so
 #: the differences it causes read as a changed measuring stick.
-RECORDER = 1
+#: 2 (#554): N2 is applied to a text value before its length test and
+#: its hash, so a hashed long value no longer carries the version.
+RECORDER = 2
 
 #: A public test secret, not a secret: `bytes(range(32))`. The suite's
 #: `tests/support/project_secret.py` FIXED_A is the same constant, and a
@@ -232,6 +238,22 @@ def _decode_text(raw_value, ds, vr: str) -> str:
     return text.rstrip(" \x00")
 
 
+def _n2_text(text: str) -> str:
+    """N2 on one decoded text value, at record time (see the text arm of
+    `_record_elements`); `normalize()` applies the same pairs after."""
+    for literal, token in output_substitutions():
+        text = text.replace(literal, token)
+    return text
+
+
+def _n2_bytes(data: bytes) -> bytes:
+    """N2 on a text value's raw bytes before they are hashed. The literal
+    is ASCII, which every character set a text VR is written in keeps."""
+    for literal, token in output_substitutions():
+        data = data.replace(literal.encode("ascii"), token.encode("ascii"))
+    return data
+
+
 def _raw_bytes(raw_value) -> bytes:
     if raw_value is None:
         return b""
@@ -292,11 +314,18 @@ def _record_elements(ds, implicit: bool, prefix: str, out: dict) -> None:
                 source = raw_value
             else:
                 source = elem.value
-            text = _decode_text(source, ds, vr)
+            # N2 before the length test and the hash (RECORDER 2, #554):
+            # a hash is not a string `normalize()` can reach, so a long
+            # value holding `isocenter/<version>` -- a De-identification
+            # Method appended after a source's own -- hashed the running
+            # version and moved on every release; and a value near the
+            # limit crossed it or not by the version's length.
+            text = _n2_text(_decode_text(source, ds, vr))
             if len(text) <= TEXT_LIMIT:
                 out[key] = f"{label} {text!r}"
             else:
-                data = _raw_bytes(raw_value if raw_value is not None else text)
+                data = _n2_bytes(_raw_bytes(
+                    raw_value if raw_value is not None else text))
                 out[key] = f"{label} {_h(data)} len={len(data)}"
             continue
         if vr in NUMBER_VRS or vr == "AT":

@@ -273,10 +273,28 @@ def withheld(out: Path):
     write(ds, out / "withheld-1.dcm")
 
 
+def prior_markers(out: Path):
+    """A CT another tool already de-identified (#554): Patient Identity
+    Removed `YES`, two De-identification Method values, a `113100`/`DCM`
+    code item and Longitudinal Temporal Information Modified `MODIFIED`.
+    No other member carries markers, so without this one the merge -- ours
+    appended after theirs, their code item passed through, `(0028,0303)`
+    replaced or kept -- would be invisible."""
+    ds = ct("prior_markers")
+    ds.PatientIdentityRemoved = "YES"
+    ds.DeidentificationMethod = ["OtherTool 3.2", "site profile 7"]
+    item = Dataset()
+    item.CodeValue, item.CodingSchemeDesignator = "113100", "DCM"
+    item.CodeMeaning = "Basic Application Confidentiality Profile"
+    ds.DeidentificationMethodCodeSequence = Sequence([item])
+    ds.LongitudinalTemporalInformationModified = "MODIFIED"
+    write(ds, out / "prior_markers-1.dcm")
+
+
 MEMBERS = {f.__name__: f for f in (
     longitudinal, private_nested, redacted, curve_overlay, implicit, ecg,
     lut_ambiguous, big_endian_words, float_pixels, no_study_date,
-    no_patient_id, withheld)}
+    no_patient_id, withheld, prior_markers)}
 
 
 def build(out: Path = COHORT, only=None) -> list:
