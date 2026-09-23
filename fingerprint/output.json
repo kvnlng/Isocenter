@@ -125894,12 +125894,12 @@
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "1f1ebcd7ec63e7c1aa6ac60db76d4f568889e5ec",
+  "git_sha": "e85c1a07091d829219106295bff0a20787226d7b",
   "isocenter_version": "0.9.8",
   "jobs": 8,
   "platform": "macOS-27.0-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 508
+  "seconds": 462
  },
  "schema": 1,
  "toolchain": {
