@@ -65,8 +65,13 @@ shows how to change the rules and read the grade they give.
 
 Locking has to come **before** `anonymize()`. The lock copies each
 file's original values into an encrypted token, and after `anonymize()`
-there is no original value left to copy, so a lock then raises
-`RuntimeError`.
+there is no original value left to copy. A lock at that point secures
+nothing, and it does not raise: `lock_identities(report)` looks for the
+report's patients by their original Patient IDs, and after `anonymize()`
+no patient holds them. It logs one `ERROR` line saying the IDs matched no
+patient, returns an empty result, and still creates the key file.
+(Locking one patient by its new ID does raise `RuntimeError`.) That is
+why the page checks the count below.
 
 ```python
 session.enable_reversible_anonymization("isocenter.key")
@@ -85,15 +90,15 @@ locked = session.lock_identities(report)
   you (mode 0600).
 
 ```python
->>> locked
-<LockingResult: 1 instances secured>
+>>> len(locked)
+1
 >>> import os
 >>> os.path.exists("isocenter.key")
 True
 ```
 
-The key is a file of its own, next to the store but not inside it. Keep
-its contents to yourself: anyone who holds it can read every locked
+The key is a file of its own. Here it sits next to the store; step 6
+moves it where it belongs. Keep its contents to yourself: anyone who holds it can read every locked
 identity. This page never prints it.
 
 Now de-identify and export as usual, with the report last:
@@ -137,7 +142,10 @@ holds this file **and** the key can recover who the patient is. So
 `export()` says so twice.
 
 **First, a warning**, printed to the console as the export runs and
-written to `isocenter.log` in the working directory:
+written to the log file. By default that is `isocenter.log` in the
+working directory; `ISOCENTER_LOG_FILE` moves it, and
+`ISOCENTER_LOG_LEVEL=ERROR` leaves this warning out of both
+([Environment variables](../environment.md)):
 
 ```python
 def logged_warning(text):
@@ -152,7 +160,8 @@ def logged_warning(text):
 WARNING - 1 of 1 exported instances carry encrypted original identities (0400,0500). They are recoverable with the session key; treat the export as re-identifiable by any holder of it.
 ```
 
-The log does not last: the next `Session` you open overwrites it.
+The log does not last: today, the next `Session` you open overwrites
+it.
 
 **Second, a `REVERSIBLE_EXPORT` row** in the store's audit log. The row
 is kept in the store for good, and the report counts it in section 2.
@@ -186,7 +195,8 @@ must not be able to re-identify, the key must never reach them.
 
     The action name `REVERSIBLE_EXPORT` and the grade values `PASS` and
     `REVIEW_REQUIRED` are frozen for 1.x. The report's layout, the log's
-    format and the warning's wording are not
+    line format, the warning's wording, and a new session overwriting the
+    log are not
     ([API stability](../api/stability.md)). If a 1.x release changes it,
     this page goes red in Isocenter's own tests and is updated with it.
 
@@ -221,8 +231,10 @@ UID of an instance that carries a token, and each value holds what that
 token holds. The first entry speaks for the patient:
 
 ```python
->>> list(identity)
-['2.25...']
+>>> len(identity)
+1
+>>> next(iter(identity)).startswith("2.25.")
+True
 >>> first = next(iter(identity.values()))
 >>> sorted(first)
 ['0008,0050', '0010,0010', '0010,0020', '0010,0030', '0010,0040']
@@ -304,7 +316,7 @@ separate files, and each one does a different job:
 | Keep | Because | If you lose it |
 | :--- | :--- | :--- |
 | **`isocenter.key`**, apart from the store and never with an export | It is the only thing that opens the identity tokens. | Nobody can recover any identity locked under it, and no new key helps. |
-| **The store**: `tutorial.db` *and* `tutorial_pixels.bin`, together | It holds the project secret that made the pseudonyms and date offsets, and the patients you recover from. Never send it with an export. | Later exports of the same patients get new pseudonyms and will not link to this one. The tokens in files already exported can still be opened with the key. |
+| **The store**: `tutorial.db` *and* `tutorial_pixels.bin`, together | It holds the project secret that made the pseudonyms and date offsets, and the patients you recover from. Never send it with an export. | Later exports of the same patients get new pseudonyms, new date offsets and new UIDs, and will not link to this one. The tokens in files already exported can still be opened with the key: ingest those files into a new store, and recover as in step 5. |
 | **`config.yaml`**, under version control | It is your policy. Reload it every time you reopen the store. | Nothing you cannot write again, but a rewritten file must be the same policy, or the next report grades `REVIEW_REQUIRED` until you audit again. |
 
 Keep them apart. The key opens the tokens in the exported files, so an
