@@ -322,3 +322,43 @@ def test_the_instances_alone_never_grade_pass(tmp_path):
         assert inst.phi_status is not PhiStatus.REMEDIATED
         grade = _graded(session, tmp_path)
     assert "**REVIEW_REQUIRED**" in grade and "**PASS**" not in grade, grade
+
+
+@pytest.mark.parametrize("owner_handed", [False, True])
+def test_a_sync_that_is_the_instances_only_write_keeps_its_status(tmp_path, owner_handed):
+    """The Study Date edited after the audit and the pass handed only the
+    instance's top-level Study Date finding (with or without the Study's):
+    the sync to `20200202` is the only write the instance receives. The
+    write moves its revision, and a status left at the old revision reads
+    UNSCANNED, which the pass-end demotion does not take to IDENTIFIED --
+    in the full-report tests another of the instance's findings stamps it
+    afterwards and hides this. Kills M-C9 (the status not re-recorded
+    across the sync)."""
+    session, patient, inst, owners, instance = _session_with(tmp_path, "5691")
+    with session:
+        patient.studies[0].study_date = datetime.date(2020, 2, 2)
+        only = [f for f in instance if f.tag == "0008,0020" and not f.entity_path]
+        assert len(only) == 1
+        study = [f for f in owners if f.entity_type == "Study"] if owner_handed else []
+        session.anonymize(only + study)
+        assert inst.attributes["0008,0020"] == "20200202"
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        assert _owner_declines(_declines(session)) == (
+            {"0008,0020": "Study"} if owner_handed else {})
+
+
+def test_a_copy_edited_after_the_audit_is_synced_back_without_a_record(tmp_path):
+    """The instance's name copy edited after the audit, the owners not
+    handed in: the sync writes the Patient's name back, the source value,
+    and records no remediation for it -- a record would make the next
+    `lock_identities()` stash the source name as a replacement, and the
+    next pass read it as already remediated. Kills M-C8 (the sync always
+    recorded): the full-report tests never sync a source value, because
+    there the copy already holds it."""
+    session, _patient, inst, _owners, instance = _session_with(tmp_path, "5692")
+    with session:
+        inst.set_attr("0010,0010", "Edited^Copy")
+        session.anonymize(instance)
+        assert inst.attributes["0010,0010"] == "Alpha^One"
+        assert not inst.remediation_vouches_for("0010,0010", "Alpha^One")
+        assert inst.phi_status is PhiStatus.IDENTIFIED
