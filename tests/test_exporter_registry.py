@@ -135,6 +135,8 @@ def test_the_exporters_page_is_in_the_nav_and_renders_the_registry():
     # The two pixel gates a plugin misses (review of #786).
     assert "redaction zones" in page
     assert "(0088,0200)" in page
+    # ...and the bookkeeping key holding the replaced source UID (#544).
+    assert "_ISOCENTER_SOURCE_SOP_UID" in page
 
 
 def test_the_two_docstrings_say_provisional():

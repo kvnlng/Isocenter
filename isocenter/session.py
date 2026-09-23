@@ -6387,6 +6387,8 @@ class DicomSession:
                 "Isocenter. None of the export gates ran for it (the "
                 "burned-in re-audit, the configured redaction zones, the "
                 "drop of nested icons that may show redacted pixels, the "
+                "filter that drops the underscore bookkeeping keys, one of "
+                "which holds the source SOP Instance UID, the "
                 "recoverable-identity disclosure, the de-identification "
                 "markers, the owner stamps, the EXPORT and DATA_LOSS "
                 "rows), so this report does not know what it wrote "

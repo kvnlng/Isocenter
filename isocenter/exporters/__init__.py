@@ -29,12 +29,14 @@ class Exporter:
     than the two built-ins, that is the whole of the boundary: `export()`
     applies none of the built-ins' gates (burned-in re-audit, the
     configured redaction zones, the drop of nested icons that may show
-    redacted pixels, identity disclosure, de-identification markers, owner
-    stamps, `EXPORT` and `DATA_LOSS` rows) before or after calling it, and
-    writes one `WARNING` audit row saying the output is not attested by
-    Isocenter. Call `redact()` first, and write no nested pixel payload
-    such as an Icon Image Sequence `(0088,0200)` item: nothing scans or
-    redacts one.
+    redacted pixels, the filter that writes only `gggg,eeee` attribute keys,
+    identity disclosure, de-identification markers, owner stamps, `EXPORT`
+    and `DATA_LOSS` rows) before or after calling it, and writes one
+    `WARNING` audit row saying the output is not attested by Isocenter.
+    Call `redact()` first, write no nested pixel payload such as an Icon
+    Image Sequence `(0088,0200)` item (nothing scans or redacts one), and
+    write no `_`-prefixed key from `attributes`: one holds the source SOP
+    Instance UID that UID replacement removed.
     """
 
     def export(self, session, folder: str, **options):

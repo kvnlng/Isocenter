@@ -59,6 +59,12 @@ exporter other than the two built-in classes, none of the following runs:
   `(0028,0303)` ([#554](https://github.com/kvnlng/Isocenter/issues/554)),
   which Isocenter decides per instance at export time and never puts in
   the graph;
+- the filter on `attributes` keys. The DICOM writer writes only keys shaped
+  `gggg,eeee` and drops every `_`-prefixed bookkeeping key. One of those,
+  `_ISOCENTER_SOURCE_SOP_UID` (`entities.SOURCE_SOP_UID_ATTR`), holds the
+  source SOP Instance UID that UID replacement removed
+  ([#544](https://github.com/kvnlng/Isocenter/issues/544)). A plugin that
+  walks `instance.attributes` writes it;
 - the owner stamps: `(0010,0010)`, `(0010,0020)`, `(0008,0020)`,
   `(0020,000D)` and `(0020,000E)` written from the patient, study and
   series rather than from an instance's own copy;
@@ -103,7 +109,9 @@ what the gates decided.
    formats only; nothing checks it for yours.
 2. **Write `exported_patient_id(patient)`, never `patient.patient_id`.**
    Take a patient's, study's or series' identifiers from the owner object,
-   not from an instance's copy of them.
+   not from an instance's copy of them. Write only `gggg,eeee` keys from
+   `attributes`, never a `_`-prefixed one: those are Isocenter's
+   bookkeeping, and one holds the source SOP Instance UID.
 3. **Do not write the de-identification markers.** Isocenter decides them
    per instance from the PHI statuses it recorded, and a plugin cannot
    reproduce that decision.
