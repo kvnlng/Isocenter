@@ -193,8 +193,10 @@ TIER_TWO_NAMES = {
 #: vocabularies), and "narrowed" has no structural test: the named
 #: behavioural test is the pin for it. Measured at 3fe24bee by deleting
 #: each `append` in turn and running all eight: each named test is red
-#: under its own condition's deletion and green under the other seven,
-#: except the condition-8 test, which condition 7's deletion also kills.
+#: under its own condition's deletion and green under the other seven.
+#: (`test_an_edit_after_a_pass_with_no_pass_since_is_not_pass`, the first
+#: choice for condition 8, is also red under condition 7's deletion, so it
+#: did not tell the two apart.)
 FROZEN_GRADE_CONDITIONS = [
     ("nothing attested",
      "tests/test_report_section5_says_what_happened.py::"
@@ -218,8 +220,8 @@ FROZEN_GRADE_CONDITIONS = [
      "tests/test_the_grade_counts_findings_not_acted_on.py::"
      "test_an_audit_nobody_acted_on_grades_review_required"),
     ("edited after its PHI status was recorded",
-     "tests/test_an_owner_field_edit_is_tracked.py::"
-     "test_an_edit_after_a_pass_with_no_pass_since_is_not_pass"),
+     "tests/test_an_edit_below_or_beside_an_instance_is_seen.py::"
+     "test_an_instance_attribute_edited_after_the_pass_is_not_pass"),
 ]
 
 #: The `Instance` fields that are frozen (`pixel_array` and
@@ -692,7 +694,6 @@ _SIGNATURE_ROW = re.compile(
 _SESSION_TABLE_HEADER = "| Method | Parameters |"
 _OTHER_TABLE_HEADER = "| Callable | Parameters |"
 _TABLE_SEPARATOR = "| --- | --- |"
-_SIGNATURE_TABLE_FRAME = (_SESSION_TABLE_HEADER, _OTHER_TABLE_HEADER, _TABLE_SEPARATOR)
 
 
 def _frozen_section(page: str) -> str:
@@ -803,7 +804,9 @@ def _output_vocabulary_block(page: str) -> str:
 
 
 def _signature_rows(page: str) -> dict:
-    """`docs/api/stability.md`'s Session table as `name -> params`.
+    """One of `docs/api/stability.md`'s signature tables as `name -> params`
+    (pass it a `_table_run`; the Session table's names are bare, the
+    second table's qualified).
 
     The duplicate check is here and not in the caller on purpose.
     `dict()` keeps the *last* match for a repeated key, so a false row
