@@ -104,6 +104,7 @@ nav:
       - 'Waveforms & WFDB': waveforms.md
   - Tutorials:
       - 'De-identify and read the grade': tutorials/deidentify-and-read-the-grade.md
+      - 'Select part of a cohort': tutorials/select-part-of-a-cohort.md
   - API Reference:
       - 'API stability': api/stability.md
       - 'Session': api/session.md
