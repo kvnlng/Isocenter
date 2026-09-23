@@ -4097,9 +4097,10 @@ def _its_key_is_in_use(patient) -> bool:
       counts, **read from the record, not through `phi_status`**: an edit
       since the scan leaves the status reading UNSCANNED, but the scan
       still ran under the key and its report still names it. A current
-      status is stored and hydrated, so a reopen keeps it; a stale one is
-      stored as UNSCANNED, and then the shift or the token below carries
-      the refusal if there is one. What a store does not hold, it cannot
+      status is stored and hydrated, so a reopen keeps it; since #767 so
+      is a stale one (`phi_status_edited`), hydrated with the status the
+      edit left behind, so a reopen keeps that refusal too -- before, it
+      was stored as UNSCANNED and read as no scan at all. What a store does not hold, it cannot
       read: an `audit()` never saved (`close()` does not
       write a status; #644) leaves nothing, and a report carried across
       that reopen reaches the re-keyed patient -- #752's class, fail-closed
@@ -4109,9 +4110,10 @@ def _its_key_is_in_use(patient) -> bool:
       either would do), or a per-value shift record, `_shifted_dates`, on
       an instance or any sequence item below it (#513). Every pass that
       shifts records a status too, so within a session the shift comes
-      with a scan result; across a reopen it may not, because a status
-      the entity has since left is stored as UNSCANNED while the shift
-      record is stored with the value.
+      with a scan result, and across a reopen as well since #767, which
+      stores a status the entity has since left; a store written before
+      that recorded such a status as UNSCANNED, and there the shift
+      record, stored with the value, is the evidence.
     - **An identity token.** Needed apart from the status:
       `lock_identities([patient_id])` locks with no scan and records
       none. `lock_identities()` stashes the Patient ID

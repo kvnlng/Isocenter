@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 
 from cryptography.fernet import InvalidToken
 
-from .entities import Instance
+from .entities import Instance, PhiStatus
 from .crypto import CryptoEngine, KeyManager
 from .logger import get_logger, describe_exception
 
@@ -157,7 +157,7 @@ class ReversibilityService:
             # `mark_modified()` is NOT redundant and must not be tidied
             # away. `add_sequence()` marks the instance modified **only
             # when it creates** -- `self.mark_modified()` at
-            # `entities.py` line 544 sits under `if sequence is None`,
+            # `entities.py` line 545 sits under `if sequence is None`,
             # #186's rule -- and this path reaches into `items` in place
             # rather than through `add_sequence_item()`, which marks on
             # every call. Without the line below the second and later
@@ -175,10 +175,24 @@ class ReversibilityService:
             # token (harmless: the stamp is keyed on the token) or, the
             # other way round, a token without its stamp, which this
             # store's next changed-value re-lock then refuses as foreign.
+            #
+            # The status is read here, before the write, and handed back
+            # after it (#767 widened, owner ruling Q-W2): the token is this
+            # library's own write and not PHI, and the documented path
+            # locks between the audit and the pass, so an instance no
+            # finding reaches would otherwise grade as edited after its
+            # scan -- a false alarm on a documented path. #486's guard, as
+            # redaction's carry has it: read through `phi_status`, which is
+            # UNSCANNED when an edit had already left the status behind,
+            # so a change made before the lock is never laundered by it.
+            carried = instance.phi_status
             instance.record_identity_token(token)
             sequence = instance.add_sequence(self.TAG_ENCRYPTED_ATTRS_SEQ)
+            item._parent = instance
             sequence.items[:] = [item]
             instance.mark_modified()
+            if carried is not PhiStatus.UNSCANNED:
+                instance.record_phi_status(carried)
 
             # self.logger.debug(f"Embedded token into {instance.sop_instance_uid}.")
 

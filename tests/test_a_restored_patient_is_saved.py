@@ -48,8 +48,12 @@ def _threads(monkeypatch):
 def test_a_patient_renamed_without_mark_modified_is_still_written(tmp_path):
     """A clean patient with no row is, by definition, not persisted.
 
-    No revision moves here and no setter is introduced: the save asks the
-    store whether the row exists before it trusts `has_unsaved_changes`.
+    The save asks the store whether the row exists before it trusts
+    `has_unsaved_changes`. Since #767 an assignment of `patient_id` is a
+    change, so the ordinary rename is written on the revision alone; the
+    guard is still the save's answer to a patient holding a new ID with
+    no revision behind it, which is built here by writing the slot past
+    the entity's own bookkeeping.
     """
     store = SqliteStore(str(tmp_path / "rename.db"))
     p = Patient("OLD", "Name^Old")
@@ -61,7 +65,10 @@ def test_a_patient_renamed_without_mark_modified_is_still_written(tmp_path):
     store.save_all([p], prune_absent_patients=True)
     p.mark_subtree_persisted()
 
-    p.patient_id = "NEW"
+    p.patient_id = "RENAMED"
+    assert p.has_unsaved_changes
+    p.mark_subtree_persisted()
+    object.__setattr__(p, "patient_id", "NEW")
     assert not p.has_unsaved_changes
     store.save_all([p], prune_absent_patients=True)
 

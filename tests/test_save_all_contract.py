@@ -455,10 +455,13 @@ def test_an_instance_renamed_after_the_prepass_is_still_written(
     def rename_then_connect(*args, **kwargs):
         if not renamed:
             renamed.append(True)
-            # In place, the way `regenerate_uid()` does it. Plain
-            # attribute assignment, so `_revision` does not move and the
-            # late #274 re-check is not what is under test here.
-            inst.sop_instance_uid = "RENAMED.MID.SAVE"
+            # In place, the way `regenerate_uid()` does it, but past the
+            # entity's bookkeeping, so `_revision` does not move and the
+            # late #274 re-check is not what is under test here. Since
+            # #767 a plain assignment of `sop_instance_uid` moves the
+            # revision (it is an edit), and the instance would then stay
+            # unsaved after this save for that reason alone.
+            object.__setattr__(inst, "sop_instance_uid", "RENAMED.MID.SAVE")
         with original_get_connection(*args, **kwargs) as conn:
             yield conn
 
