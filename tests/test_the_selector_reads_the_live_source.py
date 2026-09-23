@@ -47,16 +47,28 @@ def test_the_dispatch_finder_sees_every_worker_in_the_live_source():
     # alone, so a handed name must be the last part of one function only:
     # a `pool.submit(self.run)` would make every `*.run` ask that one
     # dispatcher, merged silently in `dispatchers()` (#744, review of #734).
+    # Two keys are not package functions at all: `func`, the parameter
+    # parallel._run_on_new_executor hands on, and `os.getpid`, submitted
+    # by io_handlers._ingest_results. No package function may take either
+    # name, or an edit to it would ask those dispatchers (review of #778).
+    # Any other key names exactly one: a new key that names none is a new
+    # hand-off of something outside the package, to be added here.
+    not_package = {"func", "getpid"}
     defined = {}
     for path in sorted((REPO / "isocenter").rglob("*.py")):
         for qualname, *_ in test_map.functions_in(path.read_text(encoding="utf-8")):
             defined.setdefault(qualname.rsplit(".", 1)[-1], []).append(
                 f"{path.relative_to(REPO).as_posix()}::{qualname}")
-    shared = {name: defined[name] for name in found
-              if len(defined.get(name, ())) > 1}
-    assert shared == {}, (
-        "two functions share a handed worker's last name part; key "
-        "`dispatchers()` on more of the name (see the comment in select())")
+    assert not_package <= found, (
+        "a key named here is no longer handed to a pool; drop it")
+    wrong = {name: defined.get(name, [])
+             for name in found
+             if len(defined.get(name, ())) != (0 if name in not_package else 1)}
+    assert wrong == {}, (
+        "a handed worker's last name part is not the last part of exactly "
+        "one package function (or, for a name that is not a package "
+        "function, of none); key `dispatchers()` on more of the name "
+        "(see the comment in select())")
 
 
 def test_every_pool_call_in_the_package_resolves_to_a_dispatcher():

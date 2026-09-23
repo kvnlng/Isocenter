@@ -476,7 +476,8 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             # pairs this way, correctly; key on more of the name if a
             # second worker ever shares a last part (#744).
             # test_the_dispatch_finder_sees_every_worker_in_the_live_source
-            # goes red that day.
+            # goes red that day, and also when a package function takes
+            # the name of a key that is not one (`func`, `getpid`).
             own = dispatching.get(change.qualname.rsplit(".", 1)[-1])
             asked = own if own else set().union(*dispatching.values())
             via, blind = set(), []
