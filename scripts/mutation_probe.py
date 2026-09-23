@@ -102,6 +102,9 @@ PYTEST = [str(REPO / ".venv/bin/python"), "-m", "pytest", "-x", "-q", "--no-head
 # `io_handlers.py` (the `apply_redaction_to_array` call and the
 # `(0400,0510)` write, both verified kills; that write was the #790 swap,
 # and the arm now picks each Encrypted Attributes element's VR by type).
+# `test_the_encrypted_attributes_item_is_conformant.py` does the same for
+# that arm (#790): measured, it kills both of its anchored mutants -- a
+# token read back as `str` written as UI, and the UI/OB choice swapped.
 #
 # That is the whole rule for reach the scan cannot see (#441): the scan
 # stays the only thing the guard demands, and a file beyond it joins a
@@ -445,7 +448,7 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_tutorials_run.py", "tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_an_unknown_subset_uid_is_counted.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/io_handlers.py": (["tests/test_the_encrypted_attributes_item_is_conformant.py", "tests/test_tutorials_run.py", "tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_an_unknown_subset_uid_is_counted.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
