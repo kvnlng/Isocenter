@@ -1010,7 +1010,7 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/entities.py": (["tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                "tests/test_a_nested_item_status_survives_a_reopen.py",
                                "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",

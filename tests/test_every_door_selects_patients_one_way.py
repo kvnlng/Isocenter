@@ -29,6 +29,7 @@ import os
 import pandas as pd
 import pytest
 
+from isocenter.entities import is_synthetic_patient_id
 from isocenter.exporters.wfdb import record_name_for
 from isocenter.session import DicomSession
 
@@ -328,9 +329,31 @@ def test_an_id_less_subject_is_selected_by_its_key(tmp_path, door):
     with _session(tmp_path, door, "") as session:
         key = next(p.patient_id for p in session.store.patients
                    if p.patient_id not in (A, B))
+        assert is_synthetic_patient_id(key), (
+            "ingest did not key the ID-less subject on its study (#584); "
+            "this test would be selecting by '' instead")
         (tmp_path / "s").mkdir()
         selected = _DOORS[door](session, tmp_path / "s", [key])
     assert selected == {key}, f"{door}: [<the key>] selected {selected}"
+
+
+def test_an_empty_string_does_not_select_an_id_less_subject(tmp_path, caplog):
+    """`[""]` matches a Patient ID that is `""`, and nothing else: since
+    #584 an ID-less subject is keyed on its study, so on a store ingested
+    by this release `[""]` selects nobody and is counted -- never every
+    ID-less subject at once, which would be #584's collapse by another
+    door (lead ruling on #686, 2026-09-22). No message names the key,
+    which embeds the source Study Instance UID."""
+    with _session(tmp_path, "blank", "") as session:
+        key = next(p.patient_id for p in session.store.patients
+                   if p.patient_id not in (A, B))
+        with caplog.at_level(logging.WARNING, logger="isocenter"):
+            selected = _cohort_report(session, tmp_path, [""])
+    assert selected == set(), selected
+    counted = [m for m in caplog.messages
+               if "no patient in the session matches 1 of the 1 id given" in m]
+    assert len(counted) == 1, caplog.messages
+    assert all(key not in m for m in caplog.messages)
 
 
 def test_an_empty_patient_id_is_a_patient(tmp_path):
