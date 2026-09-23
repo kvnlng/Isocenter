@@ -222,9 +222,11 @@ identity = session.recover_patient_identity(pseudonym, restore=False)
 ```
 
 A `Session` opened in a folder that holds a file named `isocenter.key`
-enables reversible anonymization with it on its own. The explicit call
-says which key you mean, and it is the call you need when the key lives
-anywhere else (step 6).
+enables reversible anonymization with it on its own. Don't rely on that:
+a key kept in the working directory sits beside the store and the
+exports, which is where it should not be. The explicit call says which
+key you mean, and it is the call you need once the key lives somewhere
+safer (step 6).
 
 `recover_patient_identity()` returns a dict. Each key is the SOP Instance
 UID of an instance that carries a token, and each value holds what that
