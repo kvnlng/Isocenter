@@ -9079,7 +9079,7 @@ def _is_str(value):
 
 def normalize_id_filter(values, option, kind="Patient ID", *,
                         allow_none=True, element=_is_str,
-                        element_is="a str"):
+                        element_is="a str", takes=None):
     """The shape of a selection of ids, read once, for every door that
     takes one (#696).
 
@@ -9142,6 +9142,11 @@ def normalize_id_filter(values, option, kind="Patient ID", *,
             the default, a `str`.
         element_is (str): What `element` admits, for the refusal
             ("a str or a finding" on the lock pair).
+        takes (str, optional): What the option takes, for the refusals,
+            when it is more than this function reads: `export(subset=)`
+            also takes a query `str` and a DataFrame, which its caller
+            reads before handing the rest here (#725). By default it is
+            worked out from `kind` and `allow_none`.
 
     Returns:
         Optional[tuple]: `None` for every one; otherwise the elements in
@@ -9153,8 +9158,9 @@ def normalize_id_filter(values, option, kind="Patient ID", *,
     """
     # What the refusals say this option takes: `None` only where it is a
     # reading, so the lock pair's refusals do not offer it.
-    takes = (f"None or an iterable of {kind}s" if allow_none
-             else f"an iterable of {kind}s")
+    if takes is None:
+        takes = (f"None or an iterable of {kind}s" if allow_none
+                 else f"an iterable of {kind}s")
     if values is None:
         if allow_none:
             return None
@@ -9250,6 +9256,22 @@ def select_patient_ids(patient_ids, patients, option="patient_ids"):
 _UNMATCHED_POSITIONS_LISTED = 10
 
 
+def _unmatched_count(selection, noun):
+    """"N of the M <noun>s given (positions ..., in the order given); it
+    selects nothing" -- the arithmetic both unmatched sentences share, so
+    the cap and the plurals cannot drift between `patient_ids` and
+    `subset`."""
+    count, given = len(selection.unmatched), selection.given
+    shown = selection.unmatched[:_UNMATCHED_POSITIONS_LISTED]
+    positions = ", ".join(str(position) for position in shown)
+    if count > len(shown):
+        positions += f", and {count - len(shown)} more"
+    return (f"{count} of the {given} {noun}{'' if given == 1 else 's'} "
+            f"given (position{'' if count == 1 else 's'} {positions}, in "
+            f"the order given); {'it selects' if count == 1 else 'they select'} "
+            f"nothing")
+
+
 def unmatched_patient_ids_sentence(selection, option="patient_ids"):
     """The one spelling of the unmatched-id count, for the log line and the
     audit row (#686). Numbers and positions only, never an id.
@@ -9257,17 +9279,29 @@ def unmatched_patient_ids_sentence(selection, option="patient_ids"):
     Its pinned substring is "no patient in the session matches", chosen so
     the singular and the plural read the same way.
     """
-    count, given = len(selection.unmatched), selection.given
-    shown = selection.unmatched[:_UNMATCHED_POSITIONS_LISTED]
-    positions = ", ".join(str(position) for position in shown)
-    if count > len(shown):
-        positions += f", and {count - len(shown)} more"
-    return (f"{option}: no patient in the session matches {count} of the "
-            f"{given} id{'' if given == 1 else 's'} given "
-            f"(position{'' if count == 1 else 's'} {positions}, in the order "
-            f"given); {'it selects' if count == 1 else 'they select'} "
-            f"nothing. After anonymize(), a patient is selected by its "
-            f"replacement Patient ID.")
+    return (f"{option}: no patient in the session matches "
+            f"{_unmatched_count(selection, 'id')}. After anonymize(), a "
+            f"patient is selected by its replacement Patient ID.")
+
+
+def unmatched_subset_uids_sentence(selection):
+    """The unmatched-UID count of `export(subset=)`, for the log line and
+    the audit row (#725). Numbers and positions only, never a UID.
+
+    No level is named, because the caller named none: the walk matches
+    each element at all four levels, and one that matched nothing has no
+    level to report. Its pinned substring is "nothing in the session
+    matches". The last sentence is the #544 rule, which a caller is likely
+    to have tripped over: a Study, Series or SOP Instance UID taken before
+    `anonymize()` or `redact()` still names its entity
+    (`Session._subset_names`), and a Patient ID -- a keyed pseudonym, not
+    a UID replacement -- does not.
+    """
+    return (f"subset: nothing in the session matches "
+            f"{_unmatched_count(selection, 'UID')}. A Study, Series or SOP "
+            f"Instance UID taken before anonymize() or redact() still names "
+            f"its entity; a Patient ID does not: select by the replacement "
+            f"Patient ID.")
 
 
 def export_stamp_attributes(patient, study, series):

@@ -153,7 +153,7 @@ def test_an_unusable_subset_is_refused_rather_than_ignored(
     cohort instead. Over-exporting is the dangerous direction for a
     de-identification tool to fail in.
     """
-    with pytest.raises(TypeError, match="subset must be"):
+    with pytest.raises(TypeError, match="subset takes None, a query str"):
         session_with_phi.export(str(tmp_path / "out"), subset=42)
 
     assert not captured_batch, "an unusable subset still exported something"

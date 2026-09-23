@@ -323,7 +323,11 @@ def test_an_instance_outside_the_subset_is_not_withheld(tmp_path, caplog):
 
 
 def test_a_true_empty_plan_keeps_its_text_and_no_counters(tmp_path):
-    """A subset matching nothing, no identifiers: still "nothing matched"."""
+    """A subset selecting nothing, no identifiers: still "nothing matched".
+
+    An empty subset, not an unknown UID: since #725 an unknown UID is
+    counted in a `WARNING` row of its own, which this test's `warnings ==
+    []` is not about."""
     src = tmp_path / "src"
     _write_ct(str(src), "PAT-536-C", "31", "Gamma^Test")
     session = DicomSession(persistence_file=str(tmp_path / "c.db"))
@@ -331,7 +335,7 @@ def test_a_true_empty_plan_keeps_its_text_and_no_counters(tmp_path):
         session.ingest(str(src))
         session.anonymize()
         folder = str(tmp_path / "out")
-        session.export(folder, check_burned_in=True, subset=["NO-SUCH-UID"],
+        session.export(folder, check_burned_in=True, subset=[],
                        use_compression=False, show_progress=False)
         exports = _rows(session, "EXPORT")
         warnings = _rows(session, "WARNING")

@@ -72,7 +72,7 @@ The conditions are a 1.x promise: none is removed or narrowed in a 1.x release, 
 
 !!! note "A `WARNING` row needs a person; a correction is not reported"
 
-    What you will **not** find in section 4 is Isocenter correcting a descriptor of its own making -- PixelRepresentation or BitsStored rewritten to match the pixels actually written. Those corrections are exact, lose nothing, and say nothing about your data, so they are logged at `INFO` and are neither recorded in the audit log nor graded. The default console handler shows `WARNING` and above, so they do not appear on screen either. A `WARNING` row, by contrast, needs a person to read it: most say something about the source dataset, and some about the run itself -- statuses recorded under another policy (#555), or a `patient_ids` that named a patient the session does not hold (#686).
+    What you will **not** find in section 4 is Isocenter correcting a descriptor of its own making -- PixelRepresentation or BitsStored rewritten to match the pixels actually written. Those corrections are exact, lose nothing, and say nothing about your data, so they are logged at `INFO` and are neither recorded in the audit log nor graded. The default console handler shows `WARNING` and above, so they do not appear on screen either. A `WARNING` row, by contrast, needs a person to read it: most say something about the source dataset, and some about the run itself -- statuses recorded under another policy (#555), or a `patient_ids` that named a patient the session does not hold (#686), or a `subset` that named a UID it does not hold (#725).
 
     Four grade reasons have no row anywhere else, so the Grade Basis is the only place they appear: **an empty audit trail** (a clean ingest followed by `audit()` alone writes no row, and grades `REVIEW_REQUIRED` because nothing the run did is attested), **a verb with no evidence** (`anonymize()` or `redact()` did work and none of the rows it writes reached the audit log), **findings nobody acted on** (entities the last PHI scan left `IDENTIFIED`; condition 7 under [How the grade is decided](#how-the-grade-is-decided)), and **entities edited after their scan** (condition 8).
 
@@ -200,4 +200,14 @@ target_series = ["1.2.840...", "1.2.840..."]
 subset = df[df['SeriesInstanceUID'].isin(target_series)]
 
 session.export("export_selected_series", subset=subset)
+```
+
+`subset` also takes the UIDs themselves, as any iterable -- a list, a
+tuple, a set -- at any level: Patient ID, Study, Series or SOP Instance
+UID. A UID that names nothing in the session is not silently dropped:
+the export writes what the rest selects, and one `WARNING` audit row
+counts the others by position, so the report grades `REVIEW_REQUIRED`.
+
+```python
+session.export("export_selected_series", subset=target_series)
 ```
