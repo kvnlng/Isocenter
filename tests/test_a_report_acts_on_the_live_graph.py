@@ -214,6 +214,22 @@ def _rows(session):
         return list(conn.execute("SELECT action_type, details FROM audit_log ORDER BY rowid"))
 
 
+#: Since #544 a report from another store also carries that store's
+#: replacement UIDs, which this store refuses (the UID analogue of #644),
+#: and the instances' Study and Series UID copies follow their refusing
+#: owners (#624). Those rows are the UID tests' subject; these tests count
+#: the pseudonym and seed rows, so each asserts the UID rows are there and
+#: then sets them aside.
+FOREIGN_UID = "is not this store's replacement for the UID the scan saw"
+
+
+def _without_uid_rows(declines):
+    uid_rows = [d for d in declines if FOREIGN_UID in d
+                or (OWNER_ROW in d and ("0020,000d" in d or "0020,000e" in d))]
+    assert uid_rows, declines
+    return [d for d in declines if d not in uid_rows]
+
+
 def _declined(session):
     return [d for a, d in _rows(session) if a == "REMEDIATION_DECLINED"]
 
@@ -845,7 +861,7 @@ def test_a_report_from_another_store_writes_no_pseudonym_minted_there(tmp_path):
                   for el in ds.iterall() if el.VR != "SQ"
                   and any(p in str(el.value) for p in minted_by_a)]
         assert not leaked, leaked
-        declines = _declined(b)
+        declines = _without_uid_rows(_declined(b))
         # B's Patient refuses each ID (#644), so each instance's 0010,0020
         # copy, carrying A's pseudonym too, does not fold and follows its
         # Patient (#624): one row per patient for each.
@@ -1004,7 +1020,7 @@ def test_a_legacy_stores_report_writes_no_unkeyed_pseudonym_or_offset_into_a_key
         assert _ct_tag(got["CT"], "0008,0021") == "20040119"
         assert _ct_tag(got["CT"], IMAGE_SEQ, 0, "0008,0021") == "20010101"
         assert _ct_tag(got["MR"], "0008,0020") == "20040826"
-        declines = [_reason(d) for d in _declined(b)]
+        declines = _without_uid_rows([_reason(d) for d in _declined(b)])
         # The instances' top-level Study Date copies, one per patient,
         # carry the #624 reason instead of the seed's; the Patient ID copies
         # follow their refusing Patients (#624) too.
@@ -1080,7 +1096,7 @@ def test_a_date_seeded_on_another_sites_patient_id_is_not_shifted(tmp_path):
 
         b.anonymize(findings)
 
-        declines = [_reason(d) for d in _declined(b)]
+        declines = _without_uid_rows([_reason(d) for d in _declined(b)])
         # The instances' top-level Study Date copies follow their Study
         # (#624), which was handed in and declined on the seed, and their
         # #624 reason wins over the seed's (Q-C4): one row per study. The

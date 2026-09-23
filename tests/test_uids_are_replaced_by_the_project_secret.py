@@ -862,8 +862,12 @@ def test_a_series_finding_not_acted_on_does_not_grade_pass(tmp_path, reaudit):
         assert inst.sop_instance_uid == M("1.2.3.99.71")
         assert inst.phi_status is PhiStatus.IDENTIFIED
         if reaudit:
+            # The instance's own copy follows its Series, which was not
+            # handed in (#624, Q-C5): it holds the source UID the file
+            # carries, and is raised beside the Series.
             again = session.audit()
-            assert [(f.entity_type, f.tag) for f in again] == [("Series", "0020,000e")]
+            assert sorted((f.entity_type, f.tag) for f in again) == [
+                ("Instance", "0020,000e"), ("Series", "0020,000e")]
             assert inst.phi_status is PhiStatus.IDENTIFIED
         session.export(str(tmp_path / "out"), use_compression=False)
         grade = _validation_status(session, tmp_path, "r.md")
@@ -872,45 +876,92 @@ def test_a_series_finding_not_acted_on_does_not_grade_pass(tmp_path, reaudit):
     assert pydicom.dcmread(path).SeriesInstanceUID == "1.2.3.99.72"
 
 
-def test_a_series_finding_handed_later_completes_its_instances(tmp_path):
-    """The rest of the report, handed afterwards, replaces the Series UID
-    and completes the instances: REMEDIATED, and the export grades PASS.
-    Kills a Series-demoted instance that no later pass can complete."""
+@pytest.mark.parametrize("then", ["the_instance_findings_again", "a_reaudit"])
+def test_a_series_finding_handed_later_grades_pass(tmp_path, then):
+    """The Series handed in a later pass writes its replacement onto every
+    instance copy; then the instance findings handed again (the copy is
+    satisfied by the Series' write) or a re-audit (which finds nothing)
+    completes the instance, and the export grades PASS -- #624's rule for
+    an owner handed in late (Q-C5), which the Series follows. Kills an
+    unacted Series that no later pass can clear."""
     src, cfg = _series_filtered(tmp_path)
     with DicomSession(str(tmp_path / "s.db")) as session:
         load_fixed_secret(session)
         session.load_config(cfg)
         session.ingest(str(src))
         report = session.audit()
-        session.anonymize([f for f in report if f.entity_type != "Series"])
+        rest = [f for f in report if f.entity_type != "Series"]
+        session.anonymize(rest)
         session.anonymize([f for f in report if f.entity_type == "Series"])
         series = session.store.patients[0].studies[0].series[0]
+        inst = series.instances[0]
         assert series.series_instance_uid == M("1.2.3.99.72")
-        assert series.instances[0].phi_status is PhiStatus.REMEDIATED
+        assert inst.attributes["0020,000e"] == M("1.2.3.99.72")
+        assert inst.phi_status is PhiStatus.IDENTIFIED
+        if then == "a_reaudit":
+            again = session.audit()
+            assert list(again) == []
+            session.anonymize(again)
+            assert inst.phi_status is PhiStatus.CLEARED
+        else:
+            session.anonymize(rest)
+            assert inst.phi_status is PhiStatus.REMEDIATED
         session.export(str(tmp_path / "out"), use_compression=False)
         grade = _validation_status(session, tmp_path, "r.md")
     assert grade and "PASS" in grade[0], grade
 
 
-@pytest.mark.parametrize("first", ["series-only", "sop-then-series"])
-def test_a_completed_series_lifts_no_instance_with_its_own_findings_open(tmp_path, first):
-    """Completing a Series lifts the IDENTIFIED it put on its instances,
-    and only that: an instance whose own findings are still open stays
-    IDENTIFIED. `sop-then-series` moves the instance's UID first, so what
-    is open is filed under the UID it was ingested under. Kills the lift
-    ignoring the tally, and the tally read under the current UID alone."""
+def test_a_series_pass_alone_completes_no_instance(tmp_path):
+    """The Series handed in alone replaces its UID and writes every copy,
+    and its instances still read IDENTIFIED: their own findings are open.
+    Kills a Series' completion read as its instances'."""
     src, cfg = _series_filtered(tmp_path)
     with DicomSession(str(tmp_path / "s.db")) as session:
         load_fixed_secret(session)
         session.load_config(cfg)
         session.ingest(str(src))
         report = session.audit()
-        if first == "sop-then-series":
-            session.anonymize([f for f in report if f.entity_type == "Instance"
-                               and f.tag == "0008,0018" and not f.entity_path])
-            inst = session.store.patients[0].studies[0].series[0].instances[0]
-            assert inst.sop_instance_uid == M("1.2.3.99.71")
         session.anonymize([f for f in report if f.entity_type == "Series"])
         series = session.store.patients[0].studies[0].series[0]
         assert series.series_instance_uid == M("1.2.3.99.72")
         assert series.instances[0].phi_status is PhiStatus.IDENTIFIED
+
+
+def test_another_stores_report_writes_no_uid_minted_there(tmp_path):
+    """A report resolves against the live graph by the UIDs it names, so a
+    report store A raised reaches store B over the same file, carrying A's
+    replacements. Written, they linked B's export to A's by UID -- the link
+    the project secret exists to prevent, #644's shape for UIDs -- and B's
+    next audit replaced them again. Each is refused, with a row naming no
+    value; B's own audit and pass then give B's replacements. Kills the
+    refusal dropped (`_foreign_uid_refused`)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _ct(src / "a.dcm", "1.2.3.99.81", study="1.2.3.99.80", series="1.2.3.99.82",
+        frame="1.2.3.99.83", refs=("1.2.3.99.84",))
+    sources = ("1.2.3.99.80", "1.2.3.99.81", "1.2.3.99.82", "1.2.3.99.83", "1.2.3.99.84")
+    with DicomSession(str(tmp_path / "a.db")) as store_a:
+        load_fixed_secret(store_a, secret=FIXED_A)
+        store_a.ingest(str(src))
+        report = store_a.audit()
+    db = tmp_path / "b.db"
+    with DicomSession(str(db)) as store_b:
+        load_fixed_secret(store_b, secret=FIXED_B)
+        store_b.ingest(str(src))
+        store_b.anonymize(report)
+        store_b.export(str(tmp_path / "first"), use_compression=False)
+        store_b.anonymize(store_b.audit())
+        store_b.export(str(tmp_path / "second"), use_compression=False)
+    minted_by_a = {M(u, FIXED_A) for u in sources}
+    (first,) = [pydicom.dcmread(p) for p in (tmp_path / "first").rglob("*.dcm")]
+    assert not [el for el in first.iterall() if str(el.value) in minted_by_a]
+    (second,) = [pydicom.dcmread(p) for p in (tmp_path / "second").rglob("*.dcm")]
+    assert (second.StudyInstanceUID, second.SOPInstanceUID, second.SeriesInstanceUID,
+            second.FrameOfReferenceUID,
+            second.ReferencedImageSequence[0].ReferencedSOPInstanceUID) == tuple(
+                M(u, FIXED_B) for u in sources)
+    with sqlite3.connect(str(db)) as conn:
+        rows = [d for (d,) in conn.execute(
+            "SELECT details FROM audit_log WHERE action_type='REMEDIATION_DECLINED'")]
+    refused = [d for d in rows if "is not this store's replacement for the UID" in d]
+    assert refused and not [d for d in refused for u in minted_by_a if u in d], rows

@@ -5988,7 +5988,7 @@ class DicomSession:
                 self._copy_owners(),
                 {(None if f.entity is None else id(f.entity),
                   f.remediation_proposal.target_attr) for f in findings
-                 if f.entity_type in ("Patient", "Study")
+                 if f.entity_type in ("Patient", "Study", "Series")
                  and f.remediation_proposal is not None})
             remediator._use_removal_targets(
                 self._removal_targets(findings, by_uid, project_secret))
@@ -7356,10 +7356,11 @@ class DicomSession:
         return tally
 
     def _copy_owners(self) -> dict:
-        """`id(Instance) -> (Patient, Study)` for every instance, the owners
-        the export stamps Patient's Name, Patient ID and Study Date from
-        (`RemediationService._use_copy_owners`, #624)."""
-        return {id(inst): (patient, study)
+        """`id(Instance) -> (Patient, Study, Series)` for every instance,
+        the owners the export stamps Patient's Name, Patient ID, Study Date
+        and the Study and Series Instance UIDs from
+        (`RemediationService._use_copy_owners`, #624, #544)."""
+        return {id(inst): (patient, study, series)
                 for patient in self.store.patients for study in patient.studies
                 for series in study.series for inst in series.instances}
 
