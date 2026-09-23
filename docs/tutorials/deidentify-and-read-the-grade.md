@@ -108,11 +108,13 @@ session.generate_report("report-draft.md")
 Two choices here are deliberate:
 
 - **`use_compression=False`.** `rtdose.dcm` stores 32-bit dose values,
-  and lossless JPEG 2000 cannot carry 32-bit samples exactly, so with
+  and Isocenter's JPEG 2000 encoder is exact only to 25 bits, so with
   compression on
-  [that instance fails to export](../quickstart.md#what-the-export-writes).
-  A failure is an `ERROR` row in the audit log, and a row, once written,
-  stays in the store for good.
+  [that instance fails to export](../quickstart.md#what-the-export-writes)
+  rather than be written wrong
+  ([#771](https://github.com/kvnlng/Isocenter/issues/771) plans to write
+  it uncompressed instead). A failure is an `ERROR` row in the audit log,
+  and a row, once written, stays in the store for good.
 - **The report comes last,** after `export()`. Export writes rows of its
   own (anything it lost or could not write), and the report grades only
   the rows that exist when you call it.
@@ -155,6 +157,15 @@ def grade_basis(path):
 *   **Grade Basis:** REVIEW_REQUIRED, for 1 reason(s):
     *   2 entities read IDENTIFIED: ...
 ```
+
+!!! note "These helpers read the report's layout, which can change"
+
+    The grade values `PASS` and `REVIEW_REQUIRED` are frozen for 1.x. The
+    report's layout and the wording of each Grade Basis line are not
+    ([API stability](../api/stability.md)). `grade_line` and
+    `grade_basis` are for reading a report, not for gating automation on
+    one. If a 1.x release changes the layout, this page goes red in
+    Isocenter's own tests and is updated with it.
 
 The run did what it was asked. But the scan found two values your policy
 acts on, and nothing acted on them, so the report will not call the
@@ -242,8 +253,11 @@ recipient can check without your report:
 'ANON_...'
 ```
 
-- **Patient Identity Removed `(0012,0062)`** is `YES` only when every
-  rule of the policy was applied to that file.
+- **Patient Identity Removed `(0012,0062)`** is written `YES` only when
+  every rule of the policy was applied to that file, and it describes the
+  attributes, not the pixels: a file whose Burned In Annotation says
+  `YES` does not get it. A source file that already said `YES` keeps its
+  own value.
 - **De-identification Method `(0012,0063)`** names the release, the
   profile, and a short fingerprint of the exact rules (`v1:` and 8 hex
   digits). Two configurations that differ by one rule have different
@@ -293,7 +307,8 @@ different policy
 [costs the run its `PASS`](../configuration.md#what-to-keep) until the
 next `audit()`.
 
-Every patient gets the same pseudonym and the same date offset as before:
+The export writes what the store holds, and the store holds the
+de-identified graph, so every patient comes out as before:
 
 ```python
 def identities(folder):
@@ -308,10 +323,66 @@ True
 | **Validation Status** | **PASS** |
 ```
 
-This works because the pseudonyms, the date offsets and the replacement
-UIDs are all derived from a secret the store generated for itself. It is
-not the configuration that reproduces them. The same configuration over
-a **new** store gives every patient a different pseudonym:
+### A later batch joins the same patient
+
+The store matters most when **new** data arrives. Say the CT patient
+comes back for a second scan. This block makes that scan from
+`CT_small.dcm`: a new study, series and instance, dated 1 March 2004
+instead of 19 January.
+
+```python
+from pydicom.uid import generate_uid
+
+later = pydicom.dcmread("input/CT_small.dcm")
+later.StudyInstanceUID = generate_uid()
+later.SeriesInstanceUID = generate_uid()
+later.SOPInstanceUID = generate_uid()
+later.file_meta.MediaStorageSOPInstanceUID = later.SOPInstanceUID
+later.StudyDate = "20040301"
+Path("later").mkdir()
+later.save_as("later/ct_second_visit.dcm")
+```
+
+Ingest it into the same store, de-identify it and export:
+
+```python
+batch = session.ingest("later")
+session.anonymize()
+session.export("export-later", use_compression=False)
+session.generate_report("report-later.md")
+
+second_visit = next(
+    ds for ds in (pydicom.dcmread(path)
+                  for path in Path("export-later").rglob("*.dcm"))
+    if ds.Modality == "CT" and ds.StudyDate != ct.StudyDate)
+```
+
+(`anonymize()` with no argument audits and then acts on every finding.
+That is the shortcut when you are holding nothing back.) The second
+visit gets the first visit's pseudonym, and its date moves by the same
+offset, so the 42 days between the two scans survive:
+
+```python
+>>> batch
+IngestSummary(ingested=1, failures=[], declined=0, skipped=0)
+>>> second_visit.PatientID == ct.PatientID
+True
+>>> study_date(later) - study_date(second_visit) == shift
+True
+>>> (study_date(second_visit) - study_date(ct)).days
+42
+>>> print(grade_line("report-later.md"))
+| **Validation Status** | **PASS** |
+```
+
+This is the store's real job. The pseudonym and the offset are not
+stored per file. They are derived from the patient's original ID and a
+secret the store generated for itself, so any later batch of the same
+patient lands on the same values
+([#548](https://github.com/kvnlng/Isocenter/issues/548)). The
+configuration does not reproduce them. The same configuration over a
+**new** store, with a new secret, gives every patient a different
+pseudonym:
 
 ```python
 other = Session("other.db")
@@ -325,13 +396,14 @@ other.close()
 ```python
 >>> first = {pid for pid, _ in identities("export").values()}
 >>> second = {pid for pid, _ in identities("export-other").values()}
+>>> sorted(pid[:5] for pid in second)
+['ANON_', 'ANON_', 'ANON_']
 >>> first & second
 set()
 ```
 
 Data exported from `other.db` will never link to data exported from
-`tutorial.db`. (`anonymize()` with no argument audits and then acts on
-every finding. That is the shortcut when you are holding nothing back.)
+`tutorial.db`.
 
 ```python
 session.close()

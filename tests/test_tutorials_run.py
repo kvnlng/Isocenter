@@ -15,8 +15,15 @@ breaks one is red, never skipped):
 
 1. **Which pages run: every `docs/tutorials/*.md`, whole,** plus any
    other page under `docs/` that carries the header marker below (that is
-   how a guide's quick start joins). There is no per-fence opt-in, so no
-   fence on a tutorial page can go unchecked.
+   how a guide's quick start joins). There is no per-fence opt-in. Code
+   the runner would not run is refused, not passed over
+   (`_shape_failures`): a fence that is indented (in a list item, an
+   admonition or a tab), spelled `~~~` or with four backticks, or left
+   unclosed; a `<pre>` block; a line in a `>>>` fence that is not an
+   example; and any `doctest:` directive. A run page's fences start at
+   column 0 with exactly three backticks. One gap is stated rather than
+   closed: a four-space indented code block with no fence is not seen,
+   because telling it from list-item prose needs a full Markdown parser.
 
 2. **The header marker names the inputs:**
    `<!-- tutorial: inputs=CT_small.dcm,MR_small.dcm -->`, once per page.
@@ -74,10 +81,16 @@ The info string stays exactly ```` ```python ````, #304's reason for the
 HTML-comment markers: `test_documented_api_exists.py` matches that
 string, so every name a tutorial calls is also name-checked there.
 
-No `scripts/mutation_probe.py` `TARGETS` entry, for the reason #304 and
-`test_documented_api_exists.py` give: this file imports no target module
-(the pages do, at run time), and a real session per page against every
-mutant would cost minutes for kill signal the module tests already give.
+**`TARGETS` rows: this file is listed under `session.py`,
+`io_handlers.py`, `reporting.py`, `remediation.py` and `privacy.py`**,
+the modules T1 exercises end to end (review of #785). It imports none of
+them, so no import scan demands the rows; they are there for
+`pytest --changed`. A page is new to the coverage map until the release's
+3.14t `test_map build` records it, and until then a change to one of
+those modules that breaks a tutorial is selected only through its
+`TARGETS` row. The cost is one page run (T1: about 8 s) per mutant, or per
+`--changed` selection, of those modules. A module a tutorial reaches but
+that has no row here is covered once the map is rebuilt.
 """
 import doctest
 import pathlib
@@ -111,6 +124,13 @@ _FILE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 # Any fence, with its info string. Fences are not nested in Markdown, so
 # a lazy body up to the next line-leading ``` is the whole fence.
 _FENCE = re.compile(r"^```([^\n`]*)\n(.*?)^```[ \t]*$", re.DOTALL | re.MULTILINE)
+# Anything that looks like a fence line, however indented or spelled.
+# Every such line must be the opener or closer of a fence `_FENCE`
+# consumed, or be inside one; otherwise it is code the runner would not
+# see (an indented, tilde, four-backtick or unclosed fence).
+_ANY_FENCE_LINE = re.compile(r"^[ \t]*(```|~~~)", re.MULTILINE)
+# Raw HTML code, which Markdown renders as code and `_FENCE` never sees.
+_PRE = re.compile(r"<pre\b", re.IGNORECASE)
 
 
 def tutorial_pages(root=None):
@@ -201,6 +221,80 @@ def _marker_failures(text, where):
     return failures
 
 
+def _shape_failures(text, where):
+    """Code on the page that the runner would not run, or not check.
+
+    Found in review of #785: each of these passed a page whose failing
+    code never ran. They are refused before any fence runs, never
+    skipped.
+
+    - A fence line `_FENCE` did not consume: indented (in a list item,
+      an admonition or a tab), `~~~`, four backticks, or never closed.
+      Mkdocs renders all of them as code; the runner saw prose.
+    - A `<pre>` block: raw HTML code, which a reader copies as code.
+      Refused rather than run, because a tutorial's code belongs in a
+      fence where `test_documented_api_exists.py` can also read it. A
+      four-space indented code block is *not* detected: telling it from
+      list-item prose needs a full Markdown parser.
+    - In a `>>>` fence, anything that is not an example: `doctest` reads
+      a line before the first `>>>`, or after the blank line that ends
+      an example's output, as prose and drops it.
+    - A `doctest:` directive: `+SKIP` is a skip dressed as a pass, and
+      the others change what "matches" means page by page.
+    An expected output of only `...` needs no rule: doctest reads a `...`
+    line straight after `>>>` as a continuation of the source, so the
+    example expects nothing and fails on any output.
+    """
+    failures = []
+    consumed = [(m.start(), m.end()) for m in _FENCE.finditer(text)]
+
+    def outside(pos):
+        return not any(start <= pos < end for start, end in consumed)
+
+    def line_of(pos):
+        return text.count("\n", 0, pos) + 1
+
+    for match in _ANY_FENCE_LINE.finditer(text):
+        if outside(match.start()):
+            failures.append(
+                f"{where}:{line_of(match.start())}: a fence the runner does "
+                "not run (indented, `~~~`, four backticks, or unclosed); a "
+                "run page's fences start at column 0 with exactly ```")
+    for match in _PRE.finditer(text):
+        if outside(match.start()):
+            failures.append(
+                f"{where}:{line_of(match.start())}: a <pre> block is code the "
+                "runner does not run; put it in a ```python fence")
+
+    parser = doctest.DocTestParser()
+    for match in _FENCE.finditer(text):
+        if match.group(1).strip() != "python":
+            continue
+        body = match.group(2)
+        first = line_of(match.start(2))
+        pieces = parser.parse(body)
+        if not any(isinstance(p, doctest.Example) for p in pieces):
+            continue
+        offset = 0
+        for piece in pieces:
+            if isinstance(piece, str):
+                if piece.strip():
+                    failures.append(
+                        f"{where}:{first + offset}: a `>>>` fence holds a "
+                        f"line that is not an example ({piece.strip()[:60]!r}); "
+                        "doctest would drop it unrun -- put actions in a "
+                        "fence of their own, or prefix them with >>>")
+                offset += piece.count("\n")
+                continue
+            if piece.options:
+                failures.append(
+                    f"{where}:{first + piece.lineno}: a `doctest:` directive; "
+                    "a tutorial's examples all run under the one comparison")
+            offset = piece.lineno + piece.source.count("\n") \
+                + piece.want.count("\n")
+    return failures
+
+
 def run_page(page, workdir, root=None):
     """Run one page in `workdir`. Returns a list of failure strings.
 
@@ -222,7 +316,7 @@ def run_page(page, workdir, root=None):
         names = _inputs(text, where)
     except AssertionError as exc:
         return [str(exc)]
-    failures = _marker_failures(text, where)
+    failures = _marker_failures(text, where) + _shape_failures(text, where)
     if failures:
         return failures
 
@@ -511,3 +605,44 @@ def test_a_marked_page_outside_tutorials_is_run(tmp_path):
     (tmp_path / "docs" / "plain.md").write_text("```python\nx\n```\n",
                                                 encoding="utf-8")
     assert tutorial_pages(tmp_path) == [guide]
+
+
+# -- Code the runner would not run (review of #785). Each page holds a ---
+# -- fence that raises if it ran, and must be refused before any does. ---
+
+_BOOM = "raise SystemError('THIS RAN')"
+_CHECKED = "```python\n>>> 1\n1\n```\n"
+
+
+@pytest.mark.parametrize("body, says", [
+    ('!!! tip "x"\n\n    ```python\n    ' + _BOOM + "\n    ```\n\n",
+     "a fence the runner does not run"),
+    ("1. step\n\n    ```python\n    " + _BOOM + "\n    ```\n\n",
+     "a fence the runner does not run"),
+    ("~~~python\n" + _BOOM + "\n~~~\n\n", "a fence the runner does not run"),
+    ("````python\n" + _BOOM + "\n````\n\n", "a fence the runner does not run"),
+    (_CHECKED + "\n```python\n" + _BOOM + "\n", "a fence the runner does not run"),
+    ("<pre>\n" + _BOOM + "\n</pre>\n\n", "a <pre> block"),
+    ("```python\n" + _BOOM + "\n>>> 1\n1\n```\n\n", "not an example"),
+    ("```python\n>>> 1\n1\n\n" + _BOOM + "\n```\n\n", "not an example"),
+    ("```python\n>>> 1/0  # doctest: +SKIP\n```\n\n", "`doctest:` directive"),
+    ("```python\n>>> 2  # doctest: +ELLIPSIS\n2\n```\n\n",
+     "`doctest:` directive"),
+    # Red because it fails, not by a rule: see `_shape_failures`.
+    ("```python\n>>> 'anything at all'\n...\n```\n\n", "Expected nothing"),
+], ids=["admonition", "list-item", "tilde", "four-backticks", "unclosed",
+        "pre", "code-before-example", "code-after-output", "skip",
+        "other-directive", "ellipsis-only"])
+def test_code_the_runner_would_not_run_is_red(tmp_path, body, says):
+    page = _page(tmp_path, _OK_HEADER + _CHECKED + "\n" + body)
+    failures = run_page(page, tmp_path, root=tmp_path)
+    assert failures, "passed a page holding code that never ran"
+    assert not any("SystemError: THIS RAN" in f for f in failures), failures
+    assert any(says in f for f in failures), failures
+
+
+def test_a_fence_nested_in_a_consumed_fence_is_content(tmp_path):
+    # A fence line *inside* a fence the runner runs is that fence's text.
+    page = _page(tmp_path, _OK_HEADER + (
+        "```python\n>>> print('    ```')\n    ```\n```\n"))
+    assert run_page(page, tmp_path, root=tmp_path) == []
