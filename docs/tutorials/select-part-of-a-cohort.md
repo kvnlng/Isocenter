@@ -72,7 +72,7 @@ the ten above.
 
 ## 3. De-identify, then export the selection
 
-Nothing leaves before it is de-identified. No configuration is loaded
+On this page, nothing leaves before it is de-identified. No configuration is loaded
 here, so `anonymize()` applies the session's default policy (the first
 tutorial shows how to write your own). With no argument it audits and
 then acts on every finding.
@@ -229,21 +229,24 @@ counted, and the report says a person has to look:
 ```
 
 The reason is in section 4 of the report, **Exceptions & Errors**. This
-helper prints the details of each row there:
+helper counts the rows there and prints the details of each:
 
 ```python
 def exceptions(path):
     with open(path, encoding="utf-8") as report_file:
         text = report_file.read()
     section = text.split("## 4. Exceptions & Errors")[1].split("\n## ")[0]
-    for line in section.splitlines():
-        if line.startswith("| 20"):
-            print(line.split(" | ")[-1].rstrip(" |"))
+    rows = [line.split(" | ")[-1].rstrip(" |")
+            for line in section.splitlines() if line.startswith("| 20")]
+    print(len(rows), "row(s)")
+    for row in rows:
+        print(row)
 ```
 
 ```python
 >>> exceptions("report-typo.md")
-DICOM export to export-typo: patient_ids: no patient in the session matches 1 of the 2 ids given (position 2, in the order given); it selects nothing. ...
+1 row(s)
+DICOM export to export-typo: patient_ids: no patient in the session matches 1 of the 2 ids given (position 2, in the order given); it selects nothing. After anonymize(), a patient is selected by its replacement Patient ID.
 ```
 
 Position 2 is `"ANON_TYPO"`. The row names the export folder and the
@@ -258,10 +261,10 @@ source identifier.
     `exceptions` are for reading a report, not for gating automation on
     one.
 
-The report grades every row the store holds, not only the rows of the
-last export. Exporting again with the right list writes the right files,
-and the grade stays `REVIEW_REQUIRED`, because the typo's row is still
-there:
+The report grades every row the store holds: every row any session has
+ever written into this store, not only the rows of the last export.
+Exporting again with the right list writes the right files, and the
+grade stays `REVIEW_REQUIRED`, because the typo's row is still there:
 
 ```python
 session.export("export-dose-again", patient_ids=dose_patient,
@@ -274,12 +277,18 @@ session.generate_report("report-dose-again.md")
 ['RTDOSE']
 >>> print(grade_line("report-dose-again.md"))
 | **Validation Status** | **REVIEW_REQUIRED** |
+>>> exceptions("report-dose-again.md")
+1 row(s)
+DICOM export to export-typo: patient_ids: no patient in the session matches 1 of the 2 ids given (position 2, in the order given); it selects nothing. After anonymize(), a patient is selected by its replacement Patient ID.
 ```
 
-That is deliberate. The report is the record of the whole run, and an
-export that asked for someone who was not there is part of it. The
-reviewer reads section 4, sees that the row names `export-typo`, and
-decides. Section 5 is the way to avoid the row: try the list with
+The one row is still the typo's, naming `export-typo`; the correct
+export added none. That is deliberate. The report is the record of every
+session run over this store, and an export that asked for someone who was
+not there is part of it. The reviewer reads section 4, sees that the row
+names `export-typo`, and decides. Nothing removes a row: only a new store
+starts clean ([How the grade is decided](../analytics.md#how-the-grade-is-decided)).
+Section 5 is the way to avoid the row: try the list with
 `get_cohort_report()` first.
 
 ```python
