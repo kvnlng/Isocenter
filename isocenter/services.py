@@ -1451,6 +1451,7 @@ class RedactionService:
         item = DicomItem()
         for tag, value in _REDACTION_DERIVATION_CODE:
             item.set_attr(tag, value)
+        item._parent = inst
         seq.items.append(item)
 
         inst.sequences[_REDACTION_FLAG_SEQUENCE] = seq

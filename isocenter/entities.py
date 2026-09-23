@@ -562,6 +562,7 @@ class DicomItem(TrackedEntity):
             tag (str): The DICOM tag for the sequence.
             item (DicomItem): The item to append.
         """
+        item._parent = self
         self.add_sequence(tag).items.append(item)
         self.mark_modified()
 
@@ -598,6 +599,55 @@ class DicomItem(TrackedEntity):
         for seq in self.sequences.values():
             for item in seq.items:
                 item.mark_subtree_persisted()
+
+    # The container holding this item in one of its sequences: a
+    # `DicomItem` or the `Instance` at the top; None for an instance, and
+    # for an item not yet attached (#767, widened). Declared down here, not
+    # beside the fields above, so no line above it moves: `reversibility.py`
+    # cites a line of `add_sequence` by number.
+    #
+    # Set by every place an item is attached -- `add_sequence_item` (ingest
+    # and hydration), `clone_sequences` and whoever assigns its result, and
+    # the direct writers (the lock's token item, the pass's method code, the
+    # redaction's derivation code) -- and checked over a whole pipeline by
+    # `tests/test_an_edit_below_or_beside_an_instance_is_seen.py`, not by a
+    # detector of sites.
+    #
+    # **`repr=False, compare=False`, and it must stay so.** The generated
+    # `__repr__` would recurse item -> instance -> sequences -> item.
+    # **Pickled and deep-copied**, deliberately: a whole instance copied
+    # carries its items linked to the copy (the memo sees the cycle), which
+    # is what a worker needs. A lone item copied would drag its instance
+    # along; nothing copies one.
+    _parent: Optional['DicomItem'] = field(
+        default=None, init=False, repr=False, compare=False)
+
+    def mark_modified(self):
+        """Records that this item changed, and so the instance holding it.
+
+        An item has no row and no status the grade reads: it is written
+        inside its instance's row, and the instance's status is what says
+        whether a scan read it. A change here that moved only the item left
+        the instance reading REMEDIATED over a value no scan had read, and
+        in a reopened store the save skipped the instance and lost the edit
+        (#767, widened). Every mutator (`set_attr`, `add_sequence`,
+        `add_sequence_item`, `clear_sequence_items`) and remediation's own
+        `entity.mark_modified()` come through here.
+
+        **The root only.** The items between are not moved: their own
+        status (#564) is remediation's stamp on what it wrote in them, and
+        a change further down is not a change to what they hold. And
+        `record_phi_status` advances `_revision` directly rather than
+        through here, so a status stamped on an item is not a change to its
+        instance -- remediation stamps the item, then the instance.
+        """
+        self._revision += 1
+        root = self._parent
+        if root is None:
+            return
+        while root._parent is not None:
+            root = root._parent
+        root._revision += 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -700,8 +750,13 @@ def resolve_item_path(root: 'DicomItem', path: tuple) -> Optional['DicomItem']:
     return item
 
 
-def clone_sequences(item: 'DicomItem') -> dict:
-    """Deep-copies an item's sequences.
+def clone_sequences(item: 'DicomItem', into: 'DicomItem') -> dict:
+    """Deep-copies an item's sequences, for `into` to hold.
+
+    `into` is the container the copies will sit in, and each copied item
+    is linked to it (`_parent`, #767 widened); the caller assigns the
+    result to `into.sequences`. Nested copies are linked to their own
+    copied container.
 
     Workers must not share sequence items with the session, or a finding
     raised in a worker would carry a reference the parent also holds.
@@ -725,7 +780,8 @@ def clone_sequences(item: 'DicomItem') -> dict:
             # -- the defect, with the fix in place.
             if nested._shifted_dates:
                 nested_clone._shifted_dates = dict(nested._shifted_dates)
-            nested_clone.sequences = clone_sequences(nested)
+            nested_clone.sequences = clone_sequences(nested, nested_clone)
+            nested_clone._parent = into
             clone.items.append(nested_clone)
         clones[tag] = clone
     return clones
@@ -3020,3 +3076,10 @@ def _assign_owner_field(entity, name, value) -> None:
     object.__setattr__(entity, name, value)
     if old != value:
         entity.mark_modified()
+        # A Series holds no PHI status, and the export writes its fields
+        # into every instance of it: those are what a scan read, and what
+        # an edit here makes stale (#767 widened, owner ruling). Patient
+        # and Study hold their own status and grade on it.
+        if isinstance(entity, Series):
+            for instance in entity.instances:
+                instance.mark_modified()

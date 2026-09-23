@@ -990,9 +990,13 @@ def _edited_since_its_status(entity) -> bool:
     -- a status once recorded (by a scan, or a pass after one) at a
     revision the entity has since left. On an owner the revision moves
     on an assignment of a field it writes or a scan reads
-    (`entities._assign_owner_field`), and on the ordinary paths
-    everything else that moves it records a status after: remediation
-    stamps what it wrote, a scan records what it read.
+    (`entities._assign_owner_field`); on an instance, on any change to it
+    or to an item nested in it (`DicomItem.mark_modified`), and on an
+    assignment of a field of its series. On the ordinary paths everything
+    the library itself writes after a scan records a status after it:
+    remediation stamps what it wrote, a scan records what it read, and
+    redaction (#486) and the reversible lock (#767) carry the status they
+    found when it still applied.
     """
     status, recorded_at = entity._phi_status, entity._phi_status_revision
     return (status is not None and status is not PhiStatus.UNSCANNED
@@ -3402,7 +3406,7 @@ class DicomSession:
         in section 5, because there is no second expression for it to live
         in. Every term is here, including the four with no row anywhere
         else in the report: an empty audit trail, an unattested verb,
-        entities whose findings nothing acted on (#573), and owners edited
+        entities whose findings nothing acted on (#573), and entities edited
         after their status was recorded (#767).
 
         The conditions are numbered in `docs/analytics.md`, "How the grade
@@ -3448,23 +3452,23 @@ class DicomSession:
                 f"studies {unacted['studies']}, "
                 f"instances {unacted['instances']})")
         # Condition 8 (#767). A status an edit made stale, not the absence
-        # of one: an owner never scanned is UNSCANNED and does not grade
-        # (Q3). The export writes an owner's fields into every file of its
-        # subtree, so a value no scan has read there is graded until one
-        # does. Its own line, not folded into condition 7's: that one
-        # names a finding, this one the absence of a measurement a scan
-        # once made.
+        # of one: an entity never scanned is UNSCANNED and does not grade
+        # (Q3). Every edit made after a scan costs the PASS until a scan
+        # reads it (owner ruling, widened to instances, nested items and
+        # series fields). Its own line, not folded into condition 7's:
+        # that one names a finding, this one the absence of a measurement
+        # a scan once made.
         n_edited = sum(edited.values())
         if n_edited:
             noun = "entity" if n_edited == 1 else "entities"
             review_reasons.append(
-                f"{n_edited} {noun} edited after the last PHI scan: a field "
-                "the export writes from it, or the scan reads on it, was "
-                "assigned a new value after its PHI status was recorded, "
-                "and no scan has read that value; `audit()` reads it "
+                f"{n_edited} {noun} edited after the last PHI scan: its "
+                "content was changed after its PHI status was recorded, "
+                "and no scan has read the change; `audit()` reads it "
                 f"(patients {edited['patients']}, "
                 f"studies {edited['studies']}, "
-                f"series {edited['series']})")
+                f"series {edited['series']}, "
+                f"instances {edited['instances']})")
         return review_reasons
 
     def generate_report(self, output_path: str, format: str = "markdown") -> None:
@@ -3708,11 +3712,13 @@ class DicomSession:
         # for the reason `phi_status_summary` gives: nothing scans one.
         unacted = {"patients": 0, "studies": 0, "instances": 0}
         unscanned_instances = 0
-        # Condition 8 (#767, owner ruling 2026-09-23): an owner edited
+        # Condition 8 (#767, owner rulings 2026-09-23): an entity edited
         # after its status was recorded. Counted beside condition 7 in
         # the same walk, per level; series are counted because a scan
-        # that reads one may record a status on it.
-        edited = {"patients": 0, "studies": 0, "series": 0}
+        # that reads one may record a status on it. An edit of a nested
+        # item or of a series field moves the instance's revision, so it
+        # is counted there.
+        edited = {"patients": 0, "studies": 0, "series": 0, "instances": 0}
         for patient in self.store.patients:
             unacted["patients"] += patient.phi_status is PhiStatus.IDENTIFIED
             edited["patients"] += _edited_since_its_status(patient)
@@ -3725,6 +3731,7 @@ class DicomSession:
                         status = instance.phi_status
                         unacted["instances"] += status is PhiStatus.IDENTIFIED
                         unscanned_instances += status is PhiStatus.UNSCANNED
+                        edited["instances"] += _edited_since_its_status(instance)
 
         # The grade IS this list: PASS exactly when it is empty (#481). See
         # `_review_reasons` for why it is a list and not a boolean.
@@ -8009,7 +8016,7 @@ class DicomSession:
                     # worker got a top-level-only instance, so the scan
                     # reported clean on every nested tag -- report text,
                     # annotations, anything below the first level.
-                    i_new.sequences = clone_sequences(i)
+                    i_new.sequences = clone_sequences(i, i_new)
 
                     # `date_shifted` is not carried because `Instance` no
                     # longer has one (#510): the scan reads the per-value
