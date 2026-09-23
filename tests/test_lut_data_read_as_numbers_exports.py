@@ -287,6 +287,13 @@ def test_a_caller_set_numpy_table_is_one_element_lost(tmp_path):
     accepts" would also swallow a numpy *scalar*, which is a number and
     belongs in the `US` arm. No ingest produces an array here; a caller's
     `set_attr` does, and `tobytes()` is the one-line fix for one.
+
+    Written into the item's `attributes` directly, not through `set_attr`:
+    since #767 a nested `set_attr` marks the instance changed, so the save
+    `export()` begins with tries to store the array and raises `TypeError`
+    (the store's JSON holds no `ndarray`), as a top-level `set_attr` of one
+    already did. What is pinned here is the exporter's refusal, which only
+    a value the store never saw reaches.
     """
     import numpy as np
 
@@ -298,8 +305,8 @@ def test_a_caller_set_numpy_table_is_one_element_lost(tmp_path):
         assert not session.ingest(folder).failures
         (inst,) = [i for p in session.store.patients for st in p.studies
                    for se in st.series for i in se.instances]
-        inst.sequences["0028,3010"].items[0].set_attr(
-            "0028,3006", np.array([1, 2, 3, 4], "<u2"))
+        inst.sequences["0028,3010"].items[0].attributes["0028,3006"] = \
+            np.array([1, 2, 3, 4], "<u2")
         session.export(str(tmp_path / "out"), use_compression=False)
     (written,) = _files(tmp_path / "out")
     item = pydicom.dcmread(written)[0x00283010].value[0]
