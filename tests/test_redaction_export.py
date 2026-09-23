@@ -85,7 +85,7 @@ def test_export_compressed_redaction(tmp_path):
     # We use a slightly larger zone to be sure
     config.add_rule(
         "TEST-SN-001",
-        zones=[[20, 40, 20, 40]] # [r1, r2, c1, c2]
+        redaction_zones=[[20, 40, 20, 40]] # [r1, r2, c1, c2]
     )
 
     # 3. Ingest

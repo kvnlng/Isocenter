@@ -94,21 +94,32 @@ FROZEN_DICOM_EXPORT_OPTIONS = (
 #: `_spell` spells it and keyed `Owner.name`. Until #26 these were pinned
 #: by `callable()` alone, so a renamed or re-defaulted parameter on any of
 #: them was green -- a tier-1 method with unpinned parameters is not
-#: frozen. Transcribed from the code at 3fe24bee after reading each one.
+#: frozen. Each value is read from the `def` line itself, not from `_spell`:
+#: the first version of this table took `start_patient`'s row from
+#: `_spell`'s output, which dropped the staticmethod's first parameter and
+#: froze `name` for `def start_patient(id, name)` (review of #787).
 #:
-#: `entities.is_synthetic_patient_id` is the one module-level function;
-#: `_owner_and_callable` keeps its first parameter, which `_spell` drops
-#: for a method. `DiscoveryResult.filter`'s `predicate` takes a minimum
+#: Three were renamed before the freeze rather than frozen as they stood
+#: (owner rulings on #787): `start_patient(id=)` to `patient_id` (it
+#: shadowed the builtin), `add_rule(model=, zones=)` to the file's own
+#: keys `model_name`/`redaction_zones`, and `set_phi_tag(replacement=)`
+#: to `value`, the key #538 renamed in the file.
+#:
+#: `entities.is_synthetic_patient_id` is the one module-level function,
+#: and `Builder.start_patient` the one staticmethod: `_owner_and_callable`
+#: keeps the first parameter of both, which `_spell` drops for a method.
+#: `DiscoveryResult.filter`'s `predicate` takes a minimum
 #: confidence (the float default) or a callable, as its docstring says,
 #: and is frozen that way (coordinator ruling, 2026-09-23).
 FROZEN_OTHER_CALLABLES = {
     "Session.__init__": "persistence_file=None",
     "IsocenterConfiguration.save": "",
     "IsocenterConfiguration.add_rule": (
-        "serial_number, manufacturer='Unknown', model='Unknown', zones=None"),
+        "serial_number, manufacturer='Unknown', model_name='Unknown', "
+        "redaction_zones=None"),
     "IsocenterConfiguration.update_rule": "serial_number, updates",
     "IsocenterConfiguration.delete_rule": "serial_number",
-    "IsocenterConfiguration.set_phi_tag": "tag, action, replacement=None",
+    "IsocenterConfiguration.set_phi_tag": "tag, action, value=None",
     "IsocenterConfiguration.get_rule": "serial_number",
     "DicomItem.set_attr": "tag, value",
     "Instance.set_attr": "tag, value",
@@ -117,7 +128,7 @@ FROZEN_OTHER_CALLABLES = {
     "Instance.unload_pixel_data": "",
     "Instance.discard_pixel_data": "",
     "Instance.get_waveform_data": "",
-    "Builder.start_patient": "name",
+    "Builder.start_patient": "patient_id, name",
     "PhiReport.__init__": "findings, failures=None",
     "PhiReport.to_dataframe": "",
     "DiscoveryResult.filter": "predicate=0.0",
@@ -154,7 +165,7 @@ TIER_ONE_NAMES = {
         "save", "add_rule", "update_rule", "delete_rule", "set_phi_tag",
         "get_rule", "rules", "phi_tags", "date_jitter", "remove_private_tags",
         "privacy_profile", "config_path", "auto_save"},
-    "PhiReport": {"to_dataframe"},
+    "PhiReport": {"findings", "failures", "to_dataframe"},
     "PhiFinding": {"entity_uid", "entity_type", "field_name", "value", "reason",
                    "tag", "patient_id", "entity", "remediation_proposal",
                    "metadata", "entity_path"},
@@ -162,6 +173,7 @@ TIER_ONE_NAMES = {
     "IngestSummary": {"ingested", "failures", "declined", "skipped", "failed"},
     "DiscoveryResult": {"filter", "to_zones", "to_dataframe"},
     "DicomBuilder": {"start_patient"},
+    "DicomStore": {"patients"},
 }
 
 #: The tier-2 names on the same classes, each named on stability.md's
@@ -169,6 +181,9 @@ TIER_ONE_NAMES = {
 #: (`record_remediation` to `clear_sequence_items`) were on no list until
 #: #26: the scan, remediation and the reversible lock call them across
 #: modules, so they stay public, and tier 2 says a program should not.
+#: `DicomStore`'s five methods, `DiscoveryResult.candidates` and
+#: `n_sources` were on no list either (review of #787); the owner ruled
+#: them tier 2, `n_sources` although the README teaches it.
 TIER_TWO_NAMES = {
     "TrackedEntity": {"has_unsaved_changes", "phi_status", "phi_status_policy",
                       "mark_modified", "mark_persisted", "mark_subtree_persisted",
@@ -183,7 +198,10 @@ TIER_TWO_NAMES = {
     "Study": {"record_date_shift", "date_shift_vouches_for"},
     "Equipment": {"from_parts"},
     "DiscoveryResult": {"get_density_matrix", "visualize_heatmap",
-                        "analyze_temporal_stability", "inspect_clusters"},
+                        "analyze_temporal_stability", "inspect_clusters",
+                        "candidates", "n_sources"},
+    "DicomStore": {"get_unique_equipment", "get_ingested_paths",
+                   "get_superseded_uids", "save_state", "load_state"},
 }
 
 #: The conditions that grade a run `REVIEW_REQUIRED`, in the order
@@ -857,7 +875,11 @@ def _owner_and_callable(qualified):
         return is_synthetic_patient_id, False
     assert owner in owners, f"{qualified}: teach _owner_and_callable its owner"
     assert name in vars(owners[owner]), f"{qualified} is not defined on {owner}"
-    return getattr(owners[owner], name), True
+    # A staticmethod has no `self`: its first parameter is a real one.
+    # Dropping it anyway froze `start_patient(id, name)` as taking `name`
+    # alone, and a rename of `id` was green (review of #787, mutant m1).
+    return (getattr(owners[owner], name),
+            not isinstance(vars(owners[owner])[name], staticmethod))
 
 
 def _frozen_instance_fields_in_dataclass_order():
@@ -1250,81 +1272,188 @@ def test_the_second_table_is_read_and_checked_on_its_own_run():
         _table_run(_TWO_TABLES.replace("| Callable |", "| Name |"), _OTHER_TABLE_HEADER)
 
 
-def _classes_tier_one_names():
-    """`class name -> class` for every class `TIER_ONE_NAMES` lists.
+def test_a_staticmethod_row_keeps_its_first_parameter():
+    """Review of #787, finding 1: `_owner_and_callable` said `drop_self`
+    for every class owner, so `_spell` dropped a staticmethod's first real
+    parameter and `start_patient(id, name)` was pinned as `name`; renaming
+    `id` was green. The helper's answer for each kind of row, and the
+    spelling it leads to for the one staticmethod."""
+    assert _owner_and_callable("Builder.start_patient")[1] is False
+    assert _owner_and_callable("Instance.set_pixel_data")[1] is True
+    assert _owner_and_callable("entities.is_synthetic_patient_id")[1] is False
+    target, drop_self = _owner_and_callable("Builder.start_patient")
+    assert _spell(target, drop_self=drop_self).split(", ")[0] == "patient_id"
 
-    `IngestSummary` is reached through the facade, as T-F2 reaches it,
-    because the class is bound only in a probe target this file must not
-    name.
+
+def test_the_wfdb_result_is_a_list_of_path_strings(tmp_path):
+    """`export(format='wfdb')` -> `List[str]`, the paths written (#26).
+
+    T-F2 pins the empty case (`[]`), which says nothing about the
+    elements; this exports pydicom's bundled `waveform_ecg.dcm`, so the
+    list is not empty, and pins each element as a `str` naming a file
+    that exists. Killing mutation: the exporter returning `Path` objects,
+    or a tuple.
     """
-    return {cls.__name__: cls for cls in (
-        TrackedEntity, DicomItem, Instance, Patient, Study, Series, Equipment,
-        session_module.IsocenterConfiguration, session_module.PhiReport,
-        session_module.PhiFinding, session_module.ExportSummary,
-        DiscoveryResult, isocenter.Builder)}
+    import shutil
+    from pydicom.data import get_testdata_file
+    src = tmp_path / "src"
+    src.mkdir()
+    shutil.copy(get_testdata_file("waveform_ecg.dcm"), src / "ecg.dcm")
+    with DicomSession(str(tmp_path / "wfdb.db")) as session:
+        session.ingest(str(src))
+        written = session.export(str(tmp_path / "out"), format="wfdb")
+    assert type(written) is list and written, written
+    assert all(type(path) is str and pathlib.Path(path).exists() for path in written), written
 
 
-def _public_names(cls):
+def _tier_one_class_instances(session, summary):
+    """`class name -> (class, instance or None)` for every class
+    `TIER_ONE_NAMES` lists.
+
+    An instance is built wherever the class keeps a per-object `__dict__`,
+    because an attribute set in `__init__` (`DiscoveryResult.n_sources`,
+    `PhiReport.findings`) is on the object and not in `vars(cls)`; reading
+    the class alone left four such names in no tier with this test green
+    (review of #787, mutant m5). A slots class holds a descriptor per
+    attribute in `vars(cls)` and needs none. `IngestSummary` and
+    `DicomStore` come through the facade (`ingest()`'s result and
+    `session.store`), because each is bound only in a probe target this
+    file must not name.
+    """
+    instances = {
+        session_module.IsocenterConfiguration: session.configuration,
+        session_module.PhiReport: session_module.PhiReport([]),
+        session_module.ExportSummary: session_module.ExportSummary([], []),
+        DiscoveryResult: DiscoveryResult([], 0),
+        type(summary): summary,
+        type(session.store): session.store,
+    }
+    classes = (TrackedEntity, DicomItem, Instance, Patient, Study, Series,
+               Equipment, session_module.IsocenterConfiguration,
+               session_module.PhiReport, session_module.PhiFinding,
+               session_module.ExportSummary, DiscoveryResult,
+               isocenter.Builder, type(summary), type(session.store))
+    return {cls.__name__: (cls, instances.get(cls)) for cls in classes}
+
+
+def _public_names(cls, instance=None):
     """What a program can reach on `cls` by name: the public names in
-    `vars(cls)` and the public dataclass fields. `Instance` is a slots
+    `vars(cls)`, the public dataclass fields, and the public attributes an
+    instance carries in its own `__dict__`. `Instance` is a slots
     dataclass, so `vars` holds a member descriptor per field; the set
     dedupes the two."""
     names = {n for n in vars(cls) if not n.startswith("_")}
     if dataclasses.is_dataclass(cls):
         names |= set(_public_fields(cls))
+    if instance is not None:
+        assert hasattr(instance, "__dict__"), f"{cls.__name__}: no __dict__ to read"
+        names |= {n for n in vars(instance) if not n.startswith("_")}
     return names
 
 
+#: How stability.md spells an owner whose class name is not the one a user
+#: types: `Builder` is `DicomBuilder`'s exported name.
+_PAGE_OWNER = {"DicomBuilder": "Builder"}
+
+
+def _page_paragraphs(section):
+    """`section` cut into paragraphs, and each bullet its own paragraph, so
+    an owner named in one bullet cannot vouch for a name in the next."""
+    out = []
+    for block in section.split("\n\n"):
+        out += re.split(r"\n(?=- )", block)
+    return out
+
+
+def _named_under_owner(paragraphs, owner, name):
+    """True when some paragraph that names `owner` also backticks `name`
+    as a word. A bare word match anywhere on the page was the first
+    version, and `written` -- an `ExportSummary` property -- vouched for a
+    method of that name added to `Instance` (review of #787, m2)."""
+    owner_word = re.compile(rf"\b{_PAGE_OWNER.get(owner, owner)}\b")
+    name_word = re.compile(rf"\b{name}\b")
+    return any(owner_word.search(para)
+               and any(name_word.search(span) for span in re.findall(r"`([^`]+)`", para))
+               for para in paragraphs)
+
+
+def _tier_sections(page):
+    """`(tier 1 section, tier 2 section)` of stability.md: `## Frozen at
+    1.0` and `## Documented but internal`, each to the next `## `."""
+    internal = "## Documented but internal"
+    assert internal in page, f"stability.md has no {internal!r} section"
+    return (_frozen_section(page),
+            page.split(internal, 1)[1].split("\n## ", 1)[0])
+
+
 def test_every_public_name_on_a_tier_one_class_is_classified(tmp_path):
-    """#26: a public name on a tier-1 class is in tier 1 or tier 2, by name.
+    """#26: a public name on a tier-1 class is in tier 1 or tier 2, by name,
+    and the page names it in that tier's section.
 
     T-F1 works in both directions for `Session` only. On every other
     class tier 1 names, a new public method belonged to no tier -- the
     page's tier 3 is "a leading underscore, and every module not listed"
     -- and so became frozen by default the moment someone relied on it.
     Measured at 3fe24bee: seven names on `Instance`, `DicomItem` and
-    `Study` were on no list, and are tier 2 since #26.
+    `Study` were on no list; review of #787 found four instance attributes
+    (`DiscoveryResult.candidates`, `n_sources`, `PhiReport.findings`,
+    `failures`) and `DicomStore`'s five methods besides.
 
     Both directions: a public name no list classifies is red (classify it
     on the page and here, or underscore it), and a listed name the class
     no longer defines is red (a tier-1 one is a 2.0; a tier-2 one needs
-    its CHANGELOG entry and its line here removed). Each listed name must
-    also be named on stability.md, backticked. Killing mutations: a new
-    public method on any of these classes; a listed name removed from the
-    class; a name removed from the page.
+    its CHANGELOG entry and its line here removed).
+
+    **The tier is read from the page too.** A tier-1 name must be
+    backticked in a paragraph of `## Frozen at 1.0` that names its owner,
+    and a tier-2 name in a paragraph of `## Documented but internal` that
+    does. Checked anywhere on the page, deleting `Instance.regenerate_uid()`
+    from the tier-2 list stayed green because the tier-1 section names it
+    in the `subset=` sentence -- a tier-2 method readable only as a tier-1
+    promise (review of #787, m3). A base's names are looked for under the
+    base (`TrackedEntity`) or under the subclass that carries them.
+
+    Killing mutations: a new public method or instance attribute on any of
+    these classes; a listed name removed from the class; a name removed
+    from its tier's section, or named only in the other one.
     """
     (tmp_path / "empty").mkdir()
     with DicomSession(str(tmp_path / "classify.db")) as session:
         summary = session.ingest(str(tmp_path / "empty"))
-    classes = _classes_tier_one_names()
-    classes[type(summary).__name__] = type(summary)
+        classes = _tier_one_class_instances(session, summary)
+        public_by_class = {name: _public_names(cls, instance)
+                           for name, (cls, instance) in classes.items()}
     assert set(classes) == set(TIER_ONE_NAMES), sorted(set(classes) ^ set(TIER_ONE_NAMES))
     assert set(TIER_TWO_NAMES) <= set(TIER_ONE_NAMES)
 
     page = (REPO / "docs" / "api" / "stability.md").read_text(encoding="utf-8")
-    for name, cls in sorted(classes.items()):
-        own = TIER_ONE_NAMES[name] | TIER_TWO_NAMES.get(name, set())
-        assert not TIER_ONE_NAMES[name] & TIER_TWO_NAMES.get(name, set()), (
-            f"{name}: a name is in both tiers")
+    tier_paragraphs = [_page_paragraphs(section) for section in _tier_sections(page)]
+    for name, (cls, _instance) in sorted(classes.items()):
+        tiers = (TIER_ONE_NAMES[name], TIER_TWO_NAMES.get(name, set()))
+        assert not tiers[0] & tiers[1], f"{name}: a name is in both tiers"
         allowed = set().union(*(TIER_ONE_NAMES.get(base.__name__, set())
                                 | TIER_TWO_NAMES.get(base.__name__, set())
                                 for base in cls.__mro__))
-        public = _public_names(cls)
+        public = public_by_class[name]
         unclassified = sorted(public - allowed)
         assert not unclassified, (
             f"{name} has public names in no tier: {unclassified}. Classify "
             f"each on docs/api/stability.md (tier 1 or tier 2) and in this "
             f"file's TIER_ONE_NAMES/TIER_TWO_NAMES, or give it a leading "
             f"underscore (#26)")
-        gone = sorted(own - public)
+        gone = sorted((tiers[0] | tiers[1]) - public)
         assert not gone, f"{name} no longer defines {gone}, which the tiers list"
-        # Named as a word inside a backticked span: the page lists fields
-        # in groups (`attributes, sequences, attribute_vrs`) and methods
-        # qualified (`DicomItem.add_sequence()`).
-        spans = re.findall(r"`([^`]+)`", page)
-        unnamed = sorted(n for n in own
-                         if not any(re.search(rf"\b{n}\b", s) for s in spans))
-        assert not unnamed, f"stability.md does not name {name}'s {unnamed}"
+        # The owners a name may be filed under: the class, and for an
+        # inherited name each subclass checked here that carries it.
+        owners = {name} | {other for other, (sub, _i) in classes.items()
+                           if sub is not cls and issubclass(sub, cls)}
+        for tier, (names, paragraphs) in enumerate(zip(tiers, tier_paragraphs), 1):
+            unnamed = sorted(n for n in names
+                             if not any(_named_under_owner(paragraphs, owner, n)
+                                        for owner in owners))
+            assert not unnamed, (
+                f"stability.md's tier-{tier} section does not name {name}'s "
+                f"{unnamed} in a paragraph that names {sorted(owners)}")
 
 
 def _analytics_grade_conditions():
@@ -1353,23 +1482,82 @@ def test_the_documented_grade_conditions_are_the_frozen_count():
     assert [int(n) for n, _ in items] == list(range(1, len(FROZEN_GRADE_CONDITIONS) + 1)), items
 
 
+def _review_reasons_appends(grader):
+    """The `review_reasons.append(...)` calls in `grader`, after checking
+    that every other use of the name is on an allow-list: its one
+    `review_reasons = []`, and `return review_reasons`.
+
+    Counting `append` calls alone read past every other way a list grows:
+    `review_reasons.extend([...] if ... else [])` before the `return` is a
+    ninth condition, and all of this file was green under it (review of
+    #787, m4). Anything else -- `extend`, `insert`, `+=`, a slice write, an
+    alias, the list handed to a helper -- raises, naming the shape, so a
+    condition must be added as an `append`.
+    """
+    parents = {child: node for node in ast.walk(grader)
+               for child in ast.iter_child_nodes(node)}
+    appends, initialisers = [], 0
+    for node in ast.walk(grader):
+        if not (isinstance(node, ast.Name) and node.id == "review_reasons"):
+            continue
+        parent = parents.get(node)
+        if (isinstance(parent, ast.Attribute) and parent.attr == "append"
+                and isinstance(parents.get(parent), ast.Call)
+                and parents[parent].func is parent):
+            appends.append(parents[parent])
+        elif (isinstance(parent, ast.Assign) and parent.targets == [node]
+              and isinstance(parent.value, ast.List) and not parent.value.elts):
+            initialisers += 1
+        elif isinstance(parent, ast.Return) and parent.value is node:
+            pass
+        else:
+            raise AssertionError(
+                f"review_reasons is used as {ast.unparse(parent)!r} at line "
+                f"{node.lineno}; a grade condition is added as one "
+                f"`review_reasons.append(...)`, which this pin counts")
+    assert initialisers == 1, f"review_reasons is bound {initialisers} times"
+    return appends
+
+
+def _grader(tree):
+    (grader,) = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.FunctionDef) and n.name == "_review_reasons"]
+    return grader
+
+
 def test_the_grading_function_appends_one_reason_per_frozen_condition():
-    """#26, spec §1.5: `_review_reasons` holds one `append` per condition.
+    """#26, spec §1.5: `_review_reasons` holds one `append` per condition,
+    and grows its list no other way.
 
     Read by path and AST, found by name rather than by line. Condition 6
     appends inside a `for` over the verbs, and is one site. A deleted
     site is red here as well as in its killing test; an added one is red
     until the page, `FROZEN_GRADE_CONDITIONS` and a test are added with it.
     """
-    tree = _module_tree("isocenter", "session.py")
-    (grader,) = [n for n in ast.walk(tree)
-                 if isinstance(n, ast.FunctionDef) and n.name == "_review_reasons"]
-    sites = [n for n in ast.walk(grader)
-             if isinstance(n, ast.Call) and _callee_name(n) == "append"
-             and isinstance(n.func, ast.Attribute)
-             and isinstance(n.func.value, ast.Name)
-             and n.func.value.id == "review_reasons"]
+    sites = _review_reasons_appends(_grader(_module_tree("isocenter", "session.py")))
     assert len(sites) == len(FROZEN_GRADE_CONDITIONS), [s.lineno for s in sites]
+
+
+@pytest.mark.parametrize("growth", [
+    'review_reasons.extend(["ninth"] if audit_summary else [])',
+    'review_reasons += ["ninth"]',
+    'review_reasons.insert(0, "ninth")',
+    'review_reasons[:0] = ["ninth"]',
+    'reasons = review_reasons',
+    '_more(review_reasons)',
+])
+def test_the_grade_reader_refuses_a_list_it_cannot_count(growth):
+    """The review's m4 and its relatives, synthetic: each raises. The
+    control, the shape the grader has today, reads back one `append`."""
+    src = ("def _review_reasons(*, audit_summary):\n"
+           "    review_reasons = []\n"
+           "    if not audit_summary:\n"
+           "        review_reasons.append('none')\n"
+           "    # GROW\n"
+           "    return review_reasons\n")
+    assert len(_review_reasons_appends(_grader(ast.parse(src)))) == 1
+    with pytest.raises(AssertionError, match="review_reasons is used as"):
+        _review_reasons_appends(_grader(ast.parse(src.replace("# GROW", growth))))
 
 
 def test_each_grade_condition_names_a_test_that_exists():
@@ -1433,11 +1621,14 @@ def test_the_stability_page_says_what_the_freeze_covers():
     assert ("`generate_report(format=)` accepts `'markdown'` only, and "
             "`generate_manifest(format=)` `'html'` and `'json'`; any other "
             "spelling raises `ValueError`") in frozen
-    assert ("except a SOP Instance UID that is neither the one the file was "
-            "ingested under, nor that UID's `anonymize()` replacement, nor the "
-            "current one: one taken between a first redaction and a "
-            "`force=True` second, or between two `Instance.regenerate_uid()` "
-            "calls") in frozen
+    assert ("except a SOP Instance UID that is none of these three: the one "
+            "the first move of the instance's UID (by `anonymize()`, "
+            "`redact()` or `Instance.regenerate_uid()`) left, which is the "
+            "ingested one unless `sop_instance_uid` was assigned before it; "
+            "that UID's `anonymize()` replacement; and the current one. A UID "
+            "taken between a first redaction and a `force=True` second, or "
+            "between two `Instance.regenerate_uid()` calls, is such a UID"
+            ) in frozen
 
 
 def test_the_audit_action_types_written_are_exactly_the_frozen_thirteen():

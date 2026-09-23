@@ -81,7 +81,7 @@ def test_the_7_line_file_saves_small(tmp_path):
     path = _write(tmp_path, SEVEN_LINE_CONFIG)
     with Session(str(tmp_path / "s.db")) as session:
         session.load_config(str(path))
-        session.configuration.add_rule("SN1", zones=[[0, 10, 0, 10]])
+        session.configuration.add_rule("SN1", redaction_zones=[[0, 10, 0, 10]])
         session.configuration.set_phi_tag("0008,0080", "KEEP")
         session.configuration.save()
     text = path.read_text(encoding="utf-8")
@@ -129,7 +129,7 @@ def test_every_policy_base_round_trips(tmp_path, case):
         else:
             _write(tmp_path, text)
             session.load_config(str(path))
-        session.configuration.add_rule("SN1", zones=[[0, 10, 0, 10]])
+        session.configuration.add_rule("SN1", redaction_zones=[[0, 10, 0, 10]])
         session.configuration.set_phi_tag("0008,1030", "REMOVE")
         session.configuration.date_jitter = {"min_days": -20, "max_days": -5}
         session.configuration.remove_private_tags = False
@@ -300,7 +300,7 @@ def test_zones_are_written_inline(tmp_path):
     as a list four lines tall."""
     path = tmp_path / "c.yaml"
     configuration = IsocenterConfiguration(config_path=str(path))
-    configuration.add_rule("SN1", zones=[[0, 10, 0, 10]])
+    configuration.add_rule("SN1", redaction_zones=[[0, 10, 0, 10]])
     configuration.save()
     assert "redaction_zones: [[0, 10, 0, 10]]" in path.read_text(encoding="utf-8")
 
@@ -334,7 +334,7 @@ def test_the_file_reads_top_down_in_the_schema_order(tmp_path):
     configuration.privacy_profile = "basic@2026c"
     configuration.phi_tags = {tag: dict(rule) for tag, rule in BASIC_PROFILE.items()}
     configuration.phi_tags[_D] = {"action": "KEEP", "name": "Protocol Name"}
-    configuration.add_rule("SN1", zones=[[0, 10, 0, 10]])
+    configuration.add_rule("SN1", redaction_zones=[[0, 10, 0, 10]])
     configuration.save()
     text = path.read_text(encoding="utf-8")
     assert list(yaml.safe_load(text)) == ["version", "privacy_profile", "phi_tags",

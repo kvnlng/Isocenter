@@ -5,6 +5,16 @@ from isocenter.builders import DicomBuilder
 from isocenter.entities import Instance, Equipment
 
 
+def test_start_patient_takes_a_patient_id_not_id():
+    """`start_patient(patient_id, name)` (owner ruling on #787). The first
+    parameter was `id`, which shadows the builtin; renamed before the 1.0
+    freeze, not aliased. Positional calls are unchanged."""
+    patient = DicomBuilder.start_patient(patient_id="P26", name="Doe^Jane").build()
+    assert (patient.patient_id, patient.patient_name) == ("P26", "Doe^Jane")
+    with pytest.raises(TypeError, match="unexpected keyword argument 'id'"):
+        DicomBuilder.start_patient(id="P26", name="Doe^Jane")
+
+
 def test_equipment_equality():
     """Test that frozen dataclasses hash correctly."""
     e1 = Equipment("GE", "CT", "SN1")

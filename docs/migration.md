@@ -217,6 +217,17 @@ A phi rule's `value: null` and `name: null` read as absent, as before:
   with `session.load_config(path)` or
   `ConfigLoader.load_unified_config(path)`, and hand `PhiInspector` the
   policy (`config_tags=`).
+- **Three keywords renamed at 1.0**
+  ([#26](https://github.com/kvnlng/Isocenter/issues/26)). Each old
+  keyword raises `TypeError`; positional calls are unchanged.
+  `add_rule(model=, zones=)` is `add_rule(model_name=, redaction_zones=)`,
+  the keys a `machines:` rule has in the file;
+  `set_phi_tag(replacement=)` is `set_phi_tag(value=)`, the key a phi rule
+  has; and `Builder.start_patient(id=)` is `start_patient(patient_id=)`.
+- **One spelling per format.** `generate_report(format=)` takes
+  `'markdown'` only, and `generate_manifest(format=)` `'html'` or
+  `'json'` only; `'md'` and case variants such as `'HTML'` raise
+  `ValueError`.
 
 ## Clinical Trial Processor (CTP)
 

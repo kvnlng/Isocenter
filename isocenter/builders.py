@@ -18,16 +18,21 @@ class DicomBuilder:
            .end_study().build()
     """
     @staticmethod
-    def start_patient(id, name):
-        """Begin building a Patient."""
-        return PatientBuilder(id, name)
+    def start_patient(patient_id, name):
+        """Begin building a Patient.
+
+        The first parameter was `id` until the 1.0 freeze (#26), which
+        shadowed the builtin; it was renamed, not aliased, so
+        `start_patient(id=...)` raises `TypeError`.
+        """
+        return PatientBuilder(patient_id, name)
 
 
 class PatientBuilder:
     """Fluent Builder for Patient entities."""
 
-    def __init__(self, id, name):
-        self.patient = Patient(id, name)
+    def __init__(self, patient_id, name):
+        self.patient = Patient(patient_id, name)
 
     def add_study(self, uid, date):
         """Adds a child Study to this Patient."""

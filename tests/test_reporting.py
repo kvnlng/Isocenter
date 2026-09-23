@@ -238,7 +238,7 @@ def test_an_unresolvable_profile_is_not_reported_as_applied(tmp_path):
         "applied")
 
 
-@pytest.mark.parametrize("spelling", ["md", "MARKDOWN", "Markdown", " markdown"])
+@pytest.mark.parametrize("spelling", ["md", "MARKDOWN", "Markdown", " markdown", None])
 def test_a_second_spelling_of_the_report_format_is_refused(tmp_path, spelling):
     """One spelling per behaviour (#26): `generate_report(format=)` takes
     `'markdown'`, the value `docs/api/stability.md` freezes, and nothing
@@ -257,3 +257,18 @@ def test_a_second_spelling_of_the_report_format_is_refused(tmp_path, spelling):
         assert not out.exists()
         session.generate_report(str(out), format="markdown")
     assert out.exists()
+
+
+def test_a_refused_report_format_is_refused_before_the_report_is_built(
+        tmp_path, monkeypatch):
+    """The spelling is checked first (review of #787): the report reads the
+    whole audit log and walks the store before it renders, and a refused
+    format used to be found only then. Here the first read the build makes
+    raises, so a check left at the end is red."""
+    with Session(str(tmp_path / "early.db")) as session:
+        def not_reached():
+            raise AssertionError("the report was built for a refused format")
+        with monkeypatch.context() as patched:
+            patched.setattr(session.store_backend, "get_audit_summary", not_reached)
+            with pytest.raises(ValueError, match="'markdown'"):
+                session.generate_report(str(tmp_path / "r.md"), format="md")

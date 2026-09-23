@@ -63,7 +63,7 @@ def test_session_integration(tmp_path):
         assert "Files:</strong> 0" in content
 
 
-@pytest.mark.parametrize("spelling", ["HTML", "Json", "JSON", "htm", " json"])
+@pytest.mark.parametrize("spelling", ["HTML", "Json", "JSON", "htm", " json", None])
 def test_a_second_spelling_of_the_manifest_format_is_refused(tmp_path, spelling):
     """One spelling per behaviour (#26): `generate_manifest(format=)` takes
     `'html'` and `'json'`, the values `docs/api/stability.md` freezes. A
@@ -82,3 +82,20 @@ def test_a_second_spelling_of_the_manifest_format_is_refused(tmp_path, spelling)
             written = tmp_path / f"manifest.{accepted}"
             session.generate_manifest(str(written), format=accepted)
             assert written.exists(), accepted
+
+
+def test_a_refused_manifest_format_is_refused_before_the_store_is_walked(
+        tmp_path, monkeypatch):
+    """The spelling is checked first (review of #787), before every
+    instance is walked. Here walking the store raises, so a check left at
+    the end is red."""
+    class Unwalkable:
+        @property
+        def patients(self):
+            raise AssertionError("the store was walked for a refused format")
+
+    with DicomSession(str(tmp_path / "early.db")) as session:
+        with monkeypatch.context() as patched:
+            patched.setattr(session, "store", Unwalkable())
+            with pytest.raises(ValueError, match="'html' or 'json'"):
+                session.generate_manifest(str(tmp_path / "m.html"), format="HTML")

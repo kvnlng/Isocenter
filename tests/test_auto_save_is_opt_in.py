@@ -39,7 +39,7 @@ WITH_A_RULE = SEVEN_LINE_CONFIG.replace(
 
 #: Each mutator, and what it leaves in memory.
 MUTATORS = {
-    "add_rule": (lambda c: c.add_rule("SN2", zones=[[0, 4, 0, 4]]),
+    "add_rule": (lambda c: c.add_rule("SN2", redaction_zones=[[0, 4, 0, 4]]),
                  lambda c: c.get_rule("SN2") is not None),
     "update_rule": (lambda c: c.update_rule("SN1", {"model_name": "M9"}),
                     lambda c: c.get_rule("SN1")["model_name"] == "M9"),

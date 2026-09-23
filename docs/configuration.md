@@ -540,7 +540,7 @@ These methods change the configuration **in memory**. Since 1.0 they do not writ
 
 #### add_rule()
 
-`add_rule(serial_number, manufacturer="Unknown", model="Unknown", zones=None)`
+`add_rule(serial_number, manufacturer="Unknown", model_name="Unknown", redaction_zones=None)`
 
 Add a new machine redaction rule dynamically.
 
@@ -549,8 +549,8 @@ Add a new machine redaction rule dynamically.
 session.configuration.add_rule(
     serial_number="US-5555",
     manufacturer="GE",
-    model="Voluson",
-    zones=[[0, 50, 0, 800]] # [y1, y2, x1, x2]
+    model_name="Voluson",
+    redaction_zones=[[0, 50, 0, 800]] # [y1, y2, x1, x2]
 )
 session.configuration.save()  # write it to the loaded file
 ```
@@ -574,9 +574,9 @@ Update a rule by serial number.
 
 #### set_phi_tag()
 
-`set_phi_tag(tag, action, replacement=None)`
+`set_phi_tag(tag, action, value=None)`
 
-Update the policy for a specific DICOM tag. `replacement` is stored as the rule's `value:`, which `REPLACE` writes ([#538](https://github.com/kvnlng/Isocenter/issues/538)). An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
+Update the policy for a specific DICOM tag. `value` is stored as the rule's `value:`, which `REPLACE` writes ([#538](https://github.com/kvnlng/Isocenter/issues/538)); the keyword was `replacement=` until 1.0, and that spelling now raises `TypeError`. An unknown action, or a rule Isocenter cannot honour (see [PHI Tags](#phi-tags)), raises `ValueError` and leaves the policy and its file unchanged.
 
 ```python
 # Force removal of PatientWeight
@@ -628,6 +628,6 @@ print(f"Discovered {len(zones)} zones: {zones}")
 if zones:
     session.configuration.add_rule(
         serial_number="US-12345",
-        zones=zones
+        redaction_zones=zones
     )
 ```

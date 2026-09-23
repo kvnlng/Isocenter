@@ -21,7 +21,7 @@ def test_configuration_api():
 
     # 2. Test Add Rule
     print("Testing Add Rule...")
-    s.configuration.add_rule("SERIAL_123", "TestMan", "TestModel", zones=[[10, 10, 100, 100]])
+    s.configuration.add_rule("SERIAL_123", "TestMan", "TestModel", redaction_zones=[[10, 10, 100, 100]])
 
     assert len(s.configuration.rules) == 1
     rule = s.configuration.get_rule("SERIAL_123")

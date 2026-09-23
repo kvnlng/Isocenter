@@ -27,8 +27,10 @@ behaviour came to be is in the
   ([Frozen at 1.0](#frozen-at-10)).
 - **The output.** For the same input, configuration and project secret,
   a 1.x exports what the previous release exported, or its changelog
-  says what changed ([Data promises](#frozen-at-10); #717). The grade,
-  the audit words and the conditions that grade a run are frozen too.
+  says what changed ([Data promises](#frozen-at-10); #717). The grade's
+  values and the audit words keep their spelling, and no condition that
+  grades a run is removed or narrowed; a 1.x may add words and
+  conditions, with a changelog entry.
 - **The configuration.** A file 1.0 loads, every 1.x loads, and a 1.x
   that applies an unchanged file differently raises the schema's minor
   version ([Data promises](#frozen-at-10)).
@@ -93,10 +95,10 @@ are in the paragraphs below.
 | --- | --- |
 | `Session.__init__` | `persistence_file=None` |
 | `IsocenterConfiguration.save` | — |
-| `IsocenterConfiguration.add_rule` | `serial_number, manufacturer='Unknown', model='Unknown', zones=None` |
+| `IsocenterConfiguration.add_rule` | `serial_number, manufacturer='Unknown', model_name='Unknown', redaction_zones=None` |
 | `IsocenterConfiguration.update_rule` | `serial_number, updates` |
 | `IsocenterConfiguration.delete_rule` | `serial_number` |
-| `IsocenterConfiguration.set_phi_tag` | `tag, action, replacement=None` |
+| `IsocenterConfiguration.set_phi_tag` | `tag, action, value=None` |
 | `IsocenterConfiguration.get_rule` | `serial_number` |
 | `DicomItem.set_attr` | `tag, value` |
 | `Instance.set_attr` | `tag, value` |
@@ -105,7 +107,7 @@ are in the paragraphs below.
 | `Instance.unload_pixel_data` | — |
 | `Instance.discard_pixel_data` | — |
 | `Instance.get_waveform_data` | — |
-| `Builder.start_patient` | `name` |
+| `Builder.start_patient` | `patient_id, name` |
 | `PhiReport.__init__` | `findings, failures=None` |
 | `PhiReport.to_dataframe` | — |
 | `DiscoveryResult.filter` | `predicate=0.0` |
@@ -159,10 +161,13 @@ DataFrame is read by the first of `SOPInstanceUID`,
 and one with none of them raises `ValueError`. A UID matches at any of
 the four levels. A Study, Series or SOP Instance UID taken before
 `anonymize()` or `redact()` still names its entity, except a SOP
-Instance UID that is neither the one the file was ingested under, nor
-that UID's `anonymize()` replacement, nor the current one: one taken
-between a first redaction and a `force=True` second, or between two
-`Instance.regenerate_uid()` calls. A value that names nothing in the
+Instance UID that is none of these three: the one the first move of the
+instance's UID (by `anonymize()`, `redact()` or
+`Instance.regenerate_uid()`) left, which is the ingested one unless
+`sop_instance_uid` was assigned before it; that UID's `anonymize()`
+replacement; and the current one. A UID taken between a first redaction
+and a `force=True` second, or between two `Instance.regenerate_uid()`
+calls, is such a UID. A value that names nothing in the
 session is counted, never named, in one `WARNING` line and one
 `WARNING` audit row, which grades the report `REVIEW_REQUIRED`.
 
@@ -281,7 +286,7 @@ no configuration, `phi_tags` is a copy of the floor policy
 held under is tier 2), and `audit()`/`anonymize()` apply it; a config
 with no `privacy_profile` line, or a null one, extends it, and one with
 `privacy_profile: none` opts out of it. `set_phi_tag()` stores lowercase
-keys, stores `replacement` as the rule's `value`, and raises
+keys, stores its `value` argument as the rule's `value`, and raises
 `ValueError`, leaving the policy and its file unchanged, for an unknown
 action or a rule `load_config` would refuse. `add_rule()` and
 `update_rule()` raise `ValueError`, leaving the rules and the file
@@ -532,6 +537,10 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   own `record_date_shift()` and `date_shift_vouches_for()`. Every other
   public name on a class tier 1 names is listed on this page, in one
   tier or the other.
+- **`DicomStore`'s methods** `get_unique_equipment()`,
+  `get_ingested_paths()`, `get_superseded_uids()`, `save_state()` and
+  `load_state()`. Its `patients` list is frozen (above); what else the
+  store object offers is not.
 - **`profiles.FLOOR_POLICY`**, the name the floor policy is held under.
   What the floor *contains* is frozen (above); the name is not.
 - **`entities` helpers** `clone_sequences`, `iter_item_tree`,
@@ -543,7 +552,8 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   `pixel_analysis.HAS_OCR`, `pixel_analysis.OcrUnavailableError`,
   `pixel_analysis.PixelScanError`;
   `DiscoveryResult.get_density_matrix`, `visualize_heatmap`,
-  `analyze_temporal_stability`, `inspect_clusters`.
+  `analyze_temporal_stability`, `inspect_clusters`, and its attributes
+  `candidates` and `n_sources`.
 - **`DicomExporter.write_tree()`** (the serializer alone) and the
   exporter registry `Exporter`, `register()`, `get_exporter()`,
   `available_formats()`, which is provisional (below).
