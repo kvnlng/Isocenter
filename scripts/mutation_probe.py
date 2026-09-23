@@ -322,7 +322,7 @@ TARGETS = {
     # ERROR in its `except`, which re-raises): 47 of 49 became 45 of 45.
     # tests/test_recovery_needs_the_key_it_was_locked_with.py (#615) kills
     # nothing the other five miss: the row without it is also 45 of 45.
-    "isocenter/reversibility.py": (["tests/test_a_token_says_how_it_was_written.py", "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/reversibility.py": (["tests/test_a_token_says_how_it_was_written.py", "tests/test_recovery_returns_the_identity.py","tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                     "tests/test_a_lock_under_the_wrong_key_refuses.py",
                                     "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                                     "tests/test_feature_regression.py",
