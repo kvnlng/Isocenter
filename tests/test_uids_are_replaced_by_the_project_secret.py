@@ -745,3 +745,73 @@ def test_a_misnamed_finding_that_moves_its_entity_settles_the_uid_it_had(tmp_pat
         assert (entity.sop_instance_uid if level == "instance"
                 else entity.series_instance_uid) == M(source)
         assert entity.phi_status is not PhiStatus.REMEDIATED
+
+
+@pytest.mark.parametrize("level", ["series", "study"])
+def test_a_sop_uid_finding_handed_an_owner_moves_no_instance(tmp_path, level):
+    """`anonymize(findings)` takes findings from the caller, and one can
+    name a SOP Instance UID replacement against a Series or Study. The
+    `0008,0018` arm moves an identity only for an instance: the owner keeps
+    its UID and so does every instance under it. Neither reaches the arm
+    today -- a Series is declined because its attributes do not hold
+    `0008,0018`, and a Study is not routed to the element arm -- so the
+    arm's instance check is a second guard (its mutant survives, explained
+    in #544's PR); this pins the outcome if that routing changes."""
+    import dataclasses
+
+    src = tmp_path / "src"
+    src.mkdir()
+    _ct(src / "a.dcm", "1.2.3.99.21", study="1.2.3.99.20", series="1.2.3.99.22")
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        load_fixed_secret(session)
+        session.ingest(str(src))
+        study = session.store.patients[0].studies[0]
+        series = study.series[0]
+        owner, entity_type, uid = ((series, "Series", "1.2.3.99.22") if level == "series"
+                                   else (study, "Study", "1.2.3.99.20"))
+        session.configuration.phi_tags = {"0008,0018": {"action": "REPLACE"}}
+        (finding,) = [f for f in session.audit().findings
+                      if f.tag == "0008,0018" and not f.entity_path]
+        session.anonymize([dataclasses.replace(
+            finding, entity=owner, entity_type=entity_type, entity_uid=uid)])
+        assert (study.study_instance_uid, series.series_instance_uid) == (
+            "1.2.3.99.20", "1.2.3.99.22")
+        assert [i.sop_instance_uid for i in series.instances] == ["1.2.3.99.21"]
+
+
+def test_a_nested_sop_uid_is_replaced_in_its_item_and_moves_no_instance(tmp_path):
+    """A SOP Instance UID inside a sequence item -- Source Image Sequence
+    `(0008,2112)[0]>(0008,0018)`, which the cohort carries -- is replaced
+    in the item, and the instance's own identity moves only for its own
+    top-level `0008,0018`: the item is not an instance. Kills the two
+    guards on the `0008,0018` arm dropped together (each alone is
+    redundant with the other)."""
+    own, nested = "1.2.3.99.61", "1.2.3.99.62"
+    item = Dataset()
+    item.ReferencedSOPClassUID = "1.2.840.10008.5.1.4.1.1.2"
+    item.ReferencedSOPInstanceUID = "1.2.3.99.63"
+    item.SOPInstanceUID = nested
+    src = tmp_path / "src"
+    src.mkdir()
+    _ct(src / "a.dcm", own, extra={"SourceImageSequence": Sequence([item])})
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("privacy_profile: basic\n", encoding="utf-8")
+    db = tmp_path / "s.db"
+    with DicomSession(str(db)) as session:
+        load_fixed_secret(session)
+        session.load_config(str(cfg))
+        session.ingest(str(src))
+        session.anonymize()
+        inst = session.store.patients[0].studies[0].series[0].instances[0]
+        assert inst.sop_instance_uid == M(own)
+        assert inst.attributes[SOURCE_SOP_UID_ATTR] == own
+        assert inst.phi_status is PhiStatus.REMEDIATED
+        session.export(str(tmp_path / "out"), use_compression=False)
+    (path,) = (tmp_path / "out").rglob("*.dcm")
+    ds = pydicom.dcmread(path)
+    assert ds.SOPInstanceUID == M(own)
+    assert ds.SourceImageSequence[0].SOPInstanceUID == M(nested)
+    assert ds.SourceImageSequence[0].ReferencedSOPInstanceUID == M("1.2.3.99.63")
+    with sqlite3.connect(str(db)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM audit_log WHERE action_type IN "
+                            "('ERROR', 'REMEDIATION_DECLINED')").fetchone()[0] == 0
