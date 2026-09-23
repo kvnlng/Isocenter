@@ -398,9 +398,13 @@ def test_a_re_lock_after_an_instance_only_anonymize_stashes_the_patients_identit
     then stashed as nothing, which the held-token check refuses).
 
     The floor's own name and ID rows are REPLACE since #537, so the policy
-    here is the floor with the name removed and the ID kept; the floor
-    itself now leaves `ANONYMIZED` on the copy, which the refusal names,
-    asserted last."""
+    here is the floor with the name removed and the ID kept. Under the
+    floor itself, asserted last: until #624 an instance-only pass left
+    `ANONYMIZED` on the copy and the re-lock refused it; the copy is now
+    written only through its Patient, which the pass never touched, so it
+    holds the original the file carries, and the re-lock stashes it (the
+    refusal is pinned where a replacement can still reach a copy, above
+    and in `test_a_relock_cannot_lose_a_held_identity.py`)."""
     _ct_small_into(str(tmp_path / "in"))
     locked = ["0010,0010", "0010,0020"]
     with Session(str(tmp_path / "s.db")) as session:
@@ -430,9 +434,11 @@ def test_a_re_lock_after_an_instance_only_anonymize_stashes_the_patients_identit
         inst = patient.studies[0].series[0].instances[0]
         session.lock_identities("1CT1")
         session.anonymize([f for f in session.audit() if f.entity_type == "Instance"])
-        assert inst.attributes["0010,0010"] == "ANONYMIZED"
-        with pytest.raises(RuntimeError, match=r"0010,0010 \('ANONYMIZED'\)"):
-            session.lock_identities(patient.patient_id)
+        assert inst.attributes["0010,0010"] == "CompressedSamples^CT1"
+        session.lock_identities(patient.patient_id)
+        again = session.reversibility_service.recover_original_data(inst)
+    assert again["0010,0010"] == "CompressedSamples^CT1", again
+    assert again["0010,0020"] == "1CT1", again
 
 
 # ---------------------------------------------------------------------------
