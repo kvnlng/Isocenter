@@ -146,7 +146,7 @@ privacy_profile: "basic@2026c"
 
     The table's `50xx,xxxx` row is a rule, and the whole overlay group is one: see [Repeating groups](#repeating-groups) ([#556](https://github.com/kvnlng/Isocenter/issues/556)). A rule on a sequence removes the sequence, or empties it to zero items; identifiers nested inside any sequence are handled wherever they sit. It is **not** the whole of Annex E:
     * **UIDs are replaced by UIDs derived from the project secret** ([#544](https://github.com/kvnlng/Isocenter/issues/544)). Each `U` row, and Annotation Group UID's `D`, is `REPLACE` with no value, which on a UI attribute is UID replacement: the value becomes `2.25.` followed by a UUID derived from the value and the store's [project secret](#what-to-keep). One source UID gets one replacement wherever it appears in the store -- the Study Instance UID on every file of the study, a Referenced SOP Instance UID nested in a sequence and the SOP Instance UID it names -- so references between exported files still resolve, and the next pass recognises a replacement and leaves it alone. The replacement names the entity from then on: `export(subset=...)` accepts the UID a study, series or instance had before the pass as well as its replacement, and a later `ingest()` of another file of a replaced study or series joins it. Three limits: a UID in a private tag is not replaced ([#765](https://github.com/kvnlng/Isocenter/issues/765)); a UID written into free text, such as a description, is not found; and a redacted instance's new SOP Instance UID is derived from its source UID and its zones, so a reference to it from another file names the replacement of the source UID, which no exported file carries. The table's two `X/Z/U*` sequences (Referenced Image Sequence and Source Image Sequence) have no rule: they are kept, and the UIDs inside them are replaced. `REPLACE` with a `value:` on a UI attribute writes that value, as 0.9.8 did, and on Study, Series or SOP Instance UID does not move what the export is organised by: the file keeps the source Study and Series Instance UIDs, and a file whose SOP Instance UID is given a value is still named by its source UID. Use `REPLACE` with no value there.
-    * Patient Identity Removed `(0012,0062)`, De-identification Method `(0012,0063)` and Longitudinal Temporal Information Modified `(0028,0303)` are not written ([#554](https://github.com/kvnlng/Isocenter/issues/554)).
+    * No code from CID 7050 is written to De-identification Method Code Sequence `(0012,0064)`, not even `113100` (Basic Application Confidentiality Profile): the departures listed here are why `basic@2026c` does not claim that profile. What the export writes instead is under [What an exported file says about itself](#what-an-exported-file-says-about-itself) ([#554](https://github.com/kvnlng/Isocenter/issues/554)).
     * Patient's Name is `REPLACE` rather than the table's `Z`: it becomes `ANONYMIZED`, a dummy `Z` permits. Patient ID follows its `Z/D` code: `REPLACE` with no value on Patient ID is the keyed `ANON_` pseudonym, which is its dummy, and a Patient ID rule may not empty or remove it ([#537](https://github.com/kvnlng/Isocenter/issues/537)). Study Date follows the table and is exported zero-length; the floor shifts it instead.
     * **Where an `X/D` or `X/Z/D` attribute is Type 3 in its IOD, the table's code removes it, and Isocenter writes the dummy instead.** This departs from the code's X arm. PS3.15 E.1.1 permits it as protection ("either be removed from the Data Set, or have its value replaced by a different 'replacement value' that does not allow identification of the patient"); Isocenter does not know each attribute's type in each IOD, so it cannot tell which arm applies to an instance ([#558](https://github.com/kvnlng/Isocenter/issues/558)), and writes the value that is valid under every arm. Series Date and Time, Instance Creation Date and Protocol Name are the ones most image files carry; each is present in the export holding its dummy.
     * The four sequences whose code has a D arm keep `EMPTY` or `REMOVE`: Institution Code Sequence and Referenced Performed Procedure Step Sequence (`X/Z/D`) and Person Identification Code Sequence (`D`) are emptied to zero items, and Operator Identification Sequence (`X/D`) is removed. D on a sequence asks for items that are themselves valid, and what makes an item valid depends on the IOD, so no dummy item is written ([#557](https://github.com/kvnlng/Isocenter/issues/557)). Where one of these is Type 1 in its IOD, the export departs from the table there.
@@ -439,6 +439,40 @@ phi_tags:
   "0010,0030": { "action": "SHIFT", "name": "PatientBirthDate" }
   "0008,0080": { "action": "REPLACE", "value": "Project-X", "name": "InstitutionName" }
 ```
+
+### What an exported file says about itself
+
+`export(format="dicom")` writes up to three elements that say how the file was de-identified ([#554](https://github.com/kvnlng/Isocenter/issues/554)). They state which software ran and which policy it applied. They do not say whether that policy is enough: that is your configuration's call.
+
+**When.** Only on an instance whose patient, study and own PHI status all read `REMEDIATED` or `CLEARED`, recorded under one policy, and that policy is the one in force or one this session ran `audit()` under. That is the condition under which the export writes no "recorded under a policy other than the one in force" notice. The markers are not written on:
+
+* an instance never audited;
+* an instance with a finding left open, whether declined, not handed to `anonymize()`, or a Series finding;
+* an instance edited after its pass;
+* a patient restored with `recover_patient_identity(restore=True)`;
+* a store reopened under another policy and not audited again;
+* a store written before 1.0.
+
+The markers rest on the same status the report's grade reads. An owner field assigned directly after the pass, such as `patient.patient_name = ...`, does not yet move that status ([#767](https://github.com/kvnlng/Isocenter/issues/767)), so the file still says `YES`.
+
+**What.**
+
+* **Patient Identity Removed `(0012,0062)`: `YES`.** A source value of `NO` is replaced, and a source `YES` stays.
+* **De-identification Method `(0012,0063)`** gains one value, after any values the source carried, which are kept in order: `isocenter/<version>; <policy>; v1:<8 hex>`.
+    * `<policy>` is `basic@2026c`, `floor over basic@2026c` or `none`. An external profile is `external profile`, never its path.
+    * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides.
+    * No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.
+* **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded.
+    * `REMOVED` when every date is empty or the dummy `19000101`.
+    * `MODIFIED` when the rest are shifts this store wrote.
+    * Nothing when any date is as it was ingested; the source's value, if any, then stays.
+    * TM is not read: a time of day beside a shifted date does not place the patient in time.
+    * `UNMODIFIED` is never written, because a date kept on purpose cannot be told from one no rule named.
+* **De-identification Method Code Sequence `(0012,0064)`**: no code is written (see the departures above). A source's items pass through.
+
+**Your rules decide.** Table E.1-1 has no row for any of the three elements. A rule you write on one, of any action, `KEEP` included, means the export does not stamp that element: `KEEP` over a source `NO` exports `NO`. The other two are still stamped.
+
+**Where not.** `DicomExporter.write_tree()` writes none of them: it is the serializer without the pipeline. A WFDB header has no such field. The markers are never written into the store.
 
 ### Pixel Redaction (Machines)
 

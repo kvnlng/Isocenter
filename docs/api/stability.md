@@ -312,12 +312,26 @@ default.
 - An identity token holds exactly the locked values captured from each
   instance that carries it: a lock writes one token per distinct set of
   values, and a restore gives each instance the values of the token it
-  carries. The exception is a token without this store's stamp that is
-  shared across studies and holds a non-blank value outside group 0010:
-  it is restored in full only on the first study carrying it, and as its
-  group 0010 on the others. A file carries no stamp, so this applies to
-  an exported file ingested elsewhere whose studies' locked values were
-  equal.
+  carries. Since 1.0 a token's encrypted content says so
+  (`"__isocenter_token__": 2`, never returned as a tag), so this holds in
+  any store it reaches. The exception is a token written before 1.0 that
+  carries no such mark and no stamp from this store, is shared across
+  studies, and holds a non-blank value outside group 0010. It is
+  restored in full only on the first study carrying it, and as its
+  group 0010 on the others. A file carries no stamp, so this also applies
+  to a 0.9.8 export ingested elsewhere whose studies' locked values were
+  equal. The promise runs forward only: a release before 1.0 reads the
+  mark as one more value, so recovering a 1.0 token needs 1.0 or later,
+  and a token naming a scheme this release does not know is refused.
+- An exported DICOM file whose policy was applied in full carries
+  Patient Identity Removed `(0012,0062)` `YES` and one De-identification
+  Method `(0012,0063)` value naming the release and the policy, and,
+  where its dates determine it, Longitudinal Temporal Information
+  Modified `(0028,0303)`. The fields and the condition are what is
+  promised
+  ([What an exported file says about itself](../configuration.md#what-an-exported-file-says-about-itself));
+  the value's exact text moves with the release and the policy's
+  fingerprint.
 - Date jitter and the `ANON_` pseudonym are deterministic per patient
   within a store: the same patient under the same `date_jitter` range
   gets the same offset and pseudonym every time that store derives
