@@ -51,7 +51,7 @@ print(f"Found {len(report)} potential PHI issues.")
 
 ## 4. Backup Identity (Optional)
 
-To enable reversible anonymization, generate a cryptographic key and "lock" the original patient identities into a secure, encrypted DICOM tag. This must be done *before* anonymization: locking after `anonymize()` raises `RuntimeError`, because there is no original value left to stash, and so does locking before `enable_reversible_anonymization()`. Locking again before anonymizing replaces the stored token, and the lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried.
+To enable reversible anonymization, generate a cryptographic key and "lock" the original patient identities into a secure, encrypted DICOM tag. This must be done *before* anonymization: locking after `anonymize()` raises `RuntimeError`, because there is no original value left to stash, and so does locking before `enable_reversible_anonymization()`. Locking again before anonymizing replaces the stored token, and the lock replaces any Encrypted Attributes Sequence `(0400,0500)` the source file already carried, except one holding a token a release before 1.0 wrote, which it refuses by name: 1.x does not read that layout, and Isocenter 0.9.x recovers it with its key.
 
 ```python
 # Enable encryption; the first lock creates 'isocenter.key' (mode 0600) if it does not exist.

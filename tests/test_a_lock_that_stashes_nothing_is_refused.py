@@ -144,11 +144,11 @@ def test_a_relock_with_nothing_to_stash_leaves_the_earlier_token(tmp_path):
         patient = _hand_patient(session)
         session.lock_identities(PID_A)
         [inst] = _instances(patient)
-        held = bytes(inst.sequences[SEQ].items[0].attributes["0400,0510"])
+        held = bytes(inst.sequences[SEQ].items[0].attributes["0400,0520"])
         with pytest.raises(RuntimeError) as raised:
             session.lock_identities(PID_A, tags_to_lock=[ABSENT])
         assert str(raised.value) == nothing_to_stash([ABSENT])
-        assert bytes(inst.sequences[SEQ].items[0].attributes["0400,0510"]) == held
+        assert bytes(inst.sequences[SEQ].items[0].attributes["0400,0520"]) == held
 
 
 def test_a_batch_with_one_patient_stashing_nothing_locks_nobody(tmp_path):

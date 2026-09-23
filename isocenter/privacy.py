@@ -952,7 +952,7 @@ class PhiInspector:
             # two, which are NOT the reversibility service's tags -- a
             # previous version of this comment said they were, and that
             # has been false since v0.5.0 (47278f8). Reversibility uses
-            # the Encrypted Attributes Sequence (0400,0510), an *even*
+            # the Encrypted Attributes Sequence (0400,0500), an *even*
             # group, so it never reaches this sweep and was never at risk
             # from it. See `reversibility.py`.
             #

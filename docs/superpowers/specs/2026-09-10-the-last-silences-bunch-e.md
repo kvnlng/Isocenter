@@ -10,6 +10,13 @@ recovery reads item 0)
 recorded in §2, §3 and §4; #410's fix is designed **twice** in §6, once for
 each side of the ruling the owner has not yet made. Owner questions are in
 §9. §12 is the Amendments log, empty until implementation fills it.
+**Superseded in part:** #790 (2026-09-23). §2's "a file written by 0.9.4
+carrying three items stays readable at item 0 ... The promise holds in both
+directions" is no longer true: every release through 0.9.8 wrote the token
+into `(0400,0510)`, the transfer syntax UID's element, and the owner ruled
+that 1.x reads only the PS3.6 layout (token in `(0400,0520)`), so a 0.9.4
+file of any item count is refused by name, not read. Recovery still reads
+item 0.
 
 Both issues are the same sentence with different nouns: **a call accepts an
 argument it will not honour, and says nothing.**
@@ -248,10 +255,12 @@ what the fix is obliged to keep, is the **data promise** at
 > `(0400,0520)` and the key file's format (raw Fernet key bytes).
 
 The fix writes the same three tags with the same payload encoding and
-`recover_original_data` **still reads item 0**. So a file written by 0.9.4
+`recover_original_data` **still reads item 0**. ~~So a file written by 0.9.4
 carrying three items stays readable at item 0 -- its old first-wins token,
 exactly as the owner's comment says -- and a file written after the fix
-carries one item at index 0. The promise holds in both directions. §5.5's
+carries one item at index 0. The promise holds in both directions.~~
+**Superseded by #790 (2026-09-23):** a 0.9.4 file carries its tokens in
+`(0400,0510)`, a layout 1.x refuses by name rather than reads. §5.5's
 test 5 is the pin that stops a later "tidy-up" moving recovery to
 `items[-1]`, which would be indistinguishable from correct on every
 post-fix file and would break every pre-fix one.

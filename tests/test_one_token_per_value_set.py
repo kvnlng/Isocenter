@@ -55,7 +55,7 @@ from support.ct_small_files import study_uid, write_ct
 from support.kept_uids import keep_uids
 
 PID, NAME = "PAT-583", "Secret^Eighty"
-SEQ, CONTENT = "0400,0500", "0400,0510"
+SEQ, CONTENT = "0400,0500", "0400,0520"
 ACC = "0008,0050"
 ACC_ONE, ACC_TWO = "ACC-ONE", "ACC-TWO"
 TAGS = ["0010,0010", "0010,0020"]

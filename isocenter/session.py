@@ -41,7 +41,7 @@ from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore
 from .crypto import KeyManager
 from .reversibility import (ReversibilityService, _TokenHoldsNoRecord,
-                            _TokenOfALaterScheme)
+                            _TokenOfALaterScheme, _TokenOfAnEarlierLayout)
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
                        resolve_max_workers, resolve_worker_initializer,
@@ -3988,7 +3988,9 @@ class DicomSession:
                 existing token holds; the patient carries an identity
                 token this library wrote that the key at the path given
                 to `enable_reversible_anonymization()` does not decrypt,
-                or opens to no identity record (#617); a re-lock over a
+                or opens to no identity record (#617), or that is in the
+                layout releases before 1.0 wrote, which 1.x does not read
+                (#790); a re-lock over a
                 token this store did not write -- one that arrived inside
                 a file, or one a release before 0.9.8 wrote -- would
                 change a value it holds, naming the tag, which need not be
@@ -4135,7 +4137,12 @@ class DicomSession:
         try:
             self.key_manager.load_key()
         except FileNotFoundError:
-            if any(self.reversibility_service.token_of_ours(inst) is not None
+            # `holds_a_token_of_ours`, not `token_of_ours`: a token in
+            # the layout releases before 1.0 wrote is one a key created
+            # here could not open either, and the patient's own plan
+            # refuses it by name; raising that here would refuse every
+            # patient in the session over one (#790).
+            if any(self.reversibility_service.holds_a_token_of_ours(inst)
                    for p in self.store.patients for st in p.studies
                    for se in st.series for inst in se.instances):
                 raise RuntimeError(
@@ -4397,7 +4404,21 @@ class DicomSession:
         if instances:
             carrying: Dict[bytes, List["Instance"]] = {}
             for inst in instances:
-                content = self.reversibility_service.token_of_ours(inst)
+                try:
+                    content = self.reversibility_service.token_of_ours(inst)
+                except _TokenOfAnEarlierLayout:
+                    # Not foreign: read as foreign it would be replaced
+                    # (#399) and the identity lost under a lock that
+                    # reported success, #617's failure one layout over.
+                    # 1.x does not read it, so nothing says what a
+                    # replacement would lose (#790).
+                    raise RuntimeError(
+                        "lock_identities: this patient carries an identity "
+                        "token in the layout Isocenter wrote before 1.0, "
+                        "which 1.x does not read, and this lock would "
+                        "replace it; recover it with Isocenter 0.9.x and the "
+                        "key it was locked with. The token this call would "
+                        "have written is unchanged.") from None
                 if content is not None:
                     carrying.setdefault(content, []).append(inst)
             tokens = []
@@ -5010,7 +5031,9 @@ class DicomSession:
                 not as the wrong key (#617); the key does not decrypt the
                 token, or the key opens it but it holds no identity record
                 this library writes, or was written by a later release of
-                this library (#652); or,
+                this library (#652); an instance's token is in the layout
+                releases before 1.0 wrote, the token in `(0400,0510)`,
+                which 1.x does not read (#790); or,
                 with `restore=True`, a patient holding the restored
                 Patient ID was de-identified under a different date-offset
                 scheme (raised before anything is restored).
@@ -5037,7 +5060,9 @@ class DicomSession:
         # Sequence": a foreign sequence is "no token" since #617. A
         # patient with instances and no token of ours gets
         # `recover_or_raise`'s "no token", one with none gets the raise
-        # below.
+        # below. An instance whose token is in the layout releases before
+        # 1.0 wrote raises `_TokenOfAnEarlierLayout` out of this walk,
+        # before anything is opened or written (#790).
         rs = self.reversibility_service
         walk = [(st, inst, rs.token_of_ours(inst))
                 for st in p.studies for se in st.series for inst in se.instances]
@@ -6862,6 +6887,34 @@ class DicomSession:
                 entity_uid=(next(iter(affected)) if len(affected) == 1
                             else "MULTIPLE"),
                 details=detail)
+
+        # A token in the layout releases before 1.0 wrote (#790) is
+        # written as the graph holds it -- the file 0.9.x would have
+        # written, which 0.9.x recovers with its key -- and counted above,
+        # because it is re-identifiable all the same. 1.x does not read
+        # it, so the export says so: a `WARNING` row, which grades the
+        # report REVIEW_REQUIRED. Passed through rather than refused or
+        # dropped (owner ruling on #790): refusing would leave a 0.9.x
+        # store that holds a lock with no export at all, and dropping
+        # the item would lose the one way back to the identity silently.
+        # A set over `affected`, for `affected`'s reason (#197).
+        earlier = {
+            task.instance.sop_instance_uid for task in tasks
+            if task.instance.sop_instance_uid in affected
+            and ReversibilityService.holds_an_earlier_layout_token(task.instance)}
+        if earlier:
+            sentence = (
+                f"{len(earlier)} of {len(delivered)} exported instances carry an "
+                "identity token in the layout Isocenter wrote before 1.0, "
+                "which 1.x cannot recover; Isocenter 0.9.x recovers it with "
+                "its key.")
+            get_logger().warning(sentence)
+            if getattr(self, "store_backend", None) is not None:
+                self.store_backend.log_audit(
+                    action_type="WARNING",
+                    entity_uid=(next(iter(earlier)) if len(earlier) == 1
+                                else "MULTIPLE"),
+                    details=sentence)
         return len(affected)
 
     def _report_export_collisions(self, tasks, written_uids) -> int:

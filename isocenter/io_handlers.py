@@ -190,6 +190,7 @@ from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        is_synthetic_patient_id, exported_patient_id,
                        iter_item_tree, PhiStatus)
 from .uids import generated_uid
+from .reversibility import ReversibilityService
 from .logger import (describe_exception, describe_exception_without_paths,
                      get_logger)
 from .pixel_geometry import (
@@ -10505,12 +10506,29 @@ class DicomExporter:
                 ds.add_new(0x00991001, 'OB', v)
                 continue
 
-            # Explicit handling for Encrypted Attributes to fix potential dictionary mismatches
-            if t == "0400,0510":  # Encrypted Content
-                ds.add_new(0x04000510, 'OB', v)
-                continue
-            if t == "0400,0520":  # Encrypted Content Transfer Syntax UID
-                ds.add_new(0x04000520, 'UI', v)
+            # The Encrypted Attributes item's two elements, by the value's
+            # type rather than the tag's dictionary VR (#790). The
+            # dictionary is right -- (0400,0510) is the transfer syntax
+            # UID (UI), (0400,0520) the Encrypted Content (OB) -- and a
+            # lock since 1.0 writes that layout, which this writes at
+            # the dictionary's VRs. This arm used to force OB on
+            # (0400,0510) and UI on (0400,0520), which was the swap
+            # itself. It is by type, not simply the dictionary, because
+            # a graph can still hold an item in the layout releases
+            # before 1.0 wrote (a 0.9.x store reopened, a 0.9.x export
+            # re-ingested), which the export passes through as the graph
+            # holds it (owner ruling on #790; the session writes a
+            # WARNING row for it): its token under (0400,0510) is written
+            # as the OB bytes 0.9.x wrote -- even where an Implicit VR
+            # read handed it back as a `str` -- never as a 248-character
+            # UI. Otherwise a `str` is a UI and bytes an OB.
+            if t in ("0400,0510", "0400,0520") and isinstance(
+                    v, (str, bytes, bytearray)):
+                if ReversibilityService.is_one_of_ours(v):
+                    vr, v = 'OB', v.encode("utf-8") if isinstance(v, str) else v
+                else:
+                    vr = 'UI' if isinstance(v, str) else 'OB'
+                ds.add_new(Tag(int(t[:4], 16), int(t[5:], 16)), vr, v)
                 continue
 
             if t.startswith("_") or "," not in t:

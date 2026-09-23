@@ -26,8 +26,8 @@ from isocenter.entities import DicomItem, Instance, Patient, Series, Study
 from isocenter.session import DicomSession
 
 SEQ = "0400,0500"
-CONTENT = "0400,0510"
-SYNTAX = "0400,0520"
+CONTENT = "0400,0520"
+SYNTAX = "0400,0510"
 PID = "REV_399"
 
 
@@ -179,12 +179,12 @@ def test_locking_over_a_foreign_encrypted_attributes_sequence_recovers(tmp_path)
 
 
 def test_a_legacy_three_item_sequence_is_still_read_at_item_zero(tmp_path):
-    """A file written before #399 stays recoverable at item 0.
+    """A sequence of several items is read at item 0.
 
     Green before the fix and green after it, and it is not decoration.
-    `docs/api/stability.md` promises that a file exported with
-    reversible anonymization is recoverable by every 1.x with its key.
-    After #399 every sequence this library writes holds exactly one
+    0.9.4 wrote one item per lock and recovered item 0; its files are in
+    the layout 1.x refuses by name since #790, so these items are built
+    in the PS3.6 layout, and what the test pins is the index. After #399 every sequence this library writes holds exactly one
     item, so `items[0]`, `items[-1]` and `items[len(items) // 2]` are
     the same expression on every file it will ever write again -- and a
     later reader "simplifying" recovery to the most recent item would
@@ -249,7 +249,7 @@ def test_a_legacy_three_item_sequence_is_recovered_at_item_zero_through_the_sess
 
 
 def test_the_token_item_names_its_payload_transfer_syntax(tmp_path):
-    """Each token item carries `(0400,0520)`, and a re-lock keeps it (#439).
+    """Each token item carries `(0400,0510)`, and a re-lock keeps it (#439, #790).
 
     Recovery never reads the Transfer Syntax UID, so deleting the
     `set_attr` that writes it left every recovery test green -- yet the

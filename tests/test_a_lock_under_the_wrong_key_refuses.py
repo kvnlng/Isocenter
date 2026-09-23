@@ -48,7 +48,7 @@ from support.ct_small_files import write_ct
 PID_A, PID_B = "PAT-617-A", "PAT-617-B"
 NAME_A, NAME_B = "Secret^A", "Secret^B"
 TAGS = ["0010,0010", "0010,0020"]
-SEQ, CONTENT, SYNTAX = "0400,0500", "0400,0510", "0400,0520"
+SEQ, CONTENT, SYNTAX = "0400,0500", "0400,0520", "0400,0510"
 FORMS = ("single", "batch", "report")
 SHAPES = ("wrong_key", "no_key_file")
 

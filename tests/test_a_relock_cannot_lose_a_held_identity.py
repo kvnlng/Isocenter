@@ -68,7 +68,7 @@ def _audit(session):
 
 
 def _token(instance):
-    return instance.sequences["0400,0500"].items[0].attributes["0400,0510"]
+    return instance.sequences["0400,0500"].items[0].attributes["0400,0520"]
 
 
 DOORS = pytest.mark.parametrize("load", [True, False], ids=["load_config", "audit_config_path"])

@@ -47,7 +47,7 @@ from support.ct_small_files import study_uid, write_ct
 from support.store_secret import secret_of
 
 PID, NAME = "PAT-616", "Secret^Sixteen"
-SEQ, CONTENT, SYNTAX = "0400,0500", "0400,0510", "0400,0520"
+SEQ, CONTENT, SYNTAX = "0400,0500", "0400,0520", "0400,0510"
 TAGS = ["0010,0010", "0010,0020"]
 NO_TOKEN = ("no encrypted identity token on this patient's instances; was it "
             "locked with lock_identities() before anonymize()?")

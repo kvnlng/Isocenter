@@ -100,7 +100,8 @@ PYTEST = [str(REPO / ".venv/bin/python"), "-m", "pytest", "-x", "-q", "--no-head
 # `remediation.py` without importing it, which no import scan can see;
 # `test_redaction_export.py` and `test_reversibility.py` do the same for
 # `io_handlers.py` (the `apply_redaction_to_array` call and the
-# `(0400,0510)` write, both verified kills).
+# `(0400,0510)` write, both verified kills; that write was the #790 swap,
+# and the arm now picks each Encrypted Attributes element's VR by type).
 #
 # That is the whole rule for reach the scan cannot see (#441): the scan
 # stays the only thing the guard demands, and a file beyond it joins a
@@ -153,7 +154,7 @@ TARGETS = {
                                "tests/test_duplicate_sop_uid_at_ingest.py",
                                "tests/test_annex_e_end_to_end.py"],
                               80),
-    "isocenter/crypto.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/crypto.py": (["tests/test_the_encrypted_attributes_item_is_conformant.py", "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                              "tests/test_a_lock_under_the_wrong_key_refuses.py",
                              "tests/test_an_unusable_key_file_is_not_cached.py",
                              "tests/test_recovery_needs_the_key_it_was_locked_with.py",
@@ -327,7 +328,8 @@ TARGETS = {
                                     "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                                     "tests/test_feature_regression.py",
                                     "tests/test_reversibility_coverage.py",
-                                    "tests/test_relock_identity_token.py"], 30),
+                                    "tests/test_relock_identity_token.py",
+                                    "tests/test_the_encrypted_attributes_item_is_conformant.py"], 30),
     # 7 sites, exhaustive: 6 killed. Five files, 43.3s per pass.
     #
     # Two are hand extras (#441), reaching the renderer through
@@ -729,7 +731,7 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_tutorials_run.py", "tests/test_a_third_party_export_is_not_attested.py", "tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_an_edit_below_or_beside_an_instance_is_seen.py", "tests/test_an_owner_field_edit_is_tracked.py", "tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_a_token_says_how_it_was_written.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_an_unknown_subset_uid_is_counted.py", "tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/session.py": (["tests/test_the_encrypted_attributes_item_is_conformant.py", "tests/test_tutorials_run.py", "tests/test_a_third_party_export_is_not_attested.py", "tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_an_edit_below_or_beside_an_instance_is_seen.py", "tests/test_an_owner_field_edit_is_tracked.py", "tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_a_token_says_how_it_was_written.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_an_unknown_subset_uid_is_counted.py", "tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                               "tests/test_a_nested_item_status_survives_a_reopen.py",
                               "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
@@ -1009,7 +1011,7 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_an_edit_below_or_beside_an_instance_is_seen.py", "tests/test_an_owner_field_edit_is_tracked.py", "tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_withheld_instances_are_audited.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/entities.py": (["tests/test_the_encrypted_attributes_item_is_conformant.py", "tests/test_an_edit_after_the_scan_survives_a_reopen.py", "tests/test_an_edit_below_or_beside_an_instance_is_seen.py", "tests/test_an_owner_field_edit_is_tracked.py", "tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_withheld_instances_are_audited.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                "tests/test_a_nested_item_status_survives_a_reopen.py",
                                "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
