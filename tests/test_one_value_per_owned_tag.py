@@ -351,39 +351,47 @@ def test_a_keep_policy_leaves_the_patients_value_on_every_instance(tmp_path, ord
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("order", ORDERS)
-def test_when_the_owners_own_finding_declines_the_instance_applies_its_own(tmp_path, order):
+def test_when_the_owners_own_finding_declines_the_instance_copy_follows_the_owner(
+        tmp_path, order):
     """F. The study's SHIFT_DATE declines on 'NOT-A-DATE', so no write
     reached the instance copies. Folding them anyway would leave the real
     original date in `export_dataframe(expand_metadata=True)` and
-    `get_flattened_instances()`. The instance shifts its own date; the
-    study's DECLINED row and IDENTIFIED status carry the split."""
+    `get_flattened_instances()`. Until #624 the instance then shifted its
+    own date, a value no file carried: the export stamps the Study's.
+    Now each copy holds what the export writes, 'NOT-A-DATE', and each
+    instance's finding declines with its own row, beside the study's."""
     with _built(tmp_path, study_date="NOT-A-DATE") as session:
         _anonymize(session, JITTER, order)
         study = session.store.patients[0].studies[0]
         assert study.study_date == "NOT-A-DATE"
         assert study.phi_status is PhiStatus.IDENTIFIED
         for inst in _instances(session):
-            assert inst.attributes["0008,0020"] != "20240101"
-            # The record the instance's own shift left, in place of
-            # `Instance.date_shifted`, which was cut in 0.9.6 (#510).
-            assert inst.date_shift_vouches_for(
-                "0008,0020", inst.attributes["0008,0020"])
+            assert inst.attributes["0008,0020"] == "NOT-A-DATE"
+            assert not inst.date_shift_vouches_for("0008,0020", "NOT-A-DATE")
+            assert inst.phi_status is PhiStatus.IDENTIFIED
     declines = _audit_rows(tmp_path / "m.db", "REMEDIATION_DECLINED")
-    assert len(declines) == 1 and "study_date" in declines[0], declines
+    assert sorted("study_date" in d for d in declines) == [False, False, True], declines
+    assert sum("written by the export from the Study" in d for d in declines) == 2, declines
 
 
 @pytest.mark.parametrize("order", ORDERS)
-def test_instance_findings_handed_in_alone_still_apply(tmp_path, order):
-    """G. No owner finding, no owner write, nothing to fold into: the
-    caller asked for the instance copies and gets them."""
+def test_instance_findings_handed_in_alone_follow_the_owner(tmp_path, order):
+    """G. No owner finding, no owner write, nothing to fold into. Until
+    #624 the instance copies took `ANONYMIZED` while the file carried the
+    Patient's name and ID. Now nothing applies: each copy keeps what the
+    export writes, the Patient's values, and each finding is left
+    unhandled with no row, since no owner declined (#624, Q-C5): the
+    instances read IDENTIFIED until the Patient is acted on."""
     with _built(tmp_path) as session:
         assert _anonymize(session, REPLACE, order,
-                          select=lambda f: f.entity_type == "Instance") == 4
+                          select=lambda f: f.entity_type == "Instance") == 0
         patient = session.store.patients[0]
         assert (patient.patient_name, patient.patient_id) == (NAME, PID)
         for inst in _instances(session):
-            assert inst.attributes["0010,0010"] == "ANONYMIZED"
-            assert inst.attributes["0010,0020"] == "ANONYMIZED"
+            assert inst.attributes["0010,0010"] == NAME
+            assert inst.attributes["0010,0020"] == PID
+            assert inst.phi_status is PhiStatus.IDENTIFIED
+    assert _audit_rows(tmp_path / "m.db", "REMEDIATION_DECLINED") == []
 
 
 # ---------------------------------------------------------------------------
@@ -564,24 +572,23 @@ def _two_studies(tmp_path, dates):
 def test_a_fold_is_keyed_on_the_copy_not_on_the_tag(tmp_path, order):
     """F across two studies of one patient. Study 7's date declines and
     study 8's shifts; study 8's write reached only its own instance, so
-    study 7's instance applies its own SHIFT_DATE. A fold keyed on the tag
+    study 7's instance does not fold: since #624 its copy follows its own
+    Study, 'NOT-A-DATE', and its finding declines. A fold keyed on the tag
     alone folds it into a write it never received: it keeps the original
-    20240101, is stamped REMEDIATED, and the count falls from 4 to 3
-    (review of #508, mutant M1)."""
+    20240101, is stamped REMEDIATED, and files no row (review of #508,
+    mutant M1)."""
     with _two_studies(tmp_path, [("7", "NOT-A-DATE"), ("8", "20240101")]) as session:
-        assert _anonymize(session, JITTER, order) == 4
+        assert _anonymize(session, JITTER, order) == 3
         declined, shifted = session.store.patients[0].studies
         (own,) = declined.series[0].instances
         (folded,) = shifted.series[0].instances
         assert declined.study_date == "NOT-A-DATE"
-        assert own.attributes["0008,0020"] != "20240101"
-        # The instance's own shift left a record for the value it wrote;
-        # `Instance.date_shifted`, which this asserted until 0.9.6, is
-        # gone (#510).
-        assert own.date_shift_vouches_for("0008,0020", own.attributes["0008,0020"])
+        assert own.attributes["0008,0020"] == "NOT-A-DATE"
+        assert own.phi_status is PhiStatus.IDENTIFIED
         assert folded.attributes["0008,0020"] == format_study_date(shifted.study_date)
     declines = _audit_rows(tmp_path / "m.db", "REMEDIATION_DECLINED")
-    assert len(declines) == 1 and "study_date" in declines[0], declines
+    assert sorted("study_date" in d for d in declines) == [False, True], declines
+    assert sum("written by the export from the Study" in d for d in declines) == 1, declines
 
 
 def test_the_entity_first_sort_keeps_private_sequence_removals_deepest_first(tmp_path):

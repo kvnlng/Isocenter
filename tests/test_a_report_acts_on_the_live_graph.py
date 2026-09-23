@@ -63,6 +63,11 @@ EMPTIED = ((SERIES_SEQ, 0),)
 HELD = ("JFK IMAGING CENTER", "NESTED-INST", "NESTED-OPID", "EMPTIED-INST",
         "CompressedSamples", "20040119", "20010101", "1CT1")
 SENTINEL = "VALUE-SENTINEL-644"
+#: The #624 row: an instance's copy of a tag the export stamps from its
+#: owner (Patient's Name, Patient ID, Study Date), whose owner this pass did
+#: not write. For such a copy it wins over the seed reason (coordinator
+#: ruling on #624, Q-C4): the copy follows its owner either way.
+OWNER_ROW = "is written by the export from the"
 
 #: The floor, plus a rule on each shape a finding can live in: a
 #: top-level REPLACE, a SHIFT at both levels, a sequence kept (so its
@@ -832,7 +837,12 @@ def test_a_report_from_another_store_writes_no_pseudonym_minted_there(tmp_path):
                   and any(p in str(el.value) for p in minted_by_a)]
         assert not leaked, leaked
         declines = _declined(b)
-        assert len(declines) == 2 and all(REFUSED_ID in d for d in declines), declines
+        # B's Patient refuses each ID (#644), so each instance's 0010,0020
+        # copy, carrying A's pseudonym too, does not fold and follows its
+        # Patient (#624): one row per patient for each.
+        assert len(declines) == 4, declines
+        assert sum(REFUSED_ID in d for d in declines) == 2, declines
+        assert sum(OWNER_ROW in d and "0010,0020" in d for d in declines) == 2, declines
         assert not any(p in _reason(d) or "1CT1" in _reason(d) for p in minted_by_a
                        for d in declines), declines
         assert all(p.phi_status is not PhiStatus.REMEDIATED for p in b.store.patients)
@@ -984,9 +994,16 @@ def test_a_legacy_stores_report_writes_no_unkeyed_pseudonym_or_offset_into_a_key
         assert _ct_tag(got["CT"], IMAGE_SEQ, 0, "0008,0021") == "20010101"
         assert _ct_tag(got["MR"], "0008,0020") == "20040826"
         declines = [_reason(d) for d in _declined(b)]
+        # The instances' top-level Study Date copies, one per patient,
+        # carry the #624 reason instead of the seed's; the Patient ID copies
+        # follow their refusing Patients (#624) too.
+        stamped_dates = [f for f in shifts if f.entity_type == "Instance"
+                         and not f.entity_path and f.tag == "0008,0020"]
+        assert len(stamped_dates) == 2, stamped_dates
         assert sum(REFUSED_ID in d for d in declines) == 2, declines
-        assert sum(REFUSED_SEED in d for d in declines) == len(shifts), declines
-        assert len(declines) == 2 + len(shifts), declines
+        assert sum(REFUSED_SEED in d for d in declines) == len(shifts) - 2, declines
+        assert sum(OWNER_ROW in d for d in declines) == 4, declines
+        assert len(declines) == 2 + len(shifts) + 2, declines
         assert not any("ANON_" in d or "1CT1" in d for d in declines), declines
         assert all(p.phi_status is not PhiStatus.REMEDIATED for p in b.store.patients)
         assert _grade(b, root) == ["REVIEW_REQUIRED"]
@@ -1052,8 +1069,19 @@ def test_a_date_seeded_on_another_sites_patient_id_is_not_shifted(tmp_path):
         b.anonymize(findings)
 
         declines = [_reason(d) for d in _declined(b)]
+        # The instances' top-level Study Date copies follow their Study
+        # (#624), which was handed in and declined on the seed, and their
+        # #624 reason wins over the seed's (Q-C4): one row per study. The
+        # name and ID copies follow their Patient too, whose findings were
+        # left out: no row for them, since no owner declined (Q-C5). The
+        # other shifts decline on the seed.
+        stamped_dates = [f for f in shifts if f.entity_type == "Instance"
+                         and not f.entity_path and f.tag == "0008,0020"]
+        assert len(stamped_dates) == 2, stamped_dates
+        assert sum(OWNER_ROW in d for d in declines) == 2, declines
+        assert all("0008,0020" in d for d in declines if OWNER_ROW in d), declines
+        assert sum(REFUSED_SEED in d for d in declines) == len(shifts) - 2, declines
         assert len(declines) == len(shifts), declines
-        assert all(REFUSED_SEED in d for d in declines), declines
         got = _datasets(b, root / "out")
         assert _ct_tag(got["CT"], "0008,0020") == "20040119"
         assert _ct_tag(got["CT"], "0008,0021") == "20040119"

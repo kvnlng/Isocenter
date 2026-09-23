@@ -5959,6 +5959,12 @@ class DicomSession:
             remediator._use_gone_keys(gone)
             remediator._use_instance_owners(owners)
             remediator._use_holders(self._finding_holders(findings, owners))
+            remediator._use_copy_owners(
+                self._copy_owners(),
+                {(None if f.entity is None else id(f.entity),
+                  f.remediation_proposal.target_attr) for f in findings
+                 if f.entity_type in ("Patient", "Study")
+                 and f.remediation_proposal is not None})
             remediator._use_removal_targets(
                 self._removal_targets(findings, by_uid, project_secret))
             remediator._use_scan_tally(tally, findings)
@@ -7281,6 +7287,14 @@ class DicomSession:
         if tally is None:
             tally = self._report_tallies[report_tally._audit] = report_tally.copy()
         return tally
+
+    def _copy_owners(self) -> dict:
+        """`id(Instance) -> (Patient, Study)` for every instance, the owners
+        the export stamps Patient's Name, Patient ID and Study Date from
+        (`RemediationService._use_copy_owners`, #624)."""
+        return {id(inst): (patient, study)
+                for patient in self.store.patients for study in patient.studies
+                for series in study.series for inst in series.instances}
 
     def _named_by(self, tally) -> frozenset:
         """`id`s of the patients, studies and instances `tally` raised under.

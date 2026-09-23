@@ -298,9 +298,13 @@ def test_handing_the_same_partial_list_again_stays_identified(tmp_path):
         mine = [f for f in report if f.entity_uid == instance.sop_instance_uid]
         raised = {(f.entity_path, f.remediation_proposal.target_attr)
                   for f in mine}
+        # Not the copies the export stamps from an owner: with the owner
+        # not handed in, those decline (#624), and this test is about the
+        # tally being the only thing that demotes.
         replaces = list({f.tag: f for f in _top_level(report, instance)
                          if f.remediation_proposal.action_type
-                         == "REPLACE_TAG"}.values())
+                         == "REPLACE_TAG"
+                         and f.tag not in ("0010,0010", "0010,0020")}.values())
         assert 0 < len(replaces) < len(raised), (len(replaces), len(raised))
 
         for _ in range(-(-len(raised) // len(replaces))):

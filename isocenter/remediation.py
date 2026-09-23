@@ -649,6 +649,13 @@ class RemediationService:
         attributes = getattr(entity, "attributes", None)
         sequences = getattr(entity, "sequences", None) or {}
 
+        # An instance's top-level copy of a tag the export stamps from its
+        # owner is written only through the owner (#624): reached here, the
+        # owner's write did not reach it (a reach folds, above the pins).
+        stamped = self._owner_stamps_copy(entity, finding)
+        if stamped is not None:
+            return None, stamped or None
+
         if tag in sequences and proposal.new_value == "":
             if not entity.clear_sequence_items(tag):
                 self.logger.info(
@@ -801,6 +808,11 @@ class RemediationService:
         no `loss_scope` and no `element_tag` to describe still writes
         both slots.
         """
+        if isinstance(reason, _OwnerNotHandedIn):
+            # Not a decline: an owner-stamped copy whose owner this pass
+            # was not handed (#624, Q-C5). No row and no demotion; the
+            # finding stays unhandled for the scan tally.
+            return
         if finding.entity is not None:
             self._declined_entities.append(finding.entity)
             # A decline inside a sequence leaves the value in the
@@ -960,6 +972,12 @@ class RemediationService:
         proposal = finding.remediation_proposal
         if proposal.original_value is None or not str(proposal.original_value).strip():
             return None
+        # Before the seed check: for a copy the export stamps from its
+        # owner, "the owner did not write it" is the truer reason (#624,
+        # coordinator ruling on the #644-shaped case).
+        stamped = self._owner_stamps_copy(entity, finding)
+        if stamped:
+            return stamped
         if self._holders is not None and not self._belongs_to_holder(
                 self._resolve_patient_id(entity, proposal),
                 (proposal.metadata or {}).get("jitter_scheme", JITTER_SCHEME_KEYED),
@@ -1436,6 +1454,130 @@ class RemediationService:
     def _use_holders(self, holders) -> None:
         """Name the patient holding each entity of this pass, as it begins."""
         self._holders = self._MappingProxyType(dict(holders))
+
+    #: `id(Instance) -> (Patient, Study)` holding it, for every instance
+    #: of the graph (`Session._copy_owners`, #624): the owners the export
+    #: stamps Patient's Name, Patient ID and Study Date from. Instances
+    #: only, so a nested item is never found in it -- the stamp reaches
+    #: the dataset root only (#496 N4). **None as the whole map means no
+    #: session**, and nothing is checked, as `_holders` reads it. A class
+    #: attribute for `_instance_owners`' reason.
+    _copy_owners = None
+    #: `(id(owner), field)` for each Patient or Study finding this pass was
+    #: handed, by the field it writes. A copy whose owner field is not in
+    #: it was not declined by its owner: the owner was simply not handed in
+    #: (coordinator ruling on #624, Q-C5). An owner finding that could not
+    #: be resolved against the live graph is keyed `(None, field)` and
+    #: counts as handed for every owner of that field: it was handed in
+    #: and declined ("could not be resolved"), and which live owner it
+    #: meant is exactly what is unknown, so the copy's row is kept
+    #: (fail-closed; #584's unsaved-audit reopen is the case).
+    _owners_handed = frozenset()
+
+    def _use_copy_owners(self, owners, handed=()) -> None:
+        """Name the Patient and Study the export stamps each instance from,
+        and the owner fields this pass was handed."""
+        self._copy_owners = self._MappingProxyType(dict(owners))
+        self._owners_handed = frozenset(handed)
+
+    def _owner_stamps_copy(self, entity, finding: PhiFinding) -> Optional[str]:
+        """Why an instance finding on an owner-stamped copy must not run, or
+        None when the copy is not one (#624).
+
+        The export writes `0010,0010` and `0010,0020` from the `Patient`
+        and `0008,0020` from the `Study` over whatever the instance holds
+        (`io_handlers.export_stamp_attributes`), so an instance's
+        top-level copy of one of them is never what the file carries. An
+        owner's write in this pass reaches the copy and the instance
+        finding folds into it (#496) before any arm runs; a finding that
+        reaches an arm is one whose owner did not write -- its own
+        finding declined, or was not handed in. Run anyway, it wrote a
+        value no file carries (a shift of a date the Study no longer
+        holds, `ANONYMIZED` beside a file carrying the source name) and
+        its REMEDIATED stamp vouched for it.
+
+        So it declines, and first the copy is set to what the export
+        writes: the owner's current value, rendered as the export renders
+        it (`exported_patient_id`, `format_study_date`), `''` for an owner
+        holding None -- the empty element the file carries (owner ruling,
+        2026-09-22, Q-C2) -- even when that is the source identifier
+        (Q-C1: the graph copy equals the file; graph copies are outside
+        de-identification scope). A copy no longer there is not
+        re-created (#57's decoy). When the owner's own finding was handed
+        in and declined, the decline demotes the instance to IDENTIFIED at
+        the pass end, as its owner is. When it was not handed in, nothing
+        declined: the reason is an `_OwnerNotHandedIn`, which
+        `_record_decline` writes no row for, and the finding is left
+        unhandled for the scan tally (coordinator ruling, Q-C5).
+
+        No `audit_buffer` (Pin A, `tests/test_frozen_surface.py`): the
+        callers return the reason and the arm records the row. The reason
+        names the tag and the owner's type, never a value.
+        """
+        from .entities import _canonical_tag, exported_patient_id  # pylint: disable=import-outside-toplevel
+
+        owners = (self._copy_owners or {}).get(id(entity))
+        if owners is None:
+            return None
+        patient, study = owners
+        tag = _canonical_tag(finding.remediation_proposal.target_attr)
+        if tag == "0010,0010":
+            owner, value = patient, patient.patient_name
+        elif tag == "0010,0020":
+            owner, value = patient, exported_patient_id(patient)
+        elif tag == "0008,0020":
+            from .io_handlers import format_study_date  # pylint: disable=import-outside-toplevel
+            owner, value = study, format_study_date(study.study_date)
+        else:
+            return None
+        value = "" if value is None else value
+        # The copy already holds what an owner's write left on it -- an
+        # earlier pass handed the owner and this one the instance: the
+        # end state is there, and a decline would be REVIEW_REQUIRED over
+        # nothing. `""` tells the callers so: REPLACE reads it as
+        # satisfied (#567), SHIFT runs its own checks as before #624.
+        if (entity.attributes.get(tag) == value
+                and entity.remediation_vouches_for(tag, value)):
+            return ""
+        if tag in entity.attributes and entity.attributes[tag] != value:
+            # The status it had, re-recorded at the revision the write
+            # produced, as `_write_to_instances` keeps it: a status at the
+            # old revision reads UNSCANNED, which the pass-end demotion
+            # would not take to IDENTIFIED.
+            status = entity.phi_status
+            # Recorded as a remediation's output only when it is one: when
+            # the owner's value is what an owner's write left on another
+            # of its copies. Usually it is the source value -- the owner
+            # declined or was not handed in -- and a record would make the
+            # next lock read an original as a replacement, and a later
+            # pass read it as already remediated.
+            scope = patient.studies if owner is patient else [study]
+            if any(other.remediation_vouches_for(tag, value)
+                   for each in scope for series in each.series
+                   for other in series.instances if other is not entity):
+                self._record_what_is_left(entity, tag, value)
+            entity.set_attr(tag, value)
+            if status is not PhiStatus.UNSCANNED:
+                entity.record_phi_status(status)
+        field = next(f for f, t in self.ENTITY_FIELD_TAGS.items() if t == tag)
+        if not {(id(owner), field), (None, field)} & self._owners_handed:
+            # The owner was not handed in: no decline row, since nothing
+            # declined, and the finding is left unhandled, so the scan
+            # tally keeps the instance IDENTIFIED and condition 7 grades
+            # the run REVIEW_REQUIRED until the owner is acted on; a
+            # later pass handing the owner, then a re-audit, clears it
+            # (coordinator ruling, Q-C5). A row here was permanent: every
+            # decline row ever written grades.
+            self.logger.info(
+                f"{tag} on {self._log_subject(finding)} follows its "
+                f"{type(owner).__name__}, which this pass was not handed")
+            return _OwnerNotHandedIn(tag)
+        reason = (f"{tag} is written by the export from the "
+                  f"{type(owner).__name__}, whose value this pass did not write; "
+                  "the instance's copy holds the value the export writes")
+        self.logger.warning(
+            f"Remediation declined for {self._log_subject(finding)}: {reason}")
+        return reason
 
     def _removal_subject(self, finding: PhiFinding, entity):
         """What a removal's absence is read on: `entity` with no session,
@@ -2222,3 +2364,10 @@ class _ScanTally:
             return True
         self._partial[uid] = merged
         return False
+
+
+class _OwnerNotHandedIn(str):
+    """The reason `RemediationService._owner_stamps_copy` gives for an
+    owner-stamped copy whose owner the pass was not handed (#624, Q-C5):
+    truthy, so both arms stop as at a decline, and told apart by type in
+    `_record_decline`, which then writes no row. Carries the tag only."""
