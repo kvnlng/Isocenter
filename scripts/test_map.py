@@ -349,30 +349,51 @@ def _tests_naming(repo, path):
             if any(n in test.read_text(encoding="utf-8") for n in needles)}
 
 
-_GLOB_CALL = re.compile(r"\bi?glob\(|\.rglob\(")
+# Exact spellings, never a bare `.walk(`: dozens of test files call
+# `ast.walk(` and hold a ".py" literal, and every one would become a
+# reader of every module. `Path.walk()` is not seen for the same reason;
+# no test uses it today.
+_TREE_CALL = re.compile(
+    r"\bi?glob\(|\.rglob\(|\bos\.walk\(|\bos\.listdir\(|\bos\.scandir\("
+    r"|\.iterdir\(")
 _GLOB_PATTERN = re.compile(r"""["']([^"'\s]*\*[^"'\s]*\.\w+)["']""")
+# A literal that is a whole suffix: `.endswith(".py")`, `suffix == ".md"`.
+# Whole strings only: "notes.md" names one page, not every page. Never
+# empty, so a path with no suffix (`LICENSE`) is no file's kind. A digit
+# may lead (".7z"): a UID fragment such as ".57" then counts as a suffix,
+# which costs nothing while no tracked path ends in one.
+_SUFFIX_LITERAL = re.compile(r"""["'](\.\w+)["']""")
 
 
 def glob_readers(repo, path):
-    """Test files that read every file of `path`'s kind by glob.
+    """Test files that read every file of `path`'s kind by glob or walk.
 
     A test that walks `docs/**/*.md`, or every `isocenter/**/*.py`, reads
     a file without naming it: `test_doc_anchors.py` goes red on a broken
     anchor in a page no test names, `test_source_citations.py` on a line
     inserted above a cited one (#734 review). Found by what the file
-    does -- it calls a glob and holds a `*.ext`-shaped literal matching
-    the basename -- not by a list, so the next such test is found the day
-    it is written. The literal's directory is not resolved, so this
-    over-selects (an `out.rglob("*.dcm")` over an export matches any
-    `.dcm`); it only ever adds.
+    does -- it calls something that lists a tree (a glob, `os.walk`,
+    `os.listdir`, `os.scandir`, `.iterdir()`) and holds either a
+    `*.ext`-shaped literal matching the basename or the path's suffix as
+    a whole literal -- not by a list, so the next such test is found the
+    day it is written. The suffix half is #744: `test_api_coherence.py`
+    reads every module through `os.walk` and `.endswith(".py")`, with no
+    glob literal, and an `Equipment()` added to privacy.py was not
+    selected and failed.
+
+    Neither the directory walked nor where the literal sits is resolved,
+    so this over-selects: an `out.rglob("*.dcm")` over an export matches
+    any `.dcm`, and a file that globs `*.py` and builds a `".md"` path
+    elsewhere reads every `*.md` by this test. It only ever adds.
     """
     import fnmatch
-    name, found = Path(path).name, set()
+    name, suffix, found = Path(path).name, Path(path).suffix, set()
     for test in sorted((Path(repo) / "tests").glob("test_*.py")):
         source = test.read_text(encoding="utf-8")
-        if _GLOB_CALL.search(source) and any(
-                fnmatch.fnmatchcase(name, Path(pattern).name)
-                for pattern in _GLOB_PATTERN.findall(source)):
+        if _TREE_CALL.search(source) and (
+                any(fnmatch.fnmatchcase(name, Path(pattern).name)
+                    for pattern in _GLOB_PATTERN.findall(source))
+                or suffix in _SUFFIX_LITERAL.findall(source)):
             found.add(test.relative_to(repo).as_posix())
     return found
 
@@ -448,6 +469,15 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             # By the last dotted part on both sides: the hand-off
             # `service.execute_redaction_task` is the method
             # `RedactionService.execute_redaction_task` (#734 review).
+            # The trap: two workers that share a short name pair wrongly.
+            # A future `pool.submit(self.run)` would key "run", and every
+            # worker-run `*.run` would then ask only that one dispatcher
+            # instead of the union. Today only execute_redaction_task
+            # pairs this way, correctly; key on more of the name if a
+            # second worker ever shares a last part (#744).
+            # test_the_dispatch_finder_sees_every_worker_in_the_live_source
+            # goes red that day, and also when a package function takes
+            # the name of a key that is not one (`func`, `getpid`).
             own = dispatching.get(change.qualname.rsplit(".", 1)[-1])
             asked = own if own else set().union(*dispatching.values())
             via, blind = set(), []
@@ -517,7 +547,7 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
                 # 2026-09-17 ruling ended.
                 sel.reasons.append(
                     f"{path}: documentation no test names -> only the "
-                    "tests that read it by glob")
+                    "tests that read it by glob or walk")
             else:
                 sel.full = True
                 sel.reasons.append(
@@ -531,7 +561,7 @@ def select(mapping, changes, other, targets, repo, dispatching=None,
             sel.files |= found
             sel.reasons.append(
                 f"{path}: {len(found)} test files read every "
-                f"*{Path(path).suffix} by glob -> added")
+                f"*{Path(path).suffix} by glob or walk -> added")
 
     held = {n.split("::")[0] for n in sel.nodeids} - sel.files
     whole = {f for f in held if wide(f)}

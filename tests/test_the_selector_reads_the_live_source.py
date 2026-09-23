@@ -43,6 +43,32 @@ def test_the_dispatch_finder_sees_every_worker_in_the_live_source():
         "a worker is handed to a pool at module scope; rule 2 cannot "
         "reach its tests and widens to the row instead -- decide whether "
         "that is wanted before accepting it")
+    # Rule 2 pairs a worker with its dispatchers by the last dotted part
+    # alone, so a handed name must be the last part of one function only:
+    # a `pool.submit(self.run)` would make every `*.run` ask that one
+    # dispatcher, merged silently in `dispatchers()` (#744, review of #734).
+    # Two keys are not package functions at all: `func`, the parameter
+    # parallel._run_on_new_executor hands on, and `os.getpid`, submitted
+    # by io_handlers._ingest_results. No package function may take either
+    # name, or an edit to it would ask those dispatchers (review of #778).
+    # Any other key names exactly one: a new key that names none is a new
+    # hand-off of something outside the package, to be added here.
+    not_package = {"func", "getpid"}
+    defined = {}
+    for path in sorted((REPO / "isocenter").rglob("*.py")):
+        for qualname, *_ in test_map.functions_in(path.read_text(encoding="utf-8")):
+            defined.setdefault(qualname.rsplit(".", 1)[-1], []).append(
+                f"{path.relative_to(REPO).as_posix()}::{qualname}")
+    assert not_package <= found, (
+        "a key named here is no longer handed to a pool; drop it")
+    wrong = {name: defined.get(name, [])
+             for name in found
+             if len(defined.get(name, ())) != (0 if name in not_package else 1)}
+    assert wrong == {}, (
+        "a handed worker's last name part is not the last part of exactly "
+        "one package function (or, for a name that is not a package "
+        "function, of none); key `dispatchers()` on more of the name "
+        "(see the comment in select())")
 
 
 def test_every_pool_call_in_the_package_resolves_to_a_dispatcher():
@@ -74,7 +100,7 @@ def test_every_pool_call_in_the_package_resolves_to_a_dispatcher():
 def test_the_glob_detector_finds_the_tests_that_read_docs_and_source():
     # The tests the #734 review found reading by glob, and the two
     # source-text tests no TARGETS row holds (finding 7).
-    md = test_map.glob_readers(REPO, "docs/" + "nobody-names-this" + ".md")
+    md = test_map.glob_readers(REPO, "docs/" + "nobody-names-this." + "md")
     assert {"tests/test_doc_anchors.py", "tests/test_documented_api_exists.py",
             "tests/test_documented_output_matches.py",
             "tests/test_documented_zones_are_zone_space.py",
@@ -83,6 +109,10 @@ def test_the_glob_detector_finds_the_tests_that_read_docs_and_source():
     assert {"tests/test_source_citations.py",
             "tests/test_documented_env_vars.py",
             "tests/test_the_selector_reads_the_live_source.py"} <= py
+    # Walks the package with os.walk and keeps what ends with the Python
+    # suffix: no glob literal, and an `Equipment()` added to privacy.py
+    # selected 2909 tests but not this one, which failed on the edit (#744).
+    assert "tests/test_api_coherence.py" in py
     assert "tests/test_doc_anchors.py" not in py
     assert "tests/test_changed_code_selects_its_tests.py" not in py, (
         "the selector's slow test file reads the package by glob, so every "
