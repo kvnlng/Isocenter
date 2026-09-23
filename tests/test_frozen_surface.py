@@ -1640,6 +1640,15 @@ def test_the_stability_page_says_what_the_freeze_covers():
             "`enable_reversible_anonymization()` with it") in frozen
     assert ("With no such file, reversible anonymization stays off and no "
             "key is created.") in frozen
+    # D1 of the delta review: the third arm, pinned in behaviour by
+    # `test_a_malformed_key_in_the_working_directory_makes_session_raise`.
+    assert ("A malformed one makes `Session()` raise its `ValueError`."
+            ) in frozen
+    # D2: the report arm locks the patients with a finding, not every
+    # patient scanned, and after `anonymize()` it matches nobody.
+    assert ("The report `audit()` returns locks every patient with at least "
+            "one finding, by the Patient ID the finding holds; after "
+            "`anonymize()` those IDs name no patient.") in frozen
     assert ("except a SOP Instance UID that is none of these three: the one "
             "the first move of the instance's UID (by `anonymize()`, "
             "`redact()` or `Instance.regenerate_uid()`) left, which is the "

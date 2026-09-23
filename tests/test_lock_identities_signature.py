@@ -288,3 +288,30 @@ def test_no_key_in_the_working_directory_leaves_it_off_and_creates_none(tmp_path
         assert session.reversibility_service is None
         assert session.key_manager is None
     assert not (tmp_path / "isocenter.key").exists()
+
+
+def test_a_malformed_key_in_the_working_directory_makes_session_raise(tmp_path):
+    """The third arm (review of #787, D1): a malformed `isocenter.key` in
+    the working directory makes `Session()` raise `ValueError`, rather
+    than leaving reversible anonymization off without a word. Only the
+    class is frozen: the message, and what the half-built session leaves
+    running, are #791's, so this asserts neither and closes nothing.
+
+    Killing mutation: the auto-enable wrapped in `except ValueError: pass`
+    (the reviewer's n6), which left 153 tests green."""
+    (tmp_path / "isocenter.key").write_bytes(b"not a key")
+    with pytest.raises(ValueError):
+        DicomSession(str(tmp_path / "auto.db"))
+
+
+def test_the_audit_report_names_nobody_after_anonymize(session):
+    """D2 of the delta review: the report `audit()` returns selects by the
+    Patient ID each finding holds, the source ID. `anonymize()` replaces
+    it, so the same report locks nobody afterwards -- the order the
+    tutorial on reversible anonymization teaches is lock first."""
+    report = session.audit()
+    assert {f.patient_id for f in report.findings} >= {"P1", "P2"}
+    session.anonymize(report)
+    assert not {"P1", "P2"} & {p.patient_id for p in session.store.patients}
+    result = session.lock_identities(report, tags_to_lock=TAGS)
+    assert list(result) == []
