@@ -98,8 +98,8 @@ True
 ```
 
 The key is a file of its own. Here it sits next to the store; step 6
-moves it where it belongs. Keep its contents to yourself: anyone who holds it can read every locked
-identity. This page never prints it.
+moves it where it belongs. Keep its contents to yourself: anyone who
+holds it can read every locked identity. This page never prints it.
 
 Now de-identify and export as usual, with the report last:
 
