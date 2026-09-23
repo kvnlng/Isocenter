@@ -41,9 +41,9 @@ from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 #: behave differently. Nothing checks that such a change bumps (#782).
 #:
 #: **The working test** is `docs/api/stability.md`'s promise. Bump
-#: whenever the same file and the same input would export differently:
-#: findings, values written, tags a rule reaches, pixel zones or date
-#: jitter. A re-audit does not re-check pixel zones or jitter, but the
+#: whenever the same file would be applied differently to the same input:
+#: findings, values a rule writes, tags a rule reaches, pixel zones or
+#: date jitter. A re-audit does not re-check pixel zones or jitter, but the
 #: fingerprint still moves, because the version is in it. Every bump moves
 #: every fingerprint, so it re-measures the (0012,0063) literals in
 #: `tests/test_an_export_says_how_it_was_de_identified.py` and retakes
@@ -152,8 +152,8 @@ def _newer_minor_note(declared: str, source: str) -> str:
     minor newer than `CONFIG_VERSION`, else "" (#711).
 
     Any minor of the readable major loads. A newer minor that only changed
-    how a file is applied (#762) loads with no note and is applied as this
-    library applies it; the #555 fingerprint notice catches that at export.
+    how a file is applied (#762) loads with no note, is applied as this
+    library applies it, and nothing flags it (#784 asks whether it should).
     A key or value this library lacks is refused, and this says why. Minors
     compare as integers: "2.10" is newer than "2.9". Read at call time,
     not import time, so the constant has one home.
