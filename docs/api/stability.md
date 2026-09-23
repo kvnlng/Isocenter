@@ -34,9 +34,11 @@ behaviour came to be is in the
 - **The configuration.** A file 1.0 loads, every 1.x loads, and a 1.x
   that applies an unchanged file differently raises the schema's minor
   version ([Data promises](#frozen-at-10)).
-- **Plugins, provisionally.** The exporter registry is tier 2: usable,
-  and changeable in 1.x with a changelog entry
-  ([Documented but internal](#documented-but-internal)).
+- **Plugins, provisionally.** The exporter registry is usable and
+  provisional until 1.1, which may replace it rather than extend it; a
+  plugin written against 1.0 should pin `isocenter>=1.0,<1.1`, and in
+  1.0 no third-party export grades `PASS`
+  ([The exporter registry](#the-exporter-registry-provisional-until-11)).
 
 ## Frozen at 1.0
 
@@ -556,8 +558,9 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   store object offers is not.
 - **`profiles.FLOOR_POLICY`**, the name the floor policy is held under.
   What the floor *contains* is frozen (above); the name is not.
-- **`entities` helpers** `clone_sequences`, `iter_item_tree`,
-  `normalize_study_date`, `resolve_item_path`.
+- **`entities` helpers** `clone_sequences`, `exported_patient_id`,
+  `iter_item_tree`, `normalize_study_date`, `resolve_item_path`.
+  `exported_patient_id` is on the registry's provisional terms (below).
 - **The [Intelligent OCR](ocr.md) page**: `ZoneDiscoverer.group_boxes`,
   `RedactionVerifier` (`__init__`, `get_matching_rule`, `is_covered`,
   `verify_instance`), `ConfigAutomator.suggest_config_updates`,

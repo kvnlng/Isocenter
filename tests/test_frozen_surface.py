@@ -1650,6 +1650,47 @@ def test_the_stability_page_says_what_the_freeze_covers():
             ) in frozen
 
 
+def test_the_plugins_pillar_says_what_the_registry_subsection_says():
+    """#26 x #527: the opening promise and the registry subsection agree.
+
+    #786 made the exporter registry provisional until 1.1 (1.1 may replace
+    the four names, a plugin pins `<1.1`, no third-party export grades
+    PASS) in its own subsection of tier 2. "What 1.0 promises" had been
+    written against the plain tier-2 wording ("changeable in 1.x"), so
+    its Plugins bullet must link to that subsection and use its terms,
+    or the page's first screen promises less caution than its body.
+
+    `entities.exported_patient_id()` is what the registry page tells a
+    plugin author to call; it is tier 2 on the same terms, so it is
+    listed with the other `entities` helpers and is not tier 1.
+
+    Killing mutations: the bullet's link pointed back at the tier-2
+    heading; "provisional", the `<1.1` pin or the PASS sentence dropped
+    from the bullet; `exported_patient_id` dropped from the helpers
+    bullet or promoted into the module-level names.
+    """
+    page = (REPO / "docs" / "api" / "stability.md").read_text(encoding="utf-8")
+    promises = page.split("## What 1.0 promises", 1)[1].split("\n## ", 1)[0]
+    bullet = " ".join(
+        promises.split("- **Plugins, provisionally.**", 1)[1]
+        .split("\n- ", 1)[0].split())
+    assert "(#the-exporter-registry-provisional-until-11)" in bullet
+    assert "(#documented-but-internal)" not in bullet
+    assert "provisional until 1.1" in bullet
+    assert "`isocenter>=1.0,<1.1`" in bullet
+    assert "no third-party export grades `PASS`" in bullet
+
+    headings = [line for line in page.splitlines() if line.startswith("### ")]
+    assert "### The exporter registry: provisional until 1.1" in headings
+
+    frozen = " ".join(_frozen_section(page).split())
+    internal = " ".join(page.split("## Documented but internal", 1)[1]
+                        .split("\n## ", 1)[0].split())
+    assert "exported_patient_id" not in frozen
+    assert ("**`entities` helpers** `clone_sequences`, `exported_patient_id`, "
+            "`iter_item_tree`") in internal
+
+
 def test_the_audit_action_types_written_are_exactly_the_frozen_thirteen():
     """Pin A (#396, #411): the words the audit table is handed, by AST.
 
