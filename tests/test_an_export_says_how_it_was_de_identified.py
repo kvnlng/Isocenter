@@ -348,6 +348,27 @@ def test_no_marker_on_a_status_recorded_under_another_policy(tmp_path):
     assert _markers(_written(out))["method"] is None
 
 
+def test_no_marker_on_a_status_with_no_policy(tmp_path):
+    """A status with no recorded policy -- remediated from a findings list
+    that is not a whole `audit()` report, in a session that did not scan
+    (#555's legacy row) -- names no policy the file could name. Kills: the
+    predicate accepting a status whose policy is None."""
+    db = str(tmp_path / "s.db")
+    with DicomSession(db) as session:
+        session.ingest(_source(tmp_path / "in"))
+        session.save(sync=True)
+        report = session.audit()
+    out = tmp_path / "out"
+    with DicomSession(db) as session:
+        session.anonymize(list(report.findings))
+        [inst] = _instances(session)
+        assert inst.phi_status is PhiStatus.REMEDIATED, "setup"
+        assert inst.phi_status_policy is None, "setup"
+        session.export(str(out), use_compression=False, show_progress=False)
+    assert _markers(_written(out))["removed"] is None
+    assert _markers(_written(out))["method"] is None
+
+
 # --- M3, M4 -----------------------------------------------------------------
 
 def test_another_tools_markers_are_kept_and_ours_appended(tmp_path):
@@ -556,6 +577,34 @@ def _private_date(ds):
     ds.add_new(0x00331001, "DA", "20040119")
 
 
+def _unruled_datetime(ds):
+    """Study Update DateTime `(0008,041f)`: a DT the floor has no rule for."""
+    ds.add_new(0x0008041F, "DT", "20040119120000")
+
+
+def test_the_study_date_read_is_the_one_the_file_carries(tmp_path):
+    """The file's Study Date is stamped from the `Study` (#566, #624), so
+    the walk reads the stamps too, not only the instance's own elements.
+    Here the Study Date is kept (as found) and the instance's own copy is
+    taken out of its dict behind the graph's back: the export still writes
+    the owner's date, so the file holds a date as found. Kills: the walk
+    reading the instance's attributes without the stamps over them."""
+    out = tmp_path / "out"
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.ingest(_source(tmp_path / "in"))
+        session.load_config(_config(tmp_path, "keep.yaml", phi_tags={
+            "0008,0020": {"action": "KEEP"}}))
+        session.anonymize(session.audit())
+        [inst] = _instances(session)
+        del inst.attributes["0008,0020"]
+        assert inst.phi_status is PhiStatus.REMEDIATED, "setup: no revision moved"
+        session.export(str(out), use_compression=False, show_progress=False)
+    ds = _written(out)
+    assert ds.StudyDate == "20040119", "setup: the owner's date is written"
+    assert _markers(ds)["removed"] == "YES"
+    assert _markers(ds)["temporal"] is None
+
+
 @pytest.mark.parametrize("profile, extra, edit, prior, expected", [
     ("floor", {}, None, False, "MODIFIED"),
     ("basic", {}, None, False, "REMOVED"),
@@ -563,9 +612,10 @@ def _private_date(ds):
     ("floor", {"phi_tags": {"0008,0021": {"action": "KEEP"}}}, None, True, "MODIFIED"),
     ("floor", {}, _nested_unruled_date, False, None),
     ("floor", {"remove_private_tags": False}, _private_date, False, None),
+    ("floor", {}, _unruled_datetime, False, None),
 ], ids=["floor_shifts", "basic_removes", "a_kept_series_date",
         "a_kept_date_under_a_source_modified", "a_nested_date_as_found",
-        "a_private_date_as_found"])
+        "a_private_date_as_found", "a_datetime_as_found"])
 def test_the_temporal_marker_follows_the_files_dates(
         tmp_path, profile, extra, edit, prior, expected):
     """M10 (Q3 arm a). CT_small's six DA elements under the floor: Study
