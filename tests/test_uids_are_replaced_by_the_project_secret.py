@@ -1114,3 +1114,29 @@ def test_a_series_kept_by_the_audited_policy_is_not_held_open(tmp_path):
         session.export(str(tmp_path / "out"), use_compression=False)
         grade = _validation_status(session, tmp_path, "r.md")
     assert grade and "PASS" in grade[0], grade
+
+
+def test_a_kept_reports_tally_holds_its_series_open_under_a_policy_that_keeps_it(tmp_path):
+    """The tally arm is not subsumed by the live check: a report audited
+    under basic, kept across a reopen with its Series finding dropped and
+    handed whole (so its tally comes with it) to a session whose
+    configuration KEEPs the Series Instance UID. The live check, under the
+    session's policy, finds the Series closed; the report's tally, under
+    the policy the findings were raised under, holds it open, and the
+    instances beneath it read IDENTIFIED. Kills the tally's Series settle
+    dropped, and a held-open Series demoting itself but not its
+    instances."""
+    # Copy-less: an instance carrying a Series UID copy has its own
+    # finding on it, which the tally holds open in the Series' stead.
+    report, _, source = _audited_and_closed(tmp_path, "copy-less")
+    keep = tmp_path / "keep.yaml"
+    keep.write_text('privacy_profile: basic\nphi_tags:\n'
+                    '  "0020,000e": {name: Series Instance UID, action: KEEP}\n',
+                    encoding="utf-8")
+    report.findings[:] = [f for f in report.findings if f.entity_type != "Series"]
+    with DicomSession(str(tmp_path / "s.db")) as session:
+        session.load_config(str(keep))
+        session.anonymize(report)
+        series = session.store.patients[0].studies[0].series[0]
+        assert series.series_instance_uid == source
+        assert series.instances[0].phi_status is PhiStatus.IDENTIFIED
