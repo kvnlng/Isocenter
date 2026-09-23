@@ -230,6 +230,31 @@ def test_the_running_version_is_not_a_difference_and_a_stale_one_is(tmp_path):
     assert rec["elements"]["0018,1020"] == f"LO {running!r}"
 
 
+def test_a_release_bump_moves_no_recorded_text_long_or_short(tmp_path, monkeypatch):
+    """N2 reaches a text value before its length test and its hash
+    (RECORDER 2). A De-identification Method holding a source's values and
+    then `isocenter/<version>; ...` is longer than `TEXT_LIMIT` and is
+    recorded as a hash, which `normalize()` cannot reach: under RECORDER 1
+    it hashed the running version, and every such file moved at every
+    release. And a value just under the limit crossed it, or not, by the
+    version's length. Recorded under two faked versions of different
+    lengths, both read the same."""
+    def recorded(version):
+        monkeypatch.setattr(fp, "running_version", lambda: version)
+        ds = _dataset()
+        ds.DeidentificationMethod = [
+            "OtherTool 3.2", "site profile 7",
+            f"isocenter/{version}; basic@2026c; v1:0ee566b4"]
+        ds.ClinicalTrialProtocolName = f"isocenter/{version}; {'x' * 45}"
+        return fp.normalize(_record(tmp_path, ds, f"{len(version)}.dcm"),
+                            fp.output_substitutions())["elements"]
+
+    short, long_ = recorded("1.0.0"), recorded("10.10.10rc10.dev1")
+    assert short["0012,0063"] == long_["0012,0063"]
+    assert "sha256:" in short["0012,0063"], "setup: recorded as a hash"
+    assert short["0012,0021"] == long_["0012,0021"]
+
+
 def test_pydicoms_implementation_identity_is_not_a_difference_but_ours_would_be(tmp_path):
     rec = _record(tmp_path, _dataset(), "pydicom.dcm")
     assert rec["meta"]["0002,0012"] == "UI <pydicom-implementation-uid>"
