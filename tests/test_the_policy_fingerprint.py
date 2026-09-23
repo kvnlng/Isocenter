@@ -15,10 +15,16 @@ so the canonical form decides it:
   The fingerprint may tell apart two policies that scan alike (a re-audit
   is the cost), and must never equate two that scan differently (#555
   again).
+- **`CONFIG_VERSION` is in it (#762)**: the dict does not say how the
+  library reads it, and a release that reads an unchanged dict
+  differently bumps the minor.
 
 `test_the_v1_fingerprint_is_pinned` is what makes v1 permanent: every 1.x
 store carries v1 records, so a later canonical form is a v2 beside it,
-never an edit of v1.
+never an edit of v1. The pins hold the form, not the live version: each
+reads `CONFIG_VERSION` as `PINNED_VERSION`, so a legitimate minor bump
+leaves them green and only an edit of the form turns them red. (#762
+edited v1 once, before any release carried a v1 record.)
 
 Pure: no session, no store.
 """
@@ -27,7 +33,7 @@ import hashlib
 
 import pytest
 
-from isocenter import configuration
+from isocenter import config_manager, configuration
 from isocenter.configuration import _canonical_policy_v1, _scan_policy_for
 
 NAME = "0010,0010"
@@ -111,38 +117,53 @@ def test_a_value_json_cannot_hold_does_not_raise():
     assert _fp({NAME: odd[NAME]}) != _fp(other_day)
 
 
-def test_a_value_outside_ascii_is_escaped_not_refused():
+#: The `CONFIG_VERSION` every pin below is taken under, whatever the live
+#: one is: the pins hold the form, and a minor bump is not an edit of it.
+PINNED_VERSION = "2.0"
+
+
+@pytest.fixture
+def pinned_version(monkeypatch):
+    monkeypatch.setattr(config_manager, "CONFIG_VERSION", PINNED_VERSION)
+
+
+def test_a_value_outside_ascii_is_escaped_not_refused(pinned_version):
     """The canonical form is ASCII: a non-ASCII value is escaped, so it
     hashes and never raises on the `.encode("ascii")`. Kills:
     `ensure_ascii` turned off."""
     tags = {NAME: {"action": "REPLACE", "value": "Müller"}}
     assert _canonical_policy_v1(tags, True) == (
-        b'{"phi_tags":{"0010,0010":{"action":"REPLACE","value":"M\\u00fcller"}},'
+        b'{"config_version":"2.0",'
+        b'"phi_tags":{"0010,0010":{"action":"REPLACE","value":"M\\u00fcller"}},'
         b'"remove_private_tags":true}'), NEVER_CHANGE_V1
 
 
-#: Computed once from the implementation and pasted. The canonical bytes
-#: are pinned as well as the digest, so a failure says which half moved.
+#: Computed once from the implementation and pasted (re-pasted by #762,
+#: which added `config_version` before any release carried a v1 record).
+#: The canonical bytes are pinned as well as the digest, so a failure says
+#: which half moved.
 PINNED_TAGS = {NAME: {"action": "REPLACE", "name": "x"},
                INST: {"action": "EMPTY"}}
-PINNED_CANONICAL = (b'{"phi_tags":{"0008,0080":{"action":"EMPTY"},'
+PINNED_CANONICAL = (b'{"config_version":"2.0",'
+                    b'"phi_tags":{"0008,0080":{"action":"EMPTY"},'
                     b'"0010,0010":{"action":"REPLACE"}},'
                     b'"remove_private_tags":true}')
 PINNED_FINGERPRINT = (
-    "v1:b390cfc7bc2264363c68e2f4e9463f21acef78494151eb5a236913c29d7c498a")
+    "v1:af588d97c17092db11531bde1e71841fe7712c2909beffbd37129ebc4108064e")
 
 NEVER_CHANGE_V1 = (
     "The v1 canonical form is a store format: every store a 1.x wrote "
     "carries v1 records, and a 1.0 store opens in every 1.x. Never change "
     "v1. Add `_canonical_policy_v2` with a 'v2:' prefix beside it, and "
     "compare a stored v1 record against the in-force policy's v1 "
-    "fingerprint (#555).")
+    "fingerprint (#555). A CONFIG_VERSION bump is not a change of v1: "
+    "these pins read it as PINNED_VERSION (#762).")
 
 
-def test_the_v1_fingerprint_is_pinned():
+def test_the_v1_fingerprint_is_pinned(pinned_version):
     """Kills: any change to the canonical form -- separators,
-    `ensure_ascii`, the prefix, the key names `phi_tags` and
-    `remove_private_tags`, the `__form__` spelling."""
+    `ensure_ascii`, the prefix, the key names `config_version`, `phi_tags`
+    and `remove_private_tags`, the `__form__` spelling."""
     assert _canonical_policy_v1(PINNED_TAGS, True) == PINNED_CANONICAL, \
         NEVER_CHANGE_V1
     assert ("v1:" + hashlib.sha256(PINNED_CANONICAL).hexdigest()
@@ -150,11 +171,11 @@ def test_the_v1_fingerprint_is_pinned():
     assert _fp(PINNED_TAGS) == PINNED_FINGERPRINT, NEVER_CHANGE_V1
 
 
-def test_the_string_form_spelling_is_pinned():
+def test_the_string_form_spelling_is_pinned(pinned_version):
     """The `__form__` half of the canonical form, which B5's mapping-only
     policy does not reach."""
     assert _canonical_policy_v1({NAME: "PatientName", INST: ""}, False) == (
-        b'{"phi_tags":{"0008,0080":{"__form__":"empty-string"},'
+        b'{"config_version":"2.0","phi_tags":{"0008,0080":{"__form__":"empty-string"},'
         b'"0010,0010":{"__form__":"string"}},"remove_private_tags":false}'), \
         NEVER_CHANGE_V1
 
@@ -199,3 +220,39 @@ def test_the_policy_in_force_is_computed_on_every_call():
                                      "floor over basic@2026c")
     config.remove_private_tags = False
     assert config._scan_policy().fingerprint != after.fingerprint
+
+
+# --- the configuration schema version is part of the policy (#762) --------
+#
+# Owner's ruling on #762: a change to what an unchanged configuration scans
+# for bumps `CONFIG_VERSION`'s minor, and the v1 canonical form carries
+# `CONFIG_VERSION`, so the fingerprint moves with the behaviour and the
+# #555 notice says so. Found in the final review of #760: two identical
+# dicts scanned differently across #556/#557 and fingerprinted the same.
+
+def test_one_policy_under_two_config_versions_is_two_policies(monkeypatch):
+    """Kills: `CONFIG_VERSION` left out of the canonical form; the version
+    read from a literal, or bound by `from .config_manager import`, instead
+    of `config_manager.CONFIG_VERSION` at call time."""
+    tags = {NAME: {"action": "REPLACE"}, INST: {"action": "EMPTY"}}
+    monkeypatch.setattr(config_manager, "CONFIG_VERSION", "2.0")
+    before = _fp(tags)
+    monkeypatch.setattr(config_manager, "CONFIG_VERSION", "2.1")
+    after = _fp(tags)
+    assert before != after
+    assert before.startswith("v1:") and after.startswith("v1:")
+    # The configuration's own door reads it the same way.
+    config = configuration.IsocenterConfiguration()
+    in_force_21 = config._scan_policy().fingerprint
+    monkeypatch.setattr(config_manager, "CONFIG_VERSION", "2.0")
+    assert config._scan_policy().fingerprint != in_force_21
+
+
+def test_one_policy_under_one_config_version_is_one_policy(monkeypatch):
+    """The other half: the version adds nothing that varies between two
+    calls. Kills: anything per-call (a time, an id) hashed beside it."""
+    monkeypatch.setattr(config_manager, "CONFIG_VERSION", "2.7")
+    a = {NAME: {"action": "REPLACE", "value": "v"}}
+    b = {NAME: {"value": "v", "action": "REPLACE"}}
+    assert _fp(a) == _fp(b) == _fp(dict(a))
+    assert _canonical_policy_v1(a, True) == _canonical_policy_v1(b, True)

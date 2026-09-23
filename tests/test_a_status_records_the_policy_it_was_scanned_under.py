@@ -486,6 +486,56 @@ def test_the_notice_is_one_row_per_export(tmp_path):
         assert len(_notices(session)) == 2
 
 
+@pytest.mark.parametrize("bumped", [False, True], ids=["same", "bumped"])
+def test_a_config_version_bump_is_another_policy_at_export(
+        tmp_path, monkeypatch, bumped):
+    """#762, owner's ruling: `CONFIG_VERSION` is in the v1 canonical form,
+    so a release whose scan behaves differently under an unchanged
+    configuration (it bumps the minor) reads a store's statuses as
+    recorded under another policy. The reviewer's probe of #760: the floor
+    remediated, the store reopened by a library that scans differently,
+    and a plain `export()`. Both statuses carry the floor's label, so the
+    notice tells the two apart by their short hashes, not their bases.
+
+    `same` is the control: the version unchanged, no notice, the #554
+    markers written. Kills: `CONFIG_VERSION` out of the canonical form (no
+    notice across the bump); a notice naming the base without the hash (the
+    two sides read alike); a marker written under a fingerprint the notice
+    calls another."""
+    db = str(tmp_path / "s.db")
+    with DicomSession(db) as session:
+        session.ingest(_input(tmp_path, "CT_small.dcm"))
+        session.anonymize(session.audit())
+        recorded = session.configuration._scan_policy()
+        session.save(sync=True)
+    assert recorded.base == FLOOR
+    if bumped:
+        major, minor = config_manager.CONFIG_VERSION.split(".")
+        monkeypatch.setattr(config_manager, "CONFIG_VERSION",
+                            f"{major}.{int(minor) + 1}")
+    with DicomSession(db) as session:
+        in_force = session.configuration._scan_policy()
+        assert in_force.base == FLOOR
+        session.export(str(tmp_path / "out"))
+        notices = _notices(session)
+        grade = _grade(session, tmp_path)
+    exported = _exported(tmp_path / "out")
+    if not bumped:
+        assert in_force.fingerprint == recorded.fingerprint
+        assert notices == []
+        assert "PASS" in grade
+        assert "DeidentificationMethod" in exported
+        return
+    assert in_force.fingerprint[:15] != recorded.fingerprint[:15]
+    [notice] = notices
+    assert f"({FLOOR}, {in_force.fingerprint[:15]})" in notice, notice
+    assert f": {FLOOR} ({recorded.fingerprint[:15]})." in notice, notice
+    assert "REVIEW_REQUIRED" in grade
+    # The markers are written exactly where the notice is silent (#554).
+    assert "DeidentificationMethod" not in exported
+    assert "PatientIdentityRemoved" not in exported
+
+
 def test_a_wfdb_export_says_it_too(tmp_path):
     """Kills: the check wired into `_export_dicom` only."""
     from scripts.generate_waveform_test_data import write_fixture

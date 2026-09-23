@@ -110,11 +110,18 @@ Three of these are traps YAML sets, and are refused rather than read:
 **`version`.** A file with no `version` line is version 2.0, and always
 will be. A present `version` must be a quoted string whose major is `2`;
 any `2.x` loads. It is written one way: `"2.00"` and `"02.0"` are refused
-rather than read as 2.0 ([#730](https://github.com/kvnlng/Isocenter/issues/730)). A 1.x release that adds a key or a value does so under a
-new `2.x` minor, and never changes what an existing key means, so a file
-written for a newer minor either means the same thing here or is refused
-by the key or value this release does not have -- and then the refusal says
-the file's version is newer than this isocenter's. `"1.0"` is refused: it
+rather than read as 2.0 ([#730](https://github.com/kvnlng/Isocenter/issues/730)). A 1.x release raises the `2.x` minor for either of two reasons: it adds
+a key or a value, or it applies an unchanged file differently (for
+example, a value-less `REPLACE` writing a dummy its VR can hold)
+([#762](https://github.com/kvnlng/Isocenter/issues/762)). Either way, a
+`2.x` file still loads unchanged. A file that uses a key or a value this
+release does not have is refused, and the refusal says the file's version
+is newer than this isocenter's. When the way a file is applied changes, a
+store scanned under the older minor is not silently treated as scanned
+under the new one. The minor is part of the policy fingerprint each PHI
+status records, so `export()` writes a notice and the report grades
+`REVIEW_REQUIRED` until `audit()` runs again
+([#555](https://github.com/kvnlng/Isocenter/issues/555)). `"1.0"` is refused: it
 labelled the machines-only rules file before version 2 (December 2025),
 and such a file loads unchanged as `"2.0"`.
 
@@ -462,7 +469,7 @@ The markers rest on the same status the report's grade reads, so any edit after 
 * **Patient Identity Removed `(0012,0062)`: `YES`.** A source value of `NO` is replaced, and a source `YES` stays.
 * **De-identification Method `(0012,0063)`** gains one value, after any values the source carried, which are kept in order: `isocenter/<version>; <policy>; v1:<8 hex>`.
     * `<policy>` is `basic@2026c`, `floor over basic@2026c` or `none`. An external profile is `external profile`, never its path.
-    * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides.
+    * The hex is the first 32 bits of the policy's fingerprint (`phi_status_policy`). It tells two policies under one label apart, such as the floor and the floor with overrides. The fingerprint includes the configuration schema version, so a release that raises that version's minor moves the hex in every file it writes, under an unchanged configuration.
     * No value is added if the last value is already this one. So re-exporting an ingested Isocenter export under the same policy and release adds nothing.
 * **Longitudinal Temporal Information Modified `(0028,0303)`**, read from the file's own dates. Every DA and DT element is read, including nested ones and private ones whose VR is recorded. A private element from an implicit-VR source has no recorded VR, so a date in it is not read and does not stop `MODIFIED`; it is exported as `UN`, and `remove_private_tags` (on by default) removes it.
     * `REMOVED` when every date is empty or the dummy `19000101`.
@@ -585,7 +592,7 @@ A de-identification run depends on three things, and the configuration file is o
 
 | | What it decides | Where it is | If you lose it |
 | :--- | :--- | :--- | :--- |
-| **The configuration file** | Which tags are kept, removed, emptied, replaced or date-shifted; the date-shift *range*; whether private tags go; the pixel zones for each machine. | A YAML file you keep, under version control. | Nothing you cannot write again. A 1.0 file loads and means the same thing in every 1.x, and `privacy_profile: basic@2026c` names one fixed table. But a store remembers the policy each PHI status was scanned under, as a fingerprint of the rules: a rewritten file must be the same policy -- the same fingerprint, which covers every rule key but `name` (a `value: null` line and no `value` line differ) and `remove_private_tags` -- or every export from a reopened store warns, and its report grades `REVIEW_REQUIRED`, until the next `audit()` ([#555](https://github.com/kvnlng/Isocenter/issues/555)). |
+| **The configuration file** | Which tags are kept, removed, emptied, replaced or date-shifted; the date-shift *range*; whether private tags go; the pixel zones for each machine. | A YAML file you keep, under version control. | Nothing you cannot write again. A 1.0 file loads unchanged in every 1.x, and `privacy_profile: basic@2026c` names one fixed table. A release that applies an unchanged file differently raises the schema minor (see [Schema (version 2)](#schema-version-2)). But a store remembers the policy each PHI status was scanned under, as a fingerprint of the rules: a rewritten file must be the same policy -- the same fingerprint, which covers every rule key but `name` (a `value: null` line and no `value` line differ), `remove_private_tags`, and the configuration schema version this isocenter applies the file under ([#762](https://github.com/kvnlng/Isocenter/issues/762)) -- or every export from a reopened store warns, and its report grades `REVIEW_REQUIRED`, until the next `audit()` ([#555](https://github.com/kvnlng/Isocenter/issues/555)). The same happens after an upgrade that raises the minor. |
 | **The store** (`Session("my_project.db")`) and its **project secret** | Each patient's `ANON_` pseudonym and date offset, and every replacement UID. All are derived from a secret the store generates the first time `audit()`, `anonymize()` or `redact()` needs one, and keeps inside itself. | Two files that belong together: the session file (`my_project.db`) and the pixel sidecar beside it, named after it (`my_project_pixels.bin`). | The pseudonyms, offsets and UIDs it made. The same configuration over a new store gives every patient a **new** pseudonym and a **new** offset, and every study, series and instance **new** UIDs. Files already exported keep theirs, but data exported later will not link to them, and the intervals between a patient's old and new studies are lost. |
 | **`isocenter.key`** (only with [reversible anonymization](quickstart.md#4-backup-identity-optional)) | Whether original identities written into exported files can be recovered. | The file `enable_reversible_anonymization()` names. | Recovery. Identities in files exported under that key cannot be recovered by anyone. |
 

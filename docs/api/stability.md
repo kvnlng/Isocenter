@@ -369,9 +369,16 @@ default.
   promise that no exported date is recoverable: a date tag no rule names
   is exported as ingested, and a UID the configuration keeps can embed
   one.
-- A configuration file that 1.0 loads, every 1.x loads and applies the
-  same way. Its schema is version 2. A 1.x adds keys and values only,
-  under a new 2.x minor, and never changes what an existing one means.
+- A configuration file that 1.0 loads, every 1.x loads unchanged. Its
+  schema is version 2, and a 1.x never raises the major. A 1.x raises
+  the 2.x minor when it adds keys or values, and when it applies an
+  unchanged file differently (#762). A 1.x never changes how a file is
+  applied without raising the minor. The minor is part of the policy
+  each PHI status records, so a store scanned under an older minor is
+  asked to re-audit. Its next `export()` writes a `WARNING` row saying
+  the statuses were recorded under another policy, and the report
+  grades `REVIEW_REQUIRED` until `audit()` runs under the new release
+  (#555).
 
 **Output vocabularies.** Five separate vocabularies, not one list.
 

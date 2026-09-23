@@ -21,10 +21,33 @@ from .profiles import FLOOR, FLOOR_POLICY, PRIVACY_PROFILES, PROFILE_ALIASES
 #: The schema version both writers stamp (`IsocenterConfiguration.save()`
 #: and `Session.create_config()`, which read it at call time rather than
 #: carrying their own literal). It is the schema's number, not the
-#: package's, and has been "2.0" since December 2025 (#711). A 1.x that
-#: adds a key or a value bumps the minor here and adds a row to
-#: `tests/test_config_schema_version.py::SCHEMA_BY_VERSION`; it never
-#: changes what an existing key means, and never bumps the major.
+#: package's, and has been "2.0" since December 2025 (#711). It never
+#: bumps the major in 1.x. A 1.x bumps the minor for either of two
+#: reasons, and adds a row to
+#: `tests/test_config_schema_version.py::SCHEMA_BY_VERSION` for each:
+#:
+#: - it adds a key or a value;
+#: - it applies an unchanged file differently, for example a value-less
+#:   REPLACE now writing its VR's dummy (#556). Owner's ruling on #762.
+#:
+#: A 2.x file still loads unchanged under every 2.x.
+#:
+#: **Why the second reason matters.** The v1 policy fingerprint
+#: (`configuration._canonical_policy_v1`) hashes this value, read at call
+#: time. The bump is therefore the only thing that makes statuses scanned
+#: under an older minor read as another policy. `export()` then says so
+#: and the report grades REVIEW_REQUIRED until `audit()` runs again
+#: (#555). Without the bump, the fingerprint equates two scans that
+#: behave differently. Nothing checks that such a change bumps (#782).
+#:
+#: **The working test** is `docs/api/stability.md`'s promise. Bump
+#: whenever the same file would be applied differently to the same input:
+#: findings, values a rule writes, tags a rule reaches, pixel zones or
+#: date jitter. A re-audit does not re-check pixel zones or jitter, but the
+#: fingerprint still moves, because the version is in it. Every bump moves
+#: every fingerprint, so it re-measures the (0012,0063) literals in
+#: `tests/test_an_export_says_how_it_was_de_identified.py` and retakes
+#: `fingerprint/output.json`.
 CONFIG_VERSION = "2.0"
 
 #: The one major this library reads. A string, compared as a string, so
@@ -128,10 +151,10 @@ def _newer_minor_note(declared: str, source: str) -> str:
     """The sentence a refusal gains when the file at `source` declares a
     minor newer than `CONFIG_VERSION`, else "" (#711).
 
-    Any minor of the readable major loads, which is sound only because a
-    minor adds keys and values and every key and value this library lacks
-    is refused. So a newer-minor file is either one that means the same
-    here, or one refused by what it uses -- and then this says why. Minors
+    Any minor of the readable major loads. A newer minor that only changed
+    how a file is applied (#762) loads with no note, is applied as this
+    library applies it, and nothing flags it (#784 asks whether it should).
+    A key or value this library lacks is refused, and this says why. Minors
     compare as integers: "2.10" is newer than "2.9". Read at call time,
     not import time, so the constant has one home.
     """

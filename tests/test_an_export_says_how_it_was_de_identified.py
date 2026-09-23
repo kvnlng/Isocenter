@@ -33,9 +33,11 @@ the graph, and never by `write_tree()`, which is the serializer without
 the pipeline.
 
 **Literals.** The labels and fingerprint prefixes were measured at
-f54deaa1, after L10's U rows moved `basic@2026c`'s canonical form:
-`floor over basic@2026c` is `v1:0ee566b4`, `basic@2026c` is
-`v1:3bd3e9b7`, `none` is `v1:751bc63e`. The version is read from
+f54deaa1, after L10's U rows moved `basic@2026c`'s canonical form, and
+re-measured for #762, which put `CONFIG_VERSION` ("2.0") in it; a minor
+bump moves every one of them, and each is re-measured then:
+`floor over basic@2026c` is `v1:21675ebc`, `basic@2026c` is
+`v1:599371bb`, `none` is `v1:7182a219`. The version is read from
 `isocenter/_version.py` as text, never from `isocenter`, so a release bump
 moves nothing here and a formatter that spelled the tool differently (the
 fingerprint's N2 substitution reads exactly `isocenter/<version>`) is red.
@@ -68,10 +70,10 @@ REPO = Path(__file__).resolve().parents[1]
 VERSION = re.search(r'__version__ = "([^"]+)"',
                     (REPO / "isocenter" / "_version.py").read_text()).group(1)
 
-#: Measured at f54deaa1 (see the module docstring).
-FLOOR = ("floor over basic@2026c", "v1:0ee566b4")
-BASIC = ("basic@2026c", "v1:3bd3e9b7")
-NONE = ("none", "v1:751bc63e")
+#: Measured at f54deaa1, re-measured for #762 (see the module docstring).
+FLOOR = ("floor over basic@2026c", "v1:21675ebc")
+BASIC = ("basic@2026c", "v1:599371bb")
+NONE = ("none", "v1:7182a219")
 
 REMOVED_TAG, METHOD, CODES, TEMPORAL = (0x00120062, 0x00120063, 0x00120064,
                                         0x00280303)
@@ -499,16 +501,16 @@ def test_an_external_profile_is_named_not_located(tmp_path):
 
 
 #: The floor with one override is its own policy. Each prefix measured at
-#: f54deaa1; the label is the floor's, since the file names no profile.
+#: f54deaa1 and re-measured for #762 (see the module docstring); the label is the floor's, since the file names no profile.
 @pytest.mark.parametrize("rule, expected", [
     ({"0012,0063": {"action": "REMOVE"}},
      {"removed": "YES", "method": None}),
     ({"0012,0062": {"action": "EMPTY"}},
-     {"removed": "", "method": "v1:153c1dde"}),
+     {"removed": "", "method": "v1:e4c38085"}),
     ({"0012,0062": {"action": "KEEP"}},
-     {"removed": "NO", "method": "v1:bec9eb34"}),
+     {"removed": "NO", "method": "v1:18dda10a"}),
     ({"0028,0303": {"action": "KEEP"}},
-     {"removed": "YES", "method": "v1:a31f9c17", "temporal": None}),
+     {"removed": "YES", "method": "v1:f8879f8c", "temporal": None}),
 ], ids=["remove_method", "empty_removed", "keep_a_source_no", "keep_temporal"])
 def test_a_rule_on_a_marker_tag_decides(tmp_path, rule, expected):
     """M7. The user's configuration decides: any rule on a marker tag, KEEP
