@@ -7843,6 +7843,36 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
                 f"pydicom's colour conversion takes unsigned 8-bit samples "
                 f"only.")
 
+        # A limit of a reader, not of the file (#670): pydicom's Pillow
+        # plugin refuses every JPEG 2000 codestream above 8 bits with more
+        # than one sample ("Pillow cannot decode 16-bit multi-sample data
+        # correctly", pydicom 3.0.2 pixels/decoders/pillow.py), because
+        # Pillow narrows such data to 8 bits. The file is conformant and
+        # exact: this library and pydicom with pylibjpeg-openjpeg read it
+        # back sample for sample. INFO on `corrections`, no row, as #596
+        # above -- a WARNING would grade a correct file REVIEW_REQUIRED.
+        # Keyed on the file as written (its syntax, width and sample
+        # count), after `_finalize_dataset`, so a pixel-less file (it
+        # stays native) and an icon (always raw) cannot reach it; not on
+        # `written_syntax`, which says JPEG 2000 for a pixel-less file
+        # too. `> 8` rather than `== 16` because that is Pillow's
+        # predicate: `jpeg2k_encode` writes the container width as the
+        # precision, and a later widening of `_J2K_ENCODABLE_FRAMES` must
+        # not go silent. Not for a label pydicom converts
+        # (`_PYDICOM_CONVERTS`): a 16-bit YBR_FULL file is the #596
+        # note's, and that note is the true one -- no reader here, this
+        # library included, converts 16-bit YBR -- so this note, which
+        # says this library reads the file back, would be false beside it.
+        if (written_pixels is not None
+                and str(ds.file_meta.TransferSyntaxUID)
+                == str(JPEG2000Lossless)
+                and int(ds.BitsAllocated) > 8
+                and int(ds.SamplesPerPixel) > 1
+                and _written_photometric(ds.get("PhotometricInterpretation"))
+                not in _PYDICOM_CONVERTS):
+            corrections.append(_PILLOW_J2K_NOTE.format(
+                bits=int(ds.BitsAllocated), samples=int(ds.SamplesPerPixel)))
+
         # The third arm's label judgement (#534): a file with no pixel
         # element never reaches `_write_pixel_geometry`, which judges the
         # other two. After `_finalize_dataset`, because the syntax judged
@@ -7982,7 +8012,8 @@ class _J2kFrameRefusal(RuntimeError):
 #: remove this cell**, or the export writes a file ingest refuses again.
 #:
 #: What the cell costs: a third-party reader with pydicom and only
-#: Pillow still cannot decode such a file's `pixel_array`. A caller
+#: Pillow still cannot decode such a file's `pixel_array`, and the
+#: export says so at INFO (#670, `_PILLOW_J2K_NOTE`). A caller
 #: exporting for one passes `use_compression=False`, as before.
 #: `verify_readback=True` decodes every written file through
 #: `_decode_pixels` since #449; `(2, True)` passes it through the
@@ -7993,6 +8024,21 @@ _J2K_ENCODABLE_FRAMES = frozenset({
     (2, False),
     (2, True),
 })
+
+#: The note for a JPEG 2000 file pydicom's Pillow plugin refuses (#670).
+#: It names the reader that was measured to work (pylibjpeg-openjpeg,
+#: on 3.12) and not GDCM, which was only read, and it says "and" rather
+#: than "only through", which would claim GDCM by exclusion. No path and
+#: no identifier: the parent prefixes the SOP Instance UID (D10).
+_PILLOW_J2K_NOTE = (
+    "written as JPEG 2000 Lossless at BitsAllocated {bits} with {samples} "
+    "samples per pixel, exactly. pydicom's Pillow plugin, the only one of "
+    "pydicom's JPEG 2000 plugins this package installs, refuses JPEG 2000 "
+    "above 8 bits with "
+    "more than one sample (\"Pillow cannot decode 16-bit multi-sample data "
+    "correctly\"); pydicom with pylibjpeg-openjpeg reads it exactly, and "
+    "this library reads it back through imagecodecs. For a reader with "
+    "only Pillow, export with use_compression=False (#670).")
 
 #: The 3-sample labels `_compress_j2k` encodes **with** the multiple
 #: component transform (#490). `RGB` is transformed and relabelled
@@ -8247,8 +8293,9 @@ def _compress_j2k(ds, pixel_array=None):
         # bit-exactly, but pydicom's only J2K plugin here (Pillow) cannot
         # decode it, so this library could not ingest its own export. It
         # is written now because ingest falls back to `imagecodecs`; see
-        # `_J2K_ENCODABLE_FRAMES`. `int8` RGB, which Pillow also refused,
-        # *is* exact and was never refused by this guard.
+        # `_J2K_ENCODABLE_FRAMES`. `int8` RGB, which Pillow's encoder
+        # refused before #404, *is* exact and was never refused by this
+        # guard.
         _refuse_unencodable_j2k_frame(arr, ds, samples)
 
         # **The multiple-component transform is the label, and both are
