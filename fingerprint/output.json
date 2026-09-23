@@ -122629,17 +122629,429 @@
     "redacted-1.dcm": "sha256:ae9f44fd20828f350b0d205e23d0b87446b93cda852590c8a8048e5009c613b0"
    },
    "varies": true
+  },
+  "synthetic:withheld": {
+   "configs": {
+    "A": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:A.dicom-j2k>",
+        "DICOM export to <out:A.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.dicom>",
+        "DICOM export to <out:A.dicom>: wrote 0 of 1 requested instances; all 1 were withheld by the pre-export scan (check_burned_in=True).",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.reopened.dicom>",
+        "DICOM export to <out:A.reopened.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:A.wfdb>",
+        "WFDB export to <out:A.wfdb>: wrote 0 records, 0 instances failed.",
+        null,
+        null
+       ],
+       [
+        "REMEDIATION_DECLINED",
+        "2.25.234075234956413948108761588781611830374",
+        "Remediation declined for 2.25.234075234956413948108761588781611830374: invalid date format for 0008,0020: '2023.01.01', so the value is unchanged",
+        null,
+        null
+       ],
+       [
+        "WARNING",
+        "2.25.234075234956413948108761588781611830374",
+        "DICOM export to <out:A.dicom> withheld instance 2.25.234075234956413948108761588781611830374: its instance still carries an identifier the pre-export scan raised (check_burned_in=True).",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "A.dicom": {
+       "files": {},
+       "result": {
+        "failures": [],
+        "written": 0
+       }
+      },
+      "A.dicom-j2k": {
+       "files": {
+        "Subject_ANON_5169bebba752bb8742ee01e3/Study_2022-01-20__68704/Series_1_CT__62609/2.25.234075234956413948108761588781611830374.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.234075234956413948108761588781611830374'",
+          "0008,0020": "DA '20220120'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0008,1140": "SQ items=1",
+          "0008,1140[0]>0008,0020": "DA '2023.01.01'",
+          "0008,1140[0]>0008,1150": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,1140[0]>0008,1155": "UI '2.25.210751754279475047366805711950270073687'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5169bebba752bb8742ee01e3'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.52848701353647700085858783927121568704'",
+          "0020,000e": "UI '2.25.188825476351806284937429801719144162609'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.98003972969657085987795201119130195796'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234075234956413948108761588781611830374'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.reopened.dicom": {
+       "files": {
+        "Subject_ANON_5169bebba752bb8742ee01e3/Study_2022-01-20__68704/Series_1_CT__62609/2.25.234075234956413948108761588781611830374.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.234075234956413948108761588781611830374'",
+          "0008,0020": "DA/implicit '20220120'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0008,1140": "SQ/implicit items=1",
+          "0008,1140[0]>0008,0020": "DA/implicit '2023.01.01'",
+          "0008,1140[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,1140[0]>0008,1155": "UI/implicit '2.25.210751754279475047366805711950270073687'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5169bebba752bb8742ee01e3'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.52848701353647700085858783927121568704'",
+          "0020,000e": "UI/implicit '2.25.188825476351806284937429801719144162609'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.98003972969657085987795201119130195796'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234075234956413948108761588781611830374'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "A.wfdb": {
+       "files": {},
+       "result": {
+        "returned": []
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok",
+      "redact": "redacted 0"
+     }
+    },
+    "B": {
+     "accounting": {
+      "columns": [
+       "action_type",
+       "entity_uid",
+       "details",
+       "loss_scope",
+       "element_tag"
+      ],
+      "rows": [
+       [
+        "EXPORT",
+        "<out:B.dicom-j2k>",
+        "DICOM export to <out:B.dicom-j2k>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "EXPORT",
+        "<out:B.dicom>",
+        "DICOM export to <out:B.dicom>: wrote 1 of 1 planned instances from 1 patients.",
+        null,
+        null
+       ],
+       [
+        "REMEDIATION_DECLINED",
+        "2.25.234075234956413948108761588781611830374",
+        "Remediation declined for 2.25.234075234956413948108761588781611830374: invalid date format for 0008,0020: '2023.01.01', so the value is unchanged",
+        null,
+        null
+       ]
+      ]
+     },
+     "arms": {
+      "B.dicom": {
+       "files": {
+        "Subject_ANON_5169bebba752bb8742ee01e3/Study_2022-01-20__68704/Series_1_CT__62609/2.25.234075234956413948108761588781611830374.dcm": {
+         "elements": {
+          "0008,0005": "CS/implicit 'ISO_IR 100'",
+          "0008,0016": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI/implicit '2.25.234075234956413948108761588781611830374'",
+          "0008,0020": "DA/implicit '20220120'",
+          "0008,0021": "DA/implicit '19000101'",
+          "0008,0022": "DA/implicit ''",
+          "0008,0023": "DA/implicit '19000101'",
+          "0008,0030": "TM/implicit ''",
+          "0008,0031": "TM/implicit '000000'",
+          "0008,0050": "SH/implicit ''",
+          "0008,0060": "CS/implicit 'CT'",
+          "0008,0070": "LO/implicit 'Acme'",
+          "0008,0080": "LO/implicit 'ANONYMIZED'",
+          "0008,0090": "PN/implicit ''",
+          "0008,1030": "LO/implicit ''",
+          "0008,103e": "LO/implicit ''",
+          "0008,1090": "LO/implicit 'Golden'",
+          "0008,1140": "SQ/implicit items=1",
+          "0008,1140[0]>0008,0020": "DA/implicit '2023.01.01'",
+          "0008,1140[0]>0008,1150": "UI/implicit '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,1140[0]>0008,1155": "UI/implicit '2.25.210751754279475047366805711950270073687'",
+          "0010,0010": "PN/implicit 'ANONYMIZED'",
+          "0010,0020": "LO/implicit 'ANON_5169bebba752bb8742ee01e3'",
+          "0010,0030": "DA/implicit ''",
+          "0010,0040": "CS/implicit 'F'",
+          "0010,1010": "AS/implicit '063Y'",
+          "0018,0050": "DS/implicit '1.000000'",
+          "0018,0060": "DS/implicit '120'",
+          "0018,1000": "LO/implicit 'ANONYMIZED'",
+          "0020,000d": "UI/implicit '2.25.52848701353647700085858783927121568704'",
+          "0020,000e": "UI/implicit '2.25.188825476351806284937429801719144162609'",
+          "0020,0010": "SH/implicit ''",
+          "0020,0011": "IS/implicit '1'",
+          "0020,0013": "IS/implicit '1'",
+          "0020,0032": "DS/implicit '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS/implicit '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI/implicit '2.25.98003972969657085987795201119130195796'",
+          "0028,0002": "US/implicit [1]",
+          "0028,0004": "CS/implicit 'MONOCHROME2'",
+          "0028,0010": "US/implicit [16]",
+          "0028,0011": "US/implicit [16]",
+          "0028,0030": "DS/implicit '0.500000\\\\0.5'",
+          "0028,0100": "US/implicit [16]",
+          "0028,0101": "US/implicit [16]",
+          "0028,0102": "US/implicit [15]",
+          "0028,0103": "US/implicit [0]",
+          "7fe0,0010": "OW/implicit <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [184]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234075234956413948108761588781611830374'",
+          "0002,0010": "UI '1.2.840.10008.1.2'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      },
+      "B.dicom-j2k": {
+       "files": {
+        "Subject_ANON_5169bebba752bb8742ee01e3/Study_2022-01-20__68704/Series_1_CT__62609/2.25.234075234956413948108761588781611830374.dcm": {
+         "elements": {
+          "0008,0005": "CS 'ISO_IR 100'",
+          "0008,0016": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,0018": "UI '2.25.234075234956413948108761588781611830374'",
+          "0008,0020": "DA '20220120'",
+          "0008,0021": "DA '19000101'",
+          "0008,0022": "DA ''",
+          "0008,0023": "DA '19000101'",
+          "0008,0030": "TM ''",
+          "0008,0031": "TM '000000'",
+          "0008,0050": "SH ''",
+          "0008,0060": "CS 'CT'",
+          "0008,0070": "LO 'Acme'",
+          "0008,0080": "LO 'ANONYMIZED'",
+          "0008,0090": "PN ''",
+          "0008,1030": "LO ''",
+          "0008,103e": "LO ''",
+          "0008,1090": "LO 'Golden'",
+          "0008,1140": "SQ items=1",
+          "0008,1140[0]>0008,0020": "DA '2023.01.01'",
+          "0008,1140[0]>0008,1150": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0008,1140[0]>0008,1155": "UI '2.25.210751754279475047366805711950270073687'",
+          "0010,0010": "PN 'ANONYMIZED'",
+          "0010,0020": "LO 'ANON_5169bebba752bb8742ee01e3'",
+          "0010,0030": "DA ''",
+          "0010,0040": "CS 'F'",
+          "0010,1010": "AS '063Y'",
+          "0018,0050": "DS '1.000000'",
+          "0018,0060": "DS '120'",
+          "0018,1000": "LO 'ANONYMIZED'",
+          "0020,000d": "UI '2.25.52848701353647700085858783927121568704'",
+          "0020,000e": "UI '2.25.188825476351806284937429801719144162609'",
+          "0020,0010": "SH ''",
+          "0020,0011": "IS '1'",
+          "0020,0013": "IS '1'",
+          "0020,0032": "DS '0\\\\0\\\\1.000000'",
+          "0020,0037": "DS '1\\\\0\\\\0\\\\0\\\\1\\\\0'",
+          "0020,0052": "UI '2.25.98003972969657085987795201119130195796'",
+          "0028,0002": "US [1]",
+          "0028,0004": "CS 'MONOCHROME2'",
+          "0028,0010": "US [16]",
+          "0028,0011": "US [16]",
+          "0028,0030": "DS '0.500000\\\\0.5'",
+          "0028,0100": "US [16]",
+          "0028,0101": "US [16]",
+          "0028,0102": "US [15]",
+          "0028,0103": "US [0]",
+          "7fe0,0010": "OB <pixels>"
+         },
+         "meta": {
+          "0002,0000": "UL [188]",
+          "0002,0001": "OB sha256:b413f47d13ee2fe6 len=2",
+          "0002,0002": "UI '1.2.840.10008.5.1.4.1.1.2'",
+          "0002,0003": "UI '2.25.234075234956413948108761588781611830374'",
+          "0002,0010": "UI '1.2.840.10008.1.2.4.90'",
+          "0002,0012": "UI <pydicom-implementation-uid>",
+          "0002,0013": "SH <pydicom-implementation-version>"
+         },
+         "pixels": "<u2 [16, 16] sha256:4213a37102986bb9"
+        }
+       },
+       "result": {
+        "failures": [],
+        "written": 1
+       }
+      }
+     },
+     "steps": {
+      "anonymize": "ok",
+      "audit": "ok",
+      "ingest": {
+       "declined": 0,
+       "failures": [],
+       "ingested": 1,
+       "skipped": 0
+      },
+      "load_config": "ok"
+     }
+    }
+   },
+   "inputs": {
+    "withheld-1.dcm": "sha256:5dc74a1f115ddc26b6bee43f2e14b6d276e51e13baf884130e6113a889c831b9"
+   }
   }
  },
  "provenance": {
   "dirty": false,
   "gil": true,
-  "git_sha": "ffbbfa6f4acc09e551d6addf33fbc24ed6de6b9c",
+  "git_sha": "0f31c410b928e690a77d44d3a02e8ecf9ea2e203",
   "isocenter_version": "0.9.8",
   "jobs": 4,
   "platform": "macOS-27.0-arm64-arm-64bit",
   "python": "3.12.14",
-  "seconds": 536
+  "seconds": 455
  },
  "schema": 1,
  "toolchain": {
