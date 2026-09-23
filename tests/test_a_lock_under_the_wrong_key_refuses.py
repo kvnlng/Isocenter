@@ -15,7 +15,7 @@ the same shape stashes pass output under a key nobody holds.
 Now the plan reads every distinct token on the patient through a strict
 read and refuses when a token **of ours** does not open. An Encrypted
 Attributes Sequence that did not come from this library (no Fernet token
-in `(0400,0510)`) is still replaced, as 0.9.4 released (#399): the two
+in `(0400,0520)`, #790) is still replaced, as 0.9.4 released (#399): the two
 are told apart by the token's own format -- base64url whose first
 decoded byte is `0x80` -- so a truncated token of ours is a refusal, not
 a silent replacement.
@@ -302,7 +302,7 @@ def test_the_sniff_reads_the_fernet_version_byte(content, ours):
 @pytest.mark.parametrize("form", ("single", "batch"))
 def test_a_content_str_utf8_cannot_encode_is_foreign_and_no_lock_raises_on_it(
         tmp_path, form):
-    """A `(0400,0510)` holding a `str` with a lone surrogate -- hand-set
+    """An Encrypted Content `(0400,0520)` holding a `str` with a lone surrogate -- hand-set
     only; the tag is OB and hydrates as `bytes` -- raised
     `UnicodeEncodeError` out of the sniff's encode, and the Q8 sniff
     walks every instance in the session before any plan, so one such
