@@ -387,29 +387,146 @@ def test_a_partial_pass_already_gave_the_id_less_patient_its_offset(tmp_path, le
     assert len([d for uid, d in warnings if uid == sop]) == 1, warnings
 
 
-def test_a_pass_that_shifted_nothing_still_lets_the_real_id_re_key(tmp_path):
-    """The gate reads shift evidence, not status (review finding 1). A pass
-    handed only the patient's name finding leaves the patient REMEDIATED
-    and no date shifted; nothing derived from the ID-less key is in the
-    graph, so the real ID re-keys it and no WARNING row is written. Kills
-    MG5 (a patient status read back into the gate)."""
-    _id_less(tmp_path / "in1" / "a.dcm", "5871", "Alpha^One", "absent")
-    _with_id(tmp_path / "in2" / "b.dcm", "PA", "5871", ".1.2", "Alpha^One")
+def _study_with_and_without_an_id(tmp_path, suffix, study_date="keep"):
+    """a: no Patient ID; b: `PA`, the same study, SOP `.1.2`."""
+    a = write_ct(tmp_path / "in1" / "a.dcm", "TMP", suffix,
+                 study_date=study_date, name="Alpha^One")
+    ds = pydicom.dcmread(str(a))
+    del ds.PatientID
+    ds.save_as(str(a))
+    _with_id(tmp_path / "in2" / "b.dcm", "PA", suffix, ".1.2", "Alpha^One")
+    if study_date is None:
+        ds = pydicom.dcmread(str(tmp_path / "in2" / "b.dcm"))
+        del ds.StudyDate
+        ds.save_as(str(tmp_path / "in2" / "b.dcm"))
+
+
+@pytest.mark.parametrize("shape", ["no-date", "date-kept", "check-burned-in"])
+def test_an_audited_id_less_patient_is_not_re_keyed(tmp_path, shape):
+    """Review of #763 at 49037891, F5-1, and the owner's ruling of
+    2026-09-22: a recorded scan status counts as a value derived under the
+    ID-less identity, like a shift or a token. An ID-less file a, then
+    `audit()`, then a `PA` file b of its study, then `anonymize(report)`
+    and `export()`. At 49037891 b re-keyed the patient to `PA`; the
+    report's findings were raised under the key, where the scan raises
+    no Patient ID finding (#584), so nothing covered `PA`, and both files
+    exported it in the clear -- and with no Study Date to decline, the run
+    graded PASS. Now b links under the ID-less patient with its WARNING
+    row, both files export an empty Patient ID, and the run grades
+    REVIEW_REQUIRED. The three shapes are the reviewer's probe: no Study
+    Date and the default export, the Study Date kept, and
+    `check_burned_in=True`. Kills MG6 (the status read dropped)."""
+    _study_with_and_without_an_id(
+        tmp_path, "5905", study_date=None if shape == "no-date" else "keep")
+    sop_b = study_uid("5905") + ".1.2"
     with Session(str(tmp_path / "s.db")) as session:
         session.ingest(str(tmp_path / "in1"))
         report = session.audit()
-        session.anonymize([f for f in report.findings
-                           if f.entity_type == "Patient" and f.tag == "0010,0010"])
         [patient] = session.store.patients
-        assert patient.phi_status.name == "REMEDIATED"
+        key = patient.patient_id
+        session.ingest(str(tmp_path / "in2"))
+        assert [p.patient_id for p in session.store.patients] == [key]
+        assert is_synthetic_patient_id(key)
+        linked = [d for uid, d in _audit_rows(session, "WARNING") if uid == sop_b]
+        assert len(linked) == 1, linked
+        session.anonymize(report)
+        session.export(str(tmp_path / "out"), use_compression=False,
+                       check_burned_in=shape == "check-burned-in")
+        session.generate_report(str(tmp_path / "r.md"))
+    exported = {str(ds.SOPInstanceUID): str(ds.PatientID)
+                for ds in (pydicom.dcmread(str(f))
+                           for f in (tmp_path / "out").rglob("*.dcm"))}
+    assert "PA" not in exported.values(), exported
+    if shape != "check-burned-in":
+        assert exported == {study_uid("5905") + ".1.1": "", sop_b: ""}, exported
+    content = (tmp_path / "r.md").read_text(encoding="utf-8")
+    assert "**REVIEW_REQUIRED**" in content
+    assert "**PASS**" not in content
+
+
+@pytest.mark.parametrize("state", ["audited", "patient-pass", "stale", "reopened",
+                                   "reopened-patient-only"])
+def test_a_recorded_scan_status_refuses_the_re_key(tmp_path, state):
+    """The gate's status read, in each state it must hold (F5-1's ruling):
+
+    - `audited`: `audit()` recorded IDENTIFIED;
+    - `patient-pass`: a pass handed only the name finding, which shifted
+      nothing and left the patient REMEDIATED -- until F5-1 this state
+      re-keyed (the gate read no status: "a pass that shifted nothing
+      still lets the real ID re-key");
+    - `stale`: every bearer edited since the scan, so each `phi_status`
+      reads UNSCANNED; the scan still ran under the key, and the raw
+      record is what the gate reads;
+    - `reopened`: the audit saved and the store reopened; the status is
+      stored and hydrated;
+    - `reopened-patient-only`: the studies and instances edited before
+      the save, so each is stored UNSCANNED and only the patient's status
+      survives the reopen.
+
+    Each refuses the re-key: b links under the ID-less patient with one
+    WARNING row. Kills MG6 (the read dropped) and, `stale`, MG7 (the
+    revision-checked `phi_status` read instead of the record) and,
+    `reopened-patient-only`, MG8 (the patient's status not read)."""
+    _study_with_and_without_an_id(tmp_path, "5871")
+    sop_b = study_uid("5871") + ".1.2"
+    session = Session(str(tmp_path / "s.db"))
+    try:
+        session.ingest(str(tmp_path / "in1"))
+        report = session.audit()
+        [patient] = session.store.patients
+        if state == "patient-pass":
+            session.anonymize([f for f in report.findings
+                               if f.entity_type == "Patient" and f.tag == "0010,0010"])
+            assert patient.phi_status is PhiStatus.REMEDIATED
+            assert not patient.studies[0].date_shifted
+        elif state == "stale":
+            bearers = [patient, *patient.studies,
+                       *(i for st in patient.studies for se in st.series
+                         for i in se.instances)]
+            for entity in bearers:
+                entity.mark_modified()
+            assert {e.phi_status for e in bearers} == {PhiStatus.UNSCANNED}
+        elif state.startswith("reopened"):
+            if state == "reopened-patient-only":
+                for entity in (*patient.studies,
+                               *(i for st in patient.studies for se in st.series
+                                 for i in se.instances)):
+                    entity.mark_modified()
+            session.save(sync=True)
+            session.close()
+            session = Session(str(tmp_path / "s.db"))
+            if state == "reopened-patient-only":
+                [patient] = session.store.patients
+                below = [*patient.studies,
+                         *(i for st in patient.studies for se in st.series
+                           for i in se.instances)]
+                assert {e._phi_status for e in below} <= {None, PhiStatus.UNSCANNED}
+                assert patient._phi_status is PhiStatus.IDENTIFIED
+        session.ingest(str(tmp_path / "in2"))
+        [patient] = session.store.patients
+        assert is_synthetic_patient_id(patient.patient_id)
+        linked = [d for uid, d in _audit_rows(session, "WARNING") if uid == sop_b]
+        assert len(linked) == 1, linked
+    finally:
+        session.close()
+
+
+def test_an_id_less_patient_never_scanned_is_still_re_keyed(tmp_path):
+    """The other side of the status read: with no scan recorded, no shift
+    and no lock, nothing has been derived under the key, so a real ID
+    re-keys the patient and no WARNING row is written."""
+    _study_with_and_without_an_id(tmp_path, "5872")
+    with Session(str(tmp_path / "s.db")) as session:
+        session.ingest(str(tmp_path / "in1"))
         session.ingest(str(tmp_path / "in2"))
         assert [p.patient_id for p in session.store.patients] == ["PA"]
         linked = [d for uid, d in _audit_rows(session, "WARNING")
-                  if uid == study_uid("5871") + ".1.2"]
+                  if uid == study_uid("5872") + ".1.2"]
     assert linked == [], linked
 
 
-@pytest.mark.parametrize("mode", ["lock-only", "lock-then-patient-pass", "lock-then-reopen"])
+@pytest.mark.parametrize("mode", ["lock-only", "lock-by-id", "lock-then-patient-pass",
+                                  "lock-then-reopen"])
 def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
     """Review round 2, R2-1. `lock_identities()` stashes an ID-less
     patient's Patient ID as `''` (the ID the export writes). If a real-ID
@@ -427,7 +544,13 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
     keeps its own `PA` rather than the token's blank ID (MR2: the guard
     dropped). c, also token-less, whose copy is absent, still takes the
     token's group 0010 as before: its name, and an empty ID (MR3: the
-    guard applied whatever the copy holds)."""
+    guard applied whatever the copy holds).
+
+    Since F5-1 a recorded scan status refuses the re-key too, so after
+    `audit()` the token is not the only evidence. `lock-by-id` locks by
+    Patient ID with no audit, which records no status (measured): the
+    token is all the gate has, and `lock-then-reopen` does the same
+    across a reopen, so MT1 stays killable."""
     _id_less(tmp_path / "in1" / "a.dcm", "5895", "Alpha^One", "absent")
     _with_id(tmp_path / "in2" / "b.dcm", "PA", "5895", ".1.2", "Alpha^One")
     c = tmp_path / "in2" / "c.dcm"
@@ -441,8 +564,13 @@ def test_a_locked_identity_refuses_the_re_key(tmp_path, mode):
     try:
         session.ingest(str(tmp_path / "in1"))
         session.enable_reversible_anonymization(str(tmp_path / "k.key"))
-        report = session.audit()
-        session.lock_identities(report)
+        if mode in ("lock-by-id", "lock-then-reopen"):
+            [patient] = session.store.patients
+            session.lock_identities([patient.patient_id])
+            assert patient._phi_status is None
+        else:
+            report = session.audit()
+            session.lock_identities(report)
         if mode == "lock-then-patient-pass":
             session.anonymize([f for f in report.findings
                                if f.entity_type == "Patient"])
@@ -602,69 +730,6 @@ def test_a_restore_keeps_an_id_less_patients_key_whatever_a_later_token_holds(
 
 
 
-def _rekey_between_audit_and_pass(tmp_path, suffix):
-    """An ID-less file a, audited under the floor policy P; then a `PA`
-    file b of its study, which re-keys the patient to `PA` (nothing is
-    derived under the key yet); then `anonymize()` of that report. The
-    re-key is an edit between the scan and the pass: the patient's current
-    ID was never scanned under P. Returns the patient, its status after
-    the audit, the session and the study UID; the caller closes the
-    session."""
-    _id_less(tmp_path / "in1" / "a.dcm", suffix, "Alpha^One", "absent")
-    _with_id(tmp_path / "in2" / "b.dcm", "PA", suffix, ".1.2", "Alpha^One")
-    session = Session(str(tmp_path / "s.db"))
-    session.ingest(str(tmp_path / "in1"))
-    report = session.audit()
-    [patient] = session.store.patients
-    audited = patient._phi_status_record()
-    session.ingest(str(tmp_path / "in2"))
-    [patient] = session.store.patients
-    assert patient.patient_id == "PA"
-    session.anonymize(report)
-    return patient, audited, session
-
-
-@pytest.mark.xfail(strict=True, reason="#752")
-def test_a_re_key_between_audit_and_pass_is_not_remediated_under_the_scans_policy(
-        tmp_path):
-    """The rebase check against #750 (L7): a status recorded under a policy
-    says the entity was scanned under it. The re-key gives the patient an
-    ID the scan never read, and the pass then records it REMEDIATED under
-    P -- measured on e75230a2 -- and the export writes `PA` in the clear,
-    so the status vouches for a value no scan saw. That is #752's class
-    (an edit between `audit()` and `anonymize()` stamped REMEDIATED), and
-    the re-key is a second door into it (coordinator ruling: xfail on
-    #752, not a fix here). The honest outcome, asserted: the patient is
-    not REMEDIATED under P."""
-    patient, audited, session = _rekey_between_audit_and_pass(tmp_path, "5902")
-    try:
-        status, policy = audited
-        assert status is PhiStatus.IDENTIFIED and policy is not None
-        assert patient._phi_status_record() != (PhiStatus.REMEDIATED, policy)
-    finally:
-        session.close()
-
-
-def test_a_re_key_between_audit_and_pass_does_not_grade_pass(tmp_path):
-    """The fail-closed half of the case above, which holds today and is
-    pinned apart from the xfail: the pass declines the dates, since the
-    offset's seed is no longer the patient's ID, writes a
-    REMEDIATION_DECLINED row for the study's and the instance's Study
-    Date, and the run grades REVIEW_REQUIRED, never PASS."""
-    patient, _audited, session = _rekey_between_audit_and_pass(tmp_path, "5903")
-    try:
-        declined = sorted(uid for uid, d in _audit_rows(session, "REMEDIATION_DECLINED")
-                          if "offset is seeded on" in d)
-        assert declined == sorted([study_uid("5903"), study_uid("5903") + ".1.1"]), declined
-        session.export(str(tmp_path / "out"), use_compression=False)
-        session.generate_report(str(tmp_path / "r.md"))
-        content = (tmp_path / "r.md").read_text(encoding="utf-8")
-    finally:
-        session.close()
-    assert "**REVIEW_REQUIRED**" in content
-    assert "**PASS**" not in content
-
-
 #: The floor, plus SHIFT on Series, Acquisition and Content Date: dates an
 #: instance owns, so a pass can shift them while the instance's status says
 #: nothing about it (review of this PR, finding 1).
@@ -689,7 +754,8 @@ def _nest_the_content_date(path):
     ds.save_as(str(path))
 
 
-@pytest.mark.parametrize("shape", ["dates-only", "edited", "reopened", "nested"])
+@pytest.mark.parametrize("shape", ["dates-only", "edited", "reopened", "nested",
+                                   "nested-reopened", "study-reopened"])
 def test_a_shift_the_status_does_not_show_refuses_the_re_key(tmp_path, shape):
     """Review finding 1. A pass handed only some of an instance's findings
     shifts its dates and leaves it IDENTIFIED (#553); an edit after the
@@ -700,10 +766,22 @@ def test_a_shift_the_status_does_not_show_refuses_the_re_key(tmp_path, shape):
     subject's files export one offset per date, never two. At 3fc566e1
     every shape re-keyed silently and split the subject (-18 / -275
     days). Kills MG1 (the record not read) and, nested, MG2 (the nested
-    items not walked)."""
+    items not walked).
+
+    Since F5-1 a recorded scan status refuses the re-key as well, and
+    every pass that shifts records one, so in one session the shift is
+    never the only evidence. Across a reopen it can be: a status the
+    entity has since left is saved as UNSCANNED (the store holds the
+    status as read), while the shift record is stored with the value. So
+    each `*-reopened` shape leaves every status stale before the save --
+    the patient, its studies and instances edited after the pass -- and
+    the shift record, at the root (`reopened`), in a sequence item
+    (`nested-reopened`) or on the study (`study-reopened`, the Study
+    Date), is all the reopened gate has. Kills MG1, MG2 and MG3 (the
+    study's `date_shifted` not read) with the status read in place."""
     a = tmp_path / "in1" / "a.dcm"
     _id_less(a, "5870", "Alpha^One", "absent")
-    if shape == "nested":
+    if shape.startswith("nested"):
         _nest_the_content_date(a)
     _with_id(tmp_path / "in2" / "b.dcm", "PA", "5870", ".1.2", "Alpha^One")
     source = {k: str(pydicom.dcmread(str(tmp_path / "in2" / "b.dcm")).get(k))
@@ -717,26 +795,39 @@ def test_a_shift_the_status_does_not_show_refuses_the_re_key(tmp_path, shape):
         session.load_config(str(config))
         session.ingest(str(tmp_path / "in1"))
         report = session.audit()
-        handed = [f for f in report.findings if f.entity_type == "Instance"
-                  and f.tag in _INSTANCE_DATES
-                  and bool(f.entity_path) == (shape == "nested")]
+        if shape == "study-reopened":
+            handed = [f for f in report.findings if f.entity_type == "Study"
+                      and f.tag == "0008,0020"]
+        else:
+            handed = [f for f in report.findings if f.entity_type == "Instance"
+                      and f.tag in _INSTANCE_DATES
+                      and bool(f.entity_path) == shape.startswith("nested")]
         assert handed and len(handed) < len(
             [f for f in report.findings if f.entity_type == "Instance"])
         session.anonymize(handed)
         [patient] = session.store.patients
         [inst] = [i for st in patient.studies for se in st.series
                   for i in se.instances]
-        assert not patient.studies[0].date_shifted
+        assert patient.studies[0].date_shifted == (shape == "study-reopened")
         if shape == "edited":
             inst.set_attr("0008,103e", "edited after the pass")
             assert inst.phi_status.name == "UNSCANNED"
-        else:
+        elif shape != "study-reopened":
             assert inst.phi_status.name == "IDENTIFIED"
-        if shape == "reopened":
+        if shape.endswith("reopened"):
+            bearers = [patient, *patient.studies, inst]
+            for entity in bearers:
+                entity.mark_modified()
             session.save(sync=True)
             session.close()
             session = Session(str(tmp_path / "s.db"))
             session.load_config(str(config))
+            [patient] = session.store.patients
+            reopened = [patient, *patient.studies,
+                        *(i for st in patient.studies for se in st.series
+                          for i in se.instances)]
+            # No status survives: the shift record is the only evidence.
+            assert {e._phi_status for e in reopened} <= {None, PhiStatus.UNSCANNED}
         session.ingest(str(tmp_path / "in2"))
         [patient] = session.store.patients
         assert is_synthetic_patient_id(patient.patient_id)

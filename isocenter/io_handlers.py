@@ -188,7 +188,7 @@ from pydicom.values import convert_numbers
 from .entities import (Patient, Study, Series, Instance, Equipment, DicomItem,
                        resolve_item_path, NO_PATIENT_ID_PREFIX,
                        is_synthetic_patient_id, exported_patient_id,
-                       iter_item_tree)
+                       iter_item_tree, PhiStatus)
 from .uids import generated_uid
 from .logger import (describe_exception, describe_exception_without_paths,
                      get_logger)
@@ -4083,36 +4083,60 @@ def _its_key_is_in_use(patient) -> bool:
     """Whether a value has been derived under an ID-less patient's key, so
     re-keying it to a real Patient ID would contradict that value.
 
-    Two things derive from the key, and the gate reads the evidence each
-    leaves, never a status (review of #584, finding 1):
+    Three things derive from the key, and the gate reads the evidence each
+    leaves:
 
+    - **A scan result** (review of #763 at 49037891, F5-1; owner ruling,
+      2026-09-22). `audit()` scans the patient under its key, and the
+      scan raises no Patient ID finding for a synthetic key (#584). Its
+      report is settled against the key: re-keyed to `PA` in between, the
+      patient reaches `anonymize(report)` with an ID no finding covers,
+      and at 49037891 both files exported `PA` in the clear -- and graded
+      PASS when the study carried no Study Date to decline. So any status
+      a scan or a pass recorded on the patient, a study or an instance
+      counts, **read from the record, not through `phi_status`**: an edit
+      since the scan leaves the status reading UNSCANNED, but the scan
+      still ran under the key and its report still names it. A current
+      status is stored and hydrated, so a reopen keeps it; a stale one is
+      stored as UNSCANNED, and then the shift or the token below carries
+      the refusal if there is one. What a store does not hold, it cannot
+      read: an `audit()` never saved (`close()` does not
+      write a status; #644) leaves nothing, and a report carried across
+      that reopen reaches the re-keyed patient -- #752's class, fail-closed
+      by the grade, not this gate's.
     - **A date offset.** A study's `date_shifted` (the arm sets it with
       the Study Date's shift record, remediation.py, and both are stored;
       either would do), or a per-value shift record, `_shifted_dates`, on
-      an instance or any sequence item below it (#513). A status would
-      miss it: a pass handed part of an instance's findings leaves it
-      IDENTIFIED (#553), an edit leaves it UNSCANNED, and a reopen
-      hydrates the record and nothing else.
-    - **An identity token.** `lock_identities()` stashes the Patient ID
+      an instance or any sequence item below it (#513). Every pass that
+      shifts records a status too, so within a session the shift comes
+      with a scan result; across a reopen it may not, because a status
+      the entity has since left is stored as UNSCANNED while the shift
+      record is stored with the value.
+    - **An identity token.** Needed apart from the status:
+      `lock_identities([patient_id])` locks with no scan and records
+      none. `lock_identities()` stashes the Patient ID
       the export writes, `''`, so a restore after a re-key wrote `''` over
       the real ID, and the patient read as a pre-1.0 `''` group (review
       round 2, R2-1). The instance's `_locked_token` stamp is this store's
       own embed (#607), stored and hydrated; a foreign Encrypted
       Attributes Sequence from a source file is not a lock and is not read.
 
-    **No status is read, because none adds a case.** Nothing else derives
-    from the key (the scan never pseudonymizes it, #584), so REMEDIATED
-    with neither -- a name replaced, a tag removed -- gives a re-key
-    nothing to contradict, and refusing it would only lose the real ID.
-    An ID-less patient exists only in a store written since this change,
-    where every shift and every lock is recorded.
+    The cost: an audited ID-less subject whose real ID arrives later
+    stays ID-less, and exports an empty Patient ID; the WARNING row says
+    so. An ID-less patient exists only in a store written since this
+    change, where every scan, shift and lock is recorded.
     """
+    def scanned(entity):
+        return entity._phi_status not in (None, PhiStatus.UNSCANNED)
+
+    if scanned(patient):
+        return True
     for study in patient.studies:
-        if study.date_shifted:
+        if study.date_shifted or scanned(study):
             return True
         for series in study.series:
             for instance in series.instances:
-                if instance._locked_token:
+                if instance._locked_token or scanned(instance):
                     return True
                 for item, _path in iter_item_tree(instance):
                     if item._shifted_dates:
@@ -4132,8 +4156,8 @@ def _link_patient(store, patient_map, study_owner, meta, owner):
       patient is **re-keyed** to the real ID -- or, when a patient with
       that ID exists, its studies move onto it, the move
       `SqliteStore._reparent_studies` persists. Only while nothing has
-      been derived under the ID-less key, no offset and no identity token
-      (`_its_key_is_in_use`): otherwise re-keying would contradict it, so
+      been derived under the ID-less key -- no scan result, no offset and
+      no identity token (`_its_key_is_in_use`): otherwise re-keying would contradict it, so
       the file links under the ID-less patient and the caller writes a
       `WARNING` row. **Neither branch creates an empty patient.** (Two
       patients sharing a real Study UID still can: #745, not this.)
