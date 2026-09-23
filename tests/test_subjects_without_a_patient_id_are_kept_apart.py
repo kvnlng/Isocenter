@@ -22,6 +22,7 @@ ruling Q4, 2026-09-21).
 """
 import datetime
 import logging
+import sqlite3
 
 import pydicom
 import pytest
@@ -458,6 +459,19 @@ def test_an_audited_id_less_patient_is_not_re_keyed(tmp_path, shape):
     assert "**PASS**" not in content
 
 
+def _as_written_before_767(db):
+    """The store as a build before #767's `phi_status_edited` wrote it: a
+    status an edit left stale saved as `unscanned` and nothing more. Since
+    #767 the store keeps the stale status and the gate reads it after a
+    reopen too, so the tests below that are about the gate's *other*
+    evidence -- a shift record, one level's status -- build the one store
+    where that evidence stands alone: an older one, reopened by this
+    build."""
+    with sqlite3.connect(db) as conn:
+        for table in ("patients", "studies", "instances"):
+            conn.execute(f"UPDATE {table} SET phi_status_edited = NULL")
+
+
 @pytest.mark.parametrize("state", ["audited", "patient-pass", "stale", "reopened",
                                    "reopened-patient-only", "reopened-study-only",
                                    "reopened-instance-only"])
@@ -475,8 +489,10 @@ def test_a_recorded_scan_status_refuses_the_re_key(tmp_path, state):
     - `reopened`: the audit saved and the store reopened; the status is
       stored and hydrated;
     - `reopened-patient-only`: the studies and instances edited before
-      the save, so each is stored UNSCANNED and only the patient's status
-      survives the reopen;
+      the save, in a store written before #767 (which stored each as
+      UNSCANNED), so only the patient's status survives the reopen --
+      since #767 the stale ones survive too, and
+      `test_an_edit_after_the_scan_survives_a_reopen.py` pins that;
     - `reopened-study-only` / `reopened-instance-only`: likewise, only
       the study's, or only the instance's, status survives (review round
       6: a patient-level edit after the scan, then a save).
@@ -518,6 +534,7 @@ def test_a_recorded_scan_status_refuses_the_re_key(tmp_path, state):
                             entity.mark_modified()
             session.save(sync=True)
             session.close()
+            _as_written_before_767(str(tmp_path / "s.db"))
             session = Session(str(tmp_path / "s.db"))
             if kept:
                 [patient] = session.store.patients
@@ -858,9 +875,10 @@ def test_a_shift_the_status_does_not_show_refuses_the_re_key(tmp_path, shape):
 
     Since F5-1 a recorded scan status refuses the re-key as well, and
     every pass that shifts records one, so in one session the shift is
-    never the only evidence. Across a reopen it can be: a status the
-    entity has since left is saved as UNSCANNED (the store holds the
-    status as read), while the shift record is stored with the value. So
+    never the only evidence. Across a reopen of a store written before
+    #767 it can be: such a store saved a status the entity had since left
+    as UNSCANNED, while the shift record is stored with the value (since
+    #767 the store keeps the stale status, which refuses by itself). So
     each `*-reopened` shape leaves every status stale before the save --
     the patient, its studies and instances edited after the pass -- and
     the shift record, at the root (`reopened`), in a sequence item
@@ -908,6 +926,7 @@ def test_a_shift_the_status_does_not_show_refuses_the_re_key(tmp_path, shape):
                 entity.mark_modified()
             session.save(sync=True)
             session.close()
+            _as_written_before_767(str(tmp_path / "s.db"))
             session = Session(str(tmp_path / "s.db"))
             session.load_config(str(config))
             [patient] = session.store.patients

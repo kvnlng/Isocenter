@@ -60,8 +60,9 @@ _UPSERT_INSTANCE_SQL = """
     INSERT INTO instances (series_id_fk, sop_instance_uid, sop_class_uid, instance_number, file_path,
                            source_path,
                            pixel_offset, pixel_length, pixel_hash, compress_alg, attributes_json,
-                           phi_status, shift_provenance, phi_policy, phi_policy_base)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           phi_status, shift_provenance, phi_policy, phi_policy_base,
+                           phi_status_edited)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(sop_instance_uid) DO UPDATE SET
         series_id_fk=excluded.series_id_fk,
         sop_class_uid=excluded.sop_class_uid,
@@ -82,6 +83,10 @@ _UPSERT_INSTANCE_SQL = """
         -- and a guard would keep the old policy beside it.
         phi_policy=excluded.phi_policy,
         phi_policy_base=excluded.phi_policy_base,
+        -- The status an edit left stale (#767), plainly: a status a scan
+        -- has since read again writes NULL here, and a guard would keep
+        -- the stale claim beside the fresh one.
+        phi_status_edited=excluded.phi_status_edited,
         pixel_offset=COALESCE(excluded.pixel_offset, instances.pixel_offset),
         pixel_length=COALESCE(excluded.pixel_length, instances.pixel_length),
         pixel_hash=COALESCE(excluded.pixel_hash, instances.pixel_hash),
@@ -102,19 +107,51 @@ def _phi_status_from_stored(value) -> PhiStatus:
         return PhiStatus.UNSCANNED
 
 
-def _status_columns(entity):
-    """`(phi_status, phi_policy, phi_policy_base)` for an entity's row.
+def _stale_status_from_stored(value) -> Optional[PhiStatus]:
+    """The status a row's `phi_status_edited` says an edit left stale, or
+    None: NULL (not stale, or written before the column), and any value
+    this version does not recognise or that claims nothing (UNSCANNED)."""
+    try:
+        status = PhiStatus(value)
+    except ValueError:
+        return None
+    return None if status is PhiStatus.UNSCANNED else status
 
-    From one read of the pair (`TrackedEntity._phi_status_record`), so a
-    save racing an audit writes a status with its own policy or neither
-    changed, never one status beside another's policy (#555). An
-    UNSCANNED status, and a status recorded before policies were, write
-    NULL for both policy columns.
+
+def _status_columns(entity):
+    """`(phi_status, phi_policy, phi_policy_base, phi_status_edited)` for
+    an entity's row.
+
+    From one read of the record, in `_phi_status_record`'s order (the
+    recorded revision first, the current one last), so a save racing an
+    audit writes a status with its own policy or neither changed, never
+    one status beside another's policy (#555). An UNSCANNED status, and a
+    status recorded before policies were, write NULL for both policy
+    columns.
+
+    **A stale status** -- recorded, then left behind by an edit no scan has
+    read -- writes `phi_status = 'unscanned'`, as it always did, and the
+    status the edit left behind in `phi_status_edited` (#767, review of
+    #774 finding 1, owner ruling). Before, the row said only UNSCANNED,
+    hydration recorded that at the current revision, and a save and a
+    reopen turned "scanned, then edited" into "never scanned": condition 8
+    went quiet and the run graded PASS with the edited value exported.
+    `phi_status` keeps saying UNSCANNED so that a build from before this
+    column, which does not read it, reads what it always read -- never the
+    stale status as a current one, which would grade PASS and let the
+    export write `(0012,0062) YES` over a value no scan read.
     """
-    status, policy = entity._phi_status_record()
+    recorded_at = entity._phi_status_revision
+    status = entity._phi_status
+    policy = entity._phi_status_policy
+    current = entity._revision
+    if status is None or status is PhiStatus.UNSCANNED:
+        return PhiStatus.UNSCANNED.value, None, None, None
+    if recorded_at != current:
+        return PhiStatus.UNSCANNED.value, None, None, status.value
     if policy is None:
-        return status.value, None, None
-    return status.value, policy.fingerprint, policy.base
+        return status.value, None, None, None
+    return status.value, policy.fingerprint, policy.base, None
 
 
 def _in_clause(values):
@@ -667,6 +704,7 @@ class SqliteStore:
         phi_status TEXT,
         phi_policy TEXT,      -- #555: 'v1:' + sha256 hex; NULL = none known
         phi_policy_base TEXT, -- #555: the policy's readable base
+        phi_status_edited TEXT, -- #767: the status an edit left stale; NULL = none
         -- 'keyed-hmac-v1' or 'unkeyed-sha256'; fixed once per patient,
         -- NULL only in a row a release before 0.9.7 wrote
         jitter_scheme TEXT,
@@ -692,6 +730,7 @@ class SqliteStore:
         phi_status TEXT,
         phi_policy TEXT,      -- #555: 'v1:' + sha256 hex; NULL = none known
         phi_policy_base TEXT, -- #555: the policy's readable base
+        phi_status_edited TEXT, -- #767: the status an edit left stale; NULL = none
         FOREIGN KEY(patient_id_fk) REFERENCES patients(id),
         UNIQUE(study_instance_uid)
     );
@@ -731,6 +770,9 @@ class SqliteStore:
         -- before 1.0, whose policy nothing recorded.
         phi_policy TEXT,
         phi_policy_base TEXT,
+        -- The status an edit left stale (#767): `phi_status` says
+        -- 'unscanned' beside it, as a build before this column reads it.
+        phi_status_edited TEXT,
         FOREIGN KEY(series_id_fk) REFERENCES series(id),
         UNIQUE(sop_instance_uid)
     );
@@ -1176,6 +1218,13 @@ class SqliteStore:
                 if column not in columns:
                     conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+            # The status an edit left stale (#767). NULL for every row
+            # written before it -- which recorded a stale status as
+            # UNSCANNED and so cannot say which were stale -- and for any
+            # entity not stale; no back-fill, for `phi_policy`'s reason.
+            if "phi_status_edited" not in columns:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN phi_status_edited TEXT")
 
         # `loss_scope` on audit_log (#146). A DATA_LOSS row written
         # before this column existed reads NULL, and NULL is ungraded:
@@ -2471,6 +2520,13 @@ class SqliteStore:
         refuses. Policies are interned per load, so ten thousand instances
         scanned under one policy share one object.
 
+        A row whose status an edit left stale (`phi_status_edited`, #767)
+        is restored as it was in memory: the status recorded, then the
+        revision moved past it, so it reads UNSCANNED and grade condition 8
+        counts it until `audit()` reads it. Both steps run before the load's
+        `mark_subtree_persisted()`, so the entity reads clean. It carries no
+        policy and is not counted as a status without one.
+
         Returns:
             int: How many statuses carry no policy (UNSCANNED aside).
         """
@@ -2481,7 +2537,16 @@ class SqliteStore:
             fingerprint = row['phi_policy']
             policy = None
             if status is PhiStatus.UNSCANNED:
-                pass
+                # A status an edit left stale (#767): restored as recorded
+                # and then left behind, so the entity reads UNSCANNED and
+                # condition 8 still counts it -- it grades until `audit()`
+                # reads it, as it did before the save. No policy: a stale
+                # status reads none (#555), and none was stored.
+                edited = _stale_status_from_stored(row['phi_status_edited'])
+                if edited is not None:
+                    entity.record_phi_status(edited, policy=None)
+                    entity.mark_modified()
+                    continue
             elif isinstance(fingerprint, str) and fingerprint:
                 base = row['phi_policy_base']
                 key = (fingerprint, base)
@@ -3984,13 +4049,14 @@ class SqliteStore:
             cur.execute("""
                 INSERT INTO patients (patient_id, patient_name, phi_status,
                                       phi_policy, phi_policy_base,
-                                      jitter_scheme)
-                VALUES (?, ?, ?, ?, ?, ?)
+                                      phi_status_edited, jitter_scheme)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(patient_id) DO UPDATE SET
                     patient_name=excluded.patient_name,
                     phi_status=excluded.phi_status,
                     phi_policy=excluded.phi_policy,
                     phi_policy_base=excluded.phi_policy_base,
+                    phi_status_edited=excluded.phi_status_edited,
                     jitter_scheme=COALESCE(patients.jitter_scheme,
                                            excluded.jitter_scheme)
             """, (patient.patient_id, patient.patient_name,
@@ -4013,8 +4079,9 @@ class SqliteStore:
             cur.execute("""
                 INSERT INTO studies (patient_id_fk, study_instance_uid, study_date, date_shifted,
                                      shifted_study_date, phi_status,
-                                     phi_policy, phi_policy_base)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                     phi_policy, phi_policy_base,
+                                     phi_status_edited)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(study_instance_uid) DO UPDATE SET
                     study_date=excluded.study_date,
                     date_shifted=excluded.date_shifted,
@@ -4022,7 +4089,8 @@ class SqliteStore:
                     patient_id_fk=excluded.patient_id_fk,
                     phi_status=excluded.phi_status,
                     phi_policy=excluded.phi_policy,
-                    phi_policy_base=excluded.phi_policy_base
+                    phi_policy_base=excluded.phi_policy_base,
+                    phi_status_edited=excluded.phi_status_edited
             """, (patient_pk, study.study_instance_uid,
                   _as_stored_date(study.study_date),
                   1 if study.date_shifted else 0,
@@ -4308,11 +4376,12 @@ class SqliteStore:
                 inst.instance_number, inst.file_path, inst.source_path,
                 frame.offset, frame.length, frame.hash, frame.alg,
                 json.dumps(core, cls=IsocenterJSONEncoder),
-                # The property, not the stored field: an entity edited since
-                # the scan reports UNSCANNED, and that is what belongs in the
-                # row, whose attributes are the edited ones. Its policy
-                # comes from the same read (#555), after `shift_provenance`
-                # as the columns are.
+                # UNSCANNED for an entity edited since the scan, as the
+                # property reads -- the row's attributes are the edited
+                # ones -- with the status the edit left in the last column
+                # (`phi_status_edited`, #767). Its policy comes from the
+                # same read (#555), after `shift_provenance` as the columns
+                # are.
                 status_columns[0],
                 # NULL keeps a legacy instance legacy for its life in the
                 # store; anything this version created or ingested says
