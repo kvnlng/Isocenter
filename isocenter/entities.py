@@ -2998,6 +2998,11 @@ def exported_patient_id(patient) -> str:
     the way out: the stamp, the folder name, the WFDB record name and the
     instance copies all go through it, so the synthetic key, and the source
     Study Instance UID inside it, never reach an exported file or path.
+
+    A third-party exporter (`exporters.register`) calls this too, and never
+    writes `patient.patient_id`: the built-ins' write path, which applies
+    this rule for them, does not run for a plugin (#527). Documented but
+    internal (tier 2), like the registry it serves.
     """
     pid = patient.patient_id
     return "" if is_synthetic_patient_id(pid) else pid

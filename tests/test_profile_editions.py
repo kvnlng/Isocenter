@@ -49,8 +49,17 @@ PINNED_DIGESTS = {
     "basic@2026c": "113e1151d676310a4c577690ddf6701c993473426d9db348625a28a664fbc6e2",
     "floor": "60d328ee0fb22c9602bb1dc7ad7d8b3d0fb1a1760c7835031e9fefcfc446108a",
 }
-#: Filled at the v1.0.0 cut by L14 (#26): a copy of `PINNED_DIGESTS`.
-FROZEN_AT_1_0 = {}
+#: The rules 1.0 ships under each pinned name: `PINNED_DIGESTS` as it
+#: stood when L14 (#26, #527) filled this on `main`, before RELEASING.md's
+#: "Cutting a release" step 1. Written out as literals, never as
+#: `dict(PINNED_DIGESTS)`: a copy expression tracks every later edit and
+#: pins nothing. Until the v1.0.0 tag, a change to `basic@2026c` or the
+#: floor updates **both** dicts in the same PR, and its review checks that
+#: it did; after the tag this one never changes.
+FROZEN_AT_1_0 = {
+    "basic@2026c": "113e1151d676310a4c577690ddf6701c993473426d9db348625a28a664fbc6e2",
+    "floor": "60d328ee0fb22c9602bb1dc7ad7d8b3d0fb1a1760c7835031e9fefcfc446108a",
+}
 
 #: The one sentence both digest tests end on (owner ruling Q3, 2026-09-21).
 _WHAT_MAY_CHANGE = (
@@ -149,15 +158,14 @@ def test_a_1x_release_carries_the_rules_1_0_froze():
     """Below 1.0 this skips, so it skips on `main` and at RELEASING.md's
     "Cutting a release" step 1, where the version still reads 0.9.x. It
     first runs at step 3's release commit, which bumps the version to
-    `1.0.0rc1`: L14 (#26) forgetting to copy `PINNED_DIGESTS` into
-    `FROZEN_AT_1_0` is red there, and so is any later change to a pinned
-    name's rules. L14 fills it on `main` before step 1, so step 3 is not
-    where it is found; a change between `1.0.0rc1` and the v1.0.0 tag, when
-    the pin freezes, updates both tables."""
+    `1.0.0rc1`, and is red there for any change to a pinned name's rules
+    since L14 (#26) copied `PINNED_DIGESTS` into `FROZEN_AT_1_0` on `main`.
+    A change between that copy and the v1.0.0 tag, when the pin freezes,
+    updates both tables in the same PR."""
     major = int(isocenter.__version__.split(".")[0])
     if major < 1:
         pytest.skip(f"isocenter {isocenter.__version__} is before 1.0; "
-                    f"FROZEN_AT_1_0 is filled at the v1.0.0 cut (L14, #26)")
+                    f"FROZEN_AT_1_0 is first checked at 1.0.0rc1 (L14, #26)")
     assert FROZEN_AT_1_0, (
         "FROZEN_AT_1_0 is empty in a 1.x: copy PINNED_DIGESTS into it at the "
         "v1.0.0 cut (#26)")

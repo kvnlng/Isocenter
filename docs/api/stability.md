@@ -471,7 +471,7 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   `analyze_temporal_stability`, `inspect_clusters`.
 - **`DicomExporter.write_tree()`** (the serializer alone) and the
   exporter registry `Exporter`, `register()`, `get_exporter()`,
-  `available_formats()`.
+  `available_formats()`, which is provisional (below).
 - **`RedactionService.apply_redaction_to_array`** (static).
 - **`Builder`'s fluent chain beyond `start_patient()`.**
 - **`ComplianceReport`'s fields** and the report's section layout and
@@ -483,6 +483,28 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
   "`anonymize()` ran", and it says nothing about burned-in pixel text.
 - **The `.pass.lock` / `.lock` file names**, the sidecar's `_pixels.bin`
   suffix, the audit table's columns, the schema's table names.
+
+### The exporter registry: provisional until 1.1
+
+`Exporter`, `register()`, `get_exporter()` and `available_formats()` are
+**provisional**. A real plugin API is planned for 1.1, and 1.1 may
+replace these four names rather than extend them; the change will be a
+CHANGELOG entry naming both spellings, as for anything in this section.
+A plugin written against 1.0 should pin `isocenter>=1.0,<1.1`.
+`entities.exported_patient_id()`, which the
+[exporter registry](exporters.md) page tells plugin authors to call, is
+documented but internal on the same terms.
+
+Every export gate lives inside the two built-in formats, so a
+third-party exporter receives the graph with none of them applied. Each
+of its runs writes one `WARNING` audit row, and **in 1.0 no third-party
+export grades `PASS`**. [Exporter registry](exporters.md) lists what
+does not run for it and the rules for its author; running the gates
+above dispatch is [#783](https://github.com/kvnlng/Isocenter/issues/783).
+
+There is no read-side seam: ingest reads through pydicom and the
+library's own codec dispatch, and a reader or codec plugin point is 1.1
+or later.
 
 ## Private
 
