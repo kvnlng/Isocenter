@@ -112,8 +112,12 @@ images are labelled. An `RGB` image is encoded with JPEG 2000's reversible
 colour transform and declared `YBR_RCT`, as the standard requires; a YBR
 source that decodes to RGB is already stored as `RGB`. 32- and 64-bit
 images cannot be compressed and fail export with a message naming
-`use_compression=False`. If a recipient's reader cannot handle JPEG 2000,
-export with `use_compression=False`.
+`use_compression=False`. A 16-bit colour image is compressed too, and
+pydicom cannot read it with Pillow alone. With `pylibjpeg-openjpeg`
+installed, pydicom reads it exactly. The export names each such
+instance at INFO ([#670](https://github.com/kvnlng/Isocenter/issues/670)).
+If a recipient's reader cannot handle JPEG 2000, export with
+`use_compression=False`.
 
 **The export writes two transfer syntaxes and no others**
 ([#526](https://github.com/kvnlng/Isocenter/issues/526)): Implicit VR
