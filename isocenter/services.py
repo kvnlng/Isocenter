@@ -23,15 +23,6 @@ from .logger import describe_exception, get_logger
 from .parallel import progress_bar
 
 
-# Define standard codes for the Sequence
-CODE_BASIC_PROFILE = {"0008,0100": "113100", "0008,0102": "DCM",
-                      "0008,0104": "Basic Application Confidentiality Profile"}
-CODE_CLEAN_PIXEL = {
-    "0008,0100": "113101",
-    "0008,0102": "DCM",
-    "0008,0104": "Clean Pixel Data Option"}
-
-
 class MachinePixelIndex:
     """
     Inverted index allowing O(1) retrieval of Instances by Device Serial Number.

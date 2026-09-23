@@ -105,8 +105,8 @@ paragraph is the answer, and the reason not to re-file #284.
 The wording is conditional because the probe's sample is not stable, and
 this is worth knowing before reading any of its reports. It picks
 mutation sites by INDEX -- `step = max(1, total // budget)` at
-scripts/mutation_probe.py line 1717 and `for i in range(0, total, step):`
-at scripts/mutation_probe.py line 1720 -- so removing a site anywhere in this file
+scripts/mutation_probe.py line 1715 and `for i in range(0, total, step):`
+at scripts/mutation_probe.py line 1718 -- so removing a site anywhere in this file
 renumbers every site after it and silently changes which lines get
 sampled. Measured on this very change: at `b223f6a` the module had 380
 sites and the sample selected all five of the lines above, which is why
@@ -5801,6 +5801,67 @@ def _compresses(compression) -> bool:
     raise ValueError(_COMPRESSION_REFUSAL.format(compression))
 
 
+@dataclass(frozen=True)
+class DeidMarkers:
+    """What `session.export()` stamps on one instance's file to say how it
+    was de-identified (#554), decided in the parent and carried here.
+
+    Decided in the parent because the worker cannot: the statuses and
+    policies it rests on are not on the lightweight copy a process worker
+    receives. Each field is independent, and None means "do not stamp
+    this element" -- the configuration names it with a rule (the user
+    decides it), or, for the temporal one, the file's dates do not
+    determine it. A whole `DeidMarkers` exists only for an instance whose
+    patient, study and self read REMEDIATED or CLEARED under one policy
+    the export accepts (`Session._deid_marker_policy`); otherwise the
+    context carries None and the worker writes nothing.
+
+    Attributes:
+        identity_removed: Write Patient Identity Removed `(0012,0062)`
+            `YES`, replacing a source `NO`.
+        method_value: Append this value to De-identification Method
+            `(0012,0063)`, after the source's, unless it is already last.
+        temporal: Longitudinal Temporal Information Modified `(0028,0303)`,
+            `REMOVED` or `MODIFIED`, replacing the source's.
+    """
+    identity_removed: bool = False
+    method_value: Optional[str] = None
+    temporal: Optional[str] = None
+
+
+def _write_deid_markers(ds, markers: Optional[DeidMarkers]) -> None:
+    """Stamp `markers` onto the dataset being written (#554).
+
+    After every merge, the owner stamps included, so what is stamped is
+    what the file says last, and so a source's values are already in `ds`
+    to be kept. `write_tree()` never reaches this: its contexts carry None
+    (it is the serializer without the pipeline).
+
+    Another tool's De-identification Method values are kept, in order,
+    duplicates and all: they are its history. This step's value is
+    appended unless the last value already is it, which makes re-exporting
+    a re-ingested export under the same policy and release idempotent; a
+    different policy or release appends, which is PS3.3's "successive
+    de-identification steps".
+    """
+    if markers is None:
+        return
+    if markers.identity_removed:
+        ds.add_new(0x00120062, "CS", "YES")
+    if markers.method_value:
+        held = ds.get(0x00120063)
+        values = []
+        if held is not None and held.value not in (None, ""):
+            raw = held.value
+            values = ([str(v) for v in raw]
+                      if isinstance(raw, (list, tuple, MultiValue)) else [str(raw)])
+        if not values or values[-1] != markers.method_value:
+            values.append(markers.method_value)
+        ds.add_new(0x00120063, "LO", values if len(values) > 1 else values[0])
+    if markers.temporal:
+        ds.add_new(0x00280303, "CS", markers.temporal)
+
+
 @dataclass
 class ExportContext:
     """One instance to write, and how. Validates `compression` on
@@ -5835,6 +5896,11 @@ class ExportContext:
     #: (#449). Carried here because the check runs in the worker -- the
     #: file is local to it and the cost parallelizes.
     verify_readback: bool = False
+    #: The de-identification markers to stamp (#554), decided by
+    #: `session.export()`'s plan. None writes none: `write_tree()`'s
+    #: builder never sets it, and neither does the plan for an instance
+    #: whose policy was not applied in full.
+    deid_markers: Optional[DeidMarkers] = None
 
     def __post_init__(self):
         _compresses(self.compression)
@@ -7208,6 +7274,11 @@ def _export_instance_worker(ctx: ExportContext) -> "ExportOutcome":
 
         # 3. Series Level
         DicomExporter._merge(ds, ctx.series_attributes, losses)
+
+        # 4. The de-identification markers (#554), after every merge and
+        # the owner stamps, so they are what the file says last and a
+        # source's values are in `ds` to be kept.
+        _write_deid_markers(ds, ctx.deid_markers)
 
         # Study Time is Type 2 (PS3.3 C.7.2.1): present, and empty when
         # unknown. `IODValidator` refuses it **absent**, so a study with

@@ -117,6 +117,11 @@ def _headers(path):
     return rows
 
 
+#: Patient Identity Removed, De-identification Method, Longitudinal
+#: Temporal Information Modified: what only `export()` writes (#554).
+_DEID_MARKERS = ("(0012,0062)", "(0012,0063)", "(0028,0303)")
+
+
 def test_both_public_export_paths_write_the_same_headers(tmp_path):
     """The two doors agree on what is *in* each file, not only where it
     goes (#570).
@@ -131,6 +136,11 @@ def test_both_public_export_paths_write_the_same_headers(tmp_path):
     literal restored; the equipment block restored (the ingested graph
     gains a zero-length Device Serial Number, the anonymized one the
     serial itself).
+
+    One named exception since #554: after `anonymize()`, `export()`
+    writes the three de-identification markers and `write_tree()` writes
+    none. Before it the two files are the same, since nothing had been
+    remediated for a marker to rest on.
     """
     import numpy as np
     import pydicom
@@ -159,8 +169,19 @@ def test_both_public_export_paths_write_the_same_headers(tmp_path):
                             for p in via_tree.rglob("*.dcm"))
         assert session_files and session_files == tree_files, stage
         for name in session_files:
-            assert _headers(via_session / name) == _headers(
-                via_tree / name), (stage, str(name))
+            session_headers = _headers(via_session / name)
+            tree_headers = _headers(via_tree / name)
+            if stage == "anonymized":
+                # The one named exception (#554): `export()` stamps the
+                # de-identification markers on an instance its pass
+                # remediated in full, and `write_tree()`, the serializer
+                # without the pipeline, never does. Pinned both ways, so
+                # the split is a decision and not a drift.
+                marked = [h for h in session_headers if h[0] in _DEID_MARKERS]
+                assert [h[0] for h in marked] == sorted(_DEID_MARKERS), (stage, marked)
+                assert not [h for h in tree_headers if h[0] in _DEID_MARKERS]
+                session_headers = [h for h in session_headers if h not in marked]
+            assert session_headers == tree_headers, (stage, str(name))
 
     with DicomSession(str(tmp_path / "ingested.db")) as session:
         session.ingest(str(source))

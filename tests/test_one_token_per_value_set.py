@@ -38,6 +38,7 @@ Patient ID or a UID (P6).
 **Why this file imports what it does.** `isocenter.session` is named, so
 its probe row is charged.
 """
+import json
 import logging
 from datetime import date
 
@@ -72,9 +73,10 @@ def tokenless(count, total):
 def old_shared(count, total):
     """The WARNING a restore logs for holders of an unstamped token shared
     across studies, outside the first study carrying it (Q-B b2). It names
-    no release: a store never loads the stamp from a file, so a token this
-    release wrote, exported and re-ingested, reads the same (review of
-    #650, F-2; the marker is #652)."""
+    no release, and since #652 fires only on an **unmarked** token: one
+    written before 1.0, whose plaintext carries no `__isocenter_token__`.
+    A 0.9.8 token, exported and re-ingested, still reads as one (review of
+    #650, F-2); a 1.0 token is exempt in any store."""
     return (f"{count} of {total} instances of this patient carry an identity "
             "token shared across studies that this store did not stamp, which "
             "may hold one study's values, so outside the first study carrying "
@@ -206,10 +208,15 @@ def _pre_098_token(session, instances, record, stamped=False):
     """What a release before this fix left: one token, built from `record`
     (the first instance's), embedded on every instance. `stamped=False` is
     the 0.9.7 shape (no `__locked__`); `stamped=True` is a 0.9.8
-    pre-release's, which stamped the one shared token."""
+    pre-release's, which stamped the one shared token.
+
+    Encrypted here and not through `generate_identity_token`, which since
+    1.0 adds the scheme key (#652): a release before 1.0 wrote the bare
+    record, and a marked token here would turn every pre-0.9.8 test in
+    this file into a test of a token this release wrote."""
     rs = session.reversibility_service
     session._key_for_locking()
-    token = rs.generate_identity_token(record)
+    token = rs.engine.encrypt(json.dumps(record).encode("utf-8"))
     for inst in instances:
         rs.embed_identity_token(inst, token)
         if not stamped:
@@ -937,9 +944,12 @@ def test_an_earlier_releases_export_reingested_one_study_restores_another_studys
     """Residual (iv), pinned as ruled (review of #650, M-1). Only `5842`'s
     exported folder is ingested. The token it carries holds `5841`'s
     `ACC-ONE`, but with one study in the session it is shared across none,
-    and nothing tells it from a token this release wrote for that study
-    (#652 is the marker that could): it is restored in full, `ACC-ONE` on
-    `5842`, and no WARNING fires. e418d3d wrote the same."""
+    and nothing tells an **unmarked** token (one written before 1.0) from
+    one written for that study alone: it is restored in full, `ACC-ONE` on
+    `5842`, and no WARNING fires. e418d3d wrote the same. Since #652 a
+    token 1.0 writes carries its scheme, and the same export of one would
+    be right to restore in full (`test_a_token_says_how_it_was_written.py`,
+    K4); this pins the disclosed half, which stays."""
     folder, key, pseudonym = _a_097_export(tmp_path)
     [study_folder] = [d for d in folder.glob("*/*") if d.name.endswith("5842")]
     with DicomSession(str(tmp_path / "new.db")) as session:

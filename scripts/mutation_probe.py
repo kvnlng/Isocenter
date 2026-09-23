@@ -275,7 +275,7 @@ TARGETS = {
                                      "tests/test_structured_export.py",
                                      "tests/test_suggested_config.py",
                                      "tests/test_zone_validation.py"], 30),
-    "isocenter/configuration.py": (["tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_automation.py",
+    "isocenter/configuration.py": (["tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_automation.py",
                                     "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                     "tests/test_a_replace_rule_writes_its_value.py",
                                     "tests/test_a_rule_that_cannot_be_honoured_is_refused.py",
@@ -322,7 +322,7 @@ TARGETS = {
     # ERROR in its `except`, which re-raises): 47 of 49 became 45 of 45.
     # tests/test_recovery_needs_the_key_it_was_locked_with.py (#615) kills
     # nothing the other five miss: the row without it is also 45 of 45.
-    "isocenter/reversibility.py": (["tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
+    "isocenter/reversibility.py": (["tests/test_a_token_says_how_it_was_written.py", "tests/test_a_token_this_store_did_not_write_is_not_replaced.py",
                                     "tests/test_a_lock_under_the_wrong_key_refuses.py",
                                     "tests/test_recovery_needs_the_key_it_was_locked_with.py",
                                     "tests/test_feature_regression.py",
@@ -395,7 +395,7 @@ TARGETS = {
                               "tests/test_an_empty_report_is_not_a_blind_pass.py",
                               "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                               "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/remediation.py": (["tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_floor_policy.py", "tests/test_the_grade_counts_findings_not_acted_on.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_audit_suppression.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/remediation.py": (["tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_floor_policy.py", "tests/test_the_grade_counts_findings_not_acted_on.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_audit_suppression.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_status_records_the_policy_it_was_scanned_under.py",
                                   "tests/test_anonymize_records_what_it_left.py",
                                   "tests/test_a_partial_findings_list_is_not_remediated.py",
@@ -407,7 +407,6 @@ TARGETS = {
                                   "tests/test_an_unshifted_date_is_raised.py",
                                   "tests/test_declined_date_recurs.py",
                                   "tests/test_declined_remediation_is_recorded.py",
-                                  "tests/test_deid_tags.py",
                                   "tests/test_mutation_gaps.py",
                                   "tests/test_nested_date_shifts_once.py",
                                   "tests/test_patient_level_remediation_reaches_instances.py",
@@ -444,7 +443,7 @@ TARGETS = {
                                   "tests/test_a_report_acts_on_the_live_graph.py",
                                   "tests/test_a_remove_on_an_owner_attribute_already_gone_is_satisfied.py",
                                   "tests/test_a_descriptor_edit_reads_the_same_across_a_save.py"], 30),
-    "isocenter/io_handlers.py": (["tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/io_handlers.py": (["tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                   "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                   "tests/test_a_dead_ingest_worker_costs_the_file_it_was_reading.py",
                                   # Not demanded by the scan (it reaches this module through
@@ -730,7 +729,7 @@ TARGETS = {
     # 85 minutes. Written down because an unexplained tripling of the run
     # time is the kind of thing someone later "fixes" by cutting the
     # budget.
-    "isocenter/session.py": (["tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/session.py": (["tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_a_token_says_how_it_was_written.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_an_unmatched_patient_id_is_counted.py", "tests/test_repeating_group_rules.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_a_saved_config_names_its_profile.py", "tests/test_auto_save_is_opt_in.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                               "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                               "tests/test_a_nested_item_status_survives_a_reopen.py",
                               "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
@@ -1010,7 +1009,7 @@ TARGETS = {
     # survives: no reader, no contract -- equivalent.
     #
     # Cost: ~1.8 h of a default run as an upper bound.
-    "isocenter/entities.py": (["tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_withheld_instances_are_audited.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
+    "isocenter/entities.py": (["tests/test_a_j2k_file_pillow_cannot_read_is_noted.py", "tests/test_an_export_says_how_it_was_de_identified.py", "tests/test_withheld_instances_are_audited.py", "tests/test_uids_are_replaced_by_the_project_secret.py", "tests/test_a_redacted_uid_is_derived_not_drawn.py", "tests/test_ingest_finds_what_anonymize_renamed.py", "tests/test_an_owner_stamped_copy_follows_its_owner.py", "tests/test_every_door_selects_patients_one_way.py", "tests/test_the_d_codes_write_a_dummy.py", "tests/test_a_project_secret_stays_in_its_store.py", "tests/test_a_config_value_means_one_thing.py", "tests/test_one_loader_reads_a_config.py", "tests/test_a_file_backed_instance_reads_as_its_descriptors_declare.py", "tests/test_subjects_without_a_patient_id_are_kept_apart.py", "tests/test_a_missing_study_or_series_uid_is_not_shared.py", "tests/test_an_id_less_subjects_dates_are_shifted.py",
                                "tests/test_a_kept_private_binary_value_keeps_its_vr.py",
                                "tests/test_a_nested_item_status_survives_a_reopen.py",
                                "tests/test_a_pre_1_0_store_keeps_its_statuses_without_a_policy.py",
@@ -1065,7 +1064,6 @@ TARGETS = {
                                "tests/test_dataframe_export.py",
                                "tests/test_declined_date_recurs.py",
                                "tests/test_declined_remediation_is_recorded.py",
-                               "tests/test_deid_tags.py",
                                "tests/test_descriptor_edit_with_pixels_unloaded.py",
                                "tests/test_empty_sequence_roundtrip.py",
                                "tests/test_entities.py",

@@ -8,14 +8,18 @@ import threading
 import datetime
 import multiprocessing
 import concurrent.futures
+import functools
 from collections import Counter
 from typing import (List, Union, Dict, Any, Optional, Set, Tuple,
                     NamedTuple)
 
 import yaml
+from pydicom.datadict import dictionary_VR
+from pydicom.multival import MultiValue
 
-from .io_handlers import (DicomImporter, DicomExporter, ExportContext, ExportError,
-                          ExportSummary, SidecarPixelLoader, SidecarWaveformLoader,
+from .io_handlers import (DicomImporter, DicomExporter, DeidMarkers, ExportContext,
+                          ExportError, ExportSummary, SidecarPixelLoader,
+                          SidecarWaveformLoader,
                           export_folder_names, export_stamp_attributes, GRADED_LOSS_SCOPES,
                           normalize_id_filter, redaction_in_effect, select_patient_ids,
                           unmatched_patient_ids_sentence)
@@ -36,14 +40,16 @@ from .manifest import Manifest, ManifestItem, generate_manifest_file
 from .blob_kind import serialize_blob_kind
 from .persistence import SqliteStore
 from .crypto import KeyManager
-from .reversibility import ReversibilityService, _TokenHoldsNoRecord
+from .reversibility import (ReversibilityService, _TokenHoldsNoRecord,
+                            _TokenOfALaterScheme)
 from .persistence_manager import PersistenceManager
 from .parallel import (run_parallel, _env_int, _resolve_strategy,
                        resolve_max_workers, resolve_worker_initializer,
                        progress_bar)
 from .configuration import (IsocenterConfiguration, FlowList, _policy_base_label,
-                            _scan_policy_for)
-from .entities import (Patient, PhiStatus, SOURCE_SOP_UID_ATTR, clone_sequences,
+                            _scan_policy_for, _deid_method_value)
+from ._version import __version__
+from .entities import (Patient, PhiStatus, ScanPolicy, SOURCE_SOP_UID_ATTR, clone_sequences,
                        resolve_item_path, iter_item_tree,
                        exported_patient_id, is_synthetic_patient_id)
 from .profiles import FLOOR_POLICY
@@ -591,6 +597,109 @@ def _uid_path(patient, study, series, instance) -> Tuple[str, str, str, str]:
     """
     return (patient.patient_id, study.study_instance_uid,
             series.series_instance_uid, instance.sop_instance_uid)
+
+
+#: The elements `export()` stamps to say how a file was de-identified
+#: (#554): Patient Identity Removed, De-identification Method, and
+#: Longitudinal Temporal Information Modified. A rule on any of them, of
+#: any action, KEEP included, means the configuration decides that element
+#: and the export does not stamp it.
+_IDENTITY_REMOVED, _DEID_METHOD, _TEMPORAL_MODIFIED = (
+    "0012,0062", "0012,0063", "0028,0303")
+
+
+@functools.lru_cache(maxsize=None)
+def _standard_date_vr(tag: str) -> Optional[str]:
+    """`"DA"` or `"DT"` for a standard tag whose dictionary VR is one, else
+    None -- including a malformed key, a private (odd-group) tag, and a tag
+    the dictionary does not know. Cached: the plan asks it for every
+    element of every instance, and the answer is a fact about the tag."""
+    try:
+        group, element = (int(part, 16) for part in tag.split(","))
+    except ValueError:
+        return None
+    if group % 2:
+        return None
+    try:
+        vr = dictionary_VR((group << 16) | element)
+    except KeyError:
+        return None
+    return vr if vr in ("DA", "DT") else None
+
+
+def _date_state(value, vr: str, vouched: bool) -> str:
+    """One DA or DT element as `(0028,0303)` reads it (#554, Q3 arm a):
+    `"gone"` -- empty, or every value the VR's dummy (`VR_DUMMY`, #557) --
+    `"shifted"` -- the value a shift this store wrote (`vouched`, asked by
+    the caller of the item that holds it) -- or `"found"`, which is
+    everything else: a date as it was ingested, kept on purpose or not,
+    since nothing here can tell the two apart."""
+    dummy = config_manager.VR_DUMMY[vr]
+    values = (list(value) if isinstance(value, (list, tuple, MultiValue))
+              else [value])
+    if all(v is None or not str(v).strip() or str(v).strip() == dummy
+           for v in values):
+        return "gone"
+    return "shifted" if vouched else "found"
+
+
+def _longitudinal_temporal_marker(study, instance, stamps) -> Optional[str]:
+    """What Longitudinal Temporal Information Modified `(0028,0303)` says
+    about the file `instance` exports as (#554, owner ruling Q3 arm a), or
+    None when its dates do not determine it.
+
+    Every DA and DT element the file will carry is read: the instance's
+    own, with the owner stamps (`stamps`, what `export_stamp_attributes`
+    writes over them) in their place; every nested item's (`iter_item_
+    tree`); and private elements whose recorded VR is DA or DT. TM is not
+    read: a time of day kept beside a shifted date does not carry the
+    patient's longitudinal position (a scope call, stated in the docs).
+
+    - every date gone (or none at all): `REMOVED`;
+    - at least one shifted by this store, the rest gone: `MODIFIED`;
+    - any date as found: None, and a source's value stays. `UNMODIFIED` is
+      never written: "as found" cannot tell "kept on purpose" from
+      "unknown".
+
+    The stamped Study Date `(0008,0020)` is the `Study`'s, so the `Study`
+    vouches for it (`Study.date_shift_vouches_for`, #518), never the
+    instance's copy; a study shifted before 0.9.6 has no record and reads
+    as found. Any other stamped date (none today: `Patient` has no birth
+    date field) is vouched by nothing. An element the worker then drops
+    (a write-time loss, a foreign icon) was still read here, which can
+    only withhold the marker, never write a false one.
+    """
+    shifted = False
+    for item, path in iter_item_tree(instance):
+        attributes = item.attributes
+        if not path:
+            attributes = {**attributes, **stamps}
+        for tag, value in attributes.items():
+            if tag.startswith("_") or "," not in tag:
+                continue
+            vr = _standard_date_vr(tag)
+            if vr is None and _is_private_tag(tag):
+                vr = item.attribute_vrs.get(tag)
+            if vr not in ("DA", "DT"):
+                continue
+            if not path and tag in stamps:
+                vouched = (tag == "0008,0020"
+                           and study.date_shift_vouches_for(study.study_date))
+            else:
+                vouched = item.date_shift_vouches_for(tag, value)
+            state = _date_state(value, vr, vouched)
+            if state == "found":
+                return None
+            shifted = shifted or state == "shifted"
+    return "MODIFIED" if shifted else "REMOVED"
+
+
+def _is_private_tag(tag: str) -> bool:
+    """An odd-group `gggg,eeee` key; False for anything malformed."""
+    try:
+        return int(tag.split(",")[0], 16) % 2 == 1
+    except ValueError:
+        return False
 
 
 def _uids_from_frame(frame) -> Set[str]:
@@ -4207,6 +4316,18 @@ class DicomSession:
             for content, holders in carrying.items():
                 try:
                     values = self.reversibility_service.open_token(content)
+                except _TokenOfALaterScheme:
+                    # It holds a record, so the no-record text below would
+                    # be false; a later release's scheme is not this one's
+                    # to read, and replacing it unread is what the next
+                    # refusal exists to stop (#652).
+                    raise RuntimeError(
+                        "lock_identities: this patient carries an identity "
+                        f"token that the key at {self.key_manager.key_path} "
+                        "opens but that was written by a later release of "
+                        "this library, so what it holds cannot be read here, "
+                        "and this lock would replace it unread; the token "
+                        "this call would have written is unchanged.") from None
                 except _TokenHoldsNoRecord:
                     # The key *opens* this one, so the wrong-key text
                     # below would be false. Refused all the same: what it
@@ -4800,7 +4921,8 @@ class DicomSession:
                 this library (no Fernet token in it) counts as no token,
                 not as the wrong key (#617); the key does not decrypt the
                 token, or the key opens it but it holds no identity record
-                this library writes; or,
+                this library writes, or was written by a later release of
+                this library (#652); or,
                 with `restore=True`, a patient holding the restored
                 Patient ID was de-identified under a different date-offset
                 scheme (raised before anything is restored).
@@ -4851,8 +4973,16 @@ class DicomSession:
         # this patient recoverable under this key". One decrypt per
         # distinct token, in the order found, so a token on study 1 the
         # key cannot open is still the one the message is about.
-        opened = {content: rs.recover_or_raise(holders[0][1])
-                  for content, holders in carrying.items()}
+        #
+        # The scheme each token names comes from **that same decrypt**
+        # (#652): `schemes` is filled beside `opened` and never by a
+        # second read. `open_token_with_scheme(content)` is what
+        # `recover_or_raise(holders[0][1])` read, since `carrying` holds
+        # only `token_of_ours(inst)` of its holders.
+        opened: Dict[bytes, Dict[str, Any]] = {}
+        schemes: Dict[bytes, int] = {}
+        for content in carrying:
+            opened[content], schemes[content] = rs.open_token_with_scheme(content)
         # **What the call returns (#586)**: each instance carrying a token
         # of ours, by the SOP Instance UID it holds now, mapped to a copy
         # of what its own token holds, in graph order. Taken here, before
@@ -4932,11 +5062,18 @@ class DicomSession:
                 # Number, locked by the defaults -- is no study's), and it
                 # is not stamped by this store on every holder. Its first
                 # holding study, in graph order, takes it in full; the
-                # others take its group 0010 only. The WARNING names no
-                # release: a store never loads the stamp from a file, so a
-                # token this release wrote, exported and re-ingested, over
-                # values equal across studies, reads the same (review of
-                # #650, F-2; a marker that could tell is #652).
+                # others take its group 0010 only. **And it names no
+                # scheme (#652)**: every token 1.0 writes carries
+                # `"__isocenter_token__": 2` inside its encryption, which
+                # says it was captured per value-set, so a marked token is
+                # restored in full on every holder in any store -- the
+                # stamp never reaches a file, the scheme travels with the
+                # token. The stamp check stays for unmarked tokens, because
+                # a 0.9.8 pre-release stamped its shared token (residual
+                # i). The WARNING names no release: a token 0.9.8 wrote per
+                # value-set carries no scheme, so exported and re-ingested
+                # over values equal across studies it still reads as one
+                # an earlier release shared (review of #650, F-2).
                 #
                 # **"First in graph order" is the owner only in the store
                 # that locked.** There graph order is the lock's order, so
@@ -4963,7 +5100,8 @@ class DicomSession:
                 partial: Dict[bytes, "Study"] = {}
                 for content, holders in carrying.items():
                     values = opened[content]
-                    if (len({id(st) for st, _ in holders}) > 1
+                    if (schemes[content] < ReversibilityService.TOKEN_SCHEME
+                            and len({id(st) for st, _ in holders}) > 1
                             and any(not tag.startswith("0010,")
                                     and str(val if val is not None else "").strip()
                                     for tag, val in values.items())
@@ -6703,6 +6841,99 @@ class DicomSession:
     _OTHER_POLICY_NOTICE = ("recorded under a policy other than the one "
                             "in force")
 
+    def _accepted_policy_fingerprints(self, in_force) -> Set[str]:
+        """The fingerprints a status may be recorded under and still speak
+        for what `export()` writes: the policy in force (`in_force`, the
+        caller's one read of it) and every policy this session audited
+        under (#555, owner ruling Q2).
+
+        The one answer for both readers -- the #555 notice, which is silent
+        exactly on these, and the #554 markers, which are written exactly
+        on these -- so that no file says YES under a policy the notice
+        would have called another. Fingerprints, never bases: a scaffold
+        and the bare floor are one policy under two labels.
+        """
+        return set(self._scanned_policies) | {in_force.fingerprint}
+
+    @staticmethod
+    def _deid_marker_policy(patient, study, instance, accepted) -> Optional[ScanPolicy]:
+        """The policy an instance's file may say it was de-identified under
+        (#554, owner ruling Q1), or None.
+
+        A policy when the patient, the study and the instance each read
+        REMEDIATED or CLEARED, all three under one fingerprint, and that
+        fingerprint is `accepted` (`_accepted_policy_fingerprints`). The
+        condition is a fact the graph already holds -- the policy named was
+        applied in full and nothing has changed since -- so every way the
+        file can differ from the pass moves a status off it, and no marker
+        is written by that one structural rule:
+
+        - never audited, or edited after the pass (any `set_attr`, #767's
+          owner field, a restore): UNSCANNED by revision;
+        - a finding declined or not handed in (#491, #553), or a Series
+          finding left open (#544's pass-end demotion): IDENTIFIED;
+        - reopened under another policy and not re-audited, or remediated
+          under one policy after an audit under another: a fingerprint
+          outside `accepted`, or three that disagree;
+        - a store written before 1.0: no policy.
+
+        All three are read, because each is written into the file: the
+        instance alone would miss a patient whose name was set back after
+        the pass. Nested items are not: since #561 the instance's status
+        carries their outcome, as the #555 notice reads it. A stand-in
+        that is no `TrackedEntity` records no status, so it gets none.
+
+        Returns the **recorded** policy (the instance's), not the one in
+        force: its base is what the scan ran under.
+        """
+        policies = []
+        for entity in (patient, study, instance):
+            if not isinstance(entity, entities.TrackedEntity):
+                return None
+            # One read of the pair, as the save thread reads it.
+            status, policy = entity._phi_status_record()
+            if status not in (PhiStatus.REMEDIATED, PhiStatus.CLEARED) \
+                    or policy is None:
+                return None
+            policies.append(policy)
+        if len({policy.fingerprint for policy in policies}) != 1 \
+                or policies[-1].fingerprint not in accepted:
+            return None
+        return policies[-1]
+
+    def _deid_markers_planner(self):
+        """`plan(patient, study, instance, stamps) -> Optional[DeidMarkers]`
+        for one export (#554): what each instance's file will say about how
+        it was de-identified. Built once per export, because the policy in
+        force is hashed to read it and the plan visits every instance.
+
+        The configuration's rules are read here, from `phi_tags`, the dict
+        `_scan_policy()` hashes: a rule of any action on a marker tag means
+        the user decides that element and it is not stamped (KEEP over a
+        source `NO` stays `NO`).
+        """
+        accepted = self._accepted_policy_fingerprints(
+            self.configuration._scan_policy())
+        ruled = {str(tag).strip().lower()
+                 for tag in (self.configuration.phi_tags or {})}
+        values: Dict[ScanPolicy, str] = {}
+
+        def plan(patient, study, instance, stamps):
+            policy = self._deid_marker_policy(patient, study, instance, accepted)
+            if policy is None:
+                return None
+            method = None
+            if _DEID_METHOD not in ruled:
+                method = values.get(policy)
+                if method is None:
+                    method = values[policy] = _deid_method_value(policy, __version__)
+            temporal = None
+            if _TEMPORAL_MODIFIED not in ruled:
+                temporal = _longitudinal_temporal_marker(study, instance, stamps)
+            return DeidMarkers(identity_removed=_IDENTITY_REMOVED not in ruled,
+                               method_value=method, temporal=temporal)
+        return plan
+
     def _report_statuses_under_another_policy(self, triples, folder, fmt):
         """One `WARNING` row when an export writes statuses recorded under
         a policy other than the one in force (#555, owner's ruling Q1).
@@ -6735,7 +6966,7 @@ class DicomSession:
             fmt: `"DICOM"` or `"WFDB"`, the lead word of the row.
         """
         in_force = self.configuration._scan_policy()
-        accepted = set(self._scanned_policies) | {in_force.fingerprint}
+        accepted = self._accepted_policy_fingerprints(in_force)
         others = {}
         legacy = written = 0
         for triple in triples:
@@ -6804,6 +7035,10 @@ class DicomSession:
         patient_count = 0
 
         drop_foreign = self._foreign_icon_gate()
+        # Here, in the parent, and never in the graph or the worker (#554):
+        # the statuses it rests on are not on a process worker's copy, and
+        # a stamp in the graph would be a second answer that goes stale.
+        deid_markers = self._deid_markers_planner()
 
         for patient in self.store.patients:
             if patient.patient_id not in target_ids:
@@ -6822,6 +7057,9 @@ class DicomSession:
                     # (#570): `write_tree` gets exactly these.
                     patient_attrs, study_attrs, series_attrs = \
                         export_stamp_attributes(patient, study, series)
+                    # What the worker merges over each instance's own,
+                    # in its order, for the temporal marker's walk.
+                    stamps = {**patient_attrs, **study_attrs, **series_attrs}
                     zones = self._redaction_zones_for(series)
 
                     for instance in series.instances:
@@ -6845,7 +7083,9 @@ class DicomSession:
                                          else None),
                             redaction_zones=zones,
                             drop_foreign_icons=drop_foreign,
-                            verify_readback=options.verify_readback))
+                            verify_readback=options.verify_readback,
+                            deid_markers=deid_markers(patient, study,
+                                                      instance, stamps)))
 
         return tasks, patient_count, withheld
 
