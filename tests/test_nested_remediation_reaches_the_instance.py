@@ -39,7 +39,7 @@ from pydicom.sequence import Sequence
 
 from isocenter.entities import (DicomItem, DicomSequence, Equipment, Instance,
                                 Patient, PhiStatus, Series, Study)
-from isocenter.privacy import PhiFinding, PhiRemediation
+from isocenter.privacy import PhiFinding, PhiRemediation, _replacement_uid_for
 from isocenter.remediation import RemediationService
 from isocenter.session import DicomSession
 
@@ -110,6 +110,20 @@ def _graph(*instances, pid="P1"):
     st.series.append(se)
     p.studies.append(st)
     return p
+
+
+def _series_replaced(patient):
+    """`patient`'s graph with each Series under this store's replacement
+    UID, `FIXED_A` loaded. A Series still holding a source UID under the
+    floor keeps its instances from reading REMEDIATED at the pass end
+    (review of #544, round 2, R2-1) -- and records a status that moves the
+    instance's revision, which would hide the `mark_modified()` the test
+    below pins."""
+    for study in patient.studies:
+        for series in study.series:
+            series.series_instance_uid = _replacement_uid_for(
+                series.series_instance_uid, FIXED_A)
+    return patient
 
 
 def _nested_finding(inst, index, action, tag, new_value=None, original=None,
@@ -231,7 +245,8 @@ def test_a_nested_remediation_on_an_instance_already_remediated_is_saved(
     inst = _instance_with_items("1.2.3.1.0", {STEP: NESTED_PHI})
     db = str(tmp_path / "remediated.db")
     with DicomSession(db) as session:
-        session.store.patients.append(_graph(inst))
+        load_fixed_secret(session, tmp_path, FIXED_A)
+        session.store.patients.append(_series_replaced(_graph(inst)))
         session.save(sync=True)
         _reload_at(inst, PhiStatus.REMEDIATED)
 
@@ -317,7 +332,8 @@ def test_an_owner_is_only_admitted_when_the_path_resolves_to_the_findings_item(
     first = _instance_with_items("1.2.3.1.0", {STEP: NESTED_PHI})
     second = _instance_with_items("1.2.3.1.0", {STEP: NESTED_PHI})
     with DicomSession(str(tmp_path / "twins.db")) as session:
-        session.store.patients.append(_graph(first, second))
+        load_fixed_secret(session, tmp_path, FIXED_A)
+        session.store.patients.append(_series_replaced(_graph(first, second)))
         _reload_at(first, PhiStatus.IDENTIFIED)
         _reload_at(second, PhiStatus.IDENTIFIED)
 
