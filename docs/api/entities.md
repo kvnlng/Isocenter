@@ -2,8 +2,7 @@
 
 The object graph `session.store` holds: `Patient` → `Study` → `Series` →
 `Instance`. This page renders the names of `isocenter.entities` that
-[API stability](stability.md) places in a tier, and no others. Every other
-name in the module is private (tier 3).
+[API stability](stability.md) places in tier 1 or tier 2, and no others.
 
 <!-- The two `members:` lists below are stability.md's classification of
      this module, copied by hand: tier 1 from "Frozen at 1.0", tier 2 from
@@ -60,3 +59,4 @@ names the old spelling and the new one.
         - iter_item_tree
         - normalize_study_date
         - resolve_item_path
+        - SOURCE_SOP_UID_ATTR

@@ -571,7 +571,10 @@ in a 1.x release with a CHANGELOG entry naming both spellings:
 - **`profiles.FLOOR_POLICY`**, the name the floor policy is held under.
   What the floor *contains* is frozen (above); the name is not.
 - **`entities` helpers** `clone_sequences`, `exported_patient_id`,
-  `iter_item_tree`, `normalize_study_date`, `resolve_item_path`.
+  `iter_item_tree`, `normalize_study_date`, `resolve_item_path`, and the
+  constant `SOURCE_SOP_UID_ATTR`, the `attributes` key under which an
+  instance keeps the SOP Instance UID it held before its UID first
+  changed (the ingested one, unless `sop_instance_uid` was assigned first).
   `exported_patient_id` is on the registry's provisional terms (below).
 - **The [Intelligent OCR](ocr.md) page**: `ZoneDiscoverer.group_boxes`,
   `RedactionVerifier` (`__init__`, `get_matching_rule`, `is_covered`,

@@ -1701,6 +1701,10 @@ def test_the_plugins_pillar_says_what_the_registry_subsection_says():
     assert "exported_patient_id" not in frozen
     assert ("**`entities` helpers** `clone_sequences`, `exported_patient_id`, "
             "`iter_item_tree`") in internal
+    # The key a plugin must not write (docs/api/exporters.md names it, so
+    # tier 2 by the page's own definition; ruling on #793).
+    assert "SOURCE_SOP_UID_ATTR" not in frozen
+    assert "`SOURCE_SOP_UID_ATTR`" in internal
 
 
 def test_the_audit_action_types_written_are_exactly_the_frozen_thirteen():
