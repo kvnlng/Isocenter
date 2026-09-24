@@ -199,6 +199,17 @@ fixes, never features.
    added *across* modules since the build, which is the rows' own bound
    and this step's to find.
 
+   **While #796 is open**, the map build can hang in the dead-worker
+   tests (`test_a_dead_ingest_worker_costs_the_file_it_was_reading.py`).
+   When a pool breaks, the parent SIGTERMs the other workers, and
+   coverage's own SIGTERM handler can deadlock one of them, which
+   `.coveragerc` already concedes. It hung twice at the v1.0.0rc1 cut, and
+   the owner ruled that step 1's 3.14t run may then be plain `pytest`
+   under `PYTHON_GIL=0`, sharded like the 3.12 run and without coverage.
+   Rebuild the map afterwards, outside the release path. A stall shows as
+   a repeating `Timeout (0:05:00)!` stack dump from the conftest
+   watchdog, which never ends the run: kill only that run's processes.
+
    Also run `python -m scripts.output_fingerprint check --jobs 4 --report
    fp-X.Y.Z-<interpreter>.txt; echo "exit=$?"` on **3.12 and 3.14t** at
    that SHA. Both must report **no difference**. A difference is a change
@@ -258,6 +269,14 @@ fixes, never features.
    -- and the release commit is made again on top of the fix.
    Open it as a PR into `release/X.Y`, have it reviewed, and merge it the
    same way as any other PR.
+   `release/*` is branch-protected with **Lock branch** on, so GitHub
+   refuses a normal merge into it. Merge an approved PR with
+   `gh pr merge N --squash --admin --match-head-commit <sha>` (an admin
+   step; `enforce_admins` is off). The lock stays on for everything else.
+   A fix merged into the branch after the release commit, such as a
+   rehearsal failure fixed by the patch procedure, needs no second release
+   commit when the version files are already right. The tag goes on the
+   fix's merge commit instead (v1.0.0rc1, #798).
 4. **Rehearse on TestPyPI**, from the branch, and **do not tag until the
    rehearsal passes**:
    `gh workflow run publish.yml --ref release/X.Y -f target=testpypi`.
