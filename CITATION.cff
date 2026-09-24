@@ -48,5 +48,5 @@ authors:
   - family-names: Long
     given-names: Kevin
     orcid: "https://orcid.org/0000-0001-8881-2481"
-version: 0.9.8
-date-released: 2026-09-16
+version: 1.0.0rc1
+date-released: 2026-09-24
