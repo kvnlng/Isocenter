@@ -35,7 +35,8 @@ parameter the def does not have warns too.
 The scope is the `:::` lines of `docs/api/*.md`, read at test time, so
 a page added to the reference is graded without anyone editing this
 file. Private members (`_name`) are what mkdocstrings' default filter
-hides and are not graded; dunders are graded. That is a superset of what
+hides and are not graded, except one a page names as its own target
+(#27); dunders are graded. That is a superset of what
 the site shows, not a copy of it: a page with an explicit `members:`
 list renders only those names -- `docs/api/session.md` lists the frozen
 surface of `DicomSession` and none of its dunders -- while this grades
@@ -108,7 +109,9 @@ def _resolve(target, package=PACKAGE):
     """`(module path, class name or None)` for one `:::` target.
 
     The longest dotted prefix that names a `.py` file under the package
-    is the module; one further segment, if any, is a class in it. A
+    is the module; one further segment, if any, is a class in it, and a
+    second is one member of that class, returned as `"Class.member"`
+    (#27: `docs/api/session.md` renders `_export_dicom` alone). A
     prefix naming a subpackage is its `__init__.py`: the exporter
     registry page renders the `exporters` package itself (#527).
     """
@@ -120,9 +123,9 @@ def _resolve(target, package=PACKAGE):
             candidate = root.joinpath(*parts[:cut], "__init__.py")
         if candidate.is_file():
             rest = parts[cut:]
-            if len(rest) > 1:
+            if len(rest) > 2:
                 raise ValueError(f"{target}: nested target not supported")
-            return candidate, (rest[0] if rest else None)
+            return candidate, (".".join(rest) if rest else None)
     raise ValueError(f"{target}: names no module under {package}")
 
 
@@ -138,6 +141,19 @@ def _is_rendered(name):
 
 def _documented_nodes(tree, class_name=None):
     """Every rendered def or class with a docstring, in source order."""
+    if class_name is not None and "." in class_name:
+        # One member, named by the page: rendered whatever the default
+        # filter would hide, so graded whatever its name (#27).
+        owner, member = class_name.split(".")
+        members = [node for cls in tree.body
+                   if isinstance(cls, ast.ClassDef) and cls.name == owner
+                   for node in cls.body
+                   if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and node.name == member]
+        if not members:
+            raise ValueError(f"member {class_name} not found")
+        return [node for node in members
+                if ast.get_docstring(node, clean=False)]
     if class_name is None:
         roots = [tree]
     else:
@@ -530,3 +546,42 @@ def test_the_scope_is_read_from_the_api_pages(tmp_path):
     offenders, graded, _ = check_rendered_scope(pages, pkg)
     assert graded == 5, graded
     assert any(" loose: " in o for o in offenders), offenders
+
+
+def test_a_method_target_grades_that_method_even_when_private(tmp_path):
+    """`::: pkg.mod.K._m` renders one method, and that method is graded (#27).
+
+    `docs/api/session.md` renders `_export_dicom` on purpose: its docstring
+    is the one definition of the `dicom` export options. A page that names
+    a member explicitly shows it whatever the default filter would hide, so
+    the sweep grades it -- and only it, not the rest of its class. Before
+    #27 a two-segment target raised "nested target not supported".
+    """
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "mod.py").write_text(
+        "class K:\n"
+        '    """A class."""\n'
+        "    def m(self):\n"
+        '        """Returns:\n            two.\n            items.\n        """\n'
+        "    def _m(self):\n"
+        '        """Returns:\n            two.\n            items.\n        """\n',
+        encoding="utf-8")
+    pages = tmp_path / "api"
+    pages.mkdir()
+    (pages / "k.md").write_text("::: pkg.mod.K._m\n", encoding="utf-8")
+
+    offenders, graded, targets = check_rendered_scope(pages, pkg)
+
+    assert targets == ["pkg.mod.K._m"]
+    assert graded == 1, graded
+    assert len(offenders) == 1 and " _m: " in offenders[0], offenders
+
+    (pages / "k.md").write_text("::: pkg.mod.K.absent\n", encoding="utf-8")
+    try:
+        check_rendered_scope(pages, pkg)
+    except ValueError as error:
+        assert "absent" in str(error)
+    else:
+        raise AssertionError("a target naming no member resolved")

@@ -44,7 +44,7 @@ below renders every frozen method; it rendered 16 of the 28 until 0.9.4.
 ## DICOM export options
 
 `export(folder, format="dicom", **options)` hands `options` to the DICOM
-format, whose parameters are the options below. The option names and
+format, whose parameters after `folder` are the options below. The option names and
 defaults are frozen with `export()` ([API stability](stability.md#frozen-at-10));
 an option name the format does not take raises `TypeError`, and nothing is
 written. Pass them to `export()`. The method rendered here is where they
@@ -57,13 +57,11 @@ skips what `export()` does before dispatch.
      rather than a second one in `export()`'s docstring that could drift
      from it. The name stays tier 3; the option names and defaults are
      tier 1 through `export()` (stability.md, and FROZEN_DICOM_EXPORT_OPTIONS
-     in tests/test_frozen_surface.py). An explicit `members:` list renders a
-     private member that the default filter would hide. -->
+     in tests/test_frozen_surface.py). Named as the target itself, so the
+     default filter that hides `_` names does not apply, and
+     tests/test_api_docstrings_render_cleanly.py grades its docstring. -->
 
-::: isocenter.session.DicomSession
+::: isocenter.session.DicomSession._export_dicom
     handler: python
     options:
-      show_root_heading: false
-      show_root_toc_entry: false
-      members:
-        - _export_dicom
+      show_root_full_path: false
