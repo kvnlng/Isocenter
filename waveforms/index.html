@@ -16,7 +16,7 @@
         <link rel="prev" href="../analytics/">
       
       
-        <link rel="next" href="../api/stability/">
+        <link rel="next" href="../tutorials/deidentify-and-read-the-grade/">
       
       
         
@@ -243,6 +243,26 @@
   
   
   Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
 
         </a>
       </li>
@@ -907,7 +927,7 @@
   <span class="md-ellipsis">
     
   
-    API Reference
+    Tutorials
   
 
     
@@ -920,6 +940,151 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keep a way back to the identities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1076,6 +1241,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/ocr/" class="md-nav__link">
         
   
@@ -1126,10 +1319,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1147,8 +1340,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1497,13 +1690,14 @@ data rather than a footnote.</p>
 <li><strong>A bare <code>Session()</code>, never <code>load_config()</code>-ed.</strong> <code>phi_tags</code> is the
   floor policy, <code>FLOOR_POLICY</code> (<code>isocenter/profiles.py</code>): the basic
   profile below plus the three research defaults <code>create_config()</code>
-  writes (Study Date jittered, Patient's Sex and Age kept) -- 620 rules.
+  writes (Study Date jittered, Patient's Sex and Age kept) -- 646 rules.
   Until #495 this configuration applied no tag policy at all, and Study
   ID, Institution Name, Station Name and the series/acquisition/content
   dates reached the export.</li>
 <li><strong>The Quick Start above.</strong> <code>create_config()</code> scaffolds a config with
-  <code>privacy_profile: basic</code>; <code>load_config()</code> expands that into
-  <code>PRIVACY_PROFILES["basic"]</code> (<code>isocenter/profiles.py</code>) -- <strong>620 tags, 620
+  <code>privacy_profile: basic@2026c</code> (the pinned name; <code>basic</code> is its short
+  form, #714); <code>load_config()</code> expands that into
+  <code>PRIVACY_PROFILES["basic@2026c"]</code> (<code>isocenter/profiles.py</code>) -- <strong>646 tags, 646
   effective</strong> -- the Basic Profile column of DICOM PS3.15 Annex E Table
   E.1-1 (2026c), with its departures named in
   <a href="../configuration/#privacy-profile">Configuration</a>. This is what
@@ -1512,12 +1706,12 @@ data rather than a footnote.</p>
   Annotation Sequence, and the scan never opened sequences (#57), so it
   sat in the profile doing nothing. It fires now.
   The scaffold lists only the three research defaults beneath
-  <code>privacy_profile: basic</code> -- the entries of the floor whose action
-  differs from the profile's -- so the loaded policy is the same 620
+  <code>privacy_profile: basic@2026c</code> -- the entries of the floor whose action
+  differs from the profile's -- so the loaded policy is the same 646
   rules a bare session applies.</li>
 <li><strong>Your own <code>phi_tags</code> configuration.</strong> With no <code>privacy_profile</code>
   line it is layered on the floor policy; with <code>privacy_profile: basic</code>
-  on the basic profile; with <code>privacy_profile: none</code> it is the whole
+  (or <code>basic@2026c</code>) on the basic profile; with <code>privacy_profile: none</code> it is the whole
   policy. Your explicit tags win over the base either way, and
   <code>action: KEEP</code> opts a tag out.</li>
 </ul>
@@ -1558,10 +1752,12 @@ configurations above you're in:</p>
   to restore it. That default-off behaviour is what actually protects
   this field today. <code>(0070,0006)</code> is also in the Basic profile, and
   since 0.8.0 that entry works: a configured session that passes
-  <code>include_annotation_text=True</code> gets the profile's remediated (emptied)
-  value.</li>
+  <code>include_annotation_text=True</code> gets the profile's remediated value.
+  Since #557 that is the text dummy <code>ANONYMIZED</code> in the exported DICOM,
+  as Table E.1-1's <code>D</code> asks, and the bridge reads the dummy as no text:
+  the finding carries no <code>note</code>, exactly as when the value was emptied.</li>
 </ul>
-<p>Before 0.8.0 it did not. The tag lives inside each Waveform Annotation
+<p>Before 0.8.0 the entry did not work. The tag lives inside each Waveform Annotation
   Sequence item rather than at the top level, and the scan only reached
   nested content through the instance's <code>text_index</code> -- which the worker
   clones <code>session.audit()</code> scans were not given. So the profile entry sat
@@ -1844,13 +2040,13 @@ never passed through ingest.</p>
         
         
           
-          <a href="../api/stability/" class="md-footer__link md-footer__link--next" aria-label="Next: API stability">
+          <a href="../tutorials/deidentify-and-read-the-grade/" class="md-footer__link md-footer__link--next" aria-label="Next: De-identify and read the grade">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                API stability
+                De-identify and read the grade
               </div>
             </div>
             <div class="md-footer__button md-icon">

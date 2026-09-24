@@ -257,6 +257,26 @@
     
     
       <li class="md-tabs__item">
+        <a href="tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
         <a href="api/stability/" class="md-tabs__link">
           
   
@@ -967,7 +987,7 @@
   <span class="md-ellipsis">
     
   
-    API Reference
+    Tutorials
   
 
     
@@ -980,6 +1000,151 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keep a way back to the identities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1136,6 +1301,34 @@
   
   
     <li class="md-nav__item">
+      <a href="api/exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="api/ocr/" class="md-nav__link">
         
   
@@ -1186,10 +1379,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1207,8 +1400,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1445,9 +1638,9 @@
 <ul>
 <li><strong>An object model over pydicom.</strong> <code>Patient</code>, <code>Study</code>, <code>Series</code>, and <code>Instance</code>, with attributes keyed by tag. Pixel and waveform data load lazily from the sidecar and can be released. See <a href="architecture/">Architecture</a>.</li>
 <li><strong>A persistent session.</strong> Reopen a 10,000-instance cohort without rescanning, pause and resume a job, and read the audit log of every action. See the <a href="quickstart/">Quick Start</a>.</li>
-<li><strong>De-identification against the DICOM PS3.15 Annex E Basic Profile table.</strong> A profile decides which tags go, are emptied, are replaced, or are date-shifted. A field the protocol permits stays. PHI detection walks nested sequences structurally. With no configuration a 620-rule floor policy applies: the PS3.15 Annex E Basic Profile table (2026c; UIDs not yet replaced) plus three research defaults. UIDs are not replaced. See <a href="configuration/">Configuration</a>.</li>
+<li><strong>De-identification against the DICOM PS3.15 Annex E Basic Profile table.</strong> A profile decides which tags go, are emptied, are replaced, or are date-shifted. A field the protocol permits stays. PHI detection walks nested sequences structurally. With no configuration a 646-rule floor policy applies: the PS3.15 Annex E Basic Profile table (2026c) plus three research defaults. Study, Series, SOP Instance and the other UIDs the table names are replaced by UIDs derived from a secret kept in the store. See <a href="configuration/">Configuration</a>.</li>
 <li><strong>Machine-specific pixel redaction.</strong> Zones are keyed by device. An optional OCR pass finds where burned-in text actually lands, and CTP <code>DicomPixelAnonymizer.script</code> rules import directly. See <a href="ocr/">Intelligent OCR</a> and <a href="migration/">Migration Tools</a>.</li>
-<li><strong>Reversible anonymization, if you choose it.</strong> Original identities encrypted under a Fernet key, stored in a private tag, recoverable by whoever holds the key. The export discloses when recoverable identities are present.</li>
+<li><strong>Reversible anonymization, if you choose it.</strong> Original identities encrypted under a Fernet key, stored in the Encrypted Attributes Sequence <code>(0400,0500)</code>, recoverable by whoever holds the key. The export discloses when recoverable identities are present.</li>
 <li><strong>Waveforms.</strong> DICOM waveform IODs in, PhysioNet WFDB records out, with an annotation bridge to Murmur Studio. See <a href="waveforms/">Waveforms &amp; WFDB</a>.</li>
 <li><strong>A compliance report.</strong> Cohort summary, audit trail, every exception listed, a <code>PASS</code> or <code>REVIEW_REQUIRED</code> grade, and a signature block for the reviewer who accepts it. See <a href="analytics/">Analytics &amp; Reporting</a>.</li>
 </ul>
@@ -1455,6 +1648,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>isocenter
 </code></pre></div>
 <p>Then the <a href="quickstart/">Quick Start</a> walks the pipeline end to end: ingest, examine, configure, audit, anonymize, redact, export, report. The <a href="configuration/">Configuration</a> guide is where your protocol becomes a profile.</p>
+<p>The <strong>Tutorials</strong> each follow one question end to end over files bundled with pydicom, and every code block in them runs in the test suite. Start with <a href="tutorials/deidentify-and-read-the-grade/">De-identify a cohort and read the grade</a>: what <code>PASS</code> and <code>REVIEW_REQUIRED</code> mean, and what to keep so a later export matches this one.</p>
 <p>If you are evaluating Isocenter for an institution rather than running it, <a href="for-institutions/">For institutions</a> is the page to read: the license, the citation, and what the report gives a reviewer.</p>
 <h2 id="measured-not-promised">Measured, not promised</h2>
 <p>One benchmark has a recorded run behind it: 100 multi-frame files, about 50 GB raw, ingest through export, January 2026. The numbers and the machine are on the <a href="performance/">Performance</a> page, and larger runs will appear there when they exist.</p>

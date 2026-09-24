@@ -258,6 +258,26 @@
     
     
       <li class="md-tabs__item">
+        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
         <a href="../api/stability/" class="md-tabs__link">
           
   
@@ -891,7 +911,7 @@
   <span class="md-ellipsis">
     
   
-    API Reference
+    Tutorials
   
 
     
@@ -904,6 +924,151 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keep a way back to the identities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1060,6 +1225,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/ocr/" class="md-nav__link">
         
   
@@ -1110,10 +1303,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1131,8 +1324,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1458,20 +1651,163 @@ store with no shifted study writes nothing.</p>
 <p>Before 0.9.7 the <code>ANON_</code> pseudonym was the first 12 hex characters of an unsalted SHA-256 of the original Patient ID, and the date offset was read from the same digest. Anyone holding an exported file and the date-jitter range could undo the date shift, and could recover the original ID by hashing candidates. From 0.9.7 both are derived with HMAC-SHA256 under a per-project secret kept in the store, and the pseudonym is <code>ANON_</code> plus 24 hex characters.</p>
 <p>Opening an older store classifies each patient once. A patient that was already de-identified (an ID of exactly the old <code>ANON_</code> shape, or any shifted date) keeps the old scheme, because giving them a new offset would put two offsets on one patient's dates. New studies for that patient are shifted by the old, recoverable offset. Every other patient, and every patient added later, uses the keyed scheme. While any old-scheme patient remains, each open logs a warning and writes one <code>WARNING</code> audit row naming how many, so compliance reports over the store grade <code>REVIEW_REQUIRED</code>.</p>
 <p>Files already exported by an older release stay recoverable, and nothing Isocenter does now changes that. To give those patients the keyed scheme, re-ingest their <strong>source</strong> files into a new store. Re-ingesting an old <em>export</em> does not help: an ID that is already <code>ANON_</code> is never replaced, so its unkeyed digest is exported unchanged (the load notice and <code>audit()</code> count these too). Ingesting raw files for a patient an older release already de-identified, into that same store, makes a second subject: the new data is keyed, its earlier studies keep the old pseudonym and offset, and <code>audit()</code> writes a <code>WARNING</code> row saying so.</p>
-<h3 id="carrying-a-project-secret-between-stores">Carrying a project secret between stores</h3>
-<p>A store makes its own project secret the first time <code>audit()</code> or <code>anonymize()</code> needs one, so two stores give the same patient different pseudonyms and different offsets unless they share it. To keep offsets consistent across more than one store (a later batch for the same patients, or re-ingesting an export), carry the secret:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">first</span><span class="o">.</span><span class="n">store_backend</span><span class="o">.</span><span class="n">write_project_secret</span><span class="p">(</span><span class="s2">"project.secret"</span><span class="p">)</span>   <span class="c1"># refuses to overwrite; mode 0600</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">second</span> <span class="o">=</span> <span class="n">Session</span><span class="p">(</span><span class="s2">"batch2.db"</span><span class="p">)</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">second</span><span class="o">.</span><span class="n">store_backend</span><span class="o">.</span><span class="n">load_project_secret</span><span class="p">(</span><span class="s2">"project.secret"</span><span class="p">)</span>   <span class="c1"># before second's first audit()</span>
-</code></pre></div>
-<p><code>load_project_secret</code> refuses a store that already holds a secret, whichever one, because everything it pseudonymized or shifted was derived under that secret; load into a fresh store. A store holding keyed pseudonyms accepts only a secret that minted at least one of them. A store whose shifted patients all kept their Patient IDs has no pseudonym to check a secret against: it accepts the secret, records it as unverified, and writes a <code>WARNING</code> row at the load and at every later <code>audit()</code>, so its reports grade <code>REVIEW_REQUIRED</code> -- permanently: there is no call to acknowledge the warning, and a later load into that store is recorded as unverified too, even when the secret verifies against pseudonyms minted after the first load. Make sure that file is this store's own project's secret: a different one gives each patient's later dates a second offset, and nothing in the store can tell.</p>
-<p>The file recovers the dates of every store sharing it: keep it with the store, never with an export. A store that holds shifted dates but has lost its secret refuses <code>audit()</code>, <code>anonymize()</code> and <code>export(check_burned_in=True)</code> rather than generate a second offset; load the secret back to continue.</p>
-<p><strong>Starting a new project over another project's export.</strong> A fresh store that ingests an export from another project, without that project's secret, generates its own secret and writes a <code>WARNING</code> row naming the pseudonyms it cannot verify: its offsets are its own, not the source project's, and intervals within each patient are kept. That is the one path for a new project. There is no override to adopt a secret into a store that has one, because that is the only guard against silently mixing two projects' offsets. If the data belongs to the existing project, load that project's secret into a fresh store before its first <code>audit()</code> and ingest the export there instead.</p>
+<h3 id="phi-statuses-recorded-before-10-555">PHI statuses recorded before 1.0 (#555)</h3>
+<p>A store records what the last scan concluded about each patient, study and instance (<code>phi_status</code>). From 1.0 it also records the policy that scan ran under (<code>phi_status_policy</code>: a fingerprint of the tag rules, <code>remove_private_tags</code> and the configuration schema version, and a readable base such as <code>basic@2026c</code>). The schema version is in it because a release that changes what an unchanged configuration detects raises that version's minor: a store's statuses from before such a release then read as recorded under another policy, and the export says so as below. A store written by 0.9.x never recorded which configuration ran, so opening one adds the two columns empty and fills nothing in: each status keeps its value (<code>REMEDIATED</code> stays <code>REMEDIATED</code>) with no policy, and each open logs one warning counting them. The first <code>export()</code> that writes such instances writes one <code>WARNING</code> audit row saying so, and its report grades <code>REVIEW_REQUIRED</code>. Run <code>audit()</code> (and <code>anonymize()</code>, if it finds anything) under the configuration you mean, then <code>save()</code>: the statuses then carry that policy and the row stops.</p>
+<p>A 1.0 store is not for 0.9.x: an older release reopening it reads a nested item's stored status as an attribute, and cannot export it (it reads the DS/IS values of #662 as dicts). <strong>Never save into a 1.0 store from 0.9.x.</strong> 0.9.x does not know the policy columns, so a status it records is left beside the policy of the last 1.0 scan -- a pairing no scan concluded, which the export cannot tell from a true one. If that has happened, run <code>audit()</code> under your configuration before trusting any status. Keep a copy of the 0.9.x store if you may need to go back, and go back to that copy, not into the 1.0 store.</p>
+<h3 id="files-with-no-patient-id-grouped-before-10-584">Files with no Patient ID, grouped before 1.0 (#584)</h3>
+<p>Before 1.0 ingest grouped every file whose Patient ID was <strong>empty</strong> under one patient <code>''</code>, and every file <strong>without</strong> one under one patient <code>UnknownPatient</code>, across the whole store, so either may hold several subjects. From 1.0 a file with no Patient ID belongs to the patient holding its study, or to a new patient of that study alone, and a subject with no Patient ID exports an empty one.</p>
+<p>Opening an older store splits nothing, because splitting would give dates already shifted under the group's offset a second one. So:</p>
+<ul>
+<li>New ID-less files ingested into an old store get patients of their own; the old grouping stays as it was.</li>
+<li>A <code>''</code> patient's date shift is still declined on every pass ("could not resolve a PatientID"), as before: loud and fail-closed.</li>
+<li>An <code>UnknownPatient</code> patient keeps its one pseudonym and one offset for every subject in it.</li>
+<li>Every open of a store holding either writes one <code>WARNING</code> audit row, counts only: "N patients were grouped by a release before 1.0 from files with no Patient ID and may be more than one subject". A real Patient ID <code>UnknownPatient</code> is counted too. Reports over the store grade <code>REVIEW_REQUIRED</code>.</li>
+</ul>
+<p>To separate the subjects, re-ingest their <strong>source</strong> files into a new store.</p>
+<h3 id="stores-and-exports-from-before-10-uids-544">Stores and exports from before 1.0: UIDs (#544)</h3>
+<p>Before 1.0 Isocenter exported Study, Series, SOP Instance and every other UID as it was ingested, except that redaction gave a redacted instance a random SOP Instance UID under pydicom's root. From 1.0 the floor and <code>basic@2026c</code> replace each UID the PS3.15 table codes <code>U</code> with one derived from the store's project secret (see <a href="../configuration/#privacy-profile">Configuration</a>).</p>
+<p>Opening an older store changes nothing by itself. Its instances still hold their source UIDs, so the next <code>audit()</code> raises a finding on each, and <code>anonymize()</code> replaces them. A redacted instance's random UID is replaced like any other, and is stable from then on.</p>
+<p>Files exported before 1.0 keep their source UIDs, and 1.0 exports of the same data carry replacements, so the two do not link by UID. That is inherent: it is what replacing them means. A study exported in part before 1.0 and in part after is two studies to anything that groups by Study Instance UID. To keep a project's exports linkable across the upgrade, keep the UIDs: <code>KEEP</code> on the <code>U</code> rows (<a href="../configuration/#privacy-profile">Keeping UIDs</a>).</p>
+<p>A configuration that gave a UI attribute <code>REPLACE</code> with no value failed to load before 1.0 (#560) and now means UID replacement. <code>REPLACE</code> with a <code>value:</code> on a UI attribute writes that value, as before.</p>
+<h3 id="identity-tokens-locked-before-10-790">Identity tokens locked before 1.0 (#790)</h3>
+<p>Every release before 1.0 wrote the reversible-anonymization token into <code>(0400,0510)</code> and the transfer syntax UID into <code>(0400,0520)</code>. DICOM defines those two elements the other way round: <code>(0400,0510)</code> is the Encrypted Content Transfer Syntax UID and <code>(0400,0520)</code> is the Encrypted Content. From 1.0 the token goes into <code>(0400,0520)</code>, and 1.x reads only that layout.</p>
+<p>A token in the earlier layout is recognised but not read. Whether it comes from an old store or from an old export ingested into a new one, <code>recover_patient_identity()</code> raises <code>RuntimeError</code> naming the layout and restores nothing, for the whole patient. <code>lock_identities()</code> refuses rather than replacing it. Recover such identities with Isocenter 0.9.x and the key they were locked with.</p>
+<p>Exporting such a patient from 1.x writes the item as it is, and 0.9.x can still recover it. The export also writes a <code>WARNING</code> audit row counting those instances, so the compliance report grades <code>REVIEW_REQUIRED</code>.</p>
+<h3 id="a-project-secret-stays-in-its-store">A project secret stays in its store</h3>
+<p>Until 1.0, <code>store_backend.write_project_secret(path)</code> and <code>load_project_secret(path)</code> copied a store's project secret into a fresh store. Both are gone and raise <code>AttributeError</code>: a secret belongs to the store it was generated in (see <a href="../configuration/#what-to-keep">What to keep</a>; <a href="https://github.com/kvnlng/Isocenter/issues/716">#716</a>). A later batch for the same patients goes into the same store. Nothing reads a secret file written by 0.9.7 or 0.9.8 any more; delete it as you would a key.</p>
+<p>A store that loaded a secret it could not verify, under 0.9.7 or 0.9.8, still warns at every <code>audit()</code> and still grades <code>REVIEW_REQUIRED</code>. The reason it warns is recorded in the store, and removing the load does not remove it.</p>
+<p>A store that holds shifted dates, or UIDs replaced since 1.0, but has lost its secret refuses <code>audit()</code>, <code>anonymize()</code>, <code>redact()</code> and <code>export(check_burned_in=True)</code> rather than generate a second offset or a second UID for each instance. Nothing in Isocenter deletes the secret, so this is a store whose <code>project_secret</code> row was deleted by hand, and the secret cannot be restored from outside it: re-ingest the source files into a new store.</p>
+<p><strong>Starting a new project over another project's export.</strong> A fresh store that ingests an export from another project generates its own secret and writes a <code>WARNING</code> row naming the pseudonyms it cannot verify: its offsets are its own, not the source project's, and intervals within each patient are kept. That is the one path for a new project. If the data belongs to an existing project, ingest it into that project's store.</p>
+<h2 id="configs-from-09x">Configs from 0.9.x</h2>
+<p>From 1.0 a configuration is read as exactly what it says: a key the schema
+does not have, a value of the wrong type, or a <code>version</code> this library does
+not read raises <code>ValueError</code> naming it, where 0.9.x loaded the file and
+ignored or misread the part it did not understand
+(<a href="https://github.com/kvnlng/Isocenter/issues/711">#711</a>,
+<a href="https://github.com/kvnlng/Isocenter/issues/712">#712</a>,
+<a href="https://github.com/kvnlng/Isocenter/issues/713">#713</a>;
+<a href="../configuration/#schema-version-2">Configuration</a> has the schema).</p>
+<p><strong>Files Isocenter wrote load unchanged.</strong> Every file <code>create_config()</code> or
+an auto-save wrote in 0.9.x loads, and so does every configuration in this
+documentation. A file with no <code>version</code> line is version 2.0. A file saying
+<code>privacy_profile: basic</code> means <code>basic@2026c</code>, the profile name pinned to
+its PS3.15 edition, and loads the same rules; <code>configuration.privacy_profile</code>
+then reads <code>"basic@2026c"</code>, and <code>save()</code> and <code>create_config()</code> write that
+(<a href="https://github.com/kvnlng/Isocenter/issues/714">#714</a>).</p>
+<p><strong>What is refused, and the fix.</strong> Apart from the first two, each of these
+loaded in 0.9.x without meaning what it said:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">0.9.x file</th>
+<th style="text-align: left;">Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>version: "1.0"</code> (the label before version 2)</td>
+<td style="text-align: left;">write <code>version: "2.0"</code>; the content loads as before</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>version: 2.0</code> (unquoted: a YAML number)</td>
+<td style="text-align: left;">quote it: <code>version: "2.0"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">a misspelt key at any level (<code>remove_private_tag</code>, <code>redaction_zone</code>, <code>actoin</code>)</td>
+<td style="text-align: left;">the refusal names it and, usually, the key you meant</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>machine_rules:</code></td>
+<td style="text-align: left;">rename it <code>machines:</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">an unquoted numeric serial, <code>serial_number: 0123</code> (loaded as 83)</td>
+<td style="text-align: left;">quote it: <code>serial_number: "0123"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>remove_private_tags: "false"</code>, or a bare <code>remove_private_tags:</code></td>
+<td style="text-align: left;">write <code>true</code> or <code>false</code>, unquoted</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>date_jitter: -5</code></td>
+<td style="text-align: left;">write <code>date_jitter: {min_days: -5, max_days: -5}</code></td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>date_jitter</code> with <code>min_days</code> greater than <code>max_days</code></td>
+<td style="text-align: left;">put the bounds the right way round</td>
+</tr>
+<tr>
+<td style="text-align: left;">an external profile file carrying anything but <code>phi_tags</code> and <code>version</code></td>
+<td style="text-align: left;">move the other keys into the configuration that names the profile</td>
+</tr>
+</tbody>
+</table>
+<p>A refusal changes nothing: the session's configuration is what it was
+before the call.</p>
+<p>Three more readings changed in 1.0
+(<a href="https://github.com/kvnlng/Isocenter/issues/730">#730</a>):</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">0.9.x file</th>
+<th style="text-align: left;">Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>version: "2.00"</code> or <code>"02.0"</code></td>
+<td style="text-align: left;">write <code>version: "2.0"</code></td>
+</tr>
+<tr>
+<td style="text-align: left;">a blank <code>serial_number: "  "</code> (matched no machine)</td>
+<td style="text-align: left;">give the machine's serial</td>
+</tr>
+<tr>
+<td style="text-align: left;">a bare <code>privacy_profile:</code> line</td>
+<td style="text-align: left;">nothing to do unless you meant <code>none</code>: it now means the floor, as leaving the line out does, where 0.9.x read it as <code>none</code> and applied no base; write <code>privacy_profile: none</code> to keep that</td>
+</tr>
+</tbody>
+</table>
+<p>A phi rule's <code>value: null</code> and <code>name: null</code> read as absent, as before:
+<code>REPLACE</code> writes <code>ANONYMIZED</code>, and the finding is named <code>Unknown Tag</code>.</p>
+<ul>
+<li><strong>Auto-save is off.</strong> In 0.9.x, <code>add_rule()</code>, <code>update_rule()</code>,
+  <code>delete_rule()</code> and <code>set_phi_tag()</code> rewrote the loaded file
+  (<a href="https://github.com/kvnlng/Isocenter/issues/715">#715</a>). They now
+  change memory only, and print a line saying the file is unchanged.
+  Call <code>session.configuration.save()</code>, or set
+  <code>session.configuration.auto_save = True</code> once per session. A file
+  0.9.x's auto-save wrote loads unchanged, and saving it again rewrites
+  it without the inlined profile.</li>
+<li><strong>One loader.</strong> <code>ConfigLoader.load_redaction_rules()</code> and
+  <code>ConfigLoader.load_phi_config()</code> are gone and raise <code>AttributeError</code>;
+  <code>PhiInspector(config_path=...)</code> raises <code>TypeError</code>
+  (<a href="https://github.com/kvnlng/Isocenter/issues/729">#729</a>). Read a file
+  with <code>session.load_config(path)</code> or
+  <code>ConfigLoader.load_unified_config(path)</code>, and hand <code>PhiInspector</code> the
+  policy (<code>config_tags=</code>).</li>
+<li><strong>Three keywords renamed at 1.0</strong>
+  (<a href="https://github.com/kvnlng/Isocenter/issues/26">#26</a>). Each old
+  keyword raises <code>TypeError</code>; positional calls are unchanged.
+  <code>add_rule(model=, zones=)</code> is <code>add_rule(model_name=, redaction_zones=)</code>,
+  the keys a <code>machines:</code> rule has in the file;
+  <code>set_phi_tag(replacement=)</code> is <code>set_phi_tag(value=)</code>, the key a phi rule
+  has; and <code>Builder.start_patient(id=)</code> is <code>start_patient(patient_id=)</code>.</li>
+<li><strong>One spelling per format.</strong> <code>generate_report(format=)</code> takes
+  <code>'markdown'</code> only, and <code>generate_manifest(format=)</code> <code>'html'</code> or
+  <code>'json'</code> only; <code>'md'</code> and case variants such as <code>'HTML'</code> raise
+  <code>ValueError</code>.</li>
+</ul>
 <h2 id="clinical-trial-processor-ctp">Clinical Trial Processor (CTP)</h2>
-<p>Isocenter includes a utility to convert legacy CTP <code>DicomPixelAnonymizer.script</code> files into Isocenter's YAML configuration format.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Convert CTP script to Isocenter YAML</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>python<span class="w"> </span>-m<span class="w"> </span>isocenter.utils.ctp_parser<span class="w"> </span>/path/to/anonymizer.script<span class="w"> </span>output_rules.yaml
+<p>Isocenter includes a utility to convert legacy CTP <code>DicomPixelAnonymizer.script</code> files into the CTP rule-list format (YAML), the format of the knowledge base <code>create_config()</code> matches machines against.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Convert CTP script to Isocenter YAML</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>python<span class="w"> </span>-m<span class="w"> </span>isocenter.utils.ctp_parser<span class="w"> </span>/path/to/anonymizer.script<span class="w"> </span>output_rules.yaml
 </code></pre></div>
+<p>Its output is the rule list the CTP knowledge base is read from (<code>rules:</code>,
+as in <code>isocenter/resources/ctp_rules.json</code>), not a configuration:
+<code>load_config()</code> refuses it, naming <code>rules</code> as an unknown key (0.9.x loaded it
+and applied none of its rules). Copy a rule you want into a configuration's
+<code>machines:</code> list, with the <code>serial_number</code> of the machine it is for.</p>
 <p>This parser extracts:</p>
 <ul>
 <li>Manufacturer/Model matching criteria.</li>

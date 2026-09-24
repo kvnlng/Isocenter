@@ -256,6 +256,26 @@
     
     
       <li class="md-tabs__item">
+        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
         <a href="../api/stability/" class="md-tabs__link">
           
   
@@ -802,7 +822,7 @@
   <span class="md-ellipsis">
     
   
-    API Reference
+    Tutorials
   
 
     
@@ -815,6 +835,151 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keep a way back to the identities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -971,6 +1136,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/ocr/" class="md-nav__link">
         
   
@@ -1024,10 +1217,10 @@
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -1045,8 +1238,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1503,16 +1696,16 @@
 <li><strong>A cohort summary</strong>: how many patients and instances the session holds and, after an export, how many instances were written of those requested. A per-instance manifest can be written as a separate document.</li>
 <li><strong>An audit trail</strong>: counts of every action taken (tags removed or replaced, dates shifted, pixel regions redacted, files exported) and every loss recorded.</li>
 <li><strong>Exceptions</strong>: every warning and error the run raised, listed individually.</li>
-<li><strong>A grade</strong>: <code>PASS</code> or <code>REVIEW_REQUIRED</code>. There is deliberately no <code>FAIL</code>. A run that lost something is a run a person must look at, and the report's <em>Grade Basis</em> lists every reason the run is not <code>PASS</code>.</li>
+<li><strong>A grade</strong>: <code>PASS</code> or <code>REVIEW_REQUIRED</code>. There is deliberately no <code>FAIL</code>. A run that lost something is a run a person must look at, and the report's <em>Grade Basis</em> lists every reason the run is not <code>PASS</code>. Every condition that costs a run its <code>PASS</code>, and what <code>PASS</code> does not mean, is written down in one place: <a href="../analytics/#how-the-grade-is-decided">How the grade is decided</a>.</li>
 <li><strong>A signature block</strong> for the reviewer who accepts the report.</li>
 </ul>
 <p>The report is evidence for whatever review the institution runs. It is not itself a determination.</p>
 <h2 id="how-de-identification-is-configured">How de-identification is configured</h2>
-<p>The team writes a configuration file that names the de-identification profile, the tags to remove, replace, or date-shift, and the pixel regions to redact on each make and model of equipment. Isocenter does not start from nothing. With no configuration, or a file that names no profile, a floor of 620 tag rules applies -- the PS3.15 Annex E Basic Profile table (2026c; UIDs not yet replaced) plus three research defaults -- and private tags are removed unless the file says otherwise. A file removes less than that floor only by saying so explicitly. The configuration plus that floor is what a reviewer reads to see what will happen to the data; a rule Isocenter cannot honour -- an emptied Patient ID, a date shift on a tag that is not a date, a replacement the tag's value representation cannot hold -- makes the configuration fail to load rather than do something other than it says (<a href="https://github.com/kvnlng/Isocenter/issues/537">#537</a>, <a href="https://github.com/kvnlng/Isocenter/issues/560">#560</a>).</p>
+<p>The team writes a configuration file that names the de-identification profile, the tags to remove, replace, or date-shift, and the pixel regions to redact on each make and model of equipment. Isocenter does not start from nothing. With no configuration, or a file that names no profile, a floor of 646 tag rules applies -- the PS3.15 Annex E Basic Profile table (2026c) plus three research defaults -- and private tags are removed unless the file says otherwise. A file removes less than that floor only by saying so explicitly. The configuration plus that floor is what a reviewer reads to see what will happen to the data; a rule Isocenter cannot honour -- an emptied Patient ID, a date shift on a tag that is not a date, a replacement the tag's value representation cannot hold -- makes the configuration fail to load rather than do something other than it says (<a href="https://github.com/kvnlng/Isocenter/issues/537">#537</a>, <a href="https://github.com/kvnlng/Isocenter/issues/560">#560</a>).</p>
 <p>Two options bear on review:</p>
 <ul>
-<li><strong>Date shifting</strong> is deterministic per patient within a project, so intervals between a patient's studies survive. The offset is derived from a secret held in the team's working store and is not recoverable from the de-identified files alone. It is not a guarantee that absolute dates cannot be recovered: anyone holding that store, or the secret written out of it, can recover exact dates, so neither should leave the team; a date a whole-day shift moves keeps its weekday, and the configured range bounds the guess. Releases before 0.9.7 derived both the offset and the <code>ANON_</code> pseudonym without a secret, so dates in files exported by those releases can be recovered from the file itself, and the pseudonym can be reversed by trying candidate IDs (GHSA-phg9-vcvc-j4r7).</li>
-<li><strong>UIDs are kept.</strong> Study, Series and SOP Instance UIDs are not replaced, so exported files remain linkable to the originals by anyone who can see the source UIDs (<a href="https://github.com/kvnlng/Isocenter/issues/544">#544</a>).</li>
+<li><strong>Date shifting</strong> is deterministic per patient within a project, so intervals between a patient's studies survive. The offset is derived from a secret held in the team's working store and is not recoverable from the de-identified files alone. It is not a guarantee that absolute dates cannot be recovered: anyone holding that store, or any copy of it, can recover exact dates, so it should not leave the team, and the secret cannot be written out of it or carried to another store (<a href="../configuration/#what-to-keep">What to keep</a>); a date a whole-day shift moves keeps its weekday, and the configured range bounds the guess. Releases before 0.9.7 derived both the offset and the <code>ANON_</code> pseudonym without a secret, so dates in files exported by those releases can be recovered from the file itself, and the pseudonym can be reversed by trying candidate IDs (GHSA-phg9-vcvc-j4r7).</li>
+<li><strong>UIDs are replaced, within stated limits.</strong> Study, Series, SOP Instance and the other UIDs the table codes <code>U</code> are replaced by UIDs derived from the store's project secret, so references between exported files still resolve and the export does not carry the source UIDs. A UID in a private tag is not replaced (<a href="https://github.com/kvnlng/Isocenter/issues/765">#765</a>), a UID written into free text is not found, and a reference to a redacted instance does not follow it to its new UID (<a href="https://github.com/kvnlng/Isocenter/issues/544">#544</a>).</li>
 <li><strong>Reversible anonymization</strong> is optional and off by default. When a team turns it on, original identities are encrypted under a key the team holds and stored inside the de-identified files, recoverable only with that key. The export warns and records in the audit trail when it has written files that carry recoverable identities, so a cohort cannot be shared under the impression that it does not.</li>
 </ul>
 <h2 id="burned-in-text">Burned-in text</h2>

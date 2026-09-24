@@ -258,6 +258,26 @@
     
     
       <li class="md-tabs__item">
+        <a href="../tutorials/deidentify-and-read-the-grade/" class="md-tabs__link">
+          
+  
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
         <a href="../api/stability/" class="md-tabs__link">
           
   
@@ -924,7 +944,7 @@
   <span class="md-ellipsis">
     
   
-    API Reference
+    Tutorials
   
 
     
@@ -937,6 +957,151 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/deidentify-and-read-the-grade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    De-identify and read the grade
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/select-part-of-a-cohort/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Select part of a cohort
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/reversible-anonymization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keep a way back to the identities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1093,6 +1258,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../api/exporters/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exporter registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../api/ocr/" class="md-nav__link">
         
   
@@ -1143,10 +1336,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1164,8 +1357,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -1482,6 +1675,7 @@ did not import; it does not check the binary.</p>
 <ul>
 <li><strong>A stream corrupted mid-stream can decode to plausible wrong values with no error.</strong> openjpeg, which decodes JPEG 2000 through Pillow and through <code>imagecodecs</code>, and lj92, which decodes JPEG Lossless, report nothing for a stream with bytes damaged in the middle, and the second decoder a cross-check would use returns the same wrong array. Every door reads such a file without an error. libjpeg-turbo, which decodes JPEG Baseline and Extended, reads a stream that lost data from its middle and still ends in its EOI marker with the missing rows filled with mid-grey. A truncated stream is refused, a JPEG one because it does not end in EOI, and JPEG-LS (CharLS) refuses mid-stream damage too (<a href="https://github.com/kvnlng/Isocenter/issues/452">#452</a>).</li>
 <li><strong>16-bit <code>YBR_FULL</code> JPEG-LS and JPEG 2000 files are refused at every door.</strong> The conversion to RGB that 8-bit <code>YBR_FULL</code> gets takes 8-bit samples only (<a href="https://github.com/kvnlng/Isocenter/issues/461">#461</a>).</li>
+<li><strong>A 16-bit colour image exported with <code>use_compression=True</code> (the default) is JPEG 2000 that pydicom cannot read with Pillow alone.</strong> The file is conformant and lossless, and Isocenter reads it back exactly. pydicom's Pillow plugin, the only one of pydicom's JPEG 2000 plugins that installs with Isocenter, refuses every JPEG 2000 image with more than 8 bits and more than one sample per pixel ("Pillow cannot decode 16-bit multi-sample data correctly"), because Pillow would narrow it to 8 bits. pydicom with <code>pylibjpeg</code> and <code>pylibjpeg-openjpeg</code> reads it exactly. That was measured on CPython 3.12; <code>pylibjpeg-openjpeg</code> has no wheel for the free-threaded 3.14t build. For a recipient whose reader has only Pillow, export with <code>use_compression=False</code>. Each such instance is named at INFO in the export's log. pydicom on its own installs no JPEG 2000 decoder at all, so any compressed export assumes the recipient has one (<a href="https://github.com/kvnlng/Isocenter/issues/670">#670</a>).</li>
 <li><strong>High-Throughput JPEG 2000</strong> (<code>1.2.840.10008.1.2.4.201</code>, <code>.202</code>, <code>.203</code>) is decoded by openjpeg through <code>imagecodecs.jpeg2k_decode</code>, under JPEG 2000's rules for colour, signedness and sample width. Nothing writes it: an HTJ2K source exports uncompressed or as JPEG 2000 (<a href="https://github.com/kvnlng/Isocenter/issues/459">#459</a>).</li>
 <li><strong>JPEG Baseline and Extended files Pillow cannot decode are read only when monochrome and unsigned.</strong> 12-bit JPEG Extended decodes through <code>imagecodecs.jpeg_decode</code>, value for value as DCMTK decodes pydicom's <code>JPEG-lossy.dcm</code>. A colour one is refused, because that decoder's colour answer was measured to differ from pydicom's, and so is a signed one, because nothing here re-signs a lossy JPEG decode (<a href="https://github.com/kvnlng/Isocenter/issues/604">#604</a>).</li>
 <li><strong>A JPEG 2000 codestream that is signed where PixelRepresentation 0 declares unsigned samples is refused.</strong> No decoder here returns those samples unsigned (<a href="https://github.com/kvnlng/Isocenter/issues/524">#524</a>).</li>
